@@ -44,7 +44,9 @@ const (
 // ErrInvalid : refus unique, quelle que soit la vérification qui a échoué.
 var ErrInvalid = errors.New("anti-robot invalide")
 
-var saltRe = regexp.MustCompile(`^[0-9a-f]{24}\.([0-9a-f]{16})\.([0-5])\?expires=([0-9]{10})$`)
+// Le « & » final est le délimiteur ajouté par altcha-lib-go ≥ 1.0.0 contre le
+// raboutage du sel et du nombre (GO-2025-4239) ; le format strict ci-dessous le bloquait déjà.
+var saltRe = regexp.MustCompile(`^[0-9a-f]{24}\.([0-9a-f]{16})\.([0-5])\?expires=([0-9]{10})&$`)
 
 type Captcha struct {
 	sigKey, bindKey []byte

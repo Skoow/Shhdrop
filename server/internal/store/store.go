@@ -8,6 +8,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// WITHOUT ROWID : pas de compteur d'insertion qui trahirait l'ordre de création (spec §9.1).
 const schema = `CREATE TABLE IF NOT EXISTS shares(
   id TEXT PRIMARY KEY, state TEXT NOT NULL CHECK(state IN ('uploading','ready','draining')),
   bucket INTEGER NOT NULL, ttl_hours INTEGER NOT NULL, max_opens INTEGER NOT NULL,
@@ -15,14 +16,14 @@ const schema = `CREATE TABLE IF NOT EXISTS shares(
   failed_attempts INTEGER NOT NULL DEFAULT 0, segments_mask BLOB NOT NULL,
   salt BLOB NOT NULL, kdf_ops INTEGER NOT NULL, kdf_mem INTEGER NOT NULL,
   access_v BLOB NOT NULL, proof_v BLOB NOT NULL, manage_v BLOB NOT NULL,
-  upload_deadline INTEGER, expires_at INTEGER, purge_at INTEGER)`
+  upload_deadline INTEGER, expires_at INTEGER, purge_at INTEGER) WITHOUT ROWID`
 
-// Open ouvre (ou crée) la base : WAL, effacement sûr, une seule connexion.
+// Open ouvre (ou crée) la base : WAL, effacement sûr, temporaires en mémoire, une seule connexion.
 func Open(path string) (*sql.DB, error) {
 	// Les PRAGMA passent par le DSN pour s'appliquer à chaque connexion.
 	dsn := "file:" + path +
 		"?_pragma=journal_mode(WAL)&_pragma=secure_delete(ON)" +
-		"&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)"
+		"&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=temp_store(MEMORY)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

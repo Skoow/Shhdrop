@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,7 +26,8 @@ func adminSetup(t *testing.T) (config.Config, *share.Service) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return cfg, &share.Service{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")}, Now: time.Now, StorageMax: 1 << 40}
+	return cfg, &share.Service{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")}, Now: time.Now, StorageMax: 1 << 40,
+		FrozenFile: filepath.Join(dir, "frozen")}
 }
 
 func mk(t *testing.T, s *share.Service) string {
@@ -98,8 +100,23 @@ func TestAdminWipe(t *testing.T) {
 	if code != 2 || errOut == "" || count(t, s) != 2 {
 		t.Fatal("wipe sans --yes doit refuser", code)
 	}
-	if code, _, e := run(cfg, "wipe", "--yes"); code != 0 {
+	if _, err := os.Stat(filepath.Join(cfg.DataDir, "frozen")); err == nil {
+		t.Fatal("wipe refusé ne doit pas geler")
+	}
+	code, out, e := run(cfg, "wipe", "--yes")
+	if code != 0 {
 		t.Fatal(code, e)
+	}
+	// Le gel est posé avant l'effacement et laissé en place : aucune création pendant
+	// ni après le wipe, jusqu'à un unfreeze explicite.
+	if fi, err := os.Stat(filepath.Join(cfg.DataDir, "frozen")); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatal("fichier de gel absent après wipe", err)
+	}
+	if !strings.Contains(out, "suspendues") || !strings.Contains(out, "unfreeze") {
+		t.Fatalf("sortie : %q", out)
+	}
+	if _, _, err := s.Create(share.CreateReq{}); !errors.Is(err, share.ErrFrozen) {
+		t.Fatal("création acceptée après wipe")
 	}
 	if count(t, s) != 0 {
 		t.Fatal("lignes restantes")

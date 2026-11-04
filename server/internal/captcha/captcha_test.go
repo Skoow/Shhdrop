@@ -65,7 +65,7 @@ func TestChallengeFormat(t *testing.T) {
 	if ch.Algorithm != "SHA-256" || ch.MaxNumber != 50000 || len(ch.Signature) != 64 {
 		t.Fatalf("défi : %+v", ch)
 	}
-	if !strings.HasSuffix(ch.Salt, "?expires="+strconv.FormatInt(t0.Add(2*time.Minute).Unix(), 10)) {
+	if !strings.HasSuffix(ch.Salt, "?expires="+strconv.FormatInt(t0.Add(2*time.Minute).Unix(), 10)+"&") {
 		t.Fatalf("expiration absente du sel : %q", ch.Salt)
 	}
 	// Compatibilité : la bibliothèque officielle accepte la solution.
@@ -180,6 +180,10 @@ func TestForged(t *testing.T) {
 			bad = append(bad, payload(shifted, m))
 		}
 	}
+	// Sel sans le délimiteur « & » (ancien format, raboutable) : refusé.
+	noDelim := ch
+	noDelim.Salt = strings.TrimSuffix(ch.Salt, "&")
+	bad = append(bad, payload(noDelim, n))
 	// Défi recalculé avec un sel de notre choix (sans la clé) : refusé.
 	forgedSalt := strings.Replace(ch.Salt, "?expires=", "x?expires=", 1)
 	h := sha256.Sum256([]byte(forgedSalt + "1"))

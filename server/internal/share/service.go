@@ -83,6 +83,8 @@ func validID(id string) bool {
 	return err == nil && len(b) == 16
 }
 
+// ceil15 arrondit au quart d'heure supérieur : toutes les dates stockées le sont,
+// pour ne pas révéler la minute de création ou d'ouverture (spec §9.2).
 func ceil15(t int64) int64 { return (t + 899) / 900 * 900 }
 
 func secs(n int64) time.Duration { return time.Duration(n) * time.Second }
@@ -139,7 +141,7 @@ func (s *Service) Create(r CreateReq) (string, int, error) {
 		salt,kdf_ops,kdf_mem,access_v,proof_v,manage_v,upload_deadline)
 		VALUES(?,'uploading',?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, r.Bucket, r.TTLHours, r.MaxOpens, r.MaxOpens, make([]byte, (segs+7)/8),
-		r.Salt, r.KdfOps, r.KdfMem, r.AccessV, r.ProofV, r.ManageV, s.now()+uploadWindow)
+		r.Salt, r.KdfOps, r.KdfMem, r.AccessV, r.ProofV, r.ManageV, ceil15(s.now()+uploadWindow))
 	if err != nil {
 		return "", 0, errors.Join(err, s.Blobs.Delete(id))
 	}
@@ -270,7 +272,7 @@ func (s *Service) Unlock(id string, kAcces, kPreuve []byte) (int, error) {
 			state=CASE WHEN opens_left-1=0 THEN 'draining' ELSE state END,
 			purge_at=CASE WHEN opens_left-1=0 THEN min(?, expires_at) ELSE purge_at END
 			WHERE id=? AND state='ready' AND opens_left>0 AND expires_at>? AND failed_attempts<?
-			RETURNING opens_issued`, now+purgeWindow, id, now, maxAttempts).Scan(&openN)
+			RETURNING opens_issued`, ceil15(now+purgeWindow), id, now, maxAttempts).Scan(&openN)
 		if err != nil {
 			return 0, notFound(err)
 		}
@@ -407,10 +409,16 @@ func (s *Service) DestroyAdmin(id string) error {
 }
 
 // sweepCond : partages à effacer. Ne dépend que du temps et de failed_attempts,
-// qui ne peuvent pas redevenir faux, sauf « uploading » qu'un Finalize peut changer.
+// qui ne peuvent pas redevenir faux, sauf « uploading » qu'un Finalize ou un
+// PutSegment (masque non vide) peut changer : sweepOne revérifie sous uploadMu.
+// Envoi vide (aucun segment reçu) : effacé dès upload_deadline − 55 min (3300 s), soit
+// 5 à 20 min après la création selon l'arrondi au quart d'heure : une réservation vide
+// ne bloque pas l'espace pendant une heure. La date de création n'étant pas stockée,
+// on la déduit de l'échéance ; rien de plus n'est enregistré.
 // Paramètres numérotés : ?1 = maintenant, ?2 = maxAttempts.
 const sweepCond = `((state IN ('ready','draining') AND expires_at<=?1) OR
 	(state='uploading' AND upload_deadline<=?1) OR
+	(state='uploading' AND upload_deadline-3300<=?1 AND segments_mask=zeroblob(length(segments_mask))) OR
 	(state='draining' AND purge_at<=?1) OR failed_attempts>=?2)`
 
 // Sweep efface les partages expirés, les envois abandonnés, les « draining » échus

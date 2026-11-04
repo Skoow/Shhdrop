@@ -41,7 +41,8 @@ func wipeTimes(p string) error {
 	return os.Chtimes(p, time.Unix(0, 0), time.Unix(0, 0))
 }
 
-// Reserve crée le fichier de size octets ; erreur s'il existe déjà.
+// Reserve crée le fichier de size octets, alloués sur le disque quand le système de
+// fichiers le permet (sinon fichier creux) ; erreur s'il existe déjà.
 func (s *Store) Reserve(id string, size int64) error {
 	p, err := s.path(id)
 	if err != nil {
@@ -57,7 +58,7 @@ func (s *Store) Reserve(id string, size int64) error {
 	if err != nil {
 		return err
 	}
-	if err := f.Truncate(size); err != nil {
+	if err := allocate(f, size); err != nil {
 		f.Close()
 		os.Remove(p)
 		return err

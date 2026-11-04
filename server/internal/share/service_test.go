@@ -234,9 +234,9 @@ func TestPutSegmentRules(t *testing.T) {
 	if err := s.PutSegment(id, 0, segBody(80, 0, 1)); !errors.Is(err, ErrNotFound) {
 		t.Fatal("après finalize", err)
 	}
-	// envoi abandonné : délai d'1 h
+	// envoi abandonné : délai d'1 h arrondi au quart d'heure (10:02 → 11:15)
 	id2, _, _ := s.Create(k.req(1, 1, 1))
-	c.Add(time.Hour)
+	c.Add(73 * time.Minute)
 	if err := s.PutSegment(id2, 0, segBody(1, 0, 1)); !errors.Is(err, ErrNotFound) {
 		t.Fatal("après délai", err)
 	}
@@ -419,11 +419,65 @@ func TestPurgeAt(t *testing.T) {
 		t.Fatal("purge_at = min(now+1h, expires_at)", time.Unix(purge, 0).UTC())
 	}
 	id2 := ready(t, s, k, 1, 24, 1)
-	s.Unlock(id2, k.acces, k.preuve)
+	s.Unlock(id2, k.acces, k.preuve) // 10:52 + 1 h = 11:52, arrondi au quart d'heure supérieur
 	s.DB.QueryRow("SELECT purge_at FROM shares WHERE id=?", id2).Scan(&purge)
-	if want := c.Now().Add(time.Hour).Unix(); purge != want {
-		t.Fatal("purge_at = now+1h", time.Unix(purge, 0).UTC())
+	if want := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC).Unix(); purge != want {
+		t.Fatal("purge_at = ceil15(now+1h)", time.Unix(purge, 0).UTC())
 	}
+}
+
+// Les dates stockées sont arrondies au quart d'heure : elles ne donnent pas la minute de création.
+func TestUploadDeadlineRounded(t *testing.T) {
+	s, _ := newSvc(t)
+	k := newKeys()
+	id, _, err := s.Create(k.req(1, 1, 1)) // 10:02
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dl int64
+	s.DB.QueryRow("SELECT upload_deadline FROM shares WHERE id=?", id).Scan(&dl)
+	if want := time.Date(2026, 11, 4, 11, 15, 0, 0, time.UTC).Unix(); dl != want {
+		t.Fatal("upload_deadline = ceil15(now+1h)", time.Unix(dl, 0).UTC())
+	}
+}
+
+// Un envoi sans aucun segment est balayé dès upload_deadline − 55 min (5 à 20 min après
+// la création, selon l'arrondi) : une réservation vide ne bloque pas l'espace une heure.
+func TestSweepEmptyUpload(t *testing.T) {
+	s, c := newSvc(t)
+	k := newKeys()
+	empty, _, err := s.Create(k.req(16, 1, 1)) // 10:02, échéance 11:15, balayage vide à 10:20
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, _, err := s.Create(k.req(16, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutSegment(started, 0, segBody(16, 0, 1)); err != nil {
+		t.Fatal(err)
+	}
+	c.Add(17 * time.Minute) // 10:19
+	if n, err := s.Sweep(); err != nil || n != 0 {
+		t.Fatal("trop tôt", n, err)
+	}
+	c.Add(time.Minute) // 10:20
+	if n, err := s.Sweep(); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	gone(t, s, empty)
+	if rowCount(t, s, started) != 1 {
+		t.Fatal("envoi commencé effacé")
+	}
+	c.Add(54 * time.Minute) // 11:14
+	if n, err := s.Sweep(); err != nil || n != 0 {
+		t.Fatal(n, err)
+	}
+	c.Add(time.Minute) // 11:15 = upload_deadline
+	if n, err := s.Sweep(); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	gone(t, s, started)
 }
 
 func TestReadAfterExpiry(t *testing.T) {
@@ -629,21 +683,21 @@ func TestSweep(t *testing.T) {
 	abandoned, _, _ := s.Create(k.req(1, 1, 1))
 	expired := ready(t, s, k, 1, 1, 1)  // 11:15
 	long := ready(t, s, k, 1, 24, 2)    // 10:15 le lendemain
-	drained := ready(t, s, k, 1, 24, 1) // draining, purge à 11:02
+	drained := ready(t, s, k, 1, 24, 1) // draining, purge à ceil15(11:02) = 11:15
 	s.Unlock(drained, k.acces, k.preuve)
 	if n, err := s.Sweep(); err != nil || n != 0 {
 		t.Fatal(n, err)
 	}
-	c.Add(time.Hour) // 11:02
-	if n, err := s.Sweep(); err != nil || n != 2 {
-		t.Fatal(n, err)
-	}
-	gone(t, s, abandoned)
-	gone(t, s, drained)
-	c.Add(13 * time.Minute) // 11:15
+	c.Add(time.Hour) // 11:02 : l'envoi abandonné (vide) est déjà échu
 	if n, err := s.Sweep(); err != nil || n != 1 {
 		t.Fatal(n, err)
 	}
+	gone(t, s, abandoned)
+	c.Add(13 * time.Minute) // 11:15
+	if n, err := s.Sweep(); err != nil || n != 2 {
+		t.Fatal(n, err)
+	}
+	gone(t, s, drained)
 	gone(t, s, expired)
 	if rowCount(t, s, long) != 1 {
 		t.Fatal("partage vivant effacé")

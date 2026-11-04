@@ -37,14 +37,7 @@ func runAdmin(args []string, cfg config.Config, stdout, stderr io.Writer) int {
 		if len(args) != 1 {
 			return usage("freeze n'a pas d'argument")
 		}
-		if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
-			return fail(err)
-		}
-		f, err := os.OpenFile(frozen, os.O_CREATE|os.O_WRONLY, 0o600)
-		if err != nil {
-			return fail(err)
-		}
-		if err := f.Close(); err != nil {
+		if err := freeze(cfg.DataDir, frozen); err != nil {
 			return fail(err)
 		}
 		fmt.Fprintln(stdout, "créations suspendues")
@@ -81,6 +74,11 @@ func runAdmin(args []string, cfg config.Config, stdout, stderr io.Writer) int {
 		if len(args) != 2 || args[1] != "--yes" {
 			return usage("wipe efface tous les partages : relancer avec --yes pour confirmer")
 		}
+		// Gel d'abord, laissé en place : aucune création ne s'intercale pendant l'effacement.
+		if err := freeze(cfg.DataDir, frozen); err != nil {
+			return fail(err)
+		}
+		fmt.Fprintln(stdout, "créations suspendues (relancer « shhdrop admin unfreeze » pour les rétablir)")
 		svc, closeFn, err := openService(cfg)
 		if err != nil {
 			return fail(err)
@@ -107,6 +105,18 @@ func runAdmin(args []string, cfg config.Config, stdout, stderr io.Writer) int {
 		return usage("commande admin inconnue")
 	}
 	return 0
+}
+
+// freeze crée le fichier de gel (0600) ; idempotent.
+func freeze(dataDir, frozen string) error {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(frozen, os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 func openService(cfg config.Config) (*share.Service, func(), error) {

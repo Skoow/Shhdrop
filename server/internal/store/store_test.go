@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,6 +35,23 @@ func TestPragmas(t *testing.T) {
 	}
 	if v := pragma(t, db, "busy_timeout"); v != "5000" {
 		t.Fatalf("busy_timeout = %s", v)
+	}
+	// 2 = MEMORY : tables temporaires (tris, index transitoires) jamais sur disque.
+	if v := pragma(t, db, "temp_store"); v != "2" {
+		t.Fatalf("temp_store = %s", v)
+	}
+}
+
+// Sans rowid : aucun compteur d'insertion ne trahit l'ordre de création des partages.
+func TestWithoutRowid(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var v int
+	if err := db.QueryRow("SELECT rowid FROM shares").Scan(&v); err == nil || !strings.Contains(err.Error(), "rowid") {
+		t.Fatal("la table shares ne doit pas avoir de rowid", err)
 	}
 }
 

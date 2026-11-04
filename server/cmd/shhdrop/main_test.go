@@ -126,3 +126,50 @@ func TestServeForcedShutdown(t *testing.T) {
 		t.Fatal("arrêt bloqué par une requête en cours")
 	}
 }
+
+// Au démarrage, les droits sont resserrés même si dossier, base et fichiers annexes
+// existaient déjà avec des droits trop larges.
+func TestServeTightensPermissions(t *testing.T) {
+	data := filepath.Join(t.TempDir(), "data")
+	blobs := filepath.Join(data, "blobs")
+	if err := os.MkdirAll(blobs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(data, "shares.db")
+	for _, p := range []string{db, db + "-wal", db + "-shm"} {
+		if err := os.WriteFile(p, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, p := range []string{data, blobs} {
+		os.Chmod(p, 0o755)
+	}
+	cfg := config.Config{DataDir: data, Listen: "127.0.0.1:0", StorageMaxBytes: 1 << 30, Now: time.Now}
+	ctx, cancel := context.WithCancel(context.Background())
+	pr, pw := io.Pipe()
+	errc := make(chan error, 1)
+	go func() { errc <- serve(ctx, cfg, pw); pw.Close() }()
+	sc := bufio.NewScanner(pr)
+	if !sc.Scan() {
+		t.Fatal("serve n'a pas démarré")
+	}
+	go io.Copy(io.Discard, pr)
+	check := func() {
+		t.Helper()
+		for p, want := range map[string]os.FileMode{data: 0o700, blobs: 0o700, db: 0o600, db + "-wal": 0o600, db + "-shm": 0o600} {
+			fi, err := os.Stat(p)
+			if os.IsNotExist(err) && p != data && p != blobs && p != db {
+				continue
+			}
+			if err != nil || fi.Mode().Perm() != want {
+				t.Fatalf("%s : %v %v (attendu %v)", p, err, fi, want)
+			}
+		}
+	}
+	check()
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatal(err)
+	}
+	check()
+}

@@ -74,6 +74,28 @@ func placeholder() http.Handler {
 	})
 }
 
+// tightenPerms resserre les droits au démarrage, même sur un dossier ou une base
+// créés auparavant avec des droits plus larges : dossiers 0700, base et annexes 0600.
+// SQLite crée les fichiers -wal et -shm avec les droits de la base.
+func tightenPerms(dataDir string) error {
+	blobs := filepath.Join(dataDir, "blobs")
+	if err := os.MkdirAll(blobs, 0o700); err != nil {
+		return err
+	}
+	for _, d := range []string{dataDir, blobs} {
+		if err := os.Chmod(d, 0o700); err != nil {
+			return err
+		}
+	}
+	db := filepath.Join(dataDir, "shares.db")
+	for _, f := range []string{db, db + "-wal", db + "-shm"} {
+		if err := os.Chmod(f, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
 // shutdownTimeout : délai laissé aux requêtes en cours à l'arrêt (variable pour les tests).
 var shutdownTimeout = 30 * time.Second
 
@@ -98,11 +120,18 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return err
 	}
+	// Avant l'ouverture (fichiers existants) et après (fichiers que SQLite vient de créer).
+	if err := tightenPerms(cfg.DataDir); err != nil {
+		return err
+	}
 	db, err := store.Open(filepath.Join(cfg.DataDir, "shares.db"))
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+	if err := tightenPerms(cfg.DataDir); err != nil {
+		return err
+	}
 	svc := &share.Service{DB: db, Blobs: &blob.Store{Dir: filepath.Join(cfg.DataDir, "blobs")}, Now: cfg.Now,
 		StorageMax: cfg.StorageMaxBytes, FrozenFile: filepath.Join(cfg.DataDir, "frozen")}
 

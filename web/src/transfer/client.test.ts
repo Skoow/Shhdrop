@@ -24,7 +24,7 @@ vi.mock("../crypto/kdf", async (orig) => {
 import { BadPasswordError, LimitError, NotFoundError, createShare, destroyShare, fetchMeta, openShare, shareStatus } from "./client";
 import { manageLink, shareLink } from "./link";
 
-const ORIGIN = "http://srv.test";
+const ORIGIN = "https://srv.test";
 const ID = b64u(new Uint8Array(16).fill(5));
 const LINK = shareLink(ORIGIN, ID, new Uint8Array(32).fill(1));
 const MANAGE = manageLink(ORIGIN, ID, new Uint8Array(32).fill(2));

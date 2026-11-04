@@ -36,7 +36,9 @@ export function parseLink(url: string): ParsedLink {
   } catch {
     throw invalid();
   }
-  if ((u.protocol !== "https:" && u.protocol !== "http:") || u.search !== "") throw invalid();
+  // https: obligatoire, sauf http: vers la boucle locale (développement et tests).
+  const local = u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]";
+  if (!(u.protocol === "https:" || (u.protocol === "http:" && local)) || u.search !== "") throw invalid();
   const m = /^\/([sm])\/([^/]+)$/.exec(u.pathname);
   if (!m || !u.hash.startsWith("#")) throw invalid();
   const id = m[2]!;

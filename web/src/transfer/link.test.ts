@@ -46,4 +46,17 @@ describe("liens", () => {
     ];
     for (const u of bad) expect(() => parseLink(u), u).toThrow("lien_invalide");
   });
+
+  it("n'accepte http: que pour la boucle locale", () => {
+    const k = b64u(new Uint8Array(32).fill(1));
+    for (const host of ["localhost", "localhost:8080", "127.0.0.1", "127.0.0.1:4000", "[::1]", "[::1]:4000"]) {
+      expect(parseLink(`http://${host}/s/${ID}#${k}`).id, host).toBe(ID);
+    }
+    for (const host of ["shhdrop.example", "127.0.0.2", "10.0.0.1", "localhost.example", "[::2]"]) {
+      expect(() => parseLink(`http://${host}/s/${ID}#${k}`), host).toThrow("lien_invalide");
+    }
+    for (const proto of ["ftp:", "file:", "javascript:"]) {
+      expect(() => parseLink(`${proto}//x/s/${ID}#${k}`), proto).toThrow("lien_invalide");
+    }
+  });
 });
