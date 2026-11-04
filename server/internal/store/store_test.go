@@ -100,3 +100,30 @@ func TestStateCheck(t *testing.T) {
 		t.Fatal("état invalide accepté")
 	}
 }
+
+// Une base créée avant progress_at reçoit la colonne à l'ouverture (deux fois sans erreur).
+func TestMigrationProgressAt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shares.db")
+	old := strings.Replace(schema, ", progress_at INTEGER", "", 1)
+	if old == schema {
+		t.Fatal("schéma inattendu")
+	}
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(old); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+	for i := 0; i < 2; i++ {
+		db, err := Open(path)
+		if err != nil {
+			t.Fatal(i, err)
+		}
+		if _, err := db.Exec("SELECT progress_at FROM shares"); err != nil {
+			t.Fatal(i, err)
+		}
+		db.Close()
+	}
+}

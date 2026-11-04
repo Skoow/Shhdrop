@@ -74,7 +74,14 @@ const usedKeys = new WeakSet<CryptoKey>();
 export type Sealer = {
   bucket: number;
   segmentCount: number;
-  /** Chiffre, à la demande, exactement les morceaux du segment n. */
+  /**
+   * Chiffre, à la demande, exactement les morceaux du segment n.
+   * Ne jamais régénérer un segment déjà envoyé à partir d'un File : si le fichier a changé
+   * sur le disque entre-temps, le même nonce chiffrerait un autre clair (ruine d'AES-GCM).
+   * Les nouveaux essais renvoient les octets gardés (c'est ce que fait createShare). Garde :
+   * si une entrée est un File, un second appel pour le même n lève « segment_deja_produit ».
+   * Pour un Blob ou un Uint8Array (immuables ici), un second appel rend les mêmes octets.
+   */
   segment(n: number): Promise<Uint8Array<ArrayBuffer>>;
 };
 
@@ -128,6 +135,8 @@ export async function sealStream(items: Item[], keys: ContentKeys): Promise<Seal
   if (usedKeys.has(keys.kContenu)) throw new Error("cle_deja_utilisee");
   usedKeys.add(keys.kContenu);
   const count = segmentCount(bucket);
+  const fromFile = typeof File !== "undefined" && items.some((it) => it.data instanceof File);
+  const produced = new Set<number>();
 
   // Clair du morceau i : manifeste, puis fichiers, puis zéros (bourrage).
   async function fill(chunk: Uint8Array<ArrayBuffer>, i: number): Promise<void> {
@@ -149,6 +158,10 @@ export async function sealStream(items: Item[], keys: ContentKeys): Promise<Seal
     segmentCount: count,
     async segment(n: number): Promise<Uint8Array<ArrayBuffer>> {
       if (!Number.isInteger(n) || n < 0 || n >= count) throw new Error("segment_invalide");
+      if (fromFile) {
+        if (produced.has(n)) throw new Error("segment_deja_produit");
+        produced.add(n);
+      }
       const out = new Uint8Array(segmentSize(bucket, n));
       if (n === 0) out.set(hdr);
       const chunk = new Uint8Array(CHUNK);
@@ -215,7 +228,12 @@ export type ContainerReader = {
    * ce qui a déjà été livré doit être jeté par l'appelant.
    */
   streamItem(i: number, sink: (chunk: Uint8Array<ArrayBuffer>) => Promise<void> | void): Promise<void>;
-  /** Met à zéro le segment en cache. */
+  /**
+   * Met à zéro le segment chiffré en cache. Limite : le manifeste (noms, types, textes) reste
+   * en mémoire sous forme de chaînes JavaScript, impossibles à effacer ; elles disparaissent
+   * quand le lecteur n'est plus référencé (ramasse-miettes). Une lecture en cours n'échoue
+   * pas : elle recharge le segment.
+   */
   wipe(): void;
 };
 
@@ -224,6 +242,8 @@ export type ContainerReader = {
  * taille des segments, le drapeau « dernier morceau » et le manifeste authentifié (le
  * palier doit être celui que seal aurait choisi). L'en-tête et l'engagement sont vérifiés
  * sur le segment 0 avant tout déchiffrement. Un seul segment chiffré est gardé en cache.
+ * Les opérations (item, streamItem) sont sérialisées : appelées en même temps, elles
+ * s'exécutent l'une après l'autre (elles partagent le cache).
  * Les morceaux jamais lus (bourrage) ne sont pas vérifiés : ils ne contiennent rien.
  */
 export async function openStream(
@@ -250,7 +270,9 @@ export async function openStream(
   }
   async function chunk(i: number): Promise<Uint8Array<ArrayBuffer>> {
     const n = Math.floor(i / SEG_CHUNKS);
-    const s = await seg(n);
+    let s = await seg(n);
+    // wipe() a pu vider le cache pendant l'attente : recharger plutôt que lire des zéros.
+    while (cache?.data !== s) s = await seg(n);
     const start = (n === 0 ? HEADER : 0) + (i % SEG_CHUNKS) * CHUNK_CT;
     try {
       // decrypt copie ses entrées dès l'appel : le cache peut changer ensuite.
@@ -321,9 +343,17 @@ export async function openStream(
       }
     }
 
+    // File d'attente : une opération à la fois sur le cache.
+    let tail: Promise<unknown> = Promise.resolve();
+    const serial = <T>(f: () => Promise<T>): Promise<T> => {
+      const p = tail.then(f);
+      tail = p.catch(() => undefined);
+      return p;
+    };
+
     return {
       manifest,
-      async item(i) {
+      item: (i) => serial(async () => {
         const e = entry(i);
         if (e.kind === "text") return utf8(e.text!);
         if (e.size > PREVIEW_MAX) throw new Error("trop_gros_pour_apercu");
@@ -338,8 +368,8 @@ export async function openStream(
           throw err;
         }
         return res;
-      },
-      async streamItem(i, sink) {
+      }),
+      streamItem: (i, sink) => serial(async () => {
         const e = entry(i);
         if (e.kind === "text") {
           const t = utf8(e.text!);
@@ -347,7 +377,7 @@ export async function openStream(
           return;
         }
         await range(dataStart + e.offset, e.size, (part) => sink(part));
-      },
+      }),
       wipe,
     };
   }

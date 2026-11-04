@@ -215,3 +215,107 @@ entier. Sur les 107 s, l'essentiel est l'attente imposée par la limite de débi
    `manifest.items[i].size`.
 10. **Info — disque.** 100 Gio de stockage par défaut, avec `fallocate` : le serveur doit
     disposer de cette place, plus la marge prévue au §15.
+
+## Fix round 1 (revue de ad9cf7d)
+
+### Changements
+
+1. **Course dans `openStream`** : des appels simultanés à `item()`/`streamItem()` vidaient
+   chacun le segment en cache de l'autre, d'où de faux `paquet_corrompu`. Toutes les
+   opérations du lecteur passent maintenant par une file d'attente : elles s'exécutent
+   l'une après l'autre. De plus, `chunk()` recharge le segment si le cache a changé
+   pendant l'attente : un `wipe()` au milieu d'une lecture ne la fait plus échouer.
+2. **Saturation du disque** :
+   - (a) `limits.BytesPer48 = 6 << 30` (octets utiles par jour et par /48), vérifié dans
+     `AllowCreate` avec les 3 Gio par /64 ; un refus ne consomme rien ;
+   - (b) nouvelle colonne `progress_at` : minute du dernier segment reçu. Elle vaut `NULL` à
+     la création (la minute de création n'est jamais écrite), est mise à jour à chaque `PUT`
+     (remplacement compris) et remise à `NULL` à la finalisation. Le balayage efface un envoi
+     commencé sans nouveau segment depuis 15 min. Il garde l'échéance de 3 h et la règle
+     « aucun segment en 5 min ». Les bases existantes reçoivent la colonne à l'ouverture
+     (`ALTER TABLE`, sans effet si elle existe déjà).
+3. **Limite de débit des segments** : dans `guard`, un `PUT` (jeton d'envoi) ou `GET`
+   (jeton de téléchargement) de `/api/shares/{id}/segments/{n}` dont le jeton est signé,
+   non expiré et lié à cet `id` compte dans `AllowSegment` (600/min par k64), pas dans les
+   60/min. Un jeton invalide ou absent compte dans les 60/min. Le jeton est vérifié avant
+   de compter.
+4. **`Sealer.segment`** : la JSDoc interdit de régénérer depuis un `File` un segment déjà
+   envoyé. Garde peu coûteuse : si une entrée est un `File`, un second appel pour le même n
+   lève `segment_deja_produit`. Avec un `Blob` ou un `Uint8Array` (copié, donc immuable),
+   un second appel rend toujours les mêmes octets. `createShare` n'appelle `segment(n)`
+   qu'une fois.
+5. **`collectToBlob`** : les tranches sont repliées dans le `Blob` tous les 64 Mio
+   (`acc = new Blob([acc, ...parts])`, puis mises à zéro) ; 4ᵉ paramètre `foldBytes`
+   (64 Mio par défaut, réglable pour les tests). Documenté au §18.
+6. **e2e gros fichier** : seuils abaissés : croissance de la RSS < 150 Mo, croissance de
+   `process.memoryUsage().arrayBuffers` < 150 Mo.
+7. **`wipe()`** : la JSDoc (lecteur et `Opened`) et le §18 disent ce qu'il laisse : le
+   manifeste (noms, types, textes) reste en chaînes JS, impossibles à effacer.
+8. **Spécification** : §4 (1 Gio, quotas, débit, 100 Gio), §7.3 (paliers, contrôle du
+   palier canonique, morceaux non lus non vérifiés, fichier partiel à abandonner ou
+   supprimer), §7.4 (3 h, `progress_at`, seuils de balayage, pas de rechiffrement),
+   §7.5 (3 h), §9.1 (`progress_at`, seulement pendant l'envoi), §18 (assemblage en `Blob`,
+   limites de `wipe`, aperçu), §24 (quota /48, débit des segments, envoi bloqué), §5 et
+   §13 (effacement des envois abandonnés, jeton de 3 h), §15 (trafic sortant).
+
+### Tests (écrits avant le code)
+
+ROUGE :
+
+```
+Go  : limits [build failed] (BytesPer48, AllowSegment absents) ; api [build failed]
+      (limits.SegmentsPerMin) ; --- FAIL: TestSweepStalledUpload (pas de colonne progress_at)
+TS  : × File : segment(n) ne se régénère pas
+      × opérations simultanées sur un même lecteur : sérialisées, sans fausse corruption
+      × collectToBlob replie les tranches dans un Blob tous les foldBytes
+      Tests 3 failed | 115 passed (118)
+```
+
+Ajouts :
+
+- `TestBytesPer48` : six liens de 1 Gio depuis six /64 d'un même /48 passent, l'octet de
+  plus est refusé, un autre /48 passe, remise à zéro le lendemain.
+- `TestSegmentRate` : 600 puis refus ; compteur indépendant de `AllowRequest` ; par
+  connexion ; remise à zéro à la minute.
+- `TestSweepStalledUpload` : `progress_at` vaut `NULL` à la création, puis la minute du
+  segment ; mis à jour par un remplacement ; pas balayé après 14 min 30, balayé à 15 min ;
+  `NULL` après finalisation ; un partage finalisé n'est jamais balayé comme envoi bloqué.
+- `TestMigrationProgressAt` : une base sans la colonne la reçoit ; deux ouvertures sans
+  erreur.
+- `TestSegmentRateLimit` (API) : 60/min épuisés, puis 100 `GET` de segment à jeton
+  valide passent ; jeton d'un autre type, illisible ou vide → 429 (limite générale) ; la
+  minute suivante, 600 requêtes de segments (599 `GET` + 1 `PUT` à jeton d'envoi valide)
+  puis 429, alors que la limite générale reste intacte.
+- `TestSweepEmptyUpload` et `TestSweepUnfinishedUpload` (janitor) adaptés : l'envoi
+  commencé progresse toutes les 10 à 14 min et vit jusqu'à l'échéance de 3 h, pas plus.
+- TS : `Promise.all([item(0), item(1), streamItem(2), item(2)])` avec un `fetch` lent :
+  tout est exact ; `wipe()` pendant une lecture : lecture exacte ; second
+  `segment(0)` sur un `File` → `segment_deja_produit` ; `collectToBlob` avec
+  `foldBytes` = 1 Mio sur 3 Mio : au moins 4 replis, jamais plus de 1 Mio + 64 Kio de
+  tranches en mémoire, contenu exact.
+- Le test de course du contrôleur (`scratchpad/t/race.test.ts`), copié le temps d'un
+  essai : `[ 'ok', 'ok' ]`.
+
+### Commandes et sorties
+
+`make test && cd web && npx tsc --noEmit`, puis le gros fichier seul :
+
+```
+ok  github.com/skoow/shhdrop/server/...      (10 paquets ; go vet sans remarque)
+web src : Test Files 7 passed (7) — Tests 118 passed (118) — 12,0 s
+web e2e : Test Files 4 passed (4) — Tests 23 passed (23)   — 47,2 s (contre 142,8 s avant :
+          les segments n'attendent plus la limite des 60/min)
+tsc --noEmit : aucune erreur (TSC_OK)
+RSS : base 110 Mio, pic 218 Mio, croissance 109 Mio ; ArrayBuffer : croissance 2 Mio
+```
+
+### Points restants
+
+- Marge du seuil RSS : 109 Mio (114 Mo) mesurés pour 150 Mo autorisés. Une variation du
+  ramasse-miettes pourrait un jour faire échouer le test de façon intermittente. Le seuil
+  sur les `ArrayBuffer` (2 Mio mesurés) est le contrôle le plus fiable.
+- `progress_at` donne, pendant l'envoi seulement, la minute du dernier segment reçu :
+  c'est la décision du contrôleur, documentée au §9.1.
+- Avec 600 segments par minute, un client peut télécharger environ 2,4 Gio par minute pour
+  un même partage ouvert. Les jetons bornent la durée (3 h) et le nombre d'ouvertures
+  (≤ 10), mais pas le trafic sortant : à surveiller (§15).

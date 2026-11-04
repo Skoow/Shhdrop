@@ -42,6 +42,8 @@ const (
 	purgeWindow  = 3 * 3600 // durée d'un jeton de téléchargement (spec §24 : 3 h)
 	// emptySweep : un envoi sans segment est effacé dès upload_deadline − emptySweep (sweepCond).
 	emptySweep = uploadWindow - 300
+	// stallSweep : un envoi commencé sans nouveau segment depuis 15 min est effacé.
+	stallSweep = 900
 )
 
 type CreateReq struct {
@@ -89,6 +91,9 @@ func validID(id string) bool {
 // ceil15 arrondit au quart d'heure supérieur : toutes les dates stockées le sont,
 // pour ne pas révéler la minute de création ou d'ouverture (spec §9.2).
 func ceil15(t int64) int64 { return (t + 899) / 900 * 900 }
+
+// minute : précision de progress_at, qui n'existe que pendant l'envoi (spec §9.1).
+func minute(t int64) int64 { return t - t%60 }
 
 func secs(n int64) time.Duration { return time.Duration(n) * time.Second }
 
@@ -188,12 +193,14 @@ func (s *Service) PutSegment(id string, n int, body []byte) error {
 			return notFound(err)
 		}
 		if mask[n/8]&(1<<(n%8)) != 0 {
-			return nil
+			// Segment remplacé (reprise) : c'est aussi un progrès.
+			_, err := s.DB.Exec(`UPDATE shares SET progress_at=? WHERE id=? AND state='uploading'`, minute(s.now()), id)
+			return err
 		}
 		next := append([]byte(nil), mask...)
 		next[n/8] |= 1 << (n % 8)
-		res, err := s.DB.Exec(`UPDATE shares SET segments_mask=? WHERE id=? AND state='uploading' AND segments_mask=?`,
-			next, id, mask)
+		res, err := s.DB.Exec(`UPDATE shares SET segments_mask=?, progress_at=? WHERE id=? AND state='uploading' AND segments_mask=?`,
+			next, minute(s.now()), id, mask)
 		if err != nil {
 			return err
 		}
@@ -222,9 +229,9 @@ func (s *Service) Finalize(id string) (time.Duration, error) {
 		return 0, ErrIncomplete
 	}
 	exp := ceil15(now + int64(ttl)*3600)
-	// upload_deadline effacé : il trahirait la date de création (spec §9.1).
+	// upload_deadline et progress_at effacés : ils trahiraient la date de l'envoi (spec §9.1).
 	var got int64
-	err = s.DB.QueryRow(`UPDATE shares SET state='ready', expires_at=?, upload_deadline=NULL
+	err = s.DB.QueryRow(`UPDATE shares SET state='ready', expires_at=?, upload_deadline=NULL, progress_at=NULL
 		WHERE id=? AND state='uploading' AND upload_deadline>? AND segments_mask=? RETURNING expires_at`,
 		exp, id, now, full).Scan(&got)
 	if err != nil {
@@ -418,10 +425,13 @@ func (s *Service) DestroyAdmin(id string) error {
 // 5 à 20 min après la création selon l'arrondi au quart d'heure : une réservation vide
 // ne bloque pas l'espace pendant trois heures. La date de création n'étant pas stockée,
 // on la déduit de l'échéance ; rien de plus n'est enregistré.
+// Envoi bloqué : commencé, mais aucun segment reçu depuis 15 min (progress_at, à la minute,
+// NULL hors envoi) : effacé sans attendre l'échéance de 3 h.
 // Paramètres numérotés : ?1 = maintenant, ?2 = maxAttempts.
 var sweepCond = `((state IN ('ready','draining') AND expires_at<=?1) OR
 	(state='uploading' AND upload_deadline<=?1) OR
 	(state='uploading' AND upload_deadline-` + strconv.Itoa(emptySweep) + `<=?1 AND segments_mask=zeroblob(length(segments_mask))) OR
+	(state='uploading' AND progress_at IS NOT NULL AND progress_at+` + strconv.Itoa(stallSweep) + `<=?1) OR
 	(state='draining' AND purge_at<=?1) OR failed_attempts>=?2)`
 
 // Sweep efface les partages expirés, les envois abandonnés, les « draining » échus

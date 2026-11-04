@@ -227,6 +227,31 @@ describe("sealStream / openStream", () => {
     for (const n of [-1, 3, 1.5]) await expect(s.segment(n)).rejects.toThrow("segment_invalide");
   });
 
+  it("File : segment(n) ne se régénère pas (le fichier a pu changer sur le disque)", async () => {
+    const file = new File([pseudo(100_000, 6)], "f.bin");
+    const s = await sealStream([{ kind: "file", name: "f.bin", mime: "x/y", data: file }], await freshKeys());
+    await s.segment(0);
+    await expect(s.segment(0)).rejects.toThrow("segment_deja_produit");
+  });
+
+  it("opérations simultanées sur un même lecteur : sérialisées, sans fausse corruption", async () => {
+    const srv = server(sealed.segments);
+    const slow = async (n: number) => {
+      await new Promise((r) => setTimeout(r, 1));
+      return srv.fetch(n);
+    };
+    const o = await openStream(slow, 160, keys);
+    const [t, x, y, z] = await Promise.all([o.item(0), o.item(1), streamed(o, 2), o.item(2)]);
+    expect(t).toEqual(utf8(texte));
+    expect(same(x, a)).toBe(true);
+    expect(same(y, b)).toBe(true);
+    expect(same(z, b)).toBe(true);
+    // Un wipe() au milieu d'une lecture ne la fait pas échouer : le segment est rechargé.
+    const p = o.item(2);
+    o.wipe();
+    expect(same(await p, b)).toBe(true);
+  });
+
   it("une entrée Uint8Array modifiée après sealStream ne change pas le paquet", async () => {
     const data = pseudo(100_000, 5);
     const k = await freshKeys();

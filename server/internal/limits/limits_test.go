@@ -225,3 +225,57 @@ func TestConcurrent(t *testing.T) {
 		t.Fatalf("%d créations acceptées en parallèle, attendu 10", n)
 	}
 }
+
+// Anti-saturation : 6 Gio utiles par jour et par /48, en plus des 3 Gio par /64.
+func TestBytesPer48(t *testing.T) {
+	now := t0
+	l := newLim(&now)
+	if BytesPer48 != 6<<30 {
+		t.Fatal("BytesPer48", BytesPer48)
+	}
+	const gib = 16384 * 65536
+	for i := 0; i < 6; i++ {
+		a := ip(fmt.Sprintf("2001:db8:1:%x::1", i)) // six /64 du même /48
+		if ok, _ := l.AllowCreate(a, gib); !ok {
+			t.Fatalf("lien %d refusé", i+1)
+		}
+	}
+	if ok, ra := l.AllowCreate(ip("2001:db8:1:ff::1"), 1); ok || ra <= 0 {
+		t.Fatalf("6 Gio + 1 octet par /48 : ok=%v retryAfter=%v", ok, ra)
+	}
+	if ok, _ := l.AllowCreate(ip("2001:db8:2::1"), gib); !ok {
+		t.Fatal("autre /48 refusé")
+	}
+	// Un refus par /48 ne consomme rien sur le /64.
+	if ok, _ := l.AllowCreate(ip("2001:db8:1:ff::1"), 1); ok {
+		t.Fatal("toujours refusé")
+	}
+	now = now.Add(24 * time.Hour)
+	if ok, _ := l.AllowCreate(ip("2001:db8:1:ff::1"), gib); !ok {
+		t.Fatal("remise à zéro quotidienne")
+	}
+}
+
+// Requêtes de segments à jeton valide : 600 par minute et par connexion, compteur à part.
+func TestSegmentRate(t *testing.T) {
+	now := t0
+	l := newLim(&now)
+	for i := 0; i < SegmentsPerMin; i++ {
+		if !l.AllowSegment(ip("1.2.3.4")) {
+			t.Fatalf("segment %d refusé", i+1)
+		}
+	}
+	if SegmentsPerMin != 600 || l.AllowSegment(ip("1.2.3.4")) {
+		t.Fatal("601ᵉ segment accepté")
+	}
+	if !l.AllowRequest(ip("1.2.3.4")) {
+		t.Fatal("compteur général touché par les segments")
+	}
+	if !l.AllowSegment(ip("1.2.3.5")) {
+		t.Fatal("autre connexion refusée")
+	}
+	now = now.Add(time.Minute)
+	if !l.AllowSegment(ip("1.2.3.4")) {
+		t.Fatal("pas de remise à zéro à la minute")
+	}
+}

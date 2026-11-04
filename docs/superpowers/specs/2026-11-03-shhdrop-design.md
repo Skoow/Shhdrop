@@ -98,15 +98,15 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 | Règle | Valeur V1 |
 |---|---|
 | Éléments par partage | 10 maximum |
-| Taille par partage | 100 Mio de contenu utile (1 600 morceaux de 64 Kio) ; le fichier chiffré fait 104 883 248 octets |
+| Taille par partage | 1 Gio de contenu utile (16 384 morceaux de 64 Kio) ; le fichier chiffré fait 48 + 16 384 × 65 552 = 1 074 004 016 octets (§24) |
 | Durée de vie | au choix 1 h, 6 h, 12 h, 24 h ; comptée **à partir de la fin de l'envoi** ; expiration arrondie au **quart d'heure supérieur** |
 | Ouvertures | au choix 1 à 10 ; **une ouverture = un déverrouillage réussi** (recharger la page en consomme une, c'est affiché) |
 | Fin de vie | le premier atteint : durée, ouvertures épuisées, destruction (expéditeur, destinataire, administrateur), signalement, 5 mots de passe faux |
 | Mot de passe | obligatoire ; généré par défaut : **4 mots** tirés d'une liste de 7 776 mots (≈ 52 bits) ; personnalisé : 12 caractères minimum et absent d'une liste noire des mots de passe courants (contrôle côté navigateur : le serveur ne peut pas le vérifier) |
 | Essais de mot de passe | 5 ratés → destruction |
-| Création de partages | 10 par jour par connexion (IPv4, ou bloc IPv6 /64) ; 30 par jour par bloc /48 ; 300 Mio par jour par connexion |
-| Limite de débit | 60 requêtes par minute par connexion sur les routes publiques |
-| Stockage total | plafond configurable (20 Gio par défaut), **réservé à la création** ; au-delà, nouveaux envois refusés |
+| Création de partages | 10 par jour par connexion (IPv4, ou bloc IPv6 /64) ; 30 par jour par bloc /48 ; 3 Gio utiles par jour par connexion et 6 Gio par bloc /48 (§24) |
+| Limite de débit | 60 requêtes par minute par connexion sur les routes publiques ; les envois et téléchargements de segments porteurs d'un jeton valide ont leur propre limite, 600 par minute par connexion (§24) ; un segment au jeton invalide compte dans les 60 |
+| Stockage total | plafond configurable (100 Gio par défaut), **réservé à la création** ; au-delà, nouveaux envois refusés |
 
 ---
 
@@ -117,7 +117,7 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 1. **Composer** : fichiers, photo, vocal, texte ; aperçu, ✕ pour retirer, jauge « 34 / 100 Mo · 3 / 10 ».
    - Métadonnées des photos retirées (section 12) ; avertissement pour vidéos et PDF, non nettoyés.
 2. **Options** : durée, nombre d'ouvertures, mot de passe (généré, régénérable, modifiable, indicateur de force).
-3. **Envoi** : chiffrement puis envoi par segments, progression, reprise automatique si le réseau coupe. La reprise ne fonctionne **que dans le même onglet** : fermer l'onglet abandonne l'envoi, qui compte quand même dans la limite du jour et est effacé au bout d'1 h.
+3. **Envoi** : chiffrement puis envoi par segments, progression, reprise automatique si le réseau coupe. La reprise ne fonctionne **que dans le même onglet** : fermer l'onglet abandonne l'envoi, qui compte quand même dans la limite du jour et est effacé au bout de 15 min sans nouveau segment (5 à 20 min s'il n'en a reçu aucun ; 3 h au plus).
 4. **Lien prêt**, affiché seulement quand l'envoi est entièrement terminé :
    - lien (Copier, Partager, QR code) ;
    - mot de passe (Copier), avec le rappel : « Envoie-le par un **autre moyen** que le lien. Les deux dans la même messagerie, c'est comme ne pas en mettre » ;
@@ -228,23 +228,26 @@ Chaque module a une responsabilité unique et des tests propres. `web/src/crypto
   - nonce de 12 octets = numéro du morceau (11 octets) + drapeau « dernier morceau » (1 octet) ;
   - données authentifiées = en-tête ;
   - tout morceau modifié, retiré, déplacé ou ajouté est détecté.
-- **Paliers de taille**, en nombre de morceaux : 1, 16, 80, 160, 400, 800, 1 600 (de 64 Kio à 100 Mio). Le serveur ne connaît que le palier, donc ni les noms, ni les types, ni le nombre d'éléments, ni la taille exacte.
+- **Paliers de taille**, en nombre de morceaux : 1, 16, 80, 160, 400, 800, 1 600, 4 000, 8 000, 16 384 (de 64 Kio à 1 Gio, §24). Le serveur ne connaît que le palier, donc ni les noms, ni les types, ni le nombre d'éléments, ni la taille exacte.
+- **Palier canonique** : à l'ouverture, le navigateur vérifie que le palier annoncé par le serveur est exactement celui que le chiffrement aurait choisi pour le contenu décrit par le manifeste (authentifié) ; sinon, paquet corrompu. Avec la taille exacte de chaque segment et le drapeau « dernier morceau », un serveur ne peut ni tronquer le paquet ni changer son palier.
+- **Lecture en flux** : le navigateur ne déchiffre que les morceaux dont il a besoin. Les morceaux jamais lus ne sont pas vérifiés : le bourrage, et les éléments qu'on n'ouvre pas. Tout ce qui est montré ou enregistré est authentifié.
+- **Enregistrement interrompu** : `saveItem` écrit au fil du déchiffrement ; si une erreur survient (paquet corrompu, réseau), l'écran doit **abandonner ou supprimer** le fichier partiel (`writable.abort()`) et ne jamais l'annoncer comme terminé.
 - **Segments de transport** de 64 morceaux (4 Mio + tags) : un envoi ou un téléchargement par segment. La taille exacte de chaque segment se déduit du palier.
 
 ### 7.4 Envoi
 
 1. `POST /api/shares` : durée, ouvertures, palier, `sel`, paramètres KDF, `V_accès`, `V_preuve`, `V_gestion`.
-   - Le serveur vérifie les limites, **réserve** la place du palier et répond avec un identifiant (128 bits) et un **jeton d'envoi signé** (valable 1 h). `upload_deadline` = maintenant + 1 h, arrondi au quart d'heure supérieur.
-2. `PUT /segments/{n}` : le serveur refuse tout `n` hors palier, toute taille inexacte et tout envoi après finalisation. Il écrit à la position exacte, et renvoyer un segment le remplace (reprise).
+   - Le serveur vérifie les limites, **réserve** la place du palier et répond avec un identifiant (128 bits) et un **jeton d'envoi signé** (valable 3 h). `upload_deadline` = maintenant + 3 h, arrondi au quart d'heure supérieur.
+2. `PUT /segments/{n}` : le serveur refuse tout `n` hors palier, toute taille inexacte et tout envoi après finalisation. Il écrit à la position exacte, et renvoyer un segment le remplace (reprise). Chaque segment reçu met à jour `progress_at` (minute du dernier segment, §9.1). Le navigateur chiffre chaque segment juste avant de l'envoyer et renvoie les mêmes octets en cas de nouvel essai : un segment n'est jamais rechiffré à partir du fichier.
 3. `POST /finalize` : tous les segments sont présents → état `ready`, et `expires_at` = maintenant + durée, arrondi au quart d'heure supérieur.
-4. Un envoi non finalisé à `upload_deadline` est effacé et sa place libérée. Un envoi qui n'a reçu **aucun segment** est effacé dès `upload_deadline` − 55 min (5 à 20 min après la création selon l'arrondi) : une réservation vide ne bloque pas l'espace une heure. La date de création n'est pas stockée : ce seuil se calcule à partir de l'échéance arrondie.
+4. Un envoi non finalisé à `upload_deadline` (3 h au plus) est effacé et sa place libérée. Un envoi qui n'a reçu **aucun segment** est effacé dès `upload_deadline` − 2 h 55 (5 à 20 min après la création selon l'arrondi) : une réservation vide ne bloque pas l'espace. La date de création n'est pas stockée : ce seuil se calcule à partir de l'échéance arrondie. Un envoi **bloqué** (aucun nouveau segment depuis 15 min, d'après `progress_at`) est effacé lui aussi.
 
 ### 7.5 Déverrouillage et téléchargement
 
 1. `GET meta` (avec `K_accès`) : secondes restantes avant expiration, `sel`, paramètres KDF. Sans `K_accès` valide : réponse « introuvable », qui ne compte pas comme essai.
 2. `POST unlock` (avec `K_accès` et `K_preuve`), traité en une seule requête SQL conditionnelle :
    - **Faux** : `failed_attempts = failed_attempts + 1 WHERE failed_attempts < 5` ; réponse avec les essais restants ; au 5ᵉ, destruction.
-   - **Juste** : `opens_left = opens_left - 1, opens_issued = opens_issued + 1 WHERE state='ready' AND opens_left > 0 AND expires_at > now AND failed_attempts < 5`, et passage en `draining` avec `purge_at` = min(maintenant + 1 h arrondi au quart d'heure supérieur, `expires_at`) quand `opens_left` atteint 0. Le n° d'ouverture rendu (`opens_issued`) entre dans un **jeton de téléchargement signé**, propre à cette ouverture, valable 1 h et plafonné à `expires_at`.
+   - **Juste** : `opens_left = opens_left - 1, opens_issued = opens_issued + 1 WHERE state='ready' AND opens_left > 0 AND expires_at > now AND failed_attempts < 5`, et passage en `draining` avec `purge_at` = min(maintenant + 3 h arrondi au quart d'heure supérieur, `expires_at`) quand `opens_left` atteint 0. Le n° d'ouverture rendu (`opens_issued`) entre dans un **jeton de téléchargement signé**, propre à cette ouverture, valable 3 h et plafonné à `expires_at`.
 3. `GET /segments/{n}` (avec le jeton) : refusé dès l'expiration du partage ou sa destruction (coupure nette), et pour une ouverture déjà terminée.
 4. `POST done` (avec le jeton) : pose le bit de cette ouverture dans `done_mask` (idempotent : un `done` rejoué ne change rien) ; le jeton de cette ouverture ne lit plus aucun segment.
 5. Quand `opens_left = 0` (état `draining`), plus aucun déverrouillage n'est possible. Le partage est effacé dès que toutes les ouvertures émises sont terminées (nombre de bits de `done_mask` = `opens_issued`), au plus tard à `purge_at`.
@@ -292,9 +295,10 @@ Toutes les réponses : JSON, `Cache-Control: no-store`, erreurs uniformes pour �
 
 Table `shares`, une ligne par partage vivant :
 
-`id` (clé primaire, table `WITHOUT ROWID` : aucun compteur d'insertion ne trahit l'ordre de création), `state` (`uploading`, `ready`, `draining`), `bucket` (palier), `ttl_hours`, `max_opens`, `opens_left`, `opens_issued`, `done_mask` (un bit par ouverture terminée), `failed_attempts`, `segments_mask` (segments reçus), `salt`, `kdf_ops`, `kdf_mem`, `access_v`, `proof_v`, `manage_v` (SHA-256 de `K_accès`, `K_preuve`, `S_gestion`), `upload_deadline` (effacé à la finalisation), `expires_at`, `purge_at`.
+`id` (clé primaire, table `WITHOUT ROWID` : aucun compteur d'insertion ne trahit l'ordre de création), `state` (`uploading`, `ready`, `draining`), `bucket` (palier), `ttl_hours`, `max_opens`, `opens_left`, `opens_issued`, `done_mask` (un bit par ouverture terminée), `failed_attempts`, `segments_mask` (segments reçus), `salt`, `kdf_ops`, `kdf_mem`, `access_v`, `proof_v`, `manage_v` (SHA-256 de `K_accès`, `K_preuve`, `S_gestion`), `upload_deadline` (effacé à la finalisation), `progress_at` (pendant l'envoi seulement), `expires_at`, `purge_at`.
 
-- Toutes les dates stockées sont **arrondies au quart d'heure supérieur**.
+- Toutes les dates stockées sont **arrondies au quart d'heure supérieur**, sauf `progress_at`.
+- `progress_at` : minute du dernier segment reçu, pour effacer un envoi bloqué (§7.4). Il n'existe **que pendant l'envoi** : `NULL` à la création (la minute de création n'est donc jamais écrite), mis à jour à chaque segment, remis à `NULL` à la finalisation comme `upload_deadline`. Pendant l'envoi, il donne à la minute près l'heure du dernier segment reçu.
 
 - **Jamais stockés** : adresse IP, date de création, nom, type ou taille exacte de fichier, navigateur, pays, jetons.
 - La ligne est supprimée quand le partage meurt. `secure_delete=ON`, `temp_store=MEMORY` et vidage du WAL chaque minute : rien ne reste dans le fichier de base (vérifié par le test « le serveur ne voit rien » après destruction et arrêt).
@@ -385,8 +389,8 @@ Table `shares`, une ligne par partage vivant :
 | Situation | Comportement |
 |---|---|
 | Réseau coupé pendant l'envoi | Reprise automatique au segment manquant (même onglet) |
-| Onglet fermé pendant l'envoi | Envoi abandonné, effacé au bout d'1 h, compte dans la limite du jour |
-| Réseau coupé pendant le téléchargement | Reprise tant que le jeton (1 h) et le partage sont valides |
+| Onglet fermé pendant l'envoi | Envoi abandonné, effacé au bout de 15 min sans nouveau segment (3 h au plus), compte dans la limite du jour |
+| Réseau coupé pendant le téléchargement | Reprise tant que le jeton (3 h) et le partage sont valides |
 | Serveur redémarré pendant un transfert | Message « Le transfert a été interrompu, réessayez » |
 | Mot de passe faux | « Mot de passe incorrect · N essais restants » ; destruction au 5ᵉ |
 | Partage expiré pendant la lecture | Ce qui est déjà affiché reste visible jusqu'à la fermeture ; téléchargement coupé net |
@@ -425,7 +429,7 @@ Messages en français et en anglais.
 ### 15.1 Hébergement
 
 - Serveur loué hors UE (Suisse ou Islande), choisi à la mise en ligne.
-- Vérifier le **volume de trafic sortant inclus** : un partage de 100 Mio ouvert 10 fois = 1 Gio sortant.
+- Vérifier le **volume de trafic sortant inclus** : un partage de 1 Gio ouvert 10 fois = 10 Gio sortants.
 - Aucun intermédiaire qui déchiffre le trafic (pas de CDN-proxy), TLS terminé par Caddy.
 
 ### 15.2 Au quotidien (automatique)
@@ -497,7 +501,10 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 4. La mémoire du navigateur est effacée **au mieux**, pas de façon garantie.
 5. Shhdrop **ne vérifie pas l'expéditeur** : un lien peut venir de n'importe qui.
 6. Le serveur ne stocke **aucune date de création** et arrondit ses dates au quart d'heure, mais le système de fichiers garde la date de naissance et de changement de chaque fichier chiffré : quelqu'un qui accède au volume déverrouillé du serveur en marche peut en déduire l'heure de création d'un partage vivant.
-7. On n'écrit jamais « 100 % sécurisé ». On écrit ce qui est vrai : le contenu est chiffré de bout en bout, et ni le serveur ni son propriétaire ne peuvent le lire.
+7. **Enregistrement sans `showSaveFilePicker`** (Firefox, Safari, téléphones) : l'élément est assemblé en `Blob`. Les tranches déchiffrées sont repliées dans le `Blob` tous les 64 Mio, puis mises à zéro ; le navigateur garde ce `Blob` en mémoire ou le place dans son stockage temporaire, sur le disque, hors du contrôle du site.
+8. **Effacement de la mémoire** : `wipe()` met à zéro le segment chiffré en cache, mais le manifeste (noms, types, textes) reste en mémoire sous forme de chaînes JavaScript, impossibles à effacer ; elles disparaissent quand la page les oublie.
+9. **Aperçu** limité aux éléments de 200 Mio ; au-delà, téléchargement seulement.
+10. On n'écrit jamais « 100 % sécurisé ». On écrit ce qui est vrai : le contenu est chiffré de bout en bout, et ni le serveur ni son propriétaire ne peuvent le lire.
 
 ---
 
@@ -519,7 +526,7 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 | Registraire du domaine (classique ou Njalla) | Dès maintenant |
 | Adresse e-mail de contact | Avant la mise en ligne |
 | Avis d'un juriste (LCEN, DSA) et déclaration ANSSI | Avant l'ouverture au public |
-| Stockage total (20 Gio par défaut) | Selon le serveur choisi |
+| Stockage total (100 Gio par défaut) | Selon le serveur choisi |
 
 ---
 
@@ -592,7 +599,9 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
   - aperçu sur le site (image, audio, vidéo, PDF) seulement pour les éléments de **200 Mio maximum** ; au-delà, téléchargement seulement ;
   - téléchargement **en flux** : déchiffrement segment par segment, écriture directe sur le disque via l'API d'accès aux fichiers (`showSaveFilePicker`) quand elle existe (Chrome, Edge sur ordinateur) ; sinon, assemblage en `Blob` (le navigateur peut alors placer des morceaux déchiffrés dans son stockage temporaire : limite assumée, ajoutée à la §18).
 - **Délais** : jeton d'envoi et `upload_deadline` **3 h** ; jeton de téléchargement `min(3 h, expires_at)` ; `purge_at` = `min(ceil15(now + 3 h), expires_at)`.
-- **Quotas** : 10 liens par jour par connexion (inchangé), 30 par /48 (inchangé), **3 Gio par jour** par connexion ; stockage total par défaut **100 Gio** (`SHH_STORAGE_MAX`).
+- **Quotas** : 10 liens par jour par connexion (inchangé), 30 par /48 (inchangé), **3 Gio par jour** par connexion et **6 Gio par jour par /48** (anti-saturation du disque) ; stockage total par défaut **100 Gio** (`SHH_STORAGE_MAX`).
+- **Limite de débit des segments** : un `PUT`/`GET` de segment dont le jeton est valide est exclu des 60 requêtes par minute et compte dans une limite à part de 600 par minute et par connexion ; un jeton invalide compte dans les 60.
+- **Envoi bloqué** : aucun nouveau segment depuis 15 min → effacé (`progress_at`, §9.1), en plus de l'échéance de 3 h et de la règle « aucun segment en 5 min ».
 
 ### Anti-robot
 

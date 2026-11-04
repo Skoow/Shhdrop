@@ -188,8 +188,8 @@ describe("réseau coupé pendant l'envoi", () => {
 // Spec §24 : gros fichier (File/Blob adossé au disque) chiffré, envoyé, reçu et déchiffré en
 // flux ; la mémoire du processus ne grandit pas avec la taille du fichier. 250 Mio − 64 Kio :
 // plus grand contenu du palier 4000 (63 segments) ; 300 Mio tomberaient dans le palier 8000
-// (125 segments, 500 Mio envoyés). Le serveur limite à 60 requêtes par minute : ~130
-// requêtes ici, donc environ 2 min d'attente imposée.
+// (125 segments, 500 Mio envoyés). Les segments à jeton valide ont leur propre limite
+// (600 par minute) : les ~130 requêtes passent sans attente.
 describe("gros fichier en flux (250 Mio)", () => {
   const srv = useServer();
   const SIZE = 250 * MIB - 64 * KIB;
@@ -211,15 +211,21 @@ describe("gros fichier en flux (250 Mio)", () => {
   });
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  it("SHA-256 identique, croissance de la RSS < 250 Mo", async () => {
+  it("SHA-256 identique, croissance de la RSS et des ArrayBuffer < 150 Mo", async () => {
     const blob = (await openAsBlob(file, { type: "application/octet-stream" })) as unknown as Blob;
     expect(blob.size).toBe(SIZE);
     globalThis.gc?.();
-    const base = process.memoryUsage().rss;
+    const m0 = process.memoryUsage();
+    const base = m0.rss;
+    const baseAb = m0.arrayBuffers;
     let peak = base;
-    const timer = setInterval(() => {
-      peak = Math.max(peak, process.memoryUsage().rss);
-    }, 20);
+    let peakAb = baseAb;
+    const sample = () => {
+      const m = process.memoryUsage();
+      peak = Math.max(peak, m.rss);
+      peakAb = Math.max(peakAb, m.arrayBuffers);
+    };
+    const timer = setInterval(sample, 20);
     try {
       const prog: [number, number][] = [];
       const r = await share(srv(), [{ kind: "file", name: "gros.bin", mime: "application/octet-stream", data: blob }], 1, {
@@ -242,10 +248,15 @@ describe("gros fichier en flux (250 Mio)", () => {
       await expect(fetchMeta(r.link)).rejects.toBeInstanceOf(NotFoundError);
     } finally {
       clearInterval(timer);
-      peak = Math.max(peak, process.memoryUsage().rss);
+      sample();
     }
     const growth = peak - base;
-    console.log(`RSS : base ${(base / MIB).toFixed(0)} Mio, pic ${(peak / MIB).toFixed(0)} Mio, croissance ${(growth / MIB).toFixed(0)} Mio`);
-    expect(growth).toBeLessThan(250e6);
+    const growthAb = peakAb - baseAb;
+    console.log(
+      `RSS : base ${(base / MIB).toFixed(0)} Mio, pic ${(peak / MIB).toFixed(0)} Mio, croissance ${(growth / MIB).toFixed(0)} Mio ; ` +
+        `ArrayBuffer : croissance ${(growthAb / MIB).toFixed(0)} Mio`,
+    );
+    expect(growth).toBeLessThan(150e6);
+    expect(growthAb).toBeLessThan(150e6);
   }, 400_000);
 });

@@ -204,7 +204,7 @@ export type Opened = {
    */
   saveItem(i: number, sink: (chunk: Uint8Array<ArrayBuffer>) => Promise<void> | void): Promise<void>;
   done(): Promise<void>;
-  /** Met à zéro le segment en cache. */
+  /** Met à zéro le segment en cache (le manifeste reste en mémoire : voir ContainerReader.wipe). */
   wipe(): void;
 };
 
@@ -286,18 +286,33 @@ export async function openShare(
   }, readerError);
 }
 
+/** Taille des tranches en mémoire avant repli dans le Blob (collectToBlob). */
+export const FOLD_BYTES = 64 * 1048576;
+
 /**
- * Assemble l'élément i dans un Blob, quand showSaveFilePicker n'existe pas. Les tranches
- * déchiffrées restent en mémoire jusqu'à la création du Blob (que le navigateur peut placer
- * dans son stockage temporaire, spec §24 et §18), puis sont mises à zéro.
+ * Assemble l'élément i dans un Blob, quand showSaveFilePicker n'existe pas. Tous les
+ * `foldBytes` (64 Mio ; paramètre réglable pour les tests), les tranches déchiffrées sont
+ * repliées dans le Blob puis mises à zéro : au plus ~64 Mio de tranches en mémoire JS.
+ * Le navigateur garde le Blob en mémoire ou dans son stockage temporaire (spec §24, §18).
  */
-export async function collectToBlob(open: Opened, i: number, mime: string): Promise<Blob> {
-  const parts: Uint8Array<ArrayBuffer>[] = [];
+export async function collectToBlob(open: Opened, i: number, mime: string, foldBytes = FOLD_BYTES): Promise<Blob> {
+  let acc = new Blob([], { type: mime });
+  let parts: Uint8Array<ArrayBuffer>[] = [];
+  let pending = 0;
+  const fold = () => {
+    acc = new Blob([acc, ...parts], { type: mime });
+    for (const p of parts) p.fill(0);
+    parts = [];
+    pending = 0;
+  };
   try {
     await open.saveItem(i, (chunk) => {
       parts.push(chunk);
+      pending += chunk.length;
+      if (pending >= foldBytes) fold();
     });
-    return new Blob(parts, { type: mime });
+    fold();
+    return acc;
   } finally {
     for (const p of parts) p.fill(0);
   }

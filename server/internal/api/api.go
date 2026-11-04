@@ -80,7 +80,13 @@ func (s *server) guard(next http.Handler) http.Handler {
 			writeErr(w, http.StatusInternalServerError, "internal")
 			return
 		}
-		if !s.lim.AllowRequest(ip) {
+		allowed := false
+		if s.validSegmentToken(r) {
+			allowed = s.lim.AllowSegment(ip)
+		} else {
+			allowed = s.lim.AllowRequest(ip)
+		}
+		if !allowed {
 			// Fenêtre fixe alignée sur la minute (limits.AllowRequest).
 			writeLimit(w, time.Duration(60-s.svc.Now().Unix()%60)*time.Second)
 			return
@@ -88,6 +94,35 @@ func (s *server) guard(next http.Handler) http.Handler {
 		r.Header.Del("X-Shh-Client-IP") // plus aucune lecture en aval
 		next.ServeHTTP(w, withIP(r, ip))
 	})
+}
+
+// validSegmentToken : requête de segment (PUT avec jeton d'envoi, GET avec jeton de
+// téléchargement) dont le jeton est signé, non expiré et lié à ce partage. Ces requêtes
+// ont leur propre limite (SegmentsPerMin) ; l'état du partage est revérifié ensuite.
+func (s *server) validSegmentToken(r *http.Request) bool {
+	rest, ok := strings.CutPrefix(r.URL.Path, "/api/shares/")
+	if !ok {
+		return false
+	}
+	id, n, ok := strings.Cut(rest, "/segments/")
+	if !ok || strings.Contains(id, "/") || strings.Contains(n, "/") {
+		return false
+	}
+	var kind byte
+	switch r.Method {
+	case http.MethodPut:
+		kind = token.Upload
+	case http.MethodGet:
+		kind = token.Download
+	default:
+		return false
+	}
+	tok, err := bearer(r)
+	if err != nil {
+		return false
+	}
+	_, err = s.sig.Check(tok, kind, id)
+	return err == nil
 }
 
 // healthz : santé, pour les appels locaux directs seulement (spec §8). Une requête

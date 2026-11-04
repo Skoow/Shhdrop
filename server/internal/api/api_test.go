@@ -527,6 +527,38 @@ func TestRateLimit(t *testing.T) {
 	expect(t, e.do(req{method: "GET", path: "/api/captcha"}), 200, "")
 }
 
+// Segments à jeton valide : hors de la limite de 60/min, avec leur propre limite de 600/min.
+// Un jeton invalide compte dans la limite générale.
+func TestSegmentRateLimit(t *testing.T) {
+	e := newEnv(t, false, nil)
+	k := newKeys()
+	c := e.create(t, "", k, 1, 1)
+	e.upload(t, c, 1)
+	dl, _ := e.unlock(t, c.ID, k) // 4 requêtes générales (captcha, create, finalize, unlock) ; le PUT est à part
+	for i := 0; i < limits.RequestsPerMin-4; i++ {
+		expect(t, e.do(req{method: "GET", path: "/api/nope"}), 404, notFound)
+	}
+	seg := "/api/shares/" + c.ID + "/segments/0"
+	for i := 0; i < 100; i++ {
+		expect(t, e.do(req{method: "GET", path: seg, hdr: auth(dl)}), 200, "")
+	}
+	expect(t, e.do(req{method: "GET", path: "/api/captcha"}), 429, "")
+	// Jeton invalide (autre partage, mauvais type, illisible) : limite générale, épuisée.
+	for _, tok := range []string{c.UploadToken, "x", ""} {
+		expect(t, e.do(req{method: "GET", path: seg, hdr: auth(tok)}), 429, "")
+	}
+	expect(t, e.do(req{method: "PUT", path: seg, hdr: auth(dl), body: rnd(10)}), 429, "")
+
+	e.clk.Add(time.Minute)
+	for i := 0; i < limits.SegmentsPerMin-1; i++ { // 1 de moins : le PUT ci-dessous
+		expect(t, e.do(req{method: "GET", path: seg, hdr: auth(dl)}), 200, "")
+	}
+	// PUT avec un jeton d'envoi valide : même compteur des segments (refusé après finalisation).
+	expect(t, e.do(req{method: "PUT", path: seg, hdr: auth(c.UploadToken), body: rnd(share.SegmentSize(1, 0))}), 404, notFound)
+	expect(t, e.do(req{method: "GET", path: seg, hdr: auth(dl)}), 429, "")
+	expect(t, e.do(req{method: "GET", path: "/api/captcha"}), 200, "") // limite générale intacte
+}
+
 func TestCreateRefusals(t *testing.T) {
 	e := newEnv(t, false, nil)
 	k := newKeys()

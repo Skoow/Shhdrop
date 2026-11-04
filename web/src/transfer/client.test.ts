@@ -252,6 +252,33 @@ describe("openShare en flux : segments à la demande, saveItem, collectToBlob", 
     expect(s.calls.at(-1)).toBe("POST /api/shares/ID/done");
   });
 
+  it("collectToBlob replie les tranches dans un Blob tous les foldBytes (mémoire bornée)", async () => {
+    const s = server(route());
+    const o = await openShare(LINK, PW, undefined, s.net);
+    const sizes: number[] = [];
+    const Real = globalThis.Blob;
+    vi.stubGlobal(
+      "Blob",
+      class extends Real {
+        constructor(parts?: BlobPart[], opts?: BlobPropertyBag) {
+          // tranches en mémoire (hors Blob déjà replié) au moment de chaque repli
+          sizes.push((parts ?? []).reduce((n, p) => n + (p instanceof Real ? 0 : (p as Uint8Array).length), 0));
+          super(parts, opts);
+        }
+      },
+    );
+    let blob: Blob;
+    try {
+      blob = await collectToBlob(o, 1, "image/png", 1048576);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(sizes.length).toBeGreaterThanOrEqual(4); // 3 Mio par paquets de 1 Mio, puis la fin
+    for (const n of sizes) expect(n).toBeLessThanOrEqual(1048576 + CHUNK);
+    expect(blob.type).toBe("image/png");
+    expect(same(new Uint8Array(await blob.arrayBuffer()), a)).toBe(true);
+  });
+
   it("segment corrompu pendant saveItem → NotFoundError ; erreur du sink transmise telle quelle", async () => {
     const s = server(route((n, seg) => (n === 1 ? (seg[5]! ^= 1, seg) : seg)));
     const o = await openShare(LINK, PW, undefined, s.net);
