@@ -42,6 +42,7 @@ func (c *clock) Add(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.Unloc
 type env struct {
 	h   http.Handler
 	svc *share.Service
+	sig *token.Signer
 	clk *clock
 	dir string
 }
@@ -73,8 +74,9 @@ func newEnv(t *testing.T, behindProxy bool, static http.Handler) *env {
 	if static == nil {
 		static = htmlStatic()
 	}
-	h := New(svc, token.New(rnd(32), c.Now), limits.New(c.Now), captcha.New(rnd(32), c.Now), static, behindProxy)
-	return &env{h: h, svc: svc, clk: c, dir: dir}
+	sig := token.New(rnd(32), c.Now)
+	h := New(svc, sig, limits.New(c.Now), captcha.New(rnd(32), c.Now), static, behindProxy)
+	return &env{h: h, svc: svc, sig: sig, clk: c, dir: dir}
 }
 
 type req struct {
@@ -271,6 +273,8 @@ func TestFullFlow(t *testing.T) {
 	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/segments/2", hdr: auth(dl)}), 400, badRequest)
 	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/done", hdr: auth(dl)}), 204, "")
 	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/done", hdr: auth(dl)}), 204, "") // idempotent
+	// Ouverture terminée : son jeton ne lit plus rien.
+	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/segments/0", hdr: auth(dl)}), 404, notFound)
 
 	w = e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/status",
 		hdr: map[string]string{"X-Shh-Manage": enc.EncodeToString(k.gestion)}})
@@ -323,42 +327,6 @@ func TestFifthBadPasswordIsNotFound(t *testing.T) {
 		body: mustJSON(map[string]string{"proof": enc.EncodeToString(rnd(32))})})
 	expect(t, w, 404, notFound)
 	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/meta", hdr: access(k)}), 404, notFound)
-}
-
-func TestUniformNotFound(t *testing.T) {
-	e := newEnv(t, false, nil)
-	k := newKeys()
-	destroyed := e.create(t, "", k, 1, 1)
-	e.upload(t, destroyed, 1)
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + destroyed.ID + "/destroy",
-		body: mustJSON(map[string]string{"manage": enc.EncodeToString(k.gestion)})}), 204, "")
-	live := e.create(t, "", k, 1, 1)
-	e.upload(t, live, 1)
-
-	meta := func(id string, k keys) *httptest.ResponseRecorder {
-		return e.do(req{method: "GET", path: "/api/shares/" + id + "/meta", hdr: access(k)})
-	}
-	ws := map[string]*httptest.ResponseRecorder{
-		"inexistant":   meta(enc.EncodeToString(rnd(16)), k),
-		"id invalide":  meta("pas-un-id", k),
-		"détruit":      meta(destroyed.ID, k),
-		"mauvaise clé": meta(live.ID, newKeys()),
-	}
-	expired := e.create(t, "", k, 1, 1)
-	e.upload(t, expired, 1)
-	e.clk.Add(2 * time.Hour)
-	ws["expiré"] = meta(expired.ID, k)
-
-	for name, w := range ws {
-		expect(t, w, 404, notFound)
-		if w.Body.String() != ws["inexistant"].Body.String() ||
-			w.Header().Get("Content-Type") != ws["inexistant"].Header().Get("Content-Type") {
-			t.Fatalf("%s : réponse différente %q", name, w.Body.String())
-		}
-	}
-	// Route inconnue et mauvaise méthode : même corps JSON.
-	expect(t, e.do(req{method: "GET", path: "/api/nope"}), 404, notFound)
-	expect(t, e.do(req{method: "DELETE", path: "/api/shares"}), 404, notFound)
 }
 
 var wantHeaders = map[string]string{
@@ -546,6 +514,20 @@ func TestCreateRefusals(t *testing.T) {
 	expect(t, post(k.createBody(1, 1, alt, shown)), 201, "")
 	expect(t, post(k.createBody(1, 1, alt, shown)), 400, badRequest) // défi réutilisé
 
+	// shown_at lié à son défi : réutilisé avec un autre défi → refusé.
+	// (le défi 1 n'est pas utilisé : après une création, un défi plus ancien est refusé.)
+	_, shown1 := e.captchaFor(t, "")
+	alt2, shown2 := e.captchaFor(t, "")
+	expect(t, post(k.createBody(1, 1, alt2, shown1)), 400, badRequest)
+	expect(t, post(k.createBody(1, 1, alt2, shown2)), 201, "")
+
+	// Une requête invalide ne consomme pas le défi.
+	alt, shown = e.captchaFor(t, "")
+	b = k.createBody(1, 1, alt, shown)
+	b["ttl_hours"] = 2
+	expect(t, post(b), 400, badRequest)
+	expect(t, post(k.createBody(1, 1, alt, shown)), 201, "")
+
 	// Jeton shown_at expiré (plus de 2 min) : refusé.
 	alt, shown = e.captchaFor(t, "")
 	e.clk.Add(2 * time.Minute)
@@ -560,6 +542,9 @@ func TestCreateRefusals(t *testing.T) {
 		func(m map[string]any) { m["access_v"] = base64.StdEncoding.EncodeToString(rnd(32)) },
 		func(m map[string]any) { m["proof_v"] = nil },
 		func(m map[string]any) { m["inconnu"] = 1 },
+		func(m map[string]any) { m["ttl_hours"] = 3 },
+		func(m map[string]any) { m["max_opens"] = 11 },
+		func(m map[string]any) { m["kdf"] = map[string]int{"ops": 2, "mem": 67108864} },
 	}
 	for i, f := range bad {
 		alt, shown := e.captchaFor(t, "")
@@ -583,6 +568,8 @@ func TestCreateFrozenFull(t *testing.T) {
 	expect(t, e.do(req{method: "POST", path: "/api/shares", body: mustJSON(k.createBody(1, 1, alt, shown))}),
 		503, `{"error":"frozen"}`)
 	os.Remove(e.svc.FrozenFile)
+	// Le défi n'a pas été consommé par le refus « gelé ».
+	expect(t, e.do(req{method: "POST", path: "/api/shares", body: mustJSON(k.createBody(1, 1, alt, shown))}), 201, "")
 	e.svc.StorageMax = 1000
 	alt, shown = e.captchaFor(t, "")
 	expect(t, e.do(req{method: "POST", path: "/api/shares", body: mustJSON(k.createBody(1, 1, alt, shown))}),
@@ -592,9 +579,8 @@ func TestCreateFrozenFull(t *testing.T) {
 func TestCreateQuota(t *testing.T) {
 	e := newEnv(t, false, nil)
 	k := newKeys()
-	// Palier max = 48 + 1600 × 65 552 o ≈ 100,02 Mio : trois dépassent les 300 Mio du jour
-	// (incohérence signalée dans le rapport) ; la 3ᵉ est donc refusée.
-	for i := 0; i < 2; i++ {
+	// Quota en capacité utile (1600 × 64 Kio = 100 Mio) : 3 partages max par jour, le 4ᵉ refusé.
+	for i := 0; i < 3; i++ {
 		e.create(t, "", k, 1600, 1)
 	}
 	alt, shown := e.captchaFor(t, "")
@@ -634,6 +620,10 @@ func TestBehindProxy(t *testing.T) {
 		hdr: map[string]string{"X-Shh-Client-IP": "pas-une-ip"}}), 500, `{"error":"internal"}`)
 	expect(t, e.do(req{method: "GET", path: "/api/captcha", remote: "127.0.0.1:5000",
 		hdr: map[string]string{"X-Shh-Client-IP": "198.51.100.4"}}), 200, "")
+	// Pair distant (Caddy contourné) : refusé, avec ou sans en-tête.
+	expect(t, e.do(req{method: "GET", path: "/api/captcha", remote: "198.51.100.9:443"}), 500, `{"error":"internal"}`)
+	expect(t, e.do(req{method: "GET", path: "/api/captcha", remote: "198.51.100.9:443",
+		hdr: map[string]string{"X-Shh-Client-IP": "198.51.100.4"}}), 500, `{"error":"internal"}`)
 	// Chaque client derrière le proxy a sa propre limite.
 	for i := 0; i < limits.RequestsPerMin; i++ {
 		e.do(req{method: "GET", path: "/api/nope", remote: "127.0.0.1:5000",
@@ -646,4 +636,131 @@ func TestBehindProxy(t *testing.T) {
 
 	plain := newEnv(t, false, nil)
 	expect(t, plain.do(req{method: "GET", path: "/api/captcha", remote: "127.0.0.1:5000"}), 200, "")
+}
+
+func TestUniformNotFoundAllRoutes(t *testing.T) {
+	e := newEnv(t, false, nil)
+	k := newKeys()
+	mk := func() (created, string) {
+		c := e.create(t, "", k, 1, 2)
+		e.upload(t, c, 1)
+		dl, _ := e.unlock(t, c.ID, k)
+		return c, dl
+	}
+	expired, expTok := mk()
+	destroyed, desTok := mk()
+	expect(t, e.do(req{method: "POST", path: "/api/shares/" + destroyed.ID + "/destroy",
+		body: mustJSON(map[string]string{"manage": enc.EncodeToString(k.gestion)})}), 204, "")
+	e.clk.Add(2 * time.Hour)
+	live, _ := mk()
+
+	future := e.clk.Now().Add(time.Hour)
+	unknown, invalid := enc.EncodeToString(rnd(16)), "pas-un-id"
+	cases := []struct {
+		name, id string
+		k        keys
+		tok      string
+	}{
+		{"inexistant", unknown, k, e.sig.Issue(token.Download, unknown, 1, future)},
+		{"id invalide", invalid, k, e.sig.Issue(token.Download, invalid, 1, future)},
+		{"détruit", destroyed.ID, k, desTok},
+		{"mauvaise clé", live.ID, newKeys(), token.New(rnd(32), e.clk.Now).Issue(token.Download, live.ID, 1, future)},
+		{"expiré", expired.ID, k, expTok},
+	}
+	routes := map[string]func(id string, k keys, tok string) req{
+		"meta": func(id string, k keys, _ string) req {
+			return req{method: "GET", path: "/api/shares/" + id + "/meta", hdr: access(k)}
+		},
+		"unlock": func(id string, k keys, _ string) req {
+			return req{method: "POST", path: "/api/shares/" + id + "/unlock", hdr: access(k),
+				body: mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve)})}
+		},
+		"status": func(id string, k keys, _ string) req {
+			return req{method: "GET", path: "/api/shares/" + id + "/status",
+				hdr: map[string]string{"X-Shh-Manage": enc.EncodeToString(k.gestion)}}
+		},
+		"destroy gestion": func(id string, k keys, _ string) req {
+			return req{method: "POST", path: "/api/shares/" + id + "/destroy",
+				body: mustJSON(map[string]string{"manage": enc.EncodeToString(k.gestion)})}
+		},
+		"destroy preuve": func(id string, k keys, _ string) req {
+			return req{method: "POST", path: "/api/shares/" + id + "/destroy", hdr: access(k),
+				body: mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve)})}
+		},
+		"segment": func(id string, _ keys, tok string) req {
+			return req{method: "GET", path: "/api/shares/" + id + "/segments/0", hdr: auth(tok)}
+		},
+		"done": func(id string, _ keys, tok string) req {
+			return req{method: "POST", path: "/api/shares/" + id + "/done", hdr: auth(tok)}
+		},
+	}
+	for rname, route := range routes {
+		for _, c := range cases {
+			w := e.do(route(c.id, c.k, c.tok))
+			if w.Code != 404 || w.Body.String() != notFound {
+				t.Fatalf("%s / %s : %d %q", rname, c.name, w.Code, w.Body.String())
+			}
+		}
+	}
+	// Réponses octet pour octet identiques entre elles.
+	e.clk.Add(time.Minute) // nouvelle fenêtre de débit
+	ref := e.do(routes["meta"](unknown, k, "")).Body.String()
+	for rname, route := range routes {
+		for _, c := range cases {
+			if got := e.do(route(c.id, c.k, c.tok)).Body.String(); got != ref {
+				t.Fatalf("%s / %s : %q ≠ %q", rname, c.name, got, ref)
+			}
+		}
+	}
+	// Aucun essai compté sur le partage expiré ; le partage vivant intact.
+	for _, id := range []string{expired.ID, live.ID} {
+		var f int
+		if err := e.svc.DB.QueryRow(`SELECT failed_attempts FROM shares WHERE id=?`, id).Scan(&f); err != nil || f != 0 {
+			t.Fatalf("failed_attempts = %d %v", f, err)
+		}
+	}
+	// Route inconnue et mauvaise méthode : même corps JSON.
+	expect(t, e.do(req{method: "GET", path: "/api/nope"}), 404, notFound)
+	expect(t, e.do(req{method: "DELETE", path: "/api/shares"}), 404, notFound)
+}
+
+func TestHealthz(t *testing.T) {
+	for _, proxy := range []bool{false, true} {
+		e := newEnv(t, proxy, nil)
+		for i := 0; i < limits.RequestsPerMin+5; i++ { // non limité
+			w := e.do(req{method: "GET", path: "/healthz", remote: "127.0.0.1:9"})
+			expect(t, w, 200, "ok")
+			checkHeaders(t, "healthz", w)
+		}
+		expect(t, e.do(req{method: "GET", path: "/healthz", remote: "[::1]:9"}), 200, "ok")
+		expect(t, e.do(req{method: "GET", path: "/healthz", remote: "198.51.100.1:9"}), 404, notFound)
+		// Relayé par Caddy (en-tête posé) : refusé même si le pair est local.
+		expect(t, e.do(req{method: "GET", path: "/healthz", remote: "127.0.0.1:9",
+			hdr: map[string]string{"X-Shh-Client-IP": "198.51.100.1"}}), 404, notFound)
+	}
+}
+
+func TestPanicAfterWriteAborts(t *testing.T) {
+	for name, h := range map[string]http.HandlerFunc{
+		"après écriture": func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(200)
+			w.Write([]byte("partiel"))
+			panic("boum")
+		},
+		"ErrAbortHandler": func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) },
+	} {
+		e := newEnv(t, false, h)
+		w := httptest.NewRecorder()
+		func() {
+			defer func() {
+				if v := recover(); v != http.ErrAbortHandler {
+					t.Fatalf("%s : panic %v, attendu ErrAbortHandler", name, v)
+				}
+			}()
+			e.h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+		}()
+		if strings.Contains(w.Body.String(), "internal") {
+			t.Fatalf("%s : corps ajouté %q", name, w.Body.String())
+		}
+	}
 }

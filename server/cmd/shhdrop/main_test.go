@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -79,5 +80,49 @@ func TestServe(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestHTTPServerLimits(t *testing.T) {
+	s := newHTTPServer(http.NotFoundHandler())
+	if s.ReadHeaderTimeout != 10*time.Second || s.ReadTimeout != 300*time.Second ||
+		s.WriteTimeout != 300*time.Second || s.IdleTimeout != 60*time.Second || s.MaxHeaderBytes != 16<<10 ||
+		s.ErrorLog == nil {
+		t.Fatalf("%+v", s)
+	}
+}
+
+// Une requête bloquée (corps jamais terminé) ne retient pas l'arrêt au-delà du délai :
+// la connexion est fermée de force, puis serve rend la main.
+func TestServeForcedShutdown(t *testing.T) {
+	old := shutdownTimeout
+	shutdownTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { shutdownTimeout = old })
+	cfg := config.Config{DataDir: t.TempDir(), Listen: "127.0.0.1:0", StorageMaxBytes: 1 << 30, Now: time.Now}
+	ctx, cancel := context.WithCancel(context.Background())
+	pr, pw := io.Pipe()
+	errc := make(chan error, 1)
+	go func() { errc <- serve(ctx, cfg, pw); pw.Close() }()
+	sc := bufio.NewScanner(pr)
+	sc.Scan()
+	addr := strings.TrimPrefix(sc.Text(), "SHH_LISTENING ")
+	go io.Copy(io.Discard, pr)
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	io.WriteString(conn, "POST /api/shares HTTP/1.1\r\nHost: x\r\nContent-Length: 1000\r\n\r\n{")
+	time.Sleep(100 * time.Millisecond) // le gestionnaire attend la suite du corps
+	start := time.Now()
+	cancel()
+	select {
+	case err := <-errc:
+		if err == nil || time.Since(start) > 3*time.Second {
+			t.Fatalf("serve = %v après %v (attendu : erreur d'arrêt forcé)", err, time.Since(start))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("arrêt bloqué par une requête en cours")
 	}
 }

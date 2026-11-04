@@ -155,7 +155,7 @@ func TestFullFlow(t *testing.T) {
 		t.Fatal(openN, err)
 	}
 	for _, n := range []int{0, 7, 24} {
-		got, err := s.ReadSegment(id, n)
+		got, err := s.ReadSegment(id, n, openN)
 		if err != nil || !bytes.Equal(got, segBody(1600, n, byte(n+1))) {
 			t.Fatal("lecture", n, err)
 		}
@@ -225,7 +225,10 @@ func TestPutSegmentRules(t *testing.T) {
 	if _, err := s.Finalize(id); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.ReadSegment(id, 0); !bytes.Equal(got, segBody(80, 0, 9)) {
+	if n, _ := s.Unlock(id, k.acces, k.preuve); n != 1 {
+		t.Fatal("unlock", n)
+	}
+	if got, _ := s.ReadSegment(id, 0, 1); !bytes.Equal(got, segBody(80, 0, 9)) {
 		t.Fatal("remplacement")
 	}
 	if err := s.PutSegment(id, 0, segBody(80, 0, 1)); !errors.Is(err, ErrNotFound) {
@@ -427,14 +430,15 @@ func TestReadAfterExpiry(t *testing.T) {
 	s, c := newSvc(t)
 	k := newKeys()
 	id := ready(t, s, k, 16, 1, 2)
-	if _, err := s.ReadSegment(id, 1); !errors.Is(err, ErrBadSegment) {
+	s.Unlock(id, k.acces, k.preuve)
+	if _, err := s.ReadSegment(id, 1, 1); !errors.Is(err, ErrBadSegment) {
 		t.Fatal("n hors palier", err)
 	}
-	if _, err := s.ReadSegment(id, 0); err != nil {
+	if _, err := s.ReadSegment(id, 0, 1); err != nil {
 		t.Fatal(err)
 	}
 	c.Add(73 * time.Minute) // = expires_at
-	if _, err := s.ReadSegment(id, 0); !errors.Is(err, ErrNotFound) {
+	if _, err := s.ReadSegment(id, 0, 1); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	if _, err := s.Meta(id, k.acces); !errors.Is(err, ErrNotFound) {
@@ -449,7 +453,7 @@ func TestReadUploading(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
 	id, _, _ := s.Create(k.req(1, 1, 1))
-	if _, err := s.ReadSegment(id, 0); !errors.Is(err, ErrNotFound) {
+	if _, err := s.ReadSegment(id, 0, 1); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	if _, err := s.Meta(id, k.acces); !errors.Is(err, ErrNotFound) {
@@ -746,7 +750,7 @@ func TestFailedDestructionRetried(t *testing.T) {
 	if _, err := s.Meta(id, k.acces); !errors.Is(err, ErrNotFound) {
 		t.Fatal("Meta", err)
 	}
-	if _, err := s.ReadSegment(id, 0); !errors.Is(err, ErrNotFound) {
+	if _, err := s.ReadSegment(id, 0, 1); !errors.Is(err, ErrNotFound) {
 		t.Fatal("ReadSegment", err)
 	}
 	if _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
@@ -773,7 +777,10 @@ func TestSweepRechecksFinalized(t *testing.T) {
 	if rowCount(t, s, id) != 1 {
 		t.Fatal("partage finalisé détruit")
 	}
-	if _, err := s.ReadSegment(id, 0); err != nil {
+	if _, err := s.Unlock(id, k.acces, k.preuve); err != nil {
+		t.Fatal("unlock", err)
+	}
+	if _, err := s.ReadSegment(id, 0, 1); err != nil {
 		t.Fatal("fichier détruit", err)
 	}
 }
@@ -787,5 +794,76 @@ func TestCreateCleansUpOnInsertError(t *testing.T) {
 	}
 	if ids, _ := s.Blobs.List(); len(ids) != 0 {
 		t.Fatal("réservation orpheline", ids)
+	}
+}
+
+// Le n° d'ouverture du jeton limite la lecture : ouverture émise, pas encore terminée.
+func TestReadSegmentOpenN(t *testing.T) {
+	s, _ := newSvc(t)
+	k := newKeys()
+	id := ready(t, s, k, 1, 24, 3)
+	if _, err := s.ReadSegment(id, 0, 1); !errors.Is(err, ErrNotFound) {
+		t.Fatal("avant toute ouverture", err)
+	}
+	n1, _ := s.Unlock(id, k.acces, k.preuve)
+	n2, _ := s.Unlock(id, k.acces, k.preuve)
+	for _, n := range []int{n1, n2} {
+		if _, err := s.ReadSegment(id, 0, n); err != nil {
+			t.Fatal(n, err)
+		}
+	}
+	for _, n := range []int{0, -1, 3, 11} {
+		if _, err := s.ReadSegment(id, 0, n); !errors.Is(err, ErrNotFound) {
+			t.Fatal("ouverture non émise", n, err)
+		}
+	}
+	if err := s.Done(id, n1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReadSegment(id, 0, n1); !errors.Is(err, ErrNotFound) {
+		t.Fatal("jeton mort après done", err)
+	}
+	if _, err := s.ReadSegment(id, 0, n2); err != nil {
+		t.Fatal("autre ouverture", err)
+	}
+}
+
+// Destroy respecte l'expiration comme Status : 404 et aucun essai compté.
+func TestDestroyExpired(t *testing.T) {
+	s, c := newSvc(t)
+	k := newKeys()
+	id := ready(t, s, k, 1, 1, 1)
+	up, _, _ := s.Create(k.req(1, 1, 1))
+	c.Add(2 * time.Hour)
+	for _, x := range []string{id, up} {
+		if err := s.Destroy(x, k.acces, rnd(32), nil); !errors.Is(err, ErrNotFound) {
+			t.Fatal(err)
+		}
+		if err := s.Destroy(x, nil, nil, k.gestion); !errors.Is(err, ErrNotFound) {
+			t.Fatal("gestion après expiration", err)
+		}
+		if failed(t, s, x) != 0 || rowCount(t, s, x) != 1 {
+			t.Fatal("essai compté ou ligne effacée hors Sweep")
+		}
+	}
+}
+
+func TestValidateAndFrozen(t *testing.T) {
+	s, _ := newSvc(t)
+	k := newKeys()
+	if err := Validate(k.req(1, 1, 1)); err != nil {
+		t.Fatal(err)
+	}
+	bad := k.req(1, 1, 1)
+	bad.TTLHours = 2
+	if err := Validate(bad); !errors.Is(err, ErrBadRequest) {
+		t.Fatal(err)
+	}
+	if s.Frozen() {
+		t.Fatal("gelé sans fichier")
+	}
+	os.WriteFile(s.FrozenFile, nil, 0o600)
+	if !s.Frozen() {
+		t.Fatal("non gelé")
 	}
 }

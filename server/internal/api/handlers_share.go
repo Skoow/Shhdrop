@@ -1,9 +1,12 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
-	"slices"
 	"strconv"
 	"time"
 
@@ -15,7 +18,26 @@ import (
 
 func secs(d time.Duration) int64 { return int64(d / time.Second) }
 
-// GET /api/captcha : défi ALTCHA + jeton signé de l'heure d'affichage (valable 2 min).
+// saltID lie un jeton shown_at à un seul défi : 128 bits de SHA-256 du sel ALTCHA.
+func saltID(salt string) string {
+	h := sha256.Sum256([]byte(salt))
+	return hex.EncodeToString(h[:16])
+}
+
+// altchaSalt extrait le sel d'une solution ALTCHA (vérifiée ensuite par captcha.Verify).
+func altchaSalt(payload string) (string, error) {
+	raw, err := base64.StdEncoding.DecodeString(payload)
+	var p struct {
+		Salt string `json:"salt"`
+	}
+	if err != nil || json.Unmarshal(raw, &p) != nil || p.Salt == "" {
+		return "", errBadRequest
+	}
+	return p.Salt, nil
+}
+
+// GET /api/captcha : défi ALTCHA + jeton signé de l'heure d'affichage (valable 2 min),
+// lié à ce défi : un shown_at ne sert qu'une fois, puisque le défi est à usage unique.
 func (s *server) captcha(w http.ResponseWriter, r *http.Request) {
 	ch, err := s.cap.Challenge(ipOf(r))
 	if err != nil {
@@ -25,7 +47,7 @@ func (s *server) captcha(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, struct {
 		altcha.Challenge
 		ShownAt string `json:"shown_at"`
-	}{ch, s.sig.Issue(token.CaptchaShown, captchaTokID, 0, s.svc.Now().Add(captchaTTL))})
+	}{ch, s.sig.Issue(token.CaptchaShown, saltID(ch.Salt), 0, s.svc.Now().Add(captchaTTL))})
 }
 
 type createBody struct {
@@ -45,8 +67,9 @@ type createBody struct {
 	ShownAt string `json:"shown_at"`
 }
 
-// POST /api/shares : anti-robot → quotas → création → difficulté suivante.
-// Le défi est consommé même si une étape suivante échoue.
+// POST /api/shares : format et gel → anti-robot → quotas → création → difficulté suivante.
+// Une requête invalide ou un serveur gelé ne consomme ni le défi ni le quota ; le défi
+// est en revanche consommé si le quota ou la création échoue ensuite.
 func (s *server) create(w http.ResponseWriter, r *http.Request) {
 	var b createBody
 	if err := readJSON(w, r, &b); err != nil {
@@ -60,13 +83,22 @@ func (s *server) create(w http.ResponseWriter, r *http.Request) {
 	req.AccessV, errs[1] = secret(b.AccessV, 32)
 	req.ProofV, errs[2] = secret(b.ProofV, 32)
 	req.ManageV, errs[3] = secret(b.ManageV, 32)
-	// Palier vérifié avant les quotas : il fixe les octets comptés.
-	if errs != [4]error{} || !slices.Contains(share.Buckets, b.Bucket) {
+	if errs != [4]error{} || share.Validate(req) != nil {
 		fail(w, errBadRequest)
 		return
 	}
-	// shown_at ne vient que d'un jeton signé ; absent, invalide ou expiré → 400.
-	_, exp, err := s.sig.CheckExp(b.ShownAt, token.CaptchaShown, captchaTokID)
+	if s.svc.Frozen() {
+		fail(w, share.ErrFrozen)
+		return
+	}
+	// shown_at ne vient que d'un jeton signé, lié au sel du défi résolu ;
+	// absent, invalide, expiré ou d'un autre défi → 400.
+	salt, err := altchaSalt(b.Altcha)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	_, exp, err := s.sig.CheckExp(b.ShownAt, token.CaptchaShown, saltID(salt))
 	if err != nil || exp.IsZero() {
 		fail(w, errBadRequest)
 		return
@@ -76,7 +108,8 @@ func (s *server) create(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	if ok, retry := s.lim.AllowCreate(ip, int64(share.Header+b.Bucket*share.ChunkCT)); !ok {
+	// Quota en capacité utile (64 Kio par morceau) : 3 partages de taille max par jour.
+	if ok, retry := s.lim.AllowCreate(ip, int64(b.Bucket)*65536); !ok {
 		writeLimit(w, retry)
 		return
 	}
@@ -212,7 +245,8 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {
-	id, _, err := s.checkToken(r, token.Download)
+	// openN vient du jeton signé : une ouverture terminée (done) ne lit plus rien.
+	id, openN, err := s.checkToken(r, token.Download)
 	if err != nil {
 		fail(w, err)
 		return
@@ -222,7 +256,7 @@ func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	b, err := s.svc.ReadSegment(id, n)
+	b, err := s.svc.ReadSegment(id, n, openN)
 	if err != nil {
 		fail(w, err)
 		return

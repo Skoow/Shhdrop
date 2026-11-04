@@ -69,6 +69,24 @@ func placeholder() http.Handler {
 	})
 }
 
+// shutdownTimeout : délai laissé aux requêtes en cours à l'arrêt (variable pour les tests).
+var shutdownTimeout = 30 * time.Second
+
+// newHTTPServer : délais contre les connexions lentes (un segment de 4 Mio en 300 s
+// demande environ 14 Ko/s) et en-têtes plafonnés à 16 Kio.
+func newHTTPServer(h http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       300 * time.Second,
+		WriteTimeout:      300 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    16 << 10,
+		// Les messages internes de net/http peuvent contenir l'adresse du client : jetés.
+		ErrorLog: log.New(io.Discard, "", 0),
+	}
+}
+
 // serve démarre le serveur et s'arrête proprement quand ctx est annulé.
 // Seule sortie sur out : « SHH_LISTENING <hôte:port> » une fois l'écoute ouverte.
 func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
@@ -96,16 +114,8 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if cfg.StaticDir != "" {
 		static = http.FileServerFS(os.DirFS(cfg.StaticDir))
 	}
-	srv := &http.Server{
-		Handler: api.New(svc, token.New(tokKey, cfg.Now), limits.New(cfg.Now), captcha.New(capKey, cfg.Now),
-			static, cfg.BehindProxy),
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       120 * time.Second,
-		WriteTimeout:      120 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		// Les messages internes de net/http peuvent contenir l'adresse du client : jetés.
-		ErrorLog: log.New(io.Discard, "", 0),
-	}
+	srv := newHTTPServer(api.New(svc, token.New(tokKey, cfg.Now), limits.New(cfg.Now),
+		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy))
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err
@@ -121,13 +131,19 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 		return err
 	case <-ctx.Done():
 	}
-	sctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	sctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	if err := srv.Shutdown(sctx); err != nil {
-		return err
+	serr := srv.Shutdown(sctx)
+	if serr != nil {
+		// Délai dépassé : connexions fermées de force.
+		srv.Close()
 	}
+	// Attendre la fin de Serve avant que defer ne ferme la base.
 	if err := <-errc; !errors.Is(err, http.ErrServerClosed) {
 		return err
+	}
+	if serr != nil {
+		return fmt.Errorf("arrêt forcé : %w", serr)
 	}
 	return nil
 }

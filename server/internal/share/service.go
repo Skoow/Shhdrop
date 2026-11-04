@@ -89,17 +89,31 @@ func secs(n int64) time.Duration { return time.Duration(n) * time.Second }
 
 func validTTL(h int) bool { return h == 1 || h == 6 || h == 12 || h == 24 }
 
-func (s *Service) Create(r CreateReq) (string, int, error) {
-	if s.FrozenFile != "" {
-		// Échec fermé : tout autre résultat que « absent » gèle les créations.
-		if _, err := os.Stat(s.FrozenFile); !errors.Is(err, fs.ErrNotExist) {
-			return "", 0, ErrFrozen
-		}
+// Frozen : créations suspendues. Échec fermé : tout autre résultat que « absent » gèle.
+func (s *Service) Frozen() bool {
+	if s.FrozenFile == "" {
+		return false
 	}
+	_, err := os.Stat(s.FrozenFile)
+	return !errors.Is(err, fs.ErrNotExist)
+}
+
+// Validate vérifie les champs d'une création (aussi revérifiés par Create).
+func Validate(r CreateReq) error {
 	if !validBucket(r.Bucket) || !validTTL(r.TTLHours) || r.MaxOpens < 1 || r.MaxOpens > 10 ||
 		r.KdfOps < 3 || r.KdfOps > 10 || r.KdfMem < 67108864 || r.KdfMem > 268435456 ||
 		len(r.Salt) != 16 || len(r.AccessV) != 32 || len(r.ProofV) != 32 || len(r.ManageV) != 32 {
-		return "", 0, ErrBadRequest
+		return ErrBadRequest
+	}
+	return nil
+}
+
+func (s *Service) Create(r CreateReq) (string, int, error) {
+	if s.Frozen() {
+		return "", 0, ErrFrozen
+	}
+	if err := Validate(r); err != nil {
+		return "", 0, err
 	}
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
@@ -287,14 +301,17 @@ func (s *Service) countFailure(id string) (int, error) {
 	return maxAttempts - failed, nil
 }
 
-func (s *Service) ReadSegment(id string, n int) ([]byte, error) {
-	if !validID(id) {
+// ReadSegment lit un segment pour l'ouverture openN (venue d'un jeton signé) : elle doit
+// avoir été émise et ne pas être terminée (done), sinon ErrNotFound.
+func (s *Service) ReadSegment(id string, n, openN int) ([]byte, error) {
+	if !validID(id) || openN < 1 || openN > 10 {
 		return nil, ErrNotFound
 	}
 	now := s.now()
 	var bucket int
 	err := s.DB.QueryRow(`SELECT bucket FROM shares WHERE id=? AND expires_at>? AND failed_attempts<? AND
-		(state='ready' OR (state='draining' AND purge_at>?))`, id, now, maxAttempts, now).Scan(&bucket)
+		(state='ready' OR (state='draining' AND purge_at>?)) AND ?<=opens_issued AND (done_mask & ?)=0`,
+		id, now, maxAttempts, now, openN, int64(1)<<(openN-1)).Scan(&bucket)
 	if err != nil {
 		return nil, notFound(err)
 	}
@@ -334,7 +351,11 @@ func (s *Service) Destroy(id string, kAcces, kPreuve, sGestion []byte) error {
 		return ErrNotFound
 	}
 	var accessV, proofV, manageV []byte
-	err := s.DB.QueryRow(`SELECT access_v, proof_v, manage_v FROM shares WHERE id=?`, id).
+	now := s.now()
+	// Même condition de vie que Status : un partage expiré (ou un envoi échu) est introuvable,
+	// et aucun essai n'y est compté ; Sweep l'effacera.
+	err := s.DB.QueryRow(`SELECT access_v, proof_v, manage_v FROM shares WHERE id=? AND
+		((state='uploading' AND upload_deadline>?) OR (state<>'uploading' AND expires_at>?))`, id, now, now).
 		Scan(&accessV, &proofV, &manageV)
 	if err != nil {
 		return notFound(err)

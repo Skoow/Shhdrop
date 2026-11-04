@@ -29,7 +29,6 @@ const (
 	captchaTTL    = 2 * time.Minute // durée du jeton shown_at (= celle du défi ALTCHA)
 	uploadTTL     = time.Hour
 	downloadTTL   = time.Hour
-	captchaTokID  = "captcha"
 	maxSegmentLen = share.Header + share.SegChunks*share.ChunkCT
 )
 
@@ -65,6 +64,7 @@ func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captc
 	api.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeErr(w, http.StatusNotFound, "not_found") })
 
 	root := http.NewServeMux()
+	root.HandleFunc("GET /healthz", healthz)
 	root.Handle("/api/", s.guard(api))
 	root.Handle("/", static)
 	return withHeaders(recoverPanic(root))
@@ -74,7 +74,9 @@ func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captc
 func (s *server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip, trusted := clientIP(r)
-		if s.behindProxy && !trusted {
+		// Derrière le proxy, seul Caddy (en local, avec X-Shh-Client-IP) doit parler au
+		// serveur : tout pair distant ou en-tête absent révèle une erreur de configuration.
+		if s.behindProxy && (!trusted || !parse(r.RemoteAddr).IsLoopback()) {
 			writeErr(w, http.StatusInternalServerError, "internal")
 			return
 		}
@@ -88,15 +90,48 @@ func (s *server) guard(next http.Handler) http.Handler {
 	})
 }
 
+// healthz : santé, pour les appels locaux directs seulement (spec §8). Une requête
+// relayée par Caddy (porteuse de X-Shh-Client-IP) ou distante reçoit 404. Non limité.
+func healthz(w http.ResponseWriter, r *http.Request) {
+	if !parse(r.RemoteAddr).IsLoopback() || len(r.Header.Values("X-Shh-Client-IP")) != 0 {
+		writeErr(w, http.StatusNotFound, "not_found")
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	io.WriteString(w, "ok")
+}
+
+// sentWriter retient si l'en-tête de réponse est déjà parti.
+type sentWriter struct {
+	http.ResponseWriter
+	sent bool
+}
+
+func (w *sentWriter) WriteHeader(code int) { w.sent = true; w.ResponseWriter.WriteHeader(code) }
+func (w *sentWriter) Write(b []byte) (int, error) {
+	w.sent = true
+	return w.ResponseWriter.Write(b)
+}
+func (w *sentWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 // recoverPanic : 500 sans détail ; rien n'est journalisé (pas même la pile).
+// Si la réponse a déjà commencé, rien n'y est ajouté : la connexion est coupée
+// (http.ErrAbortHandler, que net/http ne journalise pas) pour qu'une réponse tronquée
+// ne passe pas pour complète. Un http.ErrAbortHandler reçu est relancé tel quel.
 func recoverPanic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sw := &sentWriter{ResponseWriter: w}
 		defer func() {
-			if v := recover(); v != nil {
-				writeErr(w, http.StatusInternalServerError, "internal")
+			v := recover()
+			if v == nil {
+				return
 			}
+			if v == http.ErrAbortHandler || sw.sent {
+				panic(http.ErrAbortHandler)
+			}
+			writeErr(w, http.StatusInternalServerError, "internal")
 		}()
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(sw, r)
 	})
 }
 
