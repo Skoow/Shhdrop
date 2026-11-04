@@ -36,12 +36,23 @@ export function scanDir(dir: string, needles: Needle[]): string[] {
   return hits;
 }
 
-export type MemScan = { ok: true; hits: string[]; bytes: number; regions: number } | { ok: false; why: string };
+export type MemStats = {
+  regions: number; // zones lisibles dont au moins un octet a été lu
+  bytes: number; // octets distincts lus (toutes zones)
+  rwRegions: number; // zones « rw-p » (tas, anonymes, données) dont au moins un octet a été lu
+  rwBytes: number; // octets distincts des zones rw-p (lus ou non)
+  rwFailedBytes: number; // octets des zones rw-p illisibles
+  failures: number; // fenêtres dont la lecture a échoué (tout ou partie)
+};
+export type MemScan = ({ ok: true; hits: string[] } & MemStats) | { ok: false; why: string };
+
+export const MEM_WINDOW = 2 << 20; // 2 Mio
 
 /**
- * Lit la mémoire du processus via /proc/<pid>/maps et /proc/<pid>/mem (Linux).
- * Chaque zone lisible est fouillée en entier (une aiguille ne peut pas être coupée).
- * Échec global (EPERM, EACCES, ENOENT…) → { ok: false, why }.
+ * Lit la mémoire du processus via /proc/<pid>/maps et /proc/<pid>/mem (Linux), zone par
+ * zone, par fenêtres de 2 Mio qui se chevauchent de (plus longue aiguille − 1) octets :
+ * une aiguille à cheval sur deux fenêtres est donc vue en entier dans l'une d'elles.
+ * Impossible d'ouvrir maps/mem (EPERM, EACCES, ENOENT…) → { ok: false, why }.
  */
 export function scanProcessMemory(pid: number, needles: Needle[]): MemScan {
   let maps: string;
@@ -52,36 +63,69 @@ export function scanProcessMemory(pid: number, needles: Needle[]): MemScan {
   } catch (e) {
     return { ok: false, why: `${(e as NodeJS.ErrnoException).code ?? ""} ${(e as Error).message}` };
   }
-  const hits = new Set<string>();
-  let bytes = 0;
-  let regions = 0;
+  const regions: Region[] = [];
+  for (const line of maps.split("\n")) {
+    const m = /^([0-9a-f]+)-([0-9a-f]+) (\S{4})/.exec(line);
+    if (!m || m[3]![0] !== "r" || /\[(vvar|vvar_vclock|vsyscall)\]$/.test(line)) continue;
+    regions.push({ start: parseInt(m[1]!, 16), end: parseInt(m[2]!, 16), rw: m[3] === "rw-p" });
+  }
   try {
-    for (const line of maps.split("\n")) {
-      const m = /^([0-9a-f]+)-([0-9a-f]+) (\S{4})/.exec(line);
-      if (!m || m[3]![0] !== "r" || line.endsWith("[vvar]") || line.endsWith("[vsyscall]")) continue;
-      const start = parseInt(m[1]!, 16);
-      const len = parseInt(m[2]!, 16) - start;
-      const buf = Buffer.alloc(len);
+    return { ok: true, ...scanRegions(regions, (buf, len, pos) => readSync(fd, buf, 0, len, pos), needles) };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+export type Region = { start: number; end: number; rw: boolean };
+
+/** Cœur de la fouille, séparé pour être testé avec une mémoire simulée. */
+export function scanRegions(
+  regions: Region[],
+  read: (buf: Buffer, len: number, pos: number) => number,
+  needles: Needle[],
+): { hits: string[] } & MemStats {
+  const longest = Math.max(1, ...needles.flatMap((n) => n.forms.map((f) => f.length)));
+  if (longest > MEM_WINDOW / 2) throw new Error("aiguille trop longue pour la fenêtre");
+  const step = MEM_WINDOW - (longest - 1);
+  const buf = Buffer.alloc(MEM_WINDOW);
+  const hits = new Set<string>();
+  const st: MemStats = { regions: 0, bytes: 0, rwRegions: 0, rwBytes: 0, rwFailedBytes: 0, failures: 0 };
+  for (const { start, end, rw } of regions) {
+    let covered = start; // fin des octets déjà comptés (les fenêtres se chevauchent)
+    let readAny = false;
+    for (let w = start; w < end; w += step) {
+      const len = Math.min(MEM_WINDOW, end - w);
       let got = 0;
       try {
         while (got < len) {
-          const n = readSync(fd, buf, got, len - got, start + got);
+          const n = read(buf.subarray(got), len - got, w + got);
           if (n === 0) break;
           got += n;
         }
       } catch {
-        // zone illisible (EIO : pages non présentes, mappage spécial) : on garde ce qui a été lu
+        // EIO : pages illisibles ; on garde ce qui a été lu
       }
-      if (got === 0) continue;
-      regions++;
-      bytes += got;
-      for (const l of findIn(buf.subarray(0, got), needles)) hits.add(l);
+      if (got < len) st.failures++;
+      const fresh = w + len - covered; // octets de cette fenêtre pas encore comptés
+      const freshOk = Math.max(0, w + got - covered);
+      covered = w + len;
+      st.bytes += freshOk;
+      if (rw) {
+        st.rwBytes += fresh;
+        st.rwFailedBytes += fresh - freshOk;
+      }
+      if (got > 0) {
+        readAny = true;
+        for (const l of findIn(buf.subarray(0, got), needles)) hits.add(l);
+      }
+      if (w + len >= end) break;
     }
-  } finally {
-    closeSync(fd);
+    if (readAny) {
+      st.regions++;
+      if (rw) st.rwRegions++;
+    }
   }
-  if (regions === 0) return { ok: false, why: "aucune zone mémoire lisible" };
-  return { ok: true, hits: [...hits], bytes, regions };
+  return { hits: [...hits], ...st };
 }
 
 export type Captured = { method: string; url: string; headers: [string, string][]; body: Buffer };

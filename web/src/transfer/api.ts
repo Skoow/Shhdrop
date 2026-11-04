@@ -30,6 +30,13 @@ export class HttpError extends Error {
   }
 }
 
+/** Réponse 2xx inattendue (champ manquant, taille de segment fausse…) : ce n'est pas une coupure. */
+export class BadResponse extends Error {
+  constructor() {
+    super("reponse_invalide");
+  }
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type Req = { method: string; path: string; headers?: Record<string, string>; body?: string | Uint8Array; retry?: boolean };
@@ -47,10 +54,11 @@ async function httpError(r: Response): Promise<HttpError> {
 }
 
 /**
- * Envoie une requête et lit la réponse avec `read`. Si `retry` : coupure réseau, 5xx ou
- * 429 → jusqu'à RETRIES nouveaux essais, attente exponentielle (Retry-After respecté pour 429).
- * À n'utiliser que pour les requêtes sans effet si elles sont rejouées.
- * Coupure persistante → Error("reseau").
+ * Envoie une requête et lit la réponse avec `read`. Si `retry` : coupure réseau, 5xx, 429
+ * ou réponse invalide → jusqu'à RETRIES nouveaux essais, attente exponentielle
+ * (retry_after_s respecté pour 429). À n'utiliser que pour les requêtes sans effet si elles
+ * sont rejouées. Après le dernier essai, l'erreur réelle est relancée (HttpError,
+ * BadResponse) ; seule une coupure réseau devient Error("reseau").
  */
 async function send<T>(c: Ctx, q: Req, read: (r: Response) => Promise<T>): Promise<T> {
   const tries = q.retry ? 1 + RETRIES : 1;
@@ -82,11 +90,12 @@ async function send<T>(c: Ctx, q: Req, read: (r: Response) => Promise<T>): Promi
     try {
       return await read(r);
     } catch (e) {
-      if (e instanceof HttpError || !q.retry) throw e;
-      last = e; // corps interrompu ou de taille inattendue : rejoué
+      // BadResponse : réponse invalide ; toute autre erreur de lecture : corps interrompu (réseau).
+      last = e;
+      if (!q.retry && e instanceof BadResponse) throw e;
     }
   }
-  if (last instanceof HttpError) throw last;
+  if (last instanceof HttpError || last instanceof BadResponse) throw last;
   throw new Error("reseau");
 }
 
@@ -96,20 +105,28 @@ const json = (v: unknown): { headers: Record<string, string>; body: string } => 
 });
 
 function obj(v: unknown): Record<string, unknown> {
-  if (typeof v !== "object" || v === null) throw new Error("reponse_invalide");
+  if (typeof v !== "object" || v === null) throw new BadResponse();
   return v as Record<string, unknown>;
 }
 function num(o: Record<string, unknown>, k: string): number {
   const v = o[k];
-  if (!Number.isSafeInteger(v)) throw new Error("reponse_invalide");
+  if (!Number.isSafeInteger(v)) throw new BadResponse();
   return v as number;
 }
 function str(o: Record<string, unknown>, k: string): string {
   const v = o[k];
-  if (typeof v !== "string") throw new Error("reponse_invalide");
+  if (typeof v !== "string") throw new BadResponse();
   return v;
 }
-const readJSON = async (r: Response) => obj(await r.json());
+// Corps illisible en JSON : coupure (TypeError d'undici / du navigateur) ou JSON invalide.
+const readJSON = async (r: Response) => {
+  const t = await r.text(); // une coupure lève ici
+  try {
+    return obj(JSON.parse(t));
+  } catch {
+    throw new BadResponse();
+  }
+};
 const none = async (r: Response) => {
   await r.arrayBuffer();
 };
@@ -120,7 +137,7 @@ export type Captcha = { challenge: Record<string, unknown>; shownAt: string };
 export async function captcha(c: Ctx): Promise<Captcha> {
   const o = await send(c, { method: "GET", path: "/api/captcha", retry: true }, readJSON);
   const { shown_at, ...challenge } = o;
-  if (typeof shown_at !== "string") throw new Error("reponse_invalide");
+  if (typeof shown_at !== "string") throw new BadResponse();
   return { challenge, shownAt: shown_at };
 }
 
@@ -201,7 +218,7 @@ export async function unlock(c: Ctx, id: string, kAcces: Uint8Array, kPreuve: Ui
 export async function getSegment(c: Ctx, id: string, token: string, n: number, size: number): Promise<Uint8Array> {
   return send(c, { method: "GET", path: `/api/shares/${enc(id)}/segments/${n}`, headers: bearer(token), retry: true }, async (r) => {
     const b = new Uint8Array(await r.arrayBuffer());
-    if (b.length !== size) throw new Error("taille de segment inattendue"); // rejoué
+    if (b.length !== size) throw new BadResponse(); // rejoué
     return b;
   });
 }

@@ -59,6 +59,10 @@ const codePoints = (s: string) => [...s].length;
 // de zéro à chaque seal, donc deux paquets sous la même clé réutiliseraient des nonces
 // AES-GCM. La clé est marquée juste avant le premier chiffrement (les refus de
 // validation ne la consomment pas).
+// Limite : la garde reconnaît l'objet CryptoKey, pas la matière de la clé ; une même clé
+// importée deux fois donnerait deux objets distincts. Ce qui garantit vraiment l'unicité
+// des nonces, c'est que createShare tire une K_lien et un sel neufs à chaque partage
+// (donc une K_contenu neuve) ; cette garde n'est qu'un filet contre une erreur de code.
 const usedKeys = new WeakSet<CryptoKey>();
 
 export async function seal(

@@ -64,9 +64,19 @@ describe("le serveur ne voit rien", () => {
   it("la mémoire du processus serveur ne contient aucun repère", () => {
     const res = scanProcessMemory(srv.pid, secrets);
     if (!res.ok) {
-      console.warn(`[le serveur ne voit rien] fouille mémoire IGNORÉE : lecture de /proc/${srv.pid}/mem impossible (${res.why})`);
+      const why = `lecture de /proc/${srv.pid}/mem impossible (${res.why})`;
+      // En CI, ce test bloque la mise en ligne : sauter la fouille mémoire serait un faux succès.
+      if (process.env.CI) throw new Error(`[le serveur ne voit rien] fouille mémoire obligatoire en CI : ${why}`);
+      console.warn(`[le serveur ne voit rien] fouille mémoire IGNORÉE (hors CI) : ${why}`);
       return;
     }
+    console.info(
+      `[le serveur ne voit rien] mémoire : ${res.regions} zones, ${res.bytes} o lus ; ` +
+        `rw-p : ${res.rwRegions} zones, ${res.rwFailedBytes}/${res.rwBytes} o illisibles, ${res.failures} fenêtres en échec`,
+    );
+    // La fouille doit avoir réellement lu le tas et les zones anonymes.
+    expect(res.rwRegions, "aucune zone rw-p lue").toBeGreaterThan(0);
+    expect(res.rwFailedBytes, `zones rw-p illisibles : ${res.rwFailedBytes} / ${res.rwBytes} octets`).toBeLessThanOrEqual(res.rwBytes / 2);
     expect(res.hits).toEqual([]);
     // Témoin : l'identifiant du partage est retrouvé en mémoire (la lecture fonctionne).
     const ctl = scanProcessMemory(srv.pid, [needle("id", id)]);

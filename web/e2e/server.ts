@@ -1,7 +1,7 @@
 // Lance le vrai binaire `server/shhdrop serve` pour les tests d'intégration :
 // dossier de données temporaire, port libre (SHH_LISTEN=127.0.0.1:0, lu sur stdout),
 // stdout et stderr capturés en octets bruts (fouillés par le test « le serveur ne voit rien »).
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,40 +21,72 @@ export type TestServer = {
   dispose(): Promise<void>;
 };
 
-export async function startServer(): Promise<TestServer> {
+/** Échec de démarrage : le processus a été tué et son dossier supprimé. */
+export class ServerStartError extends Error {
+  constructor(
+    msg: string,
+    readonly dataDir: string,
+    readonly stdout: Buffer,
+    readonly stderr: Buffer,
+  ) {
+    super(msg);
+  }
+}
+
+export type StartOpts = {
+  /** Variables ajoutées ou remplacées (une valeur undefined retire la variable). */
+  env?: Record<string, string | undefined>;
+  timeoutMs?: number;
+};
+
+export async function startServer(opts: StartOpts = {}): Promise<TestServer> {
   if (!existsSync(BINARY)) throw new Error(`binaire absent : ${BINARY} (lancer make test-e2e)`);
   const dataDir = mkdtempSync(join(tmpdir(), "shh-e2e-"));
-  const proc: ChildProcess = spawn(BINARY, ["serve"], {
-    env: { PATH: process.env.PATH ?? "", SHH_DATA_DIR: dataDir, SHH_LISTEN: "127.0.0.1:0" },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries({ PATH: process.env.PATH ?? "", SHH_DATA_DIR: dataDir, SHH_LISTEN: "127.0.0.1:0", ...opts.env })) {
+    if (v !== undefined) env[k] = v;
+  }
+  const proc = spawn(BINARY, ["serve"], { env, stdio: ["ignore", "pipe", "pipe"] });
   const out: Buffer[] = [];
   const err: Buffer[] = [];
-  proc.stderr!.on("data", (b: Buffer) => err.push(b));
-  const exited = new Promise<void>((res) => proc.once("exit", () => res()));
+  proc.stdout.on("data", (b: Buffer) => out.push(b));
+  proc.stderr.on("data", (b: Buffer) => err.push(b));
+  // « close » : processus terminé ET flux stdout/stderr entièrement lus.
+  const closed = new Promise<void>((res) => proc.once("close", () => res()));
+  const alive = () => proc.exitCode === null && proc.signalCode === null;
 
-  const addr = await new Promise<string>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("serveur : pas de SHH_LISTENING en 10 s")), 10_000);
-    proc.stdout!.on("data", (b: Buffer) => {
-      out.push(b);
-      const m = /^SHH_LISTENING (\S+)\n/.exec(Buffer.concat(out).toString("utf8"));
-      if (m) {
+  let addr: string;
+  try {
+    addr = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("pas de SHH_LISTENING à temps")), opts.timeoutMs ?? 10_000);
+      proc.stdout.on("data", () => {
+        const m = /^SHH_LISTENING (\S+)\n/.exec(Buffer.concat(out).toString("utf8"));
+        if (m) {
+          clearTimeout(timer);
+          resolve(m[1]!);
+        }
+      });
+      proc.once("exit", (code) => {
         clearTimeout(timer);
-        resolve(m[1]!);
-      }
+        reject(new Error(`serveur arrêté avant l'écoute (code ${code})`));
+      });
     });
-    proc.once("exit", (code) => {
-      clearTimeout(timer);
-      reject(new Error(`serveur arrêté (code ${code}) : ${Buffer.concat(err).toString("utf8")}`));
-    });
-  });
+  } catch (e) {
+    if (alive()) proc.kill("SIGKILL");
+    await closed;
+    rmSync(dataDir, { recursive: true, force: true });
+    const stderr = Buffer.concat(err);
+    throw new ServerStartError(`${(e as Error).message} : ${stderr.toString("utf8")}`, dataDir, Buffer.concat(out), stderr);
+  }
 
   const stop = async () => {
-    if (proc.exitCode !== null || proc.signalCode !== null) return;
-    proc.kill("SIGTERM");
-    const t = setTimeout(() => proc.kill("SIGKILL"), 5_000);
-    await exited;
-    clearTimeout(t);
+    if (alive()) {
+      proc.kill("SIGTERM");
+      const t = setTimeout(() => proc.kill("SIGKILL"), 5_000);
+      await closed;
+      clearTimeout(t);
+    }
+    await closed;
   };
   return {
     origin: `http://${addr}`,

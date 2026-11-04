@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HttpError, ctx, putSegment } from "./api";
+import { BadResponse, HttpError, ctx, getSegment, putSegment } from "./api";
 
 afterEach(() => vi.useRealTimers());
 
@@ -28,5 +28,15 @@ describe("nouveaux essais", () => {
     const f5xx = vi.fn(async () => (++n < 3 ? res(500) : new Response(null, { status: 204 })));
     await putSegment(ctx("http://x", { fetch: f5xx as unknown as typeof fetch, retryDelayMs: 1 }), "id", "t", 0, new Uint8Array(1));
     expect(f5xx).toHaveBeenCalledTimes(3);
+  });
+
+  it("dernier essai : l'erreur réelle est relancée, pas « reseau »", async () => {
+    const short = vi.fn(async () => new Response(new Uint8Array(3)));
+    await expect(getSegment(ctx("http://x", { fetch: short as unknown as typeof fetch, retryDelayMs: 1 }), "id", "t", 0, 10)).rejects.toBeInstanceOf(BadResponse);
+    expect(short).toHaveBeenCalledTimes(6);
+    const err500 = vi.fn(async () => new Response('{"error":"internal"}', { status: 500 }));
+    const e = await getSegment(ctx("http://x", { fetch: err500 as unknown as typeof fetch, retryDelayMs: 1 }), "id", "t", 0, 10).catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(HttpError);
+    expect((e as HttpError).status).toBe(500);
   });
 });
