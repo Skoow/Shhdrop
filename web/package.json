@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run src",
-    "test:e2e": "vitest run e2e --passWithNoTests"
+    "test:e2e": "vitest run e2e --testTimeout=120000 --hookTimeout=120000"
   },
   "dependencies": {
     "libsodium-wrappers-sumo": "0.7.15"

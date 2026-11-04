@@ -9,4 +9,5 @@ test-web:
 	cd web && npm test
 
 test-e2e:
-	cd web && npm run test:e2e --if-present
+	cd server && go build -o shhdrop ./cmd/shhdrop
+	cd web && npm run test:e2e

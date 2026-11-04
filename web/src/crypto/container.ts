@@ -55,6 +55,12 @@ function nonce(index: number, last: boolean): Uint8Array {
 
 const codePoints = (s: string) => [...s].length;
 
+// Une K_contenu ne chiffre qu'un seul paquet : les nonces (numéros de morceau) repartent
+// de zéro à chaque seal, donc deux paquets sous la même clé réutiliseraient des nonces
+// AES-GCM. La clé est marquée juste avant le premier chiffrement (les refus de
+// validation ne la consomment pas).
+const usedKeys = new WeakSet<CryptoKey>();
+
 export async function seal(
   items: Item[],
   keys: ContentKeys,
@@ -89,6 +95,8 @@ export async function seal(
 
   const bucket = bucketFor(4 + manifest.length + offset);
   const hdr = header(keys.engagement);
+  if (usedKeys.has(keys.kContenu)) throw new Error("cle_deja_utilisee");
+  usedKeys.add(keys.kContenu);
   const segments = Array.from({ length: segmentCount(bucket) }, (_, n) => new Uint8Array(segmentSize(bucket, n)));
   segments[0]!.set(hdr);
 

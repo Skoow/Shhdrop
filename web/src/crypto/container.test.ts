@@ -212,8 +212,10 @@ describe("seal : refus", () => {
   });
   it("texte trop long (10 000 caractères acceptés)", async () => {
     const ok = "é".repeat(10_000);
-    const r = await seal([{ kind: "text", name: "", mime: "text/plain", data: utf8(ok) }], keys);
-    expect((await open(r.segments, keys)).manifest.items[0]!.text).toBe(ok);
+    // K_contenu neuve : `keys` a déjà servi à un seal réussi (clé à usage unique).
+    const k2 = { ...keys, kContenu: await crypto.subtle.importKey("raw", randomBytes(32), "AES-GCM", false, ["encrypt", "decrypt"]) };
+    const r = await seal([{ kind: "text", name: "", mime: "text/plain", data: utf8(ok) }], k2);
+    expect((await open(r.segments, k2)).manifest.items[0]!.text).toBe(ok);
     await expect(
       seal([{ kind: "text", name: "", mime: "text/plain", data: utf8(ok + "x") }], keys),
     ).rejects.toThrow("texte_trop_long");
@@ -259,4 +261,13 @@ describe("open : manifeste invalide (paquet bien chiffré)", () => {
   it("palier hors liste → paquet_corrompu", async () => {
     await expect(open(await forge(manifestPlain(good), 2, keys), keys)).rejects.toThrow(/^paquet_corrompu$/);
   });
+});
+
+describe("clé à usage unique", () => {
+  it("seal refuse de réutiliser la même K_contenu", async () => {
+    const k = await deriveContent(randomBytes(32), "mot de passe", randomBytes(16), KDF_MIN);
+    const items: Item[] = [{ kind: "text", name: "", mime: "text/plain", data: utf8("a") }];
+    await seal(items, k);
+    await expect(seal(items, k)).rejects.toThrow("cle_deja_utilisee");
+  }, 60_000);
 });
