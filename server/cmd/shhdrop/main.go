@@ -50,7 +50,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "erreur:", err)
 			os.Exit(1)
 		}
-		os.Exit(runAdmin(os.Args[2:], cfg, os.Stdout, os.Stderr))
+		os.Exit(runAdmin(os.Args[2:], cfg, os.Stdin, os.Stdout, os.Stderr))
 	default:
 		fmt.Fprintf(os.Stderr, "commande inconnue: %s\n", os.Args[1])
 		os.Exit(2)

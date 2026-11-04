@@ -21,17 +21,41 @@ const schema = `CREATE TABLE IF NOT EXISTS shares(
 // progress_at (minute du dernier segment reçu, NULL hors envoi) : ajouté aux bases créées avant lui.
 const addProgressAt = `ALTER TABLE shares ADD COLUMN progress_at INTEGER`
 
-// Open ouvre (ou crée) la base : WAL, effacement sûr, temporaires en mémoire, une seule connexion.
-func Open(path string) (*sql.DB, error) {
-	// Les PRAGMA passent par le DSN pour s'appliquer à chaque connexion.
-	dsn := "file:" + path +
-		"?_pragma=journal_mode(WAL)&_pragma=secure_delete(ON)" +
-		"&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=temp_store(MEMORY)"
+// Les PRAGMA passent par le DSN pour s'appliquer à chaque connexion.
+const pragmas = "_pragma=journal_mode(WAL)&_pragma=secure_delete(ON)" +
+	"&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=temp_store(MEMORY)"
+
+func open(dsn string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	return db, nil
+}
+
+// OpenExisting ouvre une base qui doit déjà exister et contenir la table shares, sans
+// jamais rien créer (mode=rw) : pour les commandes d'administration (audit M2).
+// path : chemin absolu sans « ? », « # » ni « % » (vérifié par config).
+func OpenExisting(path string) (*sql.DB, error) {
+	db, err := open("file:" + path + "?mode=rw&" + pragmas)
+	if err != nil {
+		return nil, err
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM shares`).Scan(&n); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("base %s illisible : %w", path, err)
+	}
+	return db, nil
+}
+
+// Open ouvre (ou crée) la base : WAL, effacement sûr, temporaires en mémoire, une seule connexion.
+func Open(path string) (*sql.DB, error) {
+	db, err := open("file:" + path + "?" + pragmas)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("création du schéma : %w", err)
