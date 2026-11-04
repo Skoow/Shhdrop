@@ -1,6 +1,6 @@
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-export function b64u(bytes: Uint8Array): string {
+export function b64u(bytes: Uint8Array<ArrayBuffer>): string {
   let out = "";
   let i = 0;
   for (; i + 2 < bytes.length; i += 3) {
@@ -18,7 +18,7 @@ export function b64u(bytes: Uint8Array): string {
   return out;
 }
 
-export function unb64u(s: string): Uint8Array {
+export function unb64u(s: string): Uint8Array<ArrayBuffer> {
   if (!/^[A-Za-z0-9_-]*$/.test(s) || s.length % 4 === 1) throw new Error("base64url invalide");
   const out = new Uint8Array(Math.floor((s.length * 3) / 4));
   let acc = 0;
@@ -38,11 +38,11 @@ export function unb64u(s: string): Uint8Array {
   return out;
 }
 
-export function utf8(s: string): Uint8Array {
+export function utf8(s: string): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(s);
 }
 
-export function concat(...parts: Uint8Array[]): Uint8Array {
+export function concat(...parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let o = 0;
   for (const p of parts) {

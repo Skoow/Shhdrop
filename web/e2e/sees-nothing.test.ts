@@ -24,11 +24,11 @@ describe("le serveur ne voit rien", () => {
   let srv: TestServer;
   const log: Captured[] = [];
   const fetch = capturingFetch(log); // toutes les requêtes du test passent par là
-  let kLien: Uint8Array;
-  let kAcces: Uint8Array;
-  let kPreuve: Uint8Array;
-  let sGestion: Uint8Array;
-  let salt: Uint8Array;
+  let kLien: Uint8Array<ArrayBuffer>;
+  let kAcces: Uint8Array<ArrayBuffer>;
+  let kPreuve: Uint8Array<ArrayBuffer>;
+  let sGestion: Uint8Array<ArrayBuffer>;
+  let salt: Uint8Array<ArrayBuffer>;
   let id: string;
   let manage: string;
   let secrets: Needle[]; // jamais nulle part (kAcces à part)

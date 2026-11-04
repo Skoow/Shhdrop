@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { b64u } from "../crypto/encoding";
 import { segmentSize } from "../crypto/container";
 
-const captured = vi.hoisted(() => ({ buffers: [] as Uint8Array[] }));
+const captured = vi.hoisted(() => ({ buffers: [] as Uint8Array<ArrayBuffer>[] }));
 vi.mock("../crypto/kdf", async (orig) => {
   const m = await orig<typeof import("../crypto/kdf")>();
   return {
@@ -13,7 +13,7 @@ vi.mock("../crypto/kdf", async (orig) => {
       captured.buffers.push(b);
       return b;
     },
-    deriveAccess: async (k: Uint8Array) => {
+    deriveAccess: async (k: Uint8Array<ArrayBuffer>) => {
       const r = await m.deriveAccess(k);
       captured.buffers.push(r.kAcces);
       return r;

@@ -21,7 +21,7 @@ beforeAll(async () => {
   keys = await deriveContent(new Uint8Array(32).fill(3), "mot de passe", new Uint8Array(16).fill(9), KDF_MIN);
 }, 60_000);
 
-function pseudo(n: number, seed: number): Uint8Array {
+function pseudo(n: number, seed: number): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(n);
   let x = seed;
   for (let i = 0; i < n; i++) {
@@ -31,7 +31,7 @@ function pseudo(n: number, seed: number): Uint8Array {
   return out;
 }
 
-function contains(hay: Uint8Array, needle: Uint8Array): boolean {
+function contains(hay: Uint8Array<ArrayBuffer>, needle: Uint8Array<ArrayBuffer>): boolean {
   outer: for (let i = 0; i + needle.length <= hay.length; i++) {
     for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
     return true;
@@ -39,16 +39,16 @@ function contains(hay: Uint8Array, needle: Uint8Array): boolean {
   return false;
 }
 
-const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
+const same = (a: Uint8Array<ArrayBuffer>, b: Uint8Array<ArrayBuffer>) => a.length === b.length && a.every((x, i) => x === b[i]);
 
-const copy = (segs: Uint8Array[]) => segs.map((s) => new Uint8Array(s));
+const copy = (segs: Uint8Array<ArrayBuffer>[]) => segs.map((s) => new Uint8Array(s));
 
 // Construit un paquet bien chiffré mais au clair arbitraire (expéditeur malveillant).
-async function forge(plain: Uint8Array, bucket: number, k: ContentKeys): Promise<Uint8Array[]> {
+async function forge(plain: Uint8Array<ArrayBuffer>, bucket: number, k: ContentKeys): Promise<Uint8Array<ArrayBuffer>[]> {
   const header = concat(utf8("SHH1"), new Uint8Array([1]), new Uint8Array(11), k.engagement);
   const padded = new Uint8Array(bucket * CHUNK);
   padded.set(plain);
-  const cts: Uint8Array[] = [];
+  const cts: Uint8Array<ArrayBuffer>[] = [];
   for (let i = 0; i < bucket; i++) {
     const iv = new Uint8Array(12);
     new DataView(iv.buffer).setUint32(7, i);
@@ -63,7 +63,7 @@ async function forge(plain: Uint8Array, bucket: number, k: ContentKeys): Promise
       ),
     );
   }
-  const segs: Uint8Array[] = [];
+  const segs: Uint8Array<ArrayBuffer>[] = [];
   for (let s = 0; s < segmentCount(bucket); s++) {
     const parts = cts.slice(s * 64, (s + 1) * 64);
     segs.push(s === 0 ? concat(header, ...parts) : concat(...parts));
@@ -71,7 +71,7 @@ async function forge(plain: Uint8Array, bucket: number, k: ContentKeys): Promise
   return segs;
 }
 
-function manifestPlain(m: unknown, data = new Uint8Array(0)): Uint8Array {
+function manifestPlain(m: unknown, data = new Uint8Array(0)): Uint8Array<ArrayBuffer> {
   const j = utf8(JSON.stringify(m));
   const len = new Uint8Array(4);
   new DataView(len.buffer).setUint32(0, j.length);
@@ -114,7 +114,7 @@ describe("seal / open", () => {
     { kind: "file", name: "photo.png", mime: "image/png", data: image },
     { kind: "file", name: "secret-nom.pdf", mime: "application/pdf", data: fichier },
   ];
-  let sealed: { bucket: number; segments: Uint8Array[] };
+  let sealed: { bucket: number; segments: Uint8Array<ArrayBuffer>[] };
 
   beforeAll(async () => {
     sealed = await seal(items, keys);
@@ -153,7 +153,7 @@ describe("seal / open", () => {
     expect(contains(all, utf8("photo.png"))).toBe(false);
   });
 
-  const corrupt = async (segs: Uint8Array[], k: ContentKeys = keys) =>
+  const corrupt = async (segs: Uint8Array<ArrayBuffer>[], k: ContentKeys = keys) =>
     expect(open(segs, k)).rejects.toThrow(/^paquet_corrompu$/);
 
   it("octet modifié dans le morceau 3", async () => {
@@ -230,7 +230,7 @@ describe("seal : refus", () => {
 
 describe("open : manifeste invalide (paquet bien chiffré)", () => {
   const good = { v: 1, items: [{ kind: "file", name: "a", mime: "x/y", size: 3, offset: 0 }] };
-  const bad: [string, Uint8Array][] = [
+  const bad: [string, Uint8Array<ArrayBuffer>][] = [
     ["longueur > 65536", (() => { const p = manifestPlain(good); new DataView(p.buffer).setUint32(0, 65537); return p; })()],
     ["longueur hors du clair", (() => { const p = new Uint8Array(4); new DataView(p.buffer).setUint32(0, 65536); return p; })()],
     ["JSON invalide", concat(new Uint8Array([0, 0, 0, 2]), utf8("{x"))],

@@ -2,13 +2,13 @@
 // l'envoie jamais au serveur (spec §7.1).
 import { b64u, unb64u } from "../crypto/encoding";
 
-export type ParsedLink = { kind: "s" | "m"; id: string; secret: Uint8Array };
+export type ParsedLink = { kind: "s" | "m"; id: string; secret: Uint8Array<ArrayBuffer> };
 
-export function shareLink(origin: string, id: string, kLien: Uint8Array): string {
+export function shareLink(origin: string, id: string, kLien: Uint8Array<ArrayBuffer>): string {
   return `${origin}/s/${id}#${b64u(kLien)}`;
 }
 
-export function manageLink(origin: string, id: string, sGestion: Uint8Array): string {
+export function manageLink(origin: string, id: string, sGestion: Uint8Array<ArrayBuffer>): string {
   return `${origin}/m/${id}#${b64u(sGestion)}`;
 }
 
@@ -17,9 +17,9 @@ function invalid(): Error {
 }
 
 // Décodage strict : longueur exacte et encodage canonique (unb64u refuse les bits de bourrage).
-function strict(s: string, chars: number, bytes: number): Uint8Array {
+function strict(s: string, chars: number, bytes: number): Uint8Array<ArrayBuffer> {
   if (s.length !== chars || !/^[A-Za-z0-9_-]+$/.test(s)) throw invalid();
-  let b: Uint8Array;
+  let b: Uint8Array<ArrayBuffer>;
   try {
     b = unb64u(s);
   } catch {

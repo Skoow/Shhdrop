@@ -116,7 +116,7 @@ export async function createShare(
   const kLien = randomBytes(32);
   const salt = randomBytes(16);
   const sGestion = randomBytes(32);
-  const wipe: Uint8Array[] = [kLien, sGestion]; // mis à zéro quoi qu'il arrive
+  const wipe: Uint8Array<ArrayBuffer>[] = [kLien, sGestion]; // mis à zéro quoi qu'il arrive
   try {
     return await guarded(async () => {
       const acc = await deriveAccess(kLien);
@@ -182,7 +182,7 @@ async function contentKeys(p: ParsedLink, m: api.Meta, password: string) {
     throw new api.BadResponse();
   }
   checkKdfParams(m.kdf); // le minimum est imposé par le navigateur, pas par le serveur
-  let salt: Uint8Array;
+  let salt: Uint8Array<ArrayBuffer>;
   try {
     salt = unb64u(m.salt);
   } catch {
@@ -192,7 +192,7 @@ async function contentKeys(p: ParsedLink, m: api.Meta, password: string) {
   return deriveContent(p.secret, password, salt, m.kdf);
 }
 
-export type Opened = { manifest: Manifest; item(i: number): Uint8Array; done(): Promise<void> };
+export type Opened = { manifest: Manifest; item(i: number): Uint8Array<ArrayBuffer>; done(): Promise<void> };
 
 /**
  * Ouvre un partage : meta → clés → unlock (consomme une ouverture) → segments → open().
@@ -235,7 +235,7 @@ export async function openShare(
     };
     try {
       if (u.segments !== m.segments) throw new api.BadResponse();
-      const segs: Uint8Array[] = [];
+      const segs: Uint8Array<ArrayBuffer>[] = [];
       onProgress?.(0, m.segments);
       for (let n = 0; n < m.segments; n++) {
         segs.push(await api.getSegment(c, p.id, u.downloadToken, n, segmentSize(m.bucket, n)));

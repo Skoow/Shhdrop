@@ -39,7 +39,7 @@ export class BadResponse extends Error {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-type Req = { method: string; path: string; headers?: Record<string, string>; body?: string | Uint8Array; retry?: boolean };
+type Req = { method: string; path: string; headers?: Record<string, string>; body?: string | Uint8Array<ArrayBuffer>; retry?: boolean };
 
 async function httpError(r: Response): Promise<HttpError> {
   let j: Record<string, unknown> = {};
@@ -162,7 +162,7 @@ export async function create(c: Ctx, b: CreateBody): Promise<{ id: string; uploa
 
 const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
 
-export async function putSegment(c: Ctx, id: string, token: string, n: number, data: Uint8Array): Promise<void> {
+export async function putSegment(c: Ctx, id: string, token: string, n: number, data: Uint8Array<ArrayBuffer>): Promise<void> {
   // Rejouable : renvoyer un segment le remplace (spec §7.4).
   await send(
     c,
@@ -184,7 +184,7 @@ export async function finalize(c: Ctx, id: string, token: string): Promise<numbe
 
 export type Meta = { expiresInS: number; salt: string; kdf: { ops: number; mem: number }; bucket: number; segments: number };
 
-export async function meta(c: Ctx, id: string, kAcces: Uint8Array): Promise<Meta> {
+export async function meta(c: Ctx, id: string, kAcces: Uint8Array<ArrayBuffer>): Promise<Meta> {
   const o = await send(
     c,
     { method: "GET", path: `/api/shares/${enc(id)}/meta`, headers: { "X-Shh-Access": b64u(kAcces) }, retry: true },
@@ -201,7 +201,7 @@ export async function meta(c: Ctx, id: string, kAcces: Uint8Array): Promise<Meta
 }
 
 // Jamais rejoué : un déverrouillage réussi consomme une ouverture, un échec compte un essai.
-export async function unlock(c: Ctx, id: string, kAcces: Uint8Array, kPreuve: Uint8Array): Promise<{ downloadToken: string; segments: number }> {
+export async function unlock(c: Ctx, id: string, kAcces: Uint8Array<ArrayBuffer>, kPreuve: Uint8Array<ArrayBuffer>): Promise<{ downloadToken: string; segments: number }> {
   const o = await send(
     c,
     {
@@ -215,7 +215,7 @@ export async function unlock(c: Ctx, id: string, kAcces: Uint8Array, kPreuve: Ui
   return { downloadToken: str(o, "download_token"), segments: num(o, "segments") };
 }
 
-export async function getSegment(c: Ctx, id: string, token: string, n: number, size: number): Promise<Uint8Array> {
+export async function getSegment(c: Ctx, id: string, token: string, n: number, size: number): Promise<Uint8Array<ArrayBuffer>> {
   return send(c, { method: "GET", path: `/api/shares/${enc(id)}/segments/${n}`, headers: bearer(token), retry: true }, async (r) => {
     const b = new Uint8Array(await r.arrayBuffer());
     if (b.length !== size) throw new BadResponse(); // rejoué
@@ -228,7 +228,7 @@ export async function done(c: Ctx, id: string, token: string): Promise<void> {
   await send(c, { method: "POST", path: `/api/shares/${enc(id)}/done`, headers: bearer(token), retry: true }, none);
 }
 
-export type DestroyAuth = { kAcces: Uint8Array; kPreuve: Uint8Array } | { sGestion: Uint8Array };
+export type DestroyAuth = { kAcces: Uint8Array<ArrayBuffer>; kPreuve: Uint8Array<ArrayBuffer> } | { sGestion: Uint8Array<ArrayBuffer> };
 
 export async function destroy(c: Ctx, id: string, a: DestroyAuth): Promise<void> {
   const q: Req =
@@ -245,7 +245,7 @@ export async function destroy(c: Ctx, id: string, a: DestroyAuth): Promise<void>
 
 export type Status = { opensUsed: number; maxOpens: number; expiresInS: number; state: string };
 
-export async function status(c: Ctx, id: string, sGestion: Uint8Array): Promise<Status> {
+export async function status(c: Ctx, id: string, sGestion: Uint8Array<ArrayBuffer>): Promise<Status> {
   const o = await send(
     c,
     { method: "GET", path: `/api/shares/${enc(id)}/status`, headers: { "X-Shh-Manage": b64u(sGestion) }, retry: true },

@@ -12,7 +12,7 @@ const PW = "cheval-agrafe-pile-correct";
 const KIB = 1024;
 const MIB = 1024 * KIB;
 
-function pseudo(n: number, seed: number): Uint8Array {
+function pseudo(n: number, seed: number): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(n);
   let x = seed;
   for (let i = 0; i < n; i++) {

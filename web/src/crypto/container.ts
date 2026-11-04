@@ -10,7 +10,7 @@ const TEXT_MAX = 10_000;
 const MAGIC = utf8("SHH1");
 const VERSION = 1;
 
-export type Item = { kind: "text" | "file"; name: string; mime: string; data: Uint8Array };
+export type Item = { kind: "text" | "file"; name: string; mime: string; data: Uint8Array<ArrayBuffer> };
 export type ManifestEntry = {
   kind: "text" | "file";
   name: string;
@@ -36,13 +36,13 @@ export function segmentSize(bucket: number, n: number): number {
   return (n === 0 ? HEADER : 0) + chunks * CHUNK_CT;
 }
 
-function header(engagement: Uint8Array): Uint8Array {
+function header(engagement: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
   if (engagement.length !== 32) throw new Error("engagement invalide");
   return concat(MAGIC, new Uint8Array([VERSION]), new Uint8Array(11), engagement);
 }
 
 // Nonce : indice big-endian sur 11 octets (octets 0..10) + drapeau « dernier morceau ».
-function nonce(index: number, last: boolean): Uint8Array {
+function nonce(index: number, last: boolean): Uint8Array<ArrayBuffer> {
   const iv = new Uint8Array(12);
   let x = index;
   for (let i = 10; i >= 0 && x > 0; i--) {
@@ -68,12 +68,12 @@ const usedKeys = new WeakSet<CryptoKey>();
 export async function seal(
   items: Item[],
   keys: ContentKeys,
-): Promise<{ bucket: number; segments: Uint8Array[] }> {
+): Promise<{ bucket: number; segments: Uint8Array<ArrayBuffer>[] }> {
   if (items.length === 0) throw new Error("vide");
   if (items.length > MAX_ITEMS) throw new Error("trop_d_elements");
 
   const entries: ManifestEntry[] = [];
-  const data: Uint8Array[] = [];
+  const data: Uint8Array<ArrayBuffer>[] = [];
   let offset = 0;
   for (const it of items) {
     if (it.kind === "text") {
@@ -142,7 +142,7 @@ function corrupt(): Error {
 
 const isNat = (x: unknown): x is number => Number.isSafeInteger(x) && (x as number) >= 0;
 
-function parseManifest(raw: Uint8Array, dataLen: number): Manifest {
+function parseManifest(raw: Uint8Array<ArrayBuffer>, dataLen: number): Manifest {
   let m: unknown;
   try {
     m = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw));
@@ -171,9 +171,9 @@ function parseManifest(raw: Uint8Array, dataLen: number): Manifest {
 }
 
 export async function open(
-  segments: Uint8Array[],
+  segments: Uint8Array<ArrayBuffer>[],
   keys: ContentKeys,
-): Promise<{ manifest: Manifest; item(i: number): Uint8Array }> {
+): Promise<{ manifest: Manifest; item(i: number): Uint8Array<ArrayBuffer> }> {
   // 1. Tailles : le palier se déduit de la taille totale et doit être un palier connu.
   const total = segments.reduce((n, s) => n + s.length, 0);
   const bucket = (total - HEADER) / CHUNK_CT;
@@ -217,7 +217,7 @@ export async function open(
 
   return {
     manifest,
-    item(i: number): Uint8Array {
+    item(i: number): Uint8Array<ArrayBuffer> {
       const e = manifest.items[i];
       if (!Number.isInteger(i) || e === undefined) throw new Error("element_inexistant");
       if (e.kind === "text") return utf8(e.text!);
