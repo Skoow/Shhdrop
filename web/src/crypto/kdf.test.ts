@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveAccess, deriveContent, hkdf, randomBytes, sha256, KDF_MIN } from "./kdf";
+import { checkKdfParams, KDF_MAX, deriveAccess, deriveContent, hkdf, randomBytes, sha256, KDF_MIN } from "./kdf";
 import { b64u } from "./encoding";
 
 const hex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
@@ -87,4 +87,36 @@ describe("deriveContent", () => {
     expect(hex(a.vPreuve)).toBe(hex(b.vPreuve));
     expect(hex(a.engagement)).toBe(hex(b.engagement));
   }, T);
+});
+
+describe("bornes et tailles", () => {
+  it("checkKdfParams : bornes exactes", () => {
+    expect(() => checkKdfParams({ ...KDF_MIN })).not.toThrow();
+    expect(() => checkKdfParams({ ...KDF_MAX })).not.toThrow();
+    expect(() => checkKdfParams({ ops: 2, mem: KDF_MIN.mem })).toThrow("paramètres KDF trop faibles");
+    expect(() => checkKdfParams({ ops: 3, mem: KDF_MIN.mem - 1 })).toThrow("paramètres KDF trop faibles");
+    expect(() => checkKdfParams({ ops: 11, mem: 67108864 })).toThrow("paramètres KDF invalides");
+    expect(() => checkKdfParams({ ops: 3, mem: 268435457 })).toThrow("paramètres KDF invalides");
+    expect(() => checkKdfParams({ ops: 3.5, mem: 67108864 })).toThrow("paramètres KDF invalides");
+    expect(() => checkKdfParams({ ops: 3, mem: 67108864.5 })).toThrow("paramètres KDF invalides");
+    expect(() => checkKdfParams({ ops: NaN, mem: 67108864 })).toThrow("paramètres KDF invalides");
+    expect(() => checkKdfParams({ ops: Infinity, mem: 67108864 })).toThrow("paramètres KDF invalides");
+  });
+  it("deriveContent rejette les paramètres hors bornes", async () => {
+    for (const p of [
+      { ops: 11, mem: 67108864 },
+      { ops: 3, mem: 268435457 },
+      { ops: 3.5, mem: 67108864 },
+    ]) {
+      await expect(deriveContent(kLien, "pw", salt, p)).rejects.toThrow("paramètres KDF invalides");
+    }
+  });
+  it("tailles de kLien et de sel", async () => {
+    const msg = "clé ou sel de taille invalide";
+    await expect(deriveAccess(new Uint8Array(31))).rejects.toThrow(msg);
+    await expect(deriveAccess(new Uint8Array(33))).rejects.toThrow(msg);
+    await expect(deriveContent(new Uint8Array(31), "pw", salt, KDF_MIN)).rejects.toThrow(msg);
+    await expect(deriveContent(kLien, "pw", new Uint8Array(15), KDF_MIN)).rejects.toThrow(msg);
+    await expect(deriveContent(kLien, "pw", new Uint8Array(17), KDF_MIN)).rejects.toThrow(msg);
+  });
 });
