@@ -111,3 +111,17 @@ func FuzzCheck(f *testing.F) {
 		_, _ = s.Check(tok, 'd', "id1")
 	})
 }
+
+func TestCheckExp(t *testing.T) {
+	now := t0
+	s := newSigner(&now)
+	exp := t0.Add(2 * time.Minute)
+	tok := s.Issue(CaptchaShown, "captcha", 0, exp)
+	n, got, err := s.CheckExp(tok, CaptchaShown, "captcha")
+	if err != nil || n != 0 || !got.Equal(exp) {
+		t.Fatalf("CheckExp = %d %v %v", n, got, err)
+	}
+	if _, got, err := s.CheckExp(tok, Upload, "captcha"); err == nil || !got.IsZero() {
+		t.Fatal("type faux accepté")
+	}
+}

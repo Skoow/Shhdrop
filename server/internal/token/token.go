@@ -67,32 +67,46 @@ func (s *Signer) Issue(kind byte, id string, openN int, exp time.Time) string {
 
 // Check vérifie la signature, le type, l'id et l'expiration, et rend le n° d'ouverture.
 func (s *Signer) Check(tok string, kind byte, id string) (int, error) {
+	n, _, err := s.CheckExp(tok, kind, id)
+	return n, err
+}
+
+// CheckExp est Check, et rend aussi l'expiration signée (zéro en cas d'erreur).
+func (s *Signer) CheckExp(tok string, kind byte, id string) (int, time.Time, error) {
+	n, exp, err := s.check(tok, kind, id)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	return n, time.Unix(exp, 0), nil
+}
+
+func (s *Signer) check(tok string, kind byte, id string) (int, int64, error) {
 	if len(tok) > maxTokenLen {
-		return 0, ErrInvalid
+		return 0, 0, ErrInvalid
 	}
 	p, m, ok := strings.Cut(tok, ".")
 	if !ok {
-		return 0, ErrInvalid
+		return 0, 0, ErrInvalid
 	}
 	raw, err := b64.DecodeString(p)
 	if err != nil {
-		return 0, ErrInvalid
+		return 0, 0, ErrInvalid
 	}
 	sig, err := b64.DecodeString(m)
 	if err != nil || !hmac.Equal(sig, s.mac(raw)) {
-		return 0, ErrInvalid
+		return 0, 0, ErrInvalid
 	}
 	if len(raw) < 2 || raw[0] != kind {
-		return 0, ErrInvalid
+		return 0, 0, ErrInvalid
 	}
 	l := int(raw[1])
 	if len(raw) != 2+l+12 || string(raw[2:2+l]) != id {
-		return 0, ErrInvalid
+		return 0, 0, ErrInvalid
 	}
 	openN := binary.BigEndian.Uint32(raw[2+l:])
 	exp := int64(binary.BigEndian.Uint64(raw[2+l+4:]))
 	if exp <= s.now().Unix() {
-		return 0, ErrInvalid
+		return 0, 0, ErrInvalid
 	}
-	return int(openN), nil
+	return int(openN), exp, nil
 }

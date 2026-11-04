@@ -13,7 +13,11 @@ type Config struct {
 	DataDir         string
 	Listen          string
 	StorageMaxBytes int64
-	Now             func() time.Time
+	// BehindProxy (SHH_BEHIND_PROXY=1) : une requête locale sans X-Shh-Client-IP
+	// valide est refusée au lieu de partager les limites de l'adresse locale.
+	BehindProxy bool
+	StaticDir   string // SHH_STATIC_DIR : fichiers du site (web/dist) ; vide = page d'attente
+	Now         func() time.Time
 }
 
 func FromEnv() (Config, error) {
@@ -36,5 +40,13 @@ func FromEnv() (Config, error) {
 		}
 		c.StorageMaxBytes = n
 	}
+	switch v := os.Getenv("SHH_BEHIND_PROXY"); v {
+	case "", "0":
+	case "1":
+		c.BehindProxy = true
+	default:
+		return Config{}, fmt.Errorf("SHH_BEHIND_PROXY invalide (0 ou 1): %q", v)
+	}
+	c.StaticDir = os.Getenv("SHH_STATIC_DIR")
 	return c, nil
 }
