@@ -127,8 +127,7 @@ func (s *Service) Create(r CreateReq) (string, int, error) {
 		id, r.Bucket, r.TTLHours, r.MaxOpens, r.MaxOpens, make([]byte, (segs+7)/8),
 		r.Salt, r.KdfOps, r.KdfMem, r.AccessV, r.ProofV, r.ManageV, s.now()+uploadWindow)
 	if err != nil {
-		s.Blobs.Delete(id)
-		return "", 0, err
+		return "", 0, errors.Join(err, s.Blobs.Delete(id))
 	}
 	return id, segs, nil
 }
@@ -224,7 +223,7 @@ func (s *Service) Meta(id string, kAcces []byte) (Meta, error) {
 	var exp int64
 	var accessV []byte
 	err := s.DB.QueryRow(`SELECT expires_at, salt, kdf_ops, kdf_mem, bucket, access_v FROM shares
-		WHERE id=? AND state='ready' AND expires_at>?`, id, now).
+		WHERE id=? AND state='ready' AND expires_at>? AND failed_attempts<?`, id, now, maxAttempts).
 		Scan(&exp, &m.Salt, &m.KdfOps, &m.KdfMem, &m.Bucket, &accessV)
 	if err != nil {
 		return Meta{}, notFound(err)
@@ -263,19 +262,29 @@ func (s *Service) Unlock(id string, kAcces, kPreuve []byte) (int, error) {
 		}
 		return openN, nil
 	}
+	left, err := s.countFailure(id)
+	if err != nil {
+		return 0, err
+	}
+	return 0, &BadPassword{AttemptsLeft: left}
+}
+
+// countFailure compte un mauvais K_preuve (Unlock et Destroy partagent le compteur)
+// et détruit au 5ᵉ. Renvoie les essais restants.
+func (s *Service) countFailure(id string) (int, error) {
 	var failed int
-	err = s.DB.QueryRow(`UPDATE shares SET failed_attempts=failed_attempts+1
-		WHERE id=? AND state='ready' AND expires_at>? AND failed_attempts<?
-		RETURNING failed_attempts`, id, now, maxAttempts).Scan(&failed)
+	err := s.DB.QueryRow(`UPDATE shares SET failed_attempts=failed_attempts+1
+		WHERE id=? AND failed_attempts<? RETURNING failed_attempts`, id, maxAttempts).Scan(&failed)
 	if err != nil {
 		return 0, notFound(err)
 	}
 	if failed >= maxAttempts {
+		// En cas d'échec, Sweep réessaie (failed_attempts>=5) ; le partage est déjà inaccessible.
 		if _, err := s.destroy(id); err != nil {
 			return 0, err
 		}
 	}
-	return 0, &BadPassword{AttemptsLeft: maxAttempts - failed}
+	return maxAttempts - failed, nil
 }
 
 func (s *Service) ReadSegment(id string, n int) ([]byte, error) {
@@ -284,8 +293,8 @@ func (s *Service) ReadSegment(id string, n int) ([]byte, error) {
 	}
 	now := s.now()
 	var bucket int
-	err := s.DB.QueryRow(`SELECT bucket FROM shares WHERE id=? AND expires_at>? AND
-		(state='ready' OR (state='draining' AND purge_at>?))`, id, now, now).Scan(&bucket)
+	err := s.DB.QueryRow(`SELECT bucket FROM shares WHERE id=? AND expires_at>? AND failed_attempts<? AND
+		(state='ready' OR (state='draining' AND purge_at>?))`, id, now, maxAttempts, now).Scan(&bucket)
 	if err != nil {
 		return nil, notFound(err)
 	}
@@ -332,10 +341,16 @@ func (s *Service) Destroy(id string, kAcces, kPreuve, sGestion []byte) error {
 	}
 	// Les trois comparaisons sont toujours faites (pas de court-circuit).
 	a, p, g := match(kAcces, accessV), match(kPreuve, proofV), match(sGestion, manageV)
-	if !(a && p || g) {
-		return ErrNotFound
+	if g || a && p {
+		return s.destroyOrNotFound(id)
 	}
-	return s.destroyOrNotFound(id)
+	if a {
+		// K_accès juste mais K_preuve faux : c'est un essai de mot de passe.
+		if _, err := s.countFailure(id); err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+	}
+	return ErrNotFound
 }
 
 func (s *Service) Status(id string, sGestion []byte) (Status, error) {
@@ -370,14 +385,18 @@ func (s *Service) DestroyAdmin(id string) error {
 	return s.destroyOrNotFound(id)
 }
 
-// Sweep efface les partages expirés, les envois abandonnés et les « draining » échus.
-// Ces conditions ne dépendent que du temps et ne peuvent pas redevenir fausses.
+// sweepCond : partages à effacer. Ne dépend que du temps et de failed_attempts,
+// qui ne peuvent pas redevenir faux, sauf « uploading » qu'un Finalize peut changer.
+// Paramètres numérotés : ?1 = maintenant, ?2 = maxAttempts.
+const sweepCond = `((state IN ('ready','draining') AND expires_at<=?1) OR
+	(state='uploading' AND upload_deadline<=?1) OR
+	(state='draining' AND purge_at<=?1) OR failed_attempts>=?2)`
+
+// Sweep efface les partages expirés, les envois abandonnés, les « draining » échus
+// et les destructions au 5ᵉ essai restées inachevées. Continue malgré les erreurs.
 func (s *Service) Sweep() (int, error) {
 	now := s.now()
-	rows, err := s.DB.Query(`SELECT id FROM shares WHERE
-		(state IN ('ready','draining') AND expires_at<=?) OR
-		(state='uploading' AND upload_deadline<=?) OR
-		(state='draining' AND purge_at<=?)`, now, now, now)
+	rows, err := s.DB.Query(`SELECT id FROM shares WHERE `+sweepCond, now, maxAttempts)
 	if err != nil {
 		return 0, err
 	}
@@ -395,16 +414,32 @@ func (s *Service) Sweep() (int, error) {
 		return 0, err
 	}
 	removed := 0
+	var errs []error
 	for _, id := range ids {
-		ok, err := s.destroy(id)
+		ok, err := s.sweepOne(id, now)
 		if err != nil {
-			return removed, err
-		}
-		if ok {
+			errs = append(errs, err)
+		} else if ok {
 			removed++
 		}
 	}
-	return removed, nil
+	return removed, errors.Join(errs...)
+}
+
+// sweepOne revérifie la condition sous uploadMu : aucun Finalize ne peut
+// s'intercaler entre la vérification et l'effacement (fichier, puis ligne).
+func (s *Service) sweepOne(id string, now int64) (bool, error) {
+	s.uploadMu.Lock()
+	defer s.uploadMu.Unlock()
+	var one int
+	err := s.DB.QueryRow(`SELECT 1 FROM shares WHERE id=?3 AND `+sweepCond, now, maxAttempts, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return s.destroy(id)
 }
 
 // destroy efface le fichier d'abord, puis la ligne ; renvoie si une ligne existait.

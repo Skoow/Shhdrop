@@ -645,3 +645,147 @@ func TestSweep(t *testing.T) {
 		t.Fatal("partage vivant effacé")
 	}
 }
+
+// --- Correctifs, tour 1 ---
+
+func failed(t *testing.T, s *Service, id string) int {
+	t.Helper()
+	var n int
+	s.DB.QueryRow("SELECT failed_attempts FROM shares WHERE id=?", id).Scan(&n)
+	return n
+}
+
+// blocage rend le fichier impossible à supprimer (dossier non vide à sa place).
+func blocage(t *testing.T, s *Service, id string) func() {
+	t.Helper()
+	p := filepath.Join(s.Blobs.Dir, id)
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(p, "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return func() { os.RemoveAll(p) }
+}
+
+func TestDestroyCountsAttempts(t *testing.T) {
+	s, _ := newSvc(t)
+	k := newKeys()
+	id := ready(t, s, k, 1, 1, 1)
+	for i := 1; i <= 4; i++ {
+		if err := s.Destroy(id, k.acces, rnd(32), nil); !errors.Is(err, ErrNotFound) {
+			t.Fatal(err)
+		}
+		if failed(t, s, id) != i {
+			t.Fatal("essai non compté", i)
+		}
+	}
+	// kAcces faux : ne compte pas.
+	s.Destroy(id, rnd(32), rnd(32), nil)
+	if failed(t, s, id) != 4 {
+		t.Fatal("kAcces faux compté")
+	}
+	if err := s.Destroy(id, k.acces, rnd(32), nil); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+	gone(t, s, id)
+	if err := s.Destroy(id, k.acces, rnd(32), nil); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+	if _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+}
+
+func TestMixedAttemptsShareCounter(t *testing.T) {
+	s, _ := newSvc(t)
+	k := newKeys()
+	id := ready(t, s, k, 1, 1, 1)
+	s.Unlock(id, k.acces, rnd(32))
+	s.Destroy(id, k.acces, rnd(32), nil)
+	s.Unlock(id, k.acces, rnd(32))
+	s.Destroy(id, k.acces, rnd(32), nil)
+	_, err := s.Unlock(id, k.acces, rnd(32))
+	var bp *BadPassword
+	if !errors.As(err, &bp) || bp.AttemptsLeft != 0 {
+		t.Fatal(err)
+	}
+	gone(t, s, id)
+}
+
+func TestSweepContinuesOnError(t *testing.T) {
+	s, c := newSvc(t)
+	k := newKeys()
+	a := ready(t, s, k, 1, 1, 1)
+	b := ready(t, s, k, 1, 1, 1)
+	d := ready(t, s, k, 1, 1, 1)
+	defer blocage(t, s, b)()
+	c.Add(2 * time.Hour)
+	n, err := s.Sweep()
+	if err == nil || n != 2 {
+		t.Fatal(n, err)
+	}
+	gone(t, s, a)
+	gone(t, s, d)
+	if rowCount(t, s, b) != 1 {
+		t.Fatal("ligne effacée alors que le fichier reste")
+	}
+}
+
+func TestFailedDestructionRetried(t *testing.T) {
+	s, _ := newSvc(t)
+	k := newKeys()
+	id := ready(t, s, k, 1, 24, 1)
+	unblock := blocage(t, s, id)
+	for i := 0; i < 5; i++ {
+		s.Unlock(id, k.acces, rnd(32))
+	}
+	if failed(t, s, id) != 5 || rowCount(t, s, id) != 1 {
+		t.Fatal("la destruction aurait dû échouer")
+	}
+	if _, err := s.Meta(id, k.acces); !errors.Is(err, ErrNotFound) {
+		t.Fatal("Meta", err)
+	}
+	if _, err := s.ReadSegment(id, 0); !errors.Is(err, ErrNotFound) {
+		t.Fatal("ReadSegment", err)
+	}
+	if _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
+		t.Fatal("Unlock", err)
+	}
+	unblock()
+	if n, err := s.Sweep(); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	gone(t, s, id)
+}
+
+// Sweep revérifie la condition avant d'effacer : un envoi finalisé entre la
+// sélection et l'effacement n'est jamais détruit.
+func TestSweepRechecksFinalized(t *testing.T) {
+	s, c := newSvc(t)
+	k := newKeys()
+	id := ready(t, s, k, 1, 1, 1)
+	deadline := c.Now().Add(time.Hour).Unix() // l'ancien upload_deadline
+	ok, err := s.sweepOne(id, deadline)
+	if err != nil || ok {
+		t.Fatal(ok, err)
+	}
+	if rowCount(t, s, id) != 1 {
+		t.Fatal("partage finalisé détruit")
+	}
+	if _, err := s.ReadSegment(id, 0); err != nil {
+		t.Fatal("fichier détruit", err)
+	}
+}
+
+func TestCreateCleansUpOnInsertError(t *testing.T) {
+	s, _ := newSvc(t)
+	k := newKeys()
+	s.DB.Close()
+	if _, _, err := s.Create(k.req(1, 1, 1)); err == nil {
+		t.Fatal("erreur attendue")
+	}
+	if ids, _ := s.Blobs.List(); len(ids) != 0 {
+		t.Fatal("réservation orpheline", ids)
+	}
+}
