@@ -208,6 +208,9 @@ func (s *Service) Create(r CreateReq) (string, int, error) {
 		return "", 0, ErrFull
 	}
 	if err := s.Blobs.Reserve(id, size); err != nil {
+		if errors.Is(err, blob.ErrNoAllocate) {
+			return "", 0, ErrFull // place impossible à garantir : refus, comme un disque plein
+		}
 		return "", 0, err
 	}
 	_, err = s.DB.Exec(`INSERT INTO shares(id,state,bucket,ttl_hours,max_opens,opens_left,segments_mask,

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -62,6 +63,16 @@ func htmlStatic() http.Handler {
 
 func newEnv(t *testing.T, behindProxy bool, static http.Handler) *env {
 	t.Helper()
+	return newEnvWith(t, behindProxy, nil, static)
+}
+
+func newEnvProxies(t *testing.T, proxies []netip.Prefix) *env {
+	t.Helper()
+	return newEnvWith(t, true, proxies, nil)
+}
+
+func newEnvWith(t *testing.T, behindProxy bool, proxies []netip.Prefix, static http.Handler) *env {
+	t.Helper()
 	dir := t.TempDir()
 	db, err := store.Open(filepath.Join(dir, "shares.db"))
 	if err != nil {
@@ -78,7 +89,7 @@ func newEnv(t *testing.T, behindProxy bool, static http.Handler) *env {
 		static = htmlStatic()
 	}
 	sig := token.New(rnd(32), c.Now)
-	h := New(svc, sig, limits.New(c.Now), captcha.New(rnd(32), c.Now), static, behindProxy)
+	h := New(svc, sig, limits.New(c.Now), captcha.New(rnd(32), c.Now), static, behindProxy, proxies)
 	return &env{h: h, svc: svc, sig: sig, clk: c, dir: dir}
 }
 

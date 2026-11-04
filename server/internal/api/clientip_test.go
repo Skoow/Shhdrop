@@ -32,7 +32,7 @@ func TestClientIP(t *testing.T) {
 			if c.xff != "" {
 				r.Header.Set("X-Forwarded-For", c.xff)
 			}
-			if got := ClientIP(r); got != netip.MustParseAddr(c.want) {
+			if got := ClientIP(r, nil); got != netip.MustParseAddr(c.want) {
 				t.Fatalf("ClientIP = %v, attendu %v", got, c.want)
 			}
 		})
@@ -44,7 +44,7 @@ func TestClientIPDuplicateHeader(t *testing.T) {
 	r.RemoteAddr = "127.0.0.1:1"
 	r.Header.Add("X-Shh-Client-IP", "1.2.3.4")
 	r.Header.Add("X-Shh-Client-IP", "5.6.7.8")
-	if got := ClientIP(r); got != netip.MustParseAddr("127.0.0.1") {
+	if got := ClientIP(r, nil); got != netip.MustParseAddr("127.0.0.1") {
 		t.Fatalf("en-tête en double accepté : %v", got)
 	}
 }
@@ -53,7 +53,29 @@ func TestClientIPBadRemote(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.RemoteAddr = "@"
 	r.Header.Set("X-Shh-Client-IP", "1.2.3.4")
-	if got := ClientIP(r); got.IsValid() {
+	if got := ClientIP(r, nil); got.IsValid() {
 		t.Fatalf("RemoteAddr illisible : %v", got)
+	}
+}
+
+// Audit M3 : derrière un proxy en conteneur (pair non local), X-Shh-Client-IP n'est cru
+// que d'un pair listé dans SHH_TRUSTED_PROXY ; la boucle locale reste de confiance.
+func TestClientIPTrustedProxies(t *testing.T) {
+	proxies := []netip.Prefix{netip.MustParsePrefix("172.18.0.0/16")}
+	cases := []struct{ remote, shh, want string }{
+		{"172.18.0.2:4000", "198.51.100.4", "198.51.100.4"}, // proxy déclaré
+		{"172.19.0.2:4000", "198.51.100.4", "172.19.0.2"},   // hors liste : en-tête ignoré
+		{"127.0.0.1:4000", "198.51.100.4", "198.51.100.4"},  // boucle locale : toujours de confiance
+		{"172.18.0.2:4000", "", "172.18.0.2"},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = c.remote
+		if c.shh != "" {
+			r.Header.Set("X-Shh-Client-IP", c.shh)
+		}
+		if got := ClientIP(r, proxies); got != netip.MustParseAddr(c.want) {
+			t.Fatalf("%v : ClientIP = %v, attendu %v", c, got, c.want)
+		}
 	}
 }

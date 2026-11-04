@@ -42,16 +42,18 @@ type server struct {
 	lim         *limits.Limiter
 	cap         *captcha.Captcha
 	behindProxy bool
+	proxies     []netip.Prefix
 }
 
 type ctxIP struct{}
 
 // New construit le gestionnaire HTTP complet : /api/* puis le site statique.
-// behindProxy (SHH_BEHIND_PROXY) : une requête locale sans X-Shh-Client-IP valide
-// reçoit 500 au lieu de partager les limites de l'adresse locale (échec fermé).
+// behindProxy (SHH_BEHIND_PROXY) : une requête d'un pair qui n'est pas un proxy de
+// confiance (boucle locale ou proxies, SHH_TRUSTED_PROXY), ou sans X-Shh-Client-IP
+// valide, reçoit 500 au lieu de partager les limites du proxy (échec fermé).
 func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
-	static http.Handler, behindProxy bool) http.Handler {
-	s := &server{svc: svc, sig: sig, lim: lim, cap: capt, behindProxy: behindProxy}
+	static http.Handler, behindProxy bool, proxies []netip.Prefix) http.Handler {
+	s := &server{svc: svc, sig: sig, lim: lim, cap: capt, behindProxy: behindProxy, proxies: proxies}
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/captcha", s.captcha)
 	api.HandleFunc("POST /api/shares", s.create)
@@ -75,10 +77,10 @@ func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captc
 // guard : adresse du client (de confiance) puis limite de débit, pour tout /api/*.
 func (s *server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip, trusted := clientIP(r)
-		// Derrière le proxy, seul Caddy (en local, avec X-Shh-Client-IP) doit parler au
-		// serveur : tout pair distant ou en-tête absent révèle une erreur de configuration.
-		if s.behindProxy && (!trusted || !parse(r.RemoteAddr).IsLoopback()) {
+		ip, trusted := clientIP(r, s.proxies)
+		// Derrière le proxy, seul Caddy (pair de confiance, avec X-Shh-Client-IP) doit parler
+		// au serveur : tout autre pair ou en-tête absent révèle une erreur de configuration.
+		if s.behindProxy && (!trusted || !isProxy(parse(r.RemoteAddr), s.proxies)) {
 			writeErr(w, http.StatusInternalServerError, "internal")
 			return
 		}

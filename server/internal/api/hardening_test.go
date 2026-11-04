@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/netip"
 	"strings"
 	"testing"
 )
@@ -58,4 +59,14 @@ func TestSecretsRejectNewlines(t *testing.T) {
 		hdr: map[string]string{"X-Shh-Access": a[:21] + "\r" + a[21:]}}), 400, badRequest)
 	// Identifiant avec \n dans le chemin (%0A) : introuvable, comme tout identifiant invalide.
 	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID[:11] + "%0A" + c.ID[11:] + "/meta", hdr: access(k)}), 404, notFound)
+}
+
+// Audit M3 : derrière le proxy, seul un pair de SHH_TRUSTED_PROXY (ou local) est servi.
+func TestBehindTrustedProxy(t *testing.T) {
+	e := newEnvProxies(t, []netip.Prefix{netip.MustParsePrefix("172.18.0.0/16")})
+	hdr := map[string]string{"X-Shh-Client-IP": "198.51.100.4"}
+	expect(t, e.do(req{method: "GET", path: "/api/captcha", remote: "172.18.0.2:5000", hdr: hdr}), 200, "")
+	expect(t, e.do(req{method: "GET", path: "/api/captcha", remote: "127.0.0.1:5000", hdr: hdr}), 200, "")
+	expect(t, e.do(req{method: "GET", path: "/api/captcha", remote: "172.19.0.2:5000", hdr: hdr}), 500, `{"error":"internal"}`)
+	expect(t, e.do(req{method: "GET", path: "/api/captcha", remote: "172.18.0.2:5000"}), 500, `{"error":"internal"}`)
 }

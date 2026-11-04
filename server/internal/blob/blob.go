@@ -10,10 +10,17 @@ import (
 	"time"
 )
 
-// Store range les fichiers dans Dir, un par identifiant.
-type Store struct{ Dir string }
+// Store range les fichiers dans Dir, un par identifiant. NoSparse (production) : la place
+// doit être réellement allouée sur le disque ; pas de repli « fichier creux » (audit F6).
+type Store struct {
+	Dir      string
+	NoSparse bool
+}
 
 var errID = errors.New("blob : identifiant invalide")
+
+// ErrNoAllocate : NoSparse, et le système de fichiers ne sait pas allouer à l'avance.
+var ErrNoAllocate = errors.New("blob : allocation réelle impossible sur ce système de fichiers (fichier creux refusé)")
 
 // validID n'accepte que 22 caractères base64url (anti traversée de chemin).
 func validID(id string) bool {
@@ -42,7 +49,7 @@ func wipeTimes(p string) error {
 }
 
 // Reserve crée le fichier de size octets, alloués sur le disque quand le système de
-// fichiers le permet (sinon fichier creux) ; erreur s'il existe déjà.
+// fichiers le permet (sinon fichier creux, ou ErrNoAllocate si NoSparse) ; erreur s'il existe déjà.
 func (s *Store) Reserve(id string, size int64) error {
 	p, err := s.path(id)
 	if err != nil {
@@ -58,7 +65,7 @@ func (s *Store) Reserve(id string, size int64) error {
 	if err != nil {
 		return err
 	}
-	if err := allocate(f, size); err != nil {
+	if err := allocate(f, size, s.NoSparse); err != nil {
 		f.Close()
 		os.Remove(p)
 		return err
@@ -68,6 +75,21 @@ func (s *Store) Reserve(id string, size int64) error {
 		return err
 	}
 	return wipeTimes(p)
+}
+
+// CheckAllocate vérifie au démarrage que le dossier permet l'allocation réelle (avec
+// NoSparse) : un fichier de sonde caché (ignoré par List) est réservé puis supprimé.
+func (s *Store) CheckAllocate() error {
+	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(s.Dir, ".sonde-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	err = allocate(f, 4096, s.NoSparse)
+	return errors.Join(err, f.Close())
 }
 
 // WriteAt écrit dans la zone réservée ; refuse tout dépassement.

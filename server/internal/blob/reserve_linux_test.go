@@ -67,3 +67,34 @@ func TestReserveFallback(t *testing.T) {
 		t.Fatal("fichier laissé après échec", err)
 	}
 }
+
+// Audit F6 : en production (NoSparse), le repli « fichier creux » est refusé : le disque
+// pourrait se remplir en plein envoi.
+func TestReserveNoSparse(t *testing.T) {
+	orig := fallocate
+	t.Cleanup(func() { fallocate = orig })
+	s := newStore(t)
+	s.NoSparse = true
+	fallocate = func(int, int64) error { return unix.EOPNOTSUPP }
+	if err := s.Reserve(id1, 1000); !errors.Is(err, ErrNoAllocate) {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(s.Dir, id1)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("fichier laissé après refus", err)
+	}
+	if err := s.CheckAllocate(); !errors.Is(err, ErrNoAllocate) {
+		t.Fatal("sonde de démarrage :", err)
+	}
+	if ids, _ := s.List(); len(ids) != 0 {
+		t.Fatal("sonde laissée", ids)
+	}
+	fallocate = orig
+	if fallocateSupported(t, s.Dir) {
+		if err := s.CheckAllocate(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if es, _ := os.ReadDir(s.Dir); len(es) != 0 {
+		t.Fatal("sonde laissée", es)
+	}
+}
