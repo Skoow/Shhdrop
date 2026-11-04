@@ -70,7 +70,7 @@ func (s *Store) Reserve(id string, size int64) error {
 }
 
 // WriteAt écrit dans la zone réservée ; refuse tout dépassement.
-func (s *Store) WriteAt(id string, off int64, p []byte) error {
+func (s *Store) WriteAt(id string, off int64, p []byte) (err error) {
 	path, err := s.path(id)
 	if err != nil {
 		return err
@@ -79,7 +79,18 @@ func (s *Store) WriteAt(id string, off int64, p []byte) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	// Les dates sont remises à zéro même en cas d'erreur (écriture partielle).
+	// Ordre LIFO : fermeture d'abord, puis Chtimes.
+	defer func() {
+		if werr := wipeTimes(path); err == nil {
+			err = werr
+		}
+	}()
+	defer func() {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}()
 	fi, err := f.Stat()
 	if err != nil {
 		return err
@@ -87,13 +98,8 @@ func (s *Store) WriteAt(id string, off int64, p []byte) error {
 	if off < 0 || off > fi.Size() || int64(len(p)) > fi.Size()-off {
 		return errors.New("blob : écriture hors de la réservation")
 	}
-	if _, err := f.WriteAt(p, off); err != nil {
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return wipeTimes(path)
+	_, err = f.WriteAt(p, off)
+	return err
 }
 
 // ReadAt lit exactement n octets à partir de off.
