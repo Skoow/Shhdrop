@@ -115,21 +115,25 @@ func TestThirtyPer48(t *testing.T) {
 func TestBytesPerDay(t *testing.T) {
 	now := t0
 	l := newLim(&now)
+	// Spec §24 : 3 Gio utiles par jour et par connexion (trois liens de 1 Gio).
+	if BytesPer64 != 3<<30 {
+		t.Fatal("BytesPer64", BytesPer64)
+	}
 	for i := 0; i < 3; i++ {
-		if ok, _ := l.AllowCreate(ip("1.2.3.4"), 100<<20); !ok {
+		if ok, _ := l.AllowCreate(ip("1.2.3.4"), 16384*65536); !ok {
 			t.Fatalf("envoi %d refusé", i+1)
 		}
 	}
 	if ok, ra := l.AllowCreate(ip("1.2.3.4"), 1); ok || ra <= 0 {
-		t.Fatalf("300 Mio + 1 octet : ok=%v retryAfter=%v", ok, ra)
+		t.Fatalf("3 Gio + 1 octet : ok=%v retryAfter=%v", ok, ra)
 	}
 }
 
 func TestRefusalDoesNotCount(t *testing.T) {
 	now := t0
 	l := newLim(&now)
-	if ok, _ := l.AllowCreate(ip("1.2.3.4"), 301<<20); ok {
-		t.Fatal("301 Mio accepté")
+	if ok, _ := l.AllowCreate(ip("1.2.3.4"), BytesPer64+1); ok {
+		t.Fatal("3 Gio + 1 octet accepté")
 	}
 	if ok, _ := l.AllowCreate(ip("1.2.3.4"), -1); ok {
 		t.Fatal("taille négative acceptée")
@@ -137,9 +141,9 @@ func TestRefusalDoesNotCount(t *testing.T) {
 	if ok, _ := l.AllowCreate(ip("1.2.3.4"), 1<<62); ok {
 		t.Fatal("taille énorme acceptée")
 	}
-	// Les refus n'ont rien consommé : 10 créations et 300 Mio restent possibles.
+	// Les refus n'ont rien consommé : 10 créations et 3 Gio restent possibles.
 	for i := 0; i < 10; i++ {
-		if ok, _ := l.AllowCreate(ip("1.2.3.4"), 30<<20); !ok {
+		if ok, _ := l.AllowCreate(ip("1.2.3.4"), BytesPer64/10); !ok {
 			t.Fatalf("création %d refusée", i+1)
 		}
 	}
@@ -172,7 +176,7 @@ func TestResetAtUTCMidnight(t *testing.T) {
 	paris := time.FixedZone("CET", 3600)
 	now := time.Date(2026, 11, 5, 0, 30, 0, 0, paris) // 23:30 UTC le 4
 	l := newLim(&now)
-	if _, ra := l.AllowCreate(ip("1.2.3.4"), 301<<20); ra != 30*time.Minute {
+	if _, ra := l.AllowCreate(ip("1.2.3.4"), BytesPer64+1); ra != 30*time.Minute {
 		t.Fatalf("retryAfter = %v", ra)
 	}
 }

@@ -27,8 +27,8 @@ import (
 const (
 	maxJSON       = 4 << 10
 	captchaTTL    = 2 * time.Minute // durée du jeton shown_at (= celle du défi ALTCHA)
-	uploadTTL     = time.Hour
-	downloadTTL   = time.Hour
+	uploadTTL     = 3 * time.Hour   // = share.uploadWindow (spec §24)
+	downloadTTL   = 3 * time.Hour   // plafonné à expires_at (spec §24)
 	maxSegmentLen = share.Header + share.SegChunks*share.ChunkCT
 )
 

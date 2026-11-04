@@ -18,7 +18,7 @@ import (
 const (
 	CreatesPer64   = 10
 	CreatesPer48   = 30
-	BytesPer64     = 300 << 20
+	BytesPer64     = 3 << 30 // 3 Gio utiles par jour (spec §24)
 	RequestsPerMin = 60
 	day            = 86400
 )

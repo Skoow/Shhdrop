@@ -1,7 +1,7 @@
 package share
 
 // Dimensions du paquet chiffré, miroir exact du code TypeScript (spec §7.3).
-var Buckets = []int{1, 16, 80, 160, 400, 800, 1600}
+var Buckets = []int{1, 16, 80, 160, 400, 800, 1600, 4000, 8000, 16384} // 64 Kio à 1 Gio (spec §24)
 
 const (
 	ChunkCT   = 65552 // morceau chiffré : 64 Kio + tag GCM

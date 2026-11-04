@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"math/bits"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -37,8 +38,10 @@ func (e *BadPassword) Error() string { return "mot de passe incorrect" }
 
 const (
 	maxAttempts  = 5
-	uploadWindow = 3600 // secondes
-	purgeWindow  = 3600 // durée d'un jeton de téléchargement
+	uploadWindow = 3 * 3600 // secondes (spec §24 : 3 h, comme le jeton d'envoi)
+	purgeWindow  = 3 * 3600 // durée d'un jeton de téléchargement (spec §24 : 3 h)
+	// emptySweep : un envoi sans segment est effacé dès upload_deadline − emptySweep (sweepCond).
+	emptySweep = uploadWindow - 300
 )
 
 type CreateReq struct {
@@ -411,14 +414,14 @@ func (s *Service) DestroyAdmin(id string) error {
 // sweepCond : partages à effacer. Ne dépend que du temps et de failed_attempts,
 // qui ne peuvent pas redevenir faux, sauf « uploading » qu'un Finalize ou un
 // PutSegment (masque non vide) peut changer : sweepOne revérifie sous uploadMu.
-// Envoi vide (aucun segment reçu) : effacé dès upload_deadline − 55 min (3300 s), soit
+// Envoi vide (aucun segment reçu) : effacé dès upload_deadline − 2 h 55 (10 500 s), soit
 // 5 à 20 min après la création selon l'arrondi au quart d'heure : une réservation vide
-// ne bloque pas l'espace pendant une heure. La date de création n'étant pas stockée,
+// ne bloque pas l'espace pendant trois heures. La date de création n'étant pas stockée,
 // on la déduit de l'échéance ; rien de plus n'est enregistré.
 // Paramètres numérotés : ?1 = maintenant, ?2 = maxAttempts.
-const sweepCond = `((state IN ('ready','draining') AND expires_at<=?1) OR
+var sweepCond = `((state IN ('ready','draining') AND expires_at<=?1) OR
 	(state='uploading' AND upload_deadline<=?1) OR
-	(state='uploading' AND upload_deadline-3300<=?1 AND segments_mask=zeroblob(length(segments_mask))) OR
+	(state='uploading' AND upload_deadline-` + strconv.Itoa(emptySweep) + `<=?1 AND segments_mask=zeroblob(length(segments_mask))) OR
 	(state='draining' AND purge_at<=?1) OR failed_attempts>=?2)`
 
 // Sweep efface les partages expirés, les envois abandonnés, les « draining » échus

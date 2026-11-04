@@ -481,6 +481,38 @@ func TestDownloadTokenCappedAtExpiry(t *testing.T) {
 	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/segments/0", hdr: auth(dl)}), 404, notFound)
 }
 
+// Spec §24 : jeton d'envoi 3 h ; jeton de téléchargement min(3 h, expires_at).
+func TestTokenLifetimes(t *testing.T) {
+	e := newEnv(t, false, nil)
+	k := newKeys()
+	alt, shown := e.captchaFor(t, "")
+	body := k.createBody(1, 1, alt, shown)
+	body["ttl_hours"] = 24
+	w := e.do(req{method: "POST", path: "/api/shares", body: mustJSON(body)})
+	expect(t, w, 201, "")
+	var c created
+	json.Unmarshal(w.Body.Bytes(), &c)
+	if _, exp, err := e.sig.CheckExp(c.UploadToken, token.Upload, c.ID); err != nil || !exp.Equal(e.clk.Now().Add(3*time.Hour)) {
+		t.Fatal("jeton d'envoi", exp, err)
+	}
+	e.clk.Add(2*time.Hour + 50*time.Minute) // 12:52 : l'envoi est encore accepté (échéance 13:15)
+	expect(t, e.do(req{method: "PUT", path: "/api/shares/" + c.ID + "/segments/0", body: rnd(share.SegmentSize(1, 0)),
+		hdr: auth(c.UploadToken)}), 204, "")
+	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/finalize", hdr: auth(c.UploadToken)}), 200, "")
+	dl, _ := e.unlock(t, c.ID, k)
+	if _, exp, err := e.sig.CheckExp(dl, token.Download, c.ID); err != nil || !exp.Equal(e.clk.Now().Add(3*time.Hour)) {
+		t.Fatal("jeton de téléchargement (24 h)", exp, err)
+	}
+	// Partage d'une heure : jeton plafonné à expires_at.
+	short := e.create(t, "", k, 1, 1)
+	e.upload(t, short, 1)
+	dl2, _ := e.unlock(t, short.ID, k)
+	if _, exp, err := e.sig.CheckExp(dl2, token.Download, short.ID); err != nil ||
+		!exp.Equal(time.Date(2026, 11, 4, 14, 0, 0, 0, time.UTC)) {
+		t.Fatal("jeton de téléchargement plafonné", exp, err)
+	}
+}
+
 func TestRateLimit(t *testing.T) {
 	e := newEnv(t, false, nil)
 	for i := 0; i < limits.RequestsPerMin; i++ {
@@ -579,12 +611,12 @@ func TestCreateFrozenFull(t *testing.T) {
 func TestCreateQuota(t *testing.T) {
 	e := newEnv(t, false, nil)
 	k := newKeys()
-	// Quota en capacité utile (1600 × 64 Kio = 100 Mio) : 3 partages max par jour, le 4ᵉ refusé.
+	// Quota en capacité utile (16 384 × 64 Kio = 1 Gio) : 3 partages max par jour, le 4ᵉ refusé.
 	for i := 0; i < 3; i++ {
-		e.create(t, "", k, 1600, 1)
+		e.create(t, "", k, 16384, 1)
 	}
 	alt, shown := e.captchaFor(t, "")
-	w := e.do(req{method: "POST", path: "/api/shares", body: mustJSON(k.createBody(1600, 1, alt, shown))})
+	w := e.do(req{method: "POST", path: "/api/shares", body: mustJSON(k.createBody(16384, 1, alt, shown))})
 	expect(t, w, 429, "")
 	m := jsonOf(t, w)
 	if m["error"] != "limit" || m["retry_after_s"].(float64) <= 0 {

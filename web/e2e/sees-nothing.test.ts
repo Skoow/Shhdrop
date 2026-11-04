@@ -59,7 +59,7 @@ describe("le serveur ne voit rien", () => {
     const o = await openShare(r.link, PASSWORD, undefined, { fetch });
     expect(o.manifest.items[0]!.text).toBe(`texte ${MARKER} texte`);
     expect(o.manifest.items[1]!.name).toBe(NAME);
-    expect(Buffer.from(o.item(1)).equals(Buffer.from(fileData))).toBe(true);
+    expect(Buffer.from(await o.item(1)).equals(Buffer.from(fileData))).toBe(true);
     await o.done();
     secrets = [needle("kLien", kLien), needle("texte repère", MARKER), needle("nom repère", NAME), needle("mot de passe repère", PASSWORD)];
     keysOnDisk = [needle("kAcces", kAcces), needle("kPreuve", kPreuve), needle("sGestion", sGestion)];
