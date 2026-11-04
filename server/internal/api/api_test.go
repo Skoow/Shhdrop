@@ -69,8 +69,11 @@ func newEnv(t *testing.T, behindProxy bool, static http.Handler) *env {
 	}
 	t.Cleanup(func() { db.Close() })
 	c := &clock{t: time.Date(2026, 11, 4, 10, 2, 0, 0, time.UTC)}
-	svc := &share.Service{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")}, Now: c.Now,
-		StorageMax: 1 << 40, FrozenFile: filepath.Join(dir, "frozen")}
+	svc, err := share.NewService(share.Config{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")}, Now: c.Now,
+		StorageMax: 1 << 40, FrozenFile: filepath.Join(dir, "frozen")})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if static == nil {
 		static = htmlStatic()
 	}

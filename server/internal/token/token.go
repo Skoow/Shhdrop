@@ -54,7 +54,7 @@ func (s *Signer) encode(raw []byte) string {
 
 // Issue signe un jeton. len(id) ≤ 255 et 0 ≤ openN ≤ 2³²−1 (sinon erreur de programmation : panique).
 func (s *Signer) Issue(kind byte, id string, openN int, exp time.Time) string {
-	if len(id) > 255 || openN < 0 || openN > math.MaxUint32 {
+	if len(id) > 255 || openN < 0 || uint64(openN) > math.MaxUint32 {
 		panic("token: id ou n° d'ouverture hors limites")
 	}
 	b := make([]byte, 0, 2+len(id)+12)
@@ -83,6 +83,13 @@ func (s *Signer) CheckExp(tok string, kind byte, id string) (int, time.Time, err
 func (s *Signer) check(tok string, kind byte, id string) (int, int64, error) {
 	if len(tok) > maxTokenLen {
 		return 0, 0, ErrInvalid
+	}
+	// Alphabet base64url et « . » seulement : le décodeur de Go ignore \r et \n (audit F3).
+	for i := 0; i < len(tok); i++ {
+		c := tok[i]
+		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+			return 0, 0, ErrInvalid
+		}
 	}
 	p, m, ok := strings.Cut(tok, ".")
 	if !ok {

@@ -51,8 +51,12 @@ func newSvc(t *testing.T) (*Service, *clock) {
 	}
 	t.Cleanup(func() { db.Close() })
 	c := &clock{t: time.Date(2026, 11, 4, 10, 2, 0, 0, time.UTC)}
-	return &Service{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")}, Now: c.Now,
-		StorageMax: 1 << 40, FrozenFile: filepath.Join(dir, "frozen")}, c
+	s, err := NewService(Config{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")}, Now: c.Now,
+		StorageMax: 1 << 40, FrozenFile: filepath.Join(dir, "frozen")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, c
 }
 
 func segBody(bucket, n int, fill byte) []byte {
