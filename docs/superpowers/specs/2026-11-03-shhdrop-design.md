@@ -532,3 +532,24 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 | Mineur | **Page de gestion** | Afficher « Ouvert 1 / 3 » demande de connaître le maximum | Colonne `max_opens` ajoutée à la table |
 | Mineur | **Fin de téléchargement rejouée** | Un même `done` envoyé deux fois fausserait le compteur | Un indicateur par ouverture (`done_mask`, 10 bits) rend `done` idempotent |
 | Mineur | **Partage vide** | Un envoi sans aucun élément | Bloqué dans le navigateur |
+
+---
+
+## 22. Décisions du propriétaire (v2.2) — remplacent D2 et D4 de la section 0
+
+### D2 — Base et disque chiffrés (remplace « retirés »)
+
+- Tout le dossier de données (`/data` : base SQLite, fichiers chiffrés, fichiers temporaires) est sur un **volume LUKS2 (AES-256-XTS, Argon2id)**. La base est donc chiffrée au repos avec le reste.
+- La **phrase de déverrouillage n'est jamais stockée sur le serveur**. Après un redémarrage de la machine, le propriétaire déverrouille le volume en SSH (`deploy/unlock.sh`) ; tant que ce n'est pas fait, le site reste hors service. Les redémarrages du conteneur, eux, sont automatiques et n'ont pas besoin de déverrouillage.
+- Les mises à jour de sécurité automatiques **ne redémarrent pas la machine d'elles-mêmes** ; une alerte prévient quand un redémarrage est nécessaire.
+- **Swap désactivé** (sinon des pages mémoire pourraient être écrites en clair sur un disque non chiffré) ; vidages mémoire du noyau (core dumps) désactivés.
+- La base reste en `modernc.org/sqlite` (pas de SQLCipher) : la protection au repos vient du volume chiffré. Le niveau de protection est le même, sans CGO.
+
+### D4 — Anti-robot fort et respectueux de la vie privée (remplace « reporté »)
+
+- **ALTCHA** (open source, MIT), **hébergé par Shhdrop** : widget servi depuis notre domaine, bibliothèque serveur Go (`altcha-lib-go`). Aucun service tiers, aucun cookie, aucun traceur (exclus : reCAPTCHA, hCaptcha, Turnstile).
+- **Preuve de travail adaptative** : environ 1 s pour une première création ; la difficulté **double à chaque création** de la même connexion dans l'heure (plafond : environ 30 s).
+- **Défis signés (HMAC), à usage unique** (consommés en mémoire), valables **2 minutes**, liés à la connexion.
+- **Pièges** : un champ caché qui ne doit pas être rempli, et un délai minimum de 3 s entre l'affichage de la page et la création.
+- S'ajoute aux limites de la section 4 (10 par jour, 30 par /48, 300 Mio par jour).
+- Limite assumée : aucun captcha n'arrête tous les robots ; l'objectif est de rendre la création en série lente et coûteuse.
