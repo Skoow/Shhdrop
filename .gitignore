@@ -1,0 +1,5 @@
+node_modules/
+dist/
+server/shhdrop
+*.db*
+/tmp-data/

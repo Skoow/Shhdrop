@@ -31,7 +31,7 @@ Chaque signalement donne la gravité, l'endroit, le problème et une correction 
 
 ## Git
 
-- Commits signés avec l'adresse anonyme GitHub du propriétaire (`190851638+Skoow@users.noreply.github.com`), jamais son e-mail personnel.
+- Commits : auteur = adresse anonyme GitHub du propriétaire (`git commit --author="Skoow <190851638+Skoow@users.noreply.github.com>"`), committer = identité signée de l'environnement (configuration globale, ne pas la remplacer), pour que GitHub affiche « Verified ». Jamais l'e-mail personnel du propriétaire.
 - Travail poussé régulièrement sur GitHub : la machine de développement peut être réinitialisée à tout moment.
 
 ## Langue
