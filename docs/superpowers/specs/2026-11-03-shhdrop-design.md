@@ -22,7 +22,7 @@ Historique : v1 du 3 novembre, puis revue critique indépendante et passage comp
 - Envoi **borné** : place réservée à la création, tout dépassement refusé.
 - **Clé d'accès** tirée du lien : l'identifiant seul ne permet plus de détruire un partage.
 - Compteurs **atomiques** imposés en base.
-- **Date de création** réellement indevinable (arrondi, dates de fichier effacées).
+- **Date de création** non stockée : dates enregistrées arrondies au quart d'heure, dates du fichier remises à zéro ; le système de fichiers garde toutefois des dates de naissance et de changement que l'application ne peut pas effacer (section 18).
 - **Effacement sécurisé** dans SQLite.
 - **Pas de service worker** (pas de mode hors ligne) : une promesse de la v1 était techniquement fausse.
 - Vidéo lue **après** téléchargement complet ; lecteurs natifs du navigateur.
@@ -98,7 +98,7 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 | Règle | Valeur V1 |
 |---|---|
 | Éléments par partage | 10 maximum |
-| Taille par partage | 100 Mio maximum, chiffrement et bourrage compris |
+| Taille par partage | 100 Mio de contenu utile (1 600 morceaux de 64 Kio) ; le fichier chiffré fait 104 883 248 octets |
 | Durée de vie | au choix 1 h, 6 h, 12 h, 24 h ; comptée **à partir de la fin de l'envoi** ; expiration arrondie au **quart d'heure supérieur** |
 | Ouvertures | au choix 1 à 10 ; **une ouverture = un déverrouillage réussi** (recharger la page en consomme une, c'est affiché) |
 | Fin de vie | le premier atteint : durée, ouvertures épuisées, destruction (expéditeur, destinataire, administrateur), signalement, 5 mots de passe faux |
@@ -200,13 +200,14 @@ Chaque module a une responsabilité unique et des tests propres. `web/src/crypto
 | `sel` | 16 octets aléatoires | serveur (renvoyé par `meta`) |
 | `K_mdp` | Argon2id(mot de passe, `sel`) : 64 Mio, 3 passes, 1 fil, 32 octets | navigateur |
 | `K_maître` | HKDF(`K_lien` ‖ `K_mdp`, « shhdrop/v1/maitre ») | navigateur |
-| `K_contenu` | HKDF(`K_maître`, « contenu ») | navigateur |
-| `K_preuve` | HKDF(`K_maître`, « preuve ») | envoyé pour déverrouiller et détruire |
+| `K_contenu` | HKDF(`K_maître`, « shhdrop/v1/contenu ») | navigateur |
+| `K_preuve` | HKDF(`K_maître`, « shhdrop/v1/preuve ») | envoyé pour déverrouiller et détruire |
 | `V_preuve` | SHA-256(`K_preuve`) | serveur |
-| `C_engagement` | HMAC-SHA-256(`K_contenu`, « engagement ») | en tête du paquet (en clair) |
+| `C_engagement` | HMAC-SHA-256(`K_contenu`, « shhdrop/v1/engagement ») | en tête du paquet (en clair) |
 | `S_gestion` | 32 octets aléatoires | après le `#` du lien de gestion |
 | `V_gestion` | SHA-256(`S_gestion`) | serveur |
 
+- Toutes les étiquettes HKDF et HMAC sont préfixées `shhdrop/v1/` (`acces`, `maitre`, `contenu`, `preuve`, `engagement`) : un changement de version change toutes les clés.
 - Le navigateur **refuse** des paramètres Argon2id inférieurs au minimum ci-dessus, même si le serveur les propose.
 - Les paramètres visent environ 1 s sur un téléphone d'entrée de gamme ; ils sont versionnés.
 
@@ -233,20 +234,20 @@ Chaque module a une responsabilité unique et des tests propres. `web/src/crypto
 ### 7.4 Envoi
 
 1. `POST /api/shares` : durée, ouvertures, palier, `sel`, paramètres KDF, `V_accès`, `V_preuve`, `V_gestion`.
-   - Le serveur vérifie les limites, **réserve** la place du palier et répond avec un identifiant (128 bits) et un **jeton d'envoi signé** (valable 1 h).
+   - Le serveur vérifie les limites, **réserve** la place du palier et répond avec un identifiant (128 bits) et un **jeton d'envoi signé** (valable 1 h). `upload_deadline` = maintenant + 1 h, arrondi au quart d'heure supérieur.
 2. `PUT /segments/{n}` : le serveur refuse tout `n` hors palier, toute taille inexacte et tout envoi après finalisation. Il écrit à la position exacte, et renvoyer un segment le remplace (reprise).
 3. `POST /finalize` : tous les segments sont présents → état `ready`, et `expires_at` = maintenant + durée, arrondi au quart d'heure supérieur.
-4. Un envoi non finalisé au bout d'1 h est effacé et sa place libérée.
+4. Un envoi non finalisé à `upload_deadline` est effacé et sa place libérée. Un envoi qui n'a reçu **aucun segment** est effacé dès `upload_deadline` − 55 min (5 à 20 min après la création selon l'arrondi) : une réservation vide ne bloque pas l'espace une heure. La date de création n'est pas stockée : ce seuil se calcule à partir de l'échéance arrondie.
 
 ### 7.5 Déverrouillage et téléchargement
 
 1. `GET meta` (avec `K_accès`) : secondes restantes avant expiration, `sel`, paramètres KDF. Sans `K_accès` valide : réponse « introuvable », qui ne compte pas comme essai.
 2. `POST unlock` (avec `K_accès` et `K_preuve`), traité en une seule requête SQL conditionnelle :
    - **Faux** : `failed_attempts = failed_attempts + 1 WHERE failed_attempts < 5` ; réponse avec les essais restants ; au 5ᵉ, destruction.
-   - **Juste** : `opens_left = opens_left - 1, downloads_active = downloads_active + 1 WHERE state='ready' AND opens_left > 0 AND expires_at > now`. Le serveur remet ensuite un **jeton de téléchargement signé**, propre à cette ouverture, valable 1 h et plafonné à `expires_at`.
-3. `GET /segments/{n}` (avec le jeton) : refusé dès l'expiration du partage ou sa destruction (coupure nette).
-4. `POST done` (avec le jeton) : `downloads_active − 1`.
-5. Quand `opens_left = 0` (état `draining`), plus aucun déverrouillage n'est possible. Le partage est effacé dès que `downloads_active = 0`, au plus tard à la fin du dernier jeton (`purge_at`).
+   - **Juste** : `opens_left = opens_left - 1, opens_issued = opens_issued + 1 WHERE state='ready' AND opens_left > 0 AND expires_at > now AND failed_attempts < 5`, et passage en `draining` avec `purge_at` = min(maintenant + 1 h arrondi au quart d'heure supérieur, `expires_at`) quand `opens_left` atteint 0. Le n° d'ouverture rendu (`opens_issued`) entre dans un **jeton de téléchargement signé**, propre à cette ouverture, valable 1 h et plafonné à `expires_at`.
+3. `GET /segments/{n}` (avec le jeton) : refusé dès l'expiration du partage ou sa destruction (coupure nette), et pour une ouverture déjà terminée.
+4. `POST done` (avec le jeton) : pose le bit de cette ouverture dans `done_mask` (idempotent : un `done` rejoué ne change rien) ; le jeton de cette ouverture ne lit plus aucun segment.
+5. Quand `opens_left = 0` (état `draining`), plus aucun déverrouillage n'est possible. Le partage est effacé dès que toutes les ouvertures émises sont terminées (nombre de bits de `done_mask` = `opens_issued`), au plus tard à `purge_at`.
 
 ### 7.6 Destruction et signalement
 
@@ -291,15 +292,19 @@ Toutes les réponses : JSON, `Cache-Control: no-store`, erreurs uniformes pour �
 
 Table `shares`, une ligne par partage vivant :
 
-`id`, `state` (`uploading`, `ready`, `draining`), `expires_at` (au quart d'heure), `upload_deadline`, `opens_left`, `downloads_active`, `purge_at`, `failed_attempts`, `salt`, `kdf_params`, `access_verifier`, `proof_verifier`, `manage_verifier`, `size_bucket`, `segments_received` (masque binaire).
+`id` (clé primaire, table `WITHOUT ROWID` : aucun compteur d'insertion ne trahit l'ordre de création), `state` (`uploading`, `ready`, `draining`), `bucket` (palier), `ttl_hours`, `max_opens`, `opens_left`, `opens_issued`, `done_mask` (un bit par ouverture terminée), `failed_attempts`, `segments_mask` (segments reçus), `salt`, `kdf_ops`, `kdf_mem`, `access_v`, `proof_v`, `manage_v` (SHA-256 de `K_accès`, `K_preuve`, `S_gestion`), `upload_deadline` (effacé à la finalisation), `expires_at`, `purge_at`.
+
+- Toutes les dates stockées sont **arrondies au quart d'heure supérieur**.
 
 - **Jamais stockés** : adresse IP, date de création, nom, type ou taille exacte de fichier, navigateur, pays, jetons.
-- La ligne est supprimée quand le partage meurt. `secure_delete=ON` et vidage du WAL chaque minute : rien ne reste dans le fichier de base.
+- La ligne est supprimée quand le partage meurt. `secure_delete=ON`, `temp_store=MEMORY` et vidage du WAL chaque minute : rien ne reste dans le fichier de base (vérifié par le test « le serveur ne voit rien » après destruction et arrêt).
 
 ### 9.2 Fichiers
 
 - Un fichier par partage, à la taille exacte du palier, contenant uniquement du chiffré : aucun fichier en clair n'existe jamais, même temporaire.
-- **Dates du fichier remises à zéro** à chaque écriture (`Chtimes`).
+- Place réellement réservée sur le disque à la création (`fallocate` sous Linux, sinon fichier creux).
+- **Dates d'accès et de modification du fichier remises à zéro** à chaque écriture (`Chtimes`). Le système de fichiers garde en revanche la date de naissance et la date de changement (ctime) du fichier, que l'application ne peut pas effacer : elles ne sont lisibles que par qui accède au volume déverrouillé, serveur en marche (section 18).
+- Droits resserrés à chaque démarrage : dossiers en 0700, base et fichiers annexes en 0600.
 - **Aucune sauvegarde** de ce dossier.
 - Au démarrage, une **réconciliation** efface les fichiers sans ligne et les lignes sans fichier.
 
@@ -434,7 +439,7 @@ Messages en français et en anglais.
 
 - `shhdrop admin freeze` / `unfreeze` : bloque ou rouvre les nouveaux envois.
 - `shhdrop admin destroy <lien ou id>` : traite un signalement.
-- `shhdrop admin wipe` : efface tout (urgence).
+- `shhdrop admin wipe --yes` : gèle d'abord les créations (le gel reste en place, à lever avec `unfreeze`), puis efface tout (urgence).
 - `deploy.sh` : installe une version précise (image épinglée par empreinte), contrôle la santé, et revient en arrière si le contrôle échoue (D3).
 
 ### 15.4 Sécurité des comptes du propriétaire
@@ -491,7 +496,8 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 3. Le serveur et l'hébergeur **voient l'adresse IP** de connexion, même sans l'enregistrer.
 4. La mémoire du navigateur est effacée **au mieux**, pas de façon garantie.
 5. Shhdrop **ne vérifie pas l'expéditeur** : un lien peut venir de n'importe qui.
-6. On n'écrit jamais « 100 % sécurisé ». On écrit ce qui est vrai : le contenu est chiffré de bout en bout, et ni le serveur ni son propriétaire ne peuvent le lire.
+6. Le serveur ne stocke **aucune date de création** et arrondit ses dates au quart d'heure, mais le système de fichiers garde la date de naissance et de changement de chaque fichier chiffré : quelqu'un qui accède au volume déverrouillé du serveur en marche peut en déduire l'heure de création d'un partage vivant.
+7. On n'écrit jamais « 100 % sécurisé ». On écrit ce qui est vrai : le contenu est chiffré de bout en bout, et ni le serveur ni son propriétaire ne peuvent le lire.
 
 ---
 
@@ -553,3 +559,23 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 - **Pièges** : un champ caché qui ne doit pas être rempli, et un délai minimum de 3 s entre l'affichage de la page et la création.
 - S'ajoute aux limites de la section 4 (10 par jour, 30 par /48, 300 Mio par jour).
 - Limite assumée : aucun captcha n'arrête tous les robots ; l'objectif est de rendre la création en série lente et coûteuse.
+
+---
+
+## 23. Écarts validés pendant l'implémentation du Plan 1
+
+| Sujet | Spécification d'origine | Implémentation retenue |
+|---|---|---|
+| Paramètres KDF côté navigateur | minimum seul | minimum **et** plafond : `ops` ≤ 10, `mem` ≤ 256 Mio, entiers obligatoires (un serveur malveillant ne peut pas bloquer le navigateur) |
+| Version de Go | — | Go 1.26 |
+| Quota de 300 Mio par jour | taille envoyée | octets **utiles** du palier : `bucket × 65 536` |
+| Délai de 3 s (piège anti-robot) | heure d'affichage | jeton `shown_at` signé et **lié au sel du défi** ALTCHA : utilisable une seule fois |
+| ALTCHA | `altcha-lib-go` | version ≥ 1.0.0 (correctif GO-2025-4239) ; sel au format strict terminé par le délimiteur « & » |
+| Jeton de téléchargement | par ouverture | par ouverture, **mort après `done`** de cette ouverture (`done_mask`) |
+| Destruction par le destinataire | `K_preuve` | un `K_preuve` faux (avec `K_accès` juste) **compte comme essai** de mot de passe, avec le même compteur que `unlock` |
+| Adresse du client | en-tête posé par Caddy | `SHH_BEHIND_PROXY=1` : **échec fermé**, toute requête sans `X-Shh-Client-IP` venue de la boucle locale est refusée |
+| `/healthz` | local uniquement | boucle locale seulement, et refusé s'il porte `X-Shh-Client-IP` (donc s'il passe par Caddy) |
+| Erreurs côté destinataire et gestion | — | coupure persistante → `reseau` ; 429 → `LimitError` ; mauvais mot de passe → `BadPasswordError` ; tout le reste → `NotFoundError` (aucun message choisi par le serveur) |
+| Envois vides | effacés au bout d'1 h | sans aucun segment : effacés 5 à 20 min après la création (section 7.4) |
+| Dates stockées | `expires_at` arrondi | `upload_deadline`, `expires_at` et `purge_at` arrondis au quart d'heure supérieur (`purge_at` ≤ `expires_at`) ; table `WITHOUT ROWID` |
+| Liens | — | `https:` obligatoire ; `http:` accepté seulement pour `localhost`, `127.0.0.1`, `[::1]` |
