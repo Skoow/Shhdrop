@@ -24,7 +24,7 @@ func FromEnv() (Config, error) {
 	c := Config{
 		DataDir:         os.Getenv("SHH_DATA_DIR"),
 		Listen:          "127.0.0.1:8080",
-		StorageMaxBytes: 21474836480,
+		StorageMaxBytes: 107374182400, // 100 Gio (spec §24)
 		Now:             time.Now,
 	}
 	if c.DataDir == "" {

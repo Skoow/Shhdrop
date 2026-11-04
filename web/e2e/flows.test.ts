@@ -1,5 +1,9 @@
 // Parcours complets contre le vrai serveur (binaire Go). Chaque groupe démarre son propre
 // serveur : limites, difficulté ALTCHA et clés des jetons vivent en mémoire du serveur.
+import { createHash, randomBytes } from "node:crypto";
+import { closeSync, mkdtempSync, openAsBlob, openSync, rmSync, writeSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { utf8 } from "../src/crypto/encoding";
 import type { Item } from "../src/crypto/container";
@@ -12,7 +16,7 @@ const PW = "cheval-agrafe-pile-correct";
 const KIB = 1024;
 const MIB = 1024 * KIB;
 
-function pseudo(n: number, seed: number): Uint8Array {
+function pseudo(n: number, seed: number): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(n);
   let x = seed;
   for (let i = 0; i < n; i++) {
@@ -62,15 +66,16 @@ describe("création puis ouverture (texte, image 300 Kio, fichier 5 Mio)", () =>
     expect((await fetchMeta(r.link)).expiresInS).toBeGreaterThan(3500);
     const dl: [number, number][] = [];
     const o = await openShare(r.link, PW, (d, t) => dl.push([d, t]));
-    expect(dl.at(-1)).toEqual([3, 3]);
+    expect(dl).toEqual([[1, 3]]); // à l'ouverture : segment 0 seulement (en-tête, manifeste)
     expect(o.manifest.items.map((e) => [e.kind, e.name, e.mime])).toEqual([
       ["text", "", "text/plain"],
       ["file", "photo.jpg", "image/jpeg"],
       ["file", "rapport.bin", "application/octet-stream"],
     ]);
     expect(o.manifest.items[0]!.text).toBe("Bonjour é😀");
-    expect(Buffer.from(o.item(1)).equals(Buffer.from(image))).toBe(true);
-    expect(Buffer.from(o.item(2)).equals(Buffer.from(fichier))).toBe(true);
+    expect(Buffer.from(await o.item(1)).equals(Buffer.from(image))).toBe(true);
+    expect(Buffer.from(await o.item(2)).equals(Buffer.from(fichier))).toBe(true);
+    expect(dl.at(-1)).toEqual([2, 3]); // le segment 2 ne contient que du bourrage : jamais lu
     await o.done();
     // maxOpens = 1 et téléchargement terminé : partage effacé.
     await expect(fetchMeta(r.link)).rejects.toBeInstanceOf(NotFoundError);
@@ -107,8 +112,8 @@ describe("maxOpens = 2", () => {
     const data = pseudo(5 * MIB, 3);
     const r = await share(srv(), [{ kind: "file", name: "a.bin", mime: "application/octet-stream", data }], 2);
     const [a, b] = await Promise.all([openShare(r.link, PW), openShare(r.link, PW)]);
-    expect(Buffer.from(a.item(0)).equals(Buffer.from(data))).toBe(true);
-    expect(Buffer.from(b.item(0)).equals(Buffer.from(data))).toBe(true);
+    expect(Buffer.from(await a.item(0)).equals(Buffer.from(data))).toBe(true);
+    expect(Buffer.from(await b.item(0)).equals(Buffer.from(data))).toBe(true);
     await Promise.all([a.done(), b.done()]);
     await expect(openShare(r.link, PW)).rejects.toBeInstanceOf(NotFoundError);
   });
@@ -163,7 +168,7 @@ describe("réseau coupé pendant l'envoi", () => {
     });
     expect(putAttempts).toBe(3);
     const o = await openShare(r.link, PW);
-    expect(Buffer.from(o.item(0)).equals(Buffer.from(data))).toBe(true);
+    expect(Buffer.from(await o.item(0)).equals(Buffer.from(data))).toBe(true);
     await o.done();
   });
   it("abandon après 1 + 5 essais", async () => {
@@ -178,4 +183,80 @@ describe("réseau coupé pendant l'envoi", () => {
     await expect(share(srv(), [textItem("x")], 1, { fetch: dead, retryDelayMs: 1 })).rejects.toThrow("reseau");
     expect(n).toBe(6);
   });
+});
+
+// Spec §24 : gros fichier (File/Blob adossé au disque) chiffré, envoyé, reçu et déchiffré en
+// flux ; la mémoire du processus ne grandit pas avec la taille du fichier. 250 Mio − 64 Kio :
+// plus grand contenu du palier 4000 (63 segments) ; 300 Mio tomberaient dans le palier 8000
+// (125 segments, 500 Mio envoyés). Les segments à jeton valide ont leur propre limite
+// (600 par minute) : les ~130 requêtes passent sans attente.
+describe("gros fichier en flux (250 Mio)", () => {
+  const srv = useServer();
+  const SIZE = 250 * MIB - 64 * KIB;
+  let dir: string;
+  let file: string;
+  let sourceHash: string;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "shh-gros-"));
+    file = join(dir, "gros.bin");
+    const h = createHash("sha256");
+    const fd = openSync(file, "w");
+    for (let left = SIZE; left > 0; left -= MIB) {
+      const part = randomBytes(Math.min(MIB, left));
+      h.update(part);
+      writeSync(fd, part);
+    }
+    closeSync(fd);
+    sourceHash = h.digest("hex");
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("SHA-256 identique, croissance de la RSS et des ArrayBuffer < 150 Mo", async () => {
+    const blob = (await openAsBlob(file, { type: "application/octet-stream" })) as unknown as Blob;
+    expect(blob.size).toBe(SIZE);
+    globalThis.gc?.();
+    const m0 = process.memoryUsage();
+    const base = m0.rss;
+    const baseAb = m0.arrayBuffers;
+    let peak = base;
+    let peakAb = baseAb;
+    const sample = () => {
+      const m = process.memoryUsage();
+      peak = Math.max(peak, m.rss);
+      peakAb = Math.max(peakAb, m.arrayBuffers);
+    };
+    const timer = setInterval(sample, 20);
+    try {
+      const prog: [number, number][] = [];
+      const r = await share(srv(), [{ kind: "file", name: "gros.bin", mime: "application/octet-stream", data: blob }], 1, {
+        onProgress: (d, t) => prog.push([d, t]),
+      });
+      expect(prog.at(-1)).toEqual([63, 63]); // palier 4000
+      const o = await openShare(r.link, PW);
+      expect(o.manifest.items[0]).toMatchObject({ kind: "file", name: "gros.bin", size: SIZE });
+      await expect(o.item(0)).rejects.toThrow("trop_gros_pour_apercu");
+      const h = createHash("sha256");
+      let got = 0;
+      await o.saveItem(0, (c) => {
+        h.update(c);
+        got += c.length;
+      });
+      expect(got).toBe(SIZE);
+      expect(h.digest("hex")).toBe(sourceHash);
+      o.wipe();
+      await o.done();
+      await expect(fetchMeta(r.link)).rejects.toBeInstanceOf(NotFoundError);
+    } finally {
+      clearInterval(timer);
+      sample();
+    }
+    const growth = peak - base;
+    const growthAb = peakAb - baseAb;
+    console.log(
+      `RSS : base ${(base / MIB).toFixed(0)} Mio, pic ${(peak / MIB).toFixed(0)} Mio, croissance ${(growth / MIB).toFixed(0)} Mio ; ` +
+        `ArrayBuffer : croissance ${(growthAb / MIB).toFixed(0)} Mio`,
+    );
+    expect(growth).toBeLessThan(150e6);
+    expect(growthAb).toBeLessThan(150e6);
+  }, 400_000);
 });

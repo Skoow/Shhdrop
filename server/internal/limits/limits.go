@@ -18,8 +18,10 @@ import (
 const (
 	CreatesPer64   = 10
 	CreatesPer48   = 30
-	BytesPer64     = 300 << 20
+	BytesPer64     = 3 << 30 // 3 Gio utiles par jour (spec §24)
+	BytesPer48     = 6 << 30 // 6 Gio utiles par jour et par /48 (anti-saturation du disque)
 	RequestsPerMin = 60
+	SegmentsPerMin = 600 // requêtes de segments à jeton valide, compteur à part
 	day            = 86400
 )
 
@@ -48,8 +50,10 @@ type Limiter struct {
 	count64 map[string]int
 	count48 map[string]int
 	bytes64 map[string]int64
+	bytes48 map[string]int64
 	minute  int64 // minute courante (minutes depuis 1970)
 	req     map[string]int
+	seg     map[string]int
 }
 
 func New(now func() time.Time) *Limiter {
@@ -71,11 +75,14 @@ func (l *Limiter) rotateLocked(now time.Time) {
 		l.count64 = map[string]int{}
 		l.count48 = map[string]int{}
 		l.bytes64 = map[string]int64{}
+		l.bytes48 = map[string]int64{}
 		l.req = map[string]int{}
+		l.seg = map[string]int{}
 	}
 	if m := floorDiv(t, 60); m != l.minute {
 		l.minute = m
 		l.req = map[string]int{}
+		l.seg = map[string]int{}
 	}
 }
 
@@ -106,7 +113,7 @@ func (l *Limiter) Key(ip netip.Addr) (k64, k48 string) {
 	return l.keyLocked(ip)
 }
 
-// AllowCreate vérifie les trois quotas journaliers d'un coup et ne compte la création que si
+// AllowCreate vérifie les quatre quotas journaliers d'un coup et ne compte la création que si
 // elle est acceptée. En cas de refus, retryAfter est le temps jusqu'à minuit UTC.
 func (l *Limiter) AllowCreate(ip netip.Addr, bytes int64) (ok bool, retryAfter time.Duration) {
 	l.mu.Lock()
@@ -115,12 +122,13 @@ func (l *Limiter) AllowCreate(ip netip.Addr, bytes int64) (ok bool, retryAfter t
 	l.rotateLocked(now)
 	k64, k48 := l.keyLocked(ip)
 	if bytes < 0 || l.count64[k64] >= CreatesPer64 || l.count48[k48] >= CreatesPer48 ||
-		bytes > BytesPer64-l.bytes64[k64] {
+		bytes > BytesPer64-l.bytes64[k64] || bytes > BytesPer48-l.bytes48[k48] {
 		return false, time.Unix((l.day+1)*day, 0).Sub(now)
 	}
 	l.count64[k64]++
 	l.count48[k48]++
 	l.bytes64[k64] += bytes
+	l.bytes48[k48] += bytes
 	return true, 0
 }
 
@@ -134,5 +142,19 @@ func (l *Limiter) AllowRequest(ip netip.Addr) bool {
 		return false
 	}
 	l.req[k64]++
+	return true
+}
+
+// AllowSegment : 600 requêtes de segments par minute (fenêtre fixe) et par connexion,
+// pour les seules requêtes de segments dont le jeton est valide (vérifié avant l'appel).
+func (l *Limiter) AllowSegment(ip netip.Addr) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rotateLocked(l.now())
+	k64, _ := l.keyLocked(ip)
+	if l.seg[k64] >= SegmentsPerMin {
+		return false
+	}
+	l.seg[k64]++
 	return true
 }

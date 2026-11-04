@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { checkKdfParams, KDF_MAX, deriveAccess, deriveContent, hkdf, randomBytes, sha256, KDF_MIN } from "./kdf";
 import { b64u } from "./encoding";
 
-const hex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+const hex = (b: Uint8Array<ArrayBuffer>) => [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
 const salt = new Uint8Array(16).fill(7);
 const kLien = new Uint8Array(32).fill(1);
 const T = 30_000;

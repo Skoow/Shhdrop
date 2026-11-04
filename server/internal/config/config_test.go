@@ -17,7 +17,7 @@ func TestFromEnvDefauts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.DataDir != "/tmp/x" || c.Listen != "127.0.0.1:8080" || c.StorageMaxBytes != 21474836480 {
+	if c.DataDir != "/tmp/x" || c.Listen != "127.0.0.1:8080" || c.StorageMaxBytes != 107374182400 { // 100 Gio (spec §24)
 		t.Fatalf("défauts inattendus: %+v", c)
 	}
 	if c.Now == nil || c.Now().IsZero() {

@@ -7,7 +7,7 @@ export type Needle = { label: string; forms: Buffer[] };
 // Formes recherchées : octets bruts, et base64url / base64 pour les trois alignements
 // possibles (un secret encodé au milieu d'un texte plus long ne commence pas forcément
 // sur une frontière de 3 octets). Chaque forme couvre au moins 12 octets du secret.
-export function needle(label: string, raw: Uint8Array | string): Needle {
+export function needle(label: string, raw: Uint8Array<ArrayBuffer> | string): Needle {
   const b = Buffer.from(typeof raw === "string" ? new TextEncoder().encode(raw) : raw);
   const forms = [b];
   for (let k = 0; k < 3; k++) {

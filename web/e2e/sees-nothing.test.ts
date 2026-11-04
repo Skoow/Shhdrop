@@ -24,11 +24,11 @@ describe("le serveur ne voit rien", () => {
   let srv: TestServer;
   const log: Captured[] = [];
   const fetch = capturingFetch(log); // toutes les requêtes du test passent par là
-  let kLien: Uint8Array;
-  let kAcces: Uint8Array;
-  let kPreuve: Uint8Array;
-  let sGestion: Uint8Array;
-  let salt: Uint8Array;
+  let kLien: Uint8Array<ArrayBuffer>;
+  let kAcces: Uint8Array<ArrayBuffer>;
+  let kPreuve: Uint8Array<ArrayBuffer>;
+  let sGestion: Uint8Array<ArrayBuffer>;
+  let salt: Uint8Array<ArrayBuffer>;
   let id: string;
   let manage: string;
   let secrets: Needle[]; // jamais nulle part (kAcces à part)
@@ -59,7 +59,7 @@ describe("le serveur ne voit rien", () => {
     const o = await openShare(r.link, PASSWORD, undefined, { fetch });
     expect(o.manifest.items[0]!.text).toBe(`texte ${MARKER} texte`);
     expect(o.manifest.items[1]!.name).toBe(NAME);
-    expect(Buffer.from(o.item(1)).equals(Buffer.from(fileData))).toBe(true);
+    expect(Buffer.from(await o.item(1)).equals(Buffer.from(fileData))).toBe(true);
     await o.done();
     secrets = [needle("kLien", kLien), needle("texte repère", MARKER), needle("nom repère", NAME), needle("mot de passe repère", PASSWORD)];
     keysOnDisk = [needle("kAcces", kAcces), needle("kPreuve", kPreuve), needle("sGestion", sGestion)];

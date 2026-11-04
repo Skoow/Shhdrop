@@ -2,7 +2,7 @@
 // (spec §7.4 à §7.6). Tout le chiffrement a lieu ici ; le serveur ne reçoit que des
 // empreintes (V_accès, V_preuve, V_gestion), K_accès, K_preuve ou S_gestion, et des
 // segments chiffrés. K_lien, le mot de passe, les noms et le contenu ne sortent jamais.
-import { BUCKETS, open, seal, segmentCount, segmentSize, type Item, type Manifest } from "../crypto/container";
+import { BUCKETS, openStream, sealStream, segmentCount, segmentSize, type Item, type Manifest } from "../crypto/container";
 import { b64u, unb64u } from "../crypto/encoding";
 import { checkKdfParams, deriveAccess, deriveContent, KDF_MIN, randomBytes, sha256 } from "../crypto/kdf";
 import { checkPassword } from "../crypto/passphrase";
@@ -95,9 +95,10 @@ export type CreateOpts = api.Net & {
 };
 
 /**
- * Crée un partage. Clés neuves à chaque appel (K_lien, sel, S_gestion) ; le paquet est
- * scellé une seule fois, et seuls ses segments déjà chiffrés sont renvoyés en cas de
- * nouvel essai. Ordre : scellement, puis défi anti-robot (valable 2 min), puis création,
+ * Crée un partage. Clés neuves à chaque appel (K_lien, sel, S_gestion). Le paquet est
+ * chiffré en flux : chaque segment est produit juste avant son envoi, puis abandonné
+ * (un seul segment chiffré en mémoire) ; en cas de nouvel essai, putSegment renvoie les
+ * mêmes octets. Ordre : préparation (manifeste, palier), puis défi anti-robot (valable 2 min), puis création,
  * au plus tôt CAPTCHA_MIN_MS après la réception du défi — createShare attend lui-même
  * le temps restant (l'écran du Plan 2 peut s'y fier). En cas d'échec après la création,
  * l'envoi est détruit (au mieux) pour libérer la place réservée.
@@ -116,14 +117,14 @@ export async function createShare(
   const kLien = randomBytes(32);
   const salt = randomBytes(16);
   const sGestion = randomBytes(32);
-  const wipe: Uint8Array[] = [kLien, sGestion]; // mis à zéro quoi qu'il arrive
+  const wipe: Uint8Array<ArrayBuffer>[] = [kLien, sGestion]; // mis à zéro quoi qu'il arrive
   try {
     return await guarded(async () => {
       const acc = await deriveAccess(kLien);
       wipe.push(acc.kAcces); // inutile à l'expéditeur
       const keys = await deriveContent(kLien, o.password, salt, KDF_CREATE);
       wipe.push(keys.kPreuve); // inutile à l'expéditeur
-      const { bucket, segments } = await seal(items, keys);
+      const sealed = await sealStream(items, keys);
 
       const cap = await api.captcha(c);
       const shownAt = Date.now();
@@ -132,7 +133,7 @@ export async function createShare(
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
 
       const created = await api.create(c, {
-        bucket,
+        bucket: sealed.bucket,
         ttl_hours: o.ttlHours,
         max_opens: o.maxOpens,
         salt: b64u(salt),
@@ -145,11 +146,12 @@ export async function createShare(
         shown_at: cap.shownAt,
       });
       try {
-        if (created.segments !== segments.length) throw new api.BadResponse();
-        o.onProgress?.(0, segments.length);
-        for (let n = 0; n < segments.length; n++) {
-          await api.putSegment(c, created.id, created.uploadToken, n, segments[n]!);
-          o.onProgress?.(n + 1, segments.length);
+        const total = sealed.segmentCount;
+        if (created.segments !== total) throw new api.BadResponse();
+        o.onProgress?.(0, total);
+        for (let n = 0; n < total; n++) {
+          await api.putSegment(c, created.id, created.uploadToken, n, await sealed.segment(n));
+          o.onProgress?.(n + 1, total);
         }
         const expiresInS = await api.finalize(c, created.id, created.uploadToken);
         return { link: shareLink(origin, created.id, kLien), manage: manageLink(origin, created.id, sGestion), expiresInS };
@@ -182,7 +184,7 @@ async function contentKeys(p: ParsedLink, m: api.Meta, password: string) {
     throw new api.BadResponse();
   }
   checkKdfParams(m.kdf); // le minimum est imposé par le navigateur, pas par le serveur
-  let salt: Uint8Array;
+  let salt: Uint8Array<ArrayBuffer>;
   try {
     salt = unb64u(m.salt);
   } catch {
@@ -192,13 +194,35 @@ async function contentKeys(p: ParsedLink, m: api.Meta, password: string) {
   return deriveContent(p.secret, password, salt, m.kdf);
 }
 
-export type Opened = { manifest: Manifest; item(i: number): Uint8Array; done(): Promise<void> };
+export type Opened = {
+  manifest: Manifest;
+  /** Élément entier en mémoire, pour l'aperçu (200 Mio au plus, sinon Error("trop_gros_pour_apercu")). */
+  item(i: number): Promise<Uint8Array<ArrayBuffer>>;
+  /**
+   * Déchiffre l'élément i en flux vers `sink` (écrivain de showSaveFilePicker, ou
+   * collectToBlob). Si saveItem échoue, le fichier partiel doit être supprimé.
+   */
+  saveItem(i: number, sink: (chunk: Uint8Array<ArrayBuffer>) => Promise<void> | void): Promise<void>;
+  done(): Promise<void>;
+  /** Met à zéro le segment en cache (le manifeste reste en mémoire : voir ContainerReader.wipe). */
+  wipe(): void;
+};
+
+// Erreurs d'item / saveItem : paquet corrompu et erreurs du serveur → readerError ;
+// le reste (erreur du sink, element_inexistant, trop_gros_pour_apercu) tel quel.
+function itemError(e: unknown): unknown {
+  const fromServer = e instanceof api.HttpError || e instanceof api.BadResponse || isNetwork(e);
+  return fromServer || (e instanceof Error && e.message === "paquet_corrompu") ? readerError(e) : e;
+}
 
 /**
- * Ouvre un partage : meta → clés → unlock (consomme une ouverture) → segments → open().
+ * Ouvre un partage : meta → clés → unlock (consomme une ouverture) → segment 0 (en-tête,
+ * manifeste). Les autres segments sont téléchargés à la demande par item / saveItem
+ * (onProgress(n + 1, total) à chaque segment n lu, un même segment pouvant être relu).
  * Erreurs : voir readerError (BadPasswordError, LimitError, Error("reseau"), sinon
  * NotFoundError). Après lecture, appeler done() (fin du téléchargement, qui permet
- * l'effacement). En cas d'échec après unlock, done() est appelé d'office.
+ * l'effacement ; le jeton ne lit plus rien ensuite). En cas d'échec avant de rendre
+ * la main, done() est appelé d'office.
  */
 export async function openShare(
   link: string,
@@ -235,19 +259,63 @@ export async function openShare(
     };
     try {
       if (u.segments !== m.segments) throw new api.BadResponse();
-      const segs: Uint8Array[] = [];
-      onProgress?.(0, m.segments);
-      for (let n = 0; n < m.segments; n++) {
-        segs.push(await api.getSegment(c, p.id, u.downloadToken, n, segmentSize(m.bucket, n)));
+      const fetchSegment = async (n: number) => {
+        const s = await api.getSegment(c, p.id, u.downloadToken, n, segmentSize(m.bucket, n));
         onProgress?.(n + 1, m.segments);
-      }
-      const o = await open(segs, keys);
-      return { manifest: o.manifest, item: (i: number) => o.item(i), done };
+        return s;
+      };
+      const r = await openStream(fetchSegment, m.bucket, keys);
+      const wrap = async <T>(f: () => Promise<T>): Promise<T> => {
+        try {
+          return await f();
+        } catch (e) {
+          throw itemError(e);
+        }
+      };
+      return {
+        manifest: r.manifest,
+        item: (i) => wrap(() => r.item(i)),
+        saveItem: (i, sink) => wrap(() => r.streamItem(i, sink)),
+        done,
+        wipe: r.wipe,
+      };
     } catch (e) {
       await done().catch(() => undefined);
       throw e;
     }
   }, readerError);
+}
+
+/** Taille des tranches en mémoire avant repli dans le Blob (collectToBlob). */
+export const FOLD_BYTES = 64 * 1048576;
+
+/**
+ * Assemble l'élément i dans un Blob, quand showSaveFilePicker n'existe pas. Tous les
+ * `foldBytes` (64 Mio ; paramètre réglable pour les tests), les tranches déchiffrées sont
+ * repliées dans le Blob puis mises à zéro : au plus ~64 Mio de tranches en mémoire JS.
+ * Le navigateur garde le Blob en mémoire ou dans son stockage temporaire (spec §24, §18).
+ */
+export async function collectToBlob(open: Opened, i: number, mime: string, foldBytes = FOLD_BYTES): Promise<Blob> {
+  let acc = new Blob([], { type: mime });
+  let parts: Uint8Array<ArrayBuffer>[] = [];
+  let pending = 0;
+  const fold = () => {
+    acc = new Blob([acc, ...parts], { type: mime });
+    for (const p of parts) p.fill(0);
+    parts = [];
+    pending = 0;
+  };
+  try {
+    await open.saveItem(i, (chunk) => {
+      parts.push(chunk);
+      pending += chunk.length;
+      if (pending >= foldBytes) fold();
+    });
+    fold();
+    return acc;
+  } finally {
+    for (const p of parts) p.fill(0);
+  }
 }
 
 /**

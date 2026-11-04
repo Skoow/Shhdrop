@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -107,6 +108,28 @@ func TestSizing(t *testing.T) {
 	}
 	if SegmentSize(80, 1) != 16*65552 {
 		t.Fatal("dernier segment partiel", SegmentSize(80, 1))
+	}
+	// Spec §24 : paliers jusqu'à 16 384 morceaux (1 Gio utile), 256 segments.
+	want := []int{1, 16, 80, 160, 400, 800, 1600, 4000, 8000, 16384}
+	if len(Buckets) != len(want) {
+		t.Fatal("Buckets", Buckets)
+	}
+	for i := range want {
+		if Buckets[i] != want[i] {
+			t.Fatal("Buckets", Buckets)
+		}
+	}
+	if SegmentCount(16384) != 256 || SegmentCount(4000) != 63 || SegmentCount(8000) != 125 {
+		t.Fatal("SegmentCount grands paliers")
+	}
+	if SegmentSize(16384, 255) != 64*65552 || SegmentSize(4000, 62) != 32*65552 || SegmentSize(8000, 124) != 64*65552 {
+		t.Fatal("SegmentSize grands paliers")
+	}
+	if totalSize(16384) != 48+16384*65552 || segOffset(16384, 255) != 48+255*64*65552 {
+		t.Fatal("totalSize / segOffset 16384")
+	}
+	if m := fullMask(256); len(m) != 32 || !bytes.Equal(m, bytes.Repeat([]byte{0xff}, 32)) {
+		t.Fatal("fullMask(256)", m)
 	}
 	for _, b := range Buckets {
 		total := 0
@@ -234,9 +257,13 @@ func TestPutSegmentRules(t *testing.T) {
 	if err := s.PutSegment(id, 0, segBody(80, 0, 1)); !errors.Is(err, ErrNotFound) {
 		t.Fatal("après finalize", err)
 	}
-	// envoi abandonné : délai d'1 h arrondi au quart d'heure (10:02 → 11:15)
+	// envoi abandonné : délai de 3 h arrondi au quart d'heure (10:02 → 13:15)
 	id2, _, _ := s.Create(k.req(1, 1, 1))
-	c.Add(73 * time.Minute)
+	c.Add(3*time.Hour + 12*time.Minute) // 13:14 : encore accepté
+	if err := s.PutSegment(id2, 0, segBody(1, 0, 1)); err != nil {
+		t.Fatal("avant délai", err)
+	}
+	c.Add(time.Minute) // 13:15
 	if err := s.PutSegment(id2, 0, segBody(1, 0, 1)); !errors.Is(err, ErrNotFound) {
 		t.Fatal("après délai", err)
 	}
@@ -416,13 +443,55 @@ func TestPurgeAt(t *testing.T) {
 	var purge int64
 	s.DB.QueryRow("SELECT purge_at FROM shares WHERE id=?", id).Scan(&purge)
 	if want := time.Date(2026, 11, 4, 11, 15, 0, 0, time.UTC).Unix(); purge != want {
-		t.Fatal("purge_at = min(now+1h, expires_at)", time.Unix(purge, 0).UTC())
+		t.Fatal("purge_at = min(now+3h, expires_at)", time.Unix(purge, 0).UTC())
 	}
 	id2 := ready(t, s, k, 1, 24, 1)
-	s.Unlock(id2, k.acces, k.preuve) // 10:52 + 1 h = 11:52, arrondi au quart d'heure supérieur
+	s.Unlock(id2, k.acces, k.preuve) // 10:52 + 3 h = 13:52, arrondi au quart d'heure supérieur
 	s.DB.QueryRow("SELECT purge_at FROM shares WHERE id=?", id2).Scan(&purge)
-	if want := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC).Unix(); purge != want {
-		t.Fatal("purge_at = ceil15(now+1h)", time.Unix(purge, 0).UTC())
+	if want := time.Date(2026, 11, 4, 14, 0, 0, 0, time.UTC).Unix(); purge != want {
+		t.Fatal("purge_at = ceil15(now+3h)", time.Unix(purge, 0).UTC())
+	}
+	id3 := ready(t, s, k, 1, 6, 1) // expires_at = ceil15(10:52 + 6 h) = 17:00
+	c.Add(5 * time.Hour)           // 15:52 : now + 3 h dépasse expires_at
+	s.Unlock(id3, k.acces, k.preuve)
+	s.DB.QueryRow("SELECT purge_at FROM shares WHERE id=?", id3).Scan(&purge)
+	if want := time.Date(2026, 11, 4, 17, 0, 0, 0, time.UTC).Unix(); purge != want {
+		t.Fatal("purge_at plafonné à expires_at", time.Unix(purge, 0).UTC())
+	}
+}
+
+// Palier 16 384 (1 Gio utile, 256 segments) : le masque des segments couvre les 256 bits.
+func TestLargestBucket(t *testing.T) {
+	if testing.Short() {
+		t.Skip("écrit 1 Gio")
+	}
+	s, _ := newSvc(t)
+	k := newKeys()
+	id, segs, err := s.Create(k.req(16384, 1, 1))
+	if err != nil || segs != 256 {
+		t.Fatal(segs, err)
+	}
+	body := make([]byte, SegmentSize(16384, 1))
+	for n := 1; n < segs; n++ {
+		if err := s.PutSegment(id, n, body); err != nil {
+			t.Fatal(n, err)
+		}
+	}
+	if err := s.PutSegment(id, 256, body); !errors.Is(err, ErrBadSegment) {
+		t.Fatal("segment 256", err)
+	}
+	if _, err := s.Finalize(id); !errors.Is(err, ErrIncomplete) {
+		t.Fatal("segment 0 manquant", err)
+	}
+	if err := s.PutSegment(id, 0, make([]byte, SegmentSize(16384, 0))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Finalize(id); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(filepath.Join(s.Blobs.Dir, id))
+	if err != nil || fi.Size() != 48+16384*65552 {
+		t.Fatal(fi, err)
 	}
 }
 
@@ -436,17 +505,17 @@ func TestUploadDeadlineRounded(t *testing.T) {
 	}
 	var dl int64
 	s.DB.QueryRow("SELECT upload_deadline FROM shares WHERE id=?", id).Scan(&dl)
-	if want := time.Date(2026, 11, 4, 11, 15, 0, 0, time.UTC).Unix(); dl != want {
-		t.Fatal("upload_deadline = ceil15(now+1h)", time.Unix(dl, 0).UTC())
+	if want := time.Date(2026, 11, 4, 13, 15, 0, 0, time.UTC).Unix(); dl != want {
+		t.Fatal("upload_deadline = ceil15(now+3h)", time.Unix(dl, 0).UTC())
 	}
 }
 
-// Un envoi sans aucun segment est balayé dès upload_deadline − 55 min (5 à 20 min après
-// la création, selon l'arrondi) : une réservation vide ne bloque pas l'espace une heure.
+// Un envoi sans aucun segment est balayé dès upload_deadline − 2 h 55 (5 à 20 min après
+// la création, selon l'arrondi) : une réservation vide ne bloque pas l'espace 3 heures.
 func TestSweepEmptyUpload(t *testing.T) {
 	s, c := newSvc(t)
 	k := newKeys()
-	empty, _, err := s.Create(k.req(16, 1, 1)) // 10:02, échéance 11:15, balayage vide à 10:20
+	empty, _, err := s.Create(k.req(16, 1, 1)) // 10:02, échéance 13:15, balayage vide à 10:20
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +526,11 @@ func TestSweepEmptyUpload(t *testing.T) {
 	if err := s.PutSegment(started, 0, segBody(16, 0, 1)); err != nil {
 		t.Fatal(err)
 	}
-	c.Add(17 * time.Minute) // 10:19
+	c.Add(10 * time.Minute) // 10:12 : l'envoi commencé progresse (reprise du segment 0)
+	if err := s.PutSegment(started, 0, segBody(16, 0, 1)); err != nil {
+		t.Fatal(err)
+	}
+	c.Add(7 * time.Minute) // 10:19
 	if n, err := s.Sweep(); err != nil || n != 0 {
 		t.Fatal("trop tôt", n, err)
 	}
@@ -469,11 +542,21 @@ func TestSweepEmptyUpload(t *testing.T) {
 	if rowCount(t, s, started) != 1 {
 		t.Fatal("envoi commencé effacé")
 	}
-	c.Add(54 * time.Minute) // 11:14
+	// Un envoi qui progresse (un segment toutes les 14 min) vit jusqu'à l'échéance de 3 h, pas plus.
+	for c.Now().Before(time.Date(2026, 11, 4, 13, 0, 0, 0, time.UTC)) {
+		c.Add(14 * time.Minute)
+		if err := s.PutSegment(started, 0, segBody(16, 0, 1)); err != nil {
+			t.Fatal(c.Now(), err)
+		}
+		if n, err := s.Sweep(); err != nil || n != 0 {
+			t.Fatal(c.Now(), n, err)
+		}
+	}
+	c.Add(time.Date(2026, 11, 4, 13, 14, 0, 0, time.UTC).Sub(c.Now())) // 13:14
 	if n, err := s.Sweep(); err != nil || n != 0 {
 		t.Fatal(n, err)
 	}
-	c.Add(time.Minute) // 11:15 = upload_deadline
+	c.Add(time.Minute) // 13:15 = upload_deadline
 	if n, err := s.Sweep(); err != nil || n != 1 {
 		t.Fatal(n, err)
 	}
@@ -683,7 +766,7 @@ func TestSweep(t *testing.T) {
 	abandoned, _, _ := s.Create(k.req(1, 1, 1))
 	expired := ready(t, s, k, 1, 1, 1)  // 11:15
 	long := ready(t, s, k, 1, 24, 2)    // 10:15 le lendemain
-	drained := ready(t, s, k, 1, 24, 1) // draining, purge à ceil15(11:02) = 11:15
+	drained := ready(t, s, k, 1, 24, 1) // draining, purge à ceil15(10:02 + 3 h) = 13:15
 	s.Unlock(drained, k.acces, k.preuve)
 	if n, err := s.Sweep(); err != nil || n != 0 {
 		t.Fatal(n, err)
@@ -694,11 +777,19 @@ func TestSweep(t *testing.T) {
 	}
 	gone(t, s, abandoned)
 	c.Add(13 * time.Minute) // 11:15
-	if n, err := s.Sweep(); err != nil || n != 2 {
+	if n, err := s.Sweep(); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	gone(t, s, expired)
+	c.Add(2*time.Hour - time.Minute) // 13:14
+	if n, err := s.Sweep(); err != nil || n != 0 {
+		t.Fatal(n, err)
+	}
+	c.Add(time.Minute) // 13:15
+	if n, err := s.Sweep(); err != nil || n != 1 {
 		t.Fatal(n, err)
 	}
 	gone(t, s, drained)
-	gone(t, s, expired)
 	if rowCount(t, s, long) != 1 {
 		t.Fatal("partage vivant effacé")
 	}
@@ -820,10 +911,10 @@ func TestFailedDestructionRetried(t *testing.T) {
 // Sweep revérifie la condition avant d'effacer : un envoi finalisé entre la
 // sélection et l'effacement n'est jamais détruit.
 func TestSweepRechecksFinalized(t *testing.T) {
-	s, c := newSvc(t)
+	s, _ := newSvc(t)
 	k := newKeys()
-	id := ready(t, s, k, 1, 1, 1)
-	deadline := c.Now().Add(time.Hour).Unix() // l'ancien upload_deadline
+	id := ready(t, s, k, 1, 24, 1)
+	deadline := time.Date(2026, 11, 4, 13, 15, 0, 0, time.UTC).Unix() // l'ancien upload_deadline
 	ok, err := s.sweepOne(id, deadline)
 	if err != nil || ok {
 		t.Fatal(ok, err)
@@ -888,7 +979,7 @@ func TestDestroyExpired(t *testing.T) {
 	k := newKeys()
 	id := ready(t, s, k, 1, 1, 1)
 	up, _, _ := s.Create(k.req(1, 1, 1))
-	c.Add(2 * time.Hour)
+	c.Add(3*time.Hour + 15*time.Minute) // 13:17 : partage expiré, envoi échu (13:15)
 	for _, x := range []string{id, up} {
 		if err := s.Destroy(x, k.acces, rnd(32), nil); !errors.Is(err, ErrNotFound) {
 			t.Fatal(err)
@@ -919,5 +1010,59 @@ func TestValidateAndFrozen(t *testing.T) {
 	os.WriteFile(s.FrozenFile, nil, 0o600)
 	if !s.Frozen() {
 		t.Fatal("non gelé")
+	}
+}
+
+func progressAt(t *testing.T, s *Service, id string) sql.NullInt64 {
+	t.Helper()
+	var p sql.NullInt64
+	if err := s.DB.QueryRow("SELECT progress_at FROM shares WHERE id=?", id).Scan(&p); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// Envoi bloqué : aucun nouveau segment depuis 15 min → effacé (avant l'échéance de 3 h).
+// progress_at (minute du dernier segment reçu) n'existe que pendant l'envoi : NULL à la
+// création (la minute de création n'est pas stockée) et remis à NULL à la finalisation.
+func TestSweepStalledUpload(t *testing.T) {
+	s, c := newSvc(t)
+	k := newKeys()
+	c.Add(30 * time.Second) // 10:02:30
+	id, _, err := s.Create(k.req(80, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := progressAt(t, s, id); p.Valid {
+		t.Fatal("progress_at renseigné à la création", p)
+	}
+	if err := s.PutSegment(id, 0, segBody(80, 0, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if p := progressAt(t, s, id); !p.Valid || p.Int64 != time.Date(2026, 11, 4, 10, 2, 0, 0, time.UTC).Unix() {
+		t.Fatal("progress_at à la minute", p)
+	}
+	c.Add(10 * time.Minute) // 10:12:30 : nouveau segment (remplacement compris)
+	if err := s.PutSegment(id, 0, segBody(80, 0, 2)); err != nil {
+		t.Fatal(err)
+	}
+	c.Add(14 * time.Minute) // 10:26:30 : 14 min 30 sans segment
+	if n, err := s.Sweep(); err != nil || n != 0 {
+		t.Fatal("trop tôt", n, err)
+	}
+	c.Add(30 * time.Second) // 10:27 = 10:12 + 15 min
+	if n, err := s.Sweep(); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	gone(t, s, id)
+
+	// Finalisé : progress_at effacé, et le partage n'est jamais balayé comme envoi bloqué.
+	done := ready(t, s, k, 1, 24, 1)
+	if p := progressAt(t, s, done); p.Valid {
+		t.Fatal("progress_at conservé après finalisation", p)
+	}
+	c.Add(time.Hour)
+	if n, err := s.Sweep(); err != nil || n != 0 {
+		t.Fatal(n, err)
 	}
 }
