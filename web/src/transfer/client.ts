@@ -240,7 +240,17 @@ export type Opened = {
    */
   saveItem(i: number, sink: (chunk: Uint8Array<ArrayBuffer>) => Promise<void> | void): Promise<void>;
   done(): Promise<void>;
-  /** Met à zéro le segment en cache (le manifeste reste en mémoire : voir ContainerReader.wipe). */
+  /**
+   * Détruit le partage (« report » : signalement, motif non conservé par le serveur) avec
+   * K_accès et K_preuve gardés depuis l'ouverture, sans repasser par meta : marche aussi
+   * après la dernière ouverture (état « draining »). Erreurs : voir readerError ;
+   * Error("cles_effacees") après wipe().
+   */
+  destroy(reason?: "report"): Promise<void>;
+  /**
+   * Met à zéro K_accès, K_preuve et le segment en cache (le manifeste reste en mémoire :
+   * voir ContainerReader.wipe). destroy() n'est plus possible ensuite.
+   */
   wipe(): void;
 };
 
@@ -274,14 +284,22 @@ export async function openShare(
     let u: { downloadToken: string; segments: number };
     let m: api.Meta;
     let keys: Awaited<ReturnType<typeof contentKeys>> | undefined;
+    // K_accès et K_preuve sont gardés dans l'objet rendu (Opened.destroy, S1) jusqu'à
+    // wipe() ; mis à zéro tout de suite si l'ouverture échoue.
+    const zero = () => {
+      kAcces.fill(0);
+      keys?.kPreuve.fill(0);
+    };
     try {
       m = await api.meta(c, p.id, kAcces);
       keys = await contentKeys(p.kLien, m, password);
       u = await api.unlock(c, p.id, kAcces, keys.kPreuve);
-    } finally {
-      kAcces.fill(0);
-      keys?.kPreuve.fill(0);
+    } catch (e) {
+      zero();
+      throw e;
     }
+    const kPreuve = keys.kPreuve;
+    let wiped = false;
 
     let finished = false;
     const done = async () => {
@@ -322,9 +340,19 @@ export async function openShare(
         item: (i) => wrap(() => r.item(i)),
         saveItem: (i, sink) => wrap(() => r.streamItem(i, sink)),
         done,
-        wipe: r.wipe,
+        destroy: (reason) =>
+          guarded(async () => {
+            if (wiped) throw new Error("cles_effacees");
+            await api.destroy(c, p.id, { kAcces, kPreuve }, reason);
+          }, (e) => (e instanceof Error && e.message === "cles_effacees" ? e : readerError(e))),
+        wipe: () => {
+          wiped = true;
+          zero();
+          r.wipe();
+        },
       };
     } catch (e) {
+      zero();
       await done().catch(() => undefined);
       throw e;
     }

@@ -141,6 +141,18 @@ describe("gestion : shareStatus et destruction", () => {
     await expect(openShare(r.link, PW, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
     await expect(shareStatus(r.manage, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
   });
+  it("S1 : maxOpens=1, signalement après la dernière ouverture (draining) via Opened.destroy", async () => {
+    const r = await share(srv(), [textItem("à signaler")], 1);
+    const o = await openShare(r.link, PW, srv().origin);
+    expect(await shareStatus(r.manage, srv().origin)).toMatchObject({ opensUsed: 1, state: "draining" });
+    // destroyShare (lien + mot de passe) relit meta : impossible en « draining ».
+    await expect(destroyShare(r.link, srv().origin, { password: PW })).rejects.toBeInstanceOf(NotFoundError);
+    await o.destroy("report");
+    await expect(shareStatus(r.manage, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(o.destroy()).rejects.toBeInstanceOf(NotFoundError);
+    o.wipe();
+    await expect(o.destroy()).rejects.toThrow("cles_effacees");
+  });
   it("lien de partage sans mot de passe refusé ; mauvais type de lien refusé", async () => {
     const r = await share(srv(), [textItem("c")]);
     await expect(destroyShare(r.link, srv().origin, {})).rejects.toThrow("mot_de_passe_requis");

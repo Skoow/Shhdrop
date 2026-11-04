@@ -136,3 +136,26 @@ func TestNewService(t *testing.T) {
 		t.Fatal("FrozenFile vide : le gel est désactivé (échec ouvert)")
 	}
 }
+
+// S1 : après la dernière ouverture (draining), le destinataire peut encore détruire ou
+// signaler le partage avec K_accès + K_preuve.
+func TestDestroyWhileDraining(t *testing.T) {
+	s, _ := newSvc(t)
+	k := newKeys()
+	id := ready(t, s, k, 1, 1, 1)
+	if _, err := s.Unlock(id, k.acces, k.preuve); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	s.DB.QueryRow(`SELECT state FROM shares WHERE id=?`, id).Scan(&state)
+	if state != "draining" {
+		t.Fatal(state)
+	}
+	if err := s.Destroy(id, k.acces, rnd(32), nil); !errors.Is(err, ErrNotFound) {
+		t.Fatal("mauvais K_preuve accepté", err)
+	}
+	if err := s.Destroy(id, k.acces, k.preuve, nil); err != nil {
+		t.Fatal(err)
+	}
+	gone(t, s, id)
+}

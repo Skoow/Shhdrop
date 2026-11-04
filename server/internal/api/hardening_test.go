@@ -70,3 +70,16 @@ func TestBehindTrustedProxy(t *testing.T) {
 	expect(t, e.do(req{method: "GET", path: "/api/captcha", remote: "172.19.0.2:5000", hdr: hdr}), 500, `{"error":"internal"}`)
 	expect(t, e.do(req{method: "GET", path: "/api/captcha", remote: "172.18.0.2:5000"}), 500, `{"error":"internal"}`)
 }
+
+// S1 : destruction (ou signalement) par le destinataire après la dernière ouverture,
+// sans repasser par meta (qui ne répond plus une fois le partage en « draining »).
+func TestDestroyAfterLastOpen(t *testing.T) {
+	e := newEnv(t, false, nil)
+	k := newKeys()
+	c := e.create(t, "", k, 1, 1)
+	e.upload(t, c, 1)
+	e.unlock(t, c.ID, k)
+	body := mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve), "reason": "report"})
+	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/destroy", hdr: access(k), body: body}), 204, "")
+	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/destroy", hdr: access(k), body: body}), 404, notFound)
+}

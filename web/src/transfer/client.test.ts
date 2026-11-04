@@ -410,3 +410,50 @@ describe("noms, aperçu et types dangereux à la réception (audit M4)", () => {
   });
 });
 
+
+describe("Opened.destroy et done en keepalive (S1)", () => {
+  it("après la dernière ouverture (meta répond 404), destroy passe sans meta ; wipe efface les clés", async () => {
+    const bodies: string[] = [];
+    const headers: (string | null)[] = [];
+    const keepalive: (boolean | undefined)[] = [];
+    let unlocked = false;
+    const keys = await deriveContent(new Uint8Array(32).fill(1) as KLien, PW, new Uint8Array(16).fill(3), KDF_MIN);
+    const seg = await (await sealStream([{ kind: "text", name: "", mime: "text/plain", data: utf8("x") }], keys)).segment(0);
+    const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const p = String(input).slice(ORIGIN.length).replace(ID, "ID");
+      if (p.endsWith("/meta")) return unlocked ? j(404, { error: "not_found" }) : j(200, META);
+      if (p.endsWith("/unlock")) {
+        unlocked = true; // maxOpens=1 : le partage passe en « draining »
+        return j(200, { download_token: "t", segments: 1 });
+      }
+      if (p.endsWith("/destroy")) {
+        bodies.push(String(init?.body));
+        headers.push(new Headers(init?.headers).get("X-Shh-Access"));
+        return new Response(null, { status: 204 });
+      }
+      if (p.endsWith("/done")) {
+        keepalive.push(init?.keepalive);
+        return new Response(null, { status: 204 });
+      }
+      if (p.endsWith("/segments/0")) return new Response(new Uint8Array(seg), { status: 200 });
+      return defaults(init?.method ?? "GET", p);
+    }) as typeof fetch;
+    const net = { fetch: f, retryDelayMs: 1 };
+    const o = await openShare(LINK, PW, ORIGIN, undefined, net);
+    await expect(fetchMeta(LINK, ORIGIN, net)).rejects.toBeInstanceOf(NotFoundError);
+    await o.destroy("report");
+    expect(bodies).toHaveLength(1);
+    const b = JSON.parse(bodies[0]!) as Record<string, unknown>;
+    expect(Object.keys(b).sort()).toEqual(["proof", "reason"]);
+    expect(b.reason).toBe("report");
+    expect(typeof b.proof).toBe("string");
+    expect(headers[0]).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    await o.destroy();
+    expect(JSON.parse(bodies[1]!)).toEqual({ proof: b.proof });
+    await o.done();
+    expect(keepalive).toEqual([true]);
+    o.wipe();
+    await expect(o.destroy()).rejects.toThrow("cles_effacees");
+    expect(bodies).toHaveLength(2);
+  });
+});

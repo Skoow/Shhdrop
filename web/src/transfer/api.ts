@@ -42,7 +42,15 @@ export class BadResponse extends Error {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-type Req = { method: string; path: string; headers?: Record<string, string>; body?: string | Uint8Array<ArrayBuffer>; retry?: boolean };
+type Req = {
+  method: string;
+  path: string;
+  headers?: Record<string, string>;
+  body?: string | Uint8Array<ArrayBuffer>;
+  retry?: boolean;
+  /** La requête survit à la fermeture de la page (fetch keepalive). */
+  keepalive?: boolean;
+};
 
 async function httpError(r: Response): Promise<HttpError> {
   let j: Record<string, unknown> = {};
@@ -80,6 +88,7 @@ async function send<T>(c: Ctx, q: Req, read: (r: Response) => Promise<T>): Promi
         body: q.body,
         credentials: "omit",
         redirect: "error",
+        keepalive: q.keepalive,
       });
     } catch (e) {
       last = e; // coupure réseau
@@ -227,20 +236,22 @@ export async function getSegment(c: Ctx, id: string, token: string, n: number, s
 }
 
 export async function done(c: Ctx, id: string, token: string): Promise<void> {
-  // Rejouable : done_mask |= bit de l'ouverture.
-  await send(c, { method: "POST", path: `/api/shares/${enc(id)}/done`, headers: bearer(token), retry: true }, none);
+  // Rejouable : done_mask |= bit de l'ouverture. keepalive : envoyé même si la page se ferme.
+  await send(c, { method: "POST", path: `/api/shares/${enc(id)}/done`, headers: bearer(token), retry: true, keepalive: true }, none);
 }
 
 export type DestroyAuth = { kAcces: KAcces; kPreuve: KPreuve } | { sGestion: SGestion };
 
-export async function destroy(c: Ctx, id: string, a: DestroyAuth): Promise<void> {
+/** reason "report" : signalement (le serveur ne conserve pas le motif). */
+export async function destroy(c: Ctx, id: string, a: DestroyAuth, reason?: "report"): Promise<void> {
+  const r = reason === undefined ? {} : { reason };
   const q: Req =
     "sGestion" in a
-      ? { method: "POST", path: `/api/shares/${enc(id)}/destroy`, ...json({ manage: b64u(a.sGestion) }) }
+      ? { method: "POST", path: `/api/shares/${enc(id)}/destroy`, ...json({ manage: b64u(a.sGestion), ...r }) }
       : {
           method: "POST",
           path: `/api/shares/${enc(id)}/destroy`,
-          body: JSON.stringify({ proof: b64u(a.kPreuve) }),
+          body: JSON.stringify({ proof: b64u(a.kPreuve), ...r }),
           headers: { "Content-Type": "application/json", "X-Shh-Access": b64u(a.kAcces) },
         };
   await send(c, q, none);
