@@ -19,6 +19,7 @@ import (
 	"github.com/skoow/shhdrop/server/internal/blob"
 	"github.com/skoow/shhdrop/server/internal/captcha"
 	"github.com/skoow/shhdrop/server/internal/config"
+	"github.com/skoow/shhdrop/server/internal/janitor"
 	"github.com/skoow/shhdrop/server/internal/limits"
 	"github.com/skoow/shhdrop/server/internal/share"
 	"github.com/skoow/shhdrop/server/internal/store"
@@ -43,8 +44,12 @@ func main() {
 			os.Exit(1)
 		}
 	case "admin":
-		fmt.Fprintln(os.Stderr, "admin: pas encore implémenté")
-		os.Exit(1)
+		cfg, err := config.FromEnv()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "erreur:", err)
+			os.Exit(1)
+		}
+		os.Exit(runAdmin(os.Args[2:], cfg, os.Stdout, os.Stderr))
 	default:
 		fmt.Fprintf(os.Stderr, "commande inconnue: %s\n", os.Args[1])
 		os.Exit(2)
@@ -101,6 +106,10 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	svc := &share.Service{DB: db, Blobs: &blob.Store{Dir: filepath.Join(cfg.DataDir, "blobs")}, Now: cfg.Now,
 		StorageMax: cfg.StorageMaxBytes, FrozenFile: filepath.Join(cfg.DataDir, "frozen")}
 
+	if err := janitor.Reconcile(svc); err != nil {
+		return err
+	}
+
 	// Clés tirées à chaque démarrage, gardées en mémoire seulement (spec §7.7).
 	tokKey, err := randomKey()
 	if err != nil {
@@ -124,6 +133,10 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 		ln.Close()
 		return err
 	}
+	jctx, jcancel := context.WithCancel(ctx)
+	jdone := make(chan struct{})
+	go func() { janitor.Run(jctx, svc, db, 60*time.Second); close(jdone) }()
+	defer func() { jcancel(); <-jdone }()
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {
