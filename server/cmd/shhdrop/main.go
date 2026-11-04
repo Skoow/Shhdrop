@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -49,7 +50,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "erreur:", err)
 			os.Exit(1)
 		}
-		os.Exit(runAdmin(os.Args[2:], cfg, os.Stdout, os.Stderr))
+		os.Exit(runAdmin(os.Args[2:], cfg, os.Stdin, os.Stdout, os.Stderr))
 	default:
 		fmt.Fprintf(os.Stderr, "commande inconnue: %s\n", os.Args[1])
 		os.Exit(2)
@@ -72,6 +73,52 @@ func placeholder() http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		io.WriteString(w, "<!doctype html><html lang=\"fr\"><meta charset=\"utf-8\"><title>Shhdrop</title><p>Shhdrop</p></html>\n")
 	})
+}
+
+// prepareDataDir : SHH_DATA_DIR (absolu, vérifié par config) est créé s'il n'existe pas.
+// Un dossier existant doit être vide (premier démarrage) ou contenir shares.db et blobs/ :
+// sinon c'est sans doute le dossier d'un autre programme (/var, $HOME…), dont tightenPerms
+// forcerait les droits et dont Reconcile effacerait des fichiers (audit F5).
+func prepareDataDir(dir string) error {
+	es, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return os.MkdirAll(dir, 0o700)
+	}
+	if err != nil {
+		return fmt.Errorf("SHH_DATA_DIR %s : %w", dir, err)
+	}
+	if len(es) == 0 {
+		return nil
+	}
+	db, err1 := os.Stat(filepath.Join(dir, "shares.db"))
+	blobs, err2 := os.Stat(filepath.Join(dir, "blobs"))
+	if err1 != nil || err2 != nil || !db.Mode().IsRegular() || !blobs.IsDir() {
+		return fmt.Errorf("SHH_DATA_DIR %s n'est pas vide et ne contient pas shares.db et blobs/ : refus "+
+			"(dossier d'un autre programme ?) ; indiquer un dossier vide ou celui de Shhdrop", dir)
+	}
+	return nil
+}
+
+// diskFree : espace libre du système de fichiers (variable pour les tests).
+var diskFree = statfsFree
+
+// storageMargin : place laissée libre au-delà de SHH_STORAGE_MAX (base, WAL, système).
+const storageMargin = 1 << 30
+
+// checkStorage : SHH_STORAGE_MAX doit tenir dans l'espace libre plus la place déjà
+// réservée par les fichiers, moins 1 Gio de marge (audit F6).
+func checkStorage(dataDir string, max int64, used int64) error {
+	free, err := diskFree(dataDir)
+	if err != nil {
+		return fmt.Errorf("espace disque de %s : %w", dataDir, err)
+	}
+	avail := free + uint64(used)
+	if avail < storageMargin || uint64(max) > avail-storageMargin {
+		return fmt.Errorf("SHH_STORAGE_MAX (%d octets) dépasse l'espace utilisable de %s "+
+			"(%d libres + %d déjà réservés − 1 Gio de marge) : réduire SHH_STORAGE_MAX ou agrandir le disque",
+			max, dataDir, free, used)
+	}
+	return nil
 }
 
 // tightenPerms resserre les droits au démarrage, même sur un dossier ou une base
@@ -117,7 +164,18 @@ func newHTTPServer(h http.Handler) *http.Server {
 // serve démarre le serveur et s'arrête proprement quand ctx est annulé.
 // Seule sortie sur out : « SHH_LISTENING <hôte:port> » une fois l'écoute ouverte.
 func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
-	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
+	if !filepath.IsAbs(cfg.DataDir) {
+		return errors.New("SHH_DATA_DIR doit être un chemin absolu")
+	}
+	// Site vérifié avant de toucher au dossier de données.
+	static := placeholder()
+	if cfg.StaticDir != "" {
+		var err error
+		if static, err = staticHandler(cfg.StaticDir); err != nil {
+			return err
+		}
+	}
+	if err := prepareDataDir(cfg.DataDir); err != nil {
 		return err
 	}
 	// Avant l'ouverture (fichiers existants) et après (fichiers que SQLite vient de créer).
@@ -132,11 +190,27 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if err := tightenPerms(cfg.DataDir); err != nil {
 		return err
 	}
-	svc := &share.Service{DB: db, Blobs: &blob.Store{Dir: filepath.Join(cfg.DataDir, "blobs")}, Now: cfg.Now,
-		StorageMax: cfg.StorageMaxBytes, FrozenFile: filepath.Join(cfg.DataDir, "frozen")}
-
+	// En production (derrière le proxy), pas de fichier creux : la place doit être allouée.
+	svc, err := share.NewService(share.Config{DB: db,
+		Blobs: &blob.Store{Dir: filepath.Join(cfg.DataDir, "blobs"), NoSparse: cfg.BehindProxy},
+		Now:   cfg.Now, StorageMax: cfg.StorageMaxBytes, FrozenFile: filepath.Join(cfg.DataDir, "frozen")})
+	if err != nil {
+		return err
+	}
 	if err := janitor.Reconcile(svc); err != nil {
 		return err
+	}
+	used, err := svc.Blobs.UsedBytes()
+	if err != nil {
+		return err
+	}
+	if err := checkStorage(cfg.DataDir, cfg.StorageMaxBytes, used); err != nil {
+		return err
+	}
+	if svc.Blobs.NoSparse {
+		if err := svc.Blobs.CheckAllocate(); err != nil {
+			return fmt.Errorf("SHH_BEHIND_PROXY=1 : %w", err)
+		}
 	}
 
 	// Clés tirées à chaque démarrage, gardées en mémoire seulement (spec §7.7).
@@ -148,12 +222,8 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	static := placeholder()
-	if cfg.StaticDir != "" {
-		static = http.FileServerFS(os.DirFS(cfg.StaticDir))
-	}
 	srv := newHTTPServer(api.New(svc, token.New(tokKey, cfg.Now), limits.New(cfg.Now),
-		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy))
+		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy, cfg.TrustedProxies))
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err

@@ -27,10 +27,10 @@ func TestFromEnvDefauts(t *testing.T) {
 
 func TestFromEnvValeurs(t *testing.T) {
 	t.Setenv("SHH_DATA_DIR", "/d")
-	t.Setenv("SHH_LISTEN", "0.0.0.0:9")
+	t.Setenv("SHH_LISTEN", "127.0.0.1:9")
 	t.Setenv("SHH_STORAGE_MAX", "100")
 	c, err := FromEnv()
-	if err != nil || c.Listen != "0.0.0.0:9" || c.StorageMaxBytes != 100 {
+	if err != nil || c.Listen != "127.0.0.1:9" || c.StorageMaxBytes != 100 {
 		t.Fatalf("%+v %v", c, err)
 	}
 }

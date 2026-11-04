@@ -34,8 +34,12 @@ func newSvc(t *testing.T) (*share.Service, *clock) {
 	}
 	t.Cleanup(func() { db.Close() })
 	c := &clock{t: time.Date(2026, 11, 4, 10, 2, 0, 0, time.UTC)}
-	return &share.Service{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")}, Now: c.Now,
-		StorageMax: 1 << 40}, c
+	s, err := share.NewService(share.Config{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")}, Now: c.Now,
+		StorageMax: 1 << 40, FrozenFile: filepath.Join(dir, "frozen")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, c
 }
 
 func rnd(n int) []byte    { b := make([]byte, n); rand.Read(b); return b }

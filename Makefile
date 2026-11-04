@@ -3,7 +3,7 @@
 test: test-go test-web test-e2e
 
 test-go:
-	cd server && go vet ./... && go test ./...
+	cd server && go vet ./... && go test ./... && GOARCH=386 go build ./...
 
 test-web:
 	cd web && npm test

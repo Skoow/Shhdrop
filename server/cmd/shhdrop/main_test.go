@@ -20,6 +20,7 @@ func TestServe(t *testing.T) {
 	static := filepath.Join(dir, "dist")
 	os.Mkdir(static, 0o700)
 	os.WriteFile(filepath.Join(static, "app.js"), []byte("console.log(1)"), 0o600)
+	os.WriteFile(filepath.Join(static, "index.html"), []byte("<!doctype html>"), 0o600)
 
 	for _, staticDir := range []string{"", static} {
 		cfg := config.Config{DataDir: filepath.Join(dir, "data"), Listen: "127.0.0.1:0",

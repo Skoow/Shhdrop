@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"math/bits"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -63,6 +64,34 @@ type Status struct {
 	State               string
 }
 
+// Config : dépendances et réglages d'un Service, validés par NewService.
+type Config struct {
+	DB         *sql.DB
+	Blobs      *blob.Store
+	Now        func() time.Time
+	StorageMax int64  // octets réservables au total ; > 0
+	FrozenFile string // chemin absolu du fichier de gel ; obligatoire
+}
+
+// NewService valide la configuration : une valeur zéro ne doit jamais désactiver le gel
+// en silence ni refuser toutes les créations (audit F10).
+func NewService(c Config) (*Service, error) {
+	switch {
+	case c.DB == nil:
+		return nil, errors.New("share : base absente")
+	case c.Blobs == nil || c.Blobs.Dir == "":
+		return nil, errors.New("share : dossier des fichiers absent")
+	case c.Now == nil:
+		return nil, errors.New("share : horloge absente")
+	case c.StorageMax <= 0:
+		return nil, errors.New("share : StorageMax doit être > 0")
+	case c.FrozenFile == "" || !filepath.IsAbs(c.FrozenFile):
+		return nil, errors.New("share : FrozenFile doit être un chemin absolu")
+	}
+	return &Service{DB: c.DB, Blobs: c.Blobs, Now: c.Now, StorageMax: c.StorageMax, FrozenFile: c.FrozenFile}, nil
+}
+
+// Service : à construire avec NewService.
 type Service struct {
 	DB         *sql.DB
 	Blobs      *blob.Store
@@ -76,16 +105,45 @@ type Service struct {
 
 func (s *Service) now() int64 { return s.Now().Unix() }
 
-// match compare sha256(x) au vérificateur stocké, en temps constant.
+// match compare sha256(x) au vérificateur stocké, en temps constant. Un secret fait
+// toujours 32 octets : toute autre longueur (nil compris) est refusée (audit F4).
 func match(x, stored []byte) bool {
+	if len(x) != 32 {
+		return false
+	}
 	h := sha256.Sum256(x)
 	return subtle.ConstantTimeCompare(h[:], stored) == 1
 }
 
-// validID : 22 caractères base64url (16 octets).
+// emptyHash : SHA-256 de la chaîne vide, refusé comme vérificateur (audit F4).
+var emptyHash = sha256.Sum256(nil)
+
+var b64 = base64.RawURLEncoding.Strict()
+
+// DecodeB64 décode une valeur base64url sans bourrage de n octets, sous forme canonique :
+// longueur exacte en caractères et alphabet base64url seulement. Le décodeur de Go
+// ignore \r et \n même en mode Strict (audit F3) : ils sont refusés ici avant décodage.
+func DecodeB64(s string, n int) ([]byte, error) {
+	if len(s) != b64.EncodedLen(n) {
+		return nil, ErrBadRequest
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return nil, ErrBadRequest
+		}
+	}
+	b, err := b64.DecodeString(s)
+	if err != nil || len(b) != n {
+		return nil, ErrBadRequest
+	}
+	return b, nil
+}
+
+// validID : 22 caractères base64url canoniques (16 octets).
 func validID(id string) bool {
-	b, err := base64.RawURLEncoding.Strict().DecodeString(id)
-	return err == nil && len(b) == 16
+	_, err := DecodeB64(id, 16)
+	return err == nil
 }
 
 // ceil15 arrondit au quart d'heure supérieur : toutes les dates stockées le sont,
@@ -99,10 +157,11 @@ func secs(n int64) time.Duration { return time.Duration(n) * time.Second }
 
 func validTTL(h int) bool { return h == 1 || h == 6 || h == 12 || h == 24 }
 
-// Frozen : créations suspendues. Échec fermé : tout autre résultat que « absent » gèle.
+// Frozen : créations suspendues. Échec fermé : tout autre résultat que « absent » gèle,
+// et un FrozenFile vide (Service construit sans NewService) aussi.
 func (s *Service) Frozen() bool {
 	if s.FrozenFile == "" {
-		return false
+		return true
 	}
 	_, err := os.Stat(s.FrozenFile)
 	return !errors.Is(err, fs.ErrNotExist)
@@ -114,6 +173,12 @@ func Validate(r CreateReq) error {
 		r.KdfOps < 3 || r.KdfOps > 10 || r.KdfMem < 67108864 || r.KdfMem > 268435456 ||
 		len(r.Salt) != 16 || len(r.AccessV) != 32 || len(r.ProofV) != 32 || len(r.ManageV) != 32 {
 		return ErrBadRequest
+	}
+	// Un vérificateur égal à SHA-256("") serait satisfait par un secret vide (audit F4).
+	for _, v := range [][]byte{r.AccessV, r.ProofV, r.ManageV} {
+		if subtle.ConstantTimeCompare(v, emptyHash[:]) == 1 {
+			return ErrBadRequest
+		}
 	}
 	return nil
 }
@@ -143,6 +208,9 @@ func (s *Service) Create(r CreateReq) (string, int, error) {
 		return "", 0, ErrFull
 	}
 	if err := s.Blobs.Reserve(id, size); err != nil {
+		if errors.Is(err, blob.ErrNoAllocate) {
+			return "", 0, ErrFull // place impossible à garantir : refus, comme un disque plein
+		}
 		return "", 0, err
 	}
 	_, err = s.DB.Exec(`INSERT INTO shares(id,state,bucket,ttl_hours,max_opens,opens_left,segments_mask,

@@ -1,6 +1,8 @@
 // Lance le vrai binaire `server/shhdrop serve` pour les tests d'intégration :
 // dossier de données temporaire, port libre (SHH_LISTEN=127.0.0.1:0, lu sur stdout),
 // stdout et stderr capturés en octets bruts (fouillés par le test « le serveur ne voit rien »).
+// SHH_STORAGE_MAX = 4 Gio : le serveur refuse de démarrer si le plafond dépasse l'espace
+// disque libre moins 1 Gio (audit F6), et le défaut de 100 Gio dépasse souvent un poste de test.
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,7 +45,7 @@ export async function startServer(opts: StartOpts = {}): Promise<TestServer> {
   if (!existsSync(BINARY)) throw new Error(`binaire absent : ${BINARY} (lancer make test-e2e)`);
   const dataDir = mkdtempSync(join(tmpdir(), "shh-e2e-"));
   const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries({ PATH: process.env.PATH ?? "", SHH_DATA_DIR: dataDir, SHH_LISTEN: "127.0.0.1:0", ...opts.env })) {
+  for (const [k, v] of Object.entries({ PATH: process.env.PATH ?? "", SHH_DATA_DIR: dataDir, SHH_LISTEN: "127.0.0.1:0", SHH_STORAGE_MAX: "4294967296", ...opts.env })) {
     if (v !== undefined) env[k] = v;
   }
   const proc = spawn(BINARY, ["serve"], { env, stdio: ["ignore", "pipe", "pipe"] });

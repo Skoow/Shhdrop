@@ -4,15 +4,27 @@
 // segments chiffrés. K_lien, le mot de passe, les noms et le contenu ne sortent jamais.
 import { BUCKETS, openStream, sealStream, segmentCount, segmentSize, type Item, type Manifest } from "../crypto/container";
 import { b64u, unb64u } from "../crypto/encoding";
-import { checkKdfParams, deriveAccess, deriveContent, KDF_MIN, randomBytes, sha256 } from "../crypto/kdf";
-import { checkPassword } from "../crypto/passphrase";
+import {
+  checkKdfParams,
+  deriveAccess,
+  deriveContent,
+  deriveContentForCreate,
+  KDF_CREATE,
+  newKLien,
+  newSGestion,
+  randomBytes,
+  sha256,
+} from "../crypto/kdf";
+import type { KLien } from "../crypto/types";
 import * as api from "./api";
-import { manageLink, parseLink, shareLink, type ParsedLink } from "./link";
+import { checkOrigin, manageLink, parseLink, shareLink, type ParsedLink } from "./link";
+import { isRiskyName, previewKindOf, safeName, type PreviewKind } from "./safety";
 
 export type { Net } from "./api";
+export type { PreviewKind } from "./safety";
 
-/** Paramètres Argon2id des nouveaux partages (spec §7.1 : 64 Mio, 3 passes). */
-export const KDF_CREATE = { ops: KDF_MIN.ops, mem: KDF_MIN.mem } as const;
+/** Paramètres Argon2id des nouveaux partages : ceux qu'impose deriveContentForCreate. */
+export { KDF_CREATE };
 
 /**
  * Délai minimal entre la réception du défi anti-robot et la création : le serveur refuse
@@ -79,10 +91,23 @@ async function guarded<T>(f: () => Promise<T>, map: (e: unknown) => unknown): Pr
   }
 }
 
-function parseKind(link: string, kind: "s" | "m"): ParsedLink & { origin: string } {
+/**
+ * Analyse un lien et vérifie qu'il vise l'origine attendue (celle du site, en pratique
+ * location.origin) : un lien vers une autre origine, ou avec identifiants, enverrait
+ * K_accès, K_preuve ou S_gestion à un autre serveur (audit F1) → Error("lien_invalide").
+ * Une origine attendue mal formée → Error("origine_invalide").
+ */
+function parseFor(link: string, expectedOrigin: string): ParsedLink {
+  const origin = checkOrigin(expectedOrigin);
   const p = parseLink(link);
-  if (p.kind !== kind) throw new Error("lien_invalide");
-  return { ...p, origin: new URL(link).origin };
+  if (p.origin !== origin) throw new Error("lien_invalide");
+  return p;
+}
+
+function parseShare(link: string, expectedOrigin: string): Extract<ParsedLink, { kind: "s" }> {
+  const p = parseFor(link, expectedOrigin);
+  if (p.kind !== "s") throw new Error("lien_invalide");
+  return p;
 }
 
 export type CreateOpts = api.Net & {
@@ -108,21 +133,21 @@ export async function createShare(
   items: Item[],
   o: CreateOpts,
 ): Promise<{ link: string; manage: string; expiresInS: number }> {
+  checkOrigin(origin);
   if (![1, 6, 12, 24].includes(o.ttlHours)) throw new Error("duree_invalide");
   if (!Number.isInteger(o.maxOpens) || o.maxOpens < 1 || o.maxOpens > 10) throw new Error("ouvertures_invalides");
-  const pw = checkPassword(o.password);
-  if (!pw.ok) throw new Error(`mot_de_passe_${pw.reason}`);
   const c = api.ctx(origin, o);
 
-  const kLien = randomBytes(32);
+  const kLien = newKLien();
   const salt = randomBytes(16);
-  const sGestion = randomBytes(32);
+  const sGestion = newSGestion();
   const wipe: Uint8Array<ArrayBuffer>[] = [kLien, sGestion]; // mis à zéro quoi qu'il arrive
   try {
     return await guarded(async () => {
       const acc = await deriveAccess(kLien);
       wipe.push(acc.kAcces); // inutile à l'expéditeur
-      const keys = await deriveContent(kLien, o.password, salt, KDF_CREATE);
+      // Refuse un mot de passe trop court ou trop courant (Error("mot_de_passe_…")).
+      const keys = await deriveContentForCreate(kLien, o.password, salt);
       wipe.push(keys.kPreuve); // inutile à l'expéditeur
       const sealed = await sealStream(items, keys);
 
@@ -165,10 +190,10 @@ export async function createShare(
   }
 }
 
-export async function fetchMeta(link: string, net?: api.Net): Promise<{ expiresInS: number }> {
-  const p = parseKind(link, "s");
+export async function fetchMeta(link: string, expectedOrigin: string, net?: api.Net): Promise<{ expiresInS: number }> {
+  const p = parseShare(link, expectedOrigin);
   return guarded(async () => {
-    const { kAcces } = await deriveAccess(p.secret);
+    const { kAcces } = await deriveAccess(p.kLien);
     try {
       const m = await api.meta(api.ctx(p.origin, net), p.id, kAcces);
       return { expiresInS: m.expiresInS };
@@ -179,7 +204,7 @@ export async function fetchMeta(link: string, net?: api.Net): Promise<{ expiresI
 }
 
 // Dérive les clés de contenu à partir de meta, en refusant tout paramètre douteux du serveur.
-async function contentKeys(p: ParsedLink, m: api.Meta, password: string) {
+async function contentKeys(kLien: KLien, m: api.Meta, password: string) {
   if (!(BUCKETS as readonly number[]).includes(m.bucket) || m.segments !== segmentCount(m.bucket)) {
     throw new api.BadResponse();
   }
@@ -191,11 +216,22 @@ async function contentKeys(p: ParsedLink, m: api.Meta, password: string) {
     throw new api.BadResponse();
   }
   if (salt.length !== 16) throw new api.BadResponse();
-  return deriveContent(p.secret, password, salt, m.kdf);
+  return deriveContent(kLien, password, salt, m.kdf);
 }
 
 export type Opened = {
+  /**
+   * Manifeste tel que l'expéditeur l'a écrit : name et mime sont BRUTS et hostiles ; ne
+   * jamais les afficher ni s'en servir pour un Blob. Utiliser safeName, previewKind,
+   * isRiskyFile (audit M4).
+   */
   manifest: Manifest;
+  /** Nom nettoyé de l'élément i (voir safety.safeName) ; Error("element_inexistant") si i est invalide. */
+  safeName(i: number): string;
+  /** Aperçu permis pour l'élément i (liste blanche de types MIME, 200 Mio au plus). */
+  previewKind(i: number): PreviewKind;
+  /** Extension exécutable ou interprétée (nom nettoyé) : avertir avant d'enregistrer. */
+  isRiskyFile(i: number): boolean;
   /** Élément entier en mémoire, pour l'aperçu (200 Mio au plus, sinon Error("trop_gros_pour_apercu")). */
   item(i: number): Promise<Uint8Array<ArrayBuffer>>;
   /**
@@ -204,7 +240,17 @@ export type Opened = {
    */
   saveItem(i: number, sink: (chunk: Uint8Array<ArrayBuffer>) => Promise<void> | void): Promise<void>;
   done(): Promise<void>;
-  /** Met à zéro le segment en cache (le manifeste reste en mémoire : voir ContainerReader.wipe). */
+  /**
+   * Détruit le partage (« report » : signalement, motif non conservé par le serveur) avec
+   * K_accès et K_preuve gardés depuis l'ouverture, sans repasser par meta : marche aussi
+   * après la dernière ouverture (état « draining »). Erreurs : voir readerError ;
+   * Error("cles_effacees") après wipe().
+   */
+  destroy(reason?: "report"): Promise<void>;
+  /**
+   * Met à zéro K_accès, K_preuve et le segment en cache (le manifeste reste en mémoire :
+   * voir ContainerReader.wipe). destroy() n'est plus possible ensuite.
+   */
   wipe(): void;
 };
 
@@ -227,24 +273,33 @@ function itemError(e: unknown): unknown {
 export async function openShare(
   link: string,
   password: string,
+  expectedOrigin: string,
   onProgress?: (d: number, t: number) => void,
   net?: api.Net,
 ): Promise<Opened> {
-  const p = parseKind(link, "s");
+  const p = parseShare(link, expectedOrigin);
   const c = api.ctx(p.origin, net);
   return guarded(async () => {
-    const { kAcces } = await deriveAccess(p.secret);
+    const { kAcces } = await deriveAccess(p.kLien);
     let u: { downloadToken: string; segments: number };
     let m: api.Meta;
     let keys: Awaited<ReturnType<typeof contentKeys>> | undefined;
-    try {
-      m = await api.meta(c, p.id, kAcces);
-      keys = await contentKeys(p, m, password);
-      u = await api.unlock(c, p.id, kAcces, keys.kPreuve);
-    } finally {
+    // K_accès et K_preuve sont gardés dans l'objet rendu (Opened.destroy, S1) jusqu'à
+    // wipe() ; mis à zéro tout de suite si l'ouverture échoue.
+    const zero = () => {
       kAcces.fill(0);
       keys?.kPreuve.fill(0);
+    };
+    try {
+      m = await api.meta(c, p.id, kAcces);
+      keys = await contentKeys(p.kLien, m, password);
+      u = await api.unlock(c, p.id, kAcces, keys.kPreuve);
+    } catch (e) {
+      zero();
+      throw e;
     }
+    const kPreuve = keys.kPreuve;
+    let wiped = false;
 
     let finished = false;
     const done = async () => {
@@ -272,14 +327,32 @@ export async function openShare(
           throw itemError(e);
         }
       };
+      const entry = (i: number) => {
+        const e = r.manifest.items[i];
+        if (!Number.isInteger(i) || e === undefined) throw new Error("element_inexistant");
+        return e;
+      };
       return {
         manifest: r.manifest,
+        safeName: (i) => safeName(entry(i).name),
+        previewKind: (i) => previewKindOf(entry(i)),
+        isRiskyFile: (i) => isRiskyName(safeName(entry(i).name)),
         item: (i) => wrap(() => r.item(i)),
         saveItem: (i, sink) => wrap(() => r.streamItem(i, sink)),
         done,
-        wipe: r.wipe,
+        destroy: (reason) =>
+          guarded(async () => {
+            if (wiped) throw new Error("cles_effacees");
+            await api.destroy(c, p.id, { kAcces, kPreuve }, reason);
+          }, (e) => (e instanceof Error && e.message === "cles_effacees" ? e : readerError(e))),
+        wipe: () => {
+          wiped = true;
+          zero();
+          r.wipe();
+        },
       };
     } catch (e) {
+      zero();
       await done().catch(() => undefined);
       throw e;
     }
@@ -290,12 +363,15 @@ export async function openShare(
 export const FOLD_BYTES = 64 * 1048576;
 
 /**
- * Assemble l'élément i dans un Blob, quand showSaveFilePicker n'existe pas. Tous les
+ * Assemble l'élément i dans un Blob, toujours de type application/octet-stream (jamais le
+ * type du manifeste : un Blob text/html sur l'origine du site serait dangereux ; audit M4),
+ * quand showSaveFilePicker n'existe pas. Tous les
  * `foldBytes` (64 Mio ; paramètre réglable pour les tests), les tranches déchiffrées sont
  * repliées dans le Blob puis mises à zéro : au plus ~64 Mio de tranches en mémoire JS.
  * Le navigateur garde le Blob en mémoire ou dans son stockage temporaire (spec §24, §18).
  */
-export async function collectToBlob(open: Opened, i: number, mime: string, foldBytes = FOLD_BYTES): Promise<Blob> {
+export async function collectToBlob(open: Opened, i: number, foldBytes = FOLD_BYTES): Promise<Blob> {
+  const mime = "application/octet-stream";
   let acc = new Blob([], { type: mime });
   let parts: Uint8Array<ArrayBuffer>[] = [];
   let pending = 0;
@@ -323,17 +399,17 @@ export async function collectToBlob(open: Opened, i: number, mime: string, foldB
  * un mauvais mot de passe compte un essai et rend NotFoundError), ou avec le lien de
  * gestion (S_gestion seul). Erreurs : voir readerError.
  */
-export async function destroyShare(link: string, opts: { password?: string } & api.Net): Promise<void> {
-  const p = parseLink(link);
+export async function destroyShare(link: string, expectedOrigin: string, opts: { password?: string } & api.Net = {}): Promise<void> {
+  const p = parseFor(link, expectedOrigin);
   if (p.kind === "s" && opts.password === undefined) throw new Error("mot_de_passe_requis");
-  const c = api.ctx(new URL(link).origin, opts);
+  const c = api.ctx(p.origin, opts);
   await guarded(async () => {
-    if (p.kind === "m") return api.destroy(c, p.id, { sGestion: p.secret });
-    const { kAcces } = await deriveAccess(p.secret);
+    if (p.kind === "m") return api.destroy(c, p.id, { sGestion: p.sGestion });
+    const { kAcces } = await deriveAccess(p.kLien);
     let keys: Awaited<ReturnType<typeof contentKeys>> | undefined;
     try {
       const m = await api.meta(c, p.id, kAcces);
-      keys = await contentKeys(p, m, opts.password!);
+      keys = await contentKeys(p.kLien, m, opts.password!);
       await api.destroy(c, p.id, { kAcces, kPreuve: keys.kPreuve });
     } finally {
       kAcces.fill(0);
@@ -344,8 +420,10 @@ export async function destroyShare(link: string, opts: { password?: string } & a
 
 export async function shareStatus(
   manage: string,
+  expectedOrigin: string,
   net?: api.Net,
 ): Promise<{ opensUsed: number; maxOpens: number; expiresInS: number; state: string }> {
-  const p = parseKind(manage, "m");
-  return guarded(() => api.status(api.ctx(p.origin, net), p.id, p.secret), readerError);
+  const p = parseFor(manage, expectedOrigin);
+  if (p.kind !== "m") throw new Error("lien_invalide");
+  return guarded(() => api.status(api.ctx(p.origin, net), p.id, p.sGestion), readerError);
 }

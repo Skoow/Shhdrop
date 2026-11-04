@@ -1,19 +1,33 @@
 import sodium from "libsodium-wrappers-sumo";
 import { concat, utf8 } from "./encoding";
+import { checkPassword } from "./passphrase";
+import type { KAcces, KLien, KPreuve, SGestion } from "./types";
 
 export const KDF_MIN = { ops: 3, mem: 67108864 } as const;
 export const KDF_MAX = { ops: 10, mem: 268435456 } as const;
 export type KdfParams = { ops: number; mem: number };
-export type AccessKeys = { kAcces: Uint8Array<ArrayBuffer>; vAcces: Uint8Array<ArrayBuffer> };
+/** Paramètres Argon2id des nouveaux partages (spec §7.1 : 64 Mio, 3 passes), imposés par deriveContentForCreate. */
+export const KDF_CREATE = { ops: KDF_MIN.ops, mem: KDF_MIN.mem } as const;
+export type AccessKeys = { kAcces: KAcces; vAcces: Uint8Array<ArrayBuffer> };
 export type ContentKeys = {
   kContenu: CryptoKey;
-  kPreuve: Uint8Array<ArrayBuffer>;
+  kPreuve: KPreuve;
   vPreuve: Uint8Array<ArrayBuffer>;
   engagement: Uint8Array<ArrayBuffer>;
 };
 
 export function randomBytes(n: number): Uint8Array<ArrayBuffer> {
   return crypto.getRandomValues(new Uint8Array(n));
+}
+
+/** Nouvelle K_lien (32 octets aléatoires). Seul constructeur avec parseLink. */
+export function newKLien(): KLien {
+  return randomBytes(32) as KLien;
+}
+
+/** Nouveau S_gestion (32 octets aléatoires). Seul constructeur avec parseLink. */
+export function newSGestion(): SGestion {
+  return randomBytes(32) as SGestion;
 }
 
 export async function sha256(b: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
@@ -52,18 +66,38 @@ function checkSizes(kLien: Uint8Array<ArrayBuffer>, salt?: Uint8Array<ArrayBuffe
   }
 }
 
-export async function deriveAccess(kLien: Uint8Array<ArrayBuffer>): Promise<AccessKeys> {
+export async function deriveAccess(kLien: KLien): Promise<AccessKeys> {
   checkSizes(kLien);
-  const kAcces = await hkdf(kLien, "shhdrop/v1/acces");
+  const kAcces = (await hkdf(kLien, "shhdrop/v1/acces")) as KAcces;
   return { kAcces, vAcces: await sha256(kAcces) };
 }
 
+/**
+ * Clés de contenu pour CRÉER un partage : le mot de passe doit passer checkPassword
+ * (sinon Error("mot_de_passe_trop_court" | "mot_de_passe_trop_courant")) et les paramètres
+ * Argon2id sont fixés à KDF_CREATE (= KDF_MIN, spec §7.1 : 64 Mio, 3 passes). Audit F9.
+ */
+export async function deriveContentForCreate(
+  kLien: KLien,
+  password: string,
+  salt: Uint8Array<ArrayBuffer>,
+): Promise<ContentKeys> {
+  const pw = checkPassword(password);
+  if (!pw.ok) throw new Error(`mot_de_passe_${pw.reason}`);
+  return deriveContent(kLien, password, salt, KDF_CREATE);
+}
+
+/**
+ * Clés de contenu pour OUVRIR un partage (paramètres lus sur le serveur, bornés par
+ * checkKdfParams). Tout mot de passe non vide est accepté : il a été choisi à la création.
+ */
 export async function deriveContent(
-  kLien: Uint8Array<ArrayBuffer>,
+  kLien: KLien,
   password: string,
   salt: Uint8Array<ArrayBuffer>,
   params: KdfParams,
 ): Promise<ContentKeys> {
+  if (password.length === 0) throw new Error("mot_de_passe_vide");
   checkSizes(kLien, salt);
   checkKdfParams(params);
   await sodium.ready;
@@ -84,7 +118,7 @@ export async function deriveContent(
     ikm = concat(kLien, kMdp);
     kMaitre = await hkdf(ikm, "shhdrop/v1/maitre");
     kContenuBrut = await hkdf(kMaitre, "shhdrop/v1/contenu");
-    const kPreuve = await hkdf(kMaitre, "shhdrop/v1/preuve");
+    const kPreuve = (await hkdf(kMaitre, "shhdrop/v1/preuve")) as KPreuve;
 
     const hmacKey = await crypto.subtle.importKey(
       "raw",

@@ -18,12 +18,15 @@ export function uniformIndex(max: number, rand: (n: number) => Uint8Array<ArrayB
   }
 }
 
-export function generatePassphraseWords(n = 4): string[] {
-  if (!Number.isInteger(n) || n < 1) throw new RangeError("nombre de mots invalide");
+/** Nombre minimal de mots d'une phrase générée (4 mots EFF ≈ 51,7 bits ; audit F9). */
+export const PASSPHRASE_MIN_WORDS = 4;
+
+export function generatePassphraseWords(n = PASSPHRASE_MIN_WORDS): string[] {
+  if (!Number.isInteger(n) || n < PASSPHRASE_MIN_WORDS) throw new RangeError("nombre de mots invalide (4 au moins)");
   return Array.from({ length: n }, () => WORDS[uniformIndex(WORDS.length)]!);
 }
 
-export function generatePassphrase(words = 4): string {
+export function generatePassphrase(words = PASSPHRASE_MIN_WORDS): string {
   return generatePassphraseWords(words).join("-");
 }
 

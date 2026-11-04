@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -62,6 +63,16 @@ func htmlStatic() http.Handler {
 
 func newEnv(t *testing.T, behindProxy bool, static http.Handler) *env {
 	t.Helper()
+	return newEnvWith(t, behindProxy, nil, static)
+}
+
+func newEnvProxies(t *testing.T, proxies []netip.Prefix) *env {
+	t.Helper()
+	return newEnvWith(t, true, proxies, nil)
+}
+
+func newEnvWith(t *testing.T, behindProxy bool, proxies []netip.Prefix, static http.Handler) *env {
+	t.Helper()
 	dir := t.TempDir()
 	db, err := store.Open(filepath.Join(dir, "shares.db"))
 	if err != nil {
@@ -69,13 +80,16 @@ func newEnv(t *testing.T, behindProxy bool, static http.Handler) *env {
 	}
 	t.Cleanup(func() { db.Close() })
 	c := &clock{t: time.Date(2026, 11, 4, 10, 2, 0, 0, time.UTC)}
-	svc := &share.Service{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")}, Now: c.Now,
-		StorageMax: 1 << 40, FrozenFile: filepath.Join(dir, "frozen")}
+	svc, err := share.NewService(share.Config{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")}, Now: c.Now,
+		StorageMax: 1 << 40, FrozenFile: filepath.Join(dir, "frozen")})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if static == nil {
 		static = htmlStatic()
 	}
 	sig := token.New(rnd(32), c.Now)
-	h := New(svc, sig, limits.New(c.Now), captcha.New(rnd(32), c.Now), static, behindProxy)
+	h := New(svc, sig, limits.New(c.Now), captcha.New(rnd(32), c.Now), static, behindProxy, proxies)
 	return &env{h: h, svc: svc, sig: sig, clk: c, dir: dir}
 }
 

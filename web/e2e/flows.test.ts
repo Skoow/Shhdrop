@@ -63,9 +63,9 @@ describe("création puis ouverture (texte, image 300 Kio, fichier 5 Mio)", () =>
     expect(parseLink(r.manage).kind).toBe("m");
     expect(prog.at(-1)).toEqual([3, 3]); // 5,3 Mio → palier 160 → 3 segments
 
-    expect((await fetchMeta(r.link)).expiresInS).toBeGreaterThan(3500);
+    expect((await fetchMeta(r.link, srv().origin)).expiresInS).toBeGreaterThan(3500);
     const dl: [number, number][] = [];
-    const o = await openShare(r.link, PW, (d, t) => dl.push([d, t]));
+    const o = await openShare(r.link, PW, srv().origin, (d, t) => dl.push([d, t]));
     expect(dl).toEqual([[1, 3]]); // à l'ouverture : segment 0 seulement (en-tête, manifeste)
     expect(o.manifest.items.map((e) => [e.kind, e.name, e.mime])).toEqual([
       ["text", "", "text/plain"],
@@ -78,7 +78,7 @@ describe("création puis ouverture (texte, image 300 Kio, fichier 5 Mio)", () =>
     expect(dl.at(-1)).toEqual([2, 3]); // le segment 2 ne contient que du bourrage : jamais lu
     await o.done();
     // maxOpens = 1 et téléchargement terminé : partage effacé.
-    await expect(fetchMeta(r.link)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(fetchMeta(r.link, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
@@ -87,13 +87,13 @@ describe("mauvais mot de passe ×5", () => {
   it("essais restants 4, 3, 2, 1 puis introuvable", async () => {
     const r = await share(srv(), [textItem("x")]);
     for (const left of [4, 3, 2, 1]) {
-      const e = await openShare(r.link, PW + "-faux").catch((x: unknown) => x);
+      const e = await openShare(r.link, PW + "-faux", srv().origin).catch((x: unknown) => x);
       expect(e).toBeInstanceOf(BadPasswordError);
       expect((e as BadPasswordError).attemptsLeft).toBe(left);
     }
-    await expect(openShare(r.link, PW + "-faux")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(openShare(r.link, PW + "-faux", srv().origin)).rejects.toBeInstanceOf(NotFoundError);
     // détruit : même le bon mot de passe ne sert plus
-    await expect(openShare(r.link, PW)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(openShare(r.link, PW, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
@@ -102,20 +102,20 @@ describe("maxOpens = 2", () => {
   it("deux ouvertures, la troisième est introuvable", async () => {
     const r = await share(srv(), [textItem("deux fois")], 2);
     for (let i = 0; i < 2; i++) {
-      const o = await openShare(r.link, PW);
+      const o = await openShare(r.link, PW, srv().origin);
       expect(o.manifest.items[0]!.text).toBe("deux fois");
       await o.done();
     }
-    await expect(openShare(r.link, PW)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(openShare(r.link, PW, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
   });
   it("deux ouvertures simultanées réussissent", async () => {
     const data = pseudo(5 * MIB, 3);
     const r = await share(srv(), [{ kind: "file", name: "a.bin", mime: "application/octet-stream", data }], 2);
-    const [a, b] = await Promise.all([openShare(r.link, PW), openShare(r.link, PW)]);
+    const [a, b] = await Promise.all([openShare(r.link, PW, srv().origin), openShare(r.link, PW, srv().origin)]);
     expect(Buffer.from(await a.item(0)).equals(Buffer.from(data))).toBe(true);
     expect(Buffer.from(await b.item(0)).equals(Buffer.from(data))).toBe(true);
     await Promise.all([a.done(), b.done()]);
-    await expect(openShare(r.link, PW)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(openShare(r.link, PW, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
@@ -123,29 +123,41 @@ describe("gestion : shareStatus et destruction", () => {
   const srv = useServer();
   it("opensUsed exact, puis destruction par le lien de gestion", async () => {
     const r = await share(srv(), [textItem("à détruire")], 3);
-    expect(await shareStatus(r.manage)).toMatchObject({ opensUsed: 0, maxOpens: 3, state: "ready" });
-    const o = await openShare(r.link, PW);
+    expect(await shareStatus(r.manage, srv().origin)).toMatchObject({ opensUsed: 0, maxOpens: 3, state: "ready" });
+    const o = await openShare(r.link, PW, srv().origin);
     await o.done();
-    const st = await shareStatus(r.manage);
+    const st = await shareStatus(r.manage, srv().origin);
     expect(st).toMatchObject({ opensUsed: 1, maxOpens: 3, state: "ready" });
     expect(st.expiresInS).toBeGreaterThan(3500);
-    await destroyShare(r.manage, {});
-    await expect(openShare(r.link, PW)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(fetchMeta(r.link)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(shareStatus(r.manage)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(destroyShare(r.manage, {})).rejects.toBeInstanceOf(NotFoundError);
+    await destroyShare(r.manage, srv().origin, {});
+    await expect(openShare(r.link, PW, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(fetchMeta(r.link, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(shareStatus(r.manage, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(destroyShare(r.manage, srv().origin, {})).rejects.toBeInstanceOf(NotFoundError);
   });
   it("destruction par le lien de partage + mot de passe", async () => {
     const r = await share(srv(), [textItem("b")]);
-    await destroyShare(r.link, { password: PW });
-    await expect(openShare(r.link, PW)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(shareStatus(r.manage)).rejects.toBeInstanceOf(NotFoundError);
+    await destroyShare(r.link, srv().origin, { password: PW });
+    await expect(openShare(r.link, PW, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(shareStatus(r.manage, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
+  });
+  it("S1 : maxOpens=1, signalement après la dernière ouverture (draining) via Opened.destroy", async () => {
+    const r = await share(srv(), [textItem("à signaler")], 1);
+    const o = await openShare(r.link, PW, srv().origin);
+    expect(await shareStatus(r.manage, srv().origin)).toMatchObject({ opensUsed: 1, state: "draining" });
+    // destroyShare (lien + mot de passe) relit meta : impossible en « draining ».
+    await expect(destroyShare(r.link, srv().origin, { password: PW })).rejects.toBeInstanceOf(NotFoundError);
+    await o.destroy("report");
+    await expect(shareStatus(r.manage, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(o.destroy()).rejects.toBeInstanceOf(NotFoundError);
+    o.wipe();
+    await expect(o.destroy()).rejects.toThrow("cles_effacees");
   });
   it("lien de partage sans mot de passe refusé ; mauvais type de lien refusé", async () => {
     const r = await share(srv(), [textItem("c")]);
-    await expect(destroyShare(r.link, {})).rejects.toThrow("mot_de_passe_requis");
-    await expect(openShare(r.manage, PW)).rejects.toThrow("lien_invalide");
-    await expect(shareStatus(r.link)).rejects.toThrow("lien_invalide");
+    await expect(destroyShare(r.link, srv().origin, {})).rejects.toThrow("mot_de_passe_requis");
+    await expect(openShare(r.manage, PW, srv().origin)).rejects.toThrow("lien_invalide");
+    await expect(shareStatus(r.link, srv().origin)).rejects.toThrow("lien_invalide");
   });
 });
 
@@ -167,7 +179,7 @@ describe("réseau coupé pendant l'envoi", () => {
       retryDelayMs: 20,
     });
     expect(putAttempts).toBe(3);
-    const o = await openShare(r.link, PW);
+    const o = await openShare(r.link, PW, srv().origin);
     expect(Buffer.from(await o.item(0)).equals(Buffer.from(data))).toBe(true);
     await o.done();
   });
@@ -232,7 +244,7 @@ describe("gros fichier en flux (250 Mio)", () => {
         onProgress: (d, t) => prog.push([d, t]),
       });
       expect(prog.at(-1)).toEqual([63, 63]); // palier 4000
-      const o = await openShare(r.link, PW);
+      const o = await openShare(r.link, PW, srv().origin);
       expect(o.manifest.items[0]).toMatchObject({ kind: "file", name: "gros.bin", size: SIZE });
       await expect(o.item(0)).rejects.toThrow("trop_gros_pour_apercu");
       const h = createHash("sha256");
@@ -245,7 +257,7 @@ describe("gros fichier en flux (250 Mio)", () => {
       expect(h.digest("hex")).toBe(sourceHash);
       o.wipe();
       await o.done();
-      await expect(fetchMeta(r.link)).rejects.toBeInstanceOf(NotFoundError);
+      await expect(fetchMeta(r.link, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
     } finally {
       clearInterval(timer);
       sample();

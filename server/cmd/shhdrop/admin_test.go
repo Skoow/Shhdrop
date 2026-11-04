@@ -26,8 +26,12 @@ func adminSetup(t *testing.T) (config.Config, *share.Service) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return cfg, &share.Service{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")}, Now: time.Now, StorageMax: 1 << 40,
-		FrozenFile: filepath.Join(dir, "frozen")}
+	s, err := share.NewService(share.Config{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")}, Now: time.Now,
+		StorageMax: 1 << 40, FrozenFile: filepath.Join(dir, "frozen")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg, s
 }
 
 func mk(t *testing.T, s *share.Service) string {
@@ -52,7 +56,7 @@ func count(t *testing.T, s *share.Service) int {
 
 func run(cfg config.Config, args ...string) (int, string, string) {
 	var o, e bytes.Buffer
-	c := runAdmin(args, cfg, &o, &e)
+	c := runAdmin(args, cfg, strings.NewReader(""), &o, &e)
 	return c, o.String(), e.String()
 }
 

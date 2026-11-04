@@ -7,6 +7,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"math"
 	"net/http"
 	"net/netip"
+	"reflect"
 	"strings"
 	"time"
 
@@ -40,16 +42,18 @@ type server struct {
 	lim         *limits.Limiter
 	cap         *captcha.Captcha
 	behindProxy bool
+	proxies     []netip.Prefix
 }
 
 type ctxIP struct{}
 
 // New construit le gestionnaire HTTP complet : /api/* puis le site statique.
-// behindProxy (SHH_BEHIND_PROXY) : une requête locale sans X-Shh-Client-IP valide
-// reçoit 500 au lieu de partager les limites de l'adresse locale (échec fermé).
+// behindProxy (SHH_BEHIND_PROXY) : une requête d'un pair qui n'est pas un proxy de
+// confiance (boucle locale ou proxies, SHH_TRUSTED_PROXY), ou sans X-Shh-Client-IP
+// valide, reçoit 500 au lieu de partager les limites du proxy (échec fermé).
 func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
-	static http.Handler, behindProxy bool) http.Handler {
-	s := &server{svc: svc, sig: sig, lim: lim, cap: capt, behindProxy: behindProxy}
+	static http.Handler, behindProxy bool, proxies []netip.Prefix) http.Handler {
+	s := &server{svc: svc, sig: sig, lim: lim, cap: capt, behindProxy: behindProxy, proxies: proxies}
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/captcha", s.captcha)
 	api.HandleFunc("POST /api/shares", s.create)
@@ -73,10 +77,10 @@ func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captc
 // guard : adresse du client (de confiance) puis limite de débit, pour tout /api/*.
 func (s *server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip, trusted := clientIP(r)
-		// Derrière le proxy, seul Caddy (en local, avec X-Shh-Client-IP) doit parler au
-		// serveur : tout pair distant ou en-tête absent révèle une erreur de configuration.
-		if s.behindProxy && (!trusted || !parse(r.RemoteAddr).IsLoopback()) {
+		ip, trusted := clientIP(r, s.proxies)
+		// Derrière le proxy, seul Caddy (pair de confiance, avec X-Shh-Client-IP) doit parler
+		// au serveur : tout autre pair ou en-tête absent révèle une erreur de configuration.
+		if s.behindProxy && (!trusted || !isProxy(parse(r.RemoteAddr), s.proxies)) {
 			writeErr(w, http.StatusInternalServerError, "internal")
 			return
 		}
@@ -219,10 +223,11 @@ func fail(w http.ResponseWriter, err error) {
 
 var errBadRequest = errors.New("format invalide")
 
-// secret décode strictement une valeur base64url sans bourrage de n octets.
+// secret décode strictement une valeur base64url sans bourrage de n octets
+// (longueur exacte en caractères, ni \r ni \n : share.DecodeB64).
 func secret(s string, n int) ([]byte, error) {
-	b, err := b64.DecodeString(s)
-	if err != nil || len(b) != n {
+	b, err := share.DecodeB64(s, n)
+	if err != nil {
 		return nil, errBadRequest
 	}
 	return b, nil
@@ -250,17 +255,99 @@ func bearer(r *http.Request) (string, error) {
 	return tok, nil
 }
 
-// readJSON : corps ≤ 4 Kio, un seul objet, aucun champ inconnu.
+// readJSON : corps ≤ 4 Kio, un seul objet, aucun champ inconnu. encoding/json ignore la
+// casse des clés et garde le dernier doublon (audit F2) : les clés sont d'abord vérifiées
+// une à une (exactes, sensibles à la casse, sans doublon) par strictKeys.
 func readJSON(w http.ResponseWriter, r *http.Request, v any) error {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSON))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxJSON))
+	if err != nil {
+		return errBadRequest
+	}
+	scan := json.NewDecoder(bytes.NewReader(body))
+	if err := strictKeys(scan, reflect.TypeOf(v)); err != nil {
+		return errBadRequest
+	}
+	if _, err := scan.Token(); err != io.EOF {
+		return errBadRequest
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		return errBadRequest
 	}
-	if _, err := dec.Token(); err != io.EOF {
-		return errBadRequest
-	}
 	return nil
+}
+
+var errKeys = errors.New("clés JSON invalides")
+
+// strictKeys lit une valeur JSON et vérifie que chaque clé d'objet est exactement le nom
+// JSON (balise `json`) d'un champ du type attendu, et n'apparaît qu'une fois. Les types
+// des valeurs sont vérifiés ensuite par Decode.
+func strictKeys(dec *json.Decoder, t reflect.Type) error {
+	for t != nil && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	switch tok {
+	case json.Delim('{'):
+		if t == nil || t.Kind() != reflect.Struct {
+			return errKeys
+		}
+		fields := jsonFields(t)
+		seen := map[string]bool{}
+		for dec.More() {
+			k, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			name, _ := k.(string)
+			ft, ok := fields[name]
+			if !ok || seen[name] {
+				return errKeys
+			}
+			seen[name] = true
+			if err := strictKeys(dec, ft); err != nil {
+				return err
+			}
+		}
+		_, err = dec.Token() // '}'
+		return err
+	case json.Delim('['):
+		if t == nil || (t.Kind() != reflect.Slice && t.Kind() != reflect.Array) {
+			return errKeys
+		}
+		for dec.More() {
+			if err := strictKeys(dec, t.Elem()); err != nil {
+				return err
+			}
+		}
+		_, err = dec.Token() // ']'
+		return err
+	}
+	return nil // valeur simple
+}
+
+// jsonFields : nom JSON exact → type, pour les champs exportés d'une structure.
+func jsonFields(t reflect.Type) map[string]reflect.Type {
+	m := map[string]reflect.Type{}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		m[name] = f.Type
+	}
+	return m
 }
 
 // segNum : numéro de segment en chiffres décimaux canoniques (pas de signe ni de zéro initial).

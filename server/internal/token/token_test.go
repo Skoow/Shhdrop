@@ -125,3 +125,16 @@ func TestCheckExp(t *testing.T) {
 		t.Fatal("type faux accepté")
 	}
 }
+
+// Audit F8 : la comparaison à math.MaxUint32 ne compilait pas en 32 bits ; le jeton
+// contenant \n (ignoré par le base64 de Go) est refusé.
+func TestTokenRejectsNewline(t *testing.T) {
+	now := t0
+	s := newSigner(&now)
+	tok := s.Issue('d', "id", 1, now.Add(time.Hour))
+	for _, bad := range []string{tok[:5] + "\n" + tok[5:], tok + "\n", tok[:5] + "\r" + tok[5:]} {
+		if _, err := s.Check(bad, 'd', "id"); err == nil {
+			t.Fatalf("%q accepté", bad)
+		}
+	}
+}
