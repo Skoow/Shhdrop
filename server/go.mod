@@ -2,6 +2,8 @@ module github.com/skoow/shhdrop/server
 
 go 1.26.0
 
+toolchain go1.26.10
+
 require (
 	github.com/altcha-org/altcha-lib-go v1.0.0
 	golang.org/x/sys v0.49.0
