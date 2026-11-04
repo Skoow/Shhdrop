@@ -67,3 +67,17 @@ Commits : `24493ef` (F2, F3, F4, F8, F10), `485c752` (M3, F5, F6, F7), `87f3970`
 3. **Faible, exactitude** : `Opened.manifest` expose encore le nom et le type bruts (le texte et les tailles y sont nécessaires). Le commentaire interdit de les afficher. L'interface du Plan 2 doit utiliser `safeName`, `previewKind` et `isRiskyFile`. Un test d'interface pourrait le vérifier.
 4. **Faible, exploitation** : `blob.ErrNoAllocate` est traduit en `ErrFull` (507), ce qui ne distingue pas un disque plein d'un système de fichiers incompatible. La sonde de démarrage empêche ce cas en production. Il n'existe pas de test unitaire de cette traduction : le crochet `fallocate` n'est accessible que dans `blob`.
 5. **Choix d'interprétation** : un dossier de données non vide doit contenir **à la fois** `shares.db` et `blobs/`. Le repli monopage ne s'applique qu'aux chemins sans extension. `safeName` retire aussi U+061C (marque arabe) et les points et espaces finaux. Liste MIME stricte : `audio/x-wav`, `image/heif` et les autres variantes donnent `none`.
+
+## Points mineurs restants après relecture (à traiter au début du Plan 2)
+
+1. Ignorer `lost+found` dans le contrôle « dossier vide » de `SHH_DATA_DIR` (volume dédié).
+2. `openShare`/`destroyShare` : refuser un mot de passe vide **avant** toute requête, avec une erreur distincte (`mot_de_passe_requis`).
+3. `SHH_TRUSTED_PROXY` : refuser les CIDR IPv4 écrits en IPv6 et les préfixes trop larges (exiger des réseaux privés ou ≥ /8).
+4. `safeName` : retirer aussi les caractères de largeur nulle (U+200B–U+200D, U+2060, étiquettes U+E00xx) ; couper par graphème.
+5. Liste des fichiers à risque : ajouter `.msix .appx .reg .wsf .cpl .pif .url .command .desktop`.
+6. Espace disque : utiliser `Frsize` quand il est non nul.
+7. « Le serveur ne voit rien » : parcourir aussi `Opened.destroy("report")`.
+8. Test de la conversion `ErrNoAllocate` → `ErrFull`.
+9. 404 pour tout préfixe `/api` sans tenir compte de la casse.
+10. Supprimer les fichiers de sonde `.sonde-*` au démarrage.
+11. Documenter qu'il faut au moins `SHH_STORAGE_MAX` + 1 Gio libres pour démarrer (§15.1).
