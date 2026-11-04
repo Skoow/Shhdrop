@@ -1,7 +1,10 @@
 // Couche HTTP du client (contrat : server/internal/api). Les secrets passent en en-tête
 // (X-Shh-Access, X-Shh-Manage) ou dans le corps, en base64url sans bourrage, jamais dans
 // l'URL. `fetch` est injectable (tests : capture des requêtes, coupures simulées).
+// Les secrets ont des types marqués (crypto/types) : K_lien ne peut pas être envoyé (audit M1).
+// Module interne : l'interface publique est src/index.ts, sans ce module.
 import { b64u } from "../crypto/encoding";
+import type { KAcces, KPreuve, SGestion } from "../crypto/types";
 
 export type Net = {
   fetch?: typeof fetch;
@@ -184,7 +187,7 @@ export async function finalize(c: Ctx, id: string, token: string): Promise<numbe
 
 export type Meta = { expiresInS: number; salt: string; kdf: { ops: number; mem: number }; bucket: number; segments: number };
 
-export async function meta(c: Ctx, id: string, kAcces: Uint8Array<ArrayBuffer>): Promise<Meta> {
+export async function meta(c: Ctx, id: string, kAcces: KAcces): Promise<Meta> {
   const o = await send(
     c,
     { method: "GET", path: `/api/shares/${enc(id)}/meta`, headers: { "X-Shh-Access": b64u(kAcces) }, retry: true },
@@ -201,7 +204,7 @@ export async function meta(c: Ctx, id: string, kAcces: Uint8Array<ArrayBuffer>):
 }
 
 // Jamais rejoué : un déverrouillage réussi consomme une ouverture, un échec compte un essai.
-export async function unlock(c: Ctx, id: string, kAcces: Uint8Array<ArrayBuffer>, kPreuve: Uint8Array<ArrayBuffer>): Promise<{ downloadToken: string; segments: number }> {
+export async function unlock(c: Ctx, id: string, kAcces: KAcces, kPreuve: KPreuve): Promise<{ downloadToken: string; segments: number }> {
   const o = await send(
     c,
     {
@@ -228,7 +231,7 @@ export async function done(c: Ctx, id: string, token: string): Promise<void> {
   await send(c, { method: "POST", path: `/api/shares/${enc(id)}/done`, headers: bearer(token), retry: true }, none);
 }
 
-export type DestroyAuth = { kAcces: Uint8Array<ArrayBuffer>; kPreuve: Uint8Array<ArrayBuffer> } | { sGestion: Uint8Array<ArrayBuffer> };
+export type DestroyAuth = { kAcces: KAcces; kPreuve: KPreuve } | { sGestion: SGestion };
 
 export async function destroy(c: Ctx, id: string, a: DestroyAuth): Promise<void> {
   const q: Req =
@@ -245,7 +248,7 @@ export async function destroy(c: Ctx, id: string, a: DestroyAuth): Promise<void>
 
 export type Status = { opensUsed: number; maxOpens: number; expiresInS: number; state: string };
 
-export async function status(c: Ctx, id: string, sGestion: Uint8Array<ArrayBuffer>): Promise<Status> {
+export async function status(c: Ctx, id: string, sGestion: SGestion): Promise<Status> {
   const o = await send(
     c,
     { method: "GET", path: `/api/shares/${enc(id)}/status`, headers: { "X-Shh-Manage": b64u(sGestion) }, retry: true },

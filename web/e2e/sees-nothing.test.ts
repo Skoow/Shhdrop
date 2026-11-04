@@ -9,6 +9,7 @@ import { readdirSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { unb64u, utf8 } from "../src/crypto/encoding";
 import { deriveAccess, deriveContent, sha256 } from "../src/crypto/kdf";
+import type { KAcces, KLien, KPreuve, SGestion } from "../src/crypto/types";
 import * as api from "../src/transfer/api";
 import { createShare, destroyShare, openShare } from "../src/transfer/client";
 import { parseLink } from "../src/transfer/link";
@@ -24,10 +25,10 @@ describe("le serveur ne voit rien", () => {
   let srv: TestServer;
   const log: Captured[] = [];
   const fetch = capturingFetch(log); // toutes les requêtes du test passent par là
-  let kLien: Uint8Array<ArrayBuffer>;
-  let kAcces: Uint8Array<ArrayBuffer>;
-  let kPreuve: Uint8Array<ArrayBuffer>;
-  let sGestion: Uint8Array<ArrayBuffer>;
+  let kLien: KLien;
+  let kAcces: KAcces;
+  let kPreuve: KPreuve;
+  let sGestion: SGestion;
   let salt: Uint8Array<ArrayBuffer>;
   let id: string;
   let manage: string;
@@ -47,16 +48,19 @@ describe("le serveur ne voit rien", () => {
       { ttlHours: 1, maxOpens: 2, password: PASSWORD, solveCaptcha: solveAltcha, fetch },
     );
     const p = parseLink(r.link);
-    kLien = p.secret;
+    if (p.kind !== "s") throw new Error("lien de partage attendu");
+    kLien = p.kLien;
     id = p.id;
     manage = r.manage;
     kAcces = (await deriveAccess(kLien)).kAcces;
-    sGestion = parseLink(manage).secret;
+    const g = parseLink(manage);
+    if (g.kind !== "m") throw new Error("lien de gestion attendu");
+    sGestion = g.sGestion;
     // Hors journal des requêtes (fetch global) : le sel et les paramètres tels que le serveur les rend.
     const m = await api.meta(api.ctx(srv.origin), id, kAcces);
     salt = unb64u(m.salt);
     kPreuve = (await deriveContent(kLien, PASSWORD, salt, m.kdf)).kPreuve;
-    const o = await openShare(r.link, PASSWORD, undefined, { fetch });
+    const o = await openShare(r.link, PASSWORD, srv.origin, undefined, { fetch });
     expect(o.manifest.items[0]!.text).toBe(`texte ${MARKER} texte`);
     expect(o.manifest.items[1]!.name).toBe(NAME);
     expect(Buffer.from(await o.item(1)).equals(Buffer.from(fileData))).toBe(true);
@@ -114,7 +118,7 @@ describe("le serveur ne voit rien", () => {
     });
     // Avant destruction, le fichier du partage contient bien ces octets (témoin).
     expect(scanDir(srv.dataDir, slices).length).toBeGreaterThan(0);
-    await destroyShare(manage, { fetch });
+    await destroyShare(manage, srv.origin, { fetch });
     expect(scanDir(srv.dataDir, slices)).toEqual([]);
     // Arrêt : SQLite replie le WAL et ferme la base ; on fouille alors chaque fichier
     // restant (shares.db, -wal, -shm s'ils existent, fichiers des partages).

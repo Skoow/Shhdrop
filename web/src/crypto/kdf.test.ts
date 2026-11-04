@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { checkKdfParams, KDF_MAX, deriveAccess, deriveContent, hkdf, randomBytes, sha256, KDF_MIN } from "./kdf";
+import { checkKdfParams, KDF_MAX, deriveAccess, deriveContent, deriveContentForCreate, hkdf, randomBytes, sha256, KDF_MIN } from "./kdf";
+import type { KLien } from "./types";
 import { b64u } from "./encoding";
 
 const hex = (b: Uint8Array<ArrayBuffer>) => [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
 const salt = new Uint8Array(16).fill(7);
-const kLien = new Uint8Array(32).fill(1);
+const kLien = new Uint8Array(32).fill(1) as KLien;
 const T = 30_000;
 
 describe("hkdf", () => {
@@ -36,9 +37,9 @@ describe("deriveAccess", () => {
     const a = await deriveAccess(kLien);
     expect(a.kAcces.length).toBe(32);
     expect(hex(a.vAcces)).toBe(hex(await sha256(a.kAcces)));
-    const b = await deriveAccess(new Uint8Array(kLien));
+    const b = await deriveAccess(new Uint8Array(kLien) as KLien);
     expect(hex(b.kAcces)).toBe(hex(a.kAcces));
-    const c = await deriveAccess(new Uint8Array(32).fill(2));
+    const c = await deriveAccess(new Uint8Array(32).fill(2) as KLien);
     expect(hex(c.kAcces)).not.toBe(hex(a.kAcces));
   });
 });
@@ -72,7 +73,7 @@ describe("deriveContent", () => {
 
   it("dépend de kLien et du sel", async () => {
     const a = await deriveContent(kLien, "pw", salt, KDF_MIN);
-    const b = await deriveContent(new Uint8Array(32).fill(2), "pw", salt, KDF_MIN);
+    const b = await deriveContent(new Uint8Array(32).fill(2) as KLien, "pw", salt, KDF_MIN);
     const c = await deriveContent(kLien, "pw", new Uint8Array(16).fill(8), KDF_MIN);
     expect(hex(b.vPreuve)).not.toBe(hex(a.vPreuve));
     expect(hex(c.vPreuve)).not.toBe(hex(a.vPreuve));
@@ -113,10 +114,25 @@ describe("bornes et tailles", () => {
   });
   it("tailles de kLien et de sel", async () => {
     const msg = "clé ou sel de taille invalide";
-    await expect(deriveAccess(new Uint8Array(31))).rejects.toThrow(msg);
-    await expect(deriveAccess(new Uint8Array(33))).rejects.toThrow(msg);
-    await expect(deriveContent(new Uint8Array(31), "pw", salt, KDF_MIN)).rejects.toThrow(msg);
+    await expect(deriveAccess(new Uint8Array(31) as KLien)).rejects.toThrow(msg);
+    await expect(deriveAccess(new Uint8Array(33) as KLien)).rejects.toThrow(msg);
+    await expect(deriveContent(new Uint8Array(31) as KLien, "pw", salt, KDF_MIN)).rejects.toThrow(msg);
     await expect(deriveContent(kLien, "pw", new Uint8Array(15), KDF_MIN)).rejects.toThrow(msg);
     await expect(deriveContent(kLien, "pw", new Uint8Array(17), KDF_MIN)).rejects.toThrow(msg);
+  });
+});
+
+describe("mot de passe à la création et à l'ouverture (audit F9)", () => {
+  it("deriveContent refuse le mot de passe vide", async () => {
+    await expect(deriveContent(kLien, "", salt, KDF_MIN)).rejects.toThrow("mot_de_passe_vide");
+  });
+  it("deriveContentForCreate impose checkPassword et KDF_MIN", async () => {
+    await expect(deriveContentForCreate(kLien, "", salt)).rejects.toThrow("mot_de_passe_trop_court");
+    await expect(deriveContentForCreate(kLien, "court-court", salt)).rejects.toThrow("mot_de_passe_trop_court");
+    await expect(deriveContentForCreate(kLien, "unbelievable", salt)).rejects.toThrow("mot_de_passe_trop_courant");
+    const pw = "cheval-agrafe-pile-correct";
+    const a = await deriveContentForCreate(kLien, pw, salt);
+    const b = await deriveContent(kLien, pw, salt, KDF_MIN);
+    expect(hex(a.kPreuve)).toBe(hex(b.kPreuve));
   });
 });

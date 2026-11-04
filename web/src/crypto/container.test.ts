@@ -14,13 +14,14 @@ import {
   type Item,
 } from "./container";
 import { concat, utf8 } from "./encoding";
-import { deriveContent, KDF_MIN, randomBytes, type ContentKeys } from "./kdf";
+import { deriveContent, KDF_MIN, newKLien, randomBytes, type ContentKeys } from "./kdf";
+import type { KLien } from "./types";
 
 const MIB = 1048576;
 let keys: ContentKeys;
 
 beforeAll(async () => {
-  keys = await deriveContent(new Uint8Array(32).fill(3), "mot de passe", new Uint8Array(16).fill(9), KDF_MIN);
+  keys = await deriveContent(new Uint8Array(32).fill(3) as KLien, "mot de passe", new Uint8Array(16).fill(9), KDF_MIN);
 }, 60_000);
 
 function pseudo(n: number, seed: number): Uint8Array<ArrayBuffer> {
@@ -465,7 +466,7 @@ describe("openStream : manifeste invalide (paquet bien chiffré)", () => {
 
 describe("clé à usage unique", () => {
   it("sealStream refuse de réutiliser la même K_contenu", async () => {
-    const k = await deriveContent(randomBytes(32), "mot de passe", randomBytes(16), KDF_MIN);
+    const k = await deriveContent(newKLien(), "mot de passe", randomBytes(16), KDF_MIN);
     const items: Item[] = [{ kind: "text", name: "", mime: "text/plain", data: utf8("a") }];
     await sealStream(items, k);
     await expect(sealStream(items, k)).rejects.toThrow("cle_deja_utilisee");

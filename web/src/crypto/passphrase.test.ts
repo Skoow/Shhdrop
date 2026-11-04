@@ -73,3 +73,14 @@ describe("checkPassword", () => {
     expect(checkPassword("😀".repeat(11))).toEqual({ ok: false, reason: "trop_court" });
   });
 });
+
+describe("phrases de passe trop courtes (audit F9)", () => {
+  it("moins de 4 mots : refusé", () => {
+    for (const n of [0, 1, 2, 3, 3.5, NaN]) {
+      expect(() => generatePassphrase(n), String(n)).toThrow(RangeError);
+      expect(() => generatePassphraseWords(n), String(n)).toThrow(RangeError);
+    }
+    expect(generatePassphraseWords(4)).toHaveLength(4);
+  });
+});
+

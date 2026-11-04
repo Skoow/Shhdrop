@@ -1,29 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { b64u } from "../crypto/encoding";
-import { randomBytes } from "../crypto/kdf";
-import { manageLink, parseLink, shareLink } from "./link";
+import { newKLien, newSGestion, randomBytes } from "../crypto/kdf";
+import type { KLien, SGestion } from "../crypto/types";
+import { checkOrigin, manageLink, parseLink, shareLink } from "./link";
 
 const ID = b64u(new Uint8Array(16).fill(7)); // 22 caractères
 
 describe("liens", () => {
   it("aller-retour shareLink → parseLink", () => {
-    const k = randomBytes(32);
+    const k = newKLien();
     const link = shareLink("https://shhdrop.example", ID, k);
     expect(link).toBe(`https://shhdrop.example/s/${ID}#${b64u(k)}`);
     const p = parseLink(link);
-    expect(p.kind).toBe("s");
+    if (p.kind !== "s") throw new Error("type");
+    expect(p.origin).toBe("https://shhdrop.example");
     expect(p.id).toBe(ID);
-    expect(p.secret).toEqual(k);
+    expect(p.kLien).toEqual(k);
   });
 
   it("aller-retour manageLink → parseLink", () => {
-    const s = randomBytes(32);
+    const s = newSGestion();
     const link = manageLink("http://127.0.0.1:4000", ID, s);
     expect(link).toBe(`http://127.0.0.1:4000/m/${ID}#${b64u(s)}`);
     const p = parseLink(link);
-    expect(p.kind).toBe("m");
+    if (p.kind !== "m") throw new Error("type");
     expect(p.id).toBe(ID);
-    expect(p.secret).toEqual(s);
+    expect(p.sGestion).toEqual(s);
   });
 
   it("refuse les liens invalides", () => {
@@ -58,5 +60,39 @@ describe("liens", () => {
     for (const proto of ["ftp:", "file:", "javascript:"]) {
       expect(() => parseLink(`${proto}//x/s/${ID}#${k}`), proto).toThrow("lien_invalide");
     }
+  });
+});
+
+describe("origine (audit F1)", () => {
+  const k = b64u(new Uint8Array(32).fill(1));
+  it("parseLink rend l'origine et refuse les identifiants dans l'URL", () => {
+    expect(parseLink(`https://srv.test:8443/s/${ID}#${k}`).origin).toBe("https://srv.test:8443");
+    for (const u of [`https://user:pw@srv.test/s/${ID}#${k}`, `https://user@srv.test/s/${ID}#${k}`, `https://:pw@srv.test/s/${ID}#${k}`]) {
+      expect(() => parseLink(u), u).toThrow("lien_invalide");
+    }
+  });
+  it("checkOrigin : https (http en boucle locale), sans chemin, requête, fragment ni identifiants", () => {
+    for (const o of ["https://srv.test", "https://srv.test:8443", "http://localhost:8080", "http://127.0.0.1:4000", "http://[::1]:4000"]) {
+      expect(checkOrigin(o), o).toBe(o);
+    }
+    for (const o of [
+      "http://srv.test/", // cas de l'audit : donnait http://srv.test//s/…
+      "https://srv.test/",
+      "https://srv.test/app",
+      "https://srv.test?x=1",
+      "https://srv.test#x",
+      "https://u:p@srv.test",
+      "http://srv.test",
+      "ftp://srv.test",
+      "srv.test",
+      "",
+      "HTTPS://SRV.TEST", // forme non canonique
+    ]) {
+      expect(() => checkOrigin(o), o).toThrow("origine_invalide");
+    }
+  });
+  it("shareLink et manageLink valident l'origine", () => {
+    expect(() => shareLink("http://srv.test/", ID, randomBytes(32) as KLien)).toThrow("origine_invalide");
+    expect(() => manageLink("https://srv.test/x", ID, randomBytes(32) as SGestion)).toThrow("origine_invalide");
   });
 });
