@@ -2,7 +2,10 @@ module github.com/skoow/shhdrop/server
 
 go 1.26.0
 
-require modernc.org/sqlite v1.61.1
+require (
+	github.com/altcha-org/altcha-lib-go v0.2.0
+	modernc.org/sqlite v1.61.1
+)
 
 require (
 	github.com/dustin/go-humanize v1.1.0 // indirect
