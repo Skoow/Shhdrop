@@ -1,0 +1,90 @@
+import { describe, expect, it } from "vitest";
+import { deriveAccess, deriveContent, hkdf, randomBytes, sha256, KDF_MIN } from "./kdf";
+import { b64u } from "./encoding";
+
+const hex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+const salt = new Uint8Array(16).fill(7);
+const kLien = new Uint8Array(32).fill(1);
+const T = 30_000;
+
+describe("hkdf", () => {
+  it("reproduit le cas de test 3 de la RFC 5869", async () => {
+    const okm = await hkdf(new Uint8Array(22).fill(0x0b), "", 42);
+    expect(hex(okm)).toBe(
+      "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8",
+    );
+  });
+  it("sort 32 octets par défaut", async () => {
+    expect((await hkdf(kLien, "x")).length).toBe(32);
+  });
+});
+
+describe("randomBytes / sha256", () => {
+  it("longueur et aléa", () => {
+    expect(randomBytes(32).length).toBe(32);
+    expect(b64u(randomBytes(32))).not.toBe(b64u(randomBytes(32)));
+  });
+  it("sha256 de 'abc'", async () => {
+    expect(hex(await sha256(new TextEncoder().encode("abc")))).toBe(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    );
+  });
+});
+
+describe("deriveAccess", () => {
+  it("vAcces = sha256(kAcces), 32 octets, ne dépend que de kLien", async () => {
+    const a = await deriveAccess(kLien);
+    expect(a.kAcces.length).toBe(32);
+    expect(hex(a.vAcces)).toBe(hex(await sha256(a.kAcces)));
+    const b = await deriveAccess(new Uint8Array(kLien));
+    expect(hex(b.kAcces)).toBe(hex(a.kAcces));
+    const c = await deriveAccess(new Uint8Array(32).fill(2));
+    expect(hex(c.kAcces)).not.toBe(hex(a.kAcces));
+  });
+});
+
+describe("deriveContent", () => {
+  it("refuse des paramètres trop faibles", async () => {
+    await expect(deriveContent(kLien, "pw", salt, { ops: 2, mem: 67108864 })).rejects.toThrow(
+      "paramètres KDF trop faibles",
+    );
+    await expect(deriveContent(kLien, "pw", salt, { ops: 3, mem: 33554432 })).rejects.toThrow(
+      "paramètres KDF trop faibles",
+    );
+  });
+
+  it("déterministe, sensible au mot de passe, clé non extractible", async () => {
+    const a = await deriveContent(kLien, "motdepasse", salt, KDF_MIN);
+    const b = await deriveContent(kLien, "motdepasse", salt, KDF_MIN);
+    const c = await deriveContent(kLien, "motdepassf", salt, KDF_MIN);
+    expect(hex(a.vPreuve)).toBe(hex(b.vPreuve));
+    expect(hex(a.engagement)).toBe(hex(b.engagement));
+    expect(hex(a.vPreuve)).not.toBe(hex(c.vPreuve));
+    expect(hex(a.engagement)).not.toBe(hex(c.engagement));
+    expect(a.kPreuve.length).toBe(32);
+    expect(a.engagement.length).toBe(32);
+    expect(hex(a.vPreuve)).toBe(hex(await sha256(a.kPreuve)));
+    expect(a.kContenu.extractable).toBe(false);
+    expect(a.kContenu.algorithm.name).toBe("AES-GCM");
+    expect([...a.kContenu.usages].sort()).toEqual(["decrypt", "encrypt"]);
+    await expect(crypto.subtle.exportKey("raw", a.kContenu)).rejects.toThrow();
+  }, T);
+
+  it("dépend de kLien et du sel", async () => {
+    const a = await deriveContent(kLien, "pw", salt, KDF_MIN);
+    const b = await deriveContent(new Uint8Array(32).fill(2), "pw", salt, KDF_MIN);
+    const c = await deriveContent(kLien, "pw", new Uint8Array(16).fill(8), KDF_MIN);
+    expect(hex(b.vPreuve)).not.toBe(hex(a.vPreuve));
+    expect(hex(c.vPreuve)).not.toBe(hex(a.vPreuve));
+  }, T);
+
+  it("NFC : formes composée et décomposée donnent la même clé", async () => {
+    const composed = "Café-Été";
+    const decomposed = "Café-Été";
+    expect(composed).not.toBe(decomposed);
+    const a = await deriveContent(kLien, composed, salt, KDF_MIN);
+    const b = await deriveContent(kLien, decomposed, salt, KDF_MIN);
+    expect(hex(a.vPreuve)).toBe(hex(b.vPreuve));
+    expect(hex(a.engagement)).toBe(hex(b.engagement));
+  }, T);
+});
