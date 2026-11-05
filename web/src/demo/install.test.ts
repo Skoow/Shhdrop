@@ -38,9 +38,11 @@ describe("installDemo", async () => {
     setLang("fr");
     expect(d.invalidLinkNote).toBe("(normal en démo : le partage n'existait que dans l'onglet d'origine)");
     expect(d.securityGaps).toContain("frame-ancestors");
+    expect(d.securityGaps).toContain("GitHub reçoit votre adresse IP");
     setLang("en");
     expect(d.invalidLinkNote).toBe("(expected in the demo: the share only existed in the original tab)");
     expect(d.securityGaps).toContain("HSTS");
+    expect(d.securityGaps).toContain("GitHub receives your IP address");
   });
 
   it("openAsRecipient : pushState vers /s/{id}#… et popstate ; refuse un autre lien", () => {

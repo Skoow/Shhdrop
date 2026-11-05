@@ -37,6 +37,8 @@ const SECURITY_GAPS = {
     "X-Robots-Tag: noindex : remplacé par la balise meta robots.",
     "Origine propre : partagée (skoow.github.io est commune à tous les sites Pages du propriétaire) ; à ne jamais réutiliser pour la production.",
     "Trusted Types : absent, comme en production.",
+    "Connexions : connect-src 'none' (plus strict qu'en production) : seul le faux serveur de la page répond à /api, tout autre envoi du navigateur est refusé.",
+    "Hébergeur : GitHub reçoit votre adresse IP et peut la journaliser (sa déclaration de confidentialité s'applique) ; aucun contenu, nom de fichier ni clé ne lui est envoyé.",
   ],
   en: [
     "frame-ancestors 'none': missing (ignored in a meta tag); the demo can be framed by another site, harmless: no real secret.",
@@ -49,6 +51,8 @@ const SECURITY_GAPS = {
     "X-Robots-Tag: noindex: replaced by the robots meta tag.",
     "Own origin: shared (skoow.github.io is common to all the owner's Pages sites); never to be reused for production.",
     "Trusted Types: missing, as in production.",
+    "Connections: connect-src 'none' (stricter than production): only the in-page fake server answers /api, any other request from the browser is refused.",
+    "Host: GitHub receives your IP address and may log it (its privacy statement applies); no content, file name or key is sent to it.",
   ],
 } as const;
 

@@ -17,6 +17,8 @@
   let main: HTMLElement | undefined = $state();
   let sentinel: HTMLElement | undefined = $state();
   let scrolled = $state(false);
+  // Hauteur du bandeau collant (varie avec la largeur et la taille du texte) : l'en-tête se colle dessous.
+  let bannerH = $state(0);
 
   // Verre de l'en-tête seulement une fois la page défilée (UI §5.4).
   $effect(() => {
@@ -54,12 +56,12 @@
 <a class="skip" href="#contenu" onclick={skip}>{t("shell.skip")}</a>
 
 {#if banner}
-  <div class="banner-slot">{@render banner()}</div>
+  <div class="banner-slot" bind:clientHeight={bannerH}>{@render banner()}</div>
 {/if}
 
 <div bind:this={sentinel} class="sentinel" aria-hidden="true"></div>
 
-<header class="top" class:scrolled>
+<header class="top" class:scrolled style:--banner-h={banner ? `${bannerH}px` : undefined}>
   <div class="bar wrap">
     <a class="logo" href={href("/")} onclick={(e) => followLink(e, "/")} aria-label={t("shell.home")}>
       <svg class="mark" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
@@ -126,6 +128,18 @@
     transform: none;
   }
 
+  /* Bandeau de démo collé en haut ; l'en-tête (.top) se colle juste dessous. */
+  .banner-slot {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 11;
+  }
+  @media (max-height: 500px) and (orientation: landscape) {
+    .banner-slot {
+      position: static;
+    }
+  }
+
   .sentinel {
     position: absolute;
     inset-block-start: 0;
@@ -135,7 +149,7 @@
 
   .top {
     position: sticky;
-    inset-block-start: 0;
+    inset-block-start: var(--banner-h, 0px);
     z-index: 10;
     border-block-end: 1px solid transparent;
   }

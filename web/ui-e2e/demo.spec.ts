@@ -45,6 +45,43 @@ test.describe("fr-FR", () => {
     await capture(page, "demo-home-1280");
   });
 
+  // Revue I2 : bandeau collé en haut, en-tête collant juste dessous, sans recouvrement.
+  for (const [w, h, size] of [
+    [390, 560, "100%"],
+    [1280, 560, "100%"],
+    [390, 560, "200%"],
+    [1280, 560, "200%"],
+  ] as const) {
+    test(`bandeau collant à ${w} px, texte ${size} : visible après défilement, sans couvrir l'en-tête`, async ({ page, demo }) => {
+      await page.setViewportSize({ width: w, height: h });
+      await page.goto(demo.url);
+      // Propriété CSSOM : permise par style-src 'self' (un attribut style ne le serait pas).
+      await page.evaluate((s) => void (document.documentElement.style.fontSize = s), size);
+      const banner = page.getByRole("note");
+      const header = page.locator("header.top");
+      await expect(header).toBeVisible();
+      const gap = async () => {
+        const b = (await banner.boundingBox())!;
+        const t = (await header.boundingBox())!;
+        return { b, t, gap: t.y - (b.y + b.height) };
+      };
+      let m = await gap();
+      expect(m.b.y).toBe(0);
+      expect(m.gap).toBeGreaterThanOrEqual(-0.5);
+      // Défilement : la page doit pouvoir défiler, puis rien ne bouge en haut.
+      await page.evaluate(() => window.scrollTo(0, 600));
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(20);
+      await expect(banner).toBeInViewport({ ratio: 1 });
+      m = await gap();
+      expect(m.b.y).toBe(0);
+      expect(m.t.y).toBeGreaterThanOrEqual(m.b.height - 0.5); // l'en-tête colle sous le bandeau
+      expect(m.gap).toBeGreaterThanOrEqual(-0.5);
+      expect(m.gap).toBeLessThanOrEqual(1);
+      await expect(header).toBeInViewport({ ratio: 1 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    });
+  }
+
   test("liens internes sous la base : « Comment ça marche » → /Shhdrop/securite, logo → /Shhdrop/", async ({ page, demo }) => {
     await page.goto(demo.url);
     await page.getByRole("link", { name: "Comment ça marche" }).click();
@@ -82,6 +119,25 @@ test.describe("fr-FR", () => {
     });
   }
 
+  test("adresse profonde /Shhdrop/m/<id>#<secret> : # retiré, jamais envoyé, retour arrière sans #", async ({ page, demo }) => {
+    const res = await page.goto(`${demo.url}m/${ID}#${KEY}`);
+    expect(res?.status()).toBe(404); // Pages : 404.html
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
+    expect(page.url()).toBe(`${demo.url}m/${ID}`);
+    await expect(page.getByRole("note")).toHaveText(BANNER_FR);
+    await expect(page.getByText("Cette page n'existe pas.")).toHaveCount(0);
+    const sent = demo.requests.map((r) => `${r.url} ${JSON.stringify(r.headers)} ${r.postData ?? ""}`);
+    expect(sent.length).toBeGreaterThan(0);
+    for (const s of sent) {
+      expect(s).not.toContain(KEY);
+      expect(s).not.toContain("#");
+    }
+    await page.goto(demo.url);
+    await page.goBack();
+    await expect.poll(() => page.evaluate(() => location.href)).toBe(`${demo.url}m/${ID}`);
+    expect(await storage(page)).toBe(0);
+  });
+
   test("chemin inconnu sous la base : « Cette page n'existe pas. », # retiré", async ({ page, demo }) => {
     const res = await page.goto(`${demo.url}nulle-part#${KEY}`);
     expect(res?.status()).toBe(404);
@@ -89,12 +145,11 @@ test.describe("fr-FR", () => {
     await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
   });
 
-  test("faux serveur dans la page : fetch et XHR /api détournés, autres requêtes sur le réseau", async ({ page, demo }) => {
+  test("faux serveur dans la page : fetch et XHR /api détournés (aucune requête /api sur le réseau)", async ({ page, demo }) => {
     await page.goto(demo.url);
     const r = await page.evaluate(async () => {
       const cap = await (await fetch("/api/captcha")).json();
       const nope = await fetch("/api/shares/x/status");
-      const site = await fetch("robots.txt");
       const xhr = await new Promise<number>((resolve) => {
         const x = new XMLHttpRequest();
         x.open("PUT", `${location.origin}/api/shares/x/segments/0`);
@@ -103,14 +158,65 @@ test.describe("fr-FR", () => {
         x.onerror = () => resolve(-1);
         x.send(new Uint8Array(10));
       });
-      return { cap, nope: nope.status, site: site.status, xhr };
+      return { cap, nope: nope.status, xhr };
     });
     expect(r.cap).toMatchObject({ algorithm: "SHA-256", fallback: null });
     expect(typeof r.cap.shown_at).toBe("string");
     expect(r.nope).toBe(400); // pas d'en-tête X-Shh-Manage : même code que le vrai serveur
-    expect(r.site).toBe(200);
     expect(r.xhr).toBe(404); // jeton inconnu
-    expect(demo.requests.map((q) => new URL(q.url).pathname)).toContain("/Shhdrop/robots.txt");
+  });
+
+  // Défaut fermé (revue m1) : connect-src 'none' dans la CSP meta. Seul le faux serveur répond à
+  // /api ; toute autre requête de la page, même origine ou autre origine, est refusée par le
+  // navigateur et n'atteint jamais le réseau, secrets d'en-tête compris.
+  test("fetch et XHR hors /api : refusés par la CSP, jamais transmis avec un secret", async ({ page, demo }) => {
+    const failed = new Map<string, string>();
+    page.on("requestfailed", (q) => failed.set(q.url(), q.failure()?.errorText ?? ""));
+    const answered: string[] = [];
+    page.on("response", (q) => answered.push(q.url()));
+    await page.goto(demo.url);
+    const SECRET = "secret-de-gestion-0123456789";
+    const r = await page.evaluate(async (secret) => {
+      const hdr = { "X-Shh-Access": secret, "X-Shh-Manage": secret, Authorization: `Bearer ${secret}` };
+      const attempt = (p: Promise<Response>) => p.then((x) => `ok ${x.status}`, () => "refusé");
+      const xhr = (url: string) =>
+        new Promise<string>((resolve) => {
+          const x = new XMLHttpRequest();
+          x.open("PUT", url);
+          x.setRequestHeader("Authorization", `Bearer ${secret}`);
+          x.onload = () => resolve(`ok ${x.status}`);
+          x.onerror = () => resolve("refusé");
+          x.send(new Uint8Array(4));
+        });
+      return {
+        sameOriginFile: await attempt(fetch("robots.txt", { headers: hdr })),
+        sameOriginOther: await attempt(fetch(`${location.origin}/Shhdrop/apis/x`, { method: "POST", headers: hdr, body: secret })),
+        otherOrigin: await attempt(fetch("https://ailleurs.test/api/shares", { method: "POST", headers: hdr, body: secret })),
+        otherOriginXhr: await xhr("https://ailleurs.test/api/shares/x/segments/0"),
+        sameOriginXhr: await xhr(`${location.origin}/Shhdrop/robots.txt`),
+      };
+    }, SECRET);
+    expect(r).toEqual({
+      sameOriginFile: "refusé",
+      sameOriginOther: "refusé",
+      otherOrigin: "refusé",
+      otherOriginXhr: "refusé",
+      sameOriginXhr: "refusé",
+    });
+    // Le navigateur a bien refusé (CSP), rien n'est parti : aucune requête ne porte le secret.
+    expect(demo.cspViolations.length).toBeGreaterThan(0);
+    // Playwright voit la tentative (événement « request ») avant le refus : toute tentative qui
+    // porte le secret doit avoir échoué par la CSP, sans réponse du réseau.
+    const carrying = demo.requests.filter((q) => `${JSON.stringify(q.headers)} ${q.postData ?? ""}`.includes(SECRET));
+    for (const q of carrying) {
+      expect(failed.get(q.url), q.url).toBe("csp");
+      expect(answered).not.toContain(q.url);
+    }
+    expect(answered.filter((u) => u.includes("ailleurs.test") || u.endsWith("/apis/x") || u.endsWith("/robots.txt"))).toEqual([]);
+    // Tentatives refusées par la CSP, attendues ici et seulement ici : on les retire des gardes de la fixture.
+    demo.cspViolations.length = 0;
+    demo.foreignRequests.length = 0;
+    demo.requests.length = 0;
   });
 });
 
