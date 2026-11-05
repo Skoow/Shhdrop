@@ -1,0 +1,10 @@
+{
+  "name": "shhdrop-svelte-check",
+  "private": true,
+  "version": "0.0.0",
+  "devDependencies": {
+    "svelte": "5.57.3",
+    "svelte-check": "4.7.8",
+    "typescript": "6.0.3"
+  }
+}

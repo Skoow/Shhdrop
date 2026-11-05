@@ -4,14 +4,21 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "tsc --noEmit && vitest run src",
+    "build": "vite build",
+    "check": "tsc --noEmit && npm --prefix tools/svelte-check exec -- svelte-check --workspace . --tsconfig ./tsconfig.json --fail-on-warnings",
+    "test": "tsc --noEmit && vitest run src scripts",
     "test:e2e": "vitest run e2e --testTimeout=120000 --hookTimeout=120000"
   },
   "dependencies": {
-    "libsodium-wrappers-sumo": "0.8.4"
+    "libsodium-wrappers-sumo": "0.8.4",
+    "svelte": "5.57.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.64.1",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@types/node": "22.20.5",
+    "happy-dom": "21.0.4",
     "typescript": "7.0.2",
     "vite": "8.3.5",
     "vitest": "5.1.0"
