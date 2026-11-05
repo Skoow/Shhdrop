@@ -30,6 +30,73 @@ function allRequests(page: Page): string[] {
 test.use({ locale: "fr-FR" });
 
 const hash = (page: Page) => page.evaluate(() => location.hash);
+const historyLength = (page: Page) => page.evaluate(() => history.length);
+
+/** État d'une entrée d'historique, ou null pendant un changement de document (rechargement). */
+async function entry(page: Page, secrets: string[]) {
+  try {
+    return await page.evaluate((ss) => {
+      const html = document.documentElement.outerHTML;
+      return {
+        url: location.href,
+        hash: location.hash,
+        length: history.length,
+        leak: ss.some((s) => location.href.includes(s) || html.includes(s) || document.title.includes(s)),
+      };
+    }, secrets);
+  } catch {
+    return null; // contexte détruit : la page se recharge (retour depuis le cache « page précédente »)
+  }
+}
+
+/**
+ * Parcourt TOUT l'historique de l'onglet depuis sa dernière entrée (aucune entrée « Avant ») :
+ * Retour jusqu'à la première, puis Avant jusqu'à la dernière. À chaque entrée : pas de « # » dans
+ * l'adresse, `location.hash` vide, secret absent de l'adresse, du titre et du DOM, et
+ * `history.length` inchangé (le parcours ne crée ni ne retire d'entrée : il les voit toutes).
+ * `n - 1` Retours depuis la dernière entrée atteignent la première, quelle qu'elle soit
+ * (entrée du même document créée par pushState, ou about:blank, autre document).
+ * Rend les adresses visitées, de la première à la dernière.
+ */
+async function walkHistory(page: Page, secrets: string[]): Promise<string[]> {
+  const n = await historyLength(page);
+  expect(n).toBeGreaterThan(1);
+  const settle = async (url?: string): Promise<string> => {
+    let at = "";
+    await expect
+      .poll(async () => {
+        const e = await entry(page, secrets);
+        if (!e || (url !== undefined && e.url !== url)) return null;
+        at = e.url;
+        return { hash: e.hash, length: e.length, leak: e.leak, fragment: e.url.includes("#") };
+      })
+      .toEqual({ hash: "", length: n, leak: false, fragment: false });
+    return at;
+  };
+  const urls = [await settle()];
+  // waitUntil « commit » : on n'attend pas un « load » qui ne vient pas pour une entrée du même
+  // document ni pour une page rendue par le cache « page précédente » (WebKit) ; settle() attend
+  // ensuite l'état réel de l'entrée (et un éventuel rechargement, UI §12.2).
+  for (let i = 1; i < n; i++) {
+    await page.goBack({ waitUntil: "commit" });
+    urls.unshift(await settle());
+  }
+  for (let i = 1; i < n; i++) {
+    await page.goForward({ waitUntil: "commit" });
+    await settle(urls[i]);
+  }
+  return urls;
+}
+
+/**
+ * Les entrées de l'origine sont exactement `paths`, dans l'ordre ; avant elles, seulement la page
+ * vide de départ de l'onglet (about:blank), si le navigateur l'a gardée dans l'historique.
+ */
+function expectOnlyOwnEntries(urls: string[], origin: string, paths: string[]): void {
+  const own = urls.filter((u) => u.startsWith(origin + "/"));
+  expect(own).toEqual(paths.map((p) => origin + p));
+  expect(urls.slice(0, urls.length - own.length).every((u) => u === "about:blank")).toBe(true);
+}
 
 // Spec §32 : lien court à la racine, « /#<clé> » (partage) ou « /#m<clé> » (gestion).
 for (const [kind, frag] of [
@@ -43,16 +110,14 @@ for (const [kind, frag] of [
     await expect.poll(() => hash(page)).toBe("");
     expect(page.url()).toBe(`${shh.origin}/`);
 
-    // Retour / Avant : aucune entrée d'historique ne réaffiche le #.
+    // Retour / Avant : aucune entrée d'historique ne réaffiche le #, et le retrait n'a pas
+    // ajouté d'entrée (replaceState) : une seule entrée « / » de l'origine avant « /securite ».
     await page.getByRole("link", { name: "Sécurité", exact: true }).click();
     await expect(page).toHaveURL(`${shh.origin}/securite`);
+    expectOnlyOwnEntries(await walkHistory(page, [KEY]), shh.origin, ["/", "/securite"]);
+    // Rechargement : rien ne revient.
     await page.goBack();
     await expect(page).toHaveURL(`${shh.origin}/`);
-    expect(await hash(page)).toBe("");
-    await page.goForward();
-    await page.goBack();
-    expect(page.url()).not.toContain("#");
-    // Rechargement : rien ne revient.
     await page.reload();
     expect(page.url()).toBe(`${shh.origin}/`);
     expect(await page.content()).not.toContain(KEY);
@@ -70,8 +135,9 @@ test("# collé dans la barre sur la même page (navigation de fragment) : retir�
   await expect.poll(() => hash(page)).toBe("");
   await page.evaluate((k) => (location.hash = `m${k}`), KEY2);
   await expect.poll(() => hash(page)).toBe("");
-  await page.goBack();
-  expect(page.url()).not.toContain("#");
+  // Chaque navigation de fragment a créé une entrée, aussitôt remplacée par « / » nu : trois
+  // entrées « / », aucune avec un « # », ni au Retour ni à l'Avant.
+  expectOnlyOwnEntries(await walkHistory(page, [KEY, KEY2]), shh.origin, ["/", "/", "/"]);
 });
 
 test.describe("navigateur intégré (Instagram)", () => {
@@ -157,6 +223,9 @@ for (const [what, path, frag] of [
     await page.goBack();
     await expect(page).toHaveURL(`${shh.origin}${path}`);
     expect(await hash(page)).toBe("");
+    await page.goForward();
+    await expect(page).toHaveURL(`${shh.origin}/securite`);
+    expectOnlyOwnEntries(await walkHistory(page, [KEY]), shh.origin, [path, "/securite"]);
   });
 }
 
