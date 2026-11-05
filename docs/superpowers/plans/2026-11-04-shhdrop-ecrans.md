@@ -382,6 +382,10 @@ Corps serveur (spec §29.8) : création `id`, `bucket`, `access_v`, `manage_v`, 
 - [ ] **Step 6 : Lancer** `make test` (dont « le serveur ne voit rien ») et la commande démo → SUCCÈS.
 - [ ] **Step 7 : Commit** « feat(crypto): clé de contenu aléatoire enveloppée, paquet SHH2, mot de passe de 8 caractères, droits du destinataire » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M5, constantes uniques.** Exporter, depuis un seul module, les constantes lues par les écrans pour les chiffres affichés : taille maximale (`CONTENT_MAX`), nombre maximal d'éléments, durée maximale, ouvertures maximales, nombre d'essais de mot de passe. *Contrôle* : `limits.test.ts` : les valeurs égalent celles des tests Go (même nombre côté serveur) ; `source-rules.test.ts` interdit ces chiffres écrits en dur dans `fr.ts` et `en.ts`.
+- [ ] **Texte « Le serveur ne reçoit que des données chiffrées, jamais la clé » et « Même les noms de vos fichiers sont chiffrés ».** Ces phrases ne sont vraies que si le serveur ne stocke aucun nom ni type. *Contrôle* : test « le serveur ne voit rien » : dans la base de test et les réponses d'API, aucune sous-chaîne des noms ni du texte saisis, et la réponse de statut ne contient que taille, échéance et compteurs (de quoi construire la fiche S1 de la Task 19, rien de plus).
+
 ---
 
 ### Task K2 : Lien court et gestion par `V_gestion` (spec §32)
@@ -397,6 +401,10 @@ Corps serveur (spec §29.8) : création `id`, `bucket`, `access_v`, `manage_v`, 
 - [ ] **Step 3 : Implémenter** spec §32 ; retirer `X-Robots-Tag` et le repli de `/s/`, `/m/` devenus inutiles (le préfixe `/s/` reste réservé, spec §16).
 - [ ] **Step 4 : Lancer** `make test && npx playwright test hygiene` et la commande démo → SUCCÈS.
 - [ ] **Step 5 : Commit** « feat(link): lien court à la racine, gestion par V_gestion » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M13 (forme du lien).** La forme réelle du lien court est la référence de l'exemple surligné de la Task 25. *Contrôle* : `link.test.ts` exporte une expression de forme réutilisée par le test de `pages.spec.ts`.
+- [ ] **Anti-motif « domaines voisins ».** Un seul domaine ; aucun raccourcisseur tiers ; le mot de passe n'apparaît jamais dans le lien (M18). *Contrôle* : `link.test.ts` : le lien produit ne contient pas le mot de passe, et `parseLink` rejette un lien d'un autre hôte ; `hygiene.spec.ts` : la partie après `#` n'est jamais envoyée au serveur (journal des requêtes).
 
 ---
 
@@ -426,6 +434,11 @@ prefetchShare(link, expectedOrigin, net?) → { segments: Map<number, Uint8Array
 - [ ] **Step 4 : e2e** (`web/e2e/`, vrai serveur) : composition de 20 Mio → segments partis avant le clic ; clic → « Lien prêt » en moins de 5 s sur la boucle locale ; abandon (page fermée) → partage absent du serveur ; destinataire : segments pré-lus pendant la saisie, ouverture identique ; « le serveur ne voit rien » avec un mot de passe saisi après le début de l'envoi anticipé.
 - [ ] **Step 5 : Lancer** `make test` et la commande démo → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(transfer): envoi anticipé pendant la composition, pré-lecture chez le destinataire » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M3, coches justes malgré l'envoi anticipé.** Les segments partent avant le clic, mais « Envoyé » ne s'affiche qu'après l'accusé du dernier segment et « Scellé » après `finalize`. *Contrôle* : e2e : composition de 20 Mio, clic : « Envoyé » n'apparaît pas à l'instant du clic si des segments restent ; il apparaît après l'accusé du dernier.
+- [ ] **M9, la pré-lecture ne compte pas comme ouverture.** La phrase de la Task 20 (« L'ouvrir maintenant compte cette ouverture, même si vous rechargez la page ») n'est vraie que si la lecture anticipée de segments pendant la saisie ne consomme pas d'ouverture et que l'ouverture est comptée au déverrouillage. *Contrôle* : e2e : destinataire qui pré-lit pendant la saisie puis recharge sans déverrouiller → `shareStatus` en Node : 0 ouverture ; après déverrouillage → 1. **Signalement (moyenne)** : vérifier ce point contre spec §29.6 avant de figer le texte ; s'il est faux, corriger le texte, pas le test.
+- [ ] **Abandon.** « Un partage abandonné est absent du serveur » appuie la phrase « S'efface tout seul ». *Contrôle* : e2e existant (page fermée → partage absent).
 
 ---
 
@@ -472,6 +485,8 @@ categoryOfReceived(previewKind: PreviewKind, safeName: string): Category;   // a
 
 ### Task 10 : Composer — liste, catégories, ordre, retrait, renommage, doublons, jauge
 
+> **Accueil v3 (5 novembre, révision 5 de UI §9.1).** L'accueil fournit déjà la fenêtre de dépôt et ses actions : `Home.svelte` expose `onfiles(files, source)` avec `source` ∈ `"fichiers" | "photo" | "video" | "depot"` et `onaction("vocal" | "texte" | "coller")`. Task 10 branche `onfiles` sur `composer.add` (une vidéo de « Vidéo » est nommée « Vidéo {n}.{ext} », comme « Photo {n}.jpg ») et `onaction("texte")` sur l'éditeur de texte ; elle retire l'avis provisoire « N éléments ajoutés » de `Home.svelte`. `DropZone.svelte` n'est plus à créer : le coffre de l'accueil en tient lieu, et un clic sur le verre **n'ouvre pas** le sélecteur (décision du propriétaire). Le voile `DropOverlay.svelte` et le dépôt pleine page (compteur, Échap, dossiers refusés) existent déjà dans `Home.svelte` ; `App.svelte` passe `guardFileDrop(window, allow)` avec `allow()` vrai sur l'accueil.
+
 **Files:**
 - Create: `web/src/routes/Compose.svelte`, `web/src/flows/compose.svelte.ts`, `compose.test.ts`, `web/src/ui/CapacityGauge.svelte`, `CategoryGroup.svelte`, `ItemRow.svelte`, `ReorderHandle.svelte`, `DropZone.svelte` (cliquable ici, dépôt en Task 11), `web/src/ui/reorder.ts`, `reorder.test.ts`, `web/ui-e2e/compose.spec.ts`, `web/ui-e2e/files/*` (photo, vidéo courte, PDF, 12 petits fichiers ; fichier creux de 1 Go généré)
 
@@ -484,7 +499,7 @@ createComposer(deps = { strip: stripMetadata, probe: (f: Blob) => Promise<void>,
   items: ComposeItem[];                         // ordre d'affichage = ordre du manifeste
   groups(): { category: Category; items: ComposeItem[]; count: number; bytes: number }[];
   totalBytes: number; count: number;
-  add(files: File[], source: "fichiers" | "photo" | "depot" | "collage"): Promise<AddReport>;
+  add(files: File[], source: "fichiers" | "photo" | "video" | "depot" | "collage"): Promise<AddReport>;
   addText(text: string): string; updateText(id, text): void; addVoice(blob, mime): void;
   remove(id): { undo(): void };                 // annulation 6 s
   rename(id, base): null | "vide" | "trop_long" | "interdit";
@@ -504,9 +519,17 @@ CONTENT_MAX = 1073741824 - 65540;
 - [ ] **Step 5 : Lancer** `npm test && npx playwright test compose` puis la commande démo des Global Constraints → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(ui): composer (catégories, ordre, renommage, doublons, jauge) » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M1, l'outil est l'accroche.** La rangée d'ajout (Fichiers, Photo, Texte) et `DropZone` sont visibles sans défilement à 390 × 844 et à 1440 × 900 ; aucun clic préalable, aucune case « J'accepte les conditions » avant l'ajout. *Contrôle* : e2e `webkit-mobile`, page fraîchement chargée : le bas de la rangée d'ajout est dans la fenêtre (`boundingBox().y + height <= 844`) ; ajouter un texte sans autre interaction fonctionne ; aucun `input[type=checkbox]` n'existe avant le premier élément.
+- [ ] **M5, chiffres concrets plutôt qu'adjectifs.** Ligne de preuves sous le titre de l'accueil : « Sans compte · 1 Go · 24 h au plus · 5 essais de mot de passe, puis destruction » ; la jauge affiche des valeurs réelles arrondies (octets et nombre d'éléments, par exemple « 142 Mo sur 1 Go »). Chiffres en `font-variant-numeric: tabular-nums`. Aucun badge (« ultra-sécurisé », « conforme RGPD »). *Contrôle* : test unitaire : la ligne est construite à partir des constantes (`CONTENT_MAX`, nombre maximal d'éléments, durée maximale, nombre d'essais de la Task K1), aucun chiffre écrit en dur dans `fr.ts` ni `en.ts` (changer la constante change la ligne) ; `getComputedStyle(...).fontVariantNumeric` contient `tabular-nums` sur la jauge. **Signalement (faible)** : `CONTENT_MAX` = 1 073 741 824 − 65 540 est un peu sous 1 Gio ; le « 1 Go » affiché et le blocage `trop_gros` doivent venir de la même constante, et la jauge ne doit jamais promettre plus que `CONTENT_MAX` (test à la limite exacte).
+- [ ] **Texte de confiance : noms et métadonnées.** Sous la liste : « Même les noms de vos fichiers sont chiffrés. » ; mention « Position et appareil retirés des photos. » **seulement** pour les formats réellement nettoyés (JPEG, PNG, WebP, Task 9), jamais en phrase générale. *Contrôle* : un élément d'un format non nettoyé (statut `cleanStatus` non « nettoyé ») ne reçoit pas la mention et affiche son propre avertissement ; test unitaire de la fonction qui choisit le texte.
+- [ ] **Raison toujours dite (anti-motif « bouton désactivé sans dire pourquoi »).** Chaque valeur de `blockReason()` (`vide`, `trop_gros`, `texte_trop_long`, `nettoyage`, `hors_ligne`) a une clé de texte en français et en anglais, du type « Ajoutez au moins un élément » pour `vide`. *Contrôle* : `compose.test.ts` énumère les valeurs de `blockReason` et vérifie qu'aucune n'a de clé manquante ; le branchement sur le bouton d'envoi se vérifie en Task 13.
+
 ---
 
 ### Task 11 : Glisser-déposer et coller
+
+> **Accueil v3.** `DropOverlay.svelte` et le dépôt pleine page sont faits (UI §9.1 révision 5, `ui-e2e/home.spec.ts`). Reste à Task 11 : `flows/intake.ts` (`filesFromDrop` avec `webkitGetAsEntry`, aujourd'hui en ligne dans `Home.svelte`, à y déplacer), le collage (`paste` sur `document`, bouton Coller via `onaction("coller")`), et `allow()` faux pendant un envoi.
 
 **Files:**
 - Create: `web/src/ui/DropOverlay.svelte`, `web/src/flows/intake.ts`, `intake.test.ts`, `web/ui-e2e/intake.spec.ts`
@@ -527,9 +550,16 @@ dragDepth(): { enter(e): boolean; leave(e): boolean; reset(): void };   // compt
 - [ ] **Step 5 : Lancer** → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(ui): glisser-déposer pleine page, coller (fichiers, images, texte) » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M1, dépôt dès le premier écran.** Le dépôt pleine page (`DropOverlay`) et le collage fonctionnent sur la page fraîchement chargée, sans écran intermédiaire ni clic préalable. *Contrôle* : e2e : dépôt de 3 fichiers sur l'accueil juste après le chargement, avant toute interaction → 3 éléments ; aucune case ni dialogue de conditions n'apparaît.
+- [ ] **Texte de confiance sur le voile.** Ligne secondaire du voile : « Chiffré sur votre appareil, avant de partir. » (la raison du dépôt, pas un badge). *Contrôle* : e2e : le texte est présent pendant `dragenter` et disparu avec le voile (Échap).
+- [ ] **Raison toujours dite.** Le message d'un dossier refusé dit quoi faire (ajouter les fichiers du dossier, pas le dossier) ; même règle pour les fichiers refusés par le compteur. *Contrôle* : e2e : le message est lié par `aria-describedby`/annoncé dans le `LiveRegion` et contient une consigne, pas seulement « Refusé ».
+
 ---
 
 ### Task 12 : Vocal
+
+> **Accueil v3.** Le bouton **Vocal** existe déjà dans le coffre (masqué sans `MediaRecorder`) et appelle `onaction("vocal")` : Task 12 y ouvre `VoiceRecorder`. La **Vidéo** (nouvelle, UI §9.2.1) passe par `<input accept="video/*" capture="environment">`, sans enregistreur dans la page : rien à faire ici, et la `Permissions-Policy` garde `camera=()`.
 
 **Files:**
 - Create: `web/src/media/recorder.ts`, `recorder.test.ts`, `web/src/ui/VoiceRecorder.svelte`, `web/ui-e2e/voice.spec.ts`
@@ -542,6 +572,11 @@ dragDepth(): { enter(e): boolean; leave(e): boolean; reset(): void };   // compt
 - [ ] **Step 4 : e2e** Chromium (faux micro) : 2 s → « Vocal 1 » > 0 octet dans « Audio et vocaux » ; refus → message. WebKit : `fixme` si pas de faux micro, ligne ajoutée à la liste manuelle.
 - [ ] **Step 5 : Lancer** → SUCCÈS (démo comprise : le vocal reste local à la page).
 - [ ] **Step 6 : Commit** « feat(media): enregistrement vocal » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M1, Vocal dans la rangée d'ajout.** Le bouton Vocal est dans la même rangée visible que Fichiers, Photo, Texte à 390 × 844. *Contrôle* : e2e `webkit-mobile` : le bouton est dans la fenêtre sans défilement.
+- [ ] **Texte de confiance.** Pendant et après l'enregistrement : « Chiffré sur votre appareil, avant de partir. » *Contrôle* : e2e Chromium (faux micro) : texte visible ; toutes les requêtes émises pendant l'enregistrement et l'envoi ne contiennent que des octets opaques (le cas « vocal » est ajouté au test « le serveur ne voit rien » de la Task 27).
+- [ ] **Anti-motif « animation sans pause ».** Le témoin d'enregistrement ne pulse pas au-delà de 5 s sans moyen de l'arrêter ; en mouvement réduit il est statique ; le chronomètre s'affiche en chiffres tabulaires pour ne pas trembler. *Contrôle* : e2e avec `reducedMotion: "reduce"` : `getComputedStyle(témoin).animationName === "none"` ; `fontVariantNumeric` contient `tabular-nums`.
 
 ---
 
@@ -558,6 +593,12 @@ dragDepth(): { enter(e): boolean; leave(e): boolean; reset(): void };   // compt
 - [ ] **Step 4 : e2e** : 12 h sélectionné au chargement ; flèches dans la durée ; Stepper 1 → 10 ; mot de passe trop court → bouton bloqué, message relié ; attributs UI §12.3 ; aucune `<form>` ; clavier ouvert sur `webkit-mobile` (`page.setViewportSize` réduit) → barre d'actions dans le flux, champ visible ; `axe` ; capture `options`. Démo mise à jour.
 - [ ] **Step 5 : Lancer** → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(ui): options (12 h, 1 ouverture), phrase de passe » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M4, options écrites comme une phrase.** Remplacer les contrôles séparés durée/ouvertures par : « S'efface dans **12 h** ou après **1 ouverture**, au premier des deux. » Les mots en gras sont des contrôles segmentés natifs (`<fieldset>` + `<input type="radio">`), chacun avec son nom accessible (« Durée », « Ouvertures ») lisible sans la phrase. *Contrôle* : unit : pluriel (« 1 ouverture », « 3 ouvertures ») et valeurs lues dans les constantes ; e2e : 12 h présélectionné ; flèches dans chaque groupe ; `getByRole("radiogroup", { name: "Durée" })` et `{ name: "Ouvertures" }` existent ; la phrase affichée se met à jour ; `axe` sans violation ; les attributs UI §12.3 sont conservés.
+- [ ] **Texte de confiance : mot de passe et essais.** Près du champ : « Un mot de passe en plus du lien. Envoyez-les par deux moyens différents. » et « 5 essais ratés, et le partage est détruit. » (le « 5 » vient de la constante de la Task K1, jamais écrit en dur). *Contrôle* : e2e : les deux phrases sont visibles ; test unitaire qui compare le chiffre affiché à la constante serveur utilisée en Task 20.
+- [ ] **M1, conditions en une ligne, sans barrière.** Sous « Chiffrer et envoyer », une seule ligne renvoie à une section « Conditions » ; aucune case à cocher. **Signalement (moyenne, légal)** : le plan ne crée aucune page de conditions (la Task 25 ne livre que Sécurité et Confidentialité) et le texte juridique doit venir du propriétaire. Proposition : section « Conditions » dans `PageConfidentialite.svelte` (Task 25), texte fourni par le propriétaire ; tant qu'elle n'existe pas, la ligne est absente. *Contrôle* : e2e : la ligne n'est affichée que si l'ancre cible existe ; aucun `input[type=checkbox]` sur l'écran.
+- [ ] **Anti-motif « bouton désactivé sans dire pourquoi ».** **Signalement (faible)** : l'étape 4 ci-dessus prévoit « bouton bloqué ». L'étude propose un bouton actif dont le clic dit quoi faire (« Ajoutez au moins un élément »). Si le propriétaire accepte : bouton sans `disabled`, clic → message annoncé et focus sur le champ fautif ; sinon : le bouton bloqué garde son message visible et relié (`aria-describedby`). *Contrôle* (dans les deux cas) : pour chaque valeur de `blockReason()` (Task 10), le texte de la raison est visible à l'écran à côté du bouton.
 
 ---
 
@@ -605,6 +646,11 @@ createPowPrefetcher(deps: { prepare: typeof prepareCaptcha; solvePow; now: () =>
 - [ ] **Step 5 : Lancer** → SUCCÈS sur les quatre projets.
 - [ ] **Step 6 : Commit** « feat(captcha): preuve de travail maison (Worker, WebCrypto) et pré-calcul, compatible altcha-lib-go v1 » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **B1, exception reCAPTCHA partout où « aucun tiers » apparaît.** Aucune chaîne produite par cette tâche (états de la vérification, offre de repli `fallback_offer`) ne dit « aucun tiers » ni « aucune ressource externe » sans l'exception. Texte de référence : « Ce site ne charge rien depuis un autre site. Seule exception : si la vérification anti-robot échoue, une vérification Google peut être proposée, et seulement après votre clic, dans un cadre séparé qui n'a jamais accès à vos clés. » *Contrôle* : `i18n.test.ts` : toute chaîne qui correspond à `/aucun tiers|aucune ressource (externe|tierce)|no third part/i` contient aussi « Google » ou « reCAPTCHA » (liste de motifs partagée avec les Tasks 25 et 27).
+- [ ] **Texte de confiance.** « Aucun traceur, aucune mesure d'audience, aucune publicité. » reste vrai pendant la preuve de travail. *Contrôle* : e2e `captcha.spec.ts` : pendant le pré-calcul et la résolution, toutes les requêtes ont l'origine de l'application (aucune vers l'origine de vérification ni vers Google).
+- [ ] **M3, étape cochée seulement après réalité.** Si la vérification apparaît dans `PhaseList`, sa coche ne s'allume qu'après acceptation de la preuve par le serveur, jamais à l'envoi du calcul. *Contrôle* : e2e : `page.route` retarde la réponse de création ; la coche est absente avant, présente après.
+
 ---
 
 ### Task 15 : Serveur — repli reCAPTCHA
@@ -638,6 +684,10 @@ Corps de création : `recaptcha` (jeton) + **`captcha_salt`** (le sel du défi �
 - [ ] **Step 4 : Lancer** `go test -race ./... && GOARCH=386 go build ./... && go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...` (même commande que `ci.yml`) → SUCCÈS ; `make test` (dont « le serveur ne voit rien ») vert.
 - [ ] **Step 5 : Commit** « feat(server): repli reCAPTCHA vérifié par siteverify, lié au défi, usage unique » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **B1 et « Aucune adresse IP enregistrée ».** L'appel `siteverify` n'envoie que `secret` et `response`, jamais `remoteip` (l'adresse IP de l'utilisateur ne part pas vers Google depuis le serveur) ; aucune ligne de journal ne contient l'adresse IP ni le jeton. *Contrôle* : `recaptcha_test.go` : le faux `siteverify` (`httptest.Server`) enregistre le corps reçu et le test échoue s'il contient `remoteip` ; test de journal : un échec de vérification n'écrit ni jeton ni adresse.
+- [ ] **Texte de confiance honnête.** Le repli est la seule exception à « rien depuis un autre site » ; sans `SHH_RECAPTCHA_SECRET`, `GET /api/captcha` renvoie `fallback: null` et l'interface ne propose jamais Google. *Contrôle* : test d'API existant complété par un test e2e (Task 16) vérifiant l'absence de la feuille « Vérification supplémentaire » quand `fallback` vaut `null`.
+
 ---
 
 ### Task 16 : Cadre de vérification et repli client
@@ -661,6 +711,10 @@ Le consentement est modélisé par la dépendance `consent(signal): Promise<bool
 - [ ] **Step 4 : e2e** (`verif.spec.ts`) : l'application est servie sur `http://127.0.0.1:<port>` (fixture `shh`, `startServer`) ; `verif-origin.ts` sert `dist-verif/` sur `http://localhost:<port2>` (origines distinctes) avec la CSP de UI §15.2, et `fake-recaptcha.js` à la place de Google ; serveur Go lancé avec `SHH_ORIGIN=http://127.0.0.1:<port>`, `SHH_RECAPTCHA_SECRET`, `SHH_VERIF_ORIGIN=http://localhost:<port2>`, `SHH_RECAPTCHA_VERIFY_URL` vers un faux `siteverify`. Parcours : `Worker` retiré → feuille de consentement, **aucune requête vers l'origine de vérification avant le clic** ; clic → case cochée dans le cadre → jeton → envoi réussi, « Lien prêt ». Contrôles : aucune requête du cadre principal hors `127.0.0.1` sauf le document du cadre ; un `postMessage` forgé depuis la page (`window.postMessage`) n'est pas accepté ; Échap ferme la feuille = envoi annulé ; aucune violation CSP ; captures `verif-consent`, `verif-frame`.
 - [ ] **Step 5 : Lancer** → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(captcha): repli reCAPTCHA dans un cadre d'une autre origine, après consentement » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **B1, le consentement dit l'exception en clair.** Le corps de la feuille « Vérification supplémentaire » reprend la phrase de référence : « si la vérification anti-robot échoue, une vérification Google peut être proposée, et seulement après votre clic, dans un cadre séparé qui n'a jamais accès à vos clés. » **Signalement (moyenne, confidentialité)** : charger reCAPTCHA expose l'adresse IP et des signaux du navigateur à Google, ce que la phrase de l'étude ne dit pas. Proposition : ajouter « Google verra votre adresse IP. » dans la feuille et dans la page Confidentialité (Task 25), à valider par le propriétaire. *Contrôle* : e2e : avant « Continuer avec Google », aucune requête vers l'origine de vérification ni vers `fake-recaptcha.js` ; le texte de la feuille contient « Google », « cadre séparé » et « clés » ; après le clic, les requêtes démarrent.
+- [ ] **Sortie visible.** La feuille offre un refus aussi visible que « Continuer avec Google » (anti-motif « raison toujours dite »). *Contrôle* : e2e : le bouton de refus est atteignable au clavier ; son activation ne charge rien et renvoie `captcha_impossible` avec un message qui dit quoi faire.
 
 ---
 
@@ -698,6 +752,13 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 - [ ] **Step 5 : Lancer** → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(ui): envoi (progression réelle, vitesse, reprise, pause, annulation) » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M3, coches d'étape seulement après progrès réel.** Sous la capsule : « Chiffré sur cet appareil » → « Envoyé » → « Scellé ». « Chiffré sur cet appareil » s'allume quand le contenu et l'enveloppe sont chiffrés (état du brouillon de la Task K3, pas le clic) ; « Envoyé » après l'accusé du dernier segment ; « Scellé » après la réponse de `finalize`. Annonces `aria-live="polite"`, une par étape. *Contrôle* : e2e : `page.route` retarde le dernier `PUT` de 2 s puis `finalize` de 2 s : « Envoyé » est absent (`toHaveCount(0)`) avant l'accusé et présent après, « Scellé » est absent jusqu'à `finalize` ; coupure réseau ou pause → aucune coche supplémentaire ; annulation → aucune coche ne reste ; `send.test.ts` : événements d'étape émis dans l'ordre, un par étape ; espion sur `LiveRegion` : exactement 3 annonces.
+- [ ] **M2, montrer ce que reçoit le serveur.** Volet de texte chiffré **décoratif** à côté de la capsule, avec la légende « Voici, en image, ce que le serveur reçoit : des données illisibles. » Le générateur prend une graine fixe, jamais un tampon réel. *Contrôle* : unit : la fonction a la signature `(seed: number) => string` et renvoie deux fois la même chaîne ; `source-rules.test.ts` interdit tout import du conteneur ou des octets dans le module du volet ; e2e `reducedMotion` : volet statique (aucune animation), glyphes `aria-hidden`, légende exposée.
+- [ ] **Lien jamais avant `finalize` (motif refusé : lien disponible avant la fin).** *Contrôle* : e2e : pendant le retard de `finalize`, `location.hash` est vide, aucun élément ne contient de lien de partage et `Ready` n'est pas monté.
+- [ ] **M12, l'arrêt reste à portée.** « Annuler » et « Pause » sont visibles et focalisables à chaque phase où `cancel()` est permis ; dans la phase où l'annulation ne l'est plus, un texte dit pourquoi (« Finalisation ») au lieu d'un bouton grisé muet. *Contrôle* : e2e : pour chaque phase de `PhaseList`, présence du bouton ou du texte d'explication.
+- [ ] **M6 et M5.** La capsule de scellement garde un nom de transition de vue stable (`capsule`) jusqu'à « Lien prêt » ; les mesures (octets, vitesse, pourcentage) sont des valeurs réelles en chiffres tabulaires. *Contrôle* : e2e : `getComputedStyle(...).viewTransitionName === "capsule"` avant et après la fermeture du sceau ; `tabular-nums` sur `UploadStats`.
+
 ---
 
 ### Task 18 : Lien prêt
@@ -715,6 +776,13 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 - [ ] **Step 5 : Lancer** → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(ui): lien prêt (copie, partage, QR, suppression, garde de sortie) » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M18 et S2, deux cartes pour deux secrets.** Carte « Lien » (Copier en action principale, Partager, QR) et carte « Mot de passe » (Copier), séparées physiquement (montée en éventail de 640 ms en `transform`), avec entre elles : « Un mot de passe en plus du lien. Envoyez-les par deux moyens différents. » *Contrôle* : e2e : ordre du DOM carte lien → rappel → carte mot de passe, deux `role="group"` nommés ; le mot de passe n'apparaît ni dans la carte lien, ni dans le QR décodé, ni dans la charge de `navigator.share` ; Copier lit l'état, jamais le DOM (remplacer `textContent` par « x » avant le clic : le presse-papier reçoit encore la vraie valeur) ; `getAnimations()` : durée ≤ 640 ms, aucune animation avec `reducedMotion: "reduce"`, boutons cliquables pendant l'animation.
+- [ ] **S5, mode dictée.** Bouton « Lire à voix haute » sous le mot de passe : affichage en gros, caractère par caractère, avec un mot d'aide pour chaque caractère ambigu (« B majuscule », « 7 chiffre », « ! point d'exclamation »). Tout est local, aucune synthèse vocale ni service tiers. *Contrôle* : `dictate.test.ts` : chaque caractère de l'alphabet de `generatePassword()` a une étiquette non vide, et les paires ambiguës (O/0, l/I/1, B/8, S/5, etc.) ont des étiquettes distinctes ; `source-rules.test.ts` : aucune occurrence de `speechSynthesis` ni de requête réseau dans le module ; e2e : Échap ferme le mode, le mot de passe n'est écrit ni dans la console ni dans `localStorage`.
+- [ ] **M12, état « en cours » et arrêt visibles.** Pastille « Actif · s'efface vers 9 h 45 » (échéance arrondie au quart d'heure le plus proche, formulation « vers ») et bouton **Supprimer ce partage** toujours à portée. *Contrôle* : e2e avec `page.clock` : échéance 9 h 41 → « vers 9 h 45 », 9 h 36 → « vers 9 h 30 » (espaces normalisés dans l'assertion) ; le bouton est dans la fenêtre à 390 × 844 sans défilement ou fixé en bas.
+- [ ] **Texte de confiance : autodestruction.** Remplacer la mention d'expiration par : « S'efface tout seul : après 1 ouverture, ou au bout de 12 h. » avec les valeurs choisies (« 3 ouvertures », « 6 h »). *Contrôle* : e2e : options 3 ouvertures et 6 h → « S'efface tout seul : après 3 ouvertures, ou au bout de 6 h. » ; jamais « disparaît de partout ».
+- [ ] **M6 et motif refusé (envoi par e-mail).** La petite capsule scellée prolonge celle de la Task 17 ; aucun champ d'adresse e-mail du destinataire (le serveur la connaîtrait) : `navigator.share` suffit. *Contrôle* : e2e : aucun `input[type=email]` ; le partage ne transmet que `{ url }`.
+
 ---
 
 ### Task 19 : Page de gestion
@@ -730,6 +798,13 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 - [ ] **Step 4 : e2e** : « Ouvert 1 / 3 · Expire dans … » ; Supprimer → dissolution → « Supprimé », focus ; partage inexistant → « Supprimé » ; état `uploading` (envoi lancé dans un autre contexte, mis en pause) → « Envoi en cours » ; capture en milieu de dissolution et `dissolve-end` ; `axe`. Démo mise à jour.
 - [ ] **Step 5 : Lancer** → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(ui): gestion du partage, dissolution » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M11, cycle de vie lisible d'un coup d'œil.** Composant partagé `StateChip.svelte` (réutilisé en Task H) : une icône et un mot par état, jamais la couleur seule : Actif, En cours d'effacement (`draining`), Détruit, Expiré ; ouvertures en « 1 / 3 ». **Signalement (faible)** : le plan emploie « Supprimé » pour l'état final, l'étude « Détruit » ; garder un seul mot d'état. Proposition : « Détruit » (cohérent avec « Ce partage a été détruit » chez le destinataire), l'action restant « Supprimer ce partage ». Le compte à rebours local à zéro donne « Expiré », un `NotFoundError` après `destroy()` donne « Détruit ». *Contrôle* : `manage.test.ts` : matrice état → (mot, icône) ; e2e : chaque état a un mot visible, l'icône est `aria-hidden`, `axe` sans violation de contraste, et le mot reste lisible avec `forcedColors: "active"`.
+- [ ] **M12, état et arrêt visibles.** La pastille « Actif » et **Supprimer ce partage** restent visibles dès l'état `ready`. *Contrôle* : e2e à 390 × 844 : le bouton est atteignable sans défilement ou fixé.
+- [ ] **S1, la vue du serveur.** Bascule « Ce que voit le serveur » : la capsule se retourne (rotation 3D en `transform`, 420 ms ; fondu en mouvement réduit) et montre : « un bloc illisible d'environ 142 Mo · s'efface vers 9 h 45 · 0 ouverture sur 1 · aucun nom, aucun texte, aucune clé » (valeurs d'exemple). **B5** : les valeurs viennent de `shareStatus` (taille arrondie, échéance au quart d'heure, compteur), la bascule n'existe pas pendant `uploading`. Si `shareStatus` n'expose pas la taille, ne pas ajouter de champ serveur pour cela : omettre ce segment et le consigner dans le fichier de décisions. *Contrôle* : `serverView.test.ts` : fonction pure `serverCard(status)` (aucun paramètre de nom ni de texte) → chaîne attendue ; e2e : bascule absente en `uploading`, présente en `ready` ; avec des noms et textes distinctifs saisis à l'envoi, la fiche ne contient ni eux ni le fragment `#` du lien ; face cachée `inert`, bouton `aria-pressed`.
+- [ ] **Motif refusé : options modifiables après création.** Aucun contrôle ne modifie la durée ni le nombre d'ouvertures. *Contrôle* : e2e : la page ne contient aucun champ de durée ou d'ouvertures et n'émet aucune requête de modification.
+- [ ] **S3 (branchement).** Le contour de temps restant (`TimeRim`, créé en Task 20) est branché ici dans `Manage.svelte` à la fin de la Task 20.
 
 ---
 
@@ -747,6 +822,13 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 - [ ] **Step 5 : Lancer** → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(ui): ouverture, essais, navigateur intégré, liens invalides » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M9, le geste irréversible annoncé avant.** Dans les états `meta` et `locked`, avant tout déverrouillage : « Ce partage peut être ouvert encore **1 fois**. L'ouvrir maintenant compte cette ouverture, même si vous rechargez la page. » (pluriel : « encore **3 fois** »). La donnée vient de `fetchMeta`, qui ne consomme rien (UI §0.1). *Contrôle* : e2e : partage avec `maxOpens = 3` → « encore 3 fois » ; deux rechargements sans déverrouiller → toujours « 3 fois » et `shareStatus` en Node montre 0 ouverture consommée ; déverrouillage → 1 ouverture comptée ; rechargement → « encore 2 fois » ; la phrase est reliée au bouton d'ouverture par `aria-describedby` ; unit : singulier et pluriel. Si `fetchMeta` n'expose pas le nombre restant, afficher la seconde phrase seule et le consigner dans le fichier de décisions.
+- [ ] **S3, le temps qui reste, dessiné.** Composant `TimeRim.svelte` : le contour de la capsule (même tracé `pathLength="100"` que le scellement) se raccourcit avec le temps restant, mis à jour à la minute (aucune boucle d'animation) ; les ouvertures restantes sont de petites encoches ; texte complet pour lecteurs d'écran (« Expire dans 5 h 12 · 2 ouvertures restantes »). Modifier aussi `Manage.svelte` pour l'employer. *Contrôle* : `rim.test.ts` : décalage du tracé = 100 × restant / total (6 h sur 12 h → 50), nombre d'encoches = ouvertures restantes ; e2e : `page.clock.fastForward(60_000)` met à jour le contour ; aucun appel à `requestAnimationFrame` pendant 5 s d'inactivité ; mouvement réduit → aucune transition. Si `fetchMeta` ne donne pas la durée totale, le contour se calibre sur la première mesure de la session (à consigner).
+- [ ] **Texte de confiance.** Sous la capsule verrouillée : « Le serveur ne reçoit que des données chiffrées, jamais la clé. » et, près du champ : « 5 essais ratés, et le partage est détruit. » (constante de la Task K1) en plus de « n essais restants ». *Contrôle* : e2e : les deux textes sont visibles à l'état `locked` ; le chiffre « 5 » égale la constante.
+- [ ] **M6, la capsule du destinataire.** Capsule verrouillée qui s'ouvre au déverrouillage (même élément, `data-state="locked"` puis `"open"`). *Contrôle* : e2e : l'attribut passe de `locked` à `open` sans remontage.
+- [ ] **Anti-motifs : page du destinataire sans publicité ni tiers.** *Contrôle* : e2e : sur `Open`, toutes les requêtes ont l'origine de l'application ; aucun bandeau, aucune offre dans le DOM.
+
 ---
 
 ### Task 21 : Contenu et visionneuses natives
@@ -762,6 +844,11 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 - [ ] **Step 4 : e2e** : partage texte + JPEG + MP3 + MP4 + `trap.svg` + `trap.html` + `hevc.mov` → groupes et ordre identiques à l'envoi ; texte affiché ; image affichée, `window.__pwned` jamais défini, URL blob invalide après `load` ; audio et vidéo lisibles ; `hevc.mov` sur Chromium → « ne peut pas être lu sur cet appareil » ; `trap.html` → Enregistrer seulement ; expiration (`page.clock`) → bandeau « Expiré », boutons désactivés ; destruction par l'expéditeur pendant la lecture → message `NotFoundError` ; Retour → rechargement, aucun texte du partage ; fichier déposé sur la page → aucune navigation ; `axe` ; captures `content`, `content-image`, `content-expired`. Démo mise à jour.
 - [ ] **Step 5 : Lancer** → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(viewers): contenu, image/audio/vidéo/texte, URL blob maîtrisées » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **Anti-motif « publicité ou contenu sponsorisé chez le destinataire ».** La page de contenu ne montre rien d'autre que le partage, ses actions et les liens de pied. *Contrôle* : e2e `content.spec.ts` : toutes les requêtes ont l'origine de l'application (journal `page.on("request")`), aucun `<iframe>` hors cadre PDF, aucun encart promotionnel.
+- [ ] **M6, la capsule ouverte.** Le bandeau collé reprend la capsule de la Task 20 à l'état `open`, avec le contour de temps (S3) en petit. *Contrôle* : e2e : `data-state="open"` ; le texte complet du temps restant est présent pour les lecteurs d'écran.
+- [ ] **B1.** Aucun texte de cette tâche ne dit « aucun tiers » sans l'exception reCAPTCHA. *Contrôle* : couvert par le test partagé des Tasks 14 et 27.
 
 ---
 
@@ -780,6 +867,10 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 - [ ] **Step 5 : Lancer** → SUCCÈS (ou repli consigné).
 - [ ] **Step 6 : Commit** « feat(viewers): PDF isolé (pdf.js sans worker, cadre sandbox) » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **Aucune ressource tierce dans le cadre PDF.** Le travailleur, les polices standard et les cartes de caractères de `pdfjs-dist` viennent de l'application, jamais d'un CDN. *Contrôle* : e2e `pdf.spec.ts` : l'ouverture de `simple.pdf` n'émet que des requêtes d'origine application ; `check-dist.mjs` échoue si le bundle du cadre contient une URL absolue `http(s)://` autre que celles listées.
+- [ ] **Anti-motif « fausse sécurité ».** En droit « voir seulement » (Task R), la visionneuse retire Enregistrer, Imprimer et Copier et affiche : « L'expéditeur a choisi « voir seulement ». Cela n'empêche pas une capture d'écran. » *Contrôle* : e2e : texte présent, aucun contrôle de téléchargement ; aucune formule « protégé » ou « sécurisé » dans la visionneuse.
+
 ---
 
 ### Task 23 : Enregistrer (flux, repli Blob, fichiers à risque)
@@ -795,6 +886,11 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 - [ ] **Step 4 : e2e** : Chromium ordinateur avec faux `showSaveFilePicker` → octets identiques ; coupure du 2ᵉ segment au-delà des essais → `abort` et message ; WebKit et téléphones → événement `download`, fichier identique, nom nettoyé (`facture‮fdp.exe` sans U+202E), avertissement avant ; fichier de 300 Mo → Enregistrer seulement ; captures `save-progress`, `save-risky`.
 - [ ] **Step 5 : Lancer** → SUCCÈS (démo comprise).
 - [ ] **Step 6 : Commit** « feat(viewers): enregistrement en flux, abandon du partiel, repli Blob » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **Anti-motif « bloquer le téléchargement présenté comme une protection ».** En droit « voir seulement », aucun Enregistrer ; la phrase de la Task R accompagne l'écran. *Contrôle* : e2e : pas de `SaveButton` ; texte « Cela n'empêche pas une capture d'écran. » visible.
+- [ ] **M5, chiffres réels.** Progression en octets et vitesse mesurées, en chiffres tabulaires. *Contrôle* : e2e : `tabular-nums` ; le nombre d'octets affiché à la fin égale la taille du fichier.
+- [ ] **Texte honnête sur la destruction.** Aucune formule du type « disparaît de partout » : ce qui est enregistré reste sur l'appareil, formulation à rapprocher de l'écran détruit (« Ce que vous avez déjà enregistré sur cet appareil n'est pas concerné. »). *Contrôle* : le scan de mots interdits de la Task 27 couvre les messages de `SaveButton`.
 
 ---
 
@@ -813,6 +909,12 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 - [ ] **Step 5 : Lancer** → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(ui): fin de vie (terminer, détruire, signaler) » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M10, signaler et supprimer chez le destinataire.** Boutons visibles mais secondaires, en bas, séparés du contenu par un filet ; libellé exact : « Détruire ce partage pour tout le monde » ; texte voisin : « Vous pouvez le détruire à tout moment. » Détruire passe par `InlineConfirm`. *Contrôle* : e2e : les boutons sont le dernier groupe de `Content`, précédés d'un filet (`border-top` ou `<hr>`), leur style n'est pas celui de l'action principale ; libellé exact ; aucune action sans confirmation ; atteignables au clavier à 390 px.
+- [ ] **S4, le reçu de destruction.** Après la dissolution, une fiche en chasse fixe : « Effacé du serveur : le contenu chiffré et son entrée. Pas concerné : ce qui a été enregistré sur un appareil. » ; écran final : « Ce partage a été détruit. Il a été effacé du serveur. Ce que vous avez déjà enregistré sur cet appareil n'est pas concerné. » Le composant `DestroyReceipt.svelte` est aussi employé par `Manage.svelte` après « Supprimer ce partage ». *Contrôle* : e2e : le reçu n'apparaît qu'après la réponse du serveur (réponse retardée par `page.route` : absent avant) et seulement pour Détruire et Signaler, pas pour « Terminer et effacer » ; police monospace par jeton ; jamais « il n'existe plus nulle part » (scan Task 27) ; `fetchMeta` en Node renvoie `NotFoundError`.
+- [ ] **M6, capsule en pointillés.** La capsule passe à l'état « détruit » (contour en pointillés). *Contrôle* : e2e : `data-state="destroyed"` sur le même élément.
+- [ ] **Signalement sans choix de motif** (déjà prévu) : aucune liste de motifs ; vérifier que la feuille ne collecte rien de plus. *Contrôle* : la requête de signalement n'a pas de corps libre.
+
 ---
 
 ### Task R : Droits du destinataire (spec §34)
@@ -828,6 +930,10 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 - [ ] **Step 3 : Implémenter** spec §34, textes de UI §10 (révision 4).
 - [ ] **Step 4 : Lancer** → SUCCÈS (démo comprise).
 - [ ] **Step 5 : Commit** « feat(ui): droits du destinataire (voir, enregistrer, coffre) » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **Anti-motif « bloquer le téléchargement » présenté comme une protection.** Le texte « L'expéditeur a choisi « voir seulement ». Cela n'empêche pas une capture d'écran. » (spec §34) est affiché côté destinataire dans chaque visionneuse en mode « voir », et la description de « Voir seulement » dans `RightsPicker` contient la même mise en garde avant le choix. *Contrôle* : e2e : en sélectionnant « Voir seulement » la phrase est visible à côté ; en ouvrant le partage elle est visible dans chaque visionneuse ; aucune chaîne « protégé contre la copie », « sécurisé » ou « inviolable » (scan Task 27).
+- [ ] **M4, même grammaire de phrase.** Le choix des droits se lit comme une phrase (« Le destinataire peut **enregistrer**, **voir seulement** ou **garder dans le coffre** »), contrôles segmentés natifs comme en Task 13. *Contrôle* : e2e : groupe `radiogroup` nommé « Droits » ; navigation aux flèches ; `axe` sans violation.
 
 ---
 
@@ -853,6 +959,11 @@ HISTORY_KEEP_GONE_MS = 7 * 86_400_000;
 - [ ] **Step 5 : Lancer** → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(history): historique local chiffré des envois, sans compte » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M11, cycle de vie lisible.** La liste réutilise `StateChip.svelte` (Task 19) : icône et mot par état (Actif, En cours d'effacement, Détruit, Expiré), couleur jamais seule, ouvertures en « 1 / 3 ». *Contrôle* : e2e : chaque état d'une entrée a un mot visible ; `axe` ; `forcedColors: "active"` laisse le mot lisible.
+- [ ] **M12 et B5, état et arrêt visibles, heures honnêtes.** Chaque entrée active montre « Actif · s'efface vers 9 h 45 » (même fonction d'arrondi qu'en Task 18) et Détruire en un geste. *Contrôle* : unit : la fonction d'arrondi est partagée (un seul module) ; e2e : le texte « vers » apparaît, jamais une heure à la minute.
+- [ ] **M5.** Les compteurs (« 1 / 3 ») viennent des valeurs réelles lues sur le serveur ; aucun chiffre inventé hors ligne. *Contrôle* : e2e : hors ligne, l'entrée affiche son dernier état connu avec la mention « non mis à jour » plutôt qu'un chiffre frais.
+
 ---
 
 ### Task V1 : Coffre — clés et stockage (spec §27.2 à §27.4)
@@ -877,6 +988,10 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 - [ ] **Step 4 : Lancer** `npm test` → SUCCÈS.
 - [ ] **Step 5 : Commit** « feat(vault): clés du coffre (passkey PRF ou code), stockage chiffré, échéance, essais » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M14, limites du coffre à écrire.** Recenser dans `docs/superpowers/plans/2026-11-04-shhdrop-ecrans-decisions.md` les limites propres au coffre (spec §27 : appareil perdu, sauvegardes du système, copie déjà ouverte, etc.), chacune avec son renvoi de paragraphe de la spec, pour que la Task 25 les reprenne dans « Ce que Shhdrop ne peut pas faire ». *Contrôle* : le fichier contient la liste ; le test de la Task 25 vérifie que chaque limite listée figure dans la page.
+- [ ] **Texte de confiance.** Aucune formule absolue sur la protection locale (« inviolable », « personne ne peut lire ») dans les messages d'erreur ou journaux produits par `vault/`. *Contrôle* : le scan de mots interdits de la Task 27 couvre les chaînes de `vault/` ; aucun message n'inclut de nom d'élément ni de clé.
+
 ### Task V2 : Coffre — écrans (spec §27.6)
 
 **Files:**
@@ -889,6 +1004,11 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 - [ ] **Step 4 : Lancer** → SUCCÈS.
 - [ ] **Step 5 : Commit** « feat(vault): garder dans le coffre, écran du coffre, comptes à rebours » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M11, état lisible.** Chaque élément du coffre affiche une icône et un mot (par exemple conservé, expire bientôt, détruit) via `StateChip.svelte`, jamais la couleur seule ; chiffres issus de l'état réel (jours restants, essais restants lus dans les constantes). *Contrôle* : e2e `vault.spec.ts` : mot visible pour chaque état ; `axe` ; `forcedColors`.
+- [ ] **M6, capsule verrouillée.** L'écran du coffre reprend la capsule verrouillée de la Task 20 pour l'élément fermé. *Contrôle* : `data-state="locked"` puis `"open"`.
+- [ ] **B2 et textes.** Aucune phrase de l'écran ne dit « le serveur ne voit rien » ; formules autorisées : « Sans compte. Ni pour envoyer, ni pour recevoir. » et « Le serveur ne reçoit que des données chiffrées, jamais la clé. » *Contrôle* : scan Task 27.
+
 ### Task V3 : Coffre — vérification et liste manuelle
 
 **Files:**
@@ -899,6 +1019,10 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 - [ ] **Step 2 : Lancer** → SUCCÈS exigé.
 - [ ] **Step 3 : Liste manuelle** : iPhone (Safari 18+, PWA installée, passkey iCloud), Android (Chrome, passkey Google) : garder, verrouiller en arrière-plan, déverrouiller, 5 échecs avec un code, effacement à l'échéance au relancement, coffre plein.
 - [ ] **Step 4 : Commit** « test(vault): le serveur n'apprend rien du coffre, liste manuelle » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **B2, pas de « ne voit rien » dans l'interface.** « Le serveur ne voit rien » reste le nom interne du test, jamais un texte d'écran (le serveur voit l'adresse IP, les tailles, les heures). *Contrôle* : `vault-sees-nothing.spec.ts` capture le texte de tous les écrans du coffre et le passe dans la liste de motifs interdits de la Task 27.
+- [ ] **Liste manuelle complétée.** Ajouter à la liste : lecture VoiceOver/TalkBack des états (mot présent), `prefers-reduced-motion` sur la capsule verrouillée, et vérification que « Garder dans le coffre » n'est jamais présenté comme une protection contre la capture d'écran. *Contrôle* : lignes présentes dans le fichier de décisions.
 
 ---
 
@@ -913,6 +1037,16 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 - [ ] **Step 4 : Lancer** → SUCCÈS.
 - [ ] **Step 5 : Commit** « feat(ui): pages sécurité, confidentialité, 404 » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M13, expliquer le `#` avec un exemple.** Section « Comment fonctionne le lien » : lien d'exemple fixe de la forme réelle (Task K2), dont la partie après `#` est surlignée par un `<mark>` avec légende : « Cette partie reste dans votre navigateur : elle n'est jamais envoyée au serveur. » Texte long : « La clé est dans la fin du lien, après le signe `#`. Les navigateurs n'envoient jamais cette partie au serveur. Sans elle, ce que nous stockons est illisible, pour nous aussi. » Aucun nom d'algorithme. *Contrôle* : e2e `pages.spec.ts` : l'exemple n'est pas un `<a>` et n'a pas d'`href` ; le texte du `<mark>` égale exactement ce qui suit le premier `#` de l'exemple ; la valeur est une constante marquée « exemple », jamais produite par le générateur de clés ; le surlignage n'est pas porté par la couleur seule (soulignement ou contour, visible avec `forcedColors: "active"`) ; `axe` sans violation.
+- [ ] **M14, ce que Shhdrop ne peut pas faire.** Bloc d'ancre `#limites` en langage simple, repris de spec §18 : « Nous ne pouvons pas empêcher une capture d'écran. Le serveur voit l'adresse IP de connexion. Si le site lui-même était piégé, il pourrait voler les clés : c'est pour cela que chaque version est vérifiable. » plus les limites du coffre (Task V1). Lien « Ce que Shhdrop ne peut pas faire → » depuis l'accueil (modifier `Home.svelte`). *Contrôle* : e2e : le lien de l'accueil amène au bloc et le focus y arrive ; chaque limite listée dans le fichier de décisions (spec §18 et coffre) a une phrase correspondante.
+- [ ] **B1, exception reCAPTCHA.** Texte « Pas de traçage » : « Aucun traceur, aucune mesure d'audience, aucune publicité. » et, en long, la phrase de la Task 14 avec l'exception Google. Ajouter la ligne sur l'adresse IP : « Votre adresse IP n'est pas enregistrée. » avec le long « Le serveur voit votre adresse IP le temps de la connexion, comme tout site web, mais ne l'écrit nulle part. Elle sert seulement, en mémoire, à limiter les abus. » (et « Google verra votre adresse IP » si le propriétaire valide la Task 16). *Contrôle* : `i18n.test.ts` : le motif « aucun tiers » exige « Google » ou « reCAPTCHA » dans `pages.fr.ts`, `pages.en.ts`.
+- [ ] **B3, aucune allégation d'audit ni de pays d'hébergement avant qu'elles soient vraies.** *Contrôle* : `pages.test.ts` : constantes `AUDITS = []` et `HOSTING_COUNTRY = null` ; tant qu'elles sont vides, le scan échoue sur `/audit/i`, « Suisse », « Islande », « Switzerland », « Iceland » ; le jour du choix (spec §15.1), le pays est ajouté à la page Confidentialité et la constante renseignée.
+- [ ] **M5.** Les chiffres de la page (24 h au plus, 10 au plus, 5 essais, 1 Go) viennent des constantes, pas du texte. *Contrôle* : changer une constante change la page (test unitaire).
+- [ ] **Anti-motifs : cookies, domaine, noms de fichiers.** Phrase « Pas de cookie de mesure, donc pas de bandeau. » ; « Sans compte. Ni pour envoyer, ni pour recevoir. » ; « Même les noms de vos fichiers sont chiffrés. » ; le seul domaine de Shhdrop est écrit en clair (`location.host`), les liens ne sont jamais raccourcis par un service tiers. *Contrôle* : e2e : aucun `role="dialog"` au chargement, `context.cookies()` vide après navigation ; le texte contient `location.host`.
+- [ ] **M15, preuves vérifiables.** Pied de page : « Code public » (dépôt) et « Vérifier cette version » (cible livrée en Task C3) ; pas de compteur d'étoiles chargé depuis GitHub. Texte : « Code public. Chaque version peut être vérifiée. » seulement quand C1 à C3 sont livrées. Aucune formule « Audité ». *Contrôle* : e2e : aucune requête vers `api.github.com` ni `shields.io` ; les liens externes ont `rel="noopener noreferrer"`.
+- [ ] **Conditions.** Si le propriétaire fournit le texte (voir Task 13), ajouter la section « Conditions » à `PageConfidentialite.svelte` avec ancre ; sinon ne rien afficher. *Contrôle* : l'ancre existe si et seulement si la ligne de la Task 13 existe.
+
 ---
 
 ### Task 26 : PWA (manifeste, icônes, sans service worker)
@@ -926,6 +1060,10 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 - [ ] **Step 3 : Implémenter** (icône capsule au contour ouvert, PNG par `gen-icons.mjs` commités).
 - [ ] **Step 4 : Lancer** → SUCCÈS (démo comprise).
 - [ ] **Step 5 : Commit** « feat(pwa): manifeste et icônes, sans service worker » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M7, la marque est l'illustration.** Icône : capsule dont le contour a une ouverture de 60°, constante unique `OPENING_DEG = 60` partagée par `gen-icons.mjs` et le composant de logo. Aucune image tierce ni photo. *Contrôle* : `pwa.spec.ts` et test de `gen-icons` : l'écart angulaire calculé sur le tracé de `icon.svg` vaut 60° ± 1° ; `icon.svg` n'a ni `<image>`, ni `href` externe, ni attribut `style` ; l'icône maskable garde la capsule dans la zone sûre.
+- [ ] **Anti-motifs « offre » et textes.** Aucun encart d'installation promotionnel : aucun écouteur `beforeinstallprompt` qui affiche une bannière. Le manifeste n'a aucune URL externe et sa description ne contient aucune allégation d'audit ni de pays (B3). *Contrôle* : `source-rules.test.ts` interdit la chaîne `beforeinstallprompt` dans une bannière ; test du manifeste : champs relatifs, description sans mots interdits.
 
 ---
 
@@ -947,6 +1085,11 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 - [ ] **Step 3 : Lancer** `make test && make test-ui` + commande démo → SUCCÈS ; joindre le nombre de tests et la liste des captures.
 - [ ] **Step 4 : Commit** « test(ui): parcours complets, garde « le serveur ne voit rien » dans le navigateur » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **Scan des textes de confiance sur tous les écrans.** Fichier partagé `web/src/i18n/trust-copy.ts` (liste de motifs interdits, utilisée par `i18n.test.ts` et par ces parcours) : `/100\s?%/`, « inviolable », « impossible à pirater », « ne voit rien », « militaire », « personne, nous compris », « anonyme », « audité » (sauf `AUDITS` non vide, Task 25), « aucun tiers » sans mention de Google, « il n'existe plus nulle part », « disparaît de partout », noms d'algorithmes et tailles de clé. *Contrôle* : `full.spec.ts` récupère `innerText` de chaque écran traversé (accueil, scellement, lien prêt, gestion, ouverture, contenu, détruit, coffre, pages) et échoue sur toute correspondance ; un test négatif prouve que le scan détecte une chaîne piégée.
+- [ ] **M3, M9, M6, signatures S1 à S5 dans le parcours.** Le parcours complet vérifie : coches dans l'ordre (M3, avec envoi anticipé) ; phrase d'avertissement avant ouverture et compteur inchangé au rechargement (M9) ; `data-state` de la capsule : `sealing` → `sealed` → `locked` → `open` → `destroyed` (M6) ; fiche du serveur sans nom, sans texte, sans clé (S1) ; deux cartes séparées et mode dictée (S2, S5) ; contour de temps mis à jour à la minute (S3) ; reçu de destruction après la réponse (S4). *Contrôle* : les assertions sont dans `full.spec.ts` ; chaque motif a au moins une assertion nommée par son numéro dans le titre du test.
+- [ ] **Aucune ressource tierce.** Journal de toutes les requêtes du parcours : une seule origine, sauf après clic sur « Continuer avec Google » dans le test du repli (B1). *Contrôle* : `sees-nothing-ui.spec.ts` échoue sur toute autre origine ; le cas « vocal » (Task 12) et le cas « fiche du serveur » (Task 19) sont ajoutés au test « le serveur ne voit rien ».
+
 ---
 
 ### Tasks C1 à C4 : code vérifiable (spec §28)
@@ -965,6 +1108,10 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 - [ ] **Step 4 : Lancer** `make repro` (identique deux fois de suite) et `npm test` → SUCCÈS ; si une différence apparaît, la corriger à sa source, jamais l'exclure de la comparaison.
 - [ ] **Step 5 : Commit** « build: builds reproductibles, manifeste de version, workflow de signature » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M15, « chaque version publiée est signée » doit être vrai.** La phrase de confiance « Code public. Chaque version peut être vérifiée. » et le texte long (« Chaque version publiée est signée, et n'importe qui peut vérifier que le site sert exactement ce code ») ne sont publiés qu'une fois `release.yml` produisant le manifeste et sa signature. *Contrôle* : le job de publication échoue sans fichier de signature ; le test de la Task 25 n'affiche la phrase que si `releases/web/<version>` existe.
+- [ ] **B3.** Le manifeste de version ne contient aucune allégation d'audit ni de pays. *Contrôle* : `release-manifest.test.ts` : champs autorisés listés, aucun champ libre.
+
 ### Task C2 : SRI et absence d'import dynamique
 
 **Files:**
@@ -976,6 +1123,10 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 - [ ] **Step 3 : Implémenter** spec §28.3.
 - [ ] **Step 4 : Lancer** `npm test && npm run build && node scripts/check-dist.mjs && make test-ui` → SUCCÈS.
 - [ ] **Step 5 : Commit** « build: SRI sur scripts et styles, pas d'import dynamique en production » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **Aucune ressource tierce dans l'application, exception isolée (B1).** La chaîne « recaptcha » n'apparaît que dans `dist-verif/`, jamais dans `dist/`. *Contrôle* : `check-dist.mjs` : échec si `dist/` contient `recaptcha`, `gstatic` ou `google.com` ; seule URL absolue autorisée dans l'application : l'origine de vérification lue de la configuration.
+- [ ] **Texte de confiance.** « Ce site ne charge rien depuis un autre site » n'est vrai que si SRI et absence d'import dynamique externe sont vérifiés. *Contrôle* : le test de la Task 25 renvoie à ce contrôle en commentaire.
 
 ### Task C3 : Vérificateur, page « Vérifier cette version », documentation technique publique
 
@@ -989,6 +1140,11 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 - [ ] **Step 4 : Lancer** → SUCCÈS (démo comprise).
 - [ ] **Step 5 : Commit** « feat(verify): vérificateur, page Vérifier cette version, documentation technique publique » et push.
 
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M15, preuves vérifiables plutôt que badges.** Page « Vérifier cette version » : « Le code est public. Chaque version publiée est signée, et n'importe qui peut vérifier que le site sert exactement ce code, avec un outil qui ne vient pas de ce site. » ; liens du pied de page « Code public » et « Vérifier cette version ». Pas de compteur d'étoiles chargé depuis un tiers. *Contrôle* : e2e `verifier.spec.ts` : les deux liens existent dans le pied de chaque page ; aucune requête vers `api.github.com` ni `shields.io` ; la page ne contient ni « audité » ni badge.
+- [ ] **M14.** La page renvoie à `#limites` (Task 25) : « Ce que Shhdrop ne peut pas faire → ». *Contrôle* : le lien aboutit au bloc.
+- [ ] **Texte juste sur la vérification.** Le document technique (`docs/securite-technique.md`) est le seul endroit des noms d'algorithmes (interdits à l'écran). *Contrôle* : le scan de la Task 27 passe sur les pages ; le document peut les nommer.
+
 ### Task C4 : Service worker minimal d'épinglage (conditionnelle : seulement si Q-C1 est acceptée)
 
 **Files:**
@@ -1000,6 +1156,9 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 - [ ] **Step 3 : Implémenter** spec §28.6. Mettre à jour spec §10 et UI §14.1 (règle « pas de service worker » remplacée) dans le même commit.
 - [ ] **Step 4 : Lancer** `make test && make test-ui` → SUCCÈS.
 - [ ] **Step 5 : Commit** « feat(pwa): service worker minimal d'épinglage (hors ligne pour le coffre) » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **Honnêteté sur ce que l'épinglage change.** Si Q-C1 est acceptée, la phrase « Si le site lui-même était piégé, il pourrait voler les clés : c'est pour cela que chaque version est vérifiable » (Task 25) reste exacte et ne devient pas « impossible » ; aucune page ne dit « fonctionne hors ligne » au-delà du coffre. *Contrôle* : test de textes : les mots « hors ligne » n'apparaissent que dans le contexte du coffre ; le service worker ne met en cache aucune ressource d'une autre origine (test de portée).
 
 ---
 
@@ -1015,3 +1174,81 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 - [ ] **Step 4 : DESIGN.md** : jetons et règles tels que construits ; écarts avec UI §3–§8 signalés au propriétaire.
 - [ ] **Step 5 : Liste de vérification manuelle** (spec §14) dans le fichier de décisions : iPhone et Android réels — photo (orientation), vocal croisé, vidéo d'iPhone sur Android, PDF, dépôt et collage, réordonnancement avec VoiceOver et TalkBack (mode déplacement), coupure réseau et passage en arrière-plan pendant l'envoi, pause, annulation, mauvais mot de passe, expiration, destruction, installation PWA, aucun gestionnaire de mots de passe qui propose d'enregistrer, navigateur intégré d'Instagram, repli reCAPTCHA, démo sur `skoow.github.io/Shhdrop`.
 - [ ] **Step 6 : Commit** « docs(ui): DESIGN.md, contrôle visuel, liste manuelle » et push.
+
+**Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
+- [ ] **M7 et M8, matière de la lumière.** Aurore de luminance ≤ 0,050 derrière le texte (mesurée), grain fixe à 0,035, couches retirées en `prefers-contrast: more` et en `forced-colors`. *Contrôle* : e2e avec `contrast: "more"` et `forcedColors: "active"` : `background-image: none` sur les couches décoratives ; mesure de luminance consignée dans `DESIGN.md` ; aucune ressource d'image tierce, aucun `style=""` dans `dist` (`check-dist.mjs`).
+- [ ] **M16 et B4, pause de l'ambiance.** Bouton discret « Mettre l'ambiance en pause » (icône avec nom accessible) qui arrête l'aurore et la lumière du réceptacle ; choix gardé en `localStorage` dans un `try`. **À valider par le propriétaire (B4)** ; si refusé, documenter dans `DESIGN.md` pourquoi l'ambiance est exemptée de WCAG 2.2.2 (mouvement non essentiel, très lent). *Contrôle* : e2e : pause activée → `document.getAnimations()` ne contient aucune animation `running` sur l'accueil, état conservé après rechargement ; `localStorage` qui lève une exception → la page fonctionne ; `reducedMotion` → arrêtée d'office.
+- [ ] **M17, sobriété.** Une seule couleur d'accent (menthe) réservée à « scellé, actif, sûr » ; aucun texte en dégradé. *Contrôle* : `grep -rn "background-clip: text\|text-fill-color: transparent" web/src` ne renvoie rien ; la liste des usages du jeton d'accent est relue et consignée dans `DESIGN.md`.
+- [ ] **Balayage des anti-motifs.** Aucun bandeau de cookies, aucune offre, aucune publicité, aucun fond saturé, aucune animation sans pause ; tout `button[disabled]` rencontré dans les parcours a une raison visible et reliée. *Contrôle* : balayage Playwright des écrans de la Task 27 ; sortie jointe aux captures.
+- [ ] **Accueil : sous-titre, B2, motif 2.** Titre conservé « Un lien, un mot de passe, puis plus rien. » ; sous-titre proposé : « Textes, photos, vidéos, vocaux, documents. Chiffrés sur votre appareil ; le serveur ne reçoit jamais la clé. » ; volet chiffré décoratif immobile en mouvement réduit (M2, Task 17). **B2 (faible)** : le libellé du schéma « Serveur — ne lit rien » peut se lire « ne voit rien » ; proposer « ne peut pas lire » ou « reçoit du chiffré », à trancher par le propriétaire avec UI §9.1, `fr.ts`, `en.ts` et tests. *Contrôle* : décision consignée dans le fichier de décisions ; capture de l'accueil.
+- [ ] **B3 sur le build.** *Contrôle* : `grep -rniE "\baudit|suisse|islande|switzerland|iceland" web/dist` est vide tant que `AUDITS` et `HOSTING_COUNTRY` (Task 25) sont vides.
+- [ ] **Annexe du plan.** *Contrôle* : `grep -c "Apports de l'étude des concurrents\*\*" docs/superpowers/plans/2026-11-04-shhdrop-ecrans.md` renvoie 31 (une par tâche listée) et l'annexe contient 18 lignes de motifs et 5 lignes de signatures.
+
+---
+
+## Annexe : apports de l'étude des concurrents, par motif et par tâche
+
+Source : `docs/superpowers/design/benchmark-2026-11.md`. Chaque ligne renvoie à la tâche dont le bloc « Apports de l'étude des concurrents » porte le motif, avec un contrôle. Les motifs qui touchent aussi l'accueil (Task 7, Task DA) sont repris par la Task 10 (composeur, ligne de preuves) et la Task 28 (contrôle visuel).
+
+### Les 18 motifs
+
+| # | Motif | Tâche(s) | Contrôle principal |
+|---|---|---|---|
+| 1 | L'outil est l'accroche, sans barrière de conditions | 10, 11, 12, 13 | Rangée d'ajout dans la fenêtre à 390 × 844 ; aucune case avant l'ajout |
+| 2 | Montrer ce que reçoit le serveur (volet décoratif) | 17, 28 | Générateur à graine fixe, jamais un tampon réel ; statique en mouvement réduit |
+| 3 | Coches d'état successives après progrès réel | 14, 17, K3, 27 | « Envoyé » absent avant l'accusé du dernier segment, « Scellé » avant `finalize` |
+| 4 | Options écrites comme une phrase | 13, R | Contrôles segmentés natifs ; pluriel testé |
+| 5 | Chiffres concrets plutôt qu'adjectifs | 10, 17, 23, 25, H, K1 | Chiffres lus dans les constantes ; `tabular-nums` |
+| 6 | Un objet unique qui traverse le parcours (capsule) | 17, 18, 20, 21, 24, V2, 27 | `data-state` de la capsule : `sealing`, `sealed`, `locked`, `open`, `destroyed` |
+| 7 | La marque est l'illustration | 26, 28 | Ouverture de 60°, aucune image tierce, aucun `style=""` |
+| 8 | Lumière qui a de la matière (grain) | 28 | Luminance ≤ 0,050 ; retirée en contraste renforcé et couleurs forcées |
+| 9 | Le geste irréversible annoncé avant | 20, K3, 27 | Phrase avant ouverture ; compteur inchangé au rechargement |
+| 10 | Signaler et supprimer chez le destinataire | 24 | Libellé « Détruire ce partage pour tout le monde », filet, style secondaire |
+| 11 | Cycle de vie lisible d'un coup d'œil | 19, H, V2 | Icône et mot par état, `forcedColors` |
+| 12 | État « en cours » et arrêt toujours visibles | 17, 18, 19, H | Pastille « Actif · s'efface vers 9 h 45 » ; bouton dans la fenêtre |
+| 13 | Expliquer le `#` avec un exemple | 25, K2 | `<mark>` = ce qui suit le premier `#` ; exemple non cliquable |
+| 14 | L'aveu des limites | 25, V1, C3, C4 | Bloc `#limites` ; lien depuis l'accueil |
+| 15 | Preuves vérifiables plutôt que badges | 25, C1, C3 | Pas de compteur tiers ; phrase publiée seulement si la signature existe |
+| 16 | Pause visible sur l'animation d'accroche | 28 | Aucune animation `running` après pause ; à valider (B4) |
+| 17 | Grande typographie retenue, peu de couleurs | 28 | Aucun `background-clip: text` ; usages de l'accent consignés |
+| 18 | Lien prêt hiérarchisé en deux cartes | 18 | Ordre lien, rappel, mot de passe ; Copier lit l'état |
+
+### Les 5 idées signature
+
+| # | Idée | Tâche | Contrôle principal |
+|---|---|---|---|
+| S1 | La vue du serveur | 19 (et 27) | `serverCard(status)` pure ; absente en `uploading` ; aucune donnée du contenu |
+| S2 | Deux chemins pour deux secrets | 18 | Éventail de 640 ms ; deux groupes nommés |
+| S3 | Le temps qui reste, dessiné | 20 (branché en 19) | Tracé `pathLength="100"`, mise à jour à la minute, aucune boucle d'animation |
+| S4 | Le reçu de destruction | 24 (repris par 19) | Affiché après la réponse du serveur seulement |
+| S5 | Le mode dictée | 18 | Étiquette non vide pour chaque caractère de `generatePassword()` ; aucun service tiers |
+
+### Anti-motifs
+
+| Anti-motif | Tâche(s) |
+|---|---|
+| « 100 % sûr », « impossible à pirater » | 27, 25 |
+| « Personne, nous compris, ne peut lire » sans réserve | 25, 27 |
+| Badges creux | 25, 28 |
+| Noms d'algorithmes à l'écran | 25, 27, C3 |
+| Barrière « J'accepte les conditions » | 10, 13 |
+| Bannière de cookies | 25 |
+| Offre payante, bandeau de soldes | 26, 28 |
+| Publicité chez le destinataire | 20, 21 |
+| Fond saturé, texte en dégradé | 28 |
+| Animation sans pause | 12, 28 |
+| Bouton désactivé sans dire pourquoi | 10, 11, 13, 16, 28 |
+| Domaines voisins et raccourcisseurs | 25, K2 |
+| Bloquer le téléchargement présenté comme une protection | 22, 23, R |
+| Motifs à ne pas prendre : lien avant `finalize`, options modifiables, envoi par e-mail, aperçu publicitaire | 17, 19, 18, 21 |
+
+### Signalements
+
+| # | Sujet | Tâche(s) |
+|---|---|---|
+| B1 | Exception reCAPTCHA à chaque « aucun tiers » | 14, 15, 16, 21, 25, 27, C2 |
+| B2 | « Serveur — ne lit rien » | 28, V2, V3 (décision du propriétaire) |
+| B3 | Aucune allégation d'audit ni de pays avant qu'elles soient vraies | 25, 26, 28, C1 |
+| B4 | Pause de l'ambiance, contrôle et clé `localStorage` | 28 (décision du propriétaire) |
+| B5 | La fiche du serveur seulement après scellement, valeurs réelles | 19 |
+| B6 | Information (partages de test de l'étude) | Sans objet, rien à faire |
