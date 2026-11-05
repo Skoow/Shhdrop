@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { inflateSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -178,6 +179,25 @@ describe("thème unique sombre et contraste forcé", () => {
     expect(css).toMatch(/CanvasText/);
     expect(css).toMatch(/Highlight/);
   });
+  it("index.html : ni style=, ni <style>, ni script en ligne, ni URL http(s)", () => {
+    const html = readFileSync(join(webDir, "index.html"), "utf8");
+    expect(html).not.toMatch(/\sstyle\s*=/i);
+    expect(html).not.toMatch(/<style[\s>]/i);
+    const scripts = [...html.matchAll(/<script\b[^>]*>/gi)].map((m) => m[0]);
+    expect(scripts.length).toBeGreaterThan(0);
+    for (const t of scripts) expect(t).toMatch(/\ssrc\s*=/i);
+    expect(html).not.toMatch(/https?:\/\//i);
+  });
+  it("forced-colors : ::selection en HighlightText sur Highlight", () => {
+    const block = /@media \(forced-colors: active\)\s*\{([\s\S]*)\}\s*$/.exec(css);
+    expect(block).not.toBeNull();
+    expect(block![1]).toMatch(/::selection\s*\{[^}]*color:\s*HighlightText/);
+    expect(block![1]).toMatch(/--selection:\s*Highlight;/);
+  });
+  it("package.json : engines.node couvre zlib.crc32 (>= 22.2)", () => {
+    const pkg = JSON.parse(readFileSync(join(webDir, "package.json"), "utf8"));
+    expect(pkg.engines?.node).toBe(">=22.2.0");
+  });
   it("aucune ressource externe ni data:", () => {
     for (const f of ["tokens.css", "base.css", "fonts.css"]) {
       const t = read(f);
@@ -226,10 +246,29 @@ describe("grain (UI §7.4)", () => {
     expect(png.readUInt32BE(16)).toBe(128);
     expect(png.readUInt32BE(20)).toBe(128);
   });
-  it("déterministe : gen-grain.mjs reproduit le fichier commité", async () => {
+  /** IHDR + pixels décodés (inflate de l'IDAT) : indépendant de la version de zlib. */
+  function decode(buf: Buffer) {
+    let off = 8;
+    let ihdr: Buffer = Buffer.alloc(0);
+    const idat: Buffer[] = [];
+    while (off < buf.length) {
+      const len = buf.readUInt32BE(off);
+      const type = buf.subarray(off + 4, off + 8).toString("latin1");
+      const data = buf.subarray(off + 8, off + 8 + len);
+      if (type === "IHDR") ihdr = data;
+      if (type === "IDAT") idat.push(data);
+      off += 12 + len;
+    }
+    return { ihdr, pixels: inflateSync(Buffer.concat(idat)) };
+  }
+  it("déterministe : gen-grain.mjs reproduit l'en-tête et les pixels du fichier commité", async () => {
     // @ts-expect-error module .mjs sans déclarations
     const { buildGrain } = await import("../../scripts/gen-grain.mjs");
-    expect(Buffer.compare(buildGrain(), png)).toBe(0);
+    const a = decode(buildGrain());
+    const b = decode(png);
+    expect(a.ihdr.equals(b.ihdr)).toBe(true);
+    expect(a.pixels.length).toBe(128 * (1 + 128 * 2));
+    expect(a.pixels.equals(b.pixels)).toBe(true);
   });
 });
 
