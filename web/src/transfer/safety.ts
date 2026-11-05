@@ -9,27 +9,44 @@ const EXT_MAX = 16; // au-delà, « l'extension » n'en est pas une : coupe simp
 
 // Inversions de sens d'écriture (U+202A–U+202E, U+2066–U+2069), marques LRM/RLM/ALM,
 // contrôles C0, DEL et C1, séparateurs de chemin.
-const STRIP = /[‪-‮⁦-⁩‎‏؜\u0000-\u001F\u007F-\u009F/\\]/gu;
+// Largeur nulle (U+200B–U+200D, U+2060) et étiquettes (U+E0000–U+E007F) : invisibles, ils
+// permettent de camoufler une extension ou de rendre deux noms identiques à l'œil.
+const STRIP = /[‪-‮⁦-⁩‎‏؜\u0000-\u001F\u007F-\u009F/\\\u200B-\u200D\u2060\u{E0000}-\u{E007F}]/gu;
 
 /**
- * Nom à proposer au téléchargement : NFC ; sans inversion de sens, contrôle ni séparateur ;
+ * Nom à proposer au téléchargement : NFC ; sans inversion de sens, caractère de largeur nulle, contrôle ni séparateur ;
  * espaces regroupés ; sans points initiaux (fichier caché) ni points et espaces finaux
- * (Windows les retire : « a.exe. » deviendrait « a.exe ») ; 120 points de code au plus,
+ * (Windows les retire : « a.exe. » deviendrait « a.exe ») ; 120 points de code au plus (coupé entre deux graphèmes),
  * extension gardée ; « fichier » si rien ne reste.
  */
 export function safeName(raw: string): string {
-  let s = raw.normalize("NFC").replace(STRIP, "").replace(/\s+/gu, " ");
+  // Retrait avant la normalisation : « e » + largeur nulle + accent se compose en « é ».
+  let s = raw.replace(STRIP, "").normalize("NFC").replace(/\s+/gu, " ");
   s = s.replace(/^[\s.]+/u, "").replace(/[\s.]+$/u, "");
-  const cps = [...s];
-  if (cps.length > NAME_MAX) {
+  if ([...s].length > NAME_MAX) {
     const dot = s.lastIndexOf(".");
     const ext = dot > 0 ? [...s.slice(dot)] : [];
     s =
       ext.length > 1 && ext.length <= EXT_MAX
-        ? cps.slice(0, NAME_MAX - ext.length).join("").replace(/[\s.]+$/u, "") + ext.join("")
-        : cps.slice(0, NAME_MAX).join("").replace(/[\s.]+$/u, "");
+        ? takeGraphemes(s.slice(0, dot), NAME_MAX - ext.length).replace(/[\s.]+$/u, "") + ext.join("")
+        : takeGraphemes(s, NAME_MAX).replace(/[\s.]+$/u, "");
   }
   return s === "" ? "fichier" : s;
+}
+
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** Début de s fait de graphèmes entiers, d'au plus `budget` points de code. */
+function takeGraphemes(s: string, budget: number): string {
+  let out = "";
+  let used = 0;
+  for (const { segment } of GRAPHEMES.segment(s)) {
+    const n = [...segment].length;
+    if (used + n > budget) break;
+    out += segment;
+    used += n;
+  }
+  return out;
 }
 
 const PREVIEW: Record<string, PreviewKind> = {
@@ -65,7 +82,7 @@ export function previewKindOf(e: ManifestEntry): PreviewKind {
   return Object.hasOwn(PREVIEW, mime) ? PREVIEW[mime]! : "none";
 }
 
-const RISKY = new Set(["exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "js", "jar", "apk", "app", "dmg", "pkg", "sh", "html", "htm", "hta", "lnk", "iso"]);
+const RISKY = new Set(["exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "js", "jar", "apk", "app", "dmg", "pkg", "sh", "html", "htm", "hta", "lnk", "iso", "msix", "appx", "reg", "wsf", "cpl", "pif", "url", "command", "desktop"]);
 
 /** Extension exécutable ou interprétée : avertir avant l'enregistrement (spec §12). À appeler sur un nom passé par safeName. */
 export function isRiskyName(name: string): boolean {

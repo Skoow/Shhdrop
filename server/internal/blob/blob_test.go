@@ -113,3 +113,47 @@ func TestInvalidID(t *testing.T) {
 		}
 	}
 }
+
+// Tâche M, point 10 : RemoveProbes ne supprime que les fichiers ordinaires « .sonde-<chiffres> »
+// créés par CheckAllocate (os.CreateTemp), jamais un blob, un dossier ni un lien.
+func TestRemoveProbes(t *testing.T) {
+	s := newStore(t)
+	if err := s.Reserve(id1, 100); err != nil {
+		t.Fatal(err)
+	}
+	keep := []string{".sonde-abc", ".sonde-", ".sonde", "sonde-123", ".sonde-12x", "x.sonde-123"}
+	for _, n := range keep {
+		if err := os.WriteFile(filepath.Join(s.Dir, n), []byte("à garder"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	os.Mkdir(filepath.Join(s.Dir, ".sonde-777"), 0o700)
+	os.WriteFile(filepath.Join(s.Dir, ".sonde-777", "f"), []byte("x"), 0o600)
+	outside := filepath.Join(t.TempDir(), "cible")
+	os.WriteFile(outside, []byte("hors du dossier"), 0o600)
+	os.Symlink(outside, filepath.Join(s.Dir, ".sonde-888"))
+	gone := []string{".sonde-1", ".sonde-1234567890"}
+	for _, n := range gone {
+		os.WriteFile(filepath.Join(s.Dir, n), make([]byte, 4096), 0o600)
+	}
+	if err := s.RemoveProbes(); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range gone {
+		if _, err := os.Lstat(filepath.Join(s.Dir, n)); !os.IsNotExist(err) {
+			t.Fatalf("%s laissée : %v", n, err)
+		}
+	}
+	for _, n := range append(keep, id1, ".sonde-777", ".sonde-777/f", ".sonde-888") {
+		if _, err := os.Lstat(filepath.Join(s.Dir, n)); err != nil {
+			t.Fatalf("%s supprimée : %v", n, err)
+		}
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatal("cible du lien supprimée", err)
+	}
+	// Dossier absent : rien à faire.
+	if err := (&Store{Dir: filepath.Join(t.TempDir(), "absent")}).RemoveProbes(); err != nil {
+		t.Fatal(err)
+	}
+}

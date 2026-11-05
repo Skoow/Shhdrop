@@ -68,16 +68,18 @@ Commits : `24493ef` (F2, F3, F4, F8, F10), `485c752` (M3, F5, F6, F7), `87f3970`
 4. **Faible, exploitation** : `blob.ErrNoAllocate` est traduit en `ErrFull` (507), ce qui ne distingue pas un disque plein d'un système de fichiers incompatible. La sonde de démarrage empêche ce cas en production. Il n'existe pas de test unitaire de cette traduction : le crochet `fallocate` n'est accessible que dans `blob`.
 5. **Choix d'interprétation** : un dossier de données non vide doit contenir **à la fois** `shares.db` et `blobs/`. Le repli monopage ne s'applique qu'aux chemins sans extension. `safeName` retire aussi U+061C (marque arabe) et les points et espaces finaux. Liste MIME stricte : `audio/x-wav`, `image/heif` et les autres variantes donnent `none`.
 
-## Points mineurs restants après relecture (à traiter au début du Plan 2)
+## Points mineurs restants après relecture (traités par la tâche M, avant le Plan 2)
 
-1. Ignorer `lost+found` dans le contrôle « dossier vide » de `SHH_DATA_DIR` (volume dédié).
-2. `openShare`/`destroyShare` : refuser un mot de passe vide **avant** toute requête, avec une erreur distincte (`mot_de_passe_requis`).
-3. `SHH_TRUSTED_PROXY` : refuser les CIDR IPv4 écrits en IPv6 et les préfixes trop larges (exiger des réseaux privés ou ≥ /8).
-4. `safeName` : retirer aussi les caractères de largeur nulle (U+200B–U+200D, U+2060, étiquettes U+E00xx) ; couper par graphème.
-5. Liste des fichiers à risque : ajouter `.msix .appx .reg .wsf .cpl .pif .url .command .desktop`.
-6. Espace disque : utiliser `Frsize` quand il est non nul.
-7. « Le serveur ne voit rien » : parcourir aussi `Opened.destroy("report")`.
-8. Test de la conversion `ErrNoAllocate` → `ErrFull`.
-9. 404 pour tout préfixe `/api` sans tenir compte de la casse.
-10. Supprimer les fichiers de sonde `.sonde-*` au démarrage.
-11. Documenter qu'il faut au moins `SHH_STORAGE_MAX` + 1 Gio libres pour démarrer (§15.1).
+| # | Point | Fait | Test qui le couvre |
+|---|---|---|---|
+| 1 | `lost+found` ignoré dans le contrôle « dossier vide » de `SHH_DATA_DIR` (seulement si c'est un dossier ; un fichier de ce nom ou un autre contenu reste refusé) | fait | `TestServeIgnoresLostAndFound` (cmd/shhdrop) |
+| 2 | `openShare` / `destroyShare` (lien de partage) : mot de passe vide refusé avant toute requête et toute dérivation, `mot_de_passe_requis` (le lien est jugé avant ; lien de gestion non concerné) | fait | `client.test.ts` « mot de passe vide : refusé avant toute requête », « destroyShare : mot de passe vide refusé… » |
+| 3 | `SHH_TRUSTED_PROXY` : IPv4-dans-IPv6 refusé ; réseaux privés (RFC 1918, boucle locale, `fc00::/7`) ou préfixe ≥ /8 (IPv4), ≥ /32 (IPv6) | fait | `TestTrustedProxyShape` (config) |
+| 4 | `safeName` : largeur nulle (U+200B–U+200D, U+2060) et étiquettes (U+E0000–U+E007F) retirées avant la normalisation ; coupe par graphème (`Intl.Segmenter`), 120 points de code au plus | fait | `safety.test.ts` « retire les caractères de largeur nulle… », « coupe par graphème… » |
+| 5 | Fichiers à risque : `.msix .appx .reg .wsf .cpl .pif .url .command .desktop` ajoutés | fait | `safety.test.ts` « extensions exécutables ou interprétées » |
+| 6 | Espace disque : `Frsize` quand il est non nul (Linux ; macOS n'a que `Bsize`) | fait | `TestAvailBytes` (cmd/shhdrop) |
+| 7 | « Le serveur ne voit rien » parcourt aussi `Opened.destroy("report")` (second partage, requêtes, disque, mémoire, sorties) | fait | e2e `sees-nothing.test.ts` (liste des requêtes, `kLien`/`kAcces`/`id` du second partage) |
+| 8 | Conversion `ErrNoAllocate` → `ErrFull` (et aucune conversion des autres erreurs) | fait | `TestCreateNoAllocateIsFull` (share ; crochet `reserveBlob`) |
+| 9 | 404 uniforme pour `/api` et `/api/…` sans tenir compte de la casse (`/API/x`, `/Api`, `/api` : plus de repli SPA ni de 307) | fait | `TestAPIPrefixCaseInsensitive404` (api) |
+| 10 | Fichiers de sonde `.sonde-<chiffres>` supprimés au démarrage (fichiers ordinaires de `blobs/` seulement) | fait | `TestRemoveProbes` (blob), `TestServeRemovesLeftoverProbes` (cmd/shhdrop) |
+| 11 | Il faut au moins `SHH_STORAGE_MAX` + 1 Gio libres pour démarrer | fait (spécification §15.1) | documentation |

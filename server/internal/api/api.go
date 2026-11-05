@@ -65,13 +65,30 @@ func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captc
 	api.HandleFunc("POST /api/shares/{id}/done", s.done)
 	api.HandleFunc("POST /api/shares/{id}/destroy", s.destroy)
 	api.HandleFunc("GET /api/shares/{id}/status", s.status)
-	api.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeErr(w, http.StatusNotFound, "not_found") })
+	api.HandleFunc("/api/", notFoundAPI)
 
 	root := http.NewServeMux()
 	root.HandleFunc("GET /healthz", healthz)
 	root.Handle("/api/", s.guard(api))
-	root.Handle("/", static)
+	root.Handle("/api", s.guard(http.HandlerFunc(notFoundAPI))) // sans cela : 307 vers /api/
+	// /API/x, /Api… : jamais le repli SPA (200 + index.html), la même 404 que /api/… (limites comprises).
+	root.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isAPIPath(r.URL.Path) {
+			s.guard(http.HandlerFunc(notFoundAPI)).ServeHTTP(w, r)
+			return
+		}
+		static.ServeHTTP(w, r)
+	}))
 	return withHeaders(recoverPanic(root))
+}
+
+func notFoundAPI(w http.ResponseWriter, _ *http.Request) {
+	writeErr(w, http.StatusNotFound, "not_found")
+}
+
+// isAPIPath : « /api » ou « /api/… », sans tenir compte de la casse.
+func isAPIPath(p string) bool {
+	return len(p) >= 4 && strings.EqualFold(p[:4], "/api") && (len(p) == 4 || p[4] == '/')
 }
 
 // guard : adresse du client (de confiance) puis limite de débit, pour tout /api/*.

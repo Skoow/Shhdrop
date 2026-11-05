@@ -207,7 +207,7 @@ func (s *Service) Create(r CreateReq) (string, int, error) {
 	if used+size > s.StorageMax {
 		return "", 0, ErrFull
 	}
-	if err := s.Blobs.Reserve(id, size); err != nil {
+	if err := reserveBlob(s.Blobs, id, size); err != nil {
 		if errors.Is(err, blob.ErrNoAllocate) {
 			return "", 0, ErrFull // place impossible à garantir : refus, comme un disque plein
 		}
@@ -223,6 +223,9 @@ func (s *Service) Create(r CreateReq) (string, int, error) {
 	}
 	return id, segs, nil
 }
+
+// reserveBlob : réservation de la place (variable pour tester la conversion ErrNoAllocate).
+var reserveBlob = func(b *blob.Store, id string, size int64) error { return b.Reserve(id, size) }
 
 func fullMask(segs int) []byte {
 	m := make([]byte, (segs+7)/8)

@@ -1070,3 +1070,30 @@ func TestSweepStalledUpload(t *testing.T) {
 		t.Fatal(n, err)
 	}
 }
+
+// Tâche M, point 8 : un système de fichiers qui ne sait pas allouer (ErrNoAllocate, mode
+// SHH_BEHIND_PROXY=1) est refusé comme un disque plein, et ne laisse ni fichier ni ligne.
+func TestCreateNoAllocateIsFull(t *testing.T) {
+	s, _ := newSvc(t)
+	orig := reserveBlob
+	t.Cleanup(func() { reserveBlob = orig })
+	reserveBlob = func(*blob.Store, string, int64) error { return blob.ErrNoAllocate }
+	k := newKeys()
+	_, _, err := s.Create(k.req(1, 1, 1))
+	if !errors.Is(err, ErrFull) || errors.Is(err, blob.ErrNoAllocate) {
+		t.Fatal(err)
+	}
+	if ids, _ := s.Blobs.List(); len(ids) != 0 {
+		t.Fatal("fichier laissé", ids)
+	}
+	var n int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM shares`).Scan(&n); err != nil || n != 0 {
+		t.Fatal("ligne laissée", n, err)
+	}
+	// Une autre erreur n'est pas convertie en « plein ».
+	boom := errors.New("boum")
+	reserveBlob = func(*blob.Store, string, int64) error { return boom }
+	if _, _, err := s.Create(k.req(1, 1, 1)); !errors.Is(err, boom) || errors.Is(err, ErrFull) {
+		t.Fatal(err)
+	}
+}

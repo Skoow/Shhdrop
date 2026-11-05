@@ -160,3 +160,64 @@ func TestServeStaticDir(t *testing.T) {
 		t.Fatalf("/api/inconnu : %d", code)
 	}
 }
+
+// Tâche M, point 1 : un volume dédié contient lost+found (créé par mkfs ext4) ; il ne doit
+// pas faire passer le dossier pour celui d'un autre programme.
+func TestServeIgnoresLostAndFound(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "lost+found"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	startServe(t, baseCfg(dir))
+	// lost+found plus autre chose : toujours refusé.
+	dir = t.TempDir()
+	os.Mkdir(filepath.Join(dir, "lost+found"), 0o700)
+	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("à moi"), 0o644)
+	if err := serveErr(t, baseCfg(dir)); err == nil || !strings.Contains(err.Error(), "shares.db") {
+		t.Fatalf("serve = %v", err)
+	}
+	// Un simple fichier nommé lost+found n'est pas le dossier de mkfs : refusé.
+	dir = t.TempDir()
+	os.WriteFile(filepath.Join(dir, "lost+found"), []byte("x"), 0o644)
+	if err := serveErr(t, baseCfg(dir)); err == nil {
+		t.Fatal("fichier lost+found accepté")
+	}
+}
+
+// Tâche M, point 10 : une sonde laissée par un arrêt brutal est supprimée au démarrage ;
+// rien d'autre n'est touché.
+func TestServeRemovesLeftoverProbes(t *testing.T) {
+	dir := t.TempDir()
+	blobs := filepath.Join(dir, "blobs")
+	if err := os.Mkdir(blobs, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "shares.db"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	probe := filepath.Join(blobs, ".sonde-123456789")
+	other := filepath.Join(blobs, ".sonde-notes")
+	for _, f := range []string{probe, other} {
+		if err := os.WriteFile(f, make([]byte, 4096), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	startServe(t, baseCfg(dir))
+	if _, err := os.Stat(probe); !os.IsNotExist(err) {
+		t.Fatalf("sonde laissée : %v", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("fichier étranger supprimé : %v", err)
+	}
+}
+
+// Tâche M, point 6 : Statfs_t.Bsize n'est pas l'unité de Bavail sur tous les systèmes de
+// fichiers ; Frsize l'est quand il est non nul.
+func TestAvailBytes(t *testing.T) {
+	if got := availBytes(1000, 4096, 512); got != 1000*512 {
+		t.Fatal(got)
+	}
+	if got := availBytes(1000, 4096, 0); got != 1000*4096 {
+		t.Fatal(got)
+	}
+}

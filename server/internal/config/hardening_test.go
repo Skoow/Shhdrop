@@ -102,3 +102,27 @@ func TestStorageMaxCanonical(t *testing.T) {
 		}
 	}
 }
+
+// Tâche M, point 3 : CIDR IPv4 écrits en IPv6 et préfixes trop larges.
+func TestTrustedProxyShape(t *testing.T) {
+	for _, v := range []string{
+		"::ffff:10.0.0.0/104", "::ffff:172.18.0.0/112", "::ffff:0:0/96", // IPv4-dans-IPv6
+		"10.0.0.0/7", "128.0.0.0/1", "64.0.0.0/2", "192.0.0.0/4", "11.0.0.0/7", // IPv4 trop large et public
+		"2000::/3", "2001::/16", "2001:db8::/31", // IPv6 trop large et public
+		"fc00::/6", // dépasse fc00::/7
+	} {
+		env(t, map[string]string{"SHH_DATA_DIR": "/d", "SHH_BEHIND_PROXY": "1", "SHH_TRUSTED_PROXY": v})
+		if _, err := FromEnv(); err == nil {
+			t.Errorf("SHH_TRUSTED_PROXY=%q accepté", v)
+		}
+	}
+	for _, v := range []string{
+		"10.0.0.0/8", "172.16.0.0/12", "172.18.0.0/16", "192.168.0.0/16", "192.168.1.5/32", "127.0.0.0/8", "127.0.0.1/32",
+		"fc00::/7", "fd12:3456::/32", "::1/128", "8.0.0.0/8", "203.0.113.0/24", "2001:db8::/32", "2001:db8:1::/48",
+	} {
+		env(t, map[string]string{"SHH_DATA_DIR": "/d", "SHH_BEHIND_PROXY": "1", "SHH_TRUSTED_PROXY": v})
+		if _, err := FromEnv(); err != nil {
+			t.Errorf("SHH_TRUSTED_PROXY=%q refusé : %v", v, err)
+		}
+	}
+}

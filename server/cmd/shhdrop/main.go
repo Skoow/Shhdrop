@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
@@ -87,6 +88,9 @@ func prepareDataDir(dir string) error {
 	if err != nil {
 		return fmt.Errorf("SHH_DATA_DIR %s : %w", dir, err)
 	}
+	// lost+found : dossier créé par mkfs à la racine d'un volume ext4 dédié ; ignoré ici.
+	// Un simple fichier de ce nom, lui, n'est pas celui de mkfs.
+	es = slices.DeleteFunc(es, func(e fs.DirEntry) bool { return e.Name() == "lost+found" && e.Type().IsDir() })
 	if len(es) == 0 {
 		return nil
 	}
@@ -205,6 +209,10 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 		return err
 	}
 	if err := checkStorage(cfg.DataDir, cfg.StorageMaxBytes, used); err != nil {
+		return err
+	}
+	// Sondes laissées par un arrêt brutal pendant CheckAllocate.
+	if err := svc.Blobs.RemoveProbes(); err != nil {
 		return err
 	}
 	if svc.Blobs.NoSparse {

@@ -278,6 +278,8 @@ export async function openShare(
   net?: api.Net,
 ): Promise<Opened> {
   const p = parseShare(link, expectedOrigin);
+  // Avant toute requête et toute dérivation (coûteuse) : un champ vide n'est pas un mot de passe.
+  if (password === "") throw new Error("mot_de_passe_requis");
   const c = api.ctx(p.origin, net);
   return guarded(async () => {
     const { kAcces } = await deriveAccess(p.kLien);
@@ -401,7 +403,7 @@ export async function collectToBlob(open: Opened, i: number, foldBytes = FOLD_BY
  */
 export async function destroyShare(link: string, expectedOrigin: string, opts: { password?: string } & api.Net = {}): Promise<void> {
   const p = parseFor(link, expectedOrigin);
-  if (p.kind === "s" && opts.password === undefined) throw new Error("mot_de_passe_requis");
+  if (p.kind === "s" && (opts.password === undefined || opts.password === "")) throw new Error("mot_de_passe_requis");
   const c = api.ctx(p.origin, opts);
   await guarded(async () => {
     if (p.kind === "m") return api.destroy(c, p.id, { sGestion: p.sGestion });

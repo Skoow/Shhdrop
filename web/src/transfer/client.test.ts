@@ -131,6 +131,15 @@ describe("openShare : correspondance des erreurs", () => {
   });
   it("lien invalide : erreur locale lien_invalide", async () => {
     await expect(openShare(MANAGE, PW, ORIGIN)).rejects.toThrow("lien_invalide");
+    // Le lien est jugé avant le mot de passe.
+    await expect(openShare(MANAGE, "", ORIGIN)).rejects.toThrow("lien_invalide");
+  });
+  it("mot de passe vide : refusé avant toute requête, erreur distincte (tâche M, point 2)", async () => {
+    const s = server(() => undefined);
+    const before = captured.buffers.length;
+    expect(await reject(openShare(LINK, "", ORIGIN, undefined, s.net))).toEqual(new Error("mot_de_passe_requis"));
+    expect(s.calls).toEqual([]);
+    expect(captured.buffers.length).toBe(before); // aucune dérivation de clé non plus
   });
 });
 
@@ -157,6 +166,15 @@ describe("fetchMeta, shareStatus, destroyShare : correspondance des erreurs", ()
     expect(await reject(destroyShare(LINK, ORIGIN, { password: PW, ...s.net }))).toBeInstanceOf(NotFoundError);
     expect(s.calls).toEqual(["GET /api/shares/ID/meta", "POST /api/shares/ID/destroy"]);
     expect(await reject(destroyShare(LINK, ORIGIN, {}))).toEqual(new Error("mot_de_passe_requis"));
+  });
+  it("destroyShare : mot de passe vide refusé avant toute requête (tâche M, point 2)", async () => {
+    const s = server(() => undefined);
+    const before = captured.buffers.length;
+    expect(await reject(destroyShare(LINK, ORIGIN, { password: "", ...s.net }))).toEqual(new Error("mot_de_passe_requis"));
+    expect(s.calls).toEqual([]);
+    expect(captured.buffers.length).toBe(before);
+    // Lien de gestion : le mot de passe n'intervient pas (un « "" » ne bloque rien).
+    expect(await destroyShare(MANAGE, ORIGIN, { password: "", ...server(() => new Response(null, { status: 204 })).net })).toBeUndefined();
   });
 });
 

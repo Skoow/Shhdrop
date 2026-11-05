@@ -32,6 +32,9 @@ describe("le serveur ne voit rien", () => {
   let salt: Uint8Array<ArrayBuffer>;
   let id: string;
   let manage: string;
+  let kLien2: KLien; // second partage : signalé par Opened.destroy("report")
+  let kAcces2: KAcces;
+  let id2: string;
   let secrets: Needle[]; // jamais nulle part (kAcces à part)
   let keysOnDisk: Needle[]; // jamais sur disque ni dans les journaux ; dans les requêtes, jamais dans l'URL
   let traces: Needle[]; // présents tant que le partage vit ; plus nulle part après destruction
@@ -65,10 +68,36 @@ describe("le serveur ne voit rien", () => {
     expect(o.manifest.items[1]!.name).toBe(NAME);
     expect(Buffer.from(await o.item(1)).equals(Buffer.from(fileData))).toBe(true);
     await o.done();
-    secrets = [needle("kLien", kLien), needle("texte repère", MARKER), needle("nom repère", NAME), needle("mot de passe repère", PASSWORD)];
-    keysOnDisk = [needle("kAcces", kAcces), needle("kPreuve", kPreuve), needle("sGestion", sGestion)];
+    // Second partage (une seule ouverture) : lu puis détruit par Opened.destroy("report"), qui
+    // envoie K_accès et K_preuve ; ces requêtes et le disque sont fouillés comme les autres.
+    const r2 = await createShare(srv.origin, [{ kind: "text", name: "", mime: "text/plain", data: utf8(`texte ${MARKER} texte`) }], {
+      ttlHours: 1,
+      maxOpens: 1,
+      password: PASSWORD,
+      solveCaptcha: solveAltcha,
+      fetch,
+    });
+    const p2 = parseLink(r2.link);
+    if (p2.kind !== "s") throw new Error("lien de partage attendu");
+    kLien2 = p2.kLien;
+    id2 = p2.id;
+    kAcces2 = (await deriveAccess(kLien2)).kAcces;
+    const o2 = await openShare(r2.link, PASSWORD, srv.origin, undefined, { fetch });
+    expect(o2.manifest.items[0]!.text).toBe(`texte ${MARKER} texte`);
+    await o2.destroy("report");
+    await o2.done(); // 404 attendu et toléré : le partage est déjà effacé
+    o2.wipe();
+    secrets = [
+      needle("kLien", kLien),
+      needle("kLien (signalé)", kLien2),
+      needle("texte repère", MARKER),
+      needle("nom repère", NAME),
+      needle("mot de passe repère", PASSWORD),
+    ];
+    keysOnDisk = [needle("kAcces", kAcces), needle("kAcces (signalé)", kAcces2), needle("kPreuve", kPreuve), needle("sGestion", sGestion)];
     traces = [
       needle("id", id),
+      needle("id (signalé)", id2),
       needle("sel", salt),
       needle("access_v", await sha256(kAcces)),
       needle("proof_v", await sha256(kPreuve)),
@@ -138,7 +167,7 @@ describe("le serveur ne voit rien", () => {
   });
 
   it("les requêtes émises ne contiennent aucun repère ; kAcces seulement dans X-Shh-Access ; aucune clé dans une URL", () => {
-    expect(log.map((r) => `${r.method} ${r.url.replace(/^https?:\/\/[^/]+/, "").replace(id, "ID")}`)).toEqual([
+    expect(log.map((r) => `${r.method} ${r.url.replace(/^https?:\/\/[^/]+/, "").replace(id, "ID").replace(id2, "ID")}`)).toEqual([
       "GET /api/captcha",
       "POST /api/shares",
       "PUT /api/shares/ID/segments/0",
@@ -147,9 +176,19 @@ describe("le serveur ne voit rien", () => {
       "POST /api/shares/ID/unlock",
       "GET /api/shares/ID/segments/0",
       "POST /api/shares/ID/done",
+      // Second partage : Opened.destroy("report") puis done (404 toléré).
+      "GET /api/captcha",
+      "POST /api/shares",
+      "PUT /api/shares/ID/segments/0",
+      "POST /api/shares/ID/finalize",
+      "GET /api/shares/ID/meta",
+      "POST /api/shares/ID/unlock",
+      "GET /api/shares/ID/segments/0",
+      "POST /api/shares/ID/destroy",
+      "POST /api/shares/ID/done",
       "POST /api/shares/ID/destroy",
     ]);
-    const all = [...secrets, needle("kAcces", kAcces)];
+    const all = [...secrets, needle("kAcces", kAcces), needle("kAcces (signalé)", kAcces2)];
     const hits: string[] = [];
     for (const r of log) {
       const where = `${r.method} ${r.url}`;

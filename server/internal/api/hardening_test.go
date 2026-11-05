@@ -83,3 +83,21 @@ func TestDestroyAfterLastOpen(t *testing.T) {
 	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/destroy", hdr: access(k), body: body}), 204, "")
 	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/destroy", hdr: access(k), body: body}), 404, notFound)
 }
+
+// Tâche M, point 9 : /API/x ou /Api tombait dans le repli SPA (index.html, 200) au lieu de
+// la 404 uniforme de /api/….
+func TestAPIPrefixCaseInsensitive404(t *testing.T) {
+	e := newEnv(t, false, nil)
+	want := e.do(req{method: "GET", path: "/api/inconnu"})
+	expect(t, want, 404, notFound)
+	for _, p := range []string{"/API/x", "/Api", "/aPi/", "/API/shares/abc/meta", "/Api/captcha", "/api", "/API"} {
+		got := e.do(req{method: "GET", path: p})
+		expect(t, got, 404, notFound)
+		if got.Body.String() != want.Body.String() || got.Header().Get("Content-Type") != want.Header().Get("Content-Type") {
+			t.Fatalf("%s : réponse différente de /api/… : %q", p, got.Body.String())
+		}
+	}
+	// Un chemin voisin qui n'est pas /api reste servi par le site.
+	expect(t, e.do(req{method: "GET", path: "/apiary"}), 200, "")
+	expect(t, e.do(req{method: "GET", path: "/s/abc"}), 200, "")
+}

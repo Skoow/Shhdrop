@@ -35,6 +35,28 @@ describe("safeName", () => {
     expect([...safeName(hugeExt)].length).toBe(120);
     expect([...safeName("😀".repeat(130) + ".png")].length).toBe(120);
   });
+  it("retire les caractères de largeur nulle et les étiquettes (tâche M, point 4)", () => {
+    expect(safeName("a\u200Bb\u200C\u200D\u2060c.txt")).toBe("abc.txt");
+    expect(safeName("fac\u{E0041}\u{E0000}\u{E007F}ture.pdf")).toBe("facture.pdf");
+    expect(safeName("\u200B\u200C\u200D\u2060\u{E0041}")).toBe("fichier");
+    expect(safeName("\u200Bx.exe")).toBe("x.exe");
+    // Le retrait précède la normalisation : e + largeur nulle + accent → « é » composé.
+    expect(safeName("e\u200B\u0301.txt")).toBe("\u00E9.txt");
+  });
+  it("coupe par graphème, sans jamais dépasser 120 points de code (tâche M, point 4)", () => {
+    // « x » + accent combinant (sans forme composée) : 2 points de code, 1 graphème.
+    const g = "x\u0301";
+    expect(safeName("a".repeat(119) + g + "b".repeat(50))).toBe("a".repeat(119));
+    expect(safeName("a".repeat(118) + g + "b".repeat(50))).toBe("a".repeat(118) + g);
+    expect(safeName("a".repeat(119) + "🇫🇷" + "b".repeat(50))).toBe("a".repeat(119)); // drapeau : 2 points de code
+    expect(safeName("a".repeat(119) + "👍🏽" + "b".repeat(50))).toBe("a".repeat(119)); // peau : 2 points de code
+    // Extension gardée : la tête est coupée avant un graphème qui ne tient pas.
+    expect(safeName("a".repeat(115) + "🇫🇷" + "b".repeat(30) + ".png")).toBe("a".repeat(115) + ".png");
+    expect(safeName("a".repeat(200) + ".png")).toBe("a".repeat(116) + ".png");
+    for (const n of [g.repeat(100), "🇫🇷".repeat(100) + ".png", "a".repeat(119) + g + ".jpeg"]) {
+      expect([...safeName(n)].length, n).toBeLessThanOrEqual(120);
+    }
+  });
   it("repli « fichier »", () => {
     for (const n of ["", "   ", "...", "/", "‮\u0000", "./../"]) expect(safeName(n), JSON.stringify(n)).toBe("fichier");
   });
@@ -63,7 +85,7 @@ describe("previewKindOf", () => {
 
 describe("isRiskyName", () => {
   it("extensions exécutables ou interprétées", () => {
-    for (const e of ["exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "js", "jar", "apk", "app", "dmg", "pkg", "sh", "html", "htm", "hta", "lnk", "iso"]) {
+    for (const e of ["exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "js", "jar", "apk", "app", "dmg", "pkg", "sh", "html", "htm", "hta", "lnk", "iso", "msix", "appx", "reg", "wsf", "cpl", "pif", "url", "command", "desktop"]) {
       expect(isRiskyName(`f.${e}`), e).toBe(true);
       expect(isRiskyName(`f.${e.toUpperCase()}`), e).toBe(true);
     }

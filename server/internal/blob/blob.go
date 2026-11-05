@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 )
 
@@ -90,6 +91,31 @@ func (s *Store) CheckAllocate() error {
 	defer os.Remove(f.Name())
 	err = allocate(f, 4096, s.NoSparse)
 	return errors.Join(err, f.Close())
+}
+
+// probeName : nom des fichiers que CheckAllocate crée (os.CreateTemp : préfixe + chiffres).
+var probeName = regexp.MustCompile(`^\.sonde-[0-9]+$`)
+
+// RemoveProbes supprime les fichiers de sonde laissés par un arrêt brutal pendant
+// CheckAllocate. Seuls les fichiers ordinaires au nom exact de la sonde sont touchés
+// (jamais un blob, un dossier ou un lien symbolique).
+func (s *Store) RemoveProbes() error {
+	es, err := os.ReadDir(s.Dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, e := range es {
+		if probeName.MatchString(e.Name()) && e.Type().IsRegular() {
+			if err := os.Remove(filepath.Join(s.Dir, e.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // WriteAt écrit dans la zone réservée ; refuse tout dépassement.

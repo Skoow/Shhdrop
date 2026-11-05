@@ -61,9 +61,10 @@ func FromEnv() (Config, error) {
 		}
 		for _, s := range strings.Split(v, ",") {
 			p, err := netip.ParsePrefix(strings.TrimSpace(s))
-			// Forme canonique (adresse de réseau), et jamais « tout Internet ».
-			if err != nil || p != p.Masked() || p.Bits() == 0 {
-				return Config{}, fmt.Errorf("SHH_TRUSTED_PROXY invalide (liste de CIDR): %q", v)
+			// Forme canonique (adresse de réseau), jamais « tout Internet » (point M3).
+			if err != nil || p != p.Masked() || !trustedPrefixOK(p) {
+				return Config{}, fmt.Errorf("SHH_TRUSTED_PROXY invalide (liste de CIDR canoniques, réseau privé "+
+					"ou préfixe d'au moins /8 en IPv4 et /32 en IPv6, sans notation IPv4-dans-IPv6): %q", v)
 			}
 			c.TrustedProxies = append(c.TrustedProxies, p)
 		}
@@ -78,6 +79,33 @@ func FromEnv() (Config, error) {
 		return Config{}, err
 	}
 	return c, nil
+}
+
+// privateNets : réseaux dont tout sous-réseau est accepté, quelle que soit sa taille
+// (RFC 1918, boucle locale, ULA IPv6).
+var privateNets = []netip.Prefix{
+	netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"), netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("fc00::/7"), netip.MustParsePrefix("::1/128"),
+}
+
+// trustedPrefixOK : un proxy de confiance est un réseau restreint. Refusés : la notation
+// IPv4-dans-IPv6 (::ffff:a.b.c.d/…, qui contourne les contrôles de taille IPv4) et les
+// préfixes plus larges que /8 (IPv4) ou /32 (IPv6), sauf s'ils tiennent dans un réseau privé.
+func trustedPrefixOK(p netip.Prefix) bool {
+	a := p.Addr()
+	if a.Is4In6() || a.Zone() != "" {
+		return false
+	}
+	for _, n := range privateNets {
+		if n.Addr().Is4() == a.Is4() && p.Bits() >= n.Bits() && n.Contains(a) {
+			return true
+		}
+	}
+	if a.Is4() {
+		return p.Bits() >= 8
+	}
+	return p.Bits() >= 32
 }
 
 // absDir : chemin absolu, nettoyé ; « ? », « # » et « % » refusés (ils changeraient le
