@@ -1,7 +1,7 @@
 # Shhdrop — spécification V1 (version 2, finale à valider)
 
 Date : 4 novembre 2026 · Domaine visé : **shhdrop.app**
-Historique : v1 du 3 novembre, puis revue critique indépendante et passage complet de recherche d'oublis (voir section 0). v2.4 (4 novembre) : durcissement après l'audit « sharp edges » (section 25). v2.5 (5 novembre) : repli Google reCAPTCHA isolé (section 26). v2.6 (5 novembre) : décisions du propriétaire, coffre chiffré sur téléphone (27), code vérifiable (28), chiffrement anticipé (29), revue post-quantique (30), mot de passe de 8 caractères (31), lien court (32), historique local sans compte (33), droits du destinataire (34). Les sections 29 à 34 remplacent les passages signalés « → § » ci-dessous.
+Historique : v1 du 3 novembre, puis revue critique indépendante et passage complet de recherche d'oublis (voir section 0). v2.4 (4 novembre) : durcissement après l'audit « sharp edges » (section 25). v2.5 (5 novembre) : repli Google reCAPTCHA isolé (section 26). v2.6 (5 novembre) : décisions du propriétaire, coffre chiffré sur téléphone (27), code vérifiable (28), chiffrement anticipé (29), revue post-quantique (30), mot de passe de 8 caractères (31), lien court (32), historique local sans compte (33), droits du destinataire (34, simplifiés en 34.1), puis aucune statistique, nettoyage des métadonnées de tous les fichiers et enregistrement dans l'interface (35), minimisation de ce que voit le serveur (36). Les sections 29 à 36 remplacent les passages signalés « → § » ci-dessous.
 
 ---
 
@@ -90,6 +90,7 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 ### Jamais
 
 - Comptes, profils, contacts · publicité, analytics, traceurs, ressources tierces (seule exception : le repli reCAPTCHA isolé de la section 26) · tout mécanisme permettant au serveur de lire un contenu.
+- **Aucune statistique** (décision du propriétaire, §35.1) : ni mesure d'audience, ni télémétrie, ni service de rapport d'erreurs (Sentry et semblables), ni statistiques ou compteurs côté serveur autres que les compteurs d'exploitation listés en §9.5. Rien n'est agrégé par personne, par connexion ou par partage au-delà de ce que les règles de la §4 exigent, et rien de cela n'est écrit sur disque.
 
 ---
 
@@ -116,7 +117,7 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 ### 5.1 Expéditeur
 
 1. **Composer** : fichiers, photo, vocal, texte ; aperçu, ✕ pour retirer, jauge « 34 / 100 Mo · 3 / 10 ».
-   - Métadonnées des photos retirées (section 12) ; avertissement pour vidéos et PDF, non nettoyés.
+   - Métadonnées retirées de tous les formats pris en charge (photos, vidéos, audio, PDF, bureautique, §35.2), avec un état honnête par élément ; « Nettoyé » seulement quand le nettoyage a réussi.
 2. **Options** : durée, nombre d'ouvertures, mot de passe (généré, régénérable, modifiable, indicateur de force).
 3. **Envoi** : chiffrement puis envoi par segments, progression, reprise automatique si le réseau coupe. La reprise ne fonctionne **que dans le même onglet** : fermer l'onglet abandonne l'envoi, qui compte quand même dans la limite du jour et est effacé au bout de 15 min sans nouveau segment (5 à 20 min s'il n'en a reçu aucun ; 3 h au plus).
 4. **Lien prêt**, affiché seulement quand l'envoi est entièrement terminé :
@@ -313,7 +314,7 @@ Table `shares`, une ligne par partage vivant :
 
 `id` (clé primaire, table `WITHOUT ROWID` : aucun compteur d'insertion ne trahit l'ordre de création), `state` (`uploading`, `ready`, `draining`), `bucket` (palier), `ttl_hours`, `max_opens`, `opens_left`, `opens_issued`, `done_mask` (un bit par ouverture terminée), `failed_attempts`, `segments_mask` (segments reçus), `salt`, `kdf_ops`, `kdf_mem`, `access_v`, `proof_v`, `manage_v` (SHA-256 de `K_accès`, `K_preuve`, `S_gestion`), `upload_deadline` (effacé à la finalisation), `progress_at` (pendant l'envoi seulement), `expires_at`, `purge_at`.
 
-- Toutes les dates stockées sont **arrondies au quart d'heure supérieur**, sauf `progress_at`.
+- Toutes les dates stockées sont **arrondies au quart d'heure supérieur**, sauf `progress_at`. → §36 S5, S11, S12 (Task M2) : `progress_at`, `upload_deadline` et `purge_at` passent en mémoire, `ttl_hours` à `NULL` après `finalize` ; la base ne garde plus qu'une date, `expires_at`.
 - `progress_at` : minute du dernier segment reçu, pour effacer un envoi bloqué (§7.4). Il n'existe **que pendant l'envoi** : `NULL` à la création (la minute de création n'est donc jamais écrite), mis à jour à chaque segment, remis à `NULL` à la finalisation comme `upload_deadline`. Pendant l'envoi, il donne à la minute près l'heure du dernier segment reçu.
 
 - **Jamais stockés** : adresse IP, date de création, nom, type ou taille exacte de fichier, navigateur, pays, jetons.
@@ -331,12 +332,31 @@ Table `shares`, une ligne par partage vivant :
 ### 9.3 En mémoire uniquement
 
 - Compteurs des limites : clé = HMAC(secret du jour, IP, /64 ou /48), effacés chaque jour. Ce sont des **données pseudonymisées** au sens du RGPD, pas anonymes.
-- Secret des jetons, compteur agrégé des signalements.
+- Secret des jetons, compteur agrégé des signalements (§9.5).
+- Liste complète et justifiée de ces compteurs : §9.5. Tout ce que le serveur voit ou pourrait déduire : §36.
 
 ### 9.4 Journaux
 
 - Journaux d'accès de Caddy **désactivés**.
 - Journaux de l'application : uniquement des événements sans donnée personnelle.
+- Règles de §36 : aucune adresse, aucun identifiant de partage, aucun en-tête du client dans un journal ni dans un message d'erreur.
+
+### 9.5 Aucune statistique ; compteurs d'exploitation autorisés (§35.1)
+
+Interdits, côté serveur comme côté navigateur : mesure d'audience, télémétrie, rapports d'erreurs envoyés à un service, `expvar`, `net/http/pprof`, Prometheus, OpenTelemetry, StatsD, « métriques » de Caddy (`metrics`), compteurs de partages créés, d'ouvertures, d'octets servis, de requêtes par route, histogrammes de latence, taux d'erreurs, et toute table ou fichier qui garde un historique d'activité. Un nouveau compteur exige une ligne de ce tableau, avec sa justification, avant d'être codé.
+
+| Compteur (mémoire seulement) | Clé | Durée de vie | Pourquoi il est nécessaire |
+|---|---|---|---|
+| Créations et octets du jour (`count64`, `count48`, `bytes64`, `bytes48`) | HMAC(secret du jour, /64 ou IPv4, /48) | jusqu'à minuit UTC, secret jeté | quotas de §4 (10 et 30 liens, 3 et 6 Gio) |
+| Requêtes et segments de la minute (`req`, `seg`, `seg48`) | idem | 1 min | limites de débit de §4 et §24 |
+| Transferts simultanés (`Slots`) | idem, plus un total | durée du transfert | transferts bornés (§24, audit E1) |
+| Envois anticipés en cours et octets abandonnés | id de l'envoi → clés HMAC ; clés HMAC → octets | jusqu'à `finalize` ou effacement ; minuit UTC | §29.5 |
+| Budget de lecture par ouverture, budget de pré-lecture par partage | (id, n° d'ouverture) ; id | 3 h ; vie du partage | §24 (M1), §29.6 |
+| Défis anti-robot consommés ; créations de l'heure par connexion | sel du défi ; HMAC de connexion | 2 min ; 1 h | usage unique ; difficulté qui double (§22 D4) |
+| Signalements de l'heure | aucun (un seul entier) | remis à zéro chaque heure | alerte « les signalements s'accumulent » (§15.2) ; exposé seulement comme booléen sur `/healthz` local (§36, Task M2) |
+| Place réservée totale | aucune (somme) | calculée depuis la base | plafond global `SHH_STORAGE_MAX` (§4) |
+
+Ne sont **pas** des statistiques : les colonnes d'un partage vivant (`opens_left`, `opens_issued`, `done_mask`, `failed_attempts`), nécessaires à ses règles et effacées avec lui. Hors de notre contrôle, à dire sur la page Confidentialité : les tableaux de bord de trafic de l'hébergeur, les statistiques de trafic de GitHub Pages pour la démo, la sonde externe de §15.2 (elle ne reçoit que la page d'accueil publique).
 
 ---
 
@@ -346,7 +366,7 @@ Table `shares`, une ligne par partage vivant :
   - CSP : `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`.
   - `require-trusted-types-for 'script'` **si** Svelte et libsodium le supportent sans politique « default » (testé au premier jour) ; sinon retiré.
   - `Strict-Transport-Security` (déjà préchargé pour .app), `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`.
-  - `Permissions-Policy: microphone=(self), camera=(), geolocation=()`. La photo passe par le sélecteur de fichiers, sans accès direct à la caméra.
+  - `Permissions-Policy: microphone=(self), camera=(), geolocation=()`. La photo passe par le sélecteur de fichiers, sans accès direct à la caméra. `microphone=(self)` sert au vocal enregistré dans l'interface (§35.3). `/pdf-frame.html` reçoit `microphone=(), camera=(), geolocation=()` (il n'en a jamais besoin). `camera=(self)` seulement si le propriétaire accepte la vidéo enregistrée dans l'interface (Q-REC1, §35.3).
   - `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin`. Pas de COEP : inutile, Argon2id tourne sur un seul fil.
 - **Aucune ressource tierce** sur les pages de l'application (seule exception, hors de ces pages : le cadre de repli reCAPTCHA, section 26). `robots.txt` et `noindex` sur les pages de partage, sans aperçu pour les messageries.
 - **Fichiers du site** : servis depuis `SHH_STATIC_DIR` sans jamais en sortir (liens symboliques compris) ; fichiers et dossiers cachés (`.env`, `.git/…`) → 404 ; aucune liste de dossier (dossier sans `index.html` → 404) ; `GET` et `HEAD` seulement. Application monopage : un chemin inconnu sans extension sert `index.html` avec les mêmes en-têtes ; un fichier absent (`x.js`) → 404. Sous `/s/` et `/m/` (préfixe sensible à la casse), **tout** chemin qui n'est pas un fichier existant sert `index.html` (avec `X-Robots-Tag: noindex`), même si son dernier segment contient un point : un lien abîmé par une messagerie (`/s/<id>.#…`) charge ainsi l'application, qui retire le `#` de la barre et de l'historique (UI §12.1). Les segments cachés et la remontée (`..`) restent refusés ; `/api/…` et les autres préfixes ne changent pas.
@@ -395,13 +415,9 @@ Table `shares`, une ligne par partage vivant :
 
 ### Création
 
-- **Vocal** : `MediaRecorder`, en **AAC/MP4** quand c'est disponible (lisible partout), sinon Opus/WebM. Compatibilité testée sur iPhone, Android et ordinateur.
-- **Photo** : sélecteur de fichiers (`<input capture>`).
-- **Retrait des métadonnées**, sans réencodage :
-  - JPEG : EXIF réécrit avec **seulement l'orientation**, profil de couleurs (ICC) conservé ;
-  - PNG : blocs texte et EXIF retirés ;
-  - WebP : EXIF et XMP retirés ;
-  - HEIC et vidéos : non nettoyés, avec avertissement.
+- **Vocal** : enregistré dans l'interface (§35.3) avec `MediaRecorder`, en **AAC/MP4** quand c'est disponible (lisible partout), sinon Opus/WebM. Compatibilité testée sur iPhone, Android et ordinateur.
+- **Photo** et **vidéo** : sélecteur de fichiers (`<input capture>`) ; vidéo enregistrée dans la page : question Q-REC1 (§35.3).
+- **Retrait des métadonnées**, sans réencodage, pour tous les formats courants (images, PDF, bureautique, vidéo, audio) : **§35.2**, qui remplace l'ancienne liste (JPEG, PNG, WebP seulement ; HEIC et vidéos non nettoyés).
 
 ---
 
@@ -437,11 +453,13 @@ Messages en français et en anglais.
 - **Sécurité web** : en-têtes et CSP vérifiés ; fichiers piégés (PDF avec script, SVG avec script, HTML) sans exécution ; noms de fichiers piégés nettoyés.
 - **Parcours complets** (Playwright) : Chromium et WebKit, ordinateur et simulation iPhone / Android.
 - **Analyse des dépendances** : `govulncheck`, `npm audit`, Dependabot.
+- **Aucune statistique** (§35.1) : recherche dans les sources, les dépendances (`package-lock.json`, `go.sum`) et le build (`dist/`, `dist-verif/`, `dist-demo/`) des SDK et adresses connus de mesure d'audience, télémétrie et rapports d'erreurs (liste en §35.1) ; côté serveur, aucune table hors `shares`, toute `map` déclarée hors de la liste blanche de §9.5 fait échouer le test, et chaque compteur de §9.5 est vide après sa rotation (horloge injectée).
+- **Métadonnées** (§35.2) : pour chaque format, fichiers d'essai réels générés localement avec des repères (GPS fictif, appareil, auteur, logiciel, dates) ; aucun repère après nettoyage, éléments à garder intacts, fichier toujours lisible ; échec d'analyse jamais annoncé « Nettoyé ».
 
 ### Manuels (avant chaque mise en ligne)
 
 - Site de test séparé.
-- Liste de vérification sur un vrai iPhone et un vrai Android : photo (orientation correcte), vocal enregistré sur l'un et lu sur l'autre, vidéo d'iPhone lue sur Android, PDF, mauvais mot de passe, expiration, destruction, installation de la PWA, accessibilité (VoiceOver / TalkBack).
+- Liste de vérification sur un vrai iPhone et un vrai Android : photo (orientation correcte), photo et vidéo avec localisation activée puis fichier reçu passé à `exiftool` et `ffprobe` (aucune position, aucun appareil, aucune date de prise), document Word et LibreOffice avec auteur, vocal enregistré sur l'un et lu sur l'autre (pause comprise), vidéo d'iPhone lue sur Android, PDF, mauvais mot de passe, expiration, destruction, installation de la PWA, accessibilité (VoiceOver / TalkBack).
 
 ---
 
@@ -533,6 +551,9 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 12. **Envoi anticipé** (§29.7) : un serveur qui observe l'ordre et l'heure des segments connaît la taille du contenu à 4 Mio près, et sait qu'une composition est en cours.
 13. **Victime ciblée** (§28.8) : un serveur compromis peut servir un code piégé à une seule personne ; la vérification publique ne la protège que si elle vérifie elle-même, avec un outil qui ne vient pas du site.
 14. **Coffre** (§27.1) : captures d'écran, téléphone compromis, et confiance de l'expéditeur envers le destinataire restent hors de portée ; « Voir seulement » (§34) n'est qu'une dissuasion.
+15. **Métadonnées** (§35.2) : on retire ce que les conteneurs déclarent (EXIF, XMP, propriétés du document, étiquettes, pistes de position) ; ce qui est **dans le contenu lui-même** reste : texte ou visage visibles, date incrustée dans l'image, données d'un flux vidéo (SEI), anciennes révisions d'un PDF, modifications suivies d'un document et leurs auteurs, contenu des archives.
+16. **Ordre de lecture** (§36) : le serveur voit quels segments un destinataire télécharge et quand ; la lecture monotone réduit ce qu'il en déduit (quels éléments ont été ouverts), sans le supprimer (le point d'arrêt reste visible).
+17. **En-têtes et empreinte TLS** (§36) : le proxy reçoit forcément l'adresse, l'empreinte TLS et les en-têtes du navigateur ; ils ne sont ni journalisés ni transmis au serveur, mais un serveur compromis les voit en direct.
 
 ---
 
@@ -639,7 +660,7 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 
 ### Dépendances
 
-- Toutes les dépendances (npm, modules Go, actions GitHub, chaîne Go) sont tenues à leur **dernière version stable**, installées uniquement depuis les sources officielles (registre npm, `proxy.golang.org`, actions publiées par leurs éditeurs officiels) ; versions verrouillées (`package-lock.json`, `go.sum`).
+- Toutes les dépendances (npm, modules Go, actions GitHub, chaîne Go) sont tenues à leur **dernière version stable publiée depuis au moins 7 jours, sauf correctif de sécurité** (décision du propriétaire, 5 novembre : une version piégée est le plus souvent retirée dans les premiers jours ; un correctif de sécurité, lui, s'applique sans attendre, après lecture de l'avis). Dependabot applique le délai (`cooldown: default-days: 7`, avis de sécurité exclus du délai) ; une mise à jour à la main vérifie la date de publication (`npm view <paquet> time`, `go list -m -json <module>@<version>`). Installation uniquement depuis les sources officielles (registre npm, `proxy.golang.org`, actions publiées par leurs éditeurs officiels) ; versions verrouillées (`package-lock.json`, `go.sum`).
 - Vérification à chaque modification : `govulncheck`, `npm audit` ; Dependabot activé (npm, gomod, github-actions).
 
 ---
@@ -899,7 +920,7 @@ Remplace §7.1 à §7.5 pour tout nouveau partage. Les étiquettes passent en `s
 
 ### 29.6 Pré-lecture chez le destinataire
 
-- Pendant la saisie du mot de passe, le navigateur télécharge les segments chiffrés avec `K_accès` seul : `GET /segments/{n}` avec l'en-tête `K_accès`, accepté **seulement en état `ready`**, avant l'expiration, sans consommer d'ouverture. Ordre : segment de fin (manifeste), puis les premiers segments de données, jusqu'à 64 Mio.
+- (→ §36 S10 : la pré-lecture démarre à la réponse de `meta`, à calendrier fixe, jamais au rythme des frappes.) Pendant la saisie du mot de passe, le navigateur télécharge les segments chiffrés avec `K_accès` seul : `GET /segments/{n}` avec l'en-tête `K_accès`, accepté **seulement en état `ready`**, avant l'expiration, sans consommer d'ouverture. Ordre : segment de fin (manifeste), puis les premiers segments de données, jusqu'à 64 Mio.
 - Sûr parce que `R` est aléatoire : sans `E`, rendue seulement après un `K_preuve` juste, le chiffré ne permet **aucun** essai hors ligne de mot de passe (en v1, `K_contenu` dérivait du mot de passe : la même pré-lecture aurait permis de deviner hors ligne à partir de `C_engagement`).
 - Bande passante : budget de pré-lecture par partage, en mémoire, de 2 × la taille du palier sur toute sa vie ; au-delà, 429. Les segments pré-lus comptent dans la limite de 600 par minute.
 
@@ -984,13 +1005,173 @@ Table `shares` : `proof_v`, `salt`, `kdf_*`, `ttl_hours`, `max_opens` deviennent
 - « Voir seulement » est refusé (choix désactivé, avec la liste des éléments en cause) si un élément ne peut pas s'afficher dans le navigateur (archives, bureautique, plus de 200 Mio) : il serait inaccessible au destinataire.
 - Manifeste v2 : `{ "v": 2, "rights": "enregistrer", "keep_ttl_h"?: 12, "items": [...] }`.
 
+### 34.1 Décision du propriétaire (5 novembre) — un seul interrupteur
+
+Remplace le choix à trois positions ci-dessus **dans l'interface** ; le format du manifeste (déjà livré en Task K1) ne change pas.
+
+- Un interrupteur **« Autoriser le téléchargement »**, **activé par défaut** → `rights: "enregistrer"`. Désactivé → `"voir"` : le destinataire ne peut que regarder sur le site (même effets et même mention que la ligne `"voir"` du tableau).
+- **Sous-option** affichée seulement quand l'interrupteur est activé : « Autoriser aussi une copie chiffrée dans l'app, sur téléphone » → `"coffre"` avec `keep_ttl_h` = durée du partage. Désactivée par défaut (§27 inchangé). Elle concerne l'appareil du **destinataire** : elle est proposée à tout expéditeur, téléphone ou ordinateur. **Ambiguïté signalée** : si « réservée au téléphone » visait l'appareil de l'expéditeur, il suffit de la masquer quand `pointer: coarse` est faux ; défaut retenu : proposée partout.
+- Interrupteur bloqué en position activée, avec la liste des éléments en cause, quand un élément ne s'affiche pas dans le navigateur (règle de « Voir seulement » ci-dessus) ; le désactiver retire aussi la sous-option.
+- Q-R1 réglée : téléchargement autorisé par défaut. Effet sur le plan : Task 13 et Task R (un `Switch` et une case dépendante au lieu de `RightsPicker` à trois choix). La spécification UI (§10, `RightsPicker`) est à aligner par celui qui la tient.
+
 ### Questions ouvertes de §29 à §34 (défaut recommandé)
 
 | # | Question | Défaut recommandé |
 |---|---|---|
-| Q-K1 | Accepter la fuite de la taille à 4 Mio près vers un serveur qui observe l'envoi anticipé (§29.7) | Oui (décision de vitesse) ; bascule « Envoyer seulement quand je clique » pour qui la refuse, désactivée par défaut |
+| Q-K1 | Accepter la fuite de la taille à 4 Mio près vers un serveur qui observe l'envoi anticipé (§29.7) | Oui (décision de vitesse) ; bascule « Envoyer seulement quand je clique » pour qui la refuse, désactivée par défaut. **Erreur signalée (§36 S4)** : `fill_from` révèle la même taille même au clic ; la bascule ne tient sa promesse qu'avec Q-MIN1 |
 | Q-K2 | Envoi anticipé sur données mobiles | Non si `saveData` ; oui sinon |
 | Q-MDP1 | 8 ou 10 caractères par défaut | 10 recommandé ; 8 appliqué (demande du propriétaire) |
 | Q-H1 | Verrou par passkey de l'historique | Non par défaut (destruction en un geste), proposé dans les réglages |
 | Q-H2 | Historique activé par défaut | Oui, bascule sur « Lien prêt » |
-| Q-R1 | Droit par défaut | « Voir et enregistrer » |
+| Q-R1 | Droit par défaut | Réglée (§34.1) : « Autoriser le téléchargement » activé |
+
+---
+
+## 35. Décision du propriétaire (v2.6, 5 novembre) — aucune statistique, fichiers nettoyés, enregistrement dans l'interface
+
+Demande : « Aucune donnée de statistique ni d'analytics. Des fichiers propres, documents et vidéos compris. L'enregistrement vocal doit être possible depuis notre interface. Réduire au maximum ce que le serveur peut voir » (ce dernier point : §36).
+
+### 35.1 Aucune statistique
+
+- Règle : §3 « Jamais » et §9.5 (liste fermée des compteurs d'exploitation, chacun justifié). Aucune exception pour « juste compter les visites » : un compteur anonyme agrégé reste une statistique, et il n'est demandé par aucune règle de la spécification.
+- **Navigateur** : aucun SDK, aucun `sendBeacon`, aucun écouteur `error` / `unhandledrejection` qui envoie quoi que ce soit (les erreurs restent dans la page ; la règle « aucun appel réseau hors de `web/src/index.ts` » le garantit déjà). `PerformanceObserver` n'est permis que dans les tests.
+- **Serveur** : aucun point d'accès de métriques ; `/healthz` (boucle locale seulement) rend `ok` et un seul booléen `reports_alert` (§9.5, §36) ; aucune autre sortie.
+- **Exploitation** (Plan 3) : Caddy sans `metrics` et API d'administration coupée (`admin off`) ; aucun agent de surveillance de l'hébergeur installé ; l'alerte disque lit `df`, pas l'application.
+- **Test « aucune statistique »** (bloquant, §14) :
+  - recherche, insensible à la casse, dans `web/src`, `web/scripts`, `web/*.html`, `package-lock.json` (noms de paquets), `dist/`, `dist-verif/`, `dist-demo/` : `google-analytics`, `googletagmanager`, `gtag(`, `analytics.js`, `plausible`, `matomo`, `piwik`, `posthog`, `mixpanel`, `segment.io`, `cdn.segment.com`, `amplitude`, `hotjar`, `clarity.ms`, `@sentry/`, `sentry.io`, `bugsnag`, `rollbar`, `datadog`, `newrelic`, `nr-data.net`, `logrocket`, `fullstory`, `umami`, `usefathom`, `cloudflareinsights`, `web-vitals`, `heapanalytics`, `mc.yandex`, `fbq(`, `doubleclick`, `honeybadger`, `trackjs`, `raygun`, `@opentelemetry`, `elastic-apm`, `sendBeacon` ; un fichier piégé prouve que la recherche détecte ;
+  - côté Go : aucun import de `expvar`, `net/http/pprof`, `github.com/prometheus/`, `go.opentelemetry.io/`, `github.com/getsentry/`, `gopkg.in/DataDog/`, `github.com/newrelic/`, `github.com/DataDog/`, `statsd` dans `server/` ni dans `go.sum` ;
+  - côté serveur, « rien n'agrège par personne » : (1) toute déclaration `map[` dans `server/internal` hors d'une liste blanche (`limits/`, `captcha/`, et les budgets et envois en cours de `api/`, un par ligne de §9.5) fait échouer le test, qui oblige à justifier tout nouveau compteur ; (2) chaque compteur de §9.5 est vide après sa rotation (horloge injectée : minute, heure, 3 h, minuit UTC) ; (3) `sqlite_master` ne contient que `shares` et ses index ; (4) aucun client HTTP sortant dans `server/` hors de `captcha/recaptcha.go`.
+
+### 35.2 Nettoyage des métadonnées de tous les fichiers
+
+Remplace la liste de §12 « Retrait des métadonnées ». Corrige l'audit de confidentialité P4 (promesse publiée sans code).
+
+**Principes**
+
+- **Dans le navigateur, avant tout chiffrement.** Un élément en cours de nettoyage n'est pas transmis à l'envoi anticipé (`draft.sync`, §29.4) : aucun morceau de l'original n'est chiffré. Le résultat remplace l'original dans le composeur.
+- **Sans réencodage**, en TypeScript, **sans nouvelle dépendance** (comparaison plus bas). Ce n'est pas de la cryptographie : la règle « aucune crypto maison » ne s'y applique pas. Les CRC-32 (ZIP, PNG, Ogg) sont des sommes de contrôle de format, pas des protections.
+- **Trois techniques seulement** :
+  1. **reconstruction** des petits formats lus en entier (images de `STRIP_MAX` = 50 Mio au plus, constante déjà dans `web/src/limits.ts` : JPEG, PNG, WebP, GIF ; au-delà, `echec`) ;
+  2. **neutralisation en place, à longueur constante**, pour les gros conteneurs (MP4/MOV/M4A, HEIF/AVIF, Matroska/WebM, PDF) : boîte renommée `free` et remplie de zéros, élément EBML remplacé par `Void`, objet PDF remplacé par `null` suivi d'espaces. Aucun octet ne bouge, donc aucune table de positions (`stco`, `iloc`, `xref`, `Cues`) n'est à recalculer ;
+  3. **réassemblage** : MP3 (étiquettes coupées), ZIP (Office, ODF : entrées inchangées recopiées telles quelles, parties remplacées écrites sans compression), Ogg (pages d'en-tête refaites), FLAC, WAV.
+- **Aucun fichier entier en mémoire** au-delà de `STRIP_MAX` (§24) ; les gros conteneurs n'ont pas de plafond : la sortie est un `Blob` fait de tranches de l'original (`File.slice`) et de petits correctifs ; l'analyse lit par tranches de 4 Mio et rend la main entre deux tranches (pas de Worker de plus, donc rien hors SRI, §28.3).
+- **Analyse à bornes vérifiées** : toute longueur qui sort de son parent ou du fichier, toute boîte inconnue là où une liste blanche s'applique, toute structure chiffrée ou signée → résultat `echec` ou `protege`, jamais d'exception ni de fichier à moitié modifié.
+- **Les métadonnées des fichiers enregistrés dans l'interface** (vocal, vidéo si Q-REC1) passent par le même nettoyage : `MediaRecorder` écrit le nom du logiciel et, sur Safari, des dates réelles dans `mvhd`.
+
+**Par format**
+
+| Format | Retiré | Gardé | Échec ou refus |
+|---|---|---|---|
+| **JPEG** | APP1 EXIF réécrit avec la **seule orientation** (0x0112, boutisme d'origine, sans IFD1 donc sans vignette) ; APP1 XMP et XMP étendu ; APP0 JFXX (vignette) ; APP2 MPF et FPXR ; APP3 à APP13 (IPTC, Photoshop) ; APP15 ; COM ; **tout ce qui suit le premier EOI** : images secondaires MPF, carte de gain HDR, carte de profondeur, vidéo des « photos animées » (Google, Samsung), bloc Samsung SEFT | SOI, APP0 JFIF, APP2 ICC (tous les morceaux, dans l'ordre), APP14 Adobe, DQT, DHT, DRI, SOFn, SOS et données compressées (octet pour octet), EOI | marqueur invalide, longueur hors fichier, aucun SOS ou EOI → `echec`. Perte assumée, à dire : rendu HDR, flou de portrait modifiable, animation |
+| **PNG** | `tEXt`, `zTXt`, `iTXt` (XMP compris), `tIME`, `eXIf` (réécrit avec la seule orientation si elle ≠ 1), tout bloc auxiliaire inconnu (`iDOT`, `caNv`…) | IHDR, PLTE, IDAT, IEND, `tRNS`, `cHRM`, `gAMA`, `iCCP`, `sRGB`, `sBIT`, `cICP`, `mDCV`, `cLLI`, `pHYs`, `bKGD`, `hIST`, `sPLT`, APNG (`acTL`, `fcTL`, `fdAT`) | CRC faux, bloc critique inconnu → `echec` |
+| **WebP** | `EXIF` (réécrit avec la seule orientation si elle ≠ 1), `XMP `, blocs inconnus ; drapeaux de `VP8X` et taille RIFF corrigés | `VP8`, `VP8L`, `VP8X`, `ALPH`, `ICCP`, `ANIM`, `ANMF` | taille RIFF incohérente → `echec` |
+| **GIF** | extensions Commentaire (0xFE) et Application autres que `NETSCAPE2.0`, `ANIMEXTS1.0`, `ICCRGBG1` (XMP `XMP DataXMP` compris) ; tout ce qui suit le terminateur 0x3B | en-tête, palettes, images (sous-blocs LZW recopiés sans décodage), Contrôle graphique (0xF9), Texte (0x01), boucle d'animation, profil ICC | bloc inconnu, sous-bloc hors fichier → `echec` |
+| **HEIC / HEIF / AVIF** | **nettoyés en place** (choix, Q-MD2) : données de l'élément `Exif` (repérées par `iloc`, méthodes 0 et 1) remplacées par un EXIF vide valide (18 octets) suivi de zéros ; élément XMP (`mime`, `application/rdf+xml`) remplacé par un paquet XMP vide complété d'espaces ; propriété `udes` (titre, description, mots-clés) renommée `free` ; boîtes de premier niveau hors de `ftyp`, `meta`, `mdat`, `idat`, `free`, `skip`, `moov` neutralisées | images, grilles, vignette (image de la photo elle-même), cartes auxiliaires, orientation (`irot`, `imir` : HEIF n'utilise pas l'orientation EXIF), couleurs (`colr`), boîtes `free` existantes mises à zéro | `iloc` méthode 2, extent hors fichier, `Exif` dans plusieurs éléments partagés → `echec`. Pourquoi nettoyer plutôt que refuser : c'est le format par défaut des iPhone et la position y est presque toujours ; refuser pousserait à envoyer tel quel. Note : Safari iOS convertit souvent le HEIC en JPEG dans un `<input>` ; le cas reste fréquent sur ordinateur |
+| **PDF** | dictionnaire `/Info` **de chaque révision** (chaîne des `/Prev`, tables xref classiques et flux xref, prédicteurs PNG lus par `DecompressionStream`) : objet remplacé par `null` à longueur constante ; tout flux `/Type /Metadata` (XMP du catalogue, des pages, des objets, y compris ceux des anciennes révisions) → `null` ; miniatures `/Thumb` (objet flux référencé) → `null` | tout le reste, octet pour octet : pages, polices, images, annotations, formulaires, signets, pièces jointes ; le `/ID` du trailer | `/Encrypt` → `protege` ; signature (`/ByteRange` avec `/Sig`) → `protege` (la modifier casserait la signature) ; `/Info` rangé dans un flux d'objets (`ObjStm`) → `echec` (il faudrait recompresser et réécrire la table xref) ; xref illisible → `echec`. Laissés, à dire : contenu des anciennes révisions, auteurs des annotations (`/T`), données privées d'applications (`/PieceInfo`), pièces jointes |
+| **Office OOXML** (`.docx`, `.xlsx`, `.pptx` et variantes à macros) | `docProps/core.xml`, `docProps/app.xml` (société, responsable, modèle, durée d'édition, logiciel), `docProps/custom.xml` remplacés par des versions minimales valides **de même nom** (types de contenu et relations inchangés) ; auteurs des commentaires remplacés par « Auteur » et initiales par « A », dates des commentaires retirées : `word/comments.xml`, `word/people.xml` (identifiants de compte compris), `xl/comments*.xml`, `xl/persons/person.xml`, `ppt/commentAuthors.xml`, `ppt/authors.xml` ; images intégrées (`*/media/*`) nettoyées par les règles d'images ci-dessus ; dates des entrées ZIP fixées au 1ᵉʳ janvier 1980, champs « extra » (dates Unix, UID) et commentaire ZIP retirés | toutes les autres parties, données compressées recopiées sans décompression ; **suivi des modifications laissé intact** (`w:ins`, `w:del`… avec `w:author` et `w:date`), comme demandé, mais **détecté et signalé** | ZIP64, entrée chiffrée, plusieurs disques, nom en double → `echec` ; fichier OLE (`D0 CF 11 E0`, document protégé par mot de passe) ou `_xmlsignatures/` → `protege` ; image intégrée en échec → document en `echec`. Laissés, à dire : `w:rsid*`, `customXml/`, vignette `docProps/thumbnail.*`, chemin du modèle attaché (peut contenir un nom d'utilisateur) |
+| **ODF** (`.odt`, `.ods`, `.odp`) | `meta.xml` remplacé par un `office:document-meta` minimal (version d'origine reprise) : auteur initial et dernier, dates, durée et nombre d'éditions, générateur, mots-clés, titre ; auteurs (`dc:creator` → « Auteur ») et dates des annotations dans `content.xml` ; images de `Pictures/` nettoyées ; dates et champs « extra » ZIP comme ci-dessus | `mimetype` en premier et sans compression (exigé par ODF), tout le reste ; modifications suivies (`text:tracked-changes`) laissées et signalées | `manifest:encryption-data` ou `META-INF/documentsignatures.xml` → `protege` ; ZIP invalide → `echec`. Laissés : `settings.xml` (nom d'imprimante), vignette |
+| **MP4 / MOV / M4V** (et **M4A**) | neutralisées en place (`free` + zéros) : `udta` et `meta` de `moov` et de chaque `trak` (dont `©xyz`, `©mak`, `©mod`, `©swr`, `©day`, `com.apple.quicktime.location.ISO6709`, `.make`, `.model`, `.software`, `.creationdate`, étiquettes iTunes `ilst`, pochette `covr`) ; boîtes `uuid` (XMP et autres), `prft` (heure murale de capture des MP4 fragmentés) ; toute boîte de premier niveau, de `moov` ou de `trak` hors liste blanche (par exemple `gps ` de caméras embarquées) ; **pistes de métadonnées minutées** (gestionnaire `meta`, codecs `mebx`, `gpmd`, `camm`, `rtmd`) et pistes de **timecode** (`tmcd`, heure du jour de la prise) : `trak` neutralisée **et** ses échantillons mis à zéro dans `mdat` (positions lues dans `stsc`, `stsz`, `stco`/`co64`) ; contenu des `free`/`skip` existantes mis à zéro (anciens `moov` laissés par des éditeurs) ; dates de création et de modification de `mvhd`, `tkhd`, `mdhd` mises à **0** (versions 0 et 1) | flux audio et vidéo octet pour octet, **matrice de `tkhd`** (rotation des vidéos de téléphone), dimensions, `edts`/`elst`, `stsd` complet (`colr`, `pasp`, `clli`, `mdcv`, `sv3d`, `st3d`), `mvex`, `moof`, `sidx` | taille de boîte invalide (0 ailleurs qu'en dernier, 1 avec taille 64 bits incohérente, débordement), `moov` absent, plus de 100 000 correctifs → `echec`. Perte assumée : titre, chapitres de `udta`, pochette |
+| **WebM / MKV** | `Tags`, `DateUTC`, `Title`, `SegmentUUID`, `PrevUUID`, `NextUUID` remplacés par `Void` de même taille ; `MuxingApp` et `WritingApp` (obligatoires) réécrits « shhdrop » complété d'octets nuls (chaîne vide si la place manque) | pistes, `Cluster`, `Cues`, chapitres, pièces jointes (polices de sous-titres ; laissées, à dire) | VINT invalide, élément qui déborde de son parent, taille inconnue ailleurs que `Segment` et `Cluster` → `echec` |
+| **MP3** (et AAC ADTS) | toutes les étiquettes ID3v2 du début (pied de page compris) et ID3v2.4 de fin (`3DI`), ID3v1 (`TAG`, et `TAG+`), APEv2 (`APETAGEX`), Lyrics3 | trames audio octet pour octet, trame Xing/Info/LAME (lecture à débit variable) | aucune synchronisation de trame dans les 64 Kio qui suivent → `echec` |
+| **Ogg Opus / Vorbis** | paquet de commentaires (`OpusTags`, `\x03vorbis`) réécrit : chaîne de l'encodeur vide, aucun commentaire (pochette `METADATA_BLOCK_PICTURE` comprise) ; pages d'en-tête refaites, pages suivantes renumérotées, CRC Ogg recalculés | paquet d'identification, paquet de configuration Vorbis, pages audio (seuls leur numéro et leur CRC changent) | flux multiplexés ou chaînés, autre codec (Theora, FLAC dans Ogg) → `echec` |
+| **FLAC** (coût faible) | blocs `VORBIS_COMMENT`, `PICTURE`, `APPLICATION`, `PADDING` ; ID3v2 de tête | `STREAMINFO`, `SEEKTABLE`, `CUESHEET`, trames ; drapeau « dernier bloc » reposé | bloc hors fichier → `echec` |
+| **WAV** (coût faible) | blocs `LIST`/`INFO`, `bext` (auteur, date, heure, identifiant UMID), `iXML`, `axml`, `id3 `, `_PMX` (XMP), `cart` et tout bloc hors liste ; taille RIFF corrigée | `fmt `, `fact`, `cue `, `data` (recopié par tranches) | RF64, tailles incohérentes → `echec` |
+| **Non pris en charge** | rien | tout | état `non_pris_en_charge` : SVG (peut contenir des chemins de fichiers), TIFF, DNG et photos brutes, `.doc`/`.xls`/`.ppt`, RTF, EPUB, iWork, AVI, archives (`.zip`, `.7z`… : leur contenu n'est pas ouvert) |
+| **Sans métadonnées connues** | rien | tout | état `sans` : textes du composeur, `.txt`, `.md`, `.csv`, `.json` |
+
+**États et textes à l'écran** (le seul endroit qui dit « Nettoyé » ; la spécification UI est à aligner par celui qui la tient)
+
+| État | Quand | Texte (FR) | Envoi |
+|---|---|---|---|
+| `nettoye` | nettoyage réussi **et** vérifié (le résultat est relu par le même analyseur : aucun bloc retiré ne reste) | images : « Nettoyé · lieu, appareil et date retirés » ; vidéo : « Nettoyé · lieu, appareil et dates retirés » ; audio : « Nettoyé · titre, artiste, logiciel et dates retirés » ; PDF : « Nettoyé · auteur, logiciel, dates et miniatures retirés » ; bureautique : « Nettoyé · auteur, société et dates retirés, auteurs des commentaires remplacés » ; vocal : « Enregistré ici, sans informations cachées » | normal |
+| note ajoutée | modifications suivies détectées (Office, ODF) ; PDF à plusieurs révisions | « Les modifications suivies gardent le nom de leurs auteurs. » ; « Ce PDF garde ses versions précédentes, qui peuvent contenir d'autres informations. » | normal |
+| `echec` | analyse impossible | « Pas pu nettoyer ce fichier. Il partira avec ses informations cachées (lieu, appareil, auteur…). » + **Envoyer tel quel** / **Retirer** | bloqué (`blockReason` `non_nettoye`) jusqu'au choix (Q-MD1) |
+| `protege` | signé ou chiffré | « Fichier signé ou protégé : il n'est pas modifié, pour ne pas le casser. Il garde ses informations cachées. » + les deux mêmes boutons | bloqué jusqu'au choix |
+| `non_pris_en_charge` | format de la dernière ligne du tableau | « Non nettoyé : ce type de fichier part tel quel. » | normal |
+| `sans` | textes, texte brut | rien | normal |
+
+- La phrase générale « Position et appareil retirés des photos » (accueil, FAQ, composeur) n'apparaît que si **tous** les éléments d'images sont `nettoye` ; jamais « aucune trace », jamais « 100 % ».
+- **Écarts signalés avec le code livré** (composeur, d46f19e) : un échec de nettoyage **n'ajoute pas** le fichier (`compose.failedClean`), et le texte `home.faq.scan.a` dit que vidéos et documents ne sont pas nettoyés. Les Tasks 9a à 9c remplacent le premier par l'état `echec` et mettent le second à jour format par format, seulement quand le code existe.
+- Recommandation Q-MD1 : ni envoi silencieux (la personne croirait le fichier propre, comme ses voisins), ni refus sec (elle n'aurait aucun moyen d'envoyer un fichier légitime) : un geste explicite par fichier.
+
+**Outillage : écrit à la main, sans dépendance**
+
+| Option | Licence | Taille (ordre de grandeur, à revérifier au choix) | Ce qu'elle couvre | Verdict |
+|---|---|---|---|---|
+| Analyseurs écrits à la main | — | environ 2 500 lignes TypeScript, tests compris en plus | tout le tableau | **retenu** : formats documentés, techniques simples (longueur constante), aucune chaîne d'approvisionnement de plus (§24, §28) |
+| `exifr` | MIT | plusieurs dizaines de Kio | lecture seule (EXIF, XMP, IPTC) | non : ne réécrit rien ; utile seulement comme contrôle de test, et nos tests ont leurs propres repères |
+| `piexifjs` | MIT | dizaines de Kio | JPEG seulement | non : un seul format, plus maintenu depuis des années |
+| `pdf-lib` | MIT | centaines de Kio | réécriture complète de PDF | non : taille, maintenance arrêtée, réécriture totale (risque de casser des PDF) |
+| `mp4box.js` | BSD-3-Clause | centaines de Kio | analyse ISOBMFF | non : la neutralisation en place demande une centaine de lignes |
+| `fflate` | MIT | une dizaine de Kio | ZIP et Deflate | non : `DecompressionStream('deflate-raw')` existe dans tous les navigateurs visés (Chrome 103, Safari 16.4, Firefox 113) et on écrit sans compression ; repli si absent : bureautique en `echec` |
+| `ffmpeg.wasm` | LGPL / GPL | dizaines de Mo | tout, par remultiplexage | non : taille, licence, Workers et mémoire partagée (incompatibles avec « pas de COEP », §10) |
+
+`pdfjs-dist`, déjà présent pour la visionneuse, sert seulement **dans les tests** à vérifier qu'un PDF nettoyé s'ouvre, a le même nombre de pages et le même texte.
+
+**Fichiers d'essai**
+
+- Générés localement, jamais une vraie photo du propriétaire : coordonnées GPS **fictives** repères (par exemple 12° 34′ 56″ N, 65° 43′ 21″ O), « ReperMake », « ReperModel », « ReperAuteur », « ReperSociete », « ReperLogiciel », dates 2001-02-03 04:05:06.
+- `web/scripts/gen-fixtures.mjs` (sans dépendance, relancé en CI et comparé aux fichiers commités) construit octet par octet : JPEG (avec MPF, seconde image, vidéo de photo animée en fin), PNG, WebP, GIF, PDF (Info, XMP, miniature, mise à jour incrémentale, variante à flux xref, variante signée et chiffrée), DOCX, XLSX, PPTX, ODT minimaux, MP3, Ogg Opus, FLAC, WAV.
+- `web/scripts/gen-media-fixtures.sh` (lancé à la main, versions des outils écrites en tête, résultats commités, chacun sous 200 Kio) : `ffmpeg` pour MP4, MOV (matrice de rotation 90°, piste `tmcd`, piste de métadonnées), M4A, WebM, MKV ; `exiftool` pour les repères GPS et appareil ; `heif-enc` et `avifenc` pour HEIC et AVIF.
+- Assertions communes : aucun repère (ASCII, UTF-16 BE et LE, rationnels EXIF de la latitude repère) dans la sortie ; éléments gardés identiques (orientation, ICC, matrice, `colr`, flux compressés) ; sortie relue sans erreur (image décodée par `createImageBitmap`, `<video>` et `<audio>` : même durée à 0,1 s près, mêmes dimensions ; PDF ouvert par pdf.js ; ZIP relu, CRC justes) ; fichier tronqué ou piégé → `echec` sans exception ; jamais `nettoye` sur un échec.
+
+### 35.3 Enregistrement dans l'interface
+
+- **Vocal (V1)** : dans la page, `getUserMedia({ audio })` + `MediaRecorder` ; écran d'explication **avant** la demande du navigateur (« Shhdrop va demander l'accès au micro. L'enregistrement reste sur votre appareil et n'est chiffré qu'ici ») ; forme d'onde en direct (barres DOM, sans `<canvas>`) ; pause et reprise (le temps en pause ne compte pas) ; durée maximale 30 min, avertissement 1 min avant, arrêt automatique ; écoute avant d'ajouter, « Recommencer » ; refus, absence de micro, micro occupé : messages distincts avec la marche à suivre ; pistes arrêtées et `AudioContext` fermé à la fin, à l'annulation et à `pagehide` ; passage en arrière-plan → pause automatique. Sortie nettoyée par §35.2 avant l'ajout.
+- **Signalement (faible)** : l'audit de confidentialité (P13) propose d'interdire `AudioContext` et `getContext` dans `web/src` contre l'empreinte du navigateur. La forme d'onde a besoin d'un `AnalyserNode`, donc d'un `AudioContext` branché sur le micro : exception limitée à `web/src/media/recorder.ts` (aucun oscillateur, aucun `OfflineAudioContext`), et barres en DOM pour garder l'interdiction de `getContext`.
+- `Permissions-Policy: microphone=(self)` : déjà en place (§10) ; `/pdf-frame.html` passe à `microphone=()`.
+- **Vidéo dans la page (optionnelle, Q-REC1)** : `getUserMedia({ video, audio })`, aperçu, choix avant/arrière, durée maximale 5 min à 2,5 Mbit/s (environ 94 Mo), même nettoyage. Elle exige `camera=(self)`.
+  - Ce qu'elle apporte : l'enregistrement par webcam **sur ordinateur**, où `capture` est ignoré (le sélecteur de fichiers s'ouvre) ; sur téléphone, `<input capture>` ouvre déjà l'appareil du système, de meilleure qualité.
+  - Ce qu'elle coûte : avec `camera=(self)`, tout code servi par l'origine peut demander la caméra ; si la personne a choisi « toujours autoriser », un code piégé (§18.2) pourrait filmer **sans nouvelle demande**. C'est déjà vrai pour le micro, mais la caméra est plus grave. Sans elle, l'origine n'a jamais accès à la caméra.
+  - **Recommandation** : non en V1 ; garder `camera=()` et `<input capture>`. Si le propriétaire la veut : Task 12b, l'autorisation n'est demandée qu'après un clic sur « Filmer ici », et les pistes sont coupées dès la fin.
+
+### 35.4 Questions ouvertes (défaut recommandé)
+
+| # | Question | Défaut recommandé |
+|---|---|---|
+| Q-MD1 | Échec du nettoyage : envoi silencieux, refus, ou choix | Choix explicite par fichier (« Envoyer tel quel » / « Retirer »), envoi bloqué jusque-là |
+| Q-MD2 | HEIC/HEIF : nettoyer ou refuser | Nettoyer en place (§35.2) ; `echec` si la structure sort du cas simple |
+| Q-MD3 | Modifications suivies (Office, ODF) | Laissées intactes (demande), détectées et signalées à l'écran |
+| Q-REC1 | Vidéo enregistrée dans la page (`camera=(self)`) | Non en V1 ; `<input capture>` |
+| Q-STAT1 | Compteur de signalements | Garder un seul entier horaire, exposé en booléen sur `/healthz` local ; sinon, le serveur n'a plus aucun signal d'abus |
+
+---
+
+## 36. Ce que voit le serveur : minimisation (v2.6, 5 novembre)
+
+But : que le serveur, et quiconque le lit (hébergeur, pirate, réquisition), apprenne le moins possible. **Fait** = déjà dans la spécification et le code ; **À faire** = Task M2 (Plan 2) ou Plan 3 ; **Impossible** = avec la raison. Rien ici ne permet d'écrire « le serveur ne voit rien » à l'écran (§18.11).
+
+| # | Ce qu'il voit ou peut déduire | Exposition actuelle | Réduction la plus forte, praticable | État |
+|---|---|---|---|---|
+| S1 | **Adresse IP** | en mémoire à chaque requête ; clés HMAC du jour pour les limites (§9.3) ; jamais sur disque côté application ; Caddy et l'hébergeur la voient | Caddy écrase `X-Shh-Client-IP` et ne journalise rien (journal global et d'accès vers `discard`) ; pilote de journal Docker `none`, journald `Storage=volatile`, swap et vidages mémoire coupés (§22) ; test avec une IP repère (texte et 4 octets) sur disque, stdout, stderr | Fait (application) ; **À faire** Plan 3 (pile) ; masquer l'adresse au serveur : **impossible** sans Tor (prévu plus tard, §3), car les limites par connexion en dépendent |
+| S2 | **User-Agent, Referer, Accept-Language, Sec-CH-UA-*, Cookie, Origin** | envoyés par le navigateur ; `Referrer-Policy: no-referrer` ; le serveur Go ne les lit pas (vérifié par lecture) | Caddy les **retire avant de transmettre** au serveur (`header_up -User-Agent -Referer -Accept-Language -Cookie -Sec-CH-UA* -Sec-Fetch-* -DNT -Priority`) ; test de sources : aucun `r.UserAgent()`, `r.Referer()`, lecture d'en-tête (`Header.Get`, `Header.Values`, `Header[`) hors de la liste blanche du code actuel (`Authorization`, `X-Shh-Client-IP`, `X-Shh-Access`, `X-Shh-Manage` ; la longueur passe par `r.ContentLength`) | **À faire** M2 (test Go), Plan 3 (Caddy) |
+| S3 | **Empreinte TLS** (JA3/JA4) | visible du seul Caddy, à la poignée de main | ni journalisée ni transmise (Caddy ne la transmet pas par défaut) | **Impossible** à supprimer : toute terminaison TLS la voit ; Plan 3 vérifie l'absence de journal |
+| S4 | **Taille exacte** | v1 : palier seulement ; v2 envoi anticipé : à 4 Mio près (§29.7, §18.12) ; **et `fill_from` révèle à 4 Mio près le dernier segment de données même en envoi au clic** (erreur signalée : Q-K1 promettait le contraire) | paliers inchangés (écart d'un palier au suivant : ×5 de 1 à 5 Mio, puis ×2 à ×2,5, ce qui reste raisonnable : plus fin fuit plus, plus grossier coûte la bande passante) ; **en mode « Envoyer seulement quand je clique », le navigateur envoie lui-même tout le bourrage** (octets de `crypto.getRandomValues`), sans `fill_from`/`fill_to` : le serveur ne connaît que le palier, au prix d'un envoi jusqu'à deux fois plus long | **À faire** M2 ; envoi anticipé par défaut : fuite à 4 Mio près assumée (Q-K1) |
+| S5 | **Nombre et horaire des segments** | à l'envoi : chaque `PUT` en direct, `progress_at` en base à la minute (§9.1) ; à la lecture : chaque `GET` | `progress_at` **en mémoire seulement** (un redémarrage tue de toute façon les envois, §7.7) ; aucune date de segment ailleurs ; cadence constante à l'envoi **non retenue** (Q-MIN3 : elle ne cache que le débit de la connexion, contre l'objectif de 5 s) | **À faire** M2 (`progress_at`) ; cadence : non retenue |
+| S6 | **Nombre d'éléments** | dans le manifeste chiffré (§29.3) | — | Fait |
+| S7 | **Taille du manifeste** | réserve fixe dans le dernier morceau, longueur chiffrée (§29.3, K1) : les noms ne changent ni le palier ni le nombre de segments | — | Fait |
+| S8 | **Types de fichiers** | dans le manifeste chiffré ; aucun type MIME n'est envoyé | — | Fait |
+| S9 | **Quels éléments le destinataire ouvre** (non listé dans la demande, trouvé ici) | la lecture en flux télécharge les segments d'un élément quand on l'ouvre : l'ordre des `GET` trahit les frontières des éléments et ceux qui ont été vus | **lecture monotone** : après le segment de fin (manifeste), le navigateur ne demande que des numéros croissants ; ouvrir l'élément 5 télécharge (et jette) les segments qui le précèdent ; seul un nouvel essai réutilise un numéro (le budget de 2 × le paquet, §24, le permet) ; reste visible : jusqu'où la lecture est allée (§18.16) | **À faire** M2 (client) |
+| S10 | **Saisie du mot de passe** | la pré-lecture « pendant la saisie » (§29.6) pourrait suivre les frappes | la pré-lecture démarre **dès la réponse de `meta`**, selon un calendrier fixe (segment de fin, puis 0, 1, 2… jusqu'à 64 Mio), jamais déclenchée par une frappe ; l'heure de `unlock` reste visible (elle **est** la fin de la saisie : impossible à cacher sans retarder la personne) | **À faire** M2 |
+| S11 | **Heure de création** | non stockée ; déductible de `expires_at − ttl_hours` à 15 min près (audit P9) ; date de naissance du fichier (§18.6) | `ttl_hours` et `max_opens` mis à `NULL` après `finalize` s'ils ne servent plus (`max_opens` sert à « Ouvert 1 / 3 » : gardé) ; texte honnête « à 15 min près » ; date de naissance : impossible (système de fichiers) | **À faire** M2 (`ttl_hours`) ; naissance : **impossible** |
+| S12 | **Heure des ouvertures** | aucune heure stockée, mais `purge_at` = ceil15(dernière ouverture + 3 h) **date la dernière ouverture à 15 min près** (signalé) ; `atime` réglé par `O_NOATIME` et `noatime` (audit P5) ; budget de lecture : heure de la première lecture, en mémoire | `purge_at` et `upload_deadline` **en mémoire seulement** ; au démarrage, effacer tout partage `uploading` ou `draining` (aucun jeton ne survit à un redémarrage, §7.7, donc aucun lecteur ni envoi possible) ; la base ne garde alors qu'une date, `expires_at`, arrondie au quart d'heure ; le compte à rebours n'a besoin que de `expires_at` | **À faire** M2 |
+| S13 | **Nombre d'ouvertures** | `opens_left`, `opens_issued`, `done_mask` | nécessaire aux règles (§4) ; compteurs sans heure ; effacés avec le partage | Fait (nécessaire) |
+| S14 | **Raison de la destruction** | champ `reason` libre de 64 caractères accepté puis ignoré (audit P11) | `reason` absent ou exactement `"report"` ; tout autre valeur → 400 ; jamais de texte libre | **À faire** M2 |
+| S15 | **Données anti-robot** | défi lié à la connexion ; sels consommés 2 min ; heures exactes des créations de l'heure par connexion, en mémoire ; reCAPTCHA : Google voit l'adresse, `siteverify` sans `remoteip` (§26) | heures des créations arrondies à la minute ; rien sur disque | **À faire** M2 (arrondi) ; Google : limite de §26 |
+| S16 | **État des limites** | §9.5, mémoire, clés HMAC du jour ; correspondance « envoi en cours → connexion » (§29.5) | pas plus court : les quotas du jour exigent des clés du jour | Fait |
+| S17 | **Journaux** | application : `ErrorLog` jeté, nettoyeur muet (une ligne fixe), aucune adresse (audit) | test : aucune sortie standard ou d'erreur ne contient d'adresse, d'identifiant, d'en-tête repère ; Caddy, Docker, journald : Plan 3 (S1) | Fait (application) ; **À faire** M2 (test), Plan 3 |
+| S18 | **Messages d'erreur** | codes fixes (`not_found`, `bad_request`, `limit`, `busy`, `budget`, `internal`), JSON uniforme (§8) | test : aucune réponse ne recopie un identifiant, un chemin, un en-tête ou un corps reçu | Fait ; **À faire** M2 (test) |
+| S19 | **Relectures de la page de gestion** | `manage/status` toutes les 60 s quand l'écran est visible (§33) : relie une connexion à un partage, en direct | relecture seulement écran visible (fait) ; aucune relecture en arrière-plan ni par le service worker ; aucune trace côté serveur | Fait |
+| S20 | **Pré-calcul anti-robot et envoi anticipé** | le serveur sait qu'une composition est en cours (§29.4) | mode « Envoyer seulement quand je clique » (S4) ; défaut : Q-K1 | Choix du propriétaire |
+| S21 | **Compteur de signalements** | prévu (§7.6), non codé | un entier horaire, booléen `reports_alert` sur `/healthz` local, aucun identifiant (§9.5) | **À faire** M2 |
+
+**Le test « le serveur ne voit rien » (§14) s'étend** (Task M2, bloquant comme avant) : en plus des repères de contenu, de nom, de mot de passe et de clés, il envoie une **IP repère** (texte et 4 octets), un **User-Agent, un Referer et un Accept-Language repères**, un identifiant repère dans une route inconnue et un `reason` repère ; il exige : aucun de ces repères sur disque (base, WAL, fichiers), dans stdout, stderr ni dans une réponse ; base sans `progress_at`, `upload_deadline`, `purge_at` non nuls après `finalize` et sans `ttl_hours` ; toutes les dates de la base multiples de 900 s ; en mode « au clic », aucune requête `finalize` ne porte `fill_from`. La fouille de la mémoire reste limitée aux repères de contenu et de clés : l'adresse et les en-têtes passent forcément par la mémoire du processus qui reçoit la requête ; derrière Caddy (Plan 3), les en-têtes retirés ne doivent plus y apparaître.
+
+### 36.1 Questions ouvertes (défaut recommandé)
+
+| # | Question | Défaut recommandé |
+|---|---|---|
+| Q-MIN1 | Mode « au clic » : le navigateur envoie lui-même le bourrage (envoi jusqu'à 2 × plus long) | Oui, seulement dans ce mode |
+| Q-MIN2 | Lecture monotone chez le destinataire (S9) | Oui |
+| Q-MIN3 | Cadence d'envoi constante | Non |
+| Q-K1 (rappel) | Envoi anticipé par défaut | Inchangé (oui) ; l'audit P8 recommande l'inverse : à trancher par le propriétaire |

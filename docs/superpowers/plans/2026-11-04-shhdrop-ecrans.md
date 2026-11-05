@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-04-shhdrop-ui-design.md` (notée « UI », révision 4) et `docs/superpowers/specs/2026-11-03-shhdrop-design.md` (notée « spec », v2.6).
 
-**Ordre après la Task 8 (5 novembre)** : Task DA (direction artistique v2, UI §20), puis Tasks K1 à K3 (chiffrement anticipé, lien court, spec §29, §31, §32, §34), puis Tasks 9 à 24 (avec les amendements listés après la Task K3), puis Task R (droits), Task H (historique), Tasks V1 à V3 (coffre), Tasks 25 à 27, Tasks C1 à C4 (code vérifiable, C4 conditionnelle), Task 28. Référence visuelle : `docs/superpowers/design/da-v2/`. Lire UI §0, §7, §9, §12, §14.3, §15, §18 et spec §2, §5, §7.4, §10, §12, §13, §18, §19, §21, §24, §25 avant toute tâche.
+**Ordre après la Task 8 (5 novembre)** : Task DA (direction artistique v2, UI §20), puis Tasks K1 à K3 (chiffrement anticipé, lien court, spec §29, §31, §32, §34), puis Task M2 (minimisation serveur, aucune statistique, spec §35.1, §36), puis Tasks 9a à 9c (nettoyage des métadonnées, spec §35.2) et 10 à 24, avec la Task 12b conditionnelle (Q-REC1) et les amendements listés après la Task M2, puis Task R (droits), Task H (historique), Tasks V1 à V3 (coffre), Tasks 25 à 27, Tasks C1 à C4 (code vérifiable, C4 conditionnelle), Task 28. Référence visuelle : `docs/superpowers/design/da-v2/`. Lire UI §0, §7, §9, §12, §14.3, §15, §18 et spec §2, §5, §7.4, §10, §12, §13, §18, §19, §21, §24, §25, §35, §36 avant toute tâche.
 
 ## Global Constraints
 
@@ -26,7 +26,8 @@
 - **Un seul thème, sombre** (UI §0.2 P1) : pas de jetons, tests ni captures en clair.
 - Accessibilité : WCAG 2.1 AA ; zones tactiles ≥ 44 px ; `prefers-reduced-motion` et `forced-colors` respectés.
 - Jamais « 100 % sécurisé », et aucun nom d'algorithme ni terme technique dans les textes de l'interface (UI §20.8).
-- Versions exactes, `npm ci` reproductible, `npm audit --omit=dev --audit-level=high` sans alerte, licences dans `THIRD_PARTY_LICENSES.md`.
+- **Aucune statistique** (spec §35.1) : aucun SDK de mesure d'audience, de télémétrie ni de rapport d'erreurs, aucun `sendBeacon`, aucun compteur serveur hors de spec §9.5 ; contrôlé par `no-analytics.test.ts`, `stats_test.go` et `check-dist.mjs` (Task M2).
+- Versions exactes, **dernière version stable publiée depuis au moins 7 jours, sauf correctif de sécurité** (spec §24), `npm ci` reproductible, `npm audit --omit=dev --audit-level=high` sans alerte, licences dans `THIRD_PARTY_LICENSES.md`.
 - On n'annonce une tâche finie qu'avec la sortie des tests (et les captures quand l'écran change).
 - Commits : `git commit --author="Skoow <190851638+Skoow@users.noreply.github.com>" -m "…"` (aucune surcharge de `user.*`).
 - **Démo à jour** : à partir de la Task 8, toute tâche qui change un écran finit par `npm run build:demo && node scripts/check-dist.mjs --demo && npx playwright test --project='demo-*'` (SUCCÈS exigé ; projets `demo-chromium-mobile` et `demo-webkit-desktop`) avant le push.
@@ -40,7 +41,8 @@
 5. **Annuler et quitter** : annulation et `pagehide` pendant l'envoi détruisent le partage créé (`keepalive`) ; jamais « Lien prêt » avant la résolution de `createShare` (Tasks 0, 17).
 6. **Reprise réelle** : une coupure de 60 s pendant l'envoi ne perd pas l'envoi ; une pause est bornée à 10 min et par l'échéance unique « dernier segment acquitté + `SERVER_STALL_MS` » (13 min), la même que celle de la coupure (Tasks 0, 17).
 7. **Enregistrement interrompu** : `writable.abort()`, jamais « Enregistré » (Task 23).
-8. **Métadonnées** : JPEG d'iPhone avec MPF et image secondaire → aucune trace GPS/appareil, orientation et ICC intacts (Task 9).
+8. **Métadonnées** : JPEG d'iPhone avec MPF et image secondaire, HEIC, MOV de téléphone (piste de position, `tmcd`), PDF à révisions, DOCX avec commentaires → aucune trace GPS, appareil, auteur ni date ; orientation, ICC, matrice de rotation intactes ; un échec n'est jamais affiché « Nettoyé » (Tasks 9a à 9c).
+9. **Minimisation** : aucune heure d'ouverture ni d'envoi en base, motif de destruction fermé, aucune réponse qui recopie un identifiant, lecture monotone, aucune statistique (Task M2).
 
 ---
 
@@ -68,7 +70,12 @@ web/src/main.ts | App.svelte
 web/src/app/router.svelte.ts | link.ts | lifecycle.ts | env.ts | viewport.ts | demo-hooks.ts
 web/src/i18n/fr.ts | en.ts | i18n.svelte.ts | format.ts | pages.fr.ts | pages.en.ts
 web/src/ui/tokens.css | fonts.css | base.css | motion.ts | contrast.ts | *.svelte
-web/src/media/strip.ts | jpeg.ts | png.ts | webp.ts | recorder.ts | kinds.ts | categories.ts
+web/src/media/strip.ts | format.ts | patch.ts | bytes.ts | exif.ts | crc32.ts | clean-label.ts   # porte commune (Task 9a)
+web/src/media/jpeg.ts | png.ts | webp.ts | gif.ts | heif.ts | isobmff.ts                       # images (9a)
+web/src/media/pdf.ts | zip.ts | xmlattr.ts | ooxml.ts | odf.ts                                # PDF et bureautique (9b)
+web/src/media/mp4.ts | ebml.ts | mp3.ts | ogg.ts | flac.ts | wav.ts                           # vidéo et audio (9c)
+web/src/media/recorder.ts | camera.ts (12b) ; web/src/transfer/readorder.ts (M2)
+web/scripts/gen-media-fixtures.sh                                                              # fichiers d'essai réels, lancé à la main
 web/src/flows/compose.svelte.ts | options.svelte.ts | send.svelte.ts | stats.ts | manage.svelte.ts | receive.svelte.ts | endoflife.ts
 web/src/captcha/pow.ts | pow.worker.ts | prefetch.ts | verif-host.ts | solve.ts
 web/src/routes/*.svelte
@@ -301,7 +308,7 @@ setDemo(h: DemoHooks): void;                // appelé par installDemo seulement
 
 ### Task DA : Direction artistique v2 — jetons, fond, composants de base, accueil (UI §20)
 
-À faire **juste après la Task 8**, avant la Task 9 : les écrans suivants se construisent sur ces composants. Référence visuelle : `docs/superpowers/design/da-v2/` ; en cas d'écart, UI §20 (corrections K1 à K14) l'emporte.
+À faire **juste après la Task 8**, avant la Task 9a : les écrans suivants se construisent sur ces composants. Référence visuelle : `docs/superpowers/design/da-v2/` ; en cas d'écart, UI §20 (corrections K1 à K14) l'emporte.
 
 **Files:**
 - Create: `web/scripts/gen-aurora.mjs`, `web/scripts/gen-aurora.test.ts`, `web/public/assets/aurora-mint.png`, `aurora-tide.png`, `aurora-ink.png`, `web/src/ui/Aurora.svelte`, `web/src/ui/decor.ts`, `decor.test.ts`, `web/src/ui/viewTransition.ts`, `viewTransition.test.ts`, `web/src/ui/Vessel.svelte` (contour seulement ; dépôt et catégories en Task 10), `web/ui-e2e/aurora.spec.ts`
@@ -442,6 +449,45 @@ prefetchShare(link, expectedOrigin, net?) → { segments: Map<number, Uint8Array
 
 ---
 
+### Task M2 : minimisation serveur, aucune statistique (spec §35.1, §36)
+
+Chaque étape reprend une ligne « À faire » de spec §36 (repère S…) ou de §35.1. Placée juste après K3 : elle modifie la pré-lecture (K3), `finalize` (K1) et les colonnes de la base. Ce qui touche Caddy, Docker et journald (S1, S2, S3, S17) va au Plan 3, avec les tests décrits en spec §36.
+
+**Files:**
+- Create: `server/internal/api/minimize_test.go`, `server/internal/stats_test.go` (recherche dans les sources et `go.sum`), `web/src/no-analytics.test.ts`, `web/src/transfer/readorder.ts`, `readorder.test.ts`
+- Modify: `server/internal/store/store.go` (colonnes), `server/internal/share/service.go` (échéances en mémoire, effacement au démarrage, `ttl_hours` à `NULL`), `server/internal/api/handlers_share.go` (`reason`, `/healthz`), `server/internal/api/api.go`, `server/internal/captcha/captcha.go` (heures à la minute), `server/internal/limits/*.go` (méthode `Len()` par compteur, pour les tests), `server/internal/janitor/janitor.go`, `web/src/transfer/prefetch.ts`, `web/src/transfer/draft.ts`, `web/src/transfer/client.ts`, `web/e2e/sees-nothing.test.ts`, `web/e2e/scan.ts`, `web/scripts/check-dist.mjs`
+
+- [ ] **Step 1 : Tests qui échouent — aucune statistique (§35.1).**
+  - `web/src/no-analytics.test.ts` : la liste de spec §35.1 cherchée sans tenir compte de la casse dans `web/src`, `web/scripts`, `web/*.html`, les noms de paquets de `package-lock.json` ; `check-dist.mjs` fait la même recherche dans `dist/`, `dist-verif/`, `dist-demo/` ; un fichier piégé de test (`gtag(` dans une chaîne) prouve que la recherche le trouve ; aucun écouteur `error` ni `unhandledrejection` ailleurs que dans une liste blanche vide.
+  - `server/internal/stats_test.go` : aucun import interdit (§35.1) dans `server/` ni dans `go.sum` ; toute déclaration `map[` dans `server/internal` hors de la liste blanche (fichier et nom de variable, une entrée par ligne de spec §9.5) fait échouer le test avec le message « nouveau compteur : ajouter une ligne justifiée à spec §9.5 » ; aucun client HTTP sortant (`http.Client`, `http.Get`, `net.Dial`) hors de `captcha/recaptcha.go`.
+  - Rotation : horloge injectée, chaque compteur de §9.5 rempli puis vide après sa durée (`Len() == 0`) : minute, heure, 2 min, 3 h, minuit UTC.
+  - Schéma : `sqlite_master` ne contient que `shares` et ses index.
+- [ ] **Step 2 : Tests qui échouent — base et heures (S5, S11, S12).**
+  - Après `finalize` : colonnes `progress_at`, `upload_deadline`, `purge_at` **absentes** du schéma (migration qui les retire) ; `ttl_hours` à `NULL` ; seule date en base : `expires_at`, multiple de 900.
+  - Envoi bloqué 15 min, envoi vide 5 à 20 min, échéance de 3 h, `purge_at` de l'état `draining` : mêmes résultats qu'avant (tests existants de `share/` rejoués), avec des échéances tenues en mémoire.
+  - Redémarrage simulé (nouveau `Service` sur la même base) : tout partage `uploading` ou `draining` est effacé, fichier compris ; un partage `ready` reste.
+  - Anti-robot : les heures gardées pour la difficulté sont des multiples de 60 s ; la difficulté double toujours à chaque création de l'heure.
+- [ ] **Step 3 : Tests qui échouent — requêtes (S2, S14, S17, S18, S21).**
+  - `minimize_test.go` : recherche dans `server/` : aucun `UserAgent()`, `Referer()`, `RemoteAddr` hors de `clientip.go` et `/healthz` ; aucune lecture d'en-tête hors de `Authorization`, `X-Shh-Client-IP`, `X-Shh-Access`, `X-Shh-Manage`.
+  - `destroy` : `reason` absent ou `"report"` → accepté ; `"ReperRaison"`, `""`, `"REPORT"` → 400 `bad_request` ; aucune réponse ne contient « ReperRaison ».
+  - Échos : pour chaque route, un identifiant repère (`ReperIdAAAAAAAAAAAAAA`, longueur valide puis invalide), un en-tête `X-Repere: ReperEntete` et un corps repère : aucune réponse (corps et en-têtes) ne les contient ; seules les valeurs d'erreur de la liste fixe sortent.
+  - Sorties : stdout et stderr du serveur sur un parcours complet avec `X-Shh-Client-IP: 203.0.113.77` et `User-Agent: ReperUA/1.0` : seulement `SHH_LISTENING …` ; aucune adresse ni repère.
+  - `/healthz` (boucle locale) : `{"ok":true,"reports_alert":false}` ; 5 signalements dans l'heure → `true` ; heure suivante → `false` ; aucun autre champ.
+- [ ] **Step 4 : Tests qui échouent — client (S4, S9, S10).**
+  - `readorder.test.ts` : `planReads(manifest, wanted)` rend, après le segment de fin, une suite **strictement croissante** de numéros de segments ; ouvrir l'élément 5 avant l'élément 2 → les segments des éléments 1 à 5 sont lus dans l'ordre (ceux de 1 à 4 conservés s'ils tiennent dans le cache de lecture de 64 Mio, sinon jetés) ; seul un nouvel essai répète un numéro ; revenir à un élément déjà jeté relit depuis son premier segment, une seule fois (budget de 2 × le paquet, spec §24).
+  - `prefetch.test.ts` : la pré-lecture démarre à la réponse de `meta`, dans l'ordre fin, 0, 1, 2… jusqu'à 64 Mio, à un rythme qui ne dépend d'aucun événement clavier (espion : 0 frappe contre 20 frappes → mêmes instants de requête, horloge injectée).
+  - `draft.test.ts` : mode « Envoyer seulement quand je clique » → tous les segments de bourrage sont envoyés par le navigateur (octets de `crypto.getRandomValues`, jamais de zéros), `finalize` sans `fill_from` ni `fill_to` ; mode anticipé → inchangé (K1). Côté serveur : `finalize` sans `fill_*` exige que tous les segments soient présents.
+- [ ] **Step 5 : « Le serveur ne voit rien » étendu** (`web/e2e/sees-nothing.test.ts`, `scan.ts`) selon spec §36 : IP repère (texte et 4 octets), User-Agent, Referer et Accept-Language repères, identifiant repère dans une route inconnue, `reason` repère ; aucun sur disque (base, WAL, fichiers), dans stdout, stderr ni dans les réponses ; dates de la base multiples de 900 s, colonnes retirées absentes ; en mode « au clic », aucun `finalize` avec `fill_from`. La fouille de la mémoire garde ses repères de contenu et de clés.
+- [ ] **Step 6 : Lancer** `make test` → ÉCHEC sur chaque test nouveau (sortie jointe).
+- [ ] **Step 7 : Implémenter** : migration de la base (copie dans une nouvelle table `WITHOUT ROWID` sans les trois colonnes, `secure_delete` déjà actif, puis `VACUUM`) ; échéances d'envoi, de blocage et de purge dans une table en mémoire du `Service` ; effacement au démarrage ; `ttl_hours` à `NULL` à `finalize` ; `reason` en énumération ; compteur horaire des signalements et `/healthz` ; heures de l'anti-robot à la minute ; `readorder.ts` branché dans `client.ts` (lecture des éléments et enregistrement) ; pré-lecture à calendrier fixe ; bourrage envoyé par le navigateur en mode « au clic ».
+- [ ] **Step 8 : Lancer** `make test && make test-ui` puis la commande démo → SUCCÈS ; joindre le nombre de tests.
+- [ ] **Step 9 : Mettre à jour** spec §36 : chaque ligne passée de « À faire M2 » à « Fait », avec le commit ; spec §9.1 (colonnes) ; mêmes changements dans le faux serveur de la démo (`web/src/demo/fake-server.ts`).
+- [ ] **Step 10 : Commit** « feat(server): minimisation (heures en mémoire, motif fermé, aucun écho, aucune statistique), lecture monotone » et push.
+
+**Transmis au Plan 3** (spec §36 S1, S2, S3, S17, §35.1) : Caddyfile qui écrase `X-Shh-Client-IP`, retire `User-Agent`, `Referer`, `Accept-Language`, `Cookie`, `Sec-CH-UA*`, `Sec-Fetch-*`, `DNT`, `Priority` avant de transmettre, journaux vers `discard`, `admin off`, pas de `metrics` ; Docker `log-driver: none` ; journald `Storage=volatile` ; test de déploiement : 20 requêtes avec IP et User-Agent repères, puis fouille de `/var/lib/docker`, `/var/log`, du volume de données et de la mémoire du serveur Go (en-têtes retirés absents).
+
+---
+
 ### Amendements aux tâches existantes (5 novembre, spec v2.6, UI révision 4)
 
 - **Task 10** : le composeur vit dans `Vessel` (UI §20.4) ; `createComposer` appelle `draft.sync(toApiItems())` à chaque changement (Task K3) ; e2e : ligne « L'envoi chiffré commence en arrière-plan » visible dès le premier élément.
@@ -453,33 +499,98 @@ prefetchShare(link, expectedOrigin, net?) → { segments: Map<number, Uint8Array
 - **Task 20** : pré-lecture pendant la saisie (Task K3) ; note fixe « ouvrez-y ce lien » dans un navigateur de téléphone (spec §27.6).
 - **Tasks 21 et 23** : droit `"voir"` : aucun Enregistrer ni Copier, `controlsList="nodownload"`, `disablePictureInPicture`, mention de spec §34 (détails en Task R).
 - **Task 25** : page Sécurité en langage courant, liens vers `docs/securite-technique.md` (Task C3) et `/verifier` ; règle des mots interdits étendue à `pages.fr.ts` et `pages.en.ts`.
-- **Task 27** : parcours complets avec envoi anticipé, droits et lien court ; « le serveur ne voit rien » avec `R`.
+- **Task 27** : parcours complets avec envoi anticipé, droits et lien court ; « le serveur ne voit rien » avec `R`, et les repères de spec §36 (IP, User-Agent, Referer, identifiant, motif, Task M2) ; fichiers d'essai des Tasks 9a à 9c envoyés puis reçus : aucun repère dans le fichier enregistré par le destinataire.
+- **Task 10 (composeur déjà livré, d46f19e)** : interface `strip` et états remplacés par ceux de la Task 9a (`CleanState` à cinq valeurs, échec ajouté en `echec` au lieu d'être refusé, `blockReason` `non_nettoye`, `acceptUncleaned`) ; `STRIP_MAX` ne s'applique plus qu'aux images ; `STRIPPABLE` remplacé par `detectFormat`.
+- **Tasks 13 et R (spec §34.1, décision du propriétaire)** : plus de `RightsPicker` à trois choix. Un `Switch` « Autoriser le téléchargement », activé par défaut (`"enregistrer"`), désactivé → `"voir"` ; sous-option « Autoriser aussi une copie chiffrée dans l'app, sur téléphone » (`"coffre"`, `keep_ttl_h` = durée), visible seulement quand l'interrupteur est activé, désactivée par défaut, proposée à tout expéditeur ; interrupteur bloqué activé, avec la liste des éléments en cause, si un élément ne s'affiche pas dans le navigateur. Le manifeste et `allowedActions` ne changent pas. Tests : interrupteur activé au chargement ; le désactiver masque et décoche la sous-option ; `role="switch"` nommé ; `axe`.
+- **Tasks 20, 21, 23** : pré-lecture à calendrier fixe et lecture monotone (Task M2) ; aucun numéro de segment plus petit qu'un numéro déjà demandé, sauf nouvel essai.
 
 ---
 
-### Task 9 : Retrait des métadonnées (JPEG, PNG, WebP)
+### Tasks 9a à 9c : nettoyage des métadonnées (spec §35.2)
+
+Remplacent l'ancienne Task 9 (JPEG, PNG, WebP seulement). Règles communes, à lire avant chaque sous-tâche : spec §35.2 (tableau par format, états, textes, fichiers d'essai). Analyseurs écrits à la main, sans dépendance ; aucune exception non rattrapée ; aucun fichier entier en mémoire au-delà de `STRIP_MAX` (50 Mio, `web/src/limits.ts`) ; une seule porte : `stripMetadata`.
+
+**Interfaces (communes, posées en 9a) :**
+```ts
+type CleanState = "nettoye" | "echec" | "protege" | "non_pris_en_charge" | "sans";
+type CleanNote = "suivi_modifs" | "pdf_revisions";
+type StripResult =
+  | { state: "nettoye"; data: Blob; notes: CleanNote[]; family: "image" | "video" | "audio" | "pdf" | "bureautique" | "vocal" }
+  | { state: "echec" | "protege"; reason: string }            // reason : code interne, jamais affiché tel quel
+  | { state: "non_pris_en_charge" | "sans" };
+stripMetadata(file: Blob, mime: string, name: string, opts?: { recorded?: boolean; signal?: AbortSignal }): Promise<StripResult>;
+detectFormat(head: Uint8Array, mime: string, name: string): Format;   // octets magiques d'abord, puis MIME, puis extension
+type Patch = { at: number; bytes: Uint8Array };                        // correctif à longueur constante
+patchedBlob(src: Blob, patches: Patch[], cut?: { from: number; to: number }[]): Blob;   // tranches + correctifs, jamais de copie entière
+cleanLabelKey(r: StripResult, category: Category): I18nKey | null;    // le seul endroit qui choisit « Nettoyé · … »
+```
+Le composeur (déjà livré, `flows/compose.svelte.ts`) passe de `strip?: (Blob, mime) => Promise<Uint8Array>` à `strip?: typeof stripMetadata` ; `CleanState` remplace `"nettoye" | "non_nettoye" | "sans_objet"` ; un échec **ajoute** l'élément en `echec` (au lieu de `failedClean` + refus) et `blockReason()` rend `non_nettoye` tant que la personne n'a pas choisi **Envoyer tel quel** (`composer.acceptUncleaned(id)`) ou **Retirer** (spec §35.2, Q-MD1). Un élément en cours de nettoyage (`status: "nettoyage"`) n'est jamais transmis à `draft.sync` (Task K3).
+
+### Task 9a : Images (JPEG avec MPF, PNG, WebP, GIF, HEIC/HEIF/AVIF) et porte commune
 
 **Files:**
-- Create: `web/src/media/jpeg.ts`, `png.ts`, `webp.ts`, `strip.ts`, `kinds.ts`, `categories.ts`, `strip.test.ts`, `kinds.test.ts`, `categories.test.ts`, `web/scripts/gen-fixtures.mjs`, `web/src/media/fixtures/*`
+- Create: `web/src/media/strip.ts`, `format.ts`, `patch.ts`, `bytes.ts` (lecteur borné : `u8`, `u16be/le`, `u32be/le`, `u64be`, erreur typée `Malformed` au premier dépassement), `exif.ts` (EXIF minimal à une entrée 0x0112), `jpeg.ts`, `png.ts`, `webp.ts`, `gif.ts`, `heif.ts`, `isobmff.ts` (boîtes : lecture, liste blanche, neutralisation `free`, partagé avec 9c), `crc32.ts`, `clean-label.ts`, tests `*.test.ts` de chacun, `web/scripts/gen-fixtures.mjs` (images), `web/scripts/gen-media-fixtures.sh` (HEIC, AVIF : `heif-enc`, `avifenc`, `exiftool`, versions en tête), `web/src/media/fixtures/*`
+- Modify: `web/src/flows/compose.svelte.ts`, `compose.test.ts`, `web/src/flows/kinds.ts` (reste de l'ancienne Task 9 : `categoryOfReceived(previewKind, safeName)`, qui lit la même table par extension que `categoryOf`, déjà livré), `web/src/i18n/fr.ts`, `en.ts` (textes de spec §35.2), `web/ui-e2e/compose.spec.ts`
 
-**Interfaces:**
-```ts
-type Stripped = { ok: true; data: Uint8Array<ArrayBuffer>; mime: string } | { ok: false; reason: "malforme" };
-stripMetadata(bytes: Uint8Array, mime: string): Stripped;
-cleanStatus(mime: string, name: string): "nettoyable" | "video" | "photo_non_nettoyee" | "pdf" | "document" | "texte";
-type Category = "texte" | "photos" | "videos" | "audio" | "documents" | "autres";
-CATEGORY_ORDER: readonly Category[];                          // UI §9.2.4
-categoryOf(item: { kind: "text" | "file"; mime: string; name: string; voice?: boolean }): Category;
-categoryOfReceived(previewKind: PreviewKind, safeName: string): Category;   // affichage destinataire
-// Les deux fonctions lisent UNE seule table par extension (`EXT_CATEGORY`) ; `categoryOf` retombe sur le MIME, `categoryOfReceived` sur `previewKind`, seulement si l'extension est inconnue. `previewKind` vaut `none` pour SVG, HTML, HEIC et au-delà de 200 Mio : l'extension décide donc. Le vocal (« Vocal n.ext », nom fabriqué par le composeur) suit la même règle des deux côtés.
-```
+- [ ] **Step 1 : Fichiers d'essai.** `gen-fixtures.mjs` (sans dépendance, octet par octet ; CI le relance et compare) : `iphone-like.jpg` (EXIF orientation 6 + Make « ReperMake » + Model « ReperModel » + GPS repère 12° 34′ 56″ N, 65° 43′ 21″ O + DateTimeOriginal 2001:02:03 04:05:06 + IFD1 avec vignette, XMP « ReperXMP », XMP étendu, ICC en 2 morceaux, MPF, APP13 IPTC « ReperIPTC », COM « ReperCOM », APP14, image 8 × 8 réelle, EOI, **seconde image avec EXIF « ReperSecond »**, puis un faux MP4 « ReperMotion » de photo animée) ; `progressive.jpg` (plusieurs SOS, RST) ; `meta.png` (tEXt, zTXt, iTXt XMP, tIME, eXIf orientation 8, `iDOT`, iCCP, APNG à 2 images) ; `meta.webp` (VP8X + EXIF + XMP + ICCP + ANIM) ; `simple.webp` (VP8L sans VP8X) ; `meta.gif` (commentaire « ReperGIF », XMP DataXMP, NETSCAPE2.0, 2 images) ; pièges : chaque format tronqué à 50 %, longueur de segment qui dépasse le fichier, PNG au CRC faux, bloc critique inconnu. `gen-media-fixtures.sh` : `meta.heic` (iPhone simulé : Exif GPS repère, XMP, `irot` 90°), `meta.avif` ; résultats commités, chacun sous 200 Kio, coordonnées fictives seulement.
+- [ ] **Step 2 : Tests qui échouent.**
+  - Commun : aucun repère dans la sortie (ASCII, UTF-16 BE et LE, rationnels EXIF de la latitude repère) ; `state === "nettoye"` ; la sortie, relue par le même analyseur, ne contient plus aucun bloc retiré.
+  - JPEG : orientation 6 (seule entrée EXIF, pas d'IFD1), ICC identique octet pour octet et dans l'ordre, APP14 et JFIF présents, flux compressé identique, rien après le premier EOI (ni « ReperSecond », ni « ReperMotion ») ; progressif : tous les SOS gardés.
+  - PNG : blocs retirés, `eXIf` réduit à l'orientation 8, iCCP et APNG présents, tous les CRC justes ; CRC faux → `echec` ; bloc critique inconnu → `echec`.
+  - WebP : EXIF/XMP absents, drapeaux de `VP8X` et taille RIFF justes ; `simple.webp` → identique.
+  - GIF : commentaire et XMP absents, boucle et 2 images présentes, terminateur en dernier.
+  - HEIC/AVIF : même longueur que l'entrée ; élément `Exif` = EXIF vide valide puis zéros ; XMP vide valide puis espaces ; `irot` intact ; `iloc` méthode 2 → `echec`.
+  - Pièges : chaque fichier tronqué ou piégé → `echec`, sans exception (`expect(() => …).not.toThrow()` sur 1 000 troncatures aléatoires à graine fixe de chaque fixture) ; image au-delà de `STRIP_MAX` → `echec`.
+  - `cleanLabelKey` : `nettoye`/image → « Nettoyé · lieu, appareil et date retirés » ; `echec` → texte d'échec ; jamais la clé « Nettoyé » pour un autre état (table exhaustive des états × catégories).
+  - Catégories (reste de l'ancienne Task 9) : pour chaque cas de la table de 20 cas de `kinds.test.ts` (SVG, HTML, HEIC, `.docx`, `.zip`, vocal…), `categoryOfReceived(previewKind, safeName) === categoryOf(…)`.
+  - Composeur : JPEG en échec → **ajouté** en `echec`, `blockReason() === "non_nettoye"` ; `acceptUncleaned(id)` → débloqué ; Retirer → débloqué ; la phrase générale « Position et appareil retirés des photos » absente dès qu'une image n'est pas `nettoye`.
+- [ ] **Step 3 : Lancer** `npm test -- media compose` → ÉCHEC (fonctions absentes).
+- [ ] **Step 4 : Implémenter** dans cet ordre : `bytes.ts`, `patch.ts`, `format.ts`, `exif.ts`, puis un format à la fois (test au vert avant le suivant) ; `strip.ts` aiguille selon `detectFormat` ; décodage de contrôle dans l'e2e seulement.
+- [ ] **Step 5 : e2e** (`compose.spec.ts`) : dépôt de `iphone-like.jpg` → badge « Nettoyé · lieu, appareil et date retirés » ; l'image nettoyée, relue dans la page, se décode (`createImageBitmap`) avec la même taille et l'orientation appliquée (largeur et hauteur inversées) ; JPEG tronqué → ligne « Pas pu nettoyer… », bouton d'envoi bloqué avec la raison, « Envoyer tel quel » débloque ; HEIC en Chromium (non affichable) → nettoyé quand même ; capture `compose-clean-states`.
+- [ ] **Step 6 : Lancer** `npm test && npx playwright test compose` puis la commande démo → SUCCÈS.
+- [ ] **Step 7 : Commit** « feat(media): nettoyage des images (JPEG et MPF, PNG, WebP, GIF, HEIF), états honnêtes » et push.
 
-- [ ] **Step 1 : Fixtures** (`gen-fixtures.mjs`, sans dépendance) : `iphone-like.jpg` (EXIF orientation 6 + Make « ReperMake » + GPS, XMP « ReperXMP », ICC en 2 morceaux, MPF, APP13, COM, APP14, image 8 × 8 réelle, EOI, **seconde image avec EXIF « ReperSecond »**), `meta.png`, `meta.webp`.
-- [ ] **Step 2 : Tests qui échouent.** JPEG : aucun repère, orientation 6, ICC identique, APP14 présent, flux compressé identique, rien après le premier EOI. PNG : chunks retirés, iCCP présent, CRC valides. WebP : EXIF/XMP absents, VP8X corrigé, taille RIFF juste. Tronqué → `{ok:false}` sans exception. `cleanStatus` (vidéo, HEIC/AVIF/GIF, PDF, document). `categoryOf` : table de 20 cas (`.docx` → documents, `.zip` → autres, vocal → audio, `image/heic` → photos…). `CATEGORY_ORDER` = texte, photos, videos, audio, documents, autres. **Cohérence** : pour chaque fixture de la table de 20 cas (SVG, HTML, HEIC, `.docx`, `.zip`, vocal… ), `categoryOfReceived(previewKind, safeName) === categoryOf(…)`.
-- [ ] **Step 3 : Lancer** `npm test -- strip kinds categories` → ÉCHEC.
-- [ ] **Step 4 : Implémenter** des analyseurs à bornes vérifiées ; EXIF réécrit à une entrée (0x0112).
-- [ ] **Step 5 : Lancer** → SUCCÈS.
-- [ ] **Step 6 : Commit** « feat(media): métadonnées retirées sans réencodage, catégories » et push.
+### Task 9b : PDF et bureautique (OOXML, ODF)
+
+**Files:**
+- Create: `web/src/media/pdf.ts`, `pdf.test.ts`, `zip.ts` (lecture du répertoire central, réécriture : entrées recopiées, entrées remplacées sans compression, dates fixes, sans champs « extra »), `zip.test.ts`, `ooxml.ts`, `ooxml.test.ts`, `odf.ts`, `odf.test.ts`, `xmlattr.ts` (remplacement borné de valeurs d'attributs et de textes d'éléments nommés, sans `DOMParser`, pour rester utilisable hors fenêtre), `xmlattr.test.ts`
+- Modify: `web/scripts/gen-fixtures.mjs` (PDF, DOCX, XLSX, PPTX, ODT), `web/src/media/strip.ts`, `fr.ts`, `en.ts`
+
+- [ ] **Step 1 : Fichiers d'essai** (`gen-fixtures.mjs`) : `meta.pdf` (Info : Author « ReperAuteur », Creator, Producer « ReperLogiciel », CreationDate ; XMP « ReperXMP » ; miniature `/Thumb` ; **mise à jour incrémentale** dont l'ancienne révision a un autre `/Info` « ReperAncien » ; un second flux `/Type /Metadata` sur une page) ; `xref-stream.pdf` (flux xref compressé, prédicteur PNG 12, `/Info` hors flux d'objets) ; `objstm-info.pdf` (`/Info` dans un `ObjStm`) ; `signed.pdf` (`/ByteRange`, `/Sig`) ; `encrypted.pdf` (`/Encrypt`) ; `meta.docx` (core.xml « ReperAuteur », app.xml « ReperSociete », custom.xml « ReperCustom », comments.xml `w:author="ReperCommentateur"` avec `w:date`, people.xml avec `w15:presenceInfo` « ReperCompte », une modification suivie `w:ins w:author="ReperSuivi"`, une image `word/media/image1.jpeg` = `iphone-like.jpg`, entrées avec dates réelles et champ « extra » UT) ; `meta.xlsx` (commentaire `<author>ReperAuteurXL</author>`, `xl/persons/person.xml`) ; `meta.pptx` (`ppt/commentAuthors.xml`) ; `meta.odt` (meta.xml complet « ReperAuteurODF », annotation `dc:creator`, modification suivie) ; `protected.docx` (en-tête OLE) ; `signed.docx` (`_xmlsignatures/`) ; ZIP64 et ZIP au nom en double.
+- [ ] **Step 2 : Tests qui échouent.**
+  - PDF : aucun repère de `/Info` ni d'XMP, **ancienne révision comprise** ; même longueur que l'entrée ; chaque objet neutralisé commence à la même position (table xref toujours juste : chaque entrée pointe sur `N G obj`) ; ouvert par `pdfjs-dist` (déjà en dépendance, utilisé ici en test seulement) : même nombre de pages, même texte ; note `pdf_revisions` présente pour `meta.pdf` ; `xref-stream.pdf` nettoyé ; `objstm-info.pdf` → `echec` ; `signed.pdf` et `encrypted.pdf` → `protege`.
+  - OOXML : core, app et custom minimaux et valides (les noms des parties et `[Content_Types].xml` inchangés) ; aucun repère d'auteur, de société, de compte ; commentaires conservés, auteurs « Auteur », dates absentes ; **`w:ins` et « ReperSuivi » inchangés** et note `suivi_modifs` ; image intégrée nettoyée (orientation et ICC gardés) ; entrées non modifiées : données compressées et CRC identiques ; toutes les dates ZIP au 1980-01-01, aucun champ « extra », commentaire vide ; relu par `zip.ts` sans erreur. XLSX et PPTX : idem pour leurs parties.
+  - ODF : `mimetype` premier et sans compression ; `meta.xml` minimal à la même `office:version` ; annotation « Auteur » ; modification suivie gardée, note `suivi_modifs`.
+  - Refus : `protected.docx`, `signed.docx` → `protege` ; ZIP64, nom en double, tronqué → `echec` ; `DecompressionStream` absent (simulé) → `echec` pour la bureautique, jamais d'exception.
+- [ ] **Step 3 : Lancer** `npm test -- media` → ÉCHEC.
+- [ ] **Step 4 : Implémenter** `zip.ts`, `xmlattr.ts`, `ooxml.ts`, `odf.ts`, puis `pdf.ts` (lecture des tables xref de toutes les révisions par la chaîne `/Prev`, décompression des flux xref et `ObjStm` par `DecompressionStream('deflate')` en lecture seule, neutralisation `N G obj null` + espaces + `endobj`).
+- [ ] **Step 5 : e2e** : dépôt de `meta.docx` → « Nettoyé · auteur, société et dates retirés, auteurs des commentaires remplacés » et « Les modifications suivies gardent le nom de leurs auteurs. » ; `signed.pdf` → texte `protege` et choix ; `meta.pdf` nettoyé puis ouvert dans la visionneuse PDF (Task 22, quand elle existe ; sinon pdf.js en test unitaire seulement).
+- [ ] **Step 6 : Lancer** → SUCCÈS (démo comprise).
+- [ ] **Step 7 : Commit** « feat(media): nettoyage des PDF et des documents Office et ODF » et push.
+
+### Task 9c : Vidéo et audio (MP4, MOV, M4V, M4A, WebM, MKV, MP3, Ogg, FLAC, WAV)
+
+**Files:**
+- Create: `web/src/media/mp4.ts` (sur `isobmff.ts` de 9a : liste blanche, `free`, dates, pistes minutées et `tmcd` dont les échantillons sont mis à zéro), `mp4.test.ts`, `ebml.ts`, `ebml.test.ts`, `mp3.ts`, `mp3.test.ts`, `ogg.ts` (pages, CRC Ogg à polynôme 0x04C11DB7 non réfléchi, renumérotation), `ogg.test.ts`, `flac.ts`, `wav.ts`, tests
+- Modify: `web/scripts/gen-media-fixtures.sh` (MP4, MOV, M4A, WebM, MKV par `ffmpeg`), `web/scripts/gen-fixtures.mjs` (MP3, Ogg Opus, FLAC, WAV), `web/src/media/strip.ts`, `fr.ts`, `en.ts` (et `home.faq.scan.a` : vidéos et documents ne sont plus « non nettoyés », seulement quand 9b et 9c sont livrées)
+
+- [ ] **Step 1 : Fichiers d'essai.** `gen-media-fixtures.sh` : `phone.mov` (H.264 2 s, `-metadata location=+12.5822-065.7225/`, `com.apple.quicktime.make` « ReperMake », `.model`, `.software`, `.creationdate`, rotation 90° par matrice, piste `tmcd`, piste de métadonnées minutée `mebx` contenant « ReperGPSPiste ») ; `faststart.mp4` (`moov` en tête, `udta` « ReperUdta », `©xyz`, boîte `uuid` XMP « ReperXMP », boîte `free` qui contient « ReperFree ») ; `frag.mp4` (fragmenté, `prft`) ; `tags.m4a` (`ilst` « ReperArtiste », `covr`) ; `meta.webm` et `meta.mkv` (`Tags` « ReperTag », `DateUTC`, `Title` « ReperTitre », `WritingApp` « ReperApp ») ; `recorder.webm` (sortie réelle de `MediaRecorder` Chromium : `Segment` et `Cluster` de taille inconnue). `gen-fixtures.mjs` : `id3.mp3` (ID3v2.3 « ReperID3 » avec image, ID3v1 « ReperV1 », APEv2, trame Xing) ; `tags.opus` (`OpusTags` sur 3 pages avec `METADATA_BLOCK_PICTURE` « ReperOpus ») ; `tags.ogg` (Vorbis, commentaire et configuration sur la même page) ; `tags.flac` ; `bext.wav` (`bext` « ReperOrigine », `LIST/INFO` « ReperINFO », `iXML`). Pièges : tronqués, boîte de taille 0 au milieu, VINT invalide, Ogg chaîné.
+- [ ] **Step 2 : Tests qui échouent.**
+  - MP4/MOV : aucun repère, « ReperGPSPiste » et « ReperFree » compris ; même longueur que l'entrée (neutralisation en place) ; `mvhd`, `tkhd`, `mdhd` : dates à 0 (versions 0 et 1) ; matrice de `tkhd`, `stsd`, `edts`, `stco` et contenu de `mdat` des pistes audio et vidéo identiques octet pour octet ; pistes `mebx` et `tmcd` devenues `free` et leurs échantillons à zéro ; `frag.mp4` : `prft` neutralisée, `moof` intacts.
+  - M4A : `ilst` et `covr` absents, audio identique.
+  - WebM/MKV : `Tags`, `DateUTC`, `Title` devenus `Void` de même taille totale ; `WritingApp` et `MuxingApp` « shhdrop » ou vides ; `recorder.webm` (tailles inconnues) nettoyé.
+  - MP3 : commence par une trame (synchronisation 0xFFE), finit par la dernière trame, Xing gardée ; aucune étiquette.
+  - Ogg : en-tête de commentaires sans encodeur ni commentaire ; CRC de toutes les pages justes ; numéros de page consécutifs ; pages audio identiques hors numéro et CRC ; Ogg chaîné → `echec`.
+  - FLAC, WAV : blocs retirés, taille RIFF juste, `data` identique.
+  - Lisibilité (e2e Chromium et WebKit) : chaque sortie se charge dans `<video>` ou `<audio>` (`loadedmetadata`), même durée à 0,1 s près, mêmes `videoWidth`/`videoHeight` ; `phone.mov` affiché tourné (WebKit).
+  - Pièges → `echec` sans exception (troncatures aléatoires à graine fixe) ; un fichier vidéo de 1 Go creux (`gen` à la volée) est traité sans dépasser 64 Mio de mémoire (`performance.memory` en Chromium, ou nombre d'octets lus mesuré par un `Blob` espion).
+- [ ] **Step 3 : Lancer** `npm test -- media` → ÉCHEC.
+- [ ] **Step 4 : Implémenter** `mp4.ts`, `ebml.ts`, `mp3.ts`, `ogg.ts`, `flac.ts`, `wav.ts` (un à la fois, test au vert avant le suivant).
+- [ ] **Step 5 : e2e** : dépôt de `phone.mov` → « Nettoyé · lieu, appareil et dates retirés » ; lu dans la page après nettoyage ; e2e de la Task 12 : le vocal enregistré passe par `stripMetadata(…, { recorded: true })` et ne contient ni `DateUTC` ni nom de navigateur (WebM), ni date réelle dans `mvhd` (MP4).
+- [ ] **Step 6 : Lancer** → SUCCÈS (démo comprise).
+- [ ] **Step 7 : Commit** « feat(media): nettoyage des vidéos et de l'audio sans réencodage » et push.
+
+**Liste manuelle (avant mise en ligne, spec §14)** : photo et vidéo d'un vrai iPhone et d'un vrai Android, localisation activée, et documents Word et LibreOffice avec auteur : fichier reçu passé à `exiftool -a -G1` et `ffprobe -show_format -show_streams` : aucune position, aucun appareil, aucune date de prise.
 
 ---
 
@@ -522,7 +633,7 @@ CONTENT_MAX = 1073741824 - 65540;
 **Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
 - [ ] **M1, l'outil est l'accroche.** La rangée d'ajout (Fichiers, Photo, Texte) et `DropZone` sont visibles sans défilement à 390 × 844 et à 1440 × 900 ; aucun clic préalable, aucune case « J'accepte les conditions » avant l'ajout. *Contrôle* : e2e `webkit-mobile`, page fraîchement chargée : le bas de la rangée d'ajout est dans la fenêtre (`boundingBox().y + height <= 844`) ; ajouter un texte sans autre interaction fonctionne ; aucun `input[type=checkbox]` n'existe avant le premier élément.
 - [ ] **M5, chiffres concrets plutôt qu'adjectifs.** Ligne de preuves sous le titre de l'accueil : « Sans compte · 1 Go · 24 h au plus · 5 essais de mot de passe, puis destruction » ; la jauge affiche des valeurs réelles arrondies (octets et nombre d'éléments, par exemple « 142 Mo sur 1 Go »). Chiffres en `font-variant-numeric: tabular-nums`. Aucun badge (« ultra-sécurisé », « conforme RGPD »). *Contrôle* : test unitaire : la ligne est construite à partir des constantes (`CONTENT_MAX`, nombre maximal d'éléments, durée maximale, nombre d'essais de la Task K1), aucun chiffre écrit en dur dans `fr.ts` ni `en.ts` (changer la constante change la ligne) ; `getComputedStyle(...).fontVariantNumeric` contient `tabular-nums` sur la jauge. **Signalement (faible)** : `CONTENT_MAX` = 1 073 741 824 − 65 540 est un peu sous 1 Gio ; le « 1 Go » affiché et le blocage `trop_gros` doivent venir de la même constante, et la jauge ne doit jamais promettre plus que `CONTENT_MAX` (test à la limite exacte).
-- [ ] **Texte de confiance : noms et métadonnées.** Sous la liste : « Même les noms de vos fichiers sont chiffrés. » ; mention « Position et appareil retirés des photos. » **seulement** pour les formats réellement nettoyés (JPEG, PNG, WebP, Task 9), jamais en phrase générale. *Contrôle* : un élément d'un format non nettoyé (statut `cleanStatus` non « nettoyé ») ne reçoit pas la mention et affiche son propre avertissement ; test unitaire de la fonction qui choisit le texte.
+- [ ] **Texte de confiance : noms et métadonnées.** Sous la liste : « Même les noms de vos fichiers sont chiffrés. » ; mention « Position et appareil retirés des photos. » **seulement** si toutes les images de la liste sont à l'état `nettoye` (Tasks 9a à 9c, spec §35.2), jamais en phrase générale. *Contrôle* : un élément dont l'état n'est pas `nettoye` ne reçoit pas la mention et affiche son propre avertissement ; test unitaire de la fonction qui choisit le texte.
 - [ ] **Raison toujours dite (anti-motif « bouton désactivé sans dire pourquoi »).** Chaque valeur de `blockReason()` (`vide`, `trop_gros`, `texte_trop_long`, `nettoyage`, `hors_ligne`) a une clé de texte en français et en anglais, du type « Ajoutez au moins un élément » pour `vide`. *Contrôle* : `compose.test.ts` énumère les valeurs de `blockReason` et vérifie qu'aucune n'a de clé manquante ; le branchement sur le bouton d'envoi se vérifie en Task 13.
 
 ---
@@ -557,26 +668,61 @@ dragDepth(): { enter(e): boolean; leave(e): boolean; reset(): void };   // compt
 
 ---
 
-### Task 12 : Vocal
+### Task 12 : Vocal enregistré dans l'interface (spec §35.3)
 
-> **Accueil v3.** Le bouton **Vocal** existe déjà dans le coffre (masqué sans `MediaRecorder`) et appelle `onaction("vocal")` : Task 12 y ouvre `VoiceRecorder`. La **Vidéo** (nouvelle, UI §9.2.1) passe par `<input accept="video/*" capture="environment">`, sans enregistreur dans la page : rien à faire ici, et la `Permissions-Policy` garde `camera=()`.
+> **Accueil v3.** Le bouton **Vocal** existe déjà dans le coffre (masqué sans `MediaRecorder`) et appelle `onaction("vocal")` : Task 12 y ouvre `VoiceRecorder`. La **Vidéo** (UI §9.2.1) passe par `<input accept="video/*" capture="environment">` ; la vidéo enregistrée dans la page est la Task 12b, conditionnelle (Q-REC1) : sans elle, la `Permissions-Policy` garde `camera=()`.
+>
+> **Signalements.** (1) UI §8 décrit un niveau en 5 barres ; la spec §35.3 demande une forme d'onde, la pause et l'écran d'explication : UI §9.2.7 est à aligner par celui qui tient la spécification UI. (2) L'audit de confidentialité (P13) veut interdire `AudioContext` dans `web/src` : exception écrite pour `web/src/media/recorder.ts` seulement, contrôlée par `source-rules.test.ts` ; la forme d'onde est en barres DOM, sans `<canvas>`.
 
 **Files:**
-- Create: `web/src/media/recorder.ts`, `recorder.test.ts`, `web/src/ui/VoiceRecorder.svelte`, `web/ui-e2e/voice.spec.ts`
+- Create: `web/src/media/recorder.ts`, `recorder.test.ts`, `web/src/ui/VoiceRecorder.svelte`, `web/src/ui/Waveform.svelte`, `web/ui-e2e/voice.spec.ts`
+- Modify: `web/src/flows/compose.svelte.ts` (`addVoice` reçoit le résultat de `stripMetadata`), `server/internal/api/headers.go` et son test (`/pdf-frame.html` : `microphone=(), camera=(), geolocation=()`), `web/src/source-rules.test.ts` (exception `AudioContext`), `fr.ts`, `en.ts`
 
-**Interfaces:** `pickMime(isSupported)` → `{ mime; ext: "m4a" | "webm" } | null` (ordre `audio/mp4;codecs=mp4a.40.2`, `audio/mp4`, `audio/webm;codecs=opus`, `audio/webm`) ; `startRecording({ maxMs = 1_800_000, warnBeforeMs = 60_000, onWarn }: { …; onWarn?: () => void })` → `{ stop(): Promise<Blob>; level(); elapsedMs(); cancel() }`.
+**Interfaces:**
+```ts
+pickMime(isSupported: (m: string) => boolean): { mime: string; ext: "m4a" | "webm" } | null;
+// ordre : audio/mp4;codecs=mp4a.40.2, audio/mp4, audio/webm;codecs=opus, audio/webm
+type MicError = "refuse" | "absent" | "occupe" | "bloque" | "inconnu";   // NotAllowedError, NotFoundError, NotReadableError, SecurityError, autre
+micPermission(): Promise<"granted" | "denied" | "prompt" | "unknown">;  // permissions.query si présent, sinon "unknown" ; jamais d'appel réseau
+startRecording(opts: { maxMs?: number /* 1_800_000 */; warnBeforeMs?: number /* 60_000 */; onWarn?: () => void;
+  onLevel?: (rms: number) => void /* ~20 Hz */; now?: () => number; media?: MediaDevicesLike }):
+  Promise<{ pause(): void; resume(): void; stop(): Promise<Blob>; cancel(): void;
+            state(): "recording" | "paused" | "stopped"; elapsedMs(): number /* pauses exclues */ }>;
+WAVE_BARS = 48;   // historique des niveaux affiché par Waveform
+```
 
-- [ ] **Step 1 : Tests qui échouent** : ordre de `pickMime` ; `null` → bouton masqué ; arrêt automatique à `maxMs` (horloge injectée), `onWarn` appelé une fois à `maxMs − 60 s` (et pas avant).
-- [ ] **Step 2 : Lancer** → ÉCHEC.
-- [ ] **Step 3 : Implémenter** UI §9.2.7 ; pistes arrêtées à la fin et sur `pagehide` ; nom « Vocal {n}.{ext} », catégorie Audio et vocaux.
-- [ ] **Step 4 : e2e** Chromium (faux micro) : 2 s → « Vocal 1 » > 0 octet dans « Audio et vocaux » ; refus → message. WebKit : `fixme` si pas de faux micro, ligne ajoutée à la liste manuelle.
-- [ ] **Step 5 : Lancer** → SUCCÈS (démo comprise : le vocal reste local à la page).
-- [ ] **Step 6 : Commit** « feat(media): enregistrement vocal » et push.
+- [ ] **Step 1 : Tests qui échouent** (`recorder.test.ts`, faux `MediaRecorder`, faux `getUserMedia`, horloge injectée) : ordre de `pickMime` ; `null` → bouton masqué ; chaque `DOMException` → bon `MicError` ; `getUserMedia` appelé avec `{ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }` et **jamais** `video` ; `elapsedMs` n'avance pas en pause ; arrêt automatique à `maxMs` de temps enregistré (pauses exclues) ; `onWarn` une seule fois à `maxMs − 60 s` ; `stop`, `cancel` et `pagehide` : toutes les pistes `stop()`, `AudioContext.close()` ; `visibilitychange → hidden` → `pause()` ; `onLevel` reçoit des valeurs entre 0 et 1.
+- [ ] **Step 2 : Lancer** `npm test -- recorder` → ÉCHEC.
+- [ ] **Step 3 : Implémenter** :
+  - **Avant la demande du navigateur** : écran d'explication (« Shhdrop va demander l'accès au micro. L'enregistrement reste sur votre appareil et n'est chiffré qu'ici. ») et bouton **Autoriser le micro** ; si `micPermission()` rend `denied`, on saute la demande et on affiche directement la marche à suivre (réglages du site, propre à Safari, Chrome, Firefox).
+  - **États** : prêt, enregistrement (témoin, chronomètre tabulaire, `Waveform` des 48 derniers niveaux, **Pause**, **Arrêter**, **Annuler**), en pause (**Reprendre**), relecture (`<audio controls>` sur l'URL blob, **Ajouter**, **Recommencer**), erreurs `MicError` avec un texte et une action chacune.
+  - Arrêt → `stripMetadata(blob, mime, "Vocal n.ext", { recorded: true })` (Task 9c) → `composer.addVoice` ; si le nettoyage échoue : état `echec` comme pour un fichier (spec §35.2), jamais « Enregistré ici, sans informations cachées ».
+  - Nom « Vocal {n}.{ext} », catégorie Audio et vocaux ; URL blob révoquée à l'ajout ou à l'abandon.
+- [ ] **Step 4 : e2e** (`voice.spec.ts`) Chromium (`--use-fake-device-for-media-stream`, `--use-fake-ui-for-media-stream`, permission `microphone`) : écran d'explication → Autoriser → 2 s → Pause 1 s (chronomètre figé) → Reprendre 1 s → Arrêter → relecture → Ajouter → « Vocal 1 » > 0 octet dans « Audio et vocaux », badge « Enregistré ici, sans informations cachées » ; permission refusée → message `refuse` et marche à suivre ; aucun appel à `getUserMedia` avant le clic (espion) ; après Arrêter, toutes les pistes `readyState === "ended"` ; en-têtes : `Permissions-Policy` de `/` contient `microphone=(self)`, celle de `/pdf-frame.html` `microphone=()` ; `axe` ; captures `voice-explain`, `voice-recording`, `voice-paused`, `voice-review`. WebKit : `fixme` si pas de faux micro, ligne ajoutée à la liste manuelle (pause comprise).
+- [ ] **Step 5 : Lancer** `npm test && npx playwright test voice` puis la commande démo → SUCCÈS (le vocal reste local à la page).
+- [ ] **Step 6 : Commit** « feat(media): vocal enregistré dans l'interface (forme d'onde, pause, durée maximale, sans métadonnées) » et push.
 
 **Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
 - [ ] **M1, Vocal dans la rangée d'ajout.** Le bouton Vocal est dans la même rangée visible que Fichiers, Photo, Texte à 390 × 844. *Contrôle* : e2e `webkit-mobile` : le bouton est dans la fenêtre sans défilement.
 - [ ] **Texte de confiance.** Pendant et après l'enregistrement : « Chiffré sur votre appareil, avant de partir. » *Contrôle* : e2e Chromium (faux micro) : texte visible ; toutes les requêtes émises pendant l'enregistrement et l'envoi ne contiennent que des octets opaques (le cas « vocal » est ajouté au test « le serveur ne voit rien » de la Task 27).
 - [ ] **Anti-motif « animation sans pause ».** Le témoin d'enregistrement ne pulse pas au-delà de 5 s sans moyen de l'arrêter ; en mouvement réduit il est statique ; le chronomètre s'affiche en chiffres tabulaires pour ne pas trembler. *Contrôle* : e2e avec `reducedMotion: "reduce"` : `getComputedStyle(témoin).animationName === "none"` ; `fontVariantNumeric` contient `tabular-nums`.
+
+---
+
+### Task 12b : Vidéo enregistrée dans l'interface (conditionnelle : seulement si Q-REC1 est acceptée)
+
+Recommandation de la spec §35.3 : **ne pas la faire en V1**. Le compromis : elle apporte la webcam sur ordinateur (où `capture` ouvre le sélecteur), mais `camera=(self)` donne à tout code servi par l'origine, y compris un code piégé (spec §18.2), la possibilité de filmer sans nouvelle demande si la personne a choisi « toujours autoriser ».
+
+**Files:**
+- Create: `web/src/media/camera.ts`, `camera.test.ts`, `web/src/ui/VideoRecorder.svelte`, `web/ui-e2e/video-rec.spec.ts`
+- Modify: `server/internal/api/headers.go` et son test (`camera=(self)` sur `/` seulement ; `camera=()` sur `/pdf-frame.html`), spec §10 déjà prête, `fr.ts`, `en.ts`
+
+- [ ] **Step 1 : Tests qui échouent** : `pickVideoMime` (`video/mp4;codecs=avc1,mp4a`, `video/mp4`, `video/webm;codecs=vp9,opus`, `video/webm;codecs=vp8,opus`) ; `getUserMedia` appelé seulement après le clic **Filmer ici** ; `videoBitsPerSecond = 2_500_000` ; arrêt à 5 min d'enregistrement ; bascule avant/arrière (`facingMode`) qui coupe l'ancienne piste avant d'ouvrir la nouvelle ; toutes les pistes coupées à la fin, à l'annulation, à `pagehide` et à `hidden`.
+- [ ] **Step 2 : Lancer** → ÉCHEC.
+- [ ] **Step 3 : Implémenter** : même écran d'explication que le vocal (« caméra et micro ») ; aperçu `<video muted playsinline>` ; mêmes états (pause, relecture, Recommencer) ; sortie passée à `stripMetadata(…, { recorded: true })` ; nom « Vidéo {n}.{ext} ».
+- [ ] **Step 4 : e2e** Chromium (fausse caméra) : 3 s → Ajouter → élément Vidéo nettoyé, lisible ; aucune piste vivante après l'ajout ; `Permissions-Policy` de `/` contient `camera=(self)` ; `axe` ; captures.
+- [ ] **Step 5 : Lancer** → SUCCÈS.
+- [ ] **Step 6 : Commit** « feat(media): vidéo enregistrée dans l'interface » et push.
 
 ---
 
@@ -840,7 +986,7 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 
 - [ ] **Step 1 : Tests qui échouent** : `safeBlobType` (HTML déclaré image → `null`, `video/quicktime` gardé, type inconnu de vidéo → `video/mp4`, `none` → `null`) ; `collectPreview` (octets cumulés, tranches mises à zéro, `signal`) ; `revokeAll` ; `previewQueue` sérialise deux demandes.
 - [ ] **Step 2 : Lancer** → ÉCHEC.
-- [ ] **Step 3 : Implémenter** UI §9.8 : bandeau collé, groupes par `categoryOfReceived` (même table que `categoryOf`, Task 9, donc mêmes groupes qu'à l'envoi même quand `previewKind` vaut `none`) dans l'ordre du manifeste, règles d'aperçu, image révoquée au `load`, vidéo après téléchargement complet, échec de décodage → message + Enregistrer, texte en `<pre dir="auto">`, expiration pendant la lecture, `NotFoundError` en cours de lecture, `beforeunload` pendant un téléchargement seulement, alerte mémoire.
+- [ ] **Step 3 : Implémenter** UI §9.8 : bandeau collé, groupes par `categoryOfReceived` (même table que `categoryOf`, Task 9a, donc mêmes groupes qu'à l'envoi même quand `previewKind` vaut `none`) dans l'ordre du manifeste, règles d'aperçu, image révoquée au `load`, vidéo après téléchargement complet, échec de décodage → message + Enregistrer, texte en `<pre dir="auto">`, expiration pendant la lecture, `NotFoundError` en cours de lecture, `beforeunload` pendant un téléchargement seulement, alerte mémoire.
 - [ ] **Step 4 : e2e** : partage texte + JPEG + MP3 + MP4 + `trap.svg` + `trap.html` + `hevc.mov` → groupes et ordre identiques à l'envoi ; texte affiché ; image affichée, `window.__pwned` jamais défini, URL blob invalide après `load` ; audio et vidéo lisibles ; `hevc.mov` sur Chromium → « ne peut pas être lu sur cet appareil » ; `trap.html` → Enregistrer seulement ; expiration (`page.clock`) → bandeau « Expiré », boutons désactivés ; destruction par l'expéditeur pendant la lecture → message `NotFoundError` ; Retour → rechargement, aucun texte du partage ; fichier déposé sur la page → aucune navigation ; `axe` ; captures `content`, `content-image`, `content-expired`. Démo mise à jour.
 - [ ] **Step 5 : Lancer** → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(viewers): contenu, image/audio/vidéo/texte, URL blob maîtrisées » et push.
@@ -917,7 +1063,9 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 
 ---
 
-### Task R : Droits du destinataire (spec §34)
+### Task R : Droits du destinataire (spec §34, simplifiés en §34.1)
+
+> **5 novembre, décision du propriétaire (spec §34.1)** : un interrupteur « Autoriser le téléchargement » et une sous-option coffre remplacent `RightsPicker` ; voir les amendements après la Task M2. Les étapes ci-dessous s'appliquent avec ce changement (`RightsPicker.svelte` devient `RightsSwitch.svelte`, « Voir seulement » = interrupteur désactivé).
 
 **Files:**
 - Create: `web/src/flows/rights.ts`, `rights.test.ts`, `web/src/ui/RightsPicker.svelte`, `web/ui-e2e/rights.spec.ts`
@@ -933,7 +1081,7 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 
 **Apports de l'étude des concurrents** (benchmark `docs/superpowers/design/benchmark-2026-11.md` ; M = motif, S = idée signature, B = signalement ; correspondance complète en annexe de ce plan)
 - [ ] **Anti-motif « bloquer le téléchargement » présenté comme une protection.** Le texte « L'expéditeur a choisi « voir seulement ». Cela n'empêche pas une capture d'écran. » (spec §34) est affiché côté destinataire dans chaque visionneuse en mode « voir », et la description de « Voir seulement » dans `RightsPicker` contient la même mise en garde avant le choix. *Contrôle* : e2e : en sélectionnant « Voir seulement » la phrase est visible à côté ; en ouvrant le partage elle est visible dans chaque visionneuse ; aucune chaîne « protégé contre la copie », « sécurisé » ou « inviolable » (scan Task 27).
-- [ ] **M4, même grammaire de phrase.** Le choix des droits se lit comme une phrase (« Le destinataire peut **enregistrer**, **voir seulement** ou **garder dans le coffre** »), contrôles segmentés natifs comme en Task 13. *Contrôle* : e2e : groupe `radiogroup` nommé « Droits » ; navigation aux flèches ; `axe` sans violation.
+- [ ] **M4, même grammaire de phrase** (adapté à spec §34.1). L'interrupteur se lit comme une phrase (« Le destinataire peut **télécharger** »), sous-option en dessous. *Contrôle* : e2e : `getByRole("switch", { name: "Autoriser le téléchargement" })` ; Espace bascule ; `axe` sans violation.
 
 ---
 
