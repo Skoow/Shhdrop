@@ -42,6 +42,7 @@
   }
   .qa {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--sp-2);
   }
   details {
@@ -66,6 +67,13 @@
     font-size: 1.125rem;
     font-weight: 580;
     -webkit-tap-highlight-color: transparent;
+  }
+  summary > span {
+    min-width: 0;
+    overflow-wrap: break-word;
+  }
+  .a {
+    overflow-wrap: break-word;
   }
   summary::-webkit-details-marker {
     display: none;

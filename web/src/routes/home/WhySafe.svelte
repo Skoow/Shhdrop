@@ -200,6 +200,12 @@
       transform: scale(1.08) rotate(-4deg);
     }
   }
+  /* Texte agrandi sur téléphone : un mot plus large que la colonne se coupe au lieu de déborder. */
+  .claim > div,
+  .limits {
+    min-width: 0;
+    overflow-wrap: break-word;
+  }
   .claim h3 {
     font-size: 1.1875rem;
     line-height: 1.3;

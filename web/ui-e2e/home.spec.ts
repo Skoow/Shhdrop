@@ -113,6 +113,16 @@ test.describe("fr-FR", () => {
       expect(box.bottom).toBeLessThanOrEqual(next.y);
     }
     expect(await noHScroll(page)).toBe(true);
+    // Plus strict que la page : aucune section ne déborde de sa colonne. Dans Chromium, un mot trop
+    // long (« s'autodétruit », question de la FAQ) débordait de 14 px dans la marge sans créer de
+    // défilement ; dans WebKit, aux métriques un peu plus larges, il en créait un (CI b155911).
+    const overflow = await page.evaluate(() =>
+      [document.querySelector(".home")!, ...document.querySelectorAll(".home > *, .home section *")]
+        .filter((e) => getComputedStyle(e).overflowX === "visible" && !e.closest(".band, .tile, .ill"))
+        .filter((e) => e.scrollWidth > e.clientWidth + 1 && e.clientWidth > 0)
+        .map((e) => `${e.tagName}.${(e as HTMLElement).className} ${e.scrollWidth} > ${e.clientWidth}`),
+    );
+    expect(overflow).toEqual([]);
     await page.waitForTimeout(900);
     await capture(page, "home-320-200pct");
     await page.locator(".schema").evaluate((e) => e.scrollIntoView({ block: "center" }));
