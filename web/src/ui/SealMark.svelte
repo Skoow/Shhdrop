@@ -34,7 +34,21 @@
     width: 100%;
     height: 100%;
     fill: none;
-    transition: transform 1.2s var(--ease-out);
+    transition: rotate 1.2s var(--ease-out);
+  }
+  /* Accueil v4 : la rosace tourne doucement avec le défilement de la page (composé). */
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: scroll()) {
+      .rose {
+        animation: turn linear both;
+        animation-timeline: scroll(root);
+      }
+    }
+  }
+  @keyframes turn {
+    to {
+      transform: rotate(180deg);
+    }
   }
   .r1 {
     stroke: rgb(95 227 181 / 0.5);
@@ -54,7 +68,7 @@
   }
   @media (hover: hover) and (prefers-reduced-motion: no-preference) {
     :global(:hover) > .seal .rose {
-      transform: rotate(30deg);
+      rotate: 30deg;
     }
   }
   @media (forced-colors: active) {

@@ -11,6 +11,13 @@ html {
   text-size-adjust: 100%;
 }
 
+/* Accueil v4 : les fonds de section s'étendent sur 100cqw de ce conteneur (pas de 100vw, qui
+   compte la barre de défilement et créerait un défilement horizontal). Sur #app et non sur
+   <body> : un conteneur sur <body> empêche son fond de passer au canevas et cacherait l'aurore. */
+#app {
+  container: page / inline-size;
+}
+
 body {
   margin: 0;
   min-height: 100dvh;

@@ -35,11 +35,19 @@ describe("Home (UI §9.1)", () => {
     );
     // Libellés visibles en HTML (taille de texte relative), cachés aux lecteurs d'écran : le nom est l'aria-label.
     const labels = [...document.querySelectorAll("[data-label]")].map((e) => e.textContent);
-    expect(labels).toEqual(["chiffré", "chiffré", "Votre appareil", "Serveur", "ne lit rien", "Destinataire"]);
+    expect(labels).toEqual([
+      "Votre appareil",
+      "Chiffré ici",
+      "Serveur",
+      "Illisible",
+      "Destinataire",
+      "Déchiffré ici",
+      "La clé ne passe jamais par le serveur",
+    ]);
     for (const e of document.querySelectorAll("[data-label]")) expect(e.closest('[aria-hidden="true"]')).not.toBeNull();
     const svg = document.querySelector('[role="img"]')!;
     expect(svg.getAttribute("aria-label")).toBe(
-      "Votre appareil — chiffré — serveur (ne lit rien) — chiffré — destinataire",
+      "Chiffré sur votre appareil, illisible pour le serveur, déchiffré chez le destinataire\u202f; la clé passe à part, jamais par le serveur.",
     );
     const a = [...document.querySelectorAll("a")].find((x) => x.textContent?.trim() === "Tous les détails de sécurité")!;
     expect(a.getAttribute("href")).toBe("/securite");
@@ -53,6 +61,7 @@ describe("Home (UI §9.1)", () => {
       "Glissez vos fichiers iciQue voulez-vous envoyer\u202f?",
       "Comment ça marche",
       "Pourquoi c'est sûr",
+      "Ce que Shhdrop ne peut pas faire",
       "Vos questions",
       "Quelque chose à transmettre\u202f?",
     ]);
@@ -209,7 +218,7 @@ describe("Home (UI §9.1)", () => {
     show();
     expect(title(document.querySelector("h1")!)).toBe("One link, one password, then nothing.");
     expect(document.querySelector('[role="img"]')!.getAttribute("aria-label")).toBe(
-      "Your device — encrypted — server (can't read it) — encrypted — recipient",
+      "Encrypted on your device, unreadable to the server, decrypted at the recipient; the key travels separately, never through the server.",
     );
   });
 });

@@ -23,10 +23,12 @@
   import { reducedMotion } from "../ui/motion";
   import SealBand from "../ui/SealBand.svelte";
   import SealMark from "../ui/SealMark.svelte";
+  import SectionBg from "../ui/SectionBg.svelte";
   import Vessel from "../ui/Vessel.svelte";
   import Closing from "./home/Closing.svelte";
   import Faq from "./home/Faq.svelte";
   import HowItWorks from "./home/HowItWorks.svelte";
+  import Limits from "./home/Limits.svelte";
   import WhySafe from "./home/WhySafe.svelte";
 
   type Props = {
@@ -148,6 +150,7 @@
 
 <div class={["home", { compact, reveal }]}>
   <section class="hero" aria-labelledby="hero-title">
+    {#if !compact}<SectionBg kind="night" />{/if}
     <div class="pitch">
       <h1 id="hero-title" tabindex="-1" class:compact>
         <!-- K8 : phrase entière pour les lecteurs d'écran, copie animée cachée. -->
@@ -160,9 +163,9 @@
       {#if !compact}
         <p class="lede">{t("hero.lede")}</p>
         <ul class="certs" aria-label={t("home.facts.label")}>
-          <li class="cert"><SealMark icon={Lock} /><span class="cert-t">{t("home.fact.e2e")}</span><span class="cert-p">{t("home.fact.e2e.p")}</span></li>
-          <li class="cert"><SealMark icon={Timer} /><span class="cert-t">{t("home.fact.erase")}</span><span class="cert-p">{t("home.fact.erase.p")}</span></li>
-          <li class="cert"><SealMark icon={UserX} /><span class="cert-t">{t("home.fact.account")}</span><span class="cert-p">{t("home.fact.account.p")}</span></li>
+          <li class="cert" {@attach magnet}><SealMark icon={Lock} /><span class="cert-t">{t("home.fact.e2e")}</span><span class="cert-p">{t("home.fact.e2e.p")}</span></li>
+          <li class="cert" {@attach magnet}><SealMark icon={Timer} /><span class="cert-t">{t("home.fact.erase")}</span><span class="cert-p">{t("home.fact.erase.p")}</span></li>
+          <li class="cert" {@attach magnet}><SealMark icon={UserX} /><span class="cert-t">{t("home.fact.account")}</span><span class="cert-p">{t("home.fact.account.p")}</span></li>
         </ul>
       {/if}
     </div>
@@ -223,6 +226,7 @@
   {#if !compact}
     <HowItWorks />
     <WhySafe />
+    <Limits />
     <Faq />
     <Closing onstart={start} />
   {/if}
@@ -239,6 +243,7 @@
   /* ---------- Héros ---------- */
   .hero {
     position: relative;
+    isolation: isolate;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: var(--sp-4);
@@ -309,14 +314,46 @@
   }
   .cert {
     position: relative;
+    isolation: isolate;
+    overflow: hidden;
     display: grid;
     grid-template-columns: 44px minmax(0, 1fr);
     column-gap: var(--sp-3);
     align-items: center;
     padding: 10px 14px 10px 10px;
+    border: 1px solid transparent;
     border-radius: 14px;
-    background: rgb(255 255 255 / 0.025);
-    box-shadow: inset 0 0 0 1px var(--hair);
+    background:
+      linear-gradient(180deg, rgb(19 23 30 / 0.9), rgb(13 16 21 / 0.9)) padding-box,
+      linear-gradient(180deg, rgb(233 236 242 / 0.15), rgb(233 236 242 / 0.03)) border-box;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.04),
+      0 14px 30px -22px rgb(0 0 0 / 0.9);
+    transition: translate 520ms var(--ease-settle);
+  }
+  /* Reflet menthe sous le pointeur (magnet : --lx, --ly). */
+  .cert::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    left: 0;
+    top: 0;
+    width: 240px;
+    height: 240px;
+    margin: -120px 0 0 -120px;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgb(95 227 181 / 0.11), transparent);
+    opacity: 0;
+    transform: translate(var(--lx, 50%), var(--ly, 50%));
+    transition: opacity var(--dur-base) var(--ease-out);
+  }
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .cert:hover {
+      translate: 3px 0;
+    }
+    .cert:hover::before {
+      opacity: 1;
+    }
   }
   .cert::after {
     content: "";
@@ -358,6 +395,36 @@
     padding-top: 14px;
   }
   /* Feuillets empilés derrière la fenêtre : la profondeur d'un coffre, d'une enveloppe. */
+  /* Au défilement, quand le héros sort : les feuillets rentrent dans le coffre, qui recule. */
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      .hero {
+        view-timeline: --hero;
+      }
+      .sheet-back {
+        animation: lid linear both;
+        animation-timeline: --hero;
+        animation-range: exit 0% exit 70%;
+      }
+      .home:not(.reveal) .compose {
+        animation: recede linear both;
+        animation-timeline: --hero;
+        animation-range: exit 0% exit 100%;
+      }
+    }
+  }
+  @keyframes lid {
+    to {
+      translate: 0 34px;
+    }
+  }
+  @keyframes recede {
+    to {
+      scale: 0.94;
+      translate: 0 40px;
+      opacity: 0.7;
+    }
+  }
   .sheet-back {
     position: absolute;
     z-index: -1;
@@ -673,6 +740,7 @@
   }
 
   .proof {
+    max-width: none;
     margin: 0;
     padding: var(--sp-3) 4px 0;
     border-top: 1px solid var(--hair);
@@ -686,14 +754,16 @@
 
   /* ---------- Entrée (K1 : tout fini à 900 ms au plus, tout cliquable dès l'affichage) ---------- */
   @media (prefers-reduced-motion: no-preference) {
+    /* Audit performance (5 novembre) : le texte au-dessus de la ligne de flottaison ne part
+       jamais d'une opacité nulle (le LCP attendait la fin de l'entrée) ; montée et flou seulement. */
     .reveal .w {
       animation: word-in var(--dur-reveal) var(--ease-out) var(--d) both;
     }
     .reveal .lede {
-      animation: rise-in 600ms var(--ease-out) 200ms both;
+      animation: rise-only 600ms var(--ease-out) 120ms both;
     }
     .reveal .cert {
-      animation: rise-in 560ms var(--ease-out) both;
+      animation: rise-only 560ms var(--ease-out) both;
     }
     .reveal .cert:nth-child(1) {
       animation-delay: 240ms;
@@ -748,9 +818,13 @@
   }
   @keyframes word-in {
     from {
-      opacity: 0;
       transform: translateY(0.32em);
       filter: blur(var(--blur-in));
+    }
+  }
+  @keyframes rise-only {
+    from {
+      transform: translateY(var(--rise));
     }
   }
   @keyframes rise-in {
@@ -778,9 +852,9 @@
   /* Ordinateur : texte et sceaux à gauche, coffre à droite, sur le premier écran. */
   @media (min-width: 1024px) {
     .hero {
-      grid-template-columns: minmax(0, 0.92fr) minmax(460px, 580px);
+      grid-template-columns: minmax(0, 0.95fr) minmax(480px, 620px);
       align-items: center;
-      column-gap: 64px;
+      column-gap: 88px;
       min-height: min(calc(100svh - 64px), 860px);
       padding-block: var(--sp-5) 88px;
     }

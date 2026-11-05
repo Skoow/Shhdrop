@@ -3,17 +3,19 @@
   // réponse ouverte), réponses tirées de la spécification (§2, §9, §18). La réponse entre en
   // fondu et montée de 6 px ; aucune hauteur animée (§20.6 point 1).
   import { t, type Key } from "../../i18n/i18n.svelte";
-  import { reveal } from "../../ui/attach";
+  import { magnet, reveal } from "../../ui/attach";
   import { ChevronDown } from "../../ui/Icon";
+  import SectionBg from "../../ui/SectionBg.svelte";
 
   const qs = ["server", "lost", "back", "scan", "copy", "app"] as const;
 </script>
 
 <section class="faq" aria-labelledby="faq-title">
+  <SectionBg kind="cipher" />
   <h2 id="faq-title" class="rv" {@attach reveal}>{t("home.faq.title")}</h2>
   <div class="qa">
     {#each qs as k (k)}
-      <details name="faq" class="rv" {@attach reveal}>
+      <details name="faq" class="rv" {@attach reveal} {@attach magnet}>
         <summary><span>{t(`home.faq.${k}.q` as Key)}</span><ChevronDown size={22} strokeWidth={1.75} aria-hidden="true" /></summary>
         <div class="a"><p>{t(`home.faq.${k}.a` as Key)}</p></div>
       </details>
@@ -23,6 +25,9 @@
 
 <style>
   .faq {
+    position: relative;
+    isolation: isolate;
+    padding-block-end: 120px;
     grid-template-columns: minmax(0, 1fr);
     display: grid;
     gap: var(--sp-6);
@@ -45,14 +50,52 @@
     grid-template-columns: minmax(0, 1fr);
     gap: var(--sp-2);
   }
+  /* Question : relief léger, reflet sous le pointeur, barre menthe qui se lève à l'ouverture. */
   details {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border: 1px solid transparent;
     border-radius: 18px;
-    background: rgb(255 255 255 / 0.03);
-    box-shadow: inset 0 0 0 1px var(--hair);
-    transition: background-color var(--dur-base) var(--ease-out);
+    background:
+      linear-gradient(180deg, rgb(19 23 30 / 0.94), rgb(13 16 21 / 0.94)) padding-box,
+      linear-gradient(180deg, rgb(233 236 242 / 0.14), rgb(233 236 242 / 0.03)) border-box;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
   }
-  details[open] {
-    background: rgb(255 255 255 / 0.055);
+  details::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    left: 0;
+    top: 0;
+    width: 320px;
+    height: 320px;
+    margin: -160px 0 0 -160px;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgb(95 227 181 / 0.08), transparent);
+    opacity: 0;
+    transform: translate(var(--lx, 50%), var(--ly, 50%));
+    transition: opacity var(--dur-base) var(--ease-out);
+  }
+  details::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 14px;
+    bottom: 14px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--accent);
+    transform: scaleY(0);
+    transition: transform 420ms var(--ease-settle);
+  }
+  details[open]::after {
+    transform: scaleY(1);
+  }
+  @media (hover: hover) {
+    details:hover::before {
+      opacity: 1;
+    }
   }
   summary {
     list-style: none;
@@ -90,9 +133,6 @@
     color: var(--accent);
   }
   @media (hover: hover) {
-    details:not([open]):hover {
-      background: rgb(255 255 255 / 0.05);
-    }
     summary:hover :global(svg) {
       color: var(--accent);
     }
@@ -107,30 +147,46 @@
   }
   @media (prefers-reduced-motion: no-preference) {
     details[open] .a {
-      animation: answer 420ms var(--ease-settle) both;
+      animation: answer 480ms var(--ease-settle) both;
+    }
+    details[open] summary > span {
+      animation: nudge 480ms var(--ease-settle) both;
     }
   }
   @keyframes answer {
     from {
       opacity: 0;
-      transform: translateY(-6px);
+      transform: translateY(-10px);
+      filter: blur(3px);
+    }
+  }
+  @keyframes nudge {
+    from {
+      transform: translateX(-4px);
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    details,
+    details::after,
     summary :global(svg) {
       transition: none;
     }
   }
   @media (min-width: 1024px) {
     .faq {
-      padding-block-start: 200px;
+      padding-block: 140px 140px;
     }
   }
   @media (forced-colors: active) {
     details {
       border: 1px solid CanvasText;
       box-shadow: none;
+      background: Canvas;
+    }
+    details::before {
+      display: none;
+    }
+    details::after {
+      background: Highlight;
     }
   }
 </style>

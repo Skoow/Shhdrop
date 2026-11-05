@@ -37,7 +37,7 @@ async function addText(page: Page, text: string) {
 const rows = (page: Page) => page.locator("[data-row]");
 const names = (page: Page) => page.locator("[data-row] .nm").allTextContents();
 const settle = (page: Page) =>
-  page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))));
+  page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.timeline === document.timeline && a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))));
 const noHScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 const send = (page: Page) => page.getByRole("button", { name: "Chiffrer et envoyer" });
 

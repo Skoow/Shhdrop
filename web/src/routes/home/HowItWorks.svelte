@@ -2,7 +2,8 @@
   // Accueil v3, « Comment ça marche » (UI §9.1) : trois gestes, chacun avec une petite scène
   // animée en boucle (ambiance : pause hors écran et onglet caché ; image fixe en mouvement réduit).
   import { t } from "../../i18n/i18n.svelte";
-  import { ambient, reveal } from "../../ui/attach";
+  import { ambient, magnet, reveal } from "../../ui/attach";
+  import SectionBg from "../../ui/SectionBg.svelte";
   import { Camera, KeyRound, Link2, Lock, Mic, Type } from "../../ui/Icon";
 
   // Capsule du logo à l'échelle de la scène (240 × 160), départ au milieu du bord haut.
@@ -10,27 +11,32 @@
 </script>
 
 <section class="how" id="comment" aria-labelledby="how-title">
+  <SectionBg kind="tide" />
   <div class="head rv" {@attach reveal}>
     <h2 id="how-title">{t("home.how.title")}</h2>
     <p>{t("home.how.lede")}</p>
   </div>
+  <div class="story">
+  <div class="rail" aria-hidden="true"><span></span></div>
   <ol class="steps">
-    <li class="step rv" {@attach reveal}>
+    <li class="step rv" {@attach reveal} {@attach magnet}>
       <div class="ill add" aria-hidden="true" data-ambient {@attach ambient}>
         <svg viewBox="0 0 240 160" focusable="false"><path class="cap" d={CAP} pathLength="100" /></svg>
-        <span class="sheet a"><Camera size={22} strokeWidth={1.75} /></span>
-        <span class="sheet b"><Mic size={22} strokeWidth={1.75} /></span>
-        <span class="sheet c"><Type size={22} strokeWidth={1.75} /></span>
+        <span class="floor"></span>
+        <span class="sheet a"><Camera size={22} strokeWidth={1.75} /><i></i></span>
+        <span class="sheet b"><Mic size={22} strokeWidth={1.75} /><i></i></span>
+        <span class="sheet c"><Type size={22} strokeWidth={1.75} /><i></i></span>
       </div>
       <h3>{t("home.how.add.t")}</h3>
       <p>{t("home.how.add.p")}</p>
     </li>
-    <li class="step rv" {@attach reveal}>
+    <li class="step rv" {@attach reveal} {@attach magnet}>
       <div class="ill seal" aria-hidden="true" data-ambient {@attach ambient}>
         <svg viewBox="0 0 240 160" focusable="false">
           <path class="cap" d={CAP} pathLength="100" />
           <path class="cap shut" d={CAP} pathLength="100" />
         </svg>
+        <span class="floor"></span>
         <span class="txt plain">vacances.jpg</span>
         <span class="txt ciph">x9Qe+7bLr0/k</span>
         <span class="pad"><Lock size={14} strokeWidth={2.4} /></span>
@@ -38,9 +44,10 @@
       <h3>{t("home.how.seal.t")}</h3>
       <p>{t("home.how.seal.p")}</p>
     </li>
-    <li class="step rv" {@attach reveal}>
+    <li class="step rv" {@attach reveal} {@attach magnet}>
       <div class="ill go" aria-hidden="true" data-ambient {@attach ambient}>
         <svg viewBox="0 0 240 160" focusable="false"><path class="cap dots" d={CAP} pathLength="100" /></svg>
+        <span class="floor"></span>
         <span class="chip link"><Link2 size={14} strokeWidth={2} />shhdrop.app/#…</span>
         <span class="chip key"><KeyRound size={14} strokeWidth={2} />••••••••</span>
         <span class="dust"><b></b><b></b><b></b><b></b><b></b><b></b></span>
@@ -49,10 +56,14 @@
       <p>{t("home.how.go.p")}</p>
     </li>
   </ol>
+  </div>
 </section>
 
 <style>
   .how {
+    position: relative;
+    isolation: isolate;
+    padding-block-end: 120px;
     grid-template-columns: minmax(0, 1fr);
     display: grid;
     gap: var(--sp-7);
@@ -88,11 +99,79 @@
     display: grid;
     gap: var(--sp-7);
   }
+  .story {
+    position: relative;
+    min-width: 0;
+  }
+  /* Carte en relief : bord dégradé qui accroche la lumière, lumière intérieure, reflet au pointeur. */
   .step {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
     display: grid;
     gap: var(--sp-3);
     align-content: start;
     min-width: 0;
+    padding: 12px 12px 24px;
+    border: 1px solid transparent;
+    border-radius: 28px;
+    background:
+      linear-gradient(180deg, rgb(19 24 31 / 0.94), rgb(12 15 20 / 0.94)) padding-box,
+      linear-gradient(180deg, rgb(233 236 242 / 0.18), rgb(233 236 242 / 0.03) 55%) border-box;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.06),
+      0 30px 60px -36px rgb(0 0 0 / 0.95);
+    transition: translate 520ms var(--ease-settle);
+  }
+  .step::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    left: 0;
+    top: 0;
+    width: 360px;
+    height: 360px;
+    margin: -180px 0 0 -180px;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgb(95 227 181 / 0.09), transparent);
+    opacity: 0;
+    transform: translate(var(--lx, 50%), var(--ly, 50%));
+    transition: opacity var(--dur-base) var(--ease-out);
+  }
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .step:hover {
+      translate: 0 -4px;
+    }
+    .step:hover::before {
+      opacity: 1;
+    }
+  }
+  .step h3,
+  .step p {
+    padding-inline: 12px;
+  }
+  /* Fil qui relie les trois gestes, tracé au défilement (scaleX, composé). */
+  .rail {
+    display: none;
+  }
+  .floor {
+    left: 50%;
+    bottom: 14%;
+    width: 64%;
+    height: 22%;
+    margin-left: -32%;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgb(95 227 181 / 0.16), transparent);
+  }
+  .sheet i {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 9px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgb(233 236 242 / 0.18);
+    box-shadow: 0 -6px 0 rgb(233 236 242 / 0.1);
   }
   h3 {
     margin-top: var(--sp-2);
@@ -109,9 +188,9 @@
     overflow: hidden;
     border-radius: var(--r-xl);
     background:
-      radial-gradient(70% 80% at 50% 62%, rgb(40 128 154 / 0.14), transparent 70%),
-      repeating-linear-gradient(90deg, transparent 0 23px, rgb(233 236 242 / 0.025) 23px 24px),
-      var(--vessel);
+      radial-gradient(70% 80% at 50% 62%, rgb(40 128 154 / 0.18), transparent 70%),
+      radial-gradient(circle at 1px 1px, rgb(233 236 242 / 0.08) 1px, transparent 1.5px) 0 0 / 16px 16px,
+      #0a0d12;
     box-shadow:
       inset 0 0 0 1px var(--hair),
       var(--edge-hi);
@@ -287,6 +366,9 @@
     .ill:global(.still) * {
       animation-play-state: paused;
     }
+    .step {
+      transition: translate 520ms var(--ease-settle);
+    }
   }
   @keyframes fall {
     0% { transform: translate(var(--x), -96px) rotate(0deg); opacity: 0; }
@@ -335,10 +417,51 @@
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: var(--sp-5);
     }
+    .rail {
+      display: block;
+      position: absolute;
+      z-index: -1;
+      left: 16%;
+      right: 16%;
+      top: 34%;
+      height: 2px;
+      border-radius: 2px;
+      background: var(--hair-2);
+    }
+    .rail span {
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--accent), var(--seal-light));
+      box-shadow: 0 0 12px var(--seal-halo);
+      transform-origin: left;
+      transform: scaleX(1);
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      @supports (animation-timeline: view()) {
+        .rail span {
+          animation: rail linear both;
+          animation-timeline: view();
+          animation-range: entry 60% cover 55%;
+        }
+        /* Les trois gestes entrent l'un après l'autre au fil du défilement. */
+        .step:nth-child(2) {
+          animation-range: entry 10% entry 90%;
+        }
+        .step:nth-child(3) {
+          animation-range: entry 20% entry 100%;
+        }
+      }
+    }
+  }
+  @keyframes rail {
+    from {
+      transform: scaleX(0);
+    }
   }
   @media (min-width: 1024px) {
     .how {
-      padding-block-start: 160px;
+      padding-block: 168px 150px;
     }
   }
   @media (forced-colors: active) {

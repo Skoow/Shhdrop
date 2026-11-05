@@ -3,6 +3,7 @@
 // pli (Comment ça marche, Pourquoi c'est sûr, questions, appel final), révélations au défilement.
 import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
+import { maxRelLuminance } from "./png";
 
 /** Paires de libellés du schéma dont les boîtes se croisent (texte réel, pas la cellule). */
 function labelOverlaps(page: Page) {
@@ -36,7 +37,7 @@ async function drag(page: Page, type: "dragenter" | "dragover" | "dragleave" | "
 }
 
 const TITLE_FR = "Un lien, un mot de passe, puis plus rien.";
-const SCHEMA_FR = "Votre appareil — chiffré — serveur (ne lit rien) — chiffré — destinataire";
+const SCHEMA_FR = "Chiffré sur votre appareil, illisible pour le serveur, déchiffré chez le destinataire\u202f; la clé passe à part, jamais par le serveur.";
 
 test.describe("fr-FR", () => {
   test.use({ locale: "fr-FR" });
@@ -102,12 +103,12 @@ test.describe("fr-FR", () => {
     await page.evaluate(() => {
       document.documentElement.style.fontSize = "200%"; // CSSOM : permis par la CSP
     });
-    await expect(page.locator("[data-label]")).toHaveCount(6);
+    await expect(page.locator("[data-label]")).toHaveCount(7);
     expect(await labelOverlaps(page)).toEqual([]);
     // Les libellés restent dans le flux : sous le dessin, au-dessus du lien qui le suit.
     const drawing = (await page.locator('main [role="img"]').boundingBox())!;
     const next = (await page.getByRole("link", { name: "Tous les détails de sécurité" }).boundingBox())!;
-    const boxes = await page.locator(".nodes [data-label]").evaluateAll((es) => es.map((e) => e.getBoundingClientRect().toJSON()));
+    const boxes = await page.locator(".labels [data-label], .keynote [data-label]").evaluateAll((es) => es.map((e) => e.getBoundingClientRect().toJSON()));
     for (const box of boxes) {
       expect(box.top).toBeGreaterThanOrEqual(drawing.y + drawing.height);
       expect(box.bottom).toBeLessThanOrEqual(next.y);
@@ -116,12 +117,17 @@ test.describe("fr-FR", () => {
     // Plus strict que la page : aucune section ne déborde de sa colonne. Dans Chromium, un mot trop
     // long (« s'autodétruit », question de la FAQ) débordait de 14 px dans la marge sans créer de
     // défilement ; dans WebKit, aux métriques un peu plus larges, il en créait un (CI b155911).
-    const overflow = await page.evaluate(() =>
-      [document.querySelector(".home")!, ...document.querySelectorAll(".home > *, .home section *")]
+    // Les fonds de section (.sec-bg) débordent exprès sur toute la fenêtre : écartés de la mesure.
+    const overflow = await page.evaluate(() => {
+      const bgs = [...document.querySelectorAll<HTMLElement>(".sec-bg")];
+      for (const b of bgs) b.style.display = "none";
+      const out = [document.querySelector(".home")!, ...document.querySelectorAll(".home > *, .home section *")]
         .filter((e) => getComputedStyle(e).overflowX === "visible" && !e.closest(".band, .tile, .ill"))
         .filter((e) => e.scrollWidth > e.clientWidth + 1 && e.clientWidth > 0)
-        .map((e) => `${e.tagName}.${(e as HTMLElement).className} ${e.scrollWidth} > ${e.clientWidth}`),
-    );
+        .map((e) => `${e.tagName}.${(e as HTMLElement).className} ${e.scrollWidth} > ${e.clientWidth}`);
+      for (const b of bgs) b.style.display = "";
+      return out;
+    });
     expect(overflow).toEqual([]);
     await page.waitForTimeout(900);
     await capture(page, "home-320-200pct");
@@ -284,6 +290,35 @@ test.describe("fr-FR", () => {
     }
   });
 
+  test("v4 : chaque section a son fond, sur toute la largeur, sous le plafond de luminance K5", async ({ page, shh, browserName }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(shh.origin + "/");
+    const kinds = await page.locator(".sec-bg").evaluateAll((es) => es.map((e) => [...e.classList].find((c) => c !== "sec-bg" && !c.startsWith("svelte-"))));
+    expect(kinds).toEqual(["night", "tide", "vault", "caution", "cipher", "dawn"]);
+    // Pleine largeur de la fenêtre, sans défilement horizontal.
+    for (const w of await page.locator(".sec-bg").evaluateAll((es) => es.map((e) => Math.round(e.getBoundingClientRect().width))))
+      expect(w).toBe(await page.evaluate(() => document.documentElement.clientWidth));
+    expect(await noHScroll(page)).toBe(true);
+    test.skip(browserName !== "chromium", "luminance mesurée sur la capture Chromium");
+    // K5 étendu aux fonds de section : contenu caché (CSSOM), fonds seuls, aurore retirée.
+    const max: number[] = [];
+    for (const sel of ["section.how", "section.why", "section.limits", "section.faq", "section.end"]) {
+      await page.locator(sel).evaluate((e) => e.scrollIntoView({ block: "center" }));
+      await page.waitForTimeout(300);
+      const hide = ".aurora, main, header, footer, .skip, .banner-slot";
+      await page.evaluate(async (sel) => {
+        for (const el of document.querySelectorAll<HTMLElement>(sel)) el.style.visibility = "hidden";
+        for (const bg of document.querySelectorAll<HTMLElement>(".sec-bg")) bg.style.visibility = "visible";
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      }, hide);
+      max.push(maxRelLuminance(await page.screenshot()));
+      await page.evaluate((sel) => {
+        for (const el of document.querySelectorAll<HTMLElement>(`${sel}, .sec-bg`)) el.style.visibility = "";
+      }, hide);
+    }
+    for (const m of max) expect(m).toBeLessThanOrEqual(0.05);
+  });
+
   test("ambiance : pause hors écran et onglet caché, reprise ensuite", async ({ page, shh }) => {
     await page.setViewportSize({ width: 390, height: 560 });
     await page.goto(shh.origin + "/");
@@ -390,7 +425,7 @@ test.describe("fr-FR", () => {
     await page.waitForTimeout(1000);
     const tag = isMobile ? "390" : "1440";
     await capture(page, `home-v3-${tag}`);
-    for (const s of ["how", "why", "faq", "end"]) {
+    for (const s of ["how", "why", "limits", "faq", "end"]) {
       await page.locator(`section.${s}`).evaluate((e) => e.scrollIntoView({ block: "start" }));
       await page.evaluate(() => scrollBy(0, -72));
       await page.waitForTimeout(900);
@@ -408,7 +443,7 @@ test.describe("en-US", () => {
     await page.goto(shh.origin + "/");
     await expect(page.getByRole("heading", { level: 1, name: "One link, one password, then nothing." })).toBeVisible();
     await expect(
-      page.getByRole("img", { name: "Your device — encrypted — server (can't read it) — encrypted — recipient" }),
+      page.getByRole("img", { name: "Encrypted on your device, unreadable to the server, decrypted at the recipient; the key travels separately, never through the server." }),
     ).toHaveCount(1);
     await expect(page.getByRole("button", { name: "Browse files" })).toBeVisible();
     for (const h of ["How it works", "Why it's safe", "Your questions", "Something to pass on?"])
