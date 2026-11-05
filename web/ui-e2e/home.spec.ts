@@ -132,26 +132,46 @@ test.describe("fr-FR", () => {
   });
 
   test("K1 : toutes les animations d'entrée sont finies à 900 ms (hors ambiance et défilement)", async ({ page, shh }) => {
+    // Cause de l'instabilité : document.getAnimations() ne liste que les animations vivantes. Sur une
+    // machine chargée, le chargement dure plus de 900 ms, les entrées sont déjà finies (donc retirées
+    // de la liste) au moment de l'échantillon, et il en restait 0. On enregistre donc chaque animation
+    // dès qu'elle démarre (animationstart, posé avant tout script de la page) ; la mesure est son
+    // timing déclaré (délai + durée, Web Animations API), indépendant de l'horloge et de la charge.
+    await page.addInitScript(() => {
+      type Rec = { name: string; end: number; ambient: boolean; infinite: boolean };
+      const seen = new Set<Animation>();
+      const recs: Rec[] = [];
+      (window as unknown as { __anims: Rec[] }).__anims = recs;
+      document.addEventListener(
+        "animationstart",
+        () => {
+          for (const a of document.getAnimations()) {
+            if (seen.has(a) || a.timeline !== document.timeline || !(a instanceof CSSAnimation)) continue;
+            seen.add(a);
+            const t = a.effect!.getComputedTiming();
+            recs.push({
+              name: a.animationName,
+              end: Number(t.endTime),
+              ambient: ((a.effect as KeyframeEffect).target as Element).closest("[data-ambient]") !== null,
+              infinite: t.iterations === Infinity,
+            });
+          }
+        },
+        true,
+      );
+    });
     await page.goto(shh.origin + "/");
-    const entries = await page.evaluate(() =>
-      document
-        .getAnimations()
-        .filter((a) => a.timeline === document.timeline)
-        .filter((a) => !((a.effect as KeyframeEffect).target as Element).closest("[data-ambient]"))
-        .map((a) => ({ name: (a as CSSAnimation).animationName, end: Number(a.effect!.getComputedTiming().endTime) })),
-    );
-    // Titre (9 mots), phrase, 3 sceaux, coffre et ses parties.
-    expect(entries.length).toBeGreaterThanOrEqual(20);
-    for (const e of entries) expect(e.end, e.name).toBeLessThanOrEqual(900);
+    type Rec = { name: string; end: number; ambient: boolean; infinite: boolean };
+    const recorded = () => page.evaluate(() => (window as unknown as { __anims: Rec[] }).__anims);
+    // Titre (9 mots), phrase, 3 sceaux, coffre et ses parties : au moins 20 entrées, attendues
+    // (sans durée d'horloge fixe) jusqu'à ce que tous les départs aient eu lieu.
+    await expect.poll(async () => (await recorded()).filter((r) => !r.ambient).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(20);
+    const all = await recorded();
+    for (const e of all.filter((r) => !r.ambient)) expect(e.end, e.name).toBeLessThanOrEqual(900);
     // Seule l'ambiance boucle.
-    const infinite = await page.evaluate(() =>
-      document
-        .getAnimations()
-        .filter((a) => a.effect!.getComputedTiming().iterations === Infinity)
-        .map((a) => ((a.effect as KeyframeEffect).target as Element).closest("[data-ambient]") !== null),
-    );
+    const infinite = all.filter((r) => r.infinite);
     expect(infinite.length).toBeGreaterThan(0);
-    expect(infinite.every(Boolean)).toBe(true);
+    expect(infinite.every((r) => r.ambient)).toBe(true);
   });
 
   test("K8 : le titre a pour nom la phrase entière ; la copie animée est cachée", async ({ page, shh }) => {

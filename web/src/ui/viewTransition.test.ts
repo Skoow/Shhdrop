@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runTransition } from "./viewTransition";
+import { runTransition, STALL_MS } from "./viewTransition";
 
 type Doc = { startViewTransition?: unknown };
 afterEach(() => {
@@ -83,5 +83,47 @@ describe("runTransition (UI §20.2 K2)", () => {
     }, { reduced: false });
     api.finish();
     await expect(p).rejects.toThrow("boom");
+  });
+
+  it("rappel jamais appelé (peinture bloquée) : la transition saute après STALL_MS et la mise à jour a lieu", async () => {
+    vi.useFakeTimers();
+    try {
+      let cb!: () => void;
+      let finish!: () => void;
+      const finished = new Promise<void>((r) => (finish = r));
+      const skipTransition = vi.fn(() => {
+        cb(); // comme le navigateur : sauter avant l'appel du rappel l'appelle aussitôt
+        finish();
+      });
+      (document as unknown as Doc).startViewTransition = vi.fn((c: () => void) => {
+        cb = c;
+        return { finished, updateCallbackDone: Promise.resolve(), skipTransition };
+      });
+      const update = vi.fn();
+      const p = runTransition(update, { reduced: false });
+      vi.advanceTimersByTime(STALL_MS - 1);
+      expect(skipTransition).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(skipTransition).toHaveBeenCalledTimes(1);
+      expect(update).toHaveBeenCalledTimes(1);
+      await p;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rappel appelé à temps : aucun saut forcé", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = fakeApi();
+      const p = runTransition(() => undefined, { reduced: false });
+      vi.advanceTimersByTime(STALL_MS * 3);
+      expect(api.skipTransition).not.toHaveBeenCalled();
+      api.finish();
+      await p;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

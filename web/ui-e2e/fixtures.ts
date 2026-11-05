@@ -2,7 +2,8 @@
 // web/dist-demo servie comme par GitHub Pages (fixture `demo`).
 // Gardes de fin de test : aucune violation CSP, aucune requête hors de l'origine du serveur.
 import AxeBuilder from "@axe-core/playwright";
-import { test as base, expect, type Page } from "@playwright/test";
+import { errors, test as base, expect, type Page } from "@playwright/test";
+import { get } from "node:http";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { startServer, type TestServer } from "../e2e/server";
@@ -42,6 +43,67 @@ function swallowHarnessStyle(page: Page, channel: "event" | "console", text: str
   if (!known || w[channel] >= 1) return false;
   w[channel]++;
   return true;
+}
+
+/**
+ * Sonde de disponibilité côté Node : une vraie requête GET (connexion neuve, `Connection: close`,
+ * aucune connexion persistante laissée derrière elle) jusqu'à une réponse HTTP. Le serveur Go
+ * lie son port avant d'écrire SHH_LISTENING, donc les connexions n'étaient jamais refusées, mais
+ * « le port est ouvert » ne dit pas que la boucle d'acceptation et le gestionnaire répondent.
+ * Écarte aussi toute cause serveur d'un blocage du navigateur.
+ */
+export async function probe(url: string, timeoutMs = 10_000): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      return await new Promise<number>((resolve, reject) => {
+        const req = get(url, { agent: false, headers: { Connection: "close" }, timeout: 2_000 }, (res) => {
+          res.resume();
+          res.once("end", () => resolve(res.statusCode ?? 0));
+          res.once("error", reject);
+        });
+        req.once("timeout", () => req.destroy(new Error("sonde : pas de réponse en 2 s")));
+        req.once("error", reject);
+      });
+    } catch (e) {
+      if (Date.now() > deadline) throw new Error(`serveur injoignable : ${url} (${(e as Error).message})`);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+}
+
+/**
+ * Premier `page.goto` d'un test : relancé (au plus 2 fois) s'il expire sans aucune réponse.
+ * Constat (trace CI du run 42026598153, i18n.spec.ts:72, webkit-desktop) : la requête de document
+ * part, aucune réponse n'arrive en 60 s, alors que le serveur est vivant (les 40 autres tests du
+ * même projet passent). Cause côté WebKit/réseau local non reproductible ici (pas de WebKit sur
+ * ce poste). Le plafond de 60 s d'un test entier rendait ce défaut fatal ; un nouvel essai
+ * après 15 s le surmonte. Chaque relance est consignée en annotation (jamais silencieuse), avec
+ * l'état du serveur à ce moment, pour qu'une cause serveur réapparaisse dans les rapports.
+ * Un `timeout` explicite du test est respecté et désactive le mécanisme. Aucune assertion de
+ * contenu n'est touchée : seul le transport de la toute première requête est répété.
+ */
+function retryFirstGoto(page: Page, origin: string): void {
+  const goto = page.goto.bind(page) as Page["goto"];
+  let first = true;
+  page.goto = (async (url: string, options?: Parameters<Page["goto"]>[1]) => {
+    if (!first || options?.timeout !== undefined) return goto(url, options);
+    first = false;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await goto(url, { ...options, timeout: 15_000 });
+      } catch (e) {
+        if (!(e instanceof errors.TimeoutError) || attempt >= 3) throw e;
+        let serveur: string;
+        try {
+          serveur = `HTTP ${await probe(origin + "/", 3_000)}`;
+        } catch (pe) {
+          serveur = (pe as Error).message;
+        }
+        test.info().annotations.push({ type: "premier goto relancé", description: `essai ${attempt} expiré (15 s) ; serveur : ${serveur}` });
+      }
+    }
+  }) as Page["goto"];
 }
 
 /** Gardes de fin de test : violations CSP et requêtes du cadre principal hors de `origin`. */
@@ -91,6 +153,8 @@ export const test = base.extend<{ shh: Shh; demo: Demo }>({
   shh: async ({ page }, use) => {
     const server = await startServer({ env: { SHH_STATIC_DIR: DIST } });
     try {
+      await probe(server.origin + "/");
+      retryFirstGoto(page, server.origin);
       const g = await guard(page, server.origin);
       await use({ origin: server.origin, server, ...g });
       expect(g.cspViolations).toEqual([]);
@@ -102,6 +166,8 @@ export const test = base.extend<{ shh: Shh; demo: Demo }>({
   demo: async ({ page }, use) => {
     const pages = await startPagesServer(DIST_DEMO);
     try {
+      await probe(`${pages.origin}/Shhdrop/`);
+      retryFirstGoto(page, pages.origin);
       const g = await guard(page, pages.origin);
       const requests: Demo["requests"] = [];
       page.on("request", (r) => requests.push({ url: r.url(), headers: r.headers(), postData: r.postData() }));

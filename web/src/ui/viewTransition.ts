@@ -11,6 +11,15 @@ type ViewTransitionLike = {
 };
 type DocWithVT = Document & { startViewTransition?: (cb: () => void) => ViewTransitionLike };
 
+/**
+ * Délai après lequel un rappel jamais appelé fait sauter la transition. Le navigateur n'appelle le
+ * rappel qu'après avoir peint l'état d'avant ; si cette peinture tarde (WebKit au démarrage à
+ * froid, machine saturée), la mise à jour de l'écran attendrait avec elle, sans limite. Les
+ * pages normales appellent le rappel à l'image suivante (~16 ms) : 420 ms = la fenêtre bloquante
+ * de l'interface (UI §20.2 K2). skipTransition() appelle alors le rappel sans animation.
+ */
+export const STALL_MS = 420;
+
 export async function runTransition(update: () => void, opts: { reduced?: boolean } = {}): Promise<void> {
   const doc = document as DocWithVT;
   if (typeof doc.startViewTransition !== "function") {
@@ -21,13 +30,21 @@ export async function runTransition(update: () => void, opts: { reduced?: boolea
   // Mouvement réduit : fondu de 120 ms seulement (base.css, html.vt-reduced).
   const reduced = opts.reduced ?? reducedMotion();
   if (reduced) root.classList.add("vt-reduced");
-  const vt = doc.startViewTransition.call(doc, update);
+  let called = false;
+  const vt = doc.startViewTransition.call(doc, () => {
+    called = true;
+    update();
+  });
+  const stall = setTimeout(() => {
+    if (!called) vt.skipTransition();
+  }, STALL_MS);
   const skip = () => vt.skipTransition();
   doc.addEventListener("pointerdown", skip, { capture: true, once: true });
   doc.addEventListener("keydown", skip, { capture: true, once: true });
   try {
     await vt.finished.catch(() => undefined);
   } finally {
+    clearTimeout(stall);
     doc.removeEventListener("pointerdown", skip, { capture: true });
     doc.removeEventListener("keydown", skip, { capture: true });
     if (reduced) root.classList.remove("vt-reduced");

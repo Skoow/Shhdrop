@@ -215,7 +215,7 @@ test.describe("fr-FR", () => {
   });
 
   // Composeur (Tasks 10, 11, 13) : ajouter (dépôt, collage), réordonner, retirer ; pas de coffre en démo (spec §27.6).
-  test("composeur : dépôt, collage, réordonner, retirer et annuler ; aucun droit « coffre » ; rien n'est stocké", async ({ page, demo }) => {
+  test("composeur : dépôt, collage, réordonner, retirer et annuler ; aucun droit « coffre » ; rien n'est stocké", async ({ page, demo, isMobile }) => {
     await page.goto(demo.url);
     await page.evaluate(() => {
       const dt = new DataTransfer();
@@ -233,20 +233,27 @@ test.describe("fr-FR", () => {
       document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
     });
     await expect(rows).toHaveCount(3);
-    // Téléphone (projet démo) : menu « … » de la ligne.
-    await page.getByRole("button", { name: "Actions pour a.txt" }).click();
-    await page.getByRole("dialog", { name: "a.txt" }).getByRole("button", { name: "Descendre" }).click();
-    await expect(page.locator("[data-row] .nm")).toHaveText(["b.txt", "a.txt", "c.txt"]);
-    await page.getByRole("dialog", { name: "a.txt" }).getByRole("button", { name: "Retirer" }).click();
+    // Téléphone : menu « … » de la ligne ; ordinateur (demo-webkit-desktop) : poignée et boutons sur la ligne.
+    if (isMobile) {
+      await page.getByRole("button", { name: "Actions pour a.txt" }).click();
+      await page.getByRole("dialog", { name: "a.txt" }).getByRole("button", { name: "Descendre" }).click();
+      await expect(page.locator("[data-row] .nm")).toHaveText(["b.txt", "a.txt", "c.txt"]);
+      await page.getByRole("dialog", { name: "a.txt" }).getByRole("button", { name: "Retirer" }).click();
+    } else {
+      await page.getByRole("button", { name: "Déplacer a.txt" }).focus();
+      await page.keyboard.press("Alt+ArrowDown");
+      await expect(page.locator("[data-row] .nm")).toHaveText(["b.txt", "a.txt", "c.txt"]);
+      await page.getByRole("button", { name: "Retirer a.txt" }).click();
+    }
     await expect(rows).toHaveCount(2);
     await page.getByRole("button", { name: "Annuler" }).click();
     await expect(page.locator("[data-row] .nm")).toHaveText(["b.txt", "a.txt", "c.txt"]);
     // Pas de coffre en démo (spec §27.6), même au doigt.
-    await page.getByRole("button", { name: /^Options · / }).click();
-    const opts = page.getByRole("dialog", { name: "Options" });
+    if (isMobile) await page.getByRole("button", { name: /^Options · / }).click();
+    const opts = isMobile ? page.getByRole("dialog", { name: "Options" }) : page.locator(".side");
     await expect(opts.getByRole("switch", { name: "Autoriser le téléchargement" })).toHaveAttribute("aria-checked", "true");
     await expect(opts.getByRole("switch", { name: /garder une copie chiffrée/i })).toHaveCount(0);
-    await page.keyboard.press("Escape");
+    if (isMobile) await page.keyboard.press("Escape");
     expect(await storage(page)).toBe(0);
     expect(await axe(page)).toEqual([]);
     await capture(page, "demo-compose");
