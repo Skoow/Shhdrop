@@ -12,8 +12,9 @@
     type?: "button" | "submit";
     /**
      * Appelé au plus une fois à la fois : le bouton se verrouille de façon synchrone, avant tout
-     * `await`, jusqu'à la fin de la promesse. `onpress` gère ses propres erreurs (un rejet est ici
-     * absorbé : il ne sert qu'à libérer le bouton).
+     * `await`, jusqu'à la fin de la promesse. Pendant ce temps : `aria-disabled` + `aria-busy`
+     * (pas `disabled`, pour garder le focus). Un rejet ou une exception de `onpress` est ABSORBÉ
+     * ici (il ne sert qu'à libérer le bouton) : chaque écran gère ses propres erreurs.
      */
     onpress?: () => void | Promise<void>;
     icon?: Snippet;

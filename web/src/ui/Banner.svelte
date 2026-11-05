@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { TriangleAlert } from "./Icon";
+  import { Info, TriangleAlert } from "./Icon";
   import Button from "./Button.svelte";
 
   type Props = {
@@ -15,9 +15,7 @@
 <div class={["banner", kind]} role={kind === "danger" ? "alert" : "status"}>
   <span class="ic" aria-hidden="true">
     {#if kind === "info"}
-      <svg viewBox="0 0 24 24" width="20" height="20" focusable="false"
-        ><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg
-      >
+      <Info size={20} strokeWidth={1.75} />
     {:else}
       <TriangleAlert size={20} strokeWidth={1.75} />
     {/if}
@@ -51,12 +49,6 @@
   .ic {
     display: inline-flex;
     padding-top: 1px;
-  }
-  .ic svg {
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.75;
-    stroke-linecap: round;
   }
   .info .ic {
     color: var(--info);

@@ -24,7 +24,7 @@ export function createCountdown(expiresInS: number, now: () => number = () => pe
   const done = new Set<number>(ANNOUNCE_THRESHOLDS.filter((s) => s > 0 && s >= total));
   return {
     remaining,
-    display: (lang) => formatDuration(remaining(), lang),
+    display: (lang) => formatDuration(remaining(), lang, { precise: true }),
     announceAt() {
       const r = remaining();
       let hit: number | null = null;

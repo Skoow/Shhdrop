@@ -17,6 +17,30 @@
   };
   let { message, onundo, ondismiss, durationMs = 6000 }: Props = $props();
 
+  // Le minuteur s'arrête tant que la notification a le survol ou le focus (WCAG 2.2.1), puis
+  // reprend avec le temps restant. Elle est fixe en bas de page : la marge nécessaire pour
+  // qu'elle ne couvre rien est l'affaire des écrans.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let left = 0;
+  let startedAt = 0;
+  let hovered = false;
+  let focused = false;
+  function arm() {
+    clearTimeout(timer);
+    startedAt = Date.now();
+    timer = setTimeout(dismissSelf, left);
+  }
+  function hold() {
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    timer = undefined;
+    left = Math.max(0, left - (Date.now() - startedAt));
+  }
+  function update() {
+    if (hovered || focused) hold();
+    else if (timer === undefined && !done) arm();
+  }
+
   let done = false;
   function finish(undo: boolean) {
     if (done) return;
@@ -29,9 +53,11 @@
   $effect(() => {
     if (current && current !== dismissSelf) current();
     current = dismissSelf;
-    const timer = setTimeout(dismissSelf, durationMs);
+    left = durationMs;
+    arm();
     return () => {
       clearTimeout(timer);
+      timer = undefined;
       if (current === dismissSelf) current = null;
     };
   });
@@ -45,7 +71,14 @@
 
 <svelte:window onkeydown={key} />
 
-<div class="toast" role="status">
+<div
+  class="toast"
+  role="status"
+  onpointerenter={() => ((hovered = true), update())}
+  onpointerleave={() => ((hovered = false), update())}
+  onfocusin={() => ((focused = true), update())}
+  onfocusout={() => ((focused = false), update())}
+>
   <span class="msg">{message}</span>
   <Button variant="ghost" dense onpress={() => finish(true)}>{t("common.undo")}</Button>
 </div>

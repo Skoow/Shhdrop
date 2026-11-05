@@ -43,3 +43,6 @@ export { default as Languages } from "@lucide/svelte/icons/languages";
 export { default as WifiOff } from "@lucide/svelte/icons/wifi-off";
 export { default as ClipboardX } from "@lucide/svelte/icons/clipboard-x";
 export { default as CircleHelp } from "@lucide/svelte/icons/circle-help";
+export { default as Minus } from "@lucide/svelte/icons/minus";
+export { default as Plus } from "@lucide/svelte/icons/plus";
+export { default as Info } from "@lucide/svelte/icons/info";

@@ -229,6 +229,33 @@ describe("UndoToast", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(d2).toHaveBeenCalledTimes(1);
   });
+  it("pause du minuteur au survol et au focus, reprise avec le temps restant", async () => {
+    vi.useFakeTimers();
+    const ondismiss = vi.fn();
+    show(UndoToast, { message: "x", onundo() {}, ondismiss });
+    const toast = document.querySelector(".toast")!;
+    await vi.advanceTimersByTimeAsync(4000);
+    toast.dispatchEvent(new Event("pointerenter"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(ondismiss).not.toHaveBeenCalled();
+    toast.dispatchEvent(new Event("pointerleave"));
+    await vi.advanceTimersByTimeAsync(1900);
+    expect(ondismiss).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(ondismiss).toHaveBeenCalledTimes(1);
+  });
+  it("focus : même pause", async () => {
+    vi.useFakeTimers();
+    const ondismiss = vi.fn();
+    show(UndoToast, { message: "x", onundo() {}, ondismiss });
+    const btn = document.querySelector("button")!;
+    btn.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(ondismiss).not.toHaveBeenCalled();
+    btn.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(6100);
+    expect(ondismiss).toHaveBeenCalledTimes(1);
+  });
   it("Annuler -> onundo", () => {
     const onundo = vi.fn();
     const ondismiss = vi.fn();
@@ -236,6 +263,35 @@ describe("UndoToast", () => {
     document.querySelector("button")!.click();
     expect(onundo).toHaveBeenCalledTimes(1);
     expect(ondismiss).not.toHaveBeenCalled();
+  });
+});
+
+describe("langue : aucun libellé visible hors de t()", () => {
+  it("FR : CopyField, UndoToast, Countdown", () => {
+    setLang("fr");
+    show(CopyField, { label: "Lien", value: "abc" });
+    show(UndoToast, { message: "x", onundo() {}, ondismiss() {} });
+    show(Countdown, { expiresInS: 15300 });
+    const btns = [...document.querySelectorAll("button")].map((b) => b.textContent!.trim());
+    expect(btns).toEqual(["Copier", "Annuler"]);
+    expect(document.querySelector(".cd")!.textContent).toBe("4\u202fh\u202f15");
+  });
+  it("EN : mêmes composants", () => {
+    setLang("en");
+    show(CopyField, { label: "Link", value: "abc" });
+    show(UndoToast, { message: "x", onundo() {}, ondismiss() {} });
+    show(Countdown, { expiresInS: 15300 });
+    const btns = [...document.querySelectorAll("button")].map((b) => b.textContent!.trim());
+    expect(btns).toEqual(["Copy", "Undo"]);
+    expect(document.querySelector(".cd")!.textContent).toBe("4h\u00a015m");
+  });
+  it("le Countdown suit un changement de langue", () => {
+    setLang("fr");
+    show(Countdown, { expiresInS: 15300 });
+    expect(document.querySelector(".cd")!.textContent).toBe("4\u202fh\u202f15");
+    setLang("en");
+    flushSync();
+    expect(document.querySelector(".cd")!.textContent).toBe("4h\u00a015m");
   });
 });
 

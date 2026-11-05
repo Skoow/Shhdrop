@@ -34,7 +34,9 @@ describe("createCountdown", () => {
     const cd = createCountdown(4 * 3600 + 15 * 60, c.now);
     expect(cd.display("fr")).toBe(formatDuration(15300, "fr"));
     expect(cd.display("en")).toBe(formatDuration(15300, "en"));
-    c.advance(15300 - 45);
+    c.advance(15300 - 245);
+    expect(cd.display("fr")).toBe("4\u202fmin\u202f05\u202fs"); // sous 5 min : à la seconde
+    c.advance(200);
     expect(cd.display("fr")).toBe(formatDuration(45, "fr"));
   });
 

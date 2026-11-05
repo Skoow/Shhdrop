@@ -13,6 +13,8 @@ export function plural(lang: Lang, n: number): "one" | "other" {
 export type DurationOpts = {
   /** Sous une minute : « moins d'une minute » au lieu des secondes (annonces, textes longs). */
   coarse?: boolean;
+  /** Sous 5 min, à la seconde (« 4 min 05 s »), UI §11 ; à partir de 5 min, format inchangé. */
+  precise?: boolean;
 };
 
 export function formatDuration(seconds: number, lang: Lang, opts: DurationOpts = {}): string {
@@ -20,6 +22,12 @@ export function formatDuration(seconds: number, lang: Lang, opts: DurationOpts =
   if (!Number.isFinite(seconds) || seconds <= 0) return less;
   const sec = Math.ceil(seconds);
   if (sec < 60) return opts.coarse ? less : `${sec}${sp(lang)}s`;
+  if (opts.precise && sec < 300) {
+    const m = Math.floor(sec / 60);
+    const r = sec % 60;
+    const x = sp(lang);
+    return r === 0 ? `${m}${x}min` : `${m}${x}min${x}${String(r).padStart(2, "0")}${x}s`;
+  }
   const totalMin = Math.ceil(sec / 60);
   if (totalMin < 60) return `${totalMin}${sp(lang)}min`;
   const h = Math.floor(totalMin / 60);

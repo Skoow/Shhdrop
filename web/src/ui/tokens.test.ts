@@ -279,7 +279,7 @@ describe("Icon.ts (UI §6)", () => {
     "shield-alert", "triangle-alert", "copy", "check", "share-2", "qr-code", "refresh-cw", "eye",
     "eye-off", "clock", "timer", "pause", "play", "download", "file", "file-text", "image",
     "music", "audio-lines", "film", "folder-x", "trash-2", "flag", "external-link",
-    "chevron-left", "languages", "wifi-off", "clipboard-x", "circle-help",
+    "chevron-left", "languages", "wifi-off", "clipboard-x", "circle-help", "minus", "plus", "info",
   ];
   const pascal = (s: string) =>
     s.split("-").map((p) => p[0]!.toUpperCase() + p.slice(1)).join("");

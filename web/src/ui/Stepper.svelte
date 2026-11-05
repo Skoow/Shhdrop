@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from "../i18n/i18n.svelte";
+  import { Minus, Plus } from "./Icon";
 
   type Props = { label: string; value: number; min?: number; max?: number };
   let { label, value = $bindable(), min = 1, max = 10 }: Props = $props();
@@ -14,11 +15,11 @@
 
 <div class="stepper" role="group" aria-label={label}>
   <button type="button" class="b" aria-label={t("stepper.dec")} aria-disabled={atMin} onclick={() => step(-1)}>
-    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M5 12h14" /></svg>
+    <Minus size={20} strokeWidth={1.75} aria-hidden="true" />
   </button>
   <span class="value num" aria-live="polite" aria-atomic="true">{value}</span>
   <button type="button" class="b" aria-label={t("stepper.inc")} aria-disabled={atMax} onclick={() => step(1)}>
-    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M5 12h14M12 5v14" /></svg>
+    <Plus size={20} strokeWidth={1.75} aria-hidden="true" />
   </button>
 </div>
 
@@ -41,12 +42,6 @@
     color: var(--text);
     cursor: pointer;
     touch-action: manipulation;
-  }
-  .b svg {
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.75;
-    stroke-linecap: round;
   }
   .b[aria-disabled="true"] {
     color: var(--text-disabled);

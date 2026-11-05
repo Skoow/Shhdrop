@@ -126,6 +126,20 @@ describe("formats", () => {
     expect(formatDuration(-3, "fr")).toBe("moins d'une minute");
   });
 
+  it("précision à la seconde sous 5 min (UI §11), format inchangé à partir de 5 min", () => {
+    const P = { precise: true };
+    expect(formatDuration(245, "fr", P)).toBe(`4${N}min${N}05${N}s`);
+    expect(formatDuration(245, "en", P)).toBe(`4${B}min${B}05${B}s`);
+    expect(formatDuration(299, "fr", P)).toBe(`4${N}min${N}59${N}s`);
+    expect(formatDuration(240, "fr", P)).toBe(`4${N}min`);
+    expect(formatDuration(61, "en", P)).toBe(`1${B}min${B}01${B}s`);
+    expect(formatDuration(300, "fr", P)).toBe(`5${N}min`);
+    expect(formatDuration(301, "fr", P)).toBe(`6${N}min`);
+    expect(formatDuration(15300, "fr", P)).toBe(`4${N}h${N}15`);
+    expect(formatDuration(45, "fr", P)).toBe(`45${N}s`);
+    expect(formatDuration(245, "fr")).toBe(`5${N}min`); // sans l'option : comme avant
+  });
+
   it("durées EN (U+00A0)", () => {
     expect(formatDuration(4 * 3600 + 15 * 60, "en")).toBe(`4h${B}15m`);
     expect(formatDuration(4 * 3600, "en")).toBe("4h");
