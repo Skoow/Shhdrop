@@ -22,12 +22,18 @@ describe("readLink", () => {
       `${O}/s/${ID}#${KEY.slice(0, -1)}`,
       `${O}/s/${ID}#${KEY}A`,
       `${O}/s/${ID.slice(1)}#${KEY}`,
-      `${O}/s/${ID}?x=1#${KEY}`,
       `${O}/s/${ID}/#${KEY}`,
       "pas une adresse",
       "",
     ])
       expect(readLink(h, "s", "/"), h).toEqual({ kind: "incomplete" });
+  });
+
+  it("requête ignorée (?fbclid= ajouté par Facebook, Messenger, Instagram) : lien valide, rendu sans la requête", () => {
+    expect(readLink(`${O}/s/${ID}?fbclid=x#${KEY}`, "s", "/")).toEqual({ kind: "s", link: `${O}/s/${ID}#${KEY}` });
+    expect(readLink(`${O}/m/${ID}?a=1&b=2#${KEY}`, "m", "/")).toEqual({ kind: "m", link: `${O}/m/${ID}#${KEY}` });
+    expect(readLink(`${O}/Shhdrop/s/${ID}?fbclid=x#${KEY}`, "s", "/Shhdrop/")).toEqual({ kind: "s", link: `${O}/s/${ID}#${KEY}` });
+    expect(readLink(`${O}/s/${ID}?fbclid=x`, "s", "/")).toEqual({ kind: "incomplete" });
   });
 
   it("mauvais préfixe : un lien de gestion n'est pas accepté comme lien de partage, ni l'inverse", () => {
@@ -57,7 +63,7 @@ describe("scrubAddressBar", () => {
     history.replaceState(null, "", `/s/${ID}#${KEY}`);
     expect(location.hash).toBe(`#${KEY}`);
     const before = history.length;
-    scrubAddressBar(history, location.pathname);
+    expect(scrubAddressBar(history, location.pathname)).toBe(true);
     expect(location.hash).toBe("");
     expect(location.href).not.toContain("#");
     expect(location.pathname).toBe(`/s/${ID}`);
@@ -65,10 +71,17 @@ describe("scrubAddressBar", () => {
     expect(history.state).toBeNull();
   });
 
-  it("refuse tout ce qui n'est pas un chemin nu (pas de #, ?, //, ni d'adresse complète)", () => {
+  it("retire aussi la requête (paramètres de suivi)", () => {
+    history.replaceState(null, "", `/s/${ID}?fbclid=x#${KEY}`);
+    expect(scrubAddressBar(history, location.pathname)).toBe(true);
+    expect(location.search).toBe("");
+    expect(location.hash).toBe("");
+  });
+
+  it("ce qui n'est pas un chemin nu (#, ?, //, \\, adresse complète) : sans effet, rend false, ne lève jamais", () => {
     history.replaceState(null, "", `/s/${ID}#${KEY}`);
-    for (const p of [location.href, `/s/${ID}#${KEY}`, `/s/${ID}?q`, "//evil.example/x", "s/x", "", "https://x/s"])
-      expect(() => scrubAddressBar(history, p), p).toThrow("chemin attendu");
+    for (const p of [location.href, `/s/${ID}#${KEY}`, `/s/${ID}?q`, "//evil.example/x", "/\\evil.example/x", "/a\\b", "s/x", "", "https://x/s"])
+      expect(scrubAddressBar(history, p), p).toBe(false);
     expect(location.hash).toBe(`#${KEY}`); // rien n'a été écrit
   });
 });

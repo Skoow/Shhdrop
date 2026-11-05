@@ -19,6 +19,20 @@ const IN_APP: [string, string][] = [
   [`${WV("SM-A536B Build/TP1A.220624.014")} trill_320405 JsSdk/1.0 NetType/WIFI Channel/googleplay AppName/trill app_version/32.4.5 ByteLocale/fr ByteFullLocale/fr Region/FR BytedanceWebview/d8a21c6`, "TikTok"],
   [`${IOS} Safari Line/13.19.0`, "LINE"],
   [`${WV("Pixel 7 Build/UQ1A.240205.002")} Telegram-Android/10.8.1 (Google Pixel 7; Android 14; SDK 34; HIGH)`, "Telegram"],
+  // Sources des agents ci-dessous : formes publiées par les applications et relevées dans les
+  // bases publiques d'agents (whatismybrowser.com, useragents.io) ; non relevées ici sur appareil.
+  // X : application iOS (« Twitter for iPhone ») et Android (« TwitterAndroid »).
+  [`${IOS} Twitter for iPhone/10.16`, "X"],
+  [`${WV("Pixel 7 Build/UQ1A.240205.002")} TwitterAndroid`, "X"],
+  // Pinterest : iOS (« Pinterest for iOS ») et Android (« [Pinterest/Android] »).
+  [`${IOS} Pinterest for iOS/12.5 (iPhone15,3; 17.1)`, "Pinterest"],
+  [`${WV("SM-S911B Build/TP1A.220624.014")} [Pinterest/Android]`, "Pinterest"],
+  // Discord : application mobile (« Discord/ » iOS, « Discord-Android/ » Android).
+  [`${IOS} Discord/229.0`, "Discord"],
+  [`${WV("Pixel 8 Build/UD1A.230803.041")} Discord-Android/229016`, "Discord"],
+  // Gmail et application Google sur iOS : « GSA/ » (Google Search App) ; Gmail ajoute « gmail ».
+  [`${IOS.replace("Mobile/15E148", "GSA/300.0.598994492 Mobile/15E148 Safari/604.1")}`, "Google"],
+  [`${IOS} Gmail/6.0.240101`, "Gmail"],
   [`${IOS} MicroMessenger/8.0.44(0x18002c2b) NetType/WIFI Language/zh_CN`, "WeChat"],
 ];
 

@@ -2,7 +2,7 @@
   import { inAppBrowser, isSupported } from "./app/env";
   import { guardFileDrop, reloadIfRestored } from "./app/lifecycle";
   import { readLink, scrubAddressBar, type LinkState } from "./app/link";
-  import { router } from "./app/router.svelte";
+  import { href, router } from "./app/router.svelte";
   import { watchKeyboard } from "./app/viewport";
   import NotFound from "./routes/NotFound.svelte";
   import Unsupported from "./routes/Unsupported.svelte";
@@ -20,16 +20,21 @@
     (navigator as Navigator & { standalone?: boolean }).standalone === true;
 
   /**
-   * UI §12.1 : au démarrage d'une route /s/ ou /m/, le lien est lu puis le « # » est retiré de
-   * l'adresse et de l'historique ; dans un navigateur intégré (S4), le « # » reste pour
-   * « Ouvrir dans le navigateur ». Le résultat contient le secret : il est rendu à l'appelant,
-   * jamais rangé ici. Task 20 le remet par valeur au flux de la route (createReceiver, gestion).
+   * UI §12.1 : au démarrage d'une route /s/ ou /m/, le lien est lu, puis le « # » et la requête
+   * sont retirés de l'adresse et de l'historique. Sur toute autre route (404 comprise : lien
+   * abîmé « /s/{id}/#… », « /S/… », hors base de démo), un « # » non vide est retiré aussi.
+   * Exception : navigateur intégré (S4), où le « # » reste pour « Ouvrir dans le navigateur ».
+   * Le résultat contient le secret : il est rendu à l'appelant, jamais rangé ici. Task 20 le
+   * remet par valeur au flux de la route (createReceiver, gestion).
    */
   function enterLinkRoute(): LinkState | null {
     const r = router.current;
-    if (r.name !== "open" && r.name !== "manage") return null;
-    const state = readLink(location.href, r.name === "open" ? "s" : "m");
-    if (inAppBrowser(navigator.userAgent, standalone()) === null) scrubAddressBar(history, location.pathname);
+    const linkRoute = r.name === "open" || r.name === "manage";
+    const state = linkRoute ? readLink(location.href, r.name === "open" ? "s" : "m") : null;
+    if ((linkRoute || location.hash !== "") && inAppBrowser(navigator.userAgent, standalone()) === null) {
+      // Chemin non nu (« //x », « \ ») : repli sur l'accueil plutôt que garder le « # ».
+      if (!scrubAddressBar(history, location.pathname)) scrubAddressBar(history, href("/"));
+    }
     return state;
   }
 

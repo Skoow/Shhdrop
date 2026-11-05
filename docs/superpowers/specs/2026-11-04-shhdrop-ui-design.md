@@ -640,7 +640,7 @@ Affiché seulement quand la promesse de `createShare` est résolue (spec §5.1).
 | État | Quand | Texte |
 |---|---|---|
 | Lien invalide | `NotFoundError` à `fetchMeta` ou `openShare`, `Error("lien_invalide")`, ou compte à rebours à zéro avant déverrouillage | « Ce lien n'existe pas ou n'est plus disponible. » (message unique, spec §5.2). Visuel : la capsule déjà dissoute (grain immobile), lien « Envoyer quelque chose » vers `/` |
-| Lien incomplet | Pas de `#`, ou `parseLink` refuse localement | « Ce lien est incomplet. Rouvrez-le depuis le message d'origine. » + « La partie secrète a peut-être été retirée de la barre d'adresse après une première visite. » |
+| Lien incomplet | Pas de `#`, ou `parseLink` refuse localement (la requête `?…` est ignorée avant l'analyse : nos liens n'en portent jamais, les applications y ajoutent `?fbclid=…`) | « Ce lien est incomplet. Rouvrez-le depuis le message d'origine. » + « La partie secrète a peut-être été retirée de la barre d'adresse après une première visite. » |
 | Navigateur non pris en charge | Une capacité de §9 manque | « Ce navigateur ne permet pas de chiffrer en sécurité. Utilisez une version récente de Safari, Chrome, Firefox ou Edge. » Rien n'est envoyé (spec §10) |
 | 404 | Route inconnue | « Cette page n'existe pas. » + lien accueil |
 
@@ -729,7 +729,7 @@ Clés principales (extrait normatif ; le plan fixe la liste complète) :
 
 ### 12.1 Lien et historique
 
-- `parseLink(location.href)` dès le démarrage de la route, puis `history.replaceState(null, "", location.pathname)` (spec §5.3). Exception : navigateur intégré (S4).
+- `parseLink(location.href)` (requête ignorée) dès le démarrage de la route, puis `history.replaceState(null, "", location.pathname)` (spec §5.3) : le `#` **et la requête** (paramètres de suivi) quittent la barre et l'historique. Sur **toute autre route** (404 comprise : lien abîmé `/s/{id}/#…`, `/S/…`, hors base de démo), un `#` non vide est retiré de la même façon, y compris quand il est collé dans la barre sur la même page (`hashchange`). Exceptions : navigateur intégré (S4) et navigateur non pris en charge (§9.11). Limite : un dernier segment avec un point (`/s/{id}.`) reçoit le 404 texte du serveur, sans script (voir rapport Task 5).
 - L'expéditeur ne voit jamais son lien dans la barre d'adresse : les liens sont affichés, pas navigués.
 - Aucun lien, clé ni mot de passe dans `localStorage`, `sessionStorage`, IndexedDB, cookies, titre de page, `console`, ni dans un message `postMessage` (cadre PDF, cadre de vérification).
 

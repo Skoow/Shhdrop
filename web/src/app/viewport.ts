@@ -11,11 +11,13 @@ const FIELD = "input, textarea, select, [contenteditable]";
  * Référence = plus grande `innerHeight` vue à la largeur courante : avec
  * `interactive-widget=resizes-content` (Chrome Android), `innerHeight` rétrécit avec le clavier
  * et ne peut pas servir seule ; elle repart à chaque changement de largeur (rotation).
- * À l'ouverture, le champ actif est amené au centre.
+ * Seulement avec un pointeur grossier (téléphone, tablette) : sur ordinateur, réduire la
+ * fenêtre n'est pas un clavier. À l'ouverture, le champ actif est amené au centre.
  */
 export function watchKeyboard(
   w: Window,
   set: (open: boolean) => void,
+  coarse: () => boolean = () => w.matchMedia?.("(pointer: coarse)").matches === true,
   active: () => Element | null = () => w.document.activeElement,
 ): () => void {
   let width = w.innerWidth;
@@ -27,7 +29,7 @@ export function watchKeyboard(
       ref = w.innerHeight;
     }
     ref = Math.max(ref, w.innerHeight);
-    const next = keyboardOpen(w.visualViewport, ref);
+    const next = coarse() && keyboardOpen(w.visualViewport, ref);
     if (next === open) return;
     open = next;
     set(next);

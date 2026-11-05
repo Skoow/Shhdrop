@@ -117,3 +117,64 @@ test("fichier déposé sur /s/x : défaut empêché, l'adresse ne change pas", a
   await page.evaluate(() => new Promise((r) => setTimeout(r, 300)));
   expect(page.url()).toBe(url);
 });
+
+// I1 : liens abîmés (barre oblique ou ponctuation ajoutées par une messagerie, majuscule,
+// adresse hors route) : le routeur les classe en 404, le « # » est retiré quand même.
+for (const path of [`/s/${ID}/`, `/s/${ID})`, `/S/${ID}`, "/", "/inconnu"]) {
+  test(`${path}#<clé> : le # est retiré sur toute route, Retour ne le rend pas`, async ({ page, shh }) => {
+    await page.goto(`${shh.origin}${path}#${KEY}`);
+    await expect.poll(() => hash(page)).toBe("");
+    expect(page.url()).toBe(`${shh.origin}${path}`);
+    await page.getByRole("link", { name: "Sécurité" }).click();
+    await expect(page).toHaveURL(`${shh.origin}/securite`);
+    await page.goBack();
+    await expect(page).toHaveURL(`${shh.origin}${path}`);
+    expect(await hash(page)).toBe("");
+  });
+}
+
+// Limite connue, hors de portée de l'interface : un dernier segment avec un point
+// (« /s/{id}.#clé ») est traité par le serveur comme un fichier absent (static.go) et reçoit un
+// 404 texte : aucun script ne tourne, le « # » reste. Correction proposée côté serveur (repli
+// index.html pour tout /s/… et /m/…), en attente de décision : voir task-5-report.md.
+test.fixme(`/s/<id>.#<clé> : le # est retiré (exige un repli index.html côté serveur)`, async ({ page, shh }) => {
+  await page.goto(`${shh.origin}/s/${ID}.#${KEY}`);
+  await expect.poll(() => hash(page)).toBe("");
+});
+
+// I2 : paramètre de suivi ajouté par l'application (Facebook, Messenger, Instagram).
+test("/s/<id>?fbclid=x#<clé> : requête et # retirés, adresse = chemin nu", async ({ page, shh }) => {
+  const api = apiRequests(page);
+  await page.goto(`${shh.origin}/s/${ID}?fbclid=x#${KEY}`);
+  await expect.poll(() => page.url()).toBe(`${shh.origin}/s/${ID}`);
+  expect(api).toEqual([]);
+});
+
+test.describe("navigateur intégré (Facebook) avec ?fbclid=", () => {
+  test.use({ userAgent: INSTAGRAM.replace(/Instagram .*$/, "[FBAN/FBIOS;FBDV/iPhone15,3;FBMD/iPhone;FBSN/iOS;FBSV/17.1]") });
+
+  test("rien n'est retiré (S4), même sur une route 404", async ({ page, shh }) => {
+    for (const path of [`/s/${ID}?fbclid=x`, `/s/${ID}/`]) {
+      await page.goto(`${shh.origin}${path}#${KEY}`);
+      await expect(page.locator("main#contenu")).toBeVisible();
+      await page.evaluate(() => new Promise((r) => setTimeout(r, 300)));
+      expect(page.url()).toBe(`${shh.origin}${path}#${KEY}`);
+    }
+  });
+});
+
+// m2 : la hauteur visible réduite de plus de 25 % n'est un clavier qu'avec un pointeur grossier.
+test("kbd-open seulement sur écran tactile (pointer: coarse)", async ({ page, shh }) => {
+  await page.goto(`${shh.origin}/`);
+  const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
+  const size = page.viewportSize()!;
+  await expect(page.locator("html")).not.toHaveClass(/kbd-open/);
+  await page.setViewportSize({ width: size.width, height: Math.floor(size.height * 0.5) });
+  if (coarse) await expect(page.locator("html")).toHaveClass(/kbd-open/);
+  else {
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 300)));
+    await expect(page.locator("html")).not.toHaveClass(/kbd-open/);
+  }
+  await page.setViewportSize(size);
+  await expect(page.locator("html")).not.toHaveClass(/kbd-open/);
+});

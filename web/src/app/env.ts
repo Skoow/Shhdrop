@@ -28,6 +28,12 @@ const IN_APP: readonly [RegExp, string][] = [
   [/musical_ly|BytedanceWebview/, "TikTok"],
   [/\bLine\/\d/, "LINE"],
   [/\bTelegram\b/, "Telegram"],
+  [/Twitter for iPhone|\bTwitterAndroid\b/, "X"],
+  [/\bPinterest\b/, "Pinterest"],
+  [/\bDiscord(?:-Android)?\//, "Discord"],
+  // Gmail avant Google : l'application Gmail peut aussi porter « GSA/ ».
+  [/\bGmail\//, "Gmail"],
+  [/\bGSA\//, "Google"],
 ];
 
 /** Nom de l'application dont le navigateur intégré affiche la page, ou `null`. Une PWA installée n'est jamais signalée. */
