@@ -8,11 +8,14 @@ const NAME_MAX = 120; // points de code
 const EXT_MAX = 16; // au-delà, « l'extension » n'en est pas une : coupe simple
 
 // Inversions de sens d'écriture (U+202A–U+202E, U+2066–U+2069), marques LRM/RLM/ALM,
-// contrôles C0, DEL et C1, séparateurs de chemin.
-// Largeur nulle (U+200B, U+200C, U+2060–U+2064, U+FEFF, U+180E), trait d'union conditionnel
-// (U+00AD), U+034F et étiquettes (U+E0000–U+E007F) : invisibles, ils
-// permettent de camoufler une extension ou de rendre deux noms identiques à l'œil.
-const STRIP = /[‪-‮⁦-⁩‎‏؜\u0000-\u001F\u007F-\u009F/\\\u200B\u200C\u2060\u2061-\u2064\uFEFF\u180E\u00AD\u034F\u{E0000}-\u{E007F}]/gu;
+// contrôles C0, DEL et C1, séparateurs de chemin, et toute la classe Default_Ignorable_Code_Point
+// (largeur nulle, U+00AD, U+034F, remplissages hangul, sélecteurs de variante, étiquettes…) :
+// invisibles, ils permettent de camoufler une extension ou de rendre deux noms identiques à l'œil.
+// Exceptions traitées à part : U+200D et U+FE0F, nécessaires aux emoji.
+const STRIP = /[‪-‮⁦-⁩‎‏؜\u0000-\u001F\u007F-\u009F/\\]|(?![\u200D\uFE0F])\p{Default_Ignorable_Code_Point}/gu;
+
+// U+FE0F (sélecteur d'emoji) : gardé seulement après un pictogramme.
+const VS16_OUTSIDE_EMOJI = /(?<!\p{Extended_Pictographic})\uFE0F/gu;
 
 // U+200D (liant de séquences emoji) : gardé seulement entre deux emoji (avant : pictogramme,
 // suivi au plus d'un sélecteur de variante et d'une teinte ; après : pictogramme), retiré ailleurs.
@@ -26,14 +29,16 @@ const ZWJ_OUTSIDE_EMOJI = /(?<!\p{Extended_Pictographic}\uFE0F?[\u{1F3FB}-\u{1F3
  */
 export function safeName(raw: string): string {
   // Retrait avant la normalisation : « e » + largeur nulle + accent se compose en « é ».
-  let s = raw.replace(STRIP, "").replace(ZWJ_OUTSIDE_EMOJI, "").normalize("NFC").replace(/\s+/gu, " ");
+  let s = raw.replace(STRIP, "").replace(VS16_OUTSIDE_EMOJI, "").replace(ZWJ_OUTSIDE_EMOJI, "").normalize("NFC").replace(/\s+/gu, " ");
   s = s.replace(/^[\s.]+/u, "").replace(/[\s.]+$/u, "");
   if ([...s].length > NAME_MAX) {
     const dot = s.lastIndexOf(".");
     const ext = dot > 0 ? [...s.slice(dot)] : [];
+    // Un premier graphème démesuré (centaines de marques combinantes) peut ne rien laisser
+    // devant l'extension : « fichier » plutôt que « .exe » (fichier caché, sans avertissement).
     s =
       ext.length > 1 && ext.length <= EXT_MAX
-        ? takeGraphemes(s.slice(0, dot), NAME_MAX - ext.length).replace(/[\s.]+$/u, "") + ext.join("")
+        ? (takeGraphemes(s.slice(0, dot), NAME_MAX - ext.length).replace(/[\s.]+$/u, "") || "fichier") + ext.join("")
         : takeGraphemes(s, NAME_MAX).replace(/[\s.]+$/u, "");
   }
   return s === "" ? "fichier" : s;
@@ -92,5 +97,5 @@ const RISKY = new Set(["exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "
 /** Extension exécutable ou interprétée : avertir avant l'enregistrement (spec §12). À appeler sur un nom passé par safeName. */
 export function isRiskyName(name: string): boolean {
   const dot = name.lastIndexOf(".");
-  return dot > 0 && RISKY.has(name.slice(dot + 1).toLowerCase());
+  return dot >= 0 && RISKY.has(name.slice(dot + 1).toLowerCase());
 }

@@ -109,7 +109,8 @@ func TestTrustedProxyShape(t *testing.T) {
 		"::ffff:10.0.0.0/104", "::ffff:172.18.0.0/112", "::ffff:0:0/96", // IPv4-dans-IPv6
 		"10.0.0.0/7", "128.0.0.0/1", "64.0.0.0/2", "192.0.0.0/4", "11.0.0.0/7", // IPv4 trop large et public
 		"2000::/3", "2001::/16", "2001:db8::/31", // IPv6 trop large et public
-		"fc00::/6",                                                                    // dépasse fc00::/7
+		"fc00::/6",                                                            // dépasse fc00::/7
+		"64:ff9b::/96", "64:ff9b::/104", "64:ff9b:1::/48", "64:ff9b:1:2::/64", // NAT64 : tout l'Internet IPv4
 		"8.0.0.0/8", "8.0.0.0/23", "203.0.112.0/23", "2001:db8::/32", "2001:db8::/47", // réseau public trop large
 	} {
 		env(t, map[string]string{"SHH_DATA_DIR": "/d", "SHH_BEHIND_PROXY": "1", "SHH_TRUSTED_PROXY": v})

@@ -58,6 +58,25 @@ describe("safeName", () => {
     expect(safeName("👩\u200Db")).toBe("👩b"); // après : pas un emoji
     expect(safeName("👩\u200D\u200D👧")).toBe("👩👧"); // deux ZWJ de suite
   });
+  it("retire tout caractère ignorable par défaut ; U+FE0F gardé seulement après un emoji (revue M, m1)", () => {
+    expect(safeName("x.ex\uFE00e")).toBe("x.exe");
+    expect(safeName("x.ex\uFE0Fe")).toBe("x.exe"); // sélecteur de variante après une lettre
+    expect(safeName("doc\u3164\u3164\uFFA0\u115F\u1160.pdf")).toBe("doc.pdf"); // remplissages hangul
+    expect(safeName("a\u{E0100}\u180B\u2065\u206Fb")).toBe("ab");
+    const family = "👨\u200D👩\u200D👧";
+    expect(safeName(family)).toBe(family);
+    expect(safeName("❤\uFE0F.txt")).toBe("❤\uFE0F.txt");
+  });
+  it("jamais de point initial après la coupe : repli « fichier » devant l'extension (revue M, I1)", () => {
+    const hostile = "a" + "\u0301".repeat(200) + ".exe"; // un seul graphème de 201 points de code
+    expect(safeName(hostile)).toBe("fichier.exe");
+    expect(isRiskyName(safeName(hostile))).toBe(true);
+    for (const n of [hostile, "a" + "\u0301".repeat(200), "a" + "\u0301".repeat(200) + ".tar.gz", ".exe", "...x.exe"]) {
+      expect(safeName(n).startsWith("."), JSON.stringify(n.slice(0, 8))).toBe(false);
+    }
+    expect(safeName("a" + "\u0301".repeat(200))).toBe("fichier");
+    expect(safeName(".exe")).toBe("exe");
+  });
   it("coupe par graphème, sans jamais dépasser 120 points de code (tâche M, point 4)", () => {
     // « x » + accent combinant (sans forme composée) : 2 points de code, 1 graphème.
     const g = "x\u0301";
@@ -104,6 +123,8 @@ describe("isRiskyName", () => {
       expect(isRiskyName(`f.${e}`), e).toBe(true);
       expect(isRiskyName(`f.${e.toUpperCase()}`), e).toBe(true);
     }
+    expect(isRiskyName(".exe")).toBe(true); // nom qui commence par le point : aussi
+    expect(isRiskyName(".bashrc")).toBe(false);
     for (const n of ["photo.jpg", "image.svg", "doc.pdf", "exe", "notes.txt", "fichier"]) expect(isRiskyName(n), n).toBe(false);
     expect(isRiskyName(safeName("../../facture‮fdp.exe\u0000"))).toBe(true);
     expect(isRiskyName(safeName("x.exe. "))).toBe(true);

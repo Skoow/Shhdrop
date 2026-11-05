@@ -90,6 +90,10 @@ var localNets = []netip.Prefix{
 	netip.MustParsePrefix("fc00::/7"), netip.MustParsePrefix("::1/128"), netip.MustParsePrefix("fe80::/10"),
 }
 
+// nat64Nets : préfixes de traduction IPv6 vers IPv4 (RFC 6052, RFC 8215) : ils contiennent tout
+// l'Internet IPv4, comme la notation ::ffff:a.b.c.d. Refusés, quelle que soit la taille.
+var nat64Nets = []netip.Prefix{netip.MustParsePrefix("64:ff9b::/96"), netip.MustParsePrefix("64:ff9b:1::/48")}
+
 // trustedPrefixOK : un proxy de confiance est un réseau restreint. Acceptés : un
 // sous-réseau (jamais /0) d'un réseau local (localNets) ; sinon un réseau public d'au moins
 // /24 (IPv4) ou /48 (IPv6). Refusée aussi : la notation IPv4-dans-IPv6 (::ffff:a.b.c.d/…),
@@ -98,6 +102,11 @@ func trustedPrefixOK(p netip.Prefix) bool {
 	a := p.Addr()
 	if a.Is4In6() || a.Zone() != "" || p.Bits() == 0 {
 		return false
+	}
+	for _, n := range nat64Nets {
+		if n.Overlaps(p) {
+			return false
+		}
 	}
 	for _, n := range localNets {
 		if n.Addr().Is4() == a.Is4() && p.Bits() >= n.Bits() && n.Contains(a) {
