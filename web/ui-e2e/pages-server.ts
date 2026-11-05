@@ -58,6 +58,14 @@ export async function startPagesServer(root: string, base = "/Shhdrop/"): Promis
   const { port } = server.address() as AddressInfo;
   return {
     origin: `http://127.0.0.1:${port}`,
-    close: () => new Promise<void>((r) => server.close(() => r())),
+    // Chromium ouvre des connexions de préconnexion qui n'envoient jamais de requête. server.close()
+    // ne ferme que les connexions inactives qui ont déjà servi une requête : il attendait les autres
+    // jusqu'à headersTimeout (60 s), d'où l'expiration au démontage de la fixture `demo` (CI ui,
+    // run 42014841025). La page a fini ses requêtes quand on ferme : on coupe tout.
+    close: () =>
+      new Promise<void>((r) => {
+        server.close(() => r());
+        server.closeAllConnections();
+      }),
   };
 }
