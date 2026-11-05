@@ -28,6 +28,21 @@ describe("dictionnaires", () => {
     }
   });
 
+  it("un nombre et son unité ne se séparent pas : espace insécable (U+202F en FR, U+00A0 en EN)", () => {
+    // Exceptions explicites : clé -> raison. Toute autre clé doit passer.
+    const EXCEPTIONS: Record<string, string> = {
+      "compose.moved": "phrase d'ordre (« position 2 sur 5 dans … ») : pas une quantité",
+    };
+    const re = /(\d|\{(?:n|i|u|max)\}) \p{L}/u;
+    for (const [lang, d] of [["fr", fr], ["en", en]] as const)
+      for (const [k, v] of Object.entries(d)) {
+        if (k in EXCEPTIONS) continue;
+        expect(v, `${lang} ${k}`).not.toMatch(re);
+      }
+    expect(fr["compose.gauge.empty"]).toContain("1\u202fGo et 10\u202féléments");
+    expect(en["compose.gauge.empty"]).toContain("1\u00a0GB and 10\u00a0items");
+  });
+
   it("jamais « ≈ » ni « 100 % sécurisé »", () => {
     for (const d of [fr, en])
       for (const [k, v] of Object.entries(d)) {
@@ -54,11 +69,11 @@ describe("t et langue", () => {
 
   it("pluriel : suffixe .one / .other selon n et la langue", () => {
     setLang("fr");
-    expect(t("open.badPw", { n: 1 })).toContain("1 essai restant");
-    expect(t("open.badPw", { n: 3 })).toContain("3 essais restants");
+    expect(t("open.badPw", { n: 1 })).toContain("1\u202fessai restant");
+    expect(t("open.badPw", { n: 3 })).toContain("3\u202fessais restants");
     setLang("en");
-    expect(t("open.badPw", { n: 1 })).toContain("1 attempt left");
-    expect(t("open.badPw", { n: 2 })).toContain("2 attempts left");
+    expect(t("open.badPw", { n: 1 })).toContain("1\u00a0attempt left");
+    expect(t("open.badPw", { n: 2 })).toContain("2\u00a0attempts left");
   });
 
   it("setLang met à jour <html lang> et ne stocke rien", () => {

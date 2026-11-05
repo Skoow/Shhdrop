@@ -43,11 +43,11 @@ export const fr = {
   "compose.moved": "{name}\u202f: position {i} sur {n} dans {category}.",
   "compose.removed": "{name} retiré",
   "compose.duplicate": "En double\u202f?",
-  "compose.gauge": "{size} / 1 Go · {n} / 10",
-  "compose.gauge.empty": "Rien à envoyer pour l'instant · 1 Go et 10 éléments au plus",
-  "compose.tooBig": "Trop gros\u202f: {size} sur 1 Go. Retirez {excess}.",
-  "compose.tooMany.one": "{n} élément n'a pas été ajouté\u202f: 10 au plus.",
-  "compose.tooMany.other": "{n} éléments n'ont pas été ajoutés\u202f: 10 au plus.",
+  "compose.gauge": "{size} / 1\u202fGo · {n} / 10",
+  "compose.gauge.empty": "Rien à envoyer pour l'instant · 1\u202fGo et 10\u202féléments au plus",
+  "compose.tooBig": "Trop gros\u202f: {size} sur 1\u202fGo. Retirez {excess}.",
+  "compose.tooMany.one": "{n}\u202félément n'a pas été ajouté\u202f: 10\u202fau plus.",
+  "compose.tooMany.other": "{n}\u202féléments n'ont pas été ajoutés\u202f: 10\u202fau plus.",
   "compose.cleaned": "Nettoyé · lieu, appareil et date de prise de vue retirés",
 
   "options.ttl.hint": "Comptée à partir de la fin de l'envoi.",
@@ -80,8 +80,8 @@ export const fr = {
     "Quelqu'un vous a envoyé un partage chiffré. Shhdrop ne vérifie pas l'identité de l'expéditeur.",
   "open.cost":
     "Déverrouiller utilise une ouverture. Si le téléchargement échoue ensuite, cette ouverture est perdue.",
-  "open.badPw.one": "Mot de passe incorrect · {n} essai restant",
-  "open.badPw.other": "Mot de passe incorrect · {n} essais restants",
+  "open.badPw.one": "Mot de passe incorrect · {n}\u202fessai restant",
+  "open.badPw.other": "Mot de passe incorrect · {n}\u202fessais restants",
   "open.lastTry": "Au prochain échec, le partage sera détruit.",
   "open.destroyedByPw": "Mot de passe incorrect. Le partage a été détruit.",
 

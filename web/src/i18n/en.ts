@@ -42,11 +42,11 @@ export const en = {
   "compose.moved": "{name}: position {i} of {n} in {category}.",
   "compose.removed": "{name} removed",
   "compose.duplicate": "Duplicate?",
-  "compose.gauge": "{size} / 1 GB · {n} / 10",
-  "compose.gauge.empty": "Nothing to send yet · up to 1 GB and 10 items",
-  "compose.tooBig": "Too big: {size} of 1 GB. Remove {excess}.",
-  "compose.tooMany.one": "{n} item was not added: 10 at most.",
-  "compose.tooMany.other": "{n} items were not added: 10 at most.",
+  "compose.gauge": "{size} / 1\u00a0GB · {n} / 10",
+  "compose.gauge.empty": "Nothing to send yet · up to 1\u00a0GB and 10\u00a0items",
+  "compose.tooBig": "Too big: {size} of 1\u00a0GB. Remove {excess}.",
+  "compose.tooMany.one": "{n}\u00a0item was not added: 10\u00a0at most.",
+  "compose.tooMany.other": "{n}\u00a0items were not added: 10\u00a0at most.",
   "compose.cleaned": "Cleaned · location, device and capture date removed",
 
   "options.ttl.hint": "Counted from the end of the upload.",
@@ -76,8 +76,8 @@ export const en = {
 
   "open.intro": "Someone sent you an encrypted share. Shhdrop does not verify who the sender is.",
   "open.cost": "Unlocking uses one open. If the download then fails, that open is lost.",
-  "open.badPw.one": "Wrong password · {n} attempt left",
-  "open.badPw.other": "Wrong password · {n} attempts left",
+  "open.badPw.one": "Wrong password · {n}\u00a0attempt left",
+  "open.badPw.other": "Wrong password · {n}\u00a0attempts left",
   "open.lastTry": "One more failure and the share will be destroyed.",
   "open.destroyedByPw": "Wrong password. The share has been destroyed.",
 
