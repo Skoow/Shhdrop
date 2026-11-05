@@ -5,6 +5,12 @@ export const fr = {
   "hero.lede":
     "Texte, photos, vidéos, vocaux, documents. Chiffrés sur votre appareil avant l'envoi\u202f: ni le serveur ni son propriétaire ne peuvent les lire.",
   "hero.how": "Comment ça marche",
+  "schema.label": "Votre appareil — chiffré — serveur (ne voit rien) — chiffré — destinataire",
+  "schema.device": "Votre appareil",
+  "schema.encrypted": "chiffré",
+  "schema.server": "Serveur",
+  "schema.blind": "ne voit rien",
+  "schema.recipient": "Destinataire",
 
   "shell.skip": "Aller au contenu",
   "shell.home": "Shhdrop, accueil",

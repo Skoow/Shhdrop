@@ -5,6 +5,12 @@ export const en = {
   "hero.lede":
     "Text, photos, videos, voice notes, documents. Encrypted on your device before sending: neither the server nor its owner can read them.",
   "hero.how": "How it works",
+  "schema.label": "Your device — encrypted — server (sees nothing) — encrypted — recipient",
+  "schema.device": "Your device",
+  "schema.encrypted": "encrypted",
+  "schema.server": "Server",
+  "schema.blind": "sees nothing",
+  "schema.recipient": "Recipient",
 
   "shell.skip": "Skip to content",
   "shell.home": "Shhdrop, home",

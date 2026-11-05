@@ -3,7 +3,7 @@ import { axe, capture, expect, test } from "./fixtures";
 test("l'accueil se charge sous la CSP, sans violation ni requête tierce", async ({ page, shh }) => {
   const res = await page.goto(shh.origin + "/");
   expect(res?.status()).toBe(200);
-  await expect(page.getByRole("heading", { name: "Shhdrop" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   const csp = res?.headers()["content-security-policy"] ?? "";
   expect(csp).toContain("default-src 'self'");
   expect(csp).toContain("frame-ancestors 'none'");

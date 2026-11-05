@@ -4,6 +4,7 @@
   import { readLink, scrubAddressBar, type LinkState } from "./app/link";
   import { href, router } from "./app/router.svelte";
   import { watchKeyboard } from "./app/viewport";
+  import Home from "./routes/Home.svelte";
   import NotFound from "./routes/NotFound.svelte";
   import Unsupported from "./routes/Unsupported.svelte";
   import AppShell from "./ui/AppShell.svelte";
@@ -63,8 +64,10 @@
     <Unsupported />
   {:else if router.current.name === "notfound"}
     <NotFound />
+  {:else if router.current.name === "home"}
+    <Home />
   {:else}
-    <!-- Écrans des tâches suivantes : accueil, ouverture, gestion, sécurité, confidentialité. -->
+    <!-- Écrans des tâches suivantes : ouverture, gestion, sécurité, confidentialité. -->
     <h1 tabindex="-1">Shhdrop</h1>
   {/if}
 </AppShell>

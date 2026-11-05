@@ -63,7 +63,8 @@
   <div class="bar wrap">
     <a class="logo" href={href("/")} onclick={(e) => followLink(e, "/")} aria-label={t("shell.home")}>
       <svg class="mark" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
-        <path d="M 12 3.5 A 8.5 8.5 0 1 1 6.2 5.8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+        <!-- Même dessin que public/logo.svg (UI §6) : capsule, trait ouvert de 300° depuis le milieu du haut. -->
+        <path d="M12 6H16A6 6 0 0 1 16 18H8A6 6 0 0 1 8 6H12" pathLength="100" stroke-dasharray="83.33 100" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
       </svg>
       <span class="word">shhdrop</span>
     </a>
