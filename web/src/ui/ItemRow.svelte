@@ -9,7 +9,7 @@
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { formatClock, mediaDuration } from "../media/duration";
-  import { ArrowDown, ArrowUp, AudioLines, File as FileIcon, FileText, Film, Image as ImageIcon, Pencil, ShieldAlert, ShieldCheck, Type, X } from "./Icon";
+  import { ArrowDown, ArrowUp, AudioLines, Ellipsis, File as FileIcon, FileText, Film, Image as ImageIcon, Pencil, ShieldAlert, ShieldCheck, TriangleAlert, Type, X } from "./Icon";
   import IconButton from "./IconButton.svelte";
   import ReorderHandle from "./ReorderHandle.svelte";
 
@@ -25,10 +25,15 @@
     ondragstart: (y: number) => void;
     ondragmove: (y: number) => void;
     ondragend: (commit: boolean) => void;
+    /** Téléphone : ni poignée ni boutons sur la ligne, un menu « … » (feuille d'actions). */
+    compact?: boolean;
+    onmenu?: () => void;
+    /** Sans téléchargement, le destinataire ne pourra pas l'ouvrir (spec §34). */
+    cannotOpen?: boolean;
     /** Bouton « Retirer » (le parent y remet le focus après un déplacement ou une annulation). */
     el?: HTMLDivElement | undefined;
   };
-  let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, el = $bindable() }: Props = $props();
+  let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, el = $bindable() }: Props = $props();
 
   const name = $derived(item.base + item.ext);
   const Icon = $derived(
@@ -152,8 +157,10 @@
 
 <!-- Alt + ↑/↓ depuis la poignée ou un bouton de la ligne (l'événement remonte). -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div bind:this={el} class={["row", { editing, moving }]} onkeydown={key}>
-  {#if movable}
+<div bind:this={el} class={["row", { editing, moving, compact }]} onkeydown={key}>
+  {#if compact}
+    <!-- Téléphone : l'ordre se change par le menu « … » (Monter, Descendre). -->
+  {:else if movable}
     <span class="grip-slot" bind:this={grip}>
       <ReorderHandle {name} describedby={helpId} onactivate={() => (moving ? closeMove() : openMove())} onstart={ondragstart} onmove={ondragmove} onend={ondragend} />
     </span>
@@ -210,11 +217,14 @@
         {/if}
         {#if item.duplicate}<span class="badge warn">{t("compose.duplicate")}</span>{/if}
       </span>
+      {#if cannotOpen}<span class="cant"><TriangleAlert size={14} strokeWidth={2} aria-hidden="true" />{t("compose.cannotOpen")}</span>{/if}
     {/if}
   </div>
 
   <div class="acts">
-    {#if moving}
+    {#if compact}
+      <IconButton label={t("compose.more", { name })} onpress={() => onmenu?.()} data-menu><Ellipsis size={20} strokeWidth={1.9} /></IconButton>
+    {:else if moving}
       <button bind:this={upBtn} type="button" class="mv" onclick={() => onmove(-1)}><ArrowUp size={18} strokeWidth={1.75} aria-hidden="true" /><span class="sr-only">{t("compose.move.up")}</span></button>
       <button type="button" class="mv" onclick={() => onmove(1)}><ArrowDown size={18} strokeWidth={1.75} aria-hidden="true" /><span class="sr-only">{t("compose.move.down")}</span></button>
       <button type="button" class="done" onclick={closeMove}>{t("compose.move.done")}</button>
@@ -252,6 +262,19 @@
   .row.moving {
     background: var(--surface-3);
     box-shadow: var(--e-2), inset 0 0 0 1px var(--hair-2);
+  }
+  .row.compact {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    min-height: 60px;
+    padding: 6px 0 6px 2px;
+  }
+  .cant {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--warn);
+    font-size: var(--fs-micro);
+    font-weight: 560;
   }
   .grip-slot {
     display: inline-flex;

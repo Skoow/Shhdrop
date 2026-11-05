@@ -375,6 +375,8 @@ describe("Icon.ts (UI §6)", () => {
     "chevron-left", "languages", "wifi-off", "clipboard-x", "circle-help", "minus", "plus", "info",
     // Accueil v3 : vidéo, sceaux de confiance, FAQ, appel final.
     "video", "link-2", "key-round", "server", "user-x", "hard-drive", "code-xml", "chevron-down", "arrow-right", "shield-x",
+    // Composeur v2 : menu d'un élément, Options.
+    "ellipsis", "sliders-horizontal",
   ];
   const pascal = (s: string) =>
     s.split("-").map((p) => p[0]!.toUpperCase() + p.slice(1)).join("");

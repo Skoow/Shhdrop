@@ -71,8 +71,9 @@
     list-style: none;
     margin: 0;
     padding: 0;
-    display: grid;
-    gap: 2px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 16px;
     font-size: var(--fs-small);
     color: var(--text-2);
   }

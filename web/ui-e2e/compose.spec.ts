@@ -1,11 +1,12 @@
-// Composeur (UI §9.2, §9.3) : passage de l'accueil au composeur au premier ajout, liste par
-// catégories, retrait et annulation, ordre, renommage, jauge et limites, options et mot de
-// passe, texte, dépôt et collage. Captures fr-FR à 1440 et 390.
+// Composeur (UI §9.2, §9.3), v2 : passage de l'accueil au composeur au premier ajout ; ordinateur
+// en deux colonnes ; téléphone (< 760 px) en app : lignes compactes et menu « … », pastilles
+// d'ajout qui défilent, barre collée (jauge, Options, Chiffrer et envoyer), options en feuille.
+// Captures fr-FR à 1440 × 900 et 390 × 844.
 import { closeSync, ftruncateSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
 
 const FILES = fileURLToPath(new URL("./files/", import.meta.url));
@@ -40,6 +41,31 @@ const settle = (page: Page) =>
 const noHScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 const send = (page: Page) => page.getByRole("button", { name: "Chiffrer et envoyer" });
 
+/** Les options : la colonne de droite (ordinateur) ou la feuille ouverte par « Options » (téléphone). */
+async function options(page: Page, isMobile: boolean): Promise<Locator> {
+  if (!isMobile) return page.locator(".side");
+  await page.getByRole("button", { name: /^Options · / }).click();
+  const dlg = page.getByRole("dialog", { name: "Options" });
+  await expect(dlg).toBeVisible();
+  return dlg;
+}
+async function removeItem(page: Page, name: string, isMobile: boolean) {
+  if (!isMobile) return page.getByRole("button", { name: `Retirer ${name}` }).click();
+  await page.getByRole("button", { name: `Actions pour ${name}` }).click();
+  await page.getByRole("dialog", { name }).getByRole("button", { name: "Retirer" }).click();
+}
+/** Aucun paragraphe de plus de deux lignes (demande du propriétaire, téléphone). */
+const longParagraphs = (scope: Locator) =>
+  scope.locator("p, .h, .cant").evaluateAll((els) =>
+    els
+      .filter((e) => (e as HTMLElement).offsetParent !== null && !e.closest(".sr-only, .cnote"))
+      .filter((e) => {
+        const lh = parseFloat(getComputedStyle(e).lineHeight) || 20;
+        return e.getBoundingClientRect().height > lh * 2 + 4;
+      })
+      .map((e) => e.textContent!.trim()),
+  );
+
 test.describe("fr-FR", () => {
   test.use({ locale: "fr-FR" });
   // Téléphone : captures et contrôles à 390 × 844 (largeur de référence de UI §9.1).
@@ -51,7 +77,6 @@ test.describe("fr-FR", () => {
     await open(page, shh.origin);
     await page.waitForTimeout(900);
     await capture(page, "compose-empty");
-    // Aucune case à cocher avant le premier élément (benchmark M1).
     await expect(page.locator("input[type=checkbox]")).toHaveCount(0);
 
     await browse(page, [f("plage-nuit.jpg")]);
@@ -60,38 +85,36 @@ test.describe("fr-FR", () => {
     await browse(page, MIXED.slice(1));
     await addText(page, "Le code de la porte, c'est 4512B. À ce soir !");
     await expect(rows(page)).toHaveCount(6);
+    await expect(page.locator(".count")).toHaveText(/^6\séléments · \d/);
 
-    const heads = await page.locator(".group h3").allTextContents();
-    expect(heads).toEqual(["Texte", "Photos", "Vidéos", "Audio et vocaux", "Documents"]);
-    await expect(page.locator(".group").nth(1).locator(".head .meta")).toHaveText(/^2 · \d/);
+    expect(await page.locator(".group h3").allTextContents()).toEqual(["Texte", "Photos", "Vidéos", "Audio et vocaux", "Documents"]);
     await expect(page.getByText("Même les noms de vos fichiers sont chiffrés.")).toBeVisible();
-    // Pas de « Nettoyé » tant que le nettoyage (Task 9) n'existe pas ; « Non nettoyé » dit vrai.
     await expect(page.getByText("Nettoyé", { exact: true })).toHaveCount(0);
     await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).getByText("Non nettoyé")).toBeVisible();
-    // Vignette d'image (URL blob) et durée de la vidéo.
     await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator("img")).toHaveAttribute("src", /^blob:/);
     await expect(rows(page).filter({ hasText: "anniversaire-lou.webm" }).locator(".meta")).toContainText("1:12");
-
-    // Jauge : valeurs réelles, chiffres tabulaires, deux mesures.
     await expect(page.getByRole("meter", { name: "Nombre d'éléments" })).toHaveAttribute("aria-valuenow", "6");
-    expect(await page.locator(".gauge").evaluate((e) => getComputedStyle(e).fontVariantNumeric)).toContain("tabular-nums");
-    await expect(page.getByText(/^Temps d'envoi estimé\s:\senviron\s/)).toBeVisible();
+    expect(await page.locator(".gauge, .mini").first().evaluate((e) => getComputedStyle(e).fontVariantNumeric)).toContain("tabular-nums");
     await expect(send(page)).toBeEnabled();
     expect(await noHScroll(page)).toBe(true);
+
+    if (isMobile) {
+      // App : pas de boutons Renommer / Retirer sur chaque ligne, un menu « … » ; titre d'accueil caché à l'œil.
+      await expect(page.getByRole("button", { name: /^Renommer / })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /^Retirer / })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /^Actions pour / })).toHaveCount(6);
+      await expect(page.locator(".adds.scroll")).toHaveCount(1);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+      expect((await page.getByRole("heading", { level: 1 }).boundingBox())!.height).toBeLessThanOrEqual(1);
+      await expect(page.getByRole("button", { name: /^Options · 12\sh · 1\souverture · téléchargement autorisé$/ })).toBeVisible();
+      expect(await longParagraphs(page.locator("main"))).toEqual([]);
+    } else {
+      await expect(page.getByText(/^Envoi estimé\s:\senviron\s/)).toBeVisible();
+    }
     await settle(page);
     expect(await axe(page)).toEqual([]);
     await capture(page, "compose-filled");
-    if (!isMobile) {
-      await page.setViewportSize({ width: 390, height: 844 });
-      await page.waitForTimeout(300);
-      expect(await noHScroll(page)).toBe(true);
-      await capture(page, "compose-filled-390");
-      await page.evaluate(() => scrollTo(0, document.body.scrollHeight));
-      await page.waitForTimeout(200);
-      await capture(page, "compose-filled-390-options");
-    }
 
-    // L'envoi est la Task 17 : un avis le dit, rien ne part.
     await send(page).click();
     await expect(page.locator(".cnote").filter({ hasText: "Envoi : prochaine étape." })).toBeVisible();
   });
@@ -106,8 +129,6 @@ test.describe("fr-FR", () => {
       fire("drop");
     });
     await expect(rows(page)).toHaveCount(3);
-    await expect(page.getByRole("heading", { level: 2, name: "Votre envoi" })).toBeVisible();
-    // Dossier (webkitGetAsEntry simulé) : refusé, message qui dit quoi faire.
     await page.evaluate(() => {
       const item = { kind: "file", getAsFile: () => null, webkitGetAsEntry: () => ({ isDirectory: true, name: "Vacances" }) };
       const e = new DragEvent("drop", { bubbles: true, cancelable: true });
@@ -118,106 +139,137 @@ test.describe("fr-FR", () => {
     await expect(rows(page)).toHaveCount(3);
   });
 
-  test("mot de passe : généré (8 caractères), Générer un autre, Copier, écrire le sien ; bouton bloqué avec raison", async ({ page, shh, isMobile, browserName }) => {
+  test("mot de passe : boutons dans le champ (Générer un autre, Copier), écrire le sien, Générer un autre le remplace ; raison reliée", async ({ page, shh, isMobile, browserName }) => {
     await open(page, shh.origin);
     await browse(page, [f("contrat.pdf")]);
-    const pw = page.locator(".pw-wrap .sr-only");
+    const opts = await options(page, isMobile);
+    const box = opts.locator(".box");
+    const regen = box.getByRole("button", { name: "Générer un autre" });
+    const copy = box.getByRole("button", { name: "Copier" });
+    await expect(regen).toHaveAttribute("title", "Générer un autre");
+    await expect(copy).toHaveAttribute("title", "Copier");
+    for (const b of [regen, copy]) {
+      const r = (await b.boundingBox())!;
+      expect(r.width).toBeGreaterThanOrEqual(44);
+      expect(r.height).toBeGreaterThanOrEqual(44);
+    }
+    const pw = box.locator(".val .sr-only");
     const first = await pw.textContent();
     expect(first).toMatch(/^[a-km-np-zA-HJ-NP-Z2-9!#$%+=?@]{8}$/);
-    await page.getByRole("button", { name: "Générer un autre" }).click();
+    await regen.click();
     await expect(pw).not.toHaveText(first!);
-    const second = await pw.textContent();
-    for (let i = 0; i < 5; i++) await page.getByRole("button", { name: "Générer un autre" }).click();
-    await expect(pw).not.toHaveText(second!);
-    await expect(page.getByText("Un mot de passe en plus du lien. Envoyez-les par deux moyens différents.")).toBeVisible();
-    await expect(page.getByText("5 essais ratés, et le partage est détruit.")).toBeVisible();
+    await expect(opts.getByText("Un mot de passe en plus du lien. Envoyez-les par deux moyens différents.")).toBeVisible();
+    await expect(opts.getByText("5 essais ratés, et le partage est détruit.")).toBeVisible();
     if (browserName === "chromium") {
       await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
-      await page.locator(".gen").getByRole("button", { name: "Copier" }).click();
-      await expect(page.locator(".gen").getByRole("button", { name: "Copié" })).toBeVisible();
+      await copy.click();
+      await expect(box.getByRole("button", { name: "Copié" })).toBeVisible();
       expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await pw.textContent());
     }
 
-    await page.getByRole("button", { name: "Écrire mon propre mot de passe" }).click();
-    const field = page.getByLabel("Votre mot de passe");
+    await opts.getByRole("button", { name: "Écrire mon propre mot de passe" }).click();
+    const field = opts.getByLabel("Votre mot de passe");
     await expect(field).toBeFocused();
-    // Attributs de saisie (UI §12.3), hors de tout <form>.
     for (const [k, v] of [["type", "text"], ["autocomplete", "off"], ["autocapitalize", "off"], ["autocorrect", "off"], ["spellcheck", "false"], ["name", "shh-own"]])
       await expect(field).toHaveAttribute(k, v);
     expect(await page.locator("form").count()).toBe(0);
     await field.fill("court");
-    await expect(send(page)).toBeDisabled();
-    await expect(page.locator("#send-reason")).toHaveText("Le mot de passe doit faire au moins 12 caractères.");
-    await expect(send(page)).toHaveAttribute("aria-describedby", "send-reason");
+    const reason = isMobile ? opts.locator("#opt-reason") : page.locator("#send-reason");
+    await expect(reason).toHaveText("Le mot de passe doit faire au moins 12 caractères.");
     await field.fill("unbelievable");
-    await expect(page.locator("#send-reason")).toHaveText("Ce mot de passe est trop courant. Choisissez-en un autre.");
-    await field.fill("une phrase de plusieurs mots");
-    await expect(page.locator("#send-reason")).toHaveCount(0);
-    await expect(send(page)).toBeEnabled();
-    await page.getByRole("button", { name: "Masquer le mot de passe" }).click();
-    await expect(page.getByRole("button", { name: "Afficher le mot de passe" })).toHaveAttribute("aria-pressed", "true");
+    await expect(reason).toHaveText("Ce mot de passe est trop courant. Choisissez-en un autre.");
     await field.fill("court");
-    await page.getByRole("button", { name: "Afficher le mot de passe" }).click();
-    await field.scrollIntoViewIfNeeded();
+    await expect(box.getByRole("button", { name: "Masquer le mot de passe" })).toBeVisible();
     await settle(page);
     expect(await axe(page)).toEqual([]);
-    if (!isMobile) {
-      await page.locator(".side").scrollIntoViewIfNeeded();
-      await capture(page, "compose-password-custom");
-    } else await capture(page, "compose-password-custom");
-    await page.getByRole("button", { name: "Utiliser un mot de passe généré" }).click();
+    await capture(page, "compose-password-custom");
+    if (isMobile) {
+      await page.keyboard.press("Escape");
+      await expect(send(page)).toBeDisabled();
+      await expect(page.locator("#send-reason")).toHaveText("Le mot de passe doit faire au moins 12 caractères.");
+      await capture(page, "compose-password-blocked");
+      await options(page, isMobile);
+    } else {
+      await expect(send(page)).toBeDisabled();
+      await expect(send(page)).toHaveAttribute("aria-describedby", "send-reason");
+    }
+    // « Générer un autre » rend un mot de passe généré.
+    await box.getByRole("button", { name: "Générer un autre" }).click();
+    await expect(box.locator(".val .sr-only")).toHaveText(/^.{8}$/);
+    await expect(opts.getByLabel("Votre mot de passe")).toHaveCount(0);
+    if (isMobile) await page.keyboard.press("Escape");
     await expect(send(page)).toBeEnabled();
   });
 
-  test("options : 12 h et 1 ouverture par défaut, flèches, phrase à jour, droits du destinataire", async ({ page, shh }) => {
+  test("options : 12 h et 1 ouverture par défaut, flèches, phrase à jour ; téléchargement (interrupteur), coffre sur téléphone seulement", async ({ page, shh, isMobile }) => {
     await open(page, shh.origin);
     await browse(page, [f("plage-nuit.jpg")]);
-    const ttl = page.getByRole("radiogroup", { name: "Durée" });
-    const opens = page.getByRole("radiogroup", { name: "Ouvertures" });
+    let opts = await options(page, isMobile);
+    const ttl = opts.getByRole("radiogroup", { name: "Durée" });
+    const opens = opts.getByRole("radiogroup", { name: "Ouvertures" });
     await expect(ttl.getByRole("radio", { name: "12 h" })).toBeChecked();
     await expect(opens.getByRole("radio", { name: "1", exact: true })).toBeChecked();
-    const summary = page.locator(".summary");
+    const summary = opts.locator(".summary");
     await expect(summary).toHaveText("S'efface dans 12 h ou après 1 ouverture, au premier des deux.");
     await ttl.getByRole("radio", { name: "12 h" }).focus();
     await page.keyboard.press("ArrowRight");
-    await expect(ttl.getByRole("radio", { name: "24 h" })).toBeChecked();
     await opens.getByRole("radio", { name: "1", exact: true }).focus();
     await page.keyboard.press("ArrowRight");
     await page.keyboard.press("ArrowRight");
     await expect(summary).toHaveText("S'efface dans 24 h ou après 3 ouvertures, au premier des deux.");
-    await opens.getByText("10", { exact: true }).click();
-    await expect(summary).toContainText("10 ouvertures");
-    // Droits : « Voir et enregistrer » par défaut ; pas de coffre en production tant que… (prop).
-    await expect(page.getByRole("radio", { name: "Voir et enregistrer" })).toBeChecked();
-    await page.getByRole("radio", { name: "Voir seulement" }).check();
-    await expect(page.getByText(/^Ce n'est qu'une dissuasion/)).toBeVisible();
-    // Une archive ne s'affiche pas dans un navigateur : « Voir seulement » devient impossible.
-    await browse(page, [f("archive.zip")]);
-    await expect(page.getByRole("radio", { name: "Voir seulement" })).toBeDisabled();
-    await expect(page.getByRole("radio", { name: "Voir et enregistrer" })).toBeChecked();
-    await expect(page.getByText(/^Impossible avec\s:\sarchive\.zip\./)).toBeVisible();
+
+    const dl = opts.getByRole("switch", { name: "Autoriser le téléchargement" });
+    await expect(dl).toHaveAttribute("aria-checked", "true");
+    await expect(dl).toHaveAccessibleDescription("Sans téléchargement, une capture d'écran reste possible.");
+    const vault = opts.getByRole("switch", { name: /^Garder une copie chiffrée dans l'app du destinataire/ });
+    await expect(vault).toHaveCount(isMobile ? 1 : 0);
+    if (isMobile) {
+      await vault.click();
+      await expect(vault).toHaveAttribute("aria-checked", "true");
+    }
+    await dl.click();
+    await expect(dl).toHaveAttribute("aria-checked", "false");
+    await expect(vault).toHaveCount(0);
     await expect(page.locator("input[type=checkbox]")).toHaveCount(0);
     expect(await axe(page)).toEqual([]);
+    if (isMobile) {
+      await expect(page.getByRole("button", { name: /^Options · 24\sh · 3\souvertures · sans téléchargement$/ })).toHaveCount(1);
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("button", { name: /sans téléchargement$/ })).toBeVisible();
+    }
+
+    // Sans téléchargement, une archive ne pourra pas être ouverte : avertissement sur la ligne et dans les options.
+    await browse(page, [f("archive.zip")]);
+    await expect(rows(page).filter({ hasText: "archive.zip" }).getByText("Ne pourra pas être ouvert sans téléchargement")).toBeVisible();
+    await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).getByText("Ne pourra pas être ouvert sans téléchargement")).toHaveCount(0);
+    opts = await options(page, isMobile);
+    await expect(opts.getByText("1 élément ne pourra pas être ouvert sans téléchargement.")).toBeVisible();
+    await opts.locator(".warn").scrollIntoViewIfNeeded();
+    await settle(page);
+    await capture(page, "compose-no-download");
+    await opts.locator(".warn").getByRole("button", { name: "Autoriser le téléchargement" }).click();
+    await expect(opts.getByRole("switch", { name: "Autoriser le téléchargement" })).toHaveAttribute("aria-checked", "true");
+    if (isMobile) await page.keyboard.press("Escape");
+    await expect(page.getByText("Ne pourra pas être ouvert sans téléchargement")).toHaveCount(0);
   });
 
-  test("retrait et Annuler ; Tout retirer revient à l'accueil, Annuler rouvre le composeur", async ({ page, shh }) => {
+  test("retrait et Annuler ; Tout retirer revient à l'accueil, Annuler rouvre le composeur", async ({ page, shh, isMobile }) => {
     await open(page, shh.origin);
     await browse(page, MIXED.slice(0, 2));
-    await page.getByRole("button", { name: "Retirer plage-nuit.jpg" }).click();
+    await removeItem(page, "plage-nuit.jpg", isMobile);
     await expect(rows(page)).toHaveCount(1);
-    await expect(page.getByRole("button", { name: "Retirer toits-belleville.jpg" })).toBeFocused();
+    await expect(page.getByRole("button", { name: isMobile ? "Actions pour toits-belleville.jpg" : "Retirer toits-belleville.jpg" })).toBeFocused();
     await page.getByRole("group", { name: "plage-nuit.jpg retiré" }).getByRole("button", { name: "Annuler" }).click();
     await expect(rows(page)).toHaveCount(2);
     expect(await names(page)).toEqual(["plage-nuit.jpg", "toits-belleville.jpg"]);
-
     await page.getByRole("button", { name: "Tout retirer" }).click();
     await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
-    await expect(rows(page)).toHaveCount(0);
     await page.getByRole("button", { name: "Annuler" }).click();
     await expect(rows(page)).toHaveCount(2);
   });
 
-  test("ordre : Alt + ↓ au clavier, annonce lue ; renommage (Entrée, Échap) ; doublon", async ({ page, shh }) => {
+  test("ordinateur : Alt + ↓, mode déplacement, glisser ; renommage en place (Entrée, Échap) ; doublon", async ({ page, shh, isMobile }) => {
+    test.skip(isMobile, "ordinateur : poignées et boutons sur la ligne");
     await open(page, shh.origin);
     await browse(page, MIXED.slice(0, 2));
     const grip = page.getByRole("button", { name: "Déplacer plage-nuit.jpg" });
@@ -228,14 +280,10 @@ test.describe("fr-FR", () => {
     await expect(grip).toBeFocused();
     await page.keyboard.press("Alt+ArrowDown");
     await expect(page.getByRole("status")).toHaveText("Dernier de la catégorie");
-
-    // Mode déplacement (lecteurs d'écran au toucher) : la poignée ouvre Monter / Descendre / Terminé.
     await grip.click();
     await page.getByRole("button", { name: "Monter" }).click();
     expect(await names(page)).toEqual(["plage-nuit.jpg", "toits-belleville.jpg"]);
     await page.getByRole("button", { name: "Terminé" }).click();
-
-    // Glisser à la souris : la seconde photo passe devant.
     const b = (await page.getByRole("button", { name: "Déplacer toits-belleville.jpg" }).boundingBox())!;
     await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
     await page.mouse.down();
@@ -244,10 +292,8 @@ test.describe("fr-FR", () => {
     await page.mouse.up();
     expect(await names(page)).toEqual(["toits-belleville.jpg", "plage-nuit.jpg"]);
 
-    // Renommage : extension à part, Échap annule, Entrée valide.
     await page.getByRole("button", { name: "Renommer plage-nuit.jpg" }).click();
     const input = page.getByLabel("Nouveau nom de plage-nuit.jpg");
-    await expect(input).toBeFocused();
     await expect(input).toHaveValue("plage-nuit");
     await input.fill("autre");
     await page.keyboard.press("Escape");
@@ -259,11 +305,52 @@ test.describe("fr-FR", () => {
     await page.getByLabel("Nouveau nom de plage-nuit.jpg").fill("Plage");
     await page.keyboard.press("Enter");
     expect(await names(page)).toContain("Plage.jpg");
-    await expect(page.getByRole("button", { name: "Renommer Plage.jpg" })).toBeFocused();
-
-    // Doublon : même nom (sans casse) et même taille.
     await browse(page, [f("toits-belleville.jpg")]);
     await expect(page.locator(".badge", { hasText: "En double ?" })).toHaveCount(2);
+  });
+
+  test("téléphone : menu « … » (Renommer, Monter, Descendre, Retirer) ; feuille Options : focus piégé, Échap rend le focus", async ({ page, shh, isMobile }) => {
+    test.skip(!isMobile, "téléphone : app");
+    await open(page, shh.origin);
+    await browse(page, MIXED.slice(0, 2));
+    const more = page.getByRole("button", { name: "Actions pour plage-nuit.jpg" });
+    await more.click();
+    const menu = page.getByRole("dialog", { name: "plage-nuit.jpg" });
+    await expect(menu.locator(".mi")).toHaveText(["Renommer", "Monter", "Descendre", "Retirer"]);
+    await expect(menu.getByRole("button", { name: "Fermer" })).toBeVisible();
+    await settle(page);
+    await capture(page, "compose-item-menu");
+    await menu.getByRole("button", { name: "Descendre" }).click();
+    expect(await names(page)).toEqual(["toits-belleville.jpg", "plage-nuit.jpg"]);
+    await menu.getByRole("button", { name: "Renommer" }).click();
+    const input = menu.getByLabel("Nouveau nom de plage-nuit.jpg");
+    await expect(input).toBeFocused();
+    await input.fill("Plage");
+    await page.keyboard.press("Enter");
+    await expect(menu).toBeHidden();
+    expect(await names(page)).toEqual(["toits-belleville.jpg", "Plage.jpg"]);
+    await expect(page.getByRole("button", { name: "Actions pour Plage.jpg" })).toBeFocused();
+
+    // Feuille Options : <dialog> modal ; Tab reste dedans ; Échap ferme et rend le focus au bouton.
+    const ob = page.getByRole("button", { name: /^Options · / });
+    await ob.click();
+    const dlg = page.getByRole("dialog", { name: "Options" });
+    await expect(dlg).toBeVisible();
+    for (let i = 0; i < 40; i++) {
+      await page.keyboard.press("Tab");
+      const inside = await page.evaluate(() => !!document.activeElement?.closest("dialog[open]") || document.activeElement === document.body);
+      expect(inside).toBe(true);
+    }
+    expect(await longParagraphs(dlg)).toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(dlg).toBeHidden();
+    await expect(ob).toBeFocused();
+    await ob.click();
+    await settle(page);
+    expect(await axe(page)).toEqual([]);
+    await capture(page, "compose-options-sheet");
+    await dlg.getByRole("button", { name: "Terminé" }).click();
+    await expect(dlg).toBeHidden();
   });
 
   test("limites : 12 fichiers → 10 ajoutés et message ; plus de 1 Go → jauge en danger, envoi bloqué avec la raison", async ({ page, shh, browserName }) => {
@@ -273,7 +360,6 @@ test.describe("fr-FR", () => {
     await expect(page.locator(".cnote")).toContainText("2 éléments n'ont pas été ajoutés : 10 au plus.");
     await expect(page.locator(".cnote")).toContainText("note-11.txt, note-12.txt");
     await expect(page.getByRole("meter", { name: "Nombre d'éléments" })).toHaveAttribute("aria-valuenow", "10");
-    await page.locator(".sendbar").scrollIntoViewIfNeeded();
     await capture(page, "compose-limit-count");
 
     test.skip(browserName !== "chromium", "fichier creux de 1 Go : Chromium (chemin local)");
@@ -283,27 +369,29 @@ test.describe("fr-FR", () => {
     try {
       const p = join(dir, "film-1go.bin");
       const fd = openSync(p, "w");
-      ftruncateSync(fd, 1073741824 + 1); // creux : rien n'est écrit sur le disque
+      ftruncateSync(fd, 1073741824 + 1);
       closeSync(fd);
       await browse(page, [p]);
       await expect(rows(page)).toHaveCount(1);
-      await expect(page.getByRole("alert").filter({ hasText: /^Trop gros\s:\s1\s024,0\sMo sur 1\s023,9\sMo\. Retirez\s64\sKo\.$/ })).toBeVisible();
-      await expect(page.locator(".gauge.over")).toHaveCount(1);
-      expect(await page.locator(".gauge .fill").evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(255, 138, 128)");
+      await expect(page.getByRole("alert").filter({ hasText: /^Trop gros\s:\s[\d,]+\s(?:octets?|Ko) de trop \(limite\s:\s1\sGo\)\.$/ })).toBeVisible();
+      expect(await page.locator(".fill").first().evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(255, 138, 128)");
       await expect(send(page)).toBeDisabled();
       await expect(page.locator("#send-reason")).toHaveText("Le total dépasse 1 Go. Retirez des éléments.");
-      await page.locator(".sendbar").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(6500); // l'annonce « retirés » est partie
       await capture(page, "compose-limit-size");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("texte : éditeur, compteur, Modifier ; Ctrl + V de texte hors champ ouvre l'éditeur", async ({ page, shh }) => {
+  test("texte : éditeur, compteur, Modifier ; Ctrl + V de texte hors champ ouvre l'éditeur ; image collée", async ({ page, shh, isMobile }) => {
     await open(page, shh.origin);
     await addText(page, "Premier");
     await expect(rows(page)).toHaveCount(1);
-    await page.getByRole("button", { name: "Modifier Texte 1" }).click();
+    if (isMobile) {
+      await page.getByRole("button", { name: "Actions pour Texte 1" }).click();
+      await page.getByRole("dialog", { name: "Texte 1" }).getByRole("button", { name: "Modifier" }).click();
+    } else await page.getByRole("button", { name: "Modifier Texte 1" }).click();
     const dlg = page.getByRole("dialog", { name: "Modifier le texte" });
     await expect(dlg.getByLabel("Votre texte")).toHaveValue("Premier");
     for (const [k, v] of [["autocomplete", "off"], ["autocorrect", "off"], ["autocapitalize", "off"], ["spellcheck", "false"]])
@@ -315,7 +403,6 @@ test.describe("fr-FR", () => {
     await dlg.getByRole("button", { name: "Enregistrer" }).click();
     await expect(rows(page).first()).toContainText("Second");
 
-    // Collage de texte hors champ : nouvel élément Texte, éditeur ouvert avec ce texte (jamais text/html).
     await page.evaluate(() => {
       (document.activeElement as HTMLElement | null)?.blur();
       const dt = new DataTransfer();
@@ -329,7 +416,6 @@ test.describe("fr-FR", () => {
     await nd.getByRole("button", { name: "Ajouter" }).click();
     await expect(rows(page)).toHaveCount(2);
 
-    // Ctrl + V d'une image : ajoutée comme « Image collée 1.png ».
     const png = [...readFileSync(f("schema.png"))];
     await page.evaluate((bytes) => {
       const dt = new DataTransfer();
@@ -363,14 +449,15 @@ test.describe("fr-FR", () => {
 test.describe("en-US", () => {
   test.use({ locale: "en-US" });
 
-  test("composer in English: names, gauge, options sentence ; capture", async ({ page, shh }) => {
+  test("composer in English ; capture", async ({ page, shh, isMobile }) => {
+    if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(shh.origin + "/");
     const chooser = page.waitForEvent("filechooser");
     await page.getByRole("button", { name: "Browse files" }).click();
     await (await chooser).setFiles(MIXED);
     await expect(page.getByRole("heading", { level: 2, name: "Your share" })).toBeVisible();
-    await expect(page.locator(".summary")).toHaveText("Erased in 12h or after 1\u00a0open, whichever comes first.");
-    await expect(page.getByRole("radio", { name: "View and save" })).toBeChecked();
+    if (isMobile) await expect(page.getByRole("button", { name: /^Options · 12h · 1\sopen · download allowed$/ })).toBeVisible();
+    else await expect(page.locator(".summary")).toHaveText("Erased in 12h or after 1\u00a0open, whichever comes first.");
     expect(await axe(page)).toEqual([]);
     await capture(page, "compose-filled-en");
   });

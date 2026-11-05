@@ -99,14 +99,32 @@
   .sheet[open]::backdrop {
     animation: fade var(--dur-slow) var(--ease-out);
   }
-  /* Téléphone : feuille ancrée en bas. */
+  /* Téléphone : feuille ancrée en bas, qui monte depuis le bord (UI §20.4, courbe sans rebond). */
   @media (max-width: 40rem) {
     .sheet {
       margin: auto 0 0;
       width: 100%;
+      padding-top: var(--sp-5);
       border-end-start-radius: 0;
       border-end-end-radius: 0;
+      border-inline: 0;
+      border-bottom: 0;
       padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+    }
+    /* Poignée : repère visuel d'une feuille, comme une app. */
+    .sheet::before {
+      content: "";
+      position: absolute;
+      top: 8px;
+      left: 50%;
+      width: 36px;
+      height: 4px;
+      margin-left: -18px;
+      border-radius: 2px;
+      background: rgb(233 236 242 / 0.22);
+    }
+    .sheet[open] {
+      animation: sheet-up 340ms var(--ease-view);
     }
   }
   .head {
@@ -120,6 +138,11 @@
     from {
       opacity: 0;
       transform: translateY(16px);
+    }
+  }
+  @keyframes sheet-up {
+    from {
+      transform: translateY(100%);
     }
   }
   @keyframes fade {

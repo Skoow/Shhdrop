@@ -271,6 +271,20 @@
   h1:focus {
     outline: none;
   }
+  /* Téléphone, composeur ouvert : l'app prend l'écran ; le titre reste pour les lecteurs d'écran. */
+  @media (max-width: 759px) {
+    h1.compact {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    .home.compact .hero {
+      padding-top: 0;
+    }
+  }
   .w {
     display: inline-block;
   }

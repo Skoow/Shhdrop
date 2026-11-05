@@ -238,15 +238,20 @@ test.describe("fr-FR", () => {
       document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
     });
     await expect(rows).toHaveCount(3);
-    await page.getByRole("button", { name: "Déplacer a.txt" }).focus();
-    await page.keyboard.press("Alt+ArrowDown");
+    // Téléphone (projet démo) : menu « … » de la ligne.
+    await page.getByRole("button", { name: "Actions pour a.txt" }).click();
+    await page.getByRole("dialog", { name: "a.txt" }).getByRole("button", { name: "Descendre" }).click();
     await expect(page.locator("[data-row] .nm")).toHaveText(["b.txt", "a.txt", "c.txt"]);
-    await page.getByRole("button", { name: "Retirer a.txt" }).click();
+    await page.getByRole("dialog", { name: "a.txt" }).getByRole("button", { name: "Retirer" }).click();
     await expect(rows).toHaveCount(2);
     await page.getByRole("button", { name: "Annuler" }).click();
     await expect(page.locator("[data-row] .nm")).toHaveText(["b.txt", "a.txt", "c.txt"]);
-    await expect(page.getByRole("radio", { name: /garder une copie chiffrée/ })).toHaveCount(0);
-    await expect(page.getByRole("radio", { name: "Voir et enregistrer" })).toBeChecked();
+    // Pas de coffre en démo (spec §27.6), même au doigt.
+    await page.getByRole("button", { name: /^Options · / }).click();
+    const opts = page.getByRole("dialog", { name: "Options" });
+    await expect(opts.getByRole("switch", { name: "Autoriser le téléchargement" })).toHaveAttribute("aria-checked", "true");
+    await expect(opts.getByRole("switch", { name: /garder une copie chiffrée/i })).toHaveCount(0);
+    await page.keyboard.press("Escape");
     expect(await storage(page)).toBe(0);
     expect(await axe(page)).toEqual([]);
     await capture(page, "demo-compose");

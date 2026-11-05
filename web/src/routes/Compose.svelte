@@ -4,17 +4,18 @@
   // composeur dans le réceptacle : liste par catégories, jauge, options, « Chiffrer et envoyer ».
   // Tout reste en mémoire (aucun stockage) ; l'envoi lui-même est la Task 17 (`onsend`).
   import { flushSync, tick } from "svelte";
-  import { CONTENT_MAX, MAX_ITEMS, PW_MIN_CHARS, TEXT_MAX, checkPassword, generatePassword, type Item } from "../index";
+  import { MediaQuery } from "svelte/reactivity";
+  import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, PW_MIN_CHARS, TEXT_MAX, checkPassword, generatePassword, type Item } from "../index";
   import { blockKey, createComposer, type AddReport, type Source } from "../flows/compose.svelte";
   import { fromClipboardRead, fromPasteEvent } from "../flows/intake";
-  import { createOptions, estimateUpload, viewOnlyBlockers, type Rights } from "../flows/options.svelte";
+  import { createOptions, estimateUpload, viewableInBrowser, viewOnlyBlockers, type Rights } from "../flows/options.svelte";
   import { formatBytes, formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { announce } from "../ui/announce";
   import Button from "../ui/Button.svelte";
   import CapacityGauge from "../ui/CapacityGauge.svelte";
   import CategoryGroup from "../ui/CategoryGroup.svelte";
-  import { Camera, ClipboardPaste, Lock, Mic, Paperclip, ShieldAlert, Timer, Type, Video, X } from "../ui/Icon";
+  import { ArrowDown, ArrowUp, Camera, ChevronDown, ClipboardPaste, Lock, Mic, Paperclip, Pencil, ShieldAlert, SlidersHorizontal, Type, Video, X } from "../ui/Icon";
   import Sheet from "../ui/Sheet.svelte";
   import TextArea from "../ui/TextArea.svelte";
   import UndoToast from "../ui/UndoToast.svelte";
@@ -45,7 +46,14 @@
     },
     online: () => online,
   });
-  const options = createOptions({ generate: generatePassword, check: checkPassword, vaultAllowed: () => vaultAllowed });
+  // Téléphone (< 760 px) : une vraie app (lignes compactes, menu « … », barre collée, options
+  // en feuille). Ordinateur : deux colonnes. Le coffre (spec §27) : téléphone ou app installée.
+  const narrowMq = new MediaQuery("max-width: 759px");
+  const coarseMq = new MediaQuery("pointer: coarse");
+  const standaloneMq = new MediaQuery("display-mode: standalone");
+  const narrow = $derived(narrowMq.current);
+  const vaultShown = $derived(vaultAllowed && (coarseMq.current || standaloneMq.current));
+  const options = createOptions({ generate: generatePassword, check: checkPassword, vaultAllowed: () => vaultShown });
 
   const filled = $derived(composer.count > 0);
   const lang = $derived(getLang());
@@ -194,7 +202,7 @@
   async function focusRow(id: string | undefined) {
     await tick();
     const row = id ? document.querySelector(`[data-row="${CSS.escape(id)}"]`) : null;
-    const btn = row?.querySelector<HTMLButtonElement>("[data-remove]");
+    const btn = row?.querySelector<HTMLButtonElement>("[data-remove], [data-menu]");
     if (btn) btn.focus();
     else if (composer.count === 0) focusBrowse();
   }
@@ -271,7 +279,55 @@
         : "",
   );
   const estimate = $derived(estimateUpload(composer.totalBytes));
-  const viewOnlyBlocked = $derived(viewOnlyBlockers(composer.items));
+  const unviewable = $derived(viewOnlyBlockers(composer.items));
+  const cannotOpen = (i: (typeof composer.items)[number]) => !options.allowDownload && !viewableInBrowser(i);
+  const shortSummary = $derived(
+    [formatDuration(options.ttlHours * 3600, lang), t("options.opens.count", { n: options.maxOpens }), t(options.allowDownload ? "options.short.on" : "options.short.off")].join(" · "),
+  );
+
+  // ---------- Feuilles du téléphone : options, actions d'un élément ----------
+  let optionsOpen = $state(false);
+  $effect(() => {
+    if (!narrow) optionsOpen = false;
+  });
+  let menuId = $state<string | null>(null);
+  let menuRenaming = $state(false);
+  let menuDraft = $state("");
+  let menuError = $state<null | "vide" | "trop_long" | "interdit">(null);
+  const menuItem = $derived(composer.items.find((i) => i.id === menuId) ?? null);
+  const menuName = $derived(menuItem ? (menuItem.kind === "text" ? menuItem.base : menuItem.base + menuItem.ext) : "");
+  const menuMovable = $derived(menuItem ? composer.items.filter((i) => i.category === menuItem.category).length > 1 : false);
+  $effect(() => {
+    if (menuId !== null && !menuItem) menuId = null;
+  });
+  function openMenu(id: string) {
+    menuRenaming = false;
+    menuError = null;
+    menuId = id;
+  }
+  function menuEdit() {
+    const it = menuItem;
+    if (!it) return;
+    if (it.kind === "text") {
+      menuId = null;
+      void tick().then(() => editText(it.id));
+    } else {
+      menuDraft = it.base;
+      menuError = null;
+      menuRenaming = true;
+    }
+  }
+  function menuRenameSave() {
+    if (!menuItem) return;
+    const r = menuDraft === menuItem.base ? null : composer.rename(menuItem.id, menuDraft);
+    if (r) menuError = r;
+    else menuId = null;
+  }
+  function menuRemove() {
+    const id = menuId;
+    menuId = null;
+    if (id) void tick().then(() => remove(id));
+  }
   const anyNotCleaned = $derived(composer.items.some((i) => i.clean === "non_nettoye"));
 
   function send() {
@@ -306,14 +362,17 @@
 {/snippet}
 
 {#snippet app()}
-  <div class="app">
+  <div class={["app", { narrow }]}>
     <div class="list-col">
       <div class="top">
-        <h2 id="compose-title" class="title" tabindex="-1" bind:this={title}>{t("compose.title")}</h2>
+        <div class="tt">
+          <h2 id="compose-title" class="title" tabindex="-1" bind:this={title}>{t("compose.title")}</h2>
+          <span class="count num">{t("compose.summary", { n: composer.count, size: formatBytes(composer.totalBytes, lang) })}</span>
+        </div>
         <button type="button" class="clear" onclick={clearAll}><X size={16} strokeWidth={2} aria-hidden="true" />{t("compose.clear")}</button>
       </div>
 
-      <div class="adds" role="group" aria-label={t("compose.add.label")}>
+      <div class={["adds", { scroll: narrow }]} role="group" aria-label={t("compose.add.label")}>
         {@render chip(t("compose.add.files"), Paperclip, () => filesIn?.click())}
         {@render chip(t("compose.add.photo"), Camera, () => photoIn?.click())}
         {@render chip(t("compose.add.video"), Video, () => videoIn?.click())}
@@ -324,7 +383,7 @@
       <input bind:this={filesIn} type="file" multiple hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "fichiers")} />
       <input bind:this={photoIn} type="file" accept="image/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "photo")} />
       <input bind:this={videoIn} type="file" accept="video/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "video")} />
-      <p class="drop-hint">{t("compose.drop.hint", { keys: pasteKeys })}</p>
+      {#if !narrow}<p class="drop-hint">{t("compose.drop.hint", { keys: pasteKeys })}</p>{/if}
 
       {#if notes.length > 0}
         <ul class="notes">
@@ -351,6 +410,9 @@
             onedit={editText}
             onmove={move}
             onmoveto={moveTo}
+            compact={narrow}
+            onmenu={openMenu}
+            {cannotOpen}
           />
         {/each}
       </div>
@@ -361,18 +423,27 @@
       </div>
     </div>
 
-    <div class="side">
-      <Options {options} {pwResult} {viewOnlyBlocked} {vaultAllowed} pwErrorId={optionsBlock ? "send-reason" : undefined} />
-      <p class="estimate num">
-        <Timer size={16} strokeWidth={1.9} aria-hidden="true" />
-        <span>{t("options.estimate", { fast: formatDuration(estimate.fastS, lang), slow: formatDuration(estimate.slowS, lang) })} <span class="en">{t("options.estimate.note")}</span></span>
-      </p>
-      <div class="sendbar" bind:clientHeight={barH}>
-        <CapacityGauge bytes={composer.totalBytes} count={composer.count} />
+    {#if narrow}
+      <div class="sendbar m" bind:clientHeight={barH}>
+        <CapacityGauge bytes={composer.totalBytes} count={composer.count} mini />
+        <button type="button" class="optbtn" aria-haspopup="dialog" onclick={() => (optionsOpen = true)}>
+          <SlidersHorizontal size={18} strokeWidth={1.9} aria-hidden="true" />
+          <span class="ob-tx"><span class="ob-t">{t("options.open")}</span><span class="sr-only"> · </span><span class="ob-s num">{shortSummary}</span></span>
+          <ChevronDown size={18} strokeWidth={1.9} aria-hidden="true" />
+        </button>
         <Button variant="primary" lock disabled={reasonText !== ""} aria-describedby={reasonText ? "send-reason" : undefined} onpress={send}>{t("options.submit")}</Button>
         {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{/if}
       </div>
-    </div>
+    {:else}
+      <div class="side">
+        <Options {options} {pwResult} {unviewable} {vaultShown} {estimate} pwErrorId={optionsBlock ? "send-reason" : undefined} />
+        <div class="sendbar" bind:clientHeight={barH}>
+          <CapacityGauge bytes={composer.totalBytes} count={composer.count} />
+          <Button variant="primary" lock disabled={reasonText !== ""} aria-describedby={reasonText ? "send-reason" : undefined} onpress={send}>{t("options.submit")}</Button>
+          {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{/if}
+        </div>
+      </div>
+    {/if}
   </div>
 {/snippet}
 
@@ -401,6 +472,56 @@
   </div>
 </Sheet>
 
+<Sheet bind:open={optionsOpen} title={t("options.title")}>
+  <div class="opt-sheet">
+    <Options {options} {pwResult} {unviewable} {vaultShown} {estimate} compact pwErrorId={optionsBlock ? "opt-reason" : undefined} />
+    {#if optionsBlock}<p id="opt-reason" class="reason">{reasonText}</p>{/if}
+    <Button variant="primary" onpress={() => void (optionsOpen = false)}>{t("compose.move.done")}</Button>
+  </div>
+</Sheet>
+
+<Sheet bind:open={() => menuId !== null, (v) => { if (!v) menuId = null; }} title={menuName}>
+  {#if menuItem}
+    {#if menuRenaming}
+      <div class="mrename">
+        <label class="fl" for="menu-rename">{t("compose.rename.field", { name: menuName })}</label>
+        <span class="mfield">
+          <input
+            id="menu-rename"
+            bind:value={menuDraft}
+            type="text"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            translate="no"
+            enterkeyhint="done"
+            aria-invalid={menuError ? "true" : undefined}
+            aria-describedby={menuError ? "menu-rename-err" : undefined}
+            onkeydown={(e) => e.key === "Enter" && (e.preventDefault(), menuRenameSave())}
+            {@attach (el) => { el.focus(); el.select(); }}
+          />
+          {#if menuItem.ext}<span class="ext" translate="no">{menuItem.ext}</span>{/if}
+        </span>
+        {#if menuError}<p id="menu-rename-err" class="err" role="alert">{t(`compose.rename.${menuError}`, { max: NAME_MAX })}</p>{/if}
+        <div class="ed-acts">
+          <Button variant="ghost" onpress={() => void (menuRenaming = false)}>{t("common.cancel")}</Button>
+          <Button variant="primary" onpress={menuRenameSave}>{t("text.save")}</Button>
+        </div>
+      </div>
+    {:else}
+      <div class="mlist">
+        <button type="button" class="mi" onclick={menuEdit}><Pencil size={20} strokeWidth={1.8} aria-hidden="true" />{menuItem.kind === "text" ? t("compose.edit.short") : t("compose.rename.short")}</button>
+        {#if menuMovable}
+          <button type="button" class="mi" onclick={() => move(menuItem!.id, -1)}><ArrowUp size={20} strokeWidth={1.8} aria-hidden="true" />{t("compose.move.up")}</button>
+          <button type="button" class="mi" onclick={() => move(menuItem!.id, 1)}><ArrowDown size={20} strokeWidth={1.8} aria-hidden="true" />{t("compose.move.down")}</button>
+        {/if}
+        <button type="button" class="mi danger" onclick={menuRemove}><X size={20} strokeWidth={1.8} aria-hidden="true" />{t("compose.remove.short")}</button>
+      </div>
+    {/if}
+  {/if}
+</Sheet>
+
 <Sheet bind:open={voiceOpen} title={t("compose.voice.title")}>
   <p class="soon">{t("compose.soon.voice")}</p>
 </Sheet>
@@ -421,6 +542,13 @@
     grid-template-columns: minmax(0, 1fr);
     gap: var(--sp-5);
     padding: var(--sp-4) var(--sp-3) 0 var(--sp-3);
+  }
+  .app.narrow {
+    gap: var(--sp-3);
+    padding-top: var(--sp-3);
+  }
+  .narrow .list-col {
+    gap: var(--sp-2);
   }
   .list-col {
     display: grid;
@@ -621,25 +749,193 @@
     border-radius: 14px;
     font-size: 1.0625rem;
   }
-  .estimate {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    margin: 0;
+
+  /* ---------- En-tête et ajouts ---------- */
+  .tt {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+  .count {
     color: var(--text-2);
     font-size: var(--fs-small);
-    line-height: 1.45;
   }
-  .estimate > :global(svg) {
+  /* Téléphone : rangée de pastilles qui défile à l'horizontale, comme une app. */
+  .adds.scroll {
+    display: flex;
+    gap: var(--sp-2);
+    margin-inline: calc(-1 * var(--sp-3));
+    padding: 2px var(--sp-3) 4px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* Bords qui s'estompent : on devine qu'il y a d'autres pastilles. */
+  .adds.scroll {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 28px), transparent);
+  }
+  .adds.scroll::-webkit-scrollbar {
+    display: none;
+  }
+  .adds.scroll .chip {
     flex: none;
-    margin-top: 2px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 16px 0 12px;
+    border-radius: var(--r-pill);
+    font-size: var(--fs-small);
+    scroll-snap-align: start;
+  }
+
+  /* ---------- Barre d'envoi du téléphone ---------- */
+  .sendbar.m {
+    gap: 10px;
+    padding-top: var(--sp-3);
+  }
+  .optbtn {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    padding: 6px 12px 6px 14px;
+    border: 0;
+    border-radius: 12px;
+    background: rgb(255 255 255 / 0.06);
+    box-shadow: inset 0 0 0 1px var(--hair-2);
+    color: var(--text);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      transform var(--dur-press) var(--ease-out),
+      background-color var(--dur-fast) var(--ease-out);
+  }
+  .optbtn:active {
+    transform: scale(0.98);
+    background: rgb(255 255 255 / 0.1);
+  }
+  .optbtn > :global(svg) {
+    color: var(--text-2);
+  }
+  .optbtn > :global(svg:last-child) {
+    transform: rotate(180deg);
+  }
+  .ob-tx {
+    display: grid;
+    min-width: 0;
+    line-height: 1.3;
+  }
+  .ob-t {
+    font-weight: 600;
+    font-size: var(--fs-small);
+  }
+  .ob-s {
+    color: var(--text-2);
+    font-size: var(--fs-small);
+  }
+  .sendbar.m :global(.btn) {
+    min-height: 52px;
+  }
+
+  /* ---------- Feuilles ---------- */
+  .opt-sheet {
+    display: grid;
+    gap: var(--sp-4);
+  }
+  .opt-sheet :global(.btn) {
+    width: 100%;
+  }
+  .mlist {
+    display: grid;
+    margin-inline: calc(-1 * var(--sp-2));
+  }
+  .mi {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    min-height: 52px;
+    padding: 0 var(--sp-3);
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 1rem;
+    font-weight: 520;
+    text-align: start;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      background-color var(--dur-fast) var(--ease-out),
+      transform var(--dur-press) var(--ease-out);
+  }
+  .mi > :global(svg) {
+    color: var(--text-2);
+  }
+  .mi:active {
+    transform: scale(0.98);
+    background: rgb(255 255 255 / 0.07);
+  }
+  @media (hover: hover) {
+    .mi:hover {
+      background: rgb(255 255 255 / 0.05);
+    }
+  }
+  .mi.danger,
+  .mi.danger > :global(svg) {
+    color: var(--danger);
+  }
+  .mrename {
+    display: grid;
+    gap: var(--sp-2);
+  }
+  .fl {
+    color: var(--text-2);
+    font-size: var(--fs-small);
+    font-weight: 600;
+  }
+  .mfield {
+    display: flex;
+    align-items: center;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    background: var(--surface-1);
+  }
+  .mfield:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .mfield input {
+    flex: 1;
+    min-width: 0;
+    height: 48px;
+    padding: 0 var(--sp-3);
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: max(1rem, 16px);
+    outline: none;
+  }
+  .ext {
+    padding-inline-end: var(--sp-3);
     color: var(--text-3);
+  }
+  .err {
+    margin: 0;
+    color: var(--danger);
+    font-size: var(--fs-small);
   }
   .toast-slot :global(.toast) {
     inset-block-end: calc(var(--lift) + var(--sp-3) + env(safe-area-inset-bottom, 0px));
-  }
-  .estimate .en {
-    color: var(--text-3);
   }
   .reason {
     margin: -4px 0 0;
@@ -678,9 +974,9 @@
     }
   }
   /* Ordinateur : deux colonnes, composer | options ; le bouton en fin de colonne, collé en bas. */
-  @media (min-width: 960px) {
+  @media (min-width: 760px) {
     .app {
-      grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
       column-gap: 40px;
       padding: var(--sp-6) var(--sp-6) var(--sp-6);
     }

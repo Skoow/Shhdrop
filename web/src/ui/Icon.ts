@@ -56,3 +56,6 @@ export { default as CodeXml } from "@lucide/svelte/icons/code-xml";
 export { default as ChevronDown } from "@lucide/svelte/icons/chevron-down";
 export { default as ArrowRight } from "@lucide/svelte/icons/arrow-right";
 export { default as ShieldX } from "@lucide/svelte/icons/shield-x";
+// Composeur v2 (téléphone) : menu d'un élément, bouton Options de la barre.
+export { default as Ellipsis } from "@lucide/svelte/icons/ellipsis";
+export { default as SlidersHorizontal } from "@lucide/svelte/icons/sliders-horizontal";

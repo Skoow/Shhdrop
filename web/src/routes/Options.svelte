@@ -1,31 +1,41 @@
 <script lang="ts">
-  // Options de l'envoi (UI §9.3, benchmark M4) : la phrase « S'efface dans 12 h ou après
-  // 1 ouverture, au premier des deux. » et ses deux contrôles (Durée, Ouvertures) ; mot de passe ;
-  // ce que le destinataire peut faire (spec §34). Chiffres lus dans les constantes.
+  // Options de l'envoi (UI §9.3, benchmark M4) : durée et ouvertures (phrase « S'efface dans
+  // 12 h ou après 1 ouverture… » sur ordinateur), mot de passe, destinataire (interrupteur
+  // « Autoriser le téléchargement », sous-option du coffre), estimation du temps d'envoi.
+  // `compact` : feuille du téléphone, une ligne d'aide au plus par réglage.
   import type { PwCheck } from "../index";
   import { MAX_OPENS, PW_MIN_CHARS, PW_TRIES, TTL_HOURS } from "../index";
-  import type { Options, Rights } from "../flows/options.svelte";
+  import type { Options } from "../flows/options.svelte";
   import { formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
-  import { ShieldAlert } from "../ui/Icon";
+  import { ShieldAlert, Timer, TriangleAlert } from "../ui/Icon";
   import PassphraseField from "../ui/PassphraseField.svelte";
   import Segmented from "../ui/Segmented.svelte";
+  import Switch from "../ui/Switch.svelte";
 
   type Props = {
     options: Options;
     pwResult: PwCheck | null;
-    /** Éléments qui empêchent « Voir seulement » (spec §34). */
-    viewOnlyBlocked: string[];
-    vaultAllowed: boolean;
-    /** Raison de blocage du mot de passe, reliée au champ. */
+    /** Éléments qui ne pourront pas être ouverts sans téléchargement (spec §34). */
+    unviewable: string[];
+    /** Sous-option du coffre affichée ici (téléphone ou app installée, jamais en démo). */
+    vaultShown: boolean;
+    estimate: { fastS: number; slowS: number };
+    compact?: boolean;
     pwErrorId?: string;
   };
-  let { options, pwResult, viewOnlyBlocked, vaultAllowed, pwErrorId }: Props = $props();
+  let { options, pwResult, unviewable, vaultShown, estimate, compact = false, pwErrorId }: Props = $props();
 
   const lang = $derived(getLang());
   const ttlLabel = (h: number) => formatDuration(h * 3600, lang);
   const ttlOptions = $derived(TTL_HOURS.map((h) => ({ value: h, label: ttlLabel(h) })));
   const opensOptions = Array.from({ length: MAX_OPENS }, (_, i) => ({ value: i + 1, label: String(i + 1) }));
+  // Une seule durée quand les deux s'arrondissent pareil (« environ 1 s », pas « 1 s à 1 s »).
+  const estimateText = $derived.by(() => {
+    const fast = formatDuration(estimate.fastS, lang);
+    const slow = formatDuration(estimate.slowS, lang);
+    return fast === slow ? t("options.estimate.single", { time: fast }) : t("options.estimate", { fast, slow });
+  });
   const opensText = $derived(t("options.opens.count", { n: options.maxOpens }));
 
   // Phrase coupée autour des valeurs pour les mettre en avant, sans HTML dans les textes.
@@ -34,18 +44,10 @@
     const s = t("options.summary", { ttl: "\u0000", opens: "\u0001" });
     return s.split(/(\u0000|\u0001)/).map((p) => (p === "\u0000" ? { b: ttl } : p === "\u0001" ? { b: opensText } : { s: p }));
   });
-
-  const RIGHTS: Rights[] = ["voir", "enregistrer", "coffre"];
-  const shownRights = $derived(RIGHTS.filter((r) => r !== "coffre" || vaultAllowed));
-  const voirBlocked = $derived(viewOnlyBlocked.length > 0);
-  // Si « Voir seulement » devient impossible (élément ajouté), on revient au défaut.
-  $effect(() => {
-    if (voirBlocked && options.rights === "voir") options.rights = "enregistrer";
-  });
 </script>
 
-<section class="opts" aria-labelledby="opts-title">
-  <h2 id="opts-title" class="h">{t("options.title")}</h2>
+<section class={["opts", { compact }]} aria-labelledby={compact ? undefined : "opts-title"} aria-label={compact ? t("options.title") : undefined}>
+  {#if !compact}<h2 id="opts-title" class="h">{t("options.title")}</h2>{/if}
 
   <div class="block">
     <p class="summary">
@@ -65,36 +67,29 @@
 
   <div class="block">
     <h3 class="h3">{t("options.pw.title")}</h3>
-    <p class="lead">{t("options.pw.lead")}</p>
     <PassphraseField {options} min={PW_MIN_CHARS} result={pwResult} describedby={pwErrorId} />
-    <p class="tries"><ShieldAlert size={16} strokeWidth={1.9} aria-hidden="true" />{t("options.tries", { n: PW_TRIES })}</p>
+    <p class="line"><ShieldAlert size={16} strokeWidth={1.9} aria-hidden="true" /><span>{t("options.pw.lead")}</span></p>
+    <p class="line"><ShieldAlert size={16} strokeWidth={1.9} aria-hidden="true" /><span>{t("options.tries", { n: PW_TRIES })}</span></p>
   </div>
 
-  <fieldset class="block rights">
-    <legend class="h3">{t("options.rights.label")}</legend>
-    {#each shownRights as r (r)}
-      {@const off = r === "voir" && voirBlocked}
-      <label class={["card", { on: options.rights === r, off }]}>
-        <input
-          type="radio"
-          name="shh-rights"
-          value={r}
-          checked={options.rights === r}
-          disabled={off}
-          aria-describedby="rights-{r}"
-          onchange={() => (options.rights = r)}
-        />
-        <span class="ct">
-          <span class="rt">{t(`options.rights.${r}`)}</span>
-          <span class="rp" id="rights-{r}">
-            {#if off}{t("options.rights.voir.blocked", { names: viewOnlyBlocked.join(", ") })}
-            {:else if r === "coffre"}{t("options.rights.coffre.p", { duration: ttlLabel(options.ttlHours) })}
-            {:else}{t(`options.rights.${r}.p`)}{/if}
-          </span>
-        </span>
-      </label>
-    {/each}
-  </fieldset>
+  <div class="block" role="group" aria-labelledby="rights-title">
+    <h3 class="h3" id="rights-title">{t("options.rights.label")}</h3>
+    <div class="rights">
+      <Switch label={t("options.download.label")} hint={t("options.download.hint")} checked={options.allowDownload} onchange={(v) => (options.allowDownload = v)} />
+      {#if options.allowDownload && vaultShown}
+        <Switch sub label={t("options.vault")} checked={options.keepVault} onchange={(v) => (options.keepVault = v)} />
+      {/if}
+    </div>
+    {#if !options.allowDownload && unviewable.length > 0}
+      <div class="warn" role="status">
+        <TriangleAlert size={16} strokeWidth={1.9} aria-hidden="true" />
+        <span>{t("options.download.warn", { n: unviewable.length })}</span>
+        <button type="button" class="fix" onclick={() => (options.allowDownload = true)}>{t("options.download.label")}</button>
+      </div>
+    {/if}
+  </div>
+
+  <p class="line est num"><Timer size={16} strokeWidth={1.9} aria-hidden="true" /><span>{estimateText}</span></p>
 </section>
 
 <style>
@@ -102,6 +97,9 @@
     display: grid;
     gap: var(--sp-5);
     min-width: 0;
+  }
+  .compact {
+    gap: var(--sp-4);
   }
   .h {
     font-size: var(--fs-h3);
@@ -112,9 +110,6 @@
     display: grid;
     gap: var(--sp-3);
     min-width: 0;
-    margin: 0;
-    padding: 0;
-    border: 0;
   }
   .summary {
     margin: 0;
@@ -122,6 +117,9 @@
     line-height: 1.4;
     font-weight: 520;
     text-wrap: pretty;
+  }
+  .compact .summary {
+    font-size: 1.0625rem;
   }
   .summary b {
     color: var(--accent);
@@ -142,95 +140,61 @@
     font-size: var(--fs-small);
   }
   .h3 {
-    padding: 0;
     font-size: 1rem;
     font-weight: 640;
   }
-  .lead {
-    margin: 0;
-    color: var(--text-2);
-    font-size: var(--fs-small);
-    line-height: 1.5;
-  }
-  .tries {
+  .line {
     display: flex;
     align-items: flex-start;
     gap: 8px;
     margin: 0;
     color: var(--text-2);
     font-size: var(--fs-small);
+    line-height: 1.45;
   }
-  .tries :global(svg) {
+  .line > :global(svg) {
     flex: none;
     margin-top: 2px;
     color: var(--accent);
   }
-  .rights legend {
-    margin-bottom: var(--sp-3);
+  .est > :global(svg) {
+    color: var(--text-3);
   }
-  .card {
-    position: relative;
+  .rights {
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr);
-    gap: var(--sp-3);
-    align-items: start;
-    padding: 14px var(--sp-4);
     border-radius: 14px;
-    background: rgb(255 255 255 / 0.03);
-    box-shadow: inset 0 0 0 1px var(--hair);
-    cursor: pointer;
-    transition:
-      background-color var(--dur-fast) var(--ease-out),
-      box-shadow var(--dur-fast) var(--ease-out);
   }
-  .card + .card {
-    margin-top: var(--sp-2);
-  }
-  .card.on {
-    background: rgb(16 42 35 / 0.55);
-    box-shadow: inset 0 0 0 1.5px rgb(95 227 181 / 0.55);
-  }
-  .card.off {
-    cursor: not-allowed;
-  }
-  .card.off .rt {
-    color: var(--text-disabled);
-  }
-  .card input {
-    width: 20px;
-    height: 20px;
-    margin: 1px 0 0;
-    accent-color: var(--accent);
-  }
-  .card:has(input:focus-visible) {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-  .ct {
+  .warn {
     display: grid;
-    gap: 2px;
-    min-width: 0;
-  }
-  .rt {
-    font-weight: 600;
-  }
-  .rp {
-    color: var(--text-2);
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 4px 8px;
+    padding: 8px 8px 8px 12px;
+    border-radius: 12px;
+    background: var(--warn-tint);
+    color: var(--text);
     font-size: var(--fs-small);
-    line-height: 1.45;
-    overflow-wrap: anywhere;
   }
-  @media (prefers-reduced-motion: reduce) {
-    .card {
-      transition: none;
-    }
+  .warn > :global(svg) {
+    color: var(--warn);
+  }
+  .fix {
+    grid-column: 2;
+    justify-self: start;
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--warn);
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
   }
   @media (forced-colors: active) {
-    .card {
+    .warn {
       border: 1px solid CanvasText;
-    }
-    .card.on {
-      outline: 2px solid Highlight;
     }
   }
 </style>

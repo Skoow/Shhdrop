@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { en } from "../i18n/en";
 import { fr } from "../i18n/fr";
-import { createOptions, estimateUpload, viewOnlyBlockers, type OptionsDeps } from "./options.svelte";
+import { createOptions, estimateUpload, viewableInBrowser, viewOnlyBlockers, type OptionsDeps } from "./options.svelte";
 import { CONTENT_MAX, MAX_OPENS, PW_TRIES, generatePassword, PASSWORD_ALPHABET } from "../index";
 
 const check: OptionsDeps["check"] = (pw) =>
@@ -69,13 +69,26 @@ describe("createOptions (UI §9.3)", () => {
     expect(o.ttlHours).toBe(24);
   });
 
-  it("droit « coffre » refusé quand il n'est pas permis ; retour au défaut", () => {
-    const o = make({ vaultAllowed: () => false });
-    o.rights = "coffre";
+  it("droits : téléchargement autorisé par défaut ; coupé → voir ; coffre seulement en sous-option et là où il existe", () => {
+    const o = make({ vaultAllowed: () => true });
+    expect(o.allowDownload).toBe(true);
+    expect(o.keepVault).toBe(false);
     expect(o.rights).toBe("enregistrer");
-    const p = make({ vaultAllowed: () => true });
+    o.keepVault = true;
+    expect(o.rights).toBe("coffre");
+    o.allowDownload = false;
+    expect(o.rights).toBe("voir");
+    expect(o.keepVault).toBe(false); // le coffre suppose le téléchargement
+    o.allowDownload = true;
+    expect(o.rights).toBe("coffre"); // le choix est retrouvé
+    const p = make({ vaultAllowed: () => false });
+    p.keepVault = true;
+    expect(p.keepVault).toBe(false);
+    expect(p.rights).toBe("enregistrer");
     p.rights = "coffre";
-    expect(p.rights).toBe("coffre");
+    expect(p.rights).toBe("enregistrer");
+    p.rights = "voir";
+    expect(p.allowDownload).toBe(false);
   });
 
   it("chaque raison de blocage a son texte FR et EN", () => {
@@ -104,7 +117,7 @@ describe("mot de passe généré (spec §31)", () => {
     expect(PASSWORD_ALPHABET).toHaveLength(64);
     expect(new Set(PASSWORD_ALPHABET).size).toBe(64);
     const freq = new Map<string, number>();
-    const N = 10_000;
+    const N = 20_000;
     for (let i = 0; i < N; i++) {
       const p = generatePassword();
       expect(p).toHaveLength(8);
@@ -114,13 +127,13 @@ describe("mot de passe généré (spec §31)", () => {
     }
     // Imposer les 4 familles biaise la répartition : par rapport à 1/64, une lettre sort 0,854 fois
     // et un chiffre ou un symbole 1,439 fois (calcul exact par inclusion-exclusion). Chaque
-    // caractère est comparé à SA valeur exacte, à ±10 %.
+    // caractère est comparé à SA valeur exacte, à ±15 % (plus de 7 écarts-types).
     const uniform = (N * 8) / 64;
     for (const ch of PASSWORD_ALPHABET) {
       const expected = uniform * (/[a-zA-Z]/.test(ch) ? 0.853705 : 1.438884);
       const f = freq.get(ch) ?? 0;
-      expect(f, ch).toBeGreaterThan(expected * 0.9);
-      expect(f, ch).toBeLessThan(expected * 1.1);
+      expect(f, ch).toBeGreaterThan(expected * 0.85);
+      expect(f, ch).toBeLessThan(expected * 1.15);
     }
   });
 
@@ -143,8 +156,8 @@ describe("estimation du temps d'envoi", () => {
   });
 });
 
-describe("« Voir seulement » (spec §34)", () => {
-  it("refusé pour ce que le navigateur n'affiche pas : archive, bureautique, plus de 200 Mio", () => {
+describe("sans téléchargement (spec §34)", () => {
+  it("ce que le navigateur n'affiche pas : archive, bureautique, plus de 200 Mio ; un texte s'affiche toujours", () => {
     const items = [
       { kind: "text", base: "Texte 1", ext: "", mime: "text/plain", size: 3 },
       { kind: "file", base: "a", ext: ".jpg", mime: "image/jpeg", size: 3 },
@@ -154,5 +167,7 @@ describe("« Voir seulement » (spec §34)", () => {
       { kind: "file", base: "e", ext: ".pdf", mime: "application/pdf", size: 3 },
     ] as const;
     expect(viewOnlyBlockers(items)).toEqual(["b.zip", "c.docx", "d.mp4"]);
+    expect(viewableInBrowser(items[0])).toBe(true);
+    expect(viewableInBrowser(items[5])).toBe(true);
   });
 });

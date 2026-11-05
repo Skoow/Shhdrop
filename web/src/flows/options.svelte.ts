@@ -20,7 +20,13 @@ export function createOptions(deps: OptionsDeps) {
   let mode = $state<"generated" | "custom">("generated");
   let generated = $state(deps.generate());
   let custom = $state("");
-  let rights = $state<Rights>("enregistrer");
+  // Droits (spec §34, simplifiés par le propriétaire le 5 novembre) : un interrupteur
+  // « Autoriser le téléchargement » (activé par défaut) et, seulement s'il est activé et là où
+  // le coffre existe, la sous-option « Garder une copie chiffrée dans l'app du destinataire ».
+  let download = $state(true);
+  let vault = $state(false);
+  const vaultOk = () => deps.vaultAllowed?.() === true;
+  const rights = $derived<Rights>(!download ? "voir" : vault && vaultOk() ? "coffre" : "enregistrer");
 
   function check(): PwCheck | null {
     return mode === "generated" ? { ok: true } : deps.check(custom);
@@ -52,12 +58,27 @@ export function createOptions(deps: OptionsDeps) {
     get custom() {
       return custom;
     },
-    get rights() {
+    /** Droit écrit dans le manifeste : voir, enregistrer ou coffre. */
+    get rights(): Rights {
       return rights;
     },
     set rights(v: Rights) {
-      if (v === "coffre" && !deps.vaultAllowed?.()) v = "enregistrer";
-      if (v === "voir" || v === "enregistrer" || v === "coffre") rights = v;
+      if (v === "voir") download = false;
+      else if (v === "enregistrer") (download = true), (vault = false);
+      else if (v === "coffre" && vaultOk()) (download = true), (vault = true);
+    },
+    get allowDownload() {
+      return download;
+    },
+    set allowDownload(v: boolean) {
+      download = v === true;
+    },
+    /** Sous-option du téléchargement ; sans effet si le coffre n'est pas proposé ici. */
+    get keepVault() {
+      return download && vault && vaultOk();
+    },
+    set keepVault(v: boolean) {
+      vault = v === true && vaultOk();
     },
     regenerate() {
       generated = deps.generate();
@@ -102,12 +123,12 @@ const VIEWABLE = new Set([
 ]);
 type Viewable = { kind: "file" | "text"; base: string; ext: string; mime: string; size: number };
 
-/**
- * Éléments que le destinataire ne pourrait pas voir dans le navigateur (spec §34) : « Voir
- * seulement » les rendrait inaccessibles. Même liste blanche que la visionneuse (previewKind).
- */
+/** Le destinataire peut-il ouvrir cet élément dans le navigateur, sans le télécharger ? Même liste blanche que la visionneuse (previewKind). */
+export function viewableInBrowser(i: Viewable): boolean {
+  return i.kind === "text" || (i.size <= PREVIEW_MAX && VIEWABLE.has(i.mime.split(";")[0]!.trim().toLowerCase()));
+}
+
+/** Éléments qui ne pourront pas être ouverts sans téléchargement (spec §34). */
 export function viewOnlyBlockers(items: readonly Viewable[]): string[] {
-  return items
-    .filter((i) => i.kind === "file" && (i.size > PREVIEW_MAX || !VIEWABLE.has(i.mime.split(";")[0]!.trim().toLowerCase())))
-    .map((i) => i.base + i.ext);
+  return items.filter((i) => !viewableInBrowser(i)).map((i) => i.base + i.ext);
 }

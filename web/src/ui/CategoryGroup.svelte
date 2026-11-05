@@ -22,8 +22,12 @@
     onedit: (id: string) => void;
     onmove: (id: string, delta: -1 | 1) => void;
     onmoveto: (id: string, index: number) => void;
+    /** Téléphone : lignes compactes, menu « … ». */
+    compact?: boolean;
+    onmenu?: (id: string) => void;
+    cannotOpen?: (item: ComposeItem) => boolean;
   };
-  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto }: Props = $props();
+  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, cannotOpen }: Props = $props();
 
   const KEY = {
     texte: "compose.cat.text",
@@ -111,7 +115,7 @@
   });
 </script>
 
-<section class="group" aria-labelledby="{uid}-h">
+<section class={["group", { compact }]} aria-labelledby="{uid}-h">
   <div class="head">
     <h3 id="{uid}-h">{t(KEY[category])}</h3>
     <span class="meta num">{items.length} · {formatBytes(bytes, getLang())}</span>
@@ -130,6 +134,9 @@
           ondragstart={(y) => start(item.id, y)}
           ondragmove={moveTo}
           ondragend={end}
+          {compact}
+          onmenu={() => onmenu?.(item.id)}
+          cannotOpen={cannotOpen?.(item) ?? false}
         />
       </li>
     {/each}
@@ -147,6 +154,9 @@
     justify-content: space-between;
     gap: var(--sp-3);
     padding: var(--sp-2) 4px 4px var(--sp-6);
+  }
+  .compact .head {
+    padding-inline-start: 4px;
   }
   h3 {
     font-size: 1rem;

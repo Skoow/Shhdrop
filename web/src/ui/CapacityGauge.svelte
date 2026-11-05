@@ -7,8 +7,9 @@
   import { getLang, t } from "../i18n/i18n.svelte";
   import { announce } from "./announce";
 
-  type Props = { bytes: number; count: number };
-  let { bytes, count }: Props = $props();
+  /** `mini` : une ligne, pour la barre d'envoi du téléphone. */
+  type Props = { bytes: number; count: number; mini?: boolean };
+  let { bytes, count, mini = false }: Props = $props();
 
   const lang = $derived(getLang());
   const max = $derived(formatBytes(CONTENT_MAX, lang));
@@ -18,12 +19,11 @@
   const countText = $derived(t("compose.gauge.count", { n: count, max: MAX_ITEMS }));
   const uid = $props.id();
   // « Trop gros : 1 Go sur 1 Go » ne dirait rien : quand les deux tailles s'arrondissent pareil,
-  // elles sont données en Mo avec une décimale (1 024 Mo sur 1 023,9 Mo).
-  const mo = (n: number) => `${new Intl.NumberFormat(lang, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(Math.floor((n / 1048576) * 10) / 10)}${lang === "fr" ? "\u202fMo" : "\u00a0MB"}`;
+  // seul l'excédent est donné (« 4 octets de trop, limite : 1 Go »).
   const overText = $derived.by(() => {
     const size = formatBytes(bytes, lang);
-    const same = size === max;
-    return t("compose.tooBig", { size: same ? mo(bytes) : size, max: same ? mo(CONTENT_MAX) : max, excess: formatBytes(bytes - CONTENT_MAX, lang) });
+    const excess = formatBytes(bytes - CONTENT_MAX, lang);
+    return size === max ? t("compose.tooBig.excess", { excess, max }) : t("compose.tooBig", { size, max, excess });
   });
 
   // Annonce polie aux seuls franchissements de seuil (90 %, dépassement, retour sous la limite) ;
@@ -38,6 +38,17 @@
 
 {#if count === 0}
   <p class="empty num">{t("compose.gauge.empty", { size: max, n: MAX_ITEMS })}</p>
+{:else if mini}
+  <div class={["mini", level]}>
+    <span id="{uid}-s" class="sr-only">{t("compose.gauge.sizeLabel")}</span>
+    <span id="{uid}-c" class="sr-only">{t("compose.gauge.countLabel")}</span>
+    <div class="bar" role="meter" aria-labelledby="{uid}-s" aria-valuemin="0" aria-valuemax={CONTENT_MAX} aria-valuenow={Math.min(bytes, CONTENT_MAX)} aria-valuetext={sizeText}>
+      <span class="fill" style:--r={Math.min(1, ratio)}></span>
+    </div>
+    <span class="v num" aria-hidden="true"><b>{formatBytes(bytes, lang)}</b> / {max}</span>
+    <span class="v num c" role="meter" aria-labelledby="{uid}-c" aria-valuemin="0" aria-valuemax={MAX_ITEMS} aria-valuenow={count} aria-valuetext={countText}><b>{count}</b> / {MAX_ITEMS}</span>
+  </div>
+  {#if level === "over"}<p class="over-msg" role="alert">{overText}</p>{/if}
 {:else}
   <div class={["gauge", level]}>
     <div class="m">
@@ -72,6 +83,26 @@
 {/if}
 
 <style>
+  .mini {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: var(--sp-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .mini .c {
+    padding-inline-start: var(--sp-3);
+    border-inline-start: 1px solid var(--hair-2);
+  }
+  .mini.near .fill {
+    background: var(--warn);
+  }
+  .mini.over .fill {
+    background: var(--danger);
+  }
+  .mini.over .v b {
+    color: var(--danger);
+  }
   .empty {
     margin: 0;
     color: var(--text-2);
