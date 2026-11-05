@@ -8,9 +8,9 @@
 
 **Tech Stack:** Svelte 5.57.3, `@sveltejs/vite-plugin-svelte` 7.3.1, Vite 8.3.5, TypeScript 7.0.2 (+ `svelte-check` 4.7.8 sur TypeScript 6.0.3 dans un paquet outil séparé), Vitest 5.1.0, `@playwright/test` 1.64.1, `@axe-core/playwright` 4.14.0, `pdfjs-dist` 6.5.438, `@lucide/svelte` 1.68.0, `uqr` 0.1.3, polices Mona Sans et JetBrains Mono (Fontsource 5.3.0, fichiers copiés). Go 1.26.
 
-**Spec:** `docs/superpowers/specs/2026-11-04-shhdrop-ui-design.md` (notée « UI », révision 4) et `docs/superpowers/specs/2026-11-03-shhdrop-design.md` (notée « spec », v2.6).
+**Spec:** `docs/superpowers/specs/2026-11-04-shhdrop-ui-design.md` (notée « UI », révision 4) et `docs/superpowers/specs/2026-11-03-shhdrop-design.md` (notée « spec », v2.7 : §37 compte facultatif, §38 offre payante).
 
-**Ordre après la Task 8 (5 novembre)** : Task DA (direction artistique v2, UI §20), puis Tasks K1 à K3 (chiffrement anticipé, lien court, spec §29, §31, §32, §34), puis Task M2 (minimisation serveur, aucune statistique, spec §35.1, §36), puis Tasks 9a à 9c (nettoyage des métadonnées, spec §35.2) et 10 à 24, avec la Task 12b conditionnelle (Q-REC1) et les amendements listés après la Task M2, puis Task R (droits), Task H (historique), Tasks V1 à V3 (coffre), Tasks 25 à 27, Tasks C1 à C4 (code vérifiable, C4 conditionnelle), Task 28. Référence visuelle : `docs/superpowers/design/da-v2/`. Lire UI §0, §7, §9, §12, §14.3, §15, §18 et spec §2, §5, §7.4, §10, §12, §13, §18, §19, §21, §24, §25, §35, §36 avant toute tâche.
+**Ordre après la Task 8 (5 novembre)** : Task DA (direction artistique v2, UI §20), puis Tasks K1 à K3 (chiffrement anticipé, lien court, spec §29, §31, §32, §34), puis Task M2 (minimisation serveur, aucune statistique, spec §35.1, §36), puis Tasks 9a à 9c (nettoyage des métadonnées, spec §35.2) et 10 à 24, avec la Task 12b conditionnelle (Q-REC1) et les amendements listés après la Task M2, puis Task R (droits), Task H (historique), Tasks A1 à A3 (compte facultatif, spec §37), Tasks V1 à V3 (coffre), Tasks 25 à 27, Tasks C1 à C4 (code vérifiable, C4 conditionnelle), Task 28. Référence visuelle : `docs/superpowers/design/da-v2/`. Lire UI §0, §7, §9, §12, §14.3, §15, §18 et spec §2, §5, §7.4, §10, §12, §13, §18, §19, §21, §24, §25, §35, §36 avant toute tâche. Tasks P1 à P3 (offre payante, spec §38) : **après la mise en ligne de la V1**, selon le moyen de paiement choisi (Q-P1).
 
 ## Global Constraints
 
@@ -1114,6 +1114,73 @@ HISTORY_KEEP_GONE_MS = 7 * 86_400_000;
 
 ---
 
+### Tasks A1 à A3 : compte facultatif (spec §37)
+
+Après la Task H, qui fournit l'historique à synchroniser. Prérequis : réponses du propriétaire à Q-A1 à Q-A5 (défauts de spec §37.10 appliqués sinon) ; avis du juriste (spec §37.9) avant d'activer `SHH_ACCOUNTS=1` en public, pas avant de coder. Compte désactivé dans la démo (test). Revues : `golang-backend`, `golang-testing`, `constant-time-analysis` (comparaisons de `V_s` et des jetons de session), `supply-chain-risk-auditor` (go-webauthn), `privacy-review`.
+
+### Task A1 : Serveur — passkeys (go-webauthn), base `accounts.db`, sessions en mémoire (spec §37.1, §37.3 à §37.5, §37.8)
+
+**Files:**
+- Create: `server/internal/account/service.go`, `service_test.go`, `server/internal/account/store.go`, `store_test.go`, `server/internal/account/session.go`, `session_test.go`, `server/internal/account/testauthn_test.go` (authentificateur logiciel de test : attestation `none`, ES256, PRF absent côté serveur), `server/internal/api/handlers_account.go`, `handlers_account_test.go`, `server/internal/account/unlinkable_test.go`
+- Modify: `server/go.mod`, `go.sum` (`github.com/go-webauthn/webauthn`, **version exacte**, dernière stable publiée depuis au moins 7 jours, spec §24), `THIRD_PARTY_LICENSES.md` (BSD-3-Clause, à vérifier dans le dépôt de la version choisie), `server/internal/config/config.go` (`SHH_ACCOUNTS`, `SHH_ACCOUNTS_MAX`), `server/internal/limits/*` (compteurs de spec §9.5), `server/internal/api/headers.go` (`Permissions-Policy` : `publickey-credentials-create=(self), publickey-credentials-get=(self)` ; `()` sur `/pdf-frame.html`), test de sources de spec §36 S2 (`X-Shh-Session` ajouté à la liste blanche), `server/cmd/shhdrop/*` (nettoyeur : comptes abandonnés)
+
+**Interfaces:**
+```go
+type Service struct{ /* store, sessions, webauthn.WebAuthn, limits */ }
+func NewService(cfg Config, st *Store, now func() time.Time) (*Service, error) // refuse rp.id ≠ hôte de SHH_ORIGIN
+func (s *Service) BeginRegistration(conn limits.Key) (options []byte, err error)           // H tiré par crypto/rand, user.name fixe
+func (s *Service) FinishRegistration(body []byte) (session string, err error)              // stocke cred_id, public_key, alg, env ; v_s, env_s facultatifs
+func (s *Service) BeginLogin() (options []byte, err error)                                  // allowCredentials vide
+func (s *Service) FinishLogin(body []byte) (session string, env []byte, blob []byte, gen uint64, err error)
+func (s *Service) Recover(aS [32]byte) (session string, envS []byte, blob []byte, gen uint64, err error)
+func (s *Service) PutBlob(session string, ifGen uint64, b []byte) error                    // ErrConflict, ErrTooLarge ; palier exact exigé
+func (s *Service) AddCredential / RemoveCredential / RenewRecovery / Logout / Delete
+// store : accounts(h, created_month, seen_month, blob, gen, v_s, env_s), credentials(cred_id, h, public_key, alg, env) ; WITHOUT ROWID
+```
+- [ ] **Step 1 : Tests qui échouent** : cérémonie complète avec l'authentificateur de test (création, connexion découvrable par `userHandle`) ; défi rejoué → refus ; défi de plus de 2 min → refus ; `userVerification` absente → refus ; origine ou `rp.id` différents → refus ; après création, `accounts.db` ne contient ni AAGUID, ni compteur de signatures, ni transports, ni attestation (lecture des colonnes et recherche d'octets repères dans le fichier et le WAL) ; `created_month` et `seen_month` sont des premiers du mois à 00:00 UTC ; `PutBlob` : `if_gen` périmé → `ErrConflict`, taille hors palier ou > 1 Mio → refus, 61ᵉ écriture de l'heure → `limit` ; `Recover` avec un `A_s` faux → réponse identique à « inconnu », 11ᵉ essai de l'heure → `limit` ; comparaison de `V_s` en temps constant (`subtle.ConstantTimeCompare`) ; 4ᵉ compte du jour par connexion → `limit` ; `SHH_ACCOUNTS_MAX` atteint → 503 ; sessions : absentes du disque, perdues au redémarrage, expirées à 15 min sans usage et à 2 h ; `Delete` → lignes supprimées, `wal_checkpoint(TRUNCATE)`, aucun octet repère de `B` dans le fichier après arrêt ; nettoyeur : `seen_month` de plus de 13 mois → compte effacé ; `SHH_ACCOUNTS=0` → toutes les routes `/api/compte/*` en 404.
+- [ ] **Step 2 : `unlinkable_test.go` (« le serveur ne voit rien », étendu au compte)** : un partage créé et finalisé, un compte dont `B` est un tampon opaque ; IP, User-Agent, Referer repères (spec §36) → aucun repère sur disque, stdout, stderr ni dans les réponses ; aucune valeur commune entre `accounts.db` et `shares.db` (recherche de chaque `V_accès`, `V_gestion` et identifiant de partage dans les octets de `accounts.db`) ; aucune route de partage ne lit `X-Shh-Session` (test de sources) ; aucune requête SQL ne nomme les deux bases.
+- [ ] **Step 3 : Lancer** `make test-go` → ÉCHEC.
+- [ ] **Step 4 : Implémenter** spec §37.1, §37.3 à §37.5, §37.8 ; JSON strict de spec §8 ; erreurs uniformes ; aucun journal qui contienne `H`, un identifiant de passkey ou un jeton.
+- [ ] **Step 5 : Lancer** `make test-go` (avec `-race`, `GOARCH=386 go build ./...`), `govulncheck ./...` → SUCCÈS.
+- [ ] **Step 6 : Commit** « feat(account): compte facultatif par passkey, base séparée, sessions en mémoire » et push.
+
+### Task A2 : Client — PRF, enveloppes, coffre de compte chiffré, synchronisation différée (spec §37.2, §37.4, §37.6)
+
+**Files:**
+- Create: `web/src/account/keys.ts`, `keys.test.ts`, `web/src/account/blob.ts`, `blob.test.ts`, `web/src/account/merge.ts`, `merge.test.ts`, `web/src/account/recovery.ts`, `recovery.test.ts`, `web/src/account/session.ts`, `session.test.ts`, `web/src/account/sync.ts`, `sync.test.ts`
+- Modify: `web/src/crypto/kdf.ts` (étiquettes `shhdrop/v2/compte/*`, dans le module crypto), `web/src/index.ts` (exporte `openAccount` seulement), `web/src/source-rules.test.ts` (IndexedDB permis aussi dans `account/`, pour `gen` maximal et l'enveloppe locale des appareils sans PRF ; `X-Shh-Session` posé seulement par `account/session.ts`), `web/src/history/store.ts` (source et cible de la synchronisation)
+
+**Interfaces:**
+```ts
+const PRF_INPUT = sha256("shhdrop/v2/compte/prf/1");
+deriveKek(prf: Uint8Array): Promise<CryptoKey>;                 // HKDF, info "shhdrop/v2/compte/enveloppe", non extractible
+wrapAccountKey(kek, kCompte, h, credId) / unwrapAccountKey(...)  // AES-256-GCM, AAD "SHH-ENV1" ‖ H ‖ SHA-256(credId)
+recoveryFromKey(rk) → { kekS, aS };  formatRecovery(rk): string;  parseRecovery(s): Uint8Array  // base32 Crockford, normalisation
+sealBlob(kBlob, h, gen, json) / openBlob(kBlob, h, b, minGen)   // "SHH-ACCT1", paliers 4 Ki…1 Mi ; minGen : refus d'un retour en arrière
+mergeBlobs(a, b): BlobJson;                                     // union par id, tombstones 7 j, gone l'emporte
+openAccount(deps?: { webauthn?, fetch?, idb?, now?, random? }) → { create(opts); login(); recover(code); logout(); remove(destroyShares: boolean); addDevice(); renewRecovery(); status() };
+scheduleSync(delayMs = randomBetween(120_000, 1_800_000));      // jamais immédiat après un envoi
+```
+- [ ] **Step 1 : Tests qui échouent** (WebAuthn simulé, avec et sans PRF ; IndexedDB en mémoire ; `fetch` intercepté) : vecteurs fixes HKDF et AES-GCM (enveloppe, coffre) recalculés par un script Node indépendant ; toutes les clés `extractable === false` ; corps de toutes les requêtes interceptées : aucun repère de libellé, de `S_gestion` ni de réglage, aucun `P_i`, `RK`, `K_compte` (recherche d'octets) ; `B` toujours à la taille exacte d'un palier ; `openBlob` avec `gen` < `minGen` → refus ; données authentifiées modifiées (`H`, `gen`) → refus ; `parseRecovery` accepte espaces, tirets, minuscules, `I`/`L`/`O`, refuse une longueur fausse ; sans PRF, création sans clé de secours → refus (Q-A1) ; PRF absente au `create` → `get` enchaîné ; 409 → relecture, fusion, réécriture `gen + 1` ; fusion : une entrée `gone` sur un appareil l'emporte, une tombstone de plus de 7 jours disparaît ; `scheduleSync` : aucune écriture dans les 2 min qui suivent un `add` d'historique (horloge simulée) ; jeton de session jamais envoyé vers `/api/shares/*` ni `/api/manage/*` ; `logout()` oublie clés, clair et copie locale ; `remove(true)` appelle `manageDestroy` pour chaque `S_gestion` avant `supprimer`.
+- [ ] **Step 2 : Lancer** `npm test` → ÉCHEC.
+- [ ] **Step 3 : Implémenter** spec §37.2, §37.4, §37.6 ; WebCrypto seulement (aucune dépendance nouvelle).
+- [ ] **Step 4 : Lancer** `npm test` (avec `tsc`) → SUCCÈS.
+- [ ] **Step 5 : Commit** « feat(account): clés par PRF ou clé de secours, coffre de compte chiffré, synchronisation différée » et push.
+
+### Task A3 : Écrans du compte et « le serveur ne voit rien » de bout en bout (spec §37.7)
+
+**Files:**
+- Create: `web/src/routes/Account.svelte` (`/compte`), `web/src/routes/RecoveryKey.svelte`, `web/ui-e2e/account.spec.ts`, `web/ui-e2e/account-sees-nothing.spec.ts`
+- Modify: `web/src/ui/AppShell.svelte` (lien « Compte (facultatif) » du menu), `web/src/routes/History.svelte` (« Créer un compte (facultatif) », état de synchronisation), `web/src/routes/Ready.svelte` (lien texte sous la bascule), `web/src/routes/PageSecurite.svelte` (paragraphe « Le compte facultatif », limites de spec §18.18), `web/src/i18n/*` (« Aucun compte nécessaire, ni pour envoyer, ni pour recevoir. » remplace la formule de la Task V2), `web/src/app/router.svelte.ts`
+
+- [ ] **Step 1 : Tests qui échouent** (e2e, authentificateur virtuel de Chromium par CDP `WebAuthn.addVirtualAuthenticator`, une fois avec `hasPrf: true`, une fois sans) : texte exact « Facultatif. Sans e-mail. Votre historique est chiffré : nous ne pouvons pas le lire. » suivi du lien « Ce que le compte ne protège pas » ; annulation de la passkey → retour sans erreur, aucun compte ; création avec PRF → clé de secours refusable ; sans PRF → clé de secours exigée et message de spec §37.7 ; deux contextes (deux « appareils ») avec la même passkey virtuelle : un envoi sur le premier apparaît dans `/envois` du second après la synchronisation (horloge avancée) ; récupération par la clé de secours dans un troisième contexte sans passkey ; Se déconnecter → `/envois` ne montre plus les entrées synchronisées ; Supprimer le compte (case décochée) → le partage vit encore, `GET blob` → 404 ; case cochée → partages détruits ; pages d'ouverture et de contenu : aucune mention du compte (balayage du texte) ; aucune entrée de compte sur le chemin de l'envoi hors du lien texte de « Lien prêt » ; démo → aucune entrée de compte ; `axe` ; captures `account-intro`, `account-recovery`, `account-status`.
+- [ ] **Step 2 : `account-sees-nothing.spec.ts`** (SUCCÈS exigé, bloquant comme le test du Plan 1) : parcours complet (création, envoi, synchronisation, second appareil, suppression) ; repères dans les libellés, réglages et `S_gestion` ; exige : aucun repère dans le corps d'une requête ni dans `accounts.db` / WAL après arrêt ; aucune requête de partage avec `X-Shh-Session` ; aucune requête de compte avec un identifiant ou un secret de partage ; écriture de `B` jamais dans les 2 min d'un `finalize`.
+- [ ] **Step 3 : Lancer** → ÉCHEC, **implémenter** spec §37.7 et les textes ci-dessus, **relancer** `make test-ui`, la démo (`npm run build:demo && node scripts/check-dist.mjs --demo && npx playwright test --project='demo-*'`) → SUCCÈS.
+- [ ] **Step 4 : Liste manuelle** (fichier de décisions) : iPhone (Safari 18+, trousseau iCloud), Android (Chrome, gestionnaire Google), ordinateur avec clé de sécurité sans PRF : créer, second appareil, récupération, suppression.
+- [ ] **Step 5 : Commit** « feat(account): écrans du compte facultatif, le serveur ne voit rien étendu au compte » et push.
+
+---
+
 ### Task V1 : Coffre — clés et stockage (spec §27.2 à §27.4)
 
 **Files:**
@@ -1331,6 +1398,40 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 - [ ] **Accueil : sous-titre, B2, motif 2.** Titre conservé « Un lien, un mot de passe, puis plus rien. » ; sous-titre proposé : « Textes, photos, vidéos, vocaux, documents. Chiffrés sur votre appareil ; le serveur ne reçoit jamais la clé. » ; volet chiffré décoratif immobile en mouvement réduit (M2, Task 17). **B2 (faible)** : le libellé du schéma « Serveur — ne lit rien » peut se lire « ne voit rien » ; proposer « ne peut pas lire » ou « reçoit du chiffré », à trancher par le propriétaire avec UI §9.1, `fr.ts`, `en.ts` et tests. *Contrôle* : décision consignée dans le fichier de décisions ; capture de l'accueil.
 - [ ] **B3 sur le build.** *Contrôle* : `grep -rniE "\baudit|suisse|islande|switzerland|iceland" web/dist` est vide tant que `AUDITS` et `HOSTING_COUNTRY` (Task 25) sont vides.
 - [ ] **Annexe du plan.** *Contrôle* : `grep -c "Apports de l'étude des concurrents\*\*" docs/superpowers/plans/2026-11-04-shhdrop-ecrans.md` renvoie 31 (une par tâche listée) et l'annexe contient 18 lignes de motifs et 5 lignes de signatures.
+
+---
+
+### Tasks P1 à P3 : offre payante facultative (spec §38) — **après la mise en ligne de la V1**
+
+**Bloquées** tant que le propriétaire n'a pas tranché Q-P1 (moyen de paiement), Q-P2 (exception crypto pour Privacy Pass), Q-P5 (statut juridique), et que le juriste et le comptable n'ont pas validé spec §38.5. La fonction « Demander des fichiers » (Q-P6) exige d'abord sa propre section de spec. Ces tâches ne font pas partie du Plan 2 livrable ; elles sont écrites ici pour que le reste du code ne les rende pas impossibles (aucune dépendance de V1 sur elles). Revues : `golang-backend`, `constant-time-analysis`, `supply-chain-risk-auditor` (circl, blindrsa-ts), `privacy-review`, `sharp-edges`.
+
+### Task P1 : Droit d'usage — pass, webhook du vendeur, jetons Privacy Pass (spec §38.4)
+
+**Files:**
+- Create: `server/internal/pass/store.go` (`passes.db` : `passes(q, valid_until_day, tokens_left)`, `spent(token_hash)`), `store_test.go`, `server/internal/pass/issuer.go`, `issuer_test.go` (RFC 9474 et 9578 par `github.com/cloudflare/circl/blindsign/blindrsa`), `server/internal/pass/webhook.go`, `webhook_test.go` (signature du vendeur choisi, rejouage refusé), `web/src/premium/pass.ts`, `pass.test.ts`, `web/src/premium/tokens.ts`, `tokens.test.ts` (`@cloudflare/blindrsa-ts`, ou la variante minimale si Q-P2 est refusée)
+- Modify: `go.mod`, `package.json` (versions exactes, ≥ 7 jours, spec §24), `THIRD_PARTY_LICENSES.md`, `CLAUDE.md` **seulement si le propriétaire valide l'exception Q-P2** (commit séparé, de sa main ou sur son accord écrit), `web/src/source-rules.test.ts` (`premium/` seul à manipuler `P` et les jetons)
+
+- [ ] **Step 1 : Tests qui échouent** : vecteurs de test officiels des RFC 9474 (annexe) et 9578 passent côté Go et côté navigateur ; un jeton émis puis présenté → accepté une fois, refusé la seconde (`spent`) ; jeton d'une clé d'époque expirée → refus ; deux jetons d'un même pass présentés : le serveur ne peut pas les relier (aucune donnée de pass dans `spent` ni dans `shares.db`, recherche d'octets) ; webhook non signé, rejoué ou de montant inconnu → refus ; remboursement → ligne supprimée ; `tokens_left` épuisé → refus d'émission ; aucune référence de commande, aucun e-mail, aucune adresse dans `passes.db` ; la clé publique d'émission apparaît dans le manifeste de version signé (Task C1) ; « le serveur ne voit rien » : `P` jamais dans une requête de partage, `Q` jamais dans `shares.db` ni `accounts.db`.
+- [ ] **Step 2 : Lancer** → ÉCHEC. **Step 3 : Implémenter** spec §38.4. **Step 4 : Lancer** `make test-go`, `npm test`, `govulncheck`, `npm audit` → SUCCÈS.
+- [ ] **Step 5 : Commit** « feat(premium): pass prépayé et jetons aveugles Privacy Pass » et push.
+
+### Task P2 : Limites Plus côté serveur (spec §38.2, §38.6)
+
+**Files:**
+- Modify: `server/internal/share/*` (paliers 2 et 5 Gio, + morceau du manifeste ; durées 2, 3, 7 j et 30 j jusqu'à 1 Gio ; ouvertures jusqu'à 50 sous taille × ouvertures ≤ 100 Gio ; échéance personnalisée arrondie au quart d'heure), `server/internal/limits/*` (octets Plus du jour, spec §9.5), `server/internal/config/config.go` (`SHH_STORAGE_PLUS_MAX`), `web/src/crypto/container.ts` (paliers Plus, palier canonique toujours vérifié), tests associés
+
+- [ ] **Step 1 : Tests qui échouent** : sans jeton, toute valeur hors limites gratuites → 400 identique à aujourd'hui ; avec jeton valide : 5 Gio et 7 j acceptés, 5 Gio et 30 j refusés, 5 Gio et 21 ouvertures refusés ; réserve Plus pleine → 503 « busy » sans toucher à la réserve gratuite ; quota Plus par connexion et par /48 ; budget de lecture de spec §24 inchangé (2 × le palier) ; palier canonique côté client pour 2 et 5 Gio ; aucune colonne nouvelle dans `shares` qui porte le jeton ou le pass ; « le serveur ne voit rien » vert avec un partage Plus.
+- [ ] **Step 2 : Lancer** → ÉCHEC. **Step 3 : Implémenter.** **Step 4 : Lancer** → SUCCÈS. **Step 5 : Commit** « feat(premium): limites Plus, réserve de stockage séparée » et push.
+
+### Task P3 : Écrans — page `/offre`, achat, pass, limites atteintes (spec §38.1, §38.2)
+
+**Files:**
+- Create: `web/src/routes/Offer.svelte` (`/offre`), `web/src/routes/PassKey.svelte` (affichage unique de `P`, Copier, Télécharger, Ranger dans mon compte), `web/src/routes/PageCGV.svelte`, `web/ui-e2e/offer.spec.ts`
+- Modify: `web/src/routes/Compose.svelte` et `Options.svelte` (choix Plus visibles seulement avec un pass ; ligne neutre « Au-delà de 1 Go : offre Plus, facultative » à la limite), `web/src/ui/AppShell.svelte` (lien de pied de page « Offre Plus »), `web/src/routes/PageConfidentialite.svelte` (vendeur officiel, ce qu'il voit), `web/src/i18n/*`
+
+- [ ] **Step 1 : Tests qui échouent** (e2e, faux vendeur en mémoire) : tableau gratuit / Plus de spec §38.2 affiché tel quel, prix TTC, durée et « rien n'est prélevé à la fin » ; case de renoncement à la rétractation **non cochée** par défaut et obligatoire pour l'usage immédiat ; aucun compte à rebours, prix barré, case précochée ni mot de rareté (balayage de motifs interdits) ; pages d'ouverture, de contenu et du coffre : aucune mention de l'offre (balayage du texte) ; la Task 28 (« aucune offre ») reste vraie partout sauf `/offre`, le lien de pied de page et la ligne de limite, exceptions listées dans le fichier de décisions ; aucune ressource du vendeur chargée sur une page qui détient des clés : le paiement se fait par redirection vers le site du vendeur, depuis `/offre` seulement (aucune clé en mémoire sur cette page, test) ; `axe` ; captures `offer`, `pass-key`.
+- [ ] **Step 2 : Lancer** → ÉCHEC. **Step 3 : Implémenter**, textes relus par le juriste (CGV, rétractation, médiateur). **Step 4 : Lancer** `make test-ui` et la démo (offre absente de la démo) → SUCCÈS.
+- [ ] **Step 5 : Commit** « feat(premium): page Offre Plus, pass, CGV » et push.
 
 ---
 

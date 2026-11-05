@@ -1,7 +1,7 @@
 # Shhdrop — spécification V1 (version 2, finale à valider)
 
 Date : 4 novembre 2026 · Domaine visé : **shhdrop.app**
-Historique : v1 du 3 novembre, puis revue critique indépendante et passage complet de recherche d'oublis (voir section 0). v2.4 (4 novembre) : durcissement après l'audit « sharp edges » (section 25). v2.5 (5 novembre) : repli Google reCAPTCHA isolé (section 26). v2.6 (5 novembre) : décisions du propriétaire, coffre chiffré sur téléphone (27), code vérifiable (28), chiffrement anticipé (29), revue post-quantique (30), mot de passe de 8 caractères (31), lien court (32), historique local sans compte (33), droits du destinataire (34, simplifiés en 34.1), puis aucune statistique, nettoyage des métadonnées de tous les fichiers et enregistrement dans l'interface (35), minimisation de ce que voit le serveur (36). Les sections 29 à 36 remplacent les passages signalés « → § » ci-dessous.
+Historique : v1 du 3 novembre, puis revue critique indépendante et passage complet de recherche d'oublis (voir section 0). v2.4 (4 novembre) : durcissement après l'audit « sharp edges » (section 25). v2.5 (5 novembre) : repli Google reCAPTCHA isolé (section 26). v2.6 (5 novembre) : décisions du propriétaire, coffre chiffré sur téléphone (27), code vérifiable (28), chiffrement anticipé (29), revue post-quantique (30), mot de passe de 8 caractères (31), lien court (32), historique local sans compte (33), droits du destinataire (34, simplifiés en 34.1), puis aucune statistique, nettoyage des métadonnées de tous les fichiers et enregistrement dans l'interface (35), minimisation de ce que voit le serveur (36). v2.7 (5 novembre) : compte facultatif par passkey, sans e-mail (37) et offre payante facultative « patte blanche » (38). Les sections 29 à 38 remplacent les passages signalés « → § » ci-dessous.
 
 ---
 
@@ -89,7 +89,7 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 
 ### Jamais
 
-- Comptes, profils, contacts · publicité, analytics, traceurs, ressources tierces (seule exception : le repli reCAPTCHA isolé de la section 26) · tout mécanisme permettant au serveur de lire un contenu.
+- Comptes **obligatoires**, profils, contacts (→ §37 : compte **facultatif** par passkey, jamais demandé pour envoyer ni recevoir) · publicité, analytics, traceurs, ressources tierces (seule exception : le repli reCAPTCHA isolé de la section 26) · tout mécanisme permettant au serveur de lire un contenu.
 - **Aucune statistique** (décision du propriétaire, §35.1) : ni mesure d'audience, ni télémétrie, ni service de rapport d'erreurs (Sentry et semblables), ni statistiques ou compteurs côté serveur autres que les compteurs d'exploitation listés en §9.5. Rien n'est agrégé par personne, par connexion ou par partage au-delà de ce que les règles de la §4 exigent, et rien de cela n'est écrit sur disque.
 
 ---
@@ -109,6 +109,8 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 | Limite de débit | 60 requêtes par minute par connexion sur les routes publiques ; les envois et téléchargements de segments porteurs d'un jeton valide ont leur propre limite, 600 par minute par connexion et 6 000 par bloc /48 (§24) ; un segment au jeton invalide compte dans les 60 |
 | Transferts de segments | au plus 16 téléchargements simultanés par connexion, 64 par /48 et 256 au total ; envois : 8, 32 et 64 ; au-delà 429 (connexion, /48) ou 503 (serveur), avec `Retry-After` ; une ouverture lit au plus 2 × le fichier chiffré de son palier + 2 segments 0, puis 429 `budget` (§24) |
 | Stockage total | plafond configurable (100 Gio par défaut), **réservé à la création** ; au-delà, nouveaux envois refusés |
+
+→ §38.2 : limites de l'offre payante facultative (réserve de stockage séparée, §38.6) ; les limites ci-dessus restent celles du gratuit, pour toujours.
 
 ---
 
@@ -287,7 +289,7 @@ Toutes les réponses : JSON, `Cache-Control: no-store`, erreurs uniformes pour �
 | `GET /api/manage/status` | Ouvertures, secondes restantes | `S_gestion` (en-tête) |
 | `POST /api/manage/destroy` | Destruction par l'expéditeur | `S_gestion` (en-tête) |
 
-→ §29.8 (Task K2) : **aucun identifiant dans les chemins** ; le jeton signé désigne le partage, sinon `K_accès` ou `S_gestion`.
+→ §29.8 (Task K2) : **aucun identifiant dans les chemins** ; le jeton signé désigne le partage, sinon `K_accès` ou `S_gestion`. → §37.8 : routes du compte facultatif sous `/api/compte/` ; §38.4 : jeton Privacy Pass (`Authorization: PrivateToken`) accepté sur `POST /api/shares` pour un partage Plus.
 | `GET /healthz` | Santé (local uniquement) | — |
 
 - Les secrets passent dans des **en-têtes ou le corps**, jamais dans l'URL.
@@ -358,6 +360,10 @@ Interdits, côté serveur comme côté navigateur : mesure d'audience, télémé
 | Défis anti-robot consommés ; créations de l'heure par connexion | sel du défi ; HMAC de connexion | 2 min ; 1 h | usage unique ; difficulté qui double (§22 D4) |
 | Signalements de l'heure | aucun (un seul entier) | remis à zéro chaque heure | alerte « les signalements s'accumulent » (§15.2) ; exposé seulement comme booléen sur `/healthz` local (§36, Task M2) |
 | Place réservée totale | aucune (somme) | calculée depuis la base | plafond global `SHH_STORAGE_MAX` (§4) |
+| Comptes créés du jour (§37.5) | HMAC(secret du jour, /64 ou IPv4, /48) | minuit UTC | 3 et 10 comptes par jour |
+| Défis WebAuthn, sessions de compte (§37.3) | défi ; SHA-256(jeton) → `H` | 2 min ; 15 min sans usage, 2 h au plus | cérémonies à usage unique, session sans cookie |
+| Écritures du coffre de compte, essais de secours (§37.5) | `H` ; HMAC de connexion | 1 h | 60 écritures par heure ; 10 essais par heure |
+| Octets Plus du jour (§38.6) | HMAC(secret du jour, /64 ou IPv4, /48) | minuit UTC | 20 et 40 Gio par jour |
 
 Ne sont **pas** des statistiques : les colonnes d'un partage vivant (`opens_left`, `opens_issued`, `done_mask`, `failed_attempts`), nécessaires à ses règles et effacées avec lui. Hors de notre contrôle, à dire sur la page Confidentialité : les tableaux de bord de trafic de l'hébergeur, les statistiques de trafic de GitHub Pages pour la démo, la sonde externe de §15.2 (elle ne reçoit que la page d'accueil publique).
 
@@ -534,6 +540,7 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 - **Mentions légales** : particulier non professionnel, identité communiquée à l'hébergeur, contact.
 - **CGU** : contenus illicites interdits, destruction sur signalement, aucune garantie de conservation, pas de vérification de l'expéditeur.
 - **Confidentialité** : liste exacte de ce qui est traité (section 9), pas de cookies (donc pas de bandeau).
+- **Compte facultatif et offre payante** : → §37.9 (conservation des données de création de compte) et §38.5 (statut professionnel, factures, TVA, rétractation, CGV, médiateur), à faire valider avant d'activer l'un ou l'autre en public.
 - **Domaine** : registraire classique avec WHOIS masqué et double authentification. Avec Njalla, c'est Njalla qui est propriétaire légal du domaine (risque de perte de contrôle) ; à choisir en connaissance de cause.
 
 ---
@@ -557,6 +564,8 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 15. **Métadonnées** (§35.2) : on retire ce que les conteneurs déclarent (EXIF, XMP, propriétés du document, étiquettes, pistes de position) ; ce qui est **dans le contenu lui-même** reste : texte ou visage visibles, date incrustée dans l'image, données d'un flux vidéo (SEI), anciennes révisions d'un PDF, modifications suivies d'un document et leurs auteurs, contenu des archives.
 16. **Ordre de lecture** (§36) : le serveur voit quels segments un destinataire télécharge et quand ; la lecture monotone réduit ce qu'il en déduit (quels éléments ont été ouverts), sans le supprimer (le point d'arrêt reste visible).
 17. **En-têtes et empreinte TLS** (§36) : le proxy reçoit forcément l'adresse, l'empreinte TLS et les en-têtes du navigateur ; ils ne sont ni journalisés ni transmis au serveur, mais un serveur compromis les voit en direct.
+18. **Compte facultatif** (§37) : au repos, rien ne relie un compte à ses partages ; **en direct**, un serveur compromis peut les relier par l'adresse IP et l'heure (écriture du coffre de compte, relectures de l'historique), malgré l'écriture différée. Un appareil neuf ne peut pas détecter qu'on lui ressert un ancien coffre de compte. Le texte « nous ne pouvons pas le lire » vaut tant que le code servi n'est pas piégé (point 2).
+19. **Offre payante** (§38) : le vendeur officiel connaît l'identité du payeur et l'empreinte de son pass ; au repos, on voit qu'un partage est Plus, pas qui l'a payé ; l'adresse IP à l'émission et à l'usage des jetons reste visible en direct.
 
 ---
 
@@ -579,6 +588,8 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 | Adresse e-mail de contact | Avant la mise en ligne |
 | Avis d'un juriste (LCEN, DSA) et déclaration ANSSI | Avant l'ouverture au public |
 | Stockage total (100 Gio par défaut) | Selon le serveur choisi |
+| Compte facultatif : Q-A1 à Q-A5 (§37.10) | Avant les Tasks A1 à A3 |
+| Offre payante : Q-P1 à Q-P7 (§38.7), statut juridique, juriste et comptable | Après la mise en ligne de la V1, avant les Tasks P1 à P3 |
 
 ---
 
@@ -1002,7 +1013,7 @@ Le test « le serveur ne voit rien » ajoute un repère de mot de passe saisi **
 - **Heures des ouvertures** : le serveur ne stocke aucune heure d'ouverture (§9.1). L'historique note l'intervalle pendant lequel le compteur a changé, entre deux relectures de `manage/status` (« ouvert entre 21 h 00 et 21 h 15 ») ; relecture toutes les 60 s seulement quand l'écran est visible ; sans relecture, pas d'heure.
 - Exception écrite à UI §12.1 : `S_gestion` est stocké, chiffré (AES-256-GCM, clé non extractible créée par WebCrypto, gardée dans IndexedDB), dans le seul module `web/src/history/`. Honnêtement, cette clé est stockée sur le même appareil : le chiffrement ne protège que des lectures naïves du stockage ; la vraie protection est le verrouillage du téléphone. Verrou optionnel par passkey (même mécanisme que §27) : question Q-H1. Une entrée expirée ou détruite est retirée 7 jours après. « Effacer l'historique » à tout moment. Bascule « Garder dans mon historique » sur « Lien prêt », activée par défaut.
 - « Ces informations ne seront plus jamais affichées » (§5.1) reste vrai pour le lien et le mot de passe ; seul le lien de gestion est gardé.
-- **Plus tard, hors V1** : compte optionnel par passkey pour synchroniser l'historique entre appareils. Coût pour la vie privée : le serveur relierait entre eux les partages d'une même personne (même chiffrés, les envois deviennent associables à un compte), ce qui crée une identité côté serveur et relance la question de conservation des données (LCEN, §17).
+- → §37 (v2.7) remplace ce point : compte facultatif spécifié, avec l'analyse de liaison de §37.4. Texte d'origine : **Plus tard, hors V1** : compte optionnel par passkey pour synchroniser l'historique entre appareils. Coût pour la vie privée : le serveur relierait entre eux les partages d'une même personne (même chiffrés, les envois deviennent associables à un compte), ce qui crée une identité côté serveur et relance la question de conservation des données (LCEN, §17).
 
 ---
 
@@ -1178,8 +1189,17 @@ But : que le serveur, et quiconque le lit (hébergeur, pirate, réquisition), ap
 | S19 | **Relectures de la page de gestion** | `manage/status` toutes les 60 s quand l'écran est visible (§33) : relie une connexion à un partage, en direct | relecture seulement écran visible (fait) ; aucune relecture en arrière-plan ni par le service worker ; aucune trace côté serveur | Fait |
 | S20 | **Pré-calcul anti-robot et envoi anticipé** | le serveur sait qu'une composition est en cours (§29.4) | mode « Envoyer seulement quand je clique » (S4) ; défaut : Q-K1 | Choix du propriétaire |
 | S21 | **Compteur de signalements** | prévu (§7.6), non codé | un entier horaire, booléen `reports_alert` sur `/healthz` local, aucun identifiant (§9.5) | **À faire** M2 |
+| S22 | **Existence d'un compte** (§37) | une ligne `accounts` par compte, `H` aléatoire, aucune identité | aucune donnée civile ; passkey seule ; comptes abandonnés effacés après 13 mois | **À faire** A1 |
+| S23 | **Date de création du compte, dernière connexion** | `created_month`, `seen_month` | au mois près ; aucune autre date, aucune heure d'écriture du coffre | **À faire** A1 |
+| S24 | **Taille du coffre de compte** | `B` | paliers 4, 16, 64, 256 Kio, 1 Mio ; plafond 1 Mio | **À faire** A2 |
+| S25 | **Lien compte ↔ partages** | aucun au repos (`S_gestion` seulement dans `B` chiffré, bases séparées, aucun cookie) ; en direct : adresse et heure | écriture de `B` différée de 2 à 30 min ; jeton de session jamais envoyé aux routes des partages ; relectures étalées ; reste en direct : §18.18 | **À faire** A1–A3 ; en direct : **impossible** sans Tor |
+| S26 | **Passkeys** | identifiant, clé publique, algorithme, enveloppe ; nombre de passkeys par compte | ni AAGUID, ni attestation, ni compteur de signatures, ni transports | **À faire** A1 |
+| S27 | **Connexions** | heure en direct ; `seen_month` | aucun historique de connexions, aucun identifiant d'appareil | **À faire** A1 |
+| S28 | **Pass payant ↔ identité** (§38) | chez le vendeur officiel seulement (empreinte `Q`) | aucune référence de commande ni moyen de paiement chez nous ; pass rangé dans `B` : le serveur ignore quel compte le détient | **À faire** P1 |
+| S29 | **Pass ↔ partages Plus** | aucun : jetons aveugles (RFC 9474, 9578) ; en direct, adresse et heure | émission par lots à heure aléatoire, longtemps avant usage ; variante sans jetons : liaison en direct (§38.4) | **À faire** P1 |
+| S30 | **Partage Plus** | palier, durée ou ouvertures au-delà du gratuit | inévitable (règles appliquées par le serveur) ; ne dit pas qui a payé | Assumé |
 
-**Le test « le serveur ne voit rien » (§14) s'étend** (Task M2, bloquant comme avant) : en plus des repères de contenu, de nom, de mot de passe et de clés, il envoie une **IP repère** (texte et 4 octets), un **User-Agent, un Referer et un Accept-Language repères**, un identifiant repère dans une route inconnue et un `reason` repère ; il exige : aucun de ces repères sur disque (base, WAL, fichiers), dans stdout, stderr ni dans une réponse ; base sans `progress_at`, `upload_deadline`, `purge_at` non nuls après `finalize` et sans `ttl_hours` ; toutes les dates de la base multiples de 900 s ; en mode « au clic », aucune requête `finalize` ne porte `fill_from`. La fouille de la mémoire reste limitée aux repères de contenu et de clés : l'adresse et les en-têtes passent forcément par la mémoire du processus qui reçoit la requête ; derrière Caddy (Plan 3), les en-têtes retirés ne doivent plus y apparaître.
+**Le test « le serveur ne voit rien » (§14) s'étend** (Task M2, bloquant comme avant) : en plus des repères de contenu, de nom, de mot de passe et de clés, il envoie une **IP repère** (texte et 4 octets), un **User-Agent, un Referer et un Accept-Language repères**, un identifiant repère dans une route inconnue et un `reason` repère ; il exige : aucun de ces repères sur disque (base, WAL, fichiers), dans stdout, stderr ni dans une réponse ; base sans `progress_at`, `upload_deadline`, `purge_at` non nuls après `finalize` et sans `ttl_hours` ; toutes les dates de la base multiples de 900 s ; en mode « au clic », aucune requête `finalize` ne porte `fill_from`. **Compte (Tasks A1 à A3)** : le même test crée un compte, synchronise un coffre de compte qui contient des `S_gestion`, libellés et réglages repères, puis exige : aucun repère dans `accounts.db`, son WAL, stdout, stderr ni une réponse ; aucune valeur commune entre `accounts.db` et `shares.db` (`V_gestion`, `V_accès`, identifiants) ; aucune date de `accounts.db` qui ne soit un premier du mois à minuit UTC ; aucune requête vers `/api/shares/*` ou `/api/manage/*` qui porte `X-Shh-Session` ; après suppression du compte et arrêt, aucun octet de `B` dans le fichier de base. La fouille de la mémoire reste limitée aux repères de contenu et de clés : l'adresse et les en-têtes passent forcément par la mémoire du processus qui reçoit la requête ; derrière Caddy (Plan 3), les en-têtes retirés ne doivent plus y apparaître.
 
 ### 36.1 Questions ouvertes (défaut recommandé)
 
@@ -1189,3 +1209,199 @@ But : que le serveur, et quiconque le lit (hébergeur, pirate, réquisition), ap
 | Q-MIN2 | Lecture monotone chez le destinataire (S9) | Oui |
 | Q-MIN3 | Cadence d'envoi constante | Non |
 | Q-K1 (rappel) | Envoi anticipé par défaut | Inchangé (oui) ; l'audit P8 recommande l'inverse : à trancher par le propriétaire |
+
+---
+
+## 37. Décision du propriétaire (v2.7, 5 novembre) — compte facultatif
+
+Le propriétaire a décidé qu'un **compte facultatif** peut exister. Il n'est **jamais** demandé pour envoyer, recevoir, gérer, garder dans le coffre ni signaler. Il ne sert qu'à deux choses : **synchroniser entre appareils** un coffre de données chiffré (historique des envois de §33 et réglages), et **ranger** un pass de l'offre payante (§38) pour qui en a un. Cette section remplace le point « Plus tard, hors V1 » de §33 et amende §3 (« Jamais : comptes ») : les profils, contacts, pseudonymes et annuaires restent exclus. Le registre du contrôleur (ledger, ligne « Spécifié en §35 ») visait cette section : §35 était déjà prise.
+
+Réalisé après la Task H (Tasks A1 à A3 du plan des écrans), désactivé par défaut côté serveur (`SHH_ACCOUNTS=0`), et **désactivé dans la démo GitHub Pages** (identifiant de site WebAuthn `github.io` partagé avec tous les sites Pages, faux serveur en mémoire).
+
+### 37.1 Identité : passkey seule
+
+- **WebAuthn uniquement.** Aucun e-mail, nom, téléphone, pseudonyme ni mot de passe n'est demandé ou stocké côté serveur.
+- **Création** (`navigator.credentials.create`) : `rp.id` = hôte de `SHH_ORIGIN` (`shhdrop.app`) ; `user.id` = **identifiant de compte** `H` (16 octets tirés par le serveur, `crypto/rand`) ; `user.name` = `user.displayName` = « Compte Shhdrop » (fixe, pour tous) ; `residentKey: "required"` (connexion sans saisie) ; `userVerification: "required"` ; `attestation: "none"` ; algorithmes `-7` (ES256) puis `-257` (RS256) ; `extensions: { prf: { eval: { first: E } } }` où `E` = SHA-256(« shhdrop/v2/compte/prf/1 ») (entrée fixe et publique : le secret est dans l'authentificateur, la sortie diffère pour chaque passkey ; le `/1` permet une rotation).
+- **Connexion** (`navigator.credentials.get`) : `allowCredentials` vide (passkey découvrable), `userVerification: "required"`, même `prf.eval.first = E`. Le serveur retrouve le compte par `userHandle` = `H`, puis par l'identifiant de la passkey.
+- **Vérification côté serveur** : bibliothèque **`github.com/go-webauthn/webauthn`** (licence BSD-3-Clause, à revérifier à la Task A1), **version exacte épinglée** dans `go.mod`, dernière stable publiée depuis au moins 7 jours (§24), notée dans `THIRD_PARTY_LICENSES.md`, `govulncheck` vert. Elle ne fait que des vérifications de signatures avec la bibliothèque standard de Go : aucune crypto maison.
+- **Ce qui est gardé par passkey** : identifiant de la passkey, clé publique, algorithme, et son enveloppe (§37.2). **Jamais** : AAGUID (modèle de l'authentificateur), transports, attestation, compteur de signatures (il changerait à chaque connexion et daterait l'activité ; les passkeys synchronisées renvoient 0 de toute façon), drapeaux de sauvegarde.
+- **Récupération (facultative)** : une **clé de secours** `RK` (32 octets aléatoires, WebCrypto) est montrée **une seule fois** à la création : 52 caractères en base32 Crockford, groupés par 4, avec « Copier » et « Télécharger (.txt) ». La saisie est normalisée (majuscules, espaces et tirets retirés, `I`/`L` → `1`, `O` → `0`). Elle permet de se reconnecter et de déchiffrer sans aucune passkey. Le serveur n'en garde qu'un vérificateur (§37.2). Elle est **obligatoire** quand la passkey n'offre pas PRF (sinon rien ne permettrait de déchiffrer sur un autre appareil) ; proposée et refusable sinon, avec : « Sans clé de secours, perdre vos passkeys fait perdre cet historique. Vos partages, eux, continuent de fonctionner. »
+
+### 37.2 Données à connaissance nulle : clés et coffre de compte
+
+Aucune construction maison : HKDF-SHA-256 et AES-256-GCM de WebCrypto, aléa de `crypto.getRandomValues`. Toutes les clés importées sont **non extractibles**, les tampons intermédiaires mis à zéro au mieux (§18.4).
+
+| Élément | Création | Où il vit |
+|---|---|---|
+| `K_compte` | 32 octets aléatoires, tirés une fois à la création du compte | jamais sur le serveur en clair ; en mémoire de la page pendant la session |
+| `P_i` | sortie PRF de la passkey `i` pour l'entrée `E` (`prf.results.first`, 32 octets) | mémoire, le temps de l'enveloppe |
+| `KEK_i` | HKDF(`P_i`, sel = vide, info = « shhdrop/v2/compte/enveloppe ») → AES-256-GCM | mémoire |
+| `Env_i` | AES-256-GCM(`KEK_i`, nonce aléatoire de 12 octets, `K_compte`, données authentifiées = « SHH-ENV1 » ‖ `H` ‖ SHA-256(identifiant de la passkey `i`)) | serveur, avec la passkey `i` |
+| `KEK_s` | HKDF(`RK`, sel = vide, info = « shhdrop/v2/compte/secours/enveloppe ») | mémoire |
+| `Env_s` | AES-256-GCM(`KEK_s`, nonce aléatoire, `K_compte`, données authentifiées = « SHH-ENV1 » ‖ `H` ‖ « secours ») | serveur |
+| `A_s` | HKDF(`RK`, info = « shhdrop/v2/compte/secours/acces ») | envoyé au serveur pour la connexion de secours |
+| `V_s` | SHA-256(`A_s`) | serveur (index unique : la clé de secours retrouve le compte) |
+| `K_blob` | HKDF(`K_compte`, info = « shhdrop/v2/compte/blob ») → AES-256-GCM | mémoire |
+| `B` | voir ci-dessous | serveur |
+
+- **Pourquoi pas d'Argon2id ici** : `P_i` et `RK` sont des secrets aléatoires de 256 bits, HKDF suffit (même règle que `K_lien`, §29). Une clé de secours choisie par l'utilisateur est refusée : elle n'est jamais tapée « de tête ».
+- **Coffre de compte `B`** = « SHH-ACCT1 » (9 octets) ‖ `gen` (8 octets, entier croissant) ‖ nonce (12 octets) ‖ AES-256-GCM(`K_blob`, nonce, clair bourré, données authentifiées = « SHH-ACCT1 » ‖ `H` ‖ `gen`). Clair = longueur (4 octets) ‖ JSON ‖ zéros jusqu'au palier. **Paliers** de `B` : 4, 16, 64, 256 Kio, 1 Mio (plafond). Nonce aléatoire à chaque écriture (quelques milliers d'écritures au plus par clé : très loin de la limite de 2³² messages).
+- **Contenu du JSON** (`v: 1`) : `history` (les entrées de §33 telles quelles : `S_gestion`, échéance, maximum d'ouvertures, libellé local, ouvertures observées ; **jamais** `K_lien`, mot de passe ni noms des éléments), `tombstones` (entrées retirées, gardées 7 jours pour la fusion), `settings` (langue, « Garder dans mon historique » par défaut, mode d'envoi de Q-K1), `pass` (secret du pass de §38, seulement si l'utilisateur l'y range).
+- **Le coffre du téléphone (§27) n'est pas synchronisé**, ni son index : les paquets ne quittent jamais le téléphone, un index ailleurs ne servirait à rien et révélerait leur nombre et leurs échéances.
+- **Retour en arrière** (un serveur malveillant ressert un ancien `B`) : chaque appareil garde le plus grand `gen` vu pour `H` (module `web/src/account/`, IndexedDB) et refuse un `gen` plus petit. Limite : un appareil neuf ne peut pas le détecter (§18.18).
+- **Écritures concurrentes** : `PUT` avec `if_gen` ; si le serveur a déjà un `gen` plus grand → 409, le client relit, fusionne (union des entrées par identifiant local, `tombstones` appliquées, état le plus avancé gardé : `gone` l'emporte), réécrit avec `gen + 1`.
+- **Appareil sans PRF** (authentificateur qui ne l'offre pas, vérifié par `getClientCapabilities()` puis par la présence de `prf.results`) : la passkey authentifie seulement ; `K_compte` est obtenue par la clé de secours, saisie une fois, puis gardée sur cet appareil enveloppée par une clé AES-GCM **non extractible** de WebCrypto dans IndexedDB (même protection honnête que §33 : elle ne vaut que le verrouillage de l'appareil). Jamais de repli silencieux : l'écran le dit.
+- **PRF à la création** : certains navigateurs ne rendent pas `prf.results` pendant `create` ; le client enchaîne alors un `get` (un geste de plus, annoncé).
+
+### 37.3 Sessions
+
+- **Jeton de session en mémoire seulement**, pas de cookie : 32 octets aléatoires remis après une cérémonie réussie, envoyé dans l'en-tête `X-Shh-Session` **uniquement** par le module `web/src/account/`, et **jamais** vers `/api/shares/*` ni `/api/manage/*` (test de sources et test e2e). Le serveur ne garde que SHA-256(jeton) → `H` en mémoire ; durée 15 min sans usage, 2 h au plus ; un redémarrage les invalide toutes. Recharger la page redemande la passkey (un geste, qui redonne aussi `P_i`).
+- **Pourquoi pas de cookie** : un cookie partirait avec chaque requête vers l'origine, y compris celles des partages, ce qui relierait compte et partages ; il faudrait aussi une protection CSRF. Si un cookie devenait nécessaire (application native, §16), il serait `__Host-`, `HttpOnly`, `Secure`, `SameSite=Strict`, sans `Max-Age`, et la règle « jamais vers les partages » resterait testée.
+- **Aucun suivi** : ni identifiant d'appareil, ni empreinte, ni historique de connexions, ni « derniers appareils connectés ».
+- **Déconnexion** : le serveur oublie la session ; le client oublie `K_compte`, `K_blob`, le clair du coffre et la copie locale de l'historique synchronisé. **Correction de la demande** (signalée) : « la déconnexion détruit le coffre » ne peut viser que la copie locale ; détruire `B` sur le serveur à la déconnexion supprimerait l'historique de tous les appareils. Seule la **suppression du compte** efface `B` sur le serveur.
+
+### 37.4 Ce qui est stocké, et l'absence de lien avec les partages
+
+- **Base séparée** `accounts.db` (même dossier, mêmes règles que §9 : `secure_delete=ON`, `temp_store=MEMORY`, WAL vidé, droits 0600, `WITHOUT ROWID`), jamais jointe à `shares.db` : aucune colonne commune, aucune requête qui touche les deux.
+  - `accounts` : `h` (clé), `created_month` (premier jour du mois UTC de création), `seen_month` (mois de la dernière connexion, pour l'effacement des comptes abandonnés), `blob` (`B`), `gen`, `v_s` et `env_s` (facultatifs).
+  - `credentials` : `cred_id` (clé), `h`, `public_key`, `alg`, `env`.
+- **Jamais stockés** : adresse IP, en-têtes, heure exacte, heure des écritures de `B`, nombre de connexions, lien entre `H` et un partage, un pass ou un paiement.
+- **Aucun lien au repos entre compte et partages** : `S_gestion` n'existe que dans `B` chiffré ; les partages ne portent aucune trace du compte ; le pass (§38) est lui aussi dans `B`, donc le serveur ne sait pas quel compte détient quel pass.
+- **En direct, un serveur compromis peut relier** (signalé, §18.18) : la même adresse IP qui écrit `B` vient de finaliser un partage, ou relit `manage/status` pour N partages juste après la connexion. Réductions : l'écriture de `B` après un nouvel envoi est **différée** d'un délai aléatoire de 2 à 30 min (ou faite au prochain lancement), jamais immédiate ; les relectures de l'historique restent celles de §33 (60 s, écran visible), étalées au hasard sur la minute ; aucune requête de compte ne porte d'identifiant de partage.
+
+### 37.5 Limites anti-abus
+
+- **Création** : preuve de travail (§22, repli §26) ; 3 comptes par jour par connexion et 10 par /48 (compteurs mémoire sur les clés HMAC du jour, §9.5) ; plafond global `SHH_ACCOUNTS_MAX` (10 000 par défaut).
+- **Cérémonies** : défis WebAuthn en mémoire, usage unique, 2 min ; 60 requêtes de compte par minute par connexion (limite commune de §4) ; connexion de secours : 10 essais par heure par connexion.
+- **Coffre** : `B` ≤ 1 Mio ; 60 écritures par heure par compte (compteur mémoire par `H`, oublié chaque heure) ; 10 passkeys au plus par compte.
+- **Comptes abandonnés** : effacés quand `seen_month` a plus de 13 mois ; compte créé dont `B` est resté vide : effacé au bout de 30 jours (au mois près).
+
+### 37.6 Plusieurs appareils, récupération, suppression
+
+- **Passkey synchronisée** (trousseau iCloud, gestionnaire Google) : elle existe déjà sur les autres appareils du même écosystème, avec le même secret PRF ; « Se connecter » suffit.
+- **Autre écosystème** : connexion par l'appareil qui a la passkey (QR code WebAuthn « hybride »), puis, session ouverte et `K_compte` en mémoire, « Ajouter cet appareil » crée une passkey locale et téléverse son `Env_i`. Si PRF manque sur l'un des deux, la clé de secours prend le relais.
+- **Récupération** : « J'ai ma clé de secours » → `A_s` → session → `K_compte` par `Env_s` → nouvelle passkey et nouvelle enveloppe ; « Changer de clé de secours » remplace `V_s` et `Env_s` (l'ancienne ne sert plus à rien) ; « Retirer une passkey » supprime sa ligne (jamais la dernière s'il n'y a pas de clé de secours).
+- **Rotation de `K_compte`** (passkey perdue ou volée) : « Révoquer et rechiffrer » tire une nouvelle `K_compte`, réécrit `B` et toutes les enveloppes, supprime la passkey retirée.
+- **Suppression du compte** : confirmation sur place ; case **« Détruire aussi mes partages actifs »** (décochée par défaut : le client appelle `manage/destroy` pour chaque `S_gestion` avant de supprimer) ; le serveur supprime les lignes, vide le WAL **immédiatement** (`wal_checkpoint(TRUNCATE)`) et oublie les sessions ; le client efface sa copie locale. La passkey reste dans le gestionnaire de l'utilisateur : le site le dit, et le signale au navigateur quand l'API existe (`PublicKeyCredential.signalUnknownCredential`).
+
+### 37.7 Parcours et textes
+
+- **Où le compte apparaît** (jamais sur les pages du destinataire, jamais sur le chemin de l'envoi) :
+  - menu de l'en-tête : lien discret **« Compte (facultatif) »** ;
+  - `/envois` (§33) : ligne « Retrouver cet historique sur vos autres appareils » → **« Créer un compte (facultatif) »** ;
+  - « Lien prêt » : sous la bascule « Garder dans mon historique », un lien texte de même niveau, jamais un bouton principal ni une fenêtre ;
+  - page Sécurité : paragraphe « Le compte facultatif ».
+- **Texte d'ouverture** de `/compte`, au-dessus de l'unique bouton « Créer avec une passkey » : « **Facultatif. Sans e-mail. Votre historique est chiffré : nous ne pouvons pas le lire.** » Puis : « Il sert à retrouver vos envois sur vos autres appareils. Rien d'autre ne change : sans compte, tout fonctionne. » et un lien « Ce que le compte ne protège pas » vers la page Sécurité.
+- **Parcours de création** : (1) texte d'ouverture ; (2) geste de la passkey (annulation → retour sans erreur, rien n'est créé) ; (3) si PRF manque : « Cet appareil ne permet pas de chiffrer avec la passkey. La clé de secours sera demandée sur chaque nouvel appareil. » ; (4) clé de secours (refusable si PRF) : affichage unique, Copier, Télécharger, case « Je l'ai rangée en lieu sûr » ; (5) « Ajouter l'historique de cet appareil au compte » (activé : c'est la raison d'être du compte) ; (6) « Compte créé. Synchronisation chiffrée active. »
+- **Écran du compte** : état de synchronisation (« À jour » ou « Pas encore synchronisé »), passkeys (« Passkey 1, ajoutée en novembre 2026 », au mois près), Ajouter cet appareil, Clé de secours, Se déconnecter, Supprimer le compte.
+- La phrase des écrans « Sans compte. Ni pour envoyer, ni pour recevoir. » (Task V2) devient « **Aucun compte nécessaire, ni pour envoyer, ni pour recevoir.** »
+
+### 37.8 Routes
+
+Toutes sous `/api/compte/`, JSON strict (§8), réponses uniformes, aucune donnée de partage. `inscription/debut` (preuve de travail) et `inscription/fin` ; `connexion/debut` et `connexion/fin` ; `secours` (`A_s`) ; `GET blob` et `PUT blob` (`if_gen`) ; `appareils` (ajout, retrait) ; `secours/renouveler` ; `deconnexion` ; `supprimer`. Les en-têtes lus s'ajoutent à la liste blanche de §36 S2 : `X-Shh-Session` seulement.
+
+### 37.9 Signalements (vigilance)
+
+| Gravité | Endroit | Problème | Correction |
+|---|---|---|---|
+| Élevée | §3 « Jamais : comptes » ; §33 « Plus tard » | contradiction avec la décision | amendés par renvoi à §37 ; profils et contacts restent exclus |
+| Élevée | §37.4, liaison en direct | un serveur compromis relie compte et partages par l'adresse et l'heure | écriture différée et aléatoire, aucun cookie, limite §18.18 ; Tor (§3) seul l'éviterait |
+| Élevée | §17, LCEN et décret 2021-1362 | un compte peut faire entrer l'exploitant dans les obligations de conservation des données de création de compte (identifiants, et données de paiement en cas de paiement) | avis du juriste (§20) **avant** d'activer `SHH_ACCOUNTS` en public ; la passkey ne livre aucune identité civile |
+| Moyenne | texte imposé « nous ne pouvons pas le lire » | vrai seulement si le code servi n'est pas piégé (§18.2, §28.8) | garder la phrase du propriétaire, avec le lien « Ce que le compte ne protège pas » juste dessous (pas de formule absolue sans renvoi) |
+| Moyenne | demande « la déconnexion détruit le coffre » | détruirait l'historique de tous les appareils | déconnexion = oubli local ; suppression du compte = effacement serveur (§37.3) |
+| Moyenne | `seen_month`, `created_month` | dates stockées, même grossières | au mois près, nécessaires à l'effacement des comptes abandonnés ; listées en §36 |
+| Faible | Confidentialité, §17 « pas de cookies » | reste vrai (aucun cookie) | la page Confidentialité décrit le compte, sa base et ses durées |
+| Faible | `Permissions-Policy` (§10) | ne doit pas couper `publickey-credentials-create` / `-get` | `publickey-credentials-create=(self), publickey-credentials-get=(self)` explicites ; `()` sur `/pdf-frame.html` |
+
+### 37.10 Questions ouvertes (défaut recommandé)
+
+| # | Question | Défaut recommandé |
+|---|---|---|
+| Q-A1 | Clé de secours obligatoire | Obligatoire sans PRF ; proposée et refusable avec PRF |
+| Q-A2 | Synchronisation gratuite ou payante | **Gratuite** : quelques kilo-octets, et elle protège mieux que de recopier des liens à la main |
+| Q-A3 | Session sans cookie (jeton en mémoire, passkey redemandée au rechargement) | Oui |
+| Q-A4 | Effacement des comptes inactifs | 13 mois sans connexion |
+| Q-A5 | Case « Détruire aussi mes partages actifs » à la suppression | Proposée, décochée |
+
+---
+
+## 38. Décision du propriétaire (v2.7) — offre payante facultative (« patte blanche »)
+
+Modèle choisi par le propriétaire : le service gratuit reste **complet, privé et honnête** ; qui veut plus de capacité ou de confort peut payer. **Après la mise en ligne de la V1** (Tasks P1 à P3), et seulement après le choix du moyen de paiement (Q-P1) et l'avis du juriste et du comptable (§38.5).
+
+### 38.1 Règle d'honnêteté
+
+- L'offre payante n'apporte **aucune sécurité de plus** : même chiffrement, mêmes règles, même code, mêmes garanties que le gratuit. Seulement de la capacité ou du confort.
+- **Aucun motif trompeur** : pas de compte à rebours promotionnel, pas de case précochée, pas de « plus que 2 places », pas de renouvellement automatique, pas de prix barré fictif, pas de relance par e-mail (il n'y en a pas), pas de fonction gratuite retirée pour vendre.
+- **Le destinataire ne voit jamais l'offre** : aucune mention sur les pages d'ouverture, de contenu ni de coffre. L'expéditeur la voit seulement sur la page `/offre`, et d'une ligne neutre quand il atteint une limite (« Au-delà de 1 Go : offre Plus, facultative »).
+- Prix affichés TTC, durée exacte, ce qui se passe à la fin (« le pass s'arrête, rien n'est prélevé »).
+
+### 38.2 Gratuit pour toujours, et ce qui peut être payant
+
+**Gratuit pour toujours** (tout ce qu'il faut pour partager en privé) : chiffrement de bout en bout, mot de passe, tous les types de contenu, nettoyage des métadonnées (§35.2), jusqu'à 10 éléments et 1 Gio par lien, durées 1 h à 24 h, 1 à 10 ouvertures, lien de gestion et destruction, droits du destinataire (§34), historique local (§33), coffre du téléphone (§27), signalement, code vérifiable (§28), compte facultatif et synchronisation (§37, Q-A2).
+
+| Fonction | Gratuit | Plus (suggéré) | Recommandation |
+|---|---|---|---|
+| Taille par lien | 1 Gio | **5 Gio** (paliers 2 et 5 Gio, + morceau du manifeste, §29.3) | Oui. 10 Gio : non en premier temps (coût disque et abus, §38.6) |
+| Durée de vie | 1, 6, 12, 24 h | **2 j, 3 j, 7 j** ; 30 j seulement jusqu'à 1 Gio | Oui ; toujours arrondie au quart d'heure |
+| Ouvertures | 1 à 10 | **jusqu'à 50**, avec taille × ouvertures ≤ 100 Gio (5 Gio → 20 ouvertures) | Oui, avec le plafond de sortie |
+| Échéance personnalisée | non | date et heure choisies dans la plage permise | Oui (confort, sans coût) |
+| « Demander des fichiers » (lien de dépôt) | **version de base gratuite** (dans les limites gratuites) | limites Plus | Oui ; **fonction encore à spécifier** (registre du 5 nov., idée 1), section dédiée à écrire avant P2 |
+| Historique synchronisé | gratuit (Q-A2) | — | Ne pas le vendre |
+| Coffre plus grand | 2 Gio, 20 entrées (§27.3) | — | **Non** : stockage du téléphone de l'utilisateur, qui ne nous coûte rien ; le vendre serait malhonnête |
+| Partages Plus | — | **20 par pass de 30 jours** | Oui (borne le disque, §38.6) |
+
+### 38.3 Paiement respectueux de la vie privée : comparaison
+
+| Option | Pour | Contre | Avis |
+|---|---|---|---|
+| **Numéro de compte à la Mullvad** (numéro aléatoire, aucun e-mail) | aucun identifiant personnel chez nous ; éprouvé | seul, il ne dit pas comment payer ; le numéro est un secret au porteur | **Retenu comme forme du droit** : le « pass » de §38.4 est ce numéro |
+| **Carte via un prestataire** | simple pour tous, remboursements, conformité TVA | le prestataire voit l'identité et la carte | **Retenu en premier**, avec un **vendeur officiel (« Merchant of Record »**, par exemple Paddle ou FastSpring, à comparer) : il vend en son nom, facture, collecte la TVA de chaque pays et garde les preuves de localisation ; nous ne recevons qu'une référence de commande et l'empreinte du pass |
+| **Espèces par courrier, bons prépayés** | très anonyme | adresse postale de l'exploitant à publier, saisie et comptabilité de chaque enveloppe, pertes ; bons chez des revendeurs : contrats et commissions | **Non** au lancement ; bons vendus par le vendeur officiel (cartes cadeaux) possibles plus tard |
+| **Monero** | paiement privé par conception | retiré de la plupart des plateformes de l'UE : conversion légale en euros difficile ; volatilité ; comptabilité de chaque paiement | **Non** au lancement ; à revoir si une plateforme agréée (MiCA) le convertit |
+| **Bitcoin** (BTCPay Server, logiciel libre MIT, auto-hébergé, Lightning) | aucun tiers de paiement ; Lightning discret | registre public (paiements on-chain traçables) ; conversion par une plateforme agréée (KYC de l'exploitant) ; volatilité ; un serveur de plus à tenir | **Plus tard** (deuxième moyen), sur une machine distincte de celle des partages |
+| **Jetons d'accès anonymes** (signature aveugle, Privacy Pass) | le serveur vérifie « payé » sans savoir qui, ni relier deux partages Plus | crypto hors WebCrypto/libsodium : **exception à CLAUDE.md à valider** ; un peu plus de code | **Retenu pour l'usage** (quel que soit le moyen de paiement) |
+
+**Recommandation** : vendre par carte, par un vendeur officiel, des **pass prépayés** (30 jours, 1 an), sans abonnement ; le pass est un numéro au porteur à la Mullvad, jamais relié à un compte ; chaque partage Plus est autorisé par un **jeton Privacy Pass** non reliable. Bitcoin/Lightning via BTCPay en second moyen. Pas d'espèces ni de Monero au lancement.
+
+### 38.4 Droit d'usage : pass, puis jetons aveugles
+
+- **Pass** : le navigateur tire `P` (32 octets) **avant** le paiement et n'envoie que `Q` = SHA-256(HKDF(`P`, « shhdrop/v2/pass »)) comme donnée de commande au vendeur officiel. Le webhook signé du vendeur (signature vérifiée, rejouage refusé) crée la ligne `passes(q, valid_until_day, tokens_left)` dans une base `passes.db`, séparée de `shares.db` et `accounts.db`. Remboursement ou rétractation → ligne supprimée. Le serveur ne garde **ni** la référence de commande **ni** le moyen de paiement. `P` est gardé par l'utilisateur (affiché une fois, comme la clé de secours) ou rangé dans le coffre de compte (§37.2 : le serveur ne sait pas quel compte le détient).
+- **Ce que le vendeur relie** : identité ↔ `Q`. Ce que personne ne peut relier au repos : `Q` ↔ compte (le pass est dans `B` chiffré), `Q` ↔ partages (jetons aveugles).
+- **Jetons** : protocole **Privacy Pass** (architecture RFC 9576, émission RFC 9578), type **2, RSA aveugle publiquement vérifiable** (RSABSSA-SHA384-PSS-Randomized, RFC 9474), présentés dans l'en-tête `Authorization: PrivateToken` (RFC 9577). Bibliothèques vérifiées, aucune crypto maison : serveur **`github.com/cloudflare/circl`** (`blindsign/blindrsa`, BSD-3-Clause), client **`@cloudflare/blindrsa-ts`** (licence à vérifier à P1) ; versions exactes épinglées (§24), revue de chaîne d'approvisionnement avant ajout. **Exception écrite à CLAUDE.md** (« WebCrypto et libsodium uniquement »), à valider par le propriétaire comme celle de §26 (Q-P2).
+  - Émission : le client présente `P`, demande des jetons **par lots** (le solde du pass, 5 au plus par requête), à une heure aléatoire, longtemps avant usage ; le serveur décrémente `tokens_left`.
+  - Usage : `POST /api/shares` avec un jeton ; le serveur vérifie la signature, refuse un jeton déjà vu (empreinte du jeton dans `spent`, sans date, gardée jusqu'à la fin de l'époque de la clé), applique les limites Plus à **ce** partage, ne garde rien qui relie le partage au jeton.
+  - Clés d'émission : une par mois, publiée dans le manifeste de version signé (§28.2) pour que tout le monde reçoive la même (sinon une clé par personne la pisterait) ; jetons valables le mois de leur clé et le suivant ; `spent` purgé ensuite.
+  - Post-quantique (§30) : l'anonymat d'une signature aveugle RSA est inconditionnel ; un ordinateur quantique permettrait de **forger** des jetons (fraude), pas de lever l'anonymat.
+- **Variante minimale si Q-P2 est refusée** : présenter `P` à la création du partage, sans rien stocker qui les relie. Au repos, même résultat ; en direct, un serveur compromis relie tous les partages Plus d'un même pass. À dire honnêtement.
+- **Ce qui reste visible au repos** : qu'un partage est Plus (palier > 1 Gio, durée > 24 h ou ouvertures > 10), pas lequel des payeurs l'a créé.
+
+### 38.5 Cadre légal et fiscal (exploitant en France) — à faire valider
+
+- **Statut** : vendre est une activité professionnelle. Il faut un statut (micro-entreprise ou société) **avant** la première vente. Conséquence directe : les mentions légales d'un professionnel (LCEN art. 6) publient le nom ou la dénomination, l'adresse et le numéro d'immatriculation ; l'anonymat du « particulier non professionnel » de §17 disparaît (une domiciliation d'entreprise évite l'adresse personnelle). **Juriste.**
+- **Factures** : en vente aux particuliers, la note est obligatoire pour une prestation de services à partir de 25 € TTC, ou sur demande ; conservation comptable 10 ans (Code de commerce L123-22). Avec un vendeur officiel, c'est **lui** qui vend et facture le client : nous ne facturons que le vendeur (facture entre entreprises, soumise à la facturation électronique de 2026–2027). **C'est ce qui résout le conflit** entre « aucune donnée personnelle » et l'obligation de facturer : l'identité reste chez le vendeur. **Comptable.**
+- **TVA** : services électroniques aux particuliers de l'UE : TVA du pays du client au-delà de 10 000 € de ventes vers d'autres États membres par an (guichet OSS), ce qui exige des preuves de localisation du client (adresse, IP, banque) : **en conflit direct** avec « aucune IP enregistrée » si nous vendions nous-mêmes. Franchise en base possible selon le seuil en vigueur ; hors UE, règles de chaque pays. Le vendeur officiel porte tout cela. **Comptable.**
+- **Droit de la consommation** : information précontractuelle et **CGV** (Code de la consommation L111-1, L221-5) ; **droit de rétractation de 14 jours** (L221-18) ; pour un pass utilisable tout de suite, la perte du droit exige un accord exprès et un renoncement exprès avant l'usage (L221-28) : case **non cochée** au paiement, sinon remboursement au prorata ; **médiateur de la consommation** obligatoire (L612-1) ; pas d'abonnement, donc pas de « résiliation en trois clics » à prévoir (L215-1-1). **Juriste.**
+- **Données personnelles** : le vendeur officiel est responsable de ses propres traitements ; la page Confidentialité le nomme et dit ce qu'il voit. Décret 2021-1362 (§17, §37.9) : vérifier si des données de paiement doivent être conservées par nous ; avec un vendeur officiel, nous n'en avons pas. **Juriste.**
+- **Bitcoin** (si retenu) : accepter un paiement n'est pas une activité de prestataire de services sur crypto-actifs ; la conversion passe par une plateforme agréée MiCA ; chaque encaissement est une recette à comptabiliser à sa valeur en euros. **Comptable.**
+- **Cryptologie** (§17) : la déclaration ANSSI doit couvrir une fourniture commerciale. **Juriste.**
+- **Contenus illicites** : des liens plus gros, plus longs et plus ouverts attirent la diffusion de masse (piratage, pires contenus) ; DSA (point de contact, notification) et capacité de traiter les signalements à dimensionner avant P2.
+
+### 38.6 Coût du serveur et abus des paliers plus grands
+
+- **Disque** : un partage de 5 Gio pendant 7 jours occupe 5 % du plafond par défaut de 100 Gio ; un pass de 20 partages peut, au pire, garder 100 Gio d'un coup. D'où : **réserve Plus séparée** `SHH_STORAGE_PLUS_MAX` (en plus de `SHH_STORAGE_MAX`) ; quand elle est pleine, refus honnête « Capacité Plus momentanément pleine, réessayez plus tard » (503) ; jamais de place prise sur le gratuit.
+- **Bande passante** : sortie au pire = taille × ouvertures × 2 (budget de §24) : 5 Gio × 20 = 100 Gio, jusqu'à 200 Gio avec les nouveaux essais. Plafond « taille × ouvertures ≤ 100 Gio » par partage ; à comparer au trafic inclus de l'hébergeur (§20). Prix du pass à fixer **après** le choix de l'hébergeur, sur cette base (ordre de grandeur : quelques euros par mois et par pass).
+- **Quotas par connexion** maintenus pour les partages Plus (envois à part : 20 Gio par jour par connexion, 40 Gio par /48) : un pass volé ne permet pas de saturer le disque depuis une seule adresse.
+- **Jetons** : un jeton = un partage Plus ; émission bornée par `tokens_left` ; un pass partagé publiquement s'épuise vite, et se révoque (remboursement, abus constaté par le vendeur).
+
+### 38.7 Questions ouvertes (défaut recommandé)
+
+| # | Question | Défaut recommandé |
+|---|---|---|
+| Q-P1 | Moyen de paiement | Carte via un vendeur officiel, pass prépayés ; BTCPay ensuite ; ni espèces ni Monero au lancement |
+| Q-P2 | Exception à la règle crypto pour Privacy Pass (circl, blindrsa-ts) | Oui, après revue de chaîne d'approvisionnement et de l'implémentation ; sinon variante minimale de §38.4 |
+| Q-P3 | Limites Plus | 5 Gio ; 2, 3, 7 j (30 j jusqu'à 1 Gio) ; 50 ouvertures sous le plafond de 100 Gio ; 20 partages par pass de 30 jours |
+| Q-P4 | Abonnement ou prépayé | Prépayé seulement, aucun renouvellement automatique |
+| Q-P5 | Statut juridique de l'exploitant | À décider avec le juriste et le comptable avant P1 (micro-entreprise avec domiciliation ou société) |
+| Q-P6 | « Demander des fichiers » | Base gratuite, limites Plus payantes ; section de spec à écrire |
+| Q-P7 | Coffre plus grand payant | Non |
