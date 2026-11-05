@@ -11,7 +11,8 @@
     "check": "tsc --noEmit && npm --prefix tools/svelte-check exec -- svelte-check --workspace . --tsconfig ./tsconfig.json --fail-on-warnings",
     "test": "tsc --noEmit && vitest run src scripts",
     "test:e2e": "vitest run e2e --testTimeout=120000 --hookTimeout=120000",
-    "test:ui": "playwright test"
+    "test:ui": "playwright test",
+    "build:demo": "vite build --mode demo"
   },
   "dependencies": {
     "@lucide/svelte": "1.68.0",

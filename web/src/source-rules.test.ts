@@ -2,7 +2,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { resolveConfig } from "vite";
+import { resolveConfig, type Rollup } from "vite";
+import { demoGuard } from "../vite.config";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const webDir = dirname(srcDir);
@@ -89,6 +90,24 @@ describe("règles de sources", () => {
   });
 });
 
+describe("marque de démo", () => {
+  const MARK_RE = /__SHH_DEMO__/;
+  const all = walk(srcDir)
+    .map((abs) => ({ abs, rel: relative(srcDir, abs).split(sep).join("/") }))
+    .filter((f) => /\.(ts|svelte)$/.test(f.rel) && !/\.test\.ts$/.test(f.rel));
+
+  it("chaque module de src/demo/ porte la marque", () => {
+    const demo = all.filter((f) => f.rel.startsWith("demo/"));
+    expect(demo.length).toBeGreaterThanOrEqual(4);
+    for (const f of demo) expect(readFileSync(f.abs, "utf8"), f.rel).toMatch(/const MARK = "__SHH_DEMO__"/);
+  });
+
+  it("aucun fichier hors de src/demo/ ne porte la marque (app/demo-hooks.ts compris)", () => {
+    const out = all.filter((f) => !f.rel.startsWith("demo/") && MARK_RE.test(readFileSync(f.abs, "utf8"))).map((f) => f.rel);
+    expect(out).toEqual([]);
+  });
+});
+
 describe("motifs des règles", () => {
   const matches = (re: RegExp, text: string) => new RegExp(re.source, re.flags.replace("g", "")).test(text);
 
@@ -153,5 +172,32 @@ describe("vite.config.ts résolu", () => {
     expect(mp).not.toBe(false);
     expect(typeof mp === "object" && mp.polyfill).toBe(false);
     expect(cfg.build.sourcemap).toBe(false);
+  });
+
+  it("production : base /, sortie dist, garde demoGuard, sans demoMeta", async () => {
+    const cfg = await resolveConfig({ configFile: join(webDir, "vite.config.ts"), root: webDir }, "build");
+    expect(cfg.base).toBe("/");
+    expect(cfg.build.outDir).toBe("dist");
+    const names = cfg.plugins.map((p) => p.name);
+    expect(names).toContain("shh-demo-guard");
+    expect(names).not.toContain("shh-demo-meta");
+  });
+
+  it("mode demo : base /Shhdrop/, sortie dist-demo, demoMeta", async () => {
+    const cfg = await resolveConfig({ configFile: join(webDir, "vite.config.ts"), root: webDir, mode: "demo" }, "build");
+    expect(cfg.base).toBe("/Shhdrop/");
+    expect(cfg.build.outDir).toBe("dist-demo");
+    const names = cfg.plugins.map((p) => p.name);
+    expect(names).toContain("shh-demo-meta");
+    expect(names).not.toContain("shh-demo-guard");
+  });
+
+  it("demoGuard fait échouer le build si un module de src/demo/ est dans un morceau", () => {
+    const hook = demoGuard().generateBundle as (this: unknown, o: unknown, b: Rollup.OutputBundle) => void;
+    const ctx = { error: (m: string) => { throw new Error(m); } };
+    const chunk = (ids: string[]) => ({ "a.js": { type: "chunk", modules: Object.fromEntries(ids.map((i) => [i, {}])) } }) as unknown as Rollup.OutputBundle;
+    expect(() => hook.call(ctx, {}, chunk(["/w/src/main.ts", "/w/src/app/demo-hooks.ts"]))).not.toThrow();
+    expect(() => hook.call(ctx, {}, chunk(["/w/src/main.ts", "/w/src/demo/fake-server.ts"]))).toThrow(/code de démo/);
+    expect(() => hook.call(ctx, {}, chunk(["C:\\w\\src\\demo\\install.ts"]))).toThrow(/code de démo/);
   });
 });

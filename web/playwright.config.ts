@@ -5,6 +5,8 @@ import { defineConfig, devices } from "@playwright/test";
 // En CI : `npx playwright install --with-deps chromium webkit`, sans cette variable.
 const launchOptions = process.env.PW_LOCAL_CHROMIUM === "1" ? { executablePath: "/opt/pw-browsers/chromium" } : {};
 
+const DEMO = /demo\.spec\.ts$/;
+
 export default defineConfig({
   testDir: "ui-e2e",
   testMatch: /.*\.spec\.ts$/,
@@ -17,22 +19,37 @@ export default defineConfig({
   retries: 0,
   forbidOnly: !!process.env.CI,
   use: { trace: "retain-on-failure", screenshot: "off", video: "off" },
+  // Démo GitHub Pages (UI §14.3) : demo.spec.ts sur ses propres projets seulement (un projet = un appareil).
   projects: [
     {
       name: "chromium-desktop",
+      testIgnore: DEMO,
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, launchOptions },
     },
     {
       name: "webkit-desktop",
+      testIgnore: DEMO,
       use: { ...devices["Desktop Safari"], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 },
     },
     {
       name: "chromium-mobile",
+      testIgnore: DEMO,
       use: { ...devices["Pixel 7"], deviceScaleFactor: 1, launchOptions },
     },
     {
       name: "webkit-mobile",
+      testIgnore: DEMO,
       use: { ...devices["iPhone 15"], deviceScaleFactor: 1 },
+    },
+    {
+      name: "demo-chromium-mobile",
+      testMatch: DEMO,
+      use: { ...devices["Pixel 7"], deviceScaleFactor: 1, launchOptions },
+    },
+    {
+      name: "demo-webkit-desktop",
+      testMatch: DEMO,
+      use: { ...devices["Desktop Safari"], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 },
     },
   ],
 });

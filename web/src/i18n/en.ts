@@ -20,7 +20,6 @@ export const en = {
   "shell.nav": "Information",
   "shell.security": "Security",
   "shell.privacy": "Privacy",
-  "demo.banner": "Demo: nothing is sent, the link only works in this tab.",
 
   "notfound.title": "This page does not exist.",
   "notfound.home": "Back to the home page",

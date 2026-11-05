@@ -20,7 +20,6 @@ export const fr = {
   "shell.nav": "Informations",
   "shell.security": "Sécurité",
   "shell.privacy": "Confidentialité",
-  "demo.banner": "Démo\u202f: rien n'est envoyé, le lien ne marche que dans cet onglet.",
 
   "notfound.title": "Cette page n'existe pas.",
   "notfound.home": "Retour à l'accueil",

@@ -7,6 +7,8 @@ test-go:
 
 test-web:
 	cd web && npm test
+	cd web && npm run build && node scripts/check-dist.mjs
+	cd web && npm run build:demo && node scripts/check-dist.mjs --demo
 
 test-e2e:
 	cd server && go build -o shhdrop ./cmd/shhdrop

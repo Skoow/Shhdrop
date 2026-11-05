@@ -29,6 +29,9 @@ jobs:
       - run: cd web && npm ci && npm ci --prefix tools/svelte-check
       - run: cd web && npm test
       - run: cd web && npm run build
+      # Le code de démo est absent de la production ; la démo porte ses protections (UI §14.3, A41).
+      - run: cd web && node scripts/check-dist.mjs
+      - run: cd web && npm run build:demo && node scripts/check-dist.mjs --demo
       - run: cd web && npm run check
       - name: npm audit
         working-directory: web

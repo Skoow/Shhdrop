@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { getDemo } from "./app/demo-hooks";
   import { inAppBrowser, isSupported } from "./app/env";
   import { guardFileDrop, reloadIfRestored } from "./app/lifecycle";
   import { readLink, scrubAddressBar, type LinkState } from "./app/link";
@@ -12,6 +13,9 @@
   // UI §9 : vérifié une fois, avant toute route. Sans ces capacités, aucune route ne démarre
   // (ni lecture du lien, ni requête).
   const supported = isSupported(globalThis);
+
+  // Démo GitHub Pages seulement (UI §14.3) : bandeau permanent ; null en production.
+  const demo = getDemo();
 
   // UI §12.2 : une page restaurée du cache « page précédente » est rechargée.
   reloadIfRestored(window);
@@ -59,7 +63,11 @@
 
 <svelte:window onhashchange={onHashChange} />
 
-<AppShell>
+{#snippet demoBanner()}
+  {#if demo}<demo.Banner />{/if}
+{/snippet}
+
+<AppShell banner={demo ? demoBanner : undefined}>
   {#if !supported}
     <Unsupported />
   {:else if router.current.name === "notfound"}

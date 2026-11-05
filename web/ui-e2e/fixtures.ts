@@ -1,12 +1,15 @@
-// Banc Playwright : un serveur Go neuf par test, sert web/dist.
+// Banc Playwright : un serveur Go neuf par test, sert web/dist (fixture `shh`) ; ou la démo
+// web/dist-demo servie comme par GitHub Pages (fixture `demo`).
 // Gardes de fin de test : aucune violation CSP, aucune requête hors de l'origine du serveur.
 import AxeBuilder from "@axe-core/playwright";
 import { test as base, expect, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { startServer, type TestServer } from "../e2e/server";
+import { startPagesServer } from "./pages-server";
 
 const DIST = fileURLToPath(new URL("../dist", import.meta.url));
+const DIST_DEMO = fileURLToPath(new URL("../dist-demo", import.meta.url));
 const CAPTURES = fileURLToPath(new URL("./__captures__", import.meta.url));
 
 export type Shh = {
@@ -41,43 +44,73 @@ function swallowHarnessStyle(page: Page, channel: "event" | "console", text: str
   return true;
 }
 
-export const test = base.extend<{ shh: Shh }>({
+/** Gardes de fin de test : violations CSP et requêtes du cadre principal hors de `origin`. */
+async function guard(page: Page, origin: string): Promise<{ cspViolations: string[]; foreignRequests: string[] }> {
+  const cspViolations: string[] = [];
+  const foreignRequests: string[] = [];
+  harness.set(page, { capturing: false, event: 0, console: 0 });
+  await page.exposeFunction("__shhCsp", (d: string) => {
+    if (!swallowHarnessStyle(page, "event", d)) cspViolations.push(d);
+  });
+  await page.addInitScript(() => {
+    document.addEventListener("securitypolicyviolation", (e) => {
+      (window as unknown as { __shhCsp(d: string): void }).__shhCsp(
+        `${e.violatedDirective} ${e.blockedURI} ${e.sourceFile}:${e.lineNumber}`,
+      );
+    });
+  });
+  page.on("console", (m) => {
+    if (m.text().includes("Refused to") && !swallowHarnessStyle(page, "console", m.text())) cspViolations.push(m.text());
+  });
+  page.on("request", (r) => {
+    if (r.frame() !== page.mainFrame()) return;
+    const u = r.url();
+    if (u.startsWith("blob:")) return;
+    let o: string;
+    try {
+      o = new URL(u).origin;
+    } catch {
+      o = u;
+    }
+    if (o !== origin) foreignRequests.push(u);
+  });
+  return { cspViolations, foreignRequests };
+}
+
+/** Démo servie comme par GitHub Pages (pages-server.ts) : `url` = origine + « /Shhdrop/ ». */
+export type Demo = {
+  origin: string;
+  url: string;
+  cspViolations: string[];
+  foreignRequests: string[];
+  /** Toutes les requêtes du cadre principal (aucune ne doit viser /api : le faux serveur est dans la page). */
+  requests: { url: string; headers: Record<string, string>; postData: string | null }[];
+};
+
+export const test = base.extend<{ shh: Shh; demo: Demo }>({
   shh: async ({ page }, use) => {
     const server = await startServer({ env: { SHH_STATIC_DIR: DIST } });
-    const cspViolations: string[] = [];
-    const foreignRequests: string[] = [];
     try {
-      harness.set(page, { capturing: false, event: 0, console: 0 });
-      await page.exposeFunction("__shhCsp", (d: string) => {
-        if (!swallowHarnessStyle(page, "event", d)) cspViolations.push(d);
-      });
-      await page.addInitScript(() => {
-        document.addEventListener("securitypolicyviolation", (e) => {
-          (window as unknown as { __shhCsp(d: string): void }).__shhCsp(
-            `${e.violatedDirective} ${e.blockedURI} ${e.sourceFile}:${e.lineNumber}`,
-          );
-        });
-      });
-      page.on("console", (m) => {
-        if (m.text().includes("Refused to") && !swallowHarnessStyle(page, "console", m.text())) cspViolations.push(m.text());
-      });
-      page.on("request", (r) => {
-        if (r.frame() !== page.mainFrame()) return;
-        const u = r.url();
-        if (u.startsWith("blob:")) return;
-        let origin: string;
-        try {
-          origin = new URL(u).origin;
-        } catch {
-          origin = u;
-        }
-        if (origin !== server.origin) foreignRequests.push(u);
-      });
-      await use({ origin: server.origin, server, cspViolations, foreignRequests });
-      expect(cspViolations).toEqual([]);
-      expect(foreignRequests).toEqual([]);
+      const g = await guard(page, server.origin);
+      await use({ origin: server.origin, server, ...g });
+      expect(g.cspViolations).toEqual([]);
+      expect(g.foreignRequests).toEqual([]);
     } finally {
       await server.dispose();
+    }
+  },
+  demo: async ({ page }, use) => {
+    const pages = await startPagesServer(DIST_DEMO);
+    try {
+      const g = await guard(page, pages.origin);
+      const requests: Demo["requests"] = [];
+      page.on("request", (r) => requests.push({ url: r.url(), headers: r.headers(), postData: r.postData() }));
+      await use({ origin: pages.origin, url: `${pages.origin}/Shhdrop/`, requests, ...g });
+      expect(g.cspViolations).toEqual([]);
+      expect(g.foreignRequests).toEqual([]);
+      expect(requests.filter((r) => /^\/api(\/|$)/i.test(new URL(r.url).pathname))).toEqual([]);
+    } finally {
+      await pages.close();
     }
   },
 });
