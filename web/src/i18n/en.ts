@@ -50,7 +50,7 @@ export const en = {
   "home.why.track.t": "No tracking, no ads",
   "home.why.track.p": "No analytics, no tracker, no script or font from elsewhere. One exception, if the usual anti-bot check fails: a Google check that you choose to start, in an isolated frame. Google then sees your IP address, never your content.",
   "home.why.code.t": "Open code",
-  "home.why.code.p": "The code is public on GitHub: anyone can read it.",
+  "home.why.code.p": "Open source code (AGPL-3.0), available to read and verify on GitHub.",
   "home.why.code.link": "See the code on GitHub",
   "home.faq.title": "Your questions",
   "home.faq.server.q": "What does the server see?",

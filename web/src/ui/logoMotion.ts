@@ -1,9 +1,9 @@
 // Animations du logo « Trame » (chronologies pures, sans DOM, appliquées par Logo.svelte) :
-// « chut » à l'arrivée et effacement à la gomme pour l'écran de destruction.
+// effacement à la gomme pour l'écran de destruction.
 // Repère : celui du mot-symbole (logo-paths.ts), y = 0 sur la ligne de base, x de 0 à ~183.
 // Principe : une gomme (deux tracés) balaie le mot en deux passes ; sous elle, deux rectangles d'un
 // masque SVG glissent (transform) et effacent les lettres, bord avant adouci par un dégradé. Seules
-// opacity et transform varient. Le mot nettoyé laisse transparaître un instant sa trame, puis revient.
+// opacity et transform varient. Le mot nettoyé laisse transparaître un instant sa trame, puis reste effacé.
 
 /** Point de contact de la gomme : abscisses de début et de fin de passe, ordonnée de chaque bande. */
 export const ERASE = {
@@ -46,12 +46,9 @@ function at(pass: 1 | 2, x: number): number {
 
 const pose = (x: number, y: number, r: number) => `translate(${x + OFF.x}px, ${y + OFF.y}px) rotate(${r}deg)`;
 
-/**
- * Chronologie. `restore` : le mot revient assemblé et reste (arrivée, ~2 s) ; sinon il reste effacé
- * (écran de destruction, ~1,8 s).
- */
-export function eraseTimeline(restore: boolean): Timeline {
-  const duration = restore ? 2000 : 1800;
+/** Chronologie de l'effacement : le mot reste effacé (écran de destruction, ~1,8 s). */
+export function eraseTimeline(): Timeline {
+  const duration = 1800;
   const o = (t: number) => Math.min(1, t / duration);
   const { x0, x1, tilt } = ERASE;
   const y1 = ERASE.band1.contact;
@@ -77,35 +74,23 @@ export function eraseTimeline(restore: boolean): Timeline {
   });
 
   // Masque : chaque rectangle suit la gomme pendant sa passe, puis se retire (mot invisible à ce moment).
-  const clearAt = o(P2.to + 120);
   const passFrames = (p: { from: number; to: number }, dir: 1 | -1): Keyframe[] => [
     { offset: 0, opacity: 1, transform: "translateX(0px)" },
     { offset: o(p.from), opacity: 1, transform: "translateX(0px)", easing: "ease-in-out" },
     { offset: o(p.to), opacity: 1, transform: `translateX(${dir * D}px)` },
-    ...(restore
-      ? [
-          { offset: clearAt, opacity: 1, transform: `translateX(${dir * D}px)` },
-          { offset: Math.min(1, clearAt + 0.001), opacity: 0, transform: `translateX(${dir * D}px)` },
-        ]
-      : []),
-    { offset: 1, opacity: restore ? 0 : 1, transform: `translateX(${dir * D}px)` },
+    { offset: 1, opacity: 1, transform: `translateX(${dir * D}px)` },
   ];
   tracks.push({ target: ".m1", frames: passFrames(P1, 1) });
   tracks.push({ target: ".m2", frames: passFrames(P2, -1) });
 
-  // Encre : ce que la gomme laisse (frottement imparfait) disparaît, surface propre ; puis retour.
+  // Encre : ce que la gomme laisse (frottement imparfait) disparaît, surface propre ; puis reste effacée.
   const ink: Keyframe[] = [
     { offset: 0, opacity: 1, transform: "none" },
     { offset: o(P2.to - 80), opacity: 1, transform: "none", easing: "ease-in" },
     { offset: o(P2.to + 80), opacity: 0, transform: "none" },
   ];
-  if (restore)
-    ink.push(
-      { offset: o(1560), opacity: 0, transform: "translateY(3px)", easing: "cubic-bezier(0.16, 1, 0.3, 1)" },
-      { offset: 1, opacity: 1, transform: "none" },
-    );
-  else ink.push({ offset: 1, opacity: 0, transform: "none" });
-  tracks.push({ target: ".ink", frames: ink, fill: restore ? "none" : "forwards" });
+  ink.push({ offset: 1, opacity: 0, transform: "none" });
+  tracks.push({ target: ".ink", frames: ink, fill: "forwards" });
 
   // Trame : transparaît un instant sur la surface nettoyée, puis s'éteint.
   tracks.push({
@@ -140,66 +125,3 @@ export function eraseTimeline(restore: boolean): Timeline {
 /** Tracés de la gomme (repère centré) : embout à gauche (9 u), fourreau à droite (17 u), coins r 2,6. */
 export const ERASER_RUBBER = "M-4 -5.2H-10.4A2.6 2.6 0 0 0 -13 -2.6V2.6A2.6 2.6 0 0 0 -10.4 5.2H-4Z";
 export const ERASER_SLEEVE = "M-4 -5.2H10.4A2.6 2.6 0 0 1 13 -2.6V2.6A2.6 2.6 0 0 1 10.4 5.2H-4Z";
-
-// ---------------------------------------------------------------------------------------------
-// « Chut » (arrivée) : le fût du second h se lève en doigt menthe devant le mot, la fin du mot
-// se tait (la trame de « rop » pâlit), une onde « shh » s'éteint, puis le doigt redescend.
-// Première et dernière image = le logo au repos (doigt et ondes à opacité 0, trame à 1).
-
-/** Doigt : rectangle à bout rond, au droit du fût du second h (x 52 → 57), de la base à 4 u au-dessus de l'ascendante. */
-export const FINGER = "M52 0V-35.5A2.5 2.5 0 0 1 57 -35.5V0Z";
-export const FINGER_RISE = 6;
-/** Ondes « shh » : deux arcs concentriques à droite du bout du doigt (centre 58 ; −34, r 5 et 9, de −50° à 40°). */
-export const WAVES = [5, 9].map((r) => {
-  const c = { x: 58, y: -34 };
-  const a0 = (-50 * Math.PI) / 180, a1 = (40 * Math.PI) / 180;
-  const p = (a: number) => `${(c.x + r * Math.cos(a)).toFixed(2)} ${(c.y + r * Math.sin(a)).toFixed(2)}`;
-  return `M${p(a0)}A${r} ${r} 0 0 1 ${p(a1)}`;
-});
-
-export function hushTimeline(buckets: number): Timeline {
-  const duration = 2000;
-  const o = (t: number) => Math.min(1, Math.max(0, t / duration));
-  const tracks: Track[] = [];
-  const UP = "cubic-bezier(0.16, 1, 0.3, 1)";
-  const DOWN = "cubic-bezier(0.7, 0, 0.84, 0)";
-  tracks.push({
-    target: ".finger",
-    frames: [
-      { offset: 0, opacity: 0, transform: `translateY(${FINGER_RISE}px)`, easing: UP },
-      { offset: o(420), opacity: 1, transform: "translateY(0px)" },
-      { offset: o(1380), opacity: 1, transform: "translateY(0px)", easing: DOWN },
-      { offset: o(1680), opacity: 0, transform: `translateY(${FINGER_RISE}px)` },
-      { offset: 1, opacity: 0, transform: `translateY(${FINGER_RISE}px)` },
-    ],
-  });
-  // La fin du mot se tait, tranche par tranche de gauche à droite, puis revient exactement au repos.
-  for (let k = 0; k < buckets; k++)
-    tracks.push({
-      target: ".dots",
-      nth: k,
-      frames: [
-        { offset: 0, opacity: 1, transform: "scale(1)" },
-        { offset: o(340 + k * 45), opacity: 1, transform: "scale(1)", easing: "ease-out" },
-        { offset: o(700 + k * 45), opacity: 0.22, transform: "scale(0.86)" },
-        { offset: o(1300 + k * 40), opacity: 0.22, transform: "scale(0.86)", easing: "ease-in-out" },
-        { offset: o(1720 + k * 40), opacity: 1, transform: "scale(1)" },
-        { offset: 1, opacity: 1, transform: "scale(1)" },
-      ],
-    });
-  // Onde « shh » : naît au bout du doigt, s'élargit à peine, s'éteint.
-  for (let i = 0; i < WAVES.length; i++) {
-    const t = 480 + i * 140;
-    tracks.push({
-      target: `.wave${i}`,
-      frames: [
-        { offset: 0, opacity: 0, transform: "scale(0.85)" },
-        { offset: o(t), opacity: 0, transform: "scale(0.85)", easing: "ease-out" },
-        { offset: o(t + 160), opacity: 0.7, transform: "scale(0.95)" },
-        { offset: o(t + 620), opacity: 0, transform: "scale(1.15)" },
-        { offset: 1, opacity: 0, transform: "scale(1.15)" },
-      ],
-    });
-  }
-  return { duration, tracks };
-}

@@ -1,34 +1,24 @@
-<script lang="ts" module>
-  // L'arrivée (« chut ») se joue une fois par chargement de page, jamais au retour sur l'accueil.
-  // En mémoire seulement : rien n'est écrit dans le navigateur.
-  let arrivalPlayed = false;
-</script>
-
 <script lang="ts">
   // Logo « Trame » (scripts/gen-logo.mjs) : « shhd » plein, « rop » en trame de points.
-  // Animations : opacity et transform seulement (Web Animations API, aucun attribut style),
-  // rien en mouvement réduit (UI §7.5). Chronologies (« chut », gomme) dans logoMotion.ts. Première et
-  // dernière image de chaque animation d'arrivée = le logo au repos.
+  // Statique à l'arrivée : le logo au repos s'affiche tout de suite, rien ne s'anime.
+  // Animations (écran de destruction seulement) : opacity et transform (Web Animations API, aucun attribut style),
+  // rien en mouvement réduit (UI §7.5). Chronologie de la gomme dans logoMotion.ts.
   import { tick } from "svelte";
   import { LOGO_DOTS, LOGO_HEAD, LOGO_STROKE, LOGO_TAIL, LOGO_VIEWBOX, MARK_PATH } from "./logo-paths";
-  import { CRUMBS, ERASE, ERASER_RUBBER, ERASER_SLEEVE, FINGER, WAVES, eraseTimeline, hushTimeline, type Timeline } from "./logoMotion";
+  import { CRUMBS, ERASE, ERASER_RUBBER, ERASER_SLEEVE, eraseTimeline, type Timeline } from "./logoMotion";
   import { reducedMotion } from "./motion";
 
   type Props = {
-    /** Arrivée sur le site : le geste « chut » (une fois par chargement), du logo au repos au logo au repos. */
-    animated?: boolean;
     /** Mot-symbole complet, ou marque seule (o rayé, celui du favicon). */
     variant?: "wordmark" | "mark";
   };
-  let { animated = false, variant = "wordmark" }: Props = $props();
+  let { variant = "wordmark" }: Props = $props();
 
   const uid = $props.id();
   let svg: SVGSVGElement | undefined = $state();
   let gone = $state(false);
   /** Vrai pendant l'effacement : masque, gomme, miettes et trame fantôme n'existent que pendant ce temps. */
   let erasing = $state(false);
-  /** Vrai pendant le « chut » : doigt et ondes n'existent que pendant ce temps. */
-  let hushing = $state(false);
   let running: Animation[] = [];
 
   const parts = (sel: string) => [...(svg?.querySelectorAll<SVGElement>(sel) ?? [])];
@@ -59,22 +49,6 @@
     }
   }
 
-  async function hush(): Promise<void> {
-    hushing = true;
-    await tick();
-    try {
-      await play(hushTimeline(LOGO_DOTS.length));
-    } finally {
-      hushing = false;
-    }
-  }
-
-  $effect(() => {
-    if (!svg || variant !== "wordmark" || !animated || arrivalPlayed) return;
-    arrivalPlayed = true;
-    if (canAnimate()) void hush();
-  });
-
   /** Écran de destruction : la gomme efface le mot, qui reste effacé ; résolue à la fin (tout de suite en mouvement réduit). */
   export async function erase(): Promise<void> {
     if (!canAnimate()) {
@@ -84,7 +58,7 @@
     erasing = true;
     await tick();
     try {
-      await play(eraseTimeline(false));
+      await play(eraseTimeline());
     } finally {
       gone = true;
       erasing = false;
@@ -144,12 +118,6 @@
         <path class="dots" {d} />
       {/each}
     </g>
-    {#if hushing}
-      <path class="fx finger" d={FINGER} />
-      {#each WAVES as d, i (i)}
-        <path class="fx wave wave{i}" {d} />
-      {/each}
-    {/if}
     {#if erasing}
       {#each CRUMBS as c, i (i)}
         <circle class="fx crumb crumb{i}" cx={c.x} cy={c.y} r={1.1 - i * 0.1} />
@@ -186,7 +154,7 @@
     fill: none;
     stroke: currentColor;
   }
-  /* État statique (et mouvement réduit) : le logo final, « rop » en trame. */
+  /* État statique : « shhd » plein, « rop » en trame. */
   .tail {
     opacity: 0;
   }
@@ -197,15 +165,14 @@
   .ink,
   .dots,
   .eraser,
-  .crumb,
-  .wave {
+  .crumb {
     transform-box: fill-box;
     transform-origin: center;
   }
   .gone .ink {
     opacity: 0;
   }
-  /* Effets de la gomme : invisibles hors animation ; jamais cibles du pointeur. */
+  /* Effets de la gomme : invisibles hors effacement ; jamais cibles du pointeur. */
   .fx {
     opacity: 0;
     pointer-events: none;
@@ -219,15 +186,6 @@
   }
   .crumb {
     fill: var(--text-2);
-  }
-  .finger {
-    fill: var(--accent);
-  }
-  .wave {
-    fill: none;
-    stroke: var(--accent);
-    stroke-width: 1.6;
-    stroke-linecap: round;
   }
   .sleeve {
     fill: var(--accent);
@@ -245,12 +203,8 @@
     .crumb {
       fill: currentColor;
     }
-    .ghost,
-    .wave {
+    .ghost {
       stroke: currentColor;
-    }
-    .finger {
-      fill: CanvasText;
     }
     .sleeve {
       fill: CanvasText;

@@ -50,7 +50,7 @@ export const fr = {
   "home.why.track.t": "Aucun pistage, aucune publicité",
   "home.why.track.p": "Ni statistiques ni traceur, aucun script ni police venus d'ailleurs. Seule exception, si la vérification anti-robot habituelle échoue\u202f: un contrôle de Google, que vous choisissez de lancer, dans un cadre isolé. Google voit alors votre adresse IP, jamais votre contenu.",
   "home.why.code.t": "Un code ouvert",
-  "home.why.code.p": "Le code est public sur GitHub\u202f: chacun peut le relire.",
+  "home.why.code.p": "Code ouvert (AGPL-3.0), consultable et vérifiable sur GitHub.",
   "home.why.code.link": "Voir le code sur GitHub",
   "home.faq.title": "Vos questions",
   "home.faq.server.q": "Que voit le serveur\u202f?",

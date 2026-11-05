@@ -56,6 +56,8 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("link", { name: "Tous les détails de sécurité" })).toHaveAttribute("href", "/securite");
     // Le code public : lien sortant sans référent (aucune ressource chargée, une simple navigation).
     await expect(page.getByRole("link", { name: "Voir le code sur GitHub" })).toHaveAttribute("rel", "noopener noreferrer");
+    await expect(page.getByText("Code ouvert (AGPL-3.0), consultable et vérifiable sur GitHub.")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Voir le code sur GitHub" })).toHaveAttribute("href", "https://github.com/Skoow/Shhdrop");
     // Aucun « # » dans un lien de la page (réservé aux clés, UI §12.1).
     expect(await page.locator("main a[href*='#']").count()).toBe(0);
     expect(await noHScroll(page)).toBe(true);

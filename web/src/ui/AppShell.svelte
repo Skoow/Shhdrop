@@ -69,7 +69,7 @@
   <div class="bar wrap">
     <a class="logo" href={href("/")} onclick={(e) => followLink(e, "/")} aria-label={t("shell.home")}>
       <!-- Logo « Trame » (scripts/gen-logo.mjs) ; l'introduction ne se joue que sur l'accueil, une fois par chargement. -->
-      <Logo animated={router.current.name === "home"} />
+      <Logo />
     </a>
     <button
       type="button"

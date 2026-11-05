@@ -11,7 +11,7 @@
   import { ArrowRight, CodeXml, EyeOff, HardDrive, Link2, Lock, Server, ShieldX, Timer, UserX } from "../../ui/Icon";
   import Schema from "../../ui/Schema.svelte";
 
-  const CODE_URL = "https://github.com/Skoow/shhdrop";
+  const CODE_URL = "https://github.com/Skoow/Shhdrop";
   const claims = [
     { k: "e2e", icon: Lock },
     { k: "link", icon: Link2 },

@@ -1,5 +1,7 @@
 # Licences tierces
 
+Le code de Shhdrop est publié sous licence GNU AGPL-3.0 (voir `LICENSE`). Les composants ci-dessous ne sont pas couverts par cette licence : chacun garde la sienne, rappelée dans sa section.
+
 ## Liste de mots EFF (grande liste, 7 776 mots)
 
 - Source : https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt (voir https://www.eff.org/dice)
