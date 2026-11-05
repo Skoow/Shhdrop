@@ -1,4 +1,4 @@
-/* Jetons « Nuit chiffrée » (UI §3.1, §4.2, §5, §7.2). Un seul thème, sombre. */
+/* Jetons « Nuit chiffrée » (UI §3.1, §4.2, §5, §7.2), direction artistique v2 (UI §20.3). Un seul thème, sombre. */
 :root {
   color-scheme: dark;
 
@@ -27,15 +27,33 @@
   --selection: rgb(95 227 181 / 0.28);
   --scrim: rgb(5 7 10 / 0.72);
 
+  /* §20.3 profondeur et matière */
+  --bg-deep: #07080C;
+  --hair: rgb(233 236 242 / 0.08);
+  --hair-2: rgb(233 236 242 / 0.13);
+  /* Verre statique : remplissage seul, jamais de backdrop-filter (K6). */
+  --vessel: rgb(17 20 27 / 0.62);
+  --edge-hi: inset 0 1px 0 rgb(255 255 255 / 0.06);
+  --seal-light: #C9FBE8;
+  --seal-halo: rgb(95 227 181 / 0.28);
+  --paper: #EEF1F5;
+  --ink: #0B0D12;
+
+  /* §20.3 lumière d'ambiance (aurore) : plafond de luminance K5 */
+  --aur-mint-o: 0.18;
+  --aur-tide-o: 0.34;
+  --aur-ink-o: 0.32;
+
   /* §4.1 familles */
   --font-sans: "Mona Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
   /* §4.2 échelle : taille, interligne, poids, largeur (font-stretch) */
-  --fs-display: clamp(2.5rem, 1.6rem + 4vw, 4.25rem);
-  --lh-display: 1.02;
-  --fw-display: 620;
-  --wd-display: 118%;
+  --fs-display: clamp(2.625rem, 1.1rem + 4.6vw, 5.5rem);
+  --lh-display: 0.98;
+  --fw-display: 600;
+  --wd-display: 116%;
+  --ls-display: -0.035em;
   --fs-h1: 1.75rem;
   --lh-h1: 1.15;
   --fw-h1: 650;
@@ -64,10 +82,16 @@
   --lh-mono: 1.5;
   --fw-mono: 480;
   --fs-mono-block: 1.25rem;
-  --fs-figure: 2.75rem;
+  --fs-figure: clamp(3.5rem, 2rem + 6vw, 5.5rem);
   --lh-figure: 1;
   --fw-figure: 560;
   --wd-figure: 112%;
+  --ls-figure: -0.04em;
+  --fs-ready: clamp(2rem, 1.4rem + 2.4vw, 3rem);
+  --wd-ready: 114%;
+  --ls-ready: -0.03em;
+  --fs-screen: clamp(1.75rem, 1.3rem + 1.8vw, 2.5rem);
+  --wd-screen: 112%;
 
   /* §5.1 espacement */
   --sp-1: 4px;
@@ -85,6 +109,7 @@
   --r-md: 10px;
   --r-lg: 16px;
   --r-xl: 24px;
+  --r-2xl: 32px;
   --r-pill: 999px;
 
   /* §5.3 élévation */
@@ -92,6 +117,7 @@
   --e-2: 0 8px 24px -8px rgb(0 0 0 / 0.60), 0 2px 6px rgb(0 0 0 / 0.35);
   --e-3: 0 24px 64px -16px rgb(0 0 0 / 0.70);
   --edge: inset 0 1px 0 rgb(255 255 255 / 0.05);
+  --e-vessel: 0 40px 80px -32px rgb(0 0 0 / 0.75), 0 12px 24px -12px rgb(0 0 0 / 0.5);
 
   /* §7.2 mouvement */
   --dur-instant: 120ms;
@@ -103,6 +129,19 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* §20.3 mouvement v2 */
+  --dur-press: 90ms;
+  --dur-stagger: 45ms;
+  --dur-view: 420ms;
+  --dur-reveal: 560ms;
+  --dur-orbit: 7.2s;
+  --dur-ambient: 46s;
+  --dur-ambient-2: 58s;
+  --dur-ambient-3: 64s;
+  --ease-view: cubic-bezier(0.22, 1, 0.36, 1);
+  --rise: 14px;
+  --blur-in: 6px;
 }
 
 /* §3.3 contraste forcé : couleurs système, ni ombres ni verre. */
@@ -115,10 +154,18 @@
     --text-disabled: GrayText;
     --selection: Highlight;
     --glass: Canvas;
+    --vessel: Canvas;
+    --hair: CanvasText;
+    --hair-2: CanvasText;
+    --paper: Canvas;
+    --ink: CanvasText;
+    --seal-light: Highlight;
     --e-1: none;
     --e-2: none;
     --e-3: none;
+    --e-vessel: none;
     --edge: none;
+    --edge-hi: none;
   }
   :focus-visible {
     outline: 2px solid CanvasText;

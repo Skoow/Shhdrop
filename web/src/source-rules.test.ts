@@ -78,6 +78,19 @@ describe("règles de sources", () => {
     ).toEqual([]));
   it("pas de console.log", () => expect(offenders(/console\.log/)).toEqual([]));
 
+  // UI §20.2 S6 et §20.4 (poussière) : styles par CSSOM et WAAPI seulement, aucune lecture de
+  // pixels du contenu hors des visionneuses. Ces deux règles valent pour TOUS les sources.
+  const everySource = walk(srcDir)
+    .map((abs) => ({ rel: relative(srcDir, abs).split(sep).join("/"), abs }))
+    .filter((f) => /\.(ts|svelte)$/.test(f.rel) && !/\.test\.ts$/.test(f.rel) && !f.rel.endsWith(".d.ts"))
+    .map((f) => ({ ...f, text: readFileSync(f.abs, "utf8") }));
+  it("jamais setAttribute(\"style\") (CSSOM seulement, S6), dans tout src/", () =>
+    expect(everySource.filter((f) => /setAttribute\s*\(\s*["'`]style["'`]/.test(f.text)).map((f) => f.rel)).toEqual([]));
+  it("getImageData seulement sous viewers/ (aucune lecture des pixels du contenu)", () =>
+    expect(
+      everySource.filter((f) => !f.rel.startsWith("viewers/") && /getImageData/.test(f.text)).map((f) => f.rel),
+    ).toEqual([]));
+
   it("demo/ importé seulement par main.ts, sous la forme import(\"./demo/install\")", () => {
     for (const f of files) {
       const found = f.text.match(RE_DEMO_IMPORT) ?? [];

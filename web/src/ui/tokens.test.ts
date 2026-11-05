@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { inflateSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { composite, contrast } from "./contrast";
+import { composite, contrast, contrastFromLuminance, luminance } from "./contrast";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const webDir = dirname(dirname(here));
@@ -101,10 +101,13 @@ describe("autres jetons (UI §4.2, §5, §7.2)", () => {
       "--text", "--text-2", "--text-3", "--text-disabled", "--accent", "--accent-hover",
       "--on-accent", "--accent-tint", "--danger", "--on-danger", "--danger-tint", "--warn",
       "--warn-tint", "--info", "--selection", "--scrim",
+      // §20.3 matière et aurore
+      "--bg-deep", "--hair", "--hair-2", "--vessel", "--edge-hi", "--seal-light", "--seal-halo",
+      "--paper", "--ink", "--aur-mint-o", "--aur-tide-o", "--aur-ink-o",
       // §4.1 familles
       "--font-sans", "--font-mono",
       // §4.2
-      "--fs-display", "--lh-display", "--fw-display", "--wd-display",
+      "--fs-display", "--lh-display", "--fw-display", "--wd-display", "--ls-display",
       "--fs-h1", "--lh-h1", "--fw-h1", "--wd-h1",
       "--fs-h2", "--lh-h2", "--fw-h2", "--wd-h2",
       "--fs-h3", "--lh-h3", "--fw-h3", "--wd-h3",
@@ -112,20 +115,24 @@ describe("autres jetons (UI §4.2, §5, §7.2)", () => {
       "--fs-small", "--lh-small", "--fw-small", "--wd-small",
       "--fs-micro", "--lh-micro", "--fw-micro", "--wd-micro",
       "--fs-mono", "--lh-mono", "--fw-mono", "--fs-mono-block",
-      "--fs-figure", "--lh-figure", "--fw-figure", "--wd-figure",
+      "--fs-figure", "--lh-figure", "--fw-figure", "--wd-figure", "--ls-figure",
+      "--fs-ready", "--wd-ready", "--ls-ready", "--fs-screen", "--wd-screen",
       // §5
       "--sp-1", "--sp-2", "--sp-3", "--sp-4", "--sp-5", "--sp-6", "--sp-7", "--sp-8", "--sp-9",
-      "--r-sm", "--r-md", "--r-lg", "--r-xl", "--r-pill",
-      "--e-1", "--e-2", "--e-3", "--edge",
+      "--r-sm", "--r-md", "--r-lg", "--r-xl", "--r-2xl", "--r-pill",
+      "--e-1", "--e-2", "--e-3", "--edge", "--e-vessel",
       // §7.2
       "--dur-instant", "--dur-fast", "--dur-base", "--dur-slow", "--dur-moment", "--dur-dissolve",
       "--ease-out", "--ease-in", "--ease-in-out",
+      // §20.3 mouvement v2
+      "--dur-press", "--dur-stagger", "--dur-view", "--dur-reveal", "--dur-orbit", "--dur-ambient",
+      "--dur-ambient-2", "--dur-ambient-3", "--ease-view", "--rise", "--blur-in",
     ].sort();
     expect(names).toEqual(expected);
   });
 
   it("échelle typographique (§4.2)", () => {
-    expect(T.get("--fs-display")).toBe("clamp(2.5rem, 1.6rem + 4vw, 4.25rem)");
+    expect(T.get("--fs-display")).toBe("clamp(2.625rem, 1.1rem + 4.6vw, 5.5rem)");
     expect(T.get("--fs-h1")).toBe("1.75rem");
     expect(T.get("--fs-h2")).toBe("1.4375rem");
     expect(T.get("--fs-h3")).toBe("1.1875rem");
@@ -134,11 +141,14 @@ describe("autres jetons (UI §4.2, §5, §7.2)", () => {
     expect(T.get("--fs-micro")).toBe("0.75rem");
     expect(T.get("--fs-mono")).toBe("1.0625rem");
     expect(T.get("--fs-mono-block")).toBe("1.25rem");
-    expect(T.get("--fs-figure")).toBe("2.75rem");
-    expect(T.get("--fw-display")).toBe("620");
-    expect(T.get("--wd-display")).toBe("118%");
+    expect(T.get("--fs-figure")).toBe("clamp(3.5rem, 2rem + 6vw, 5.5rem)");
+    expect(T.get("--fw-display")).toBe("600");
+    expect(T.get("--wd-display")).toBe("116%");
+    expect(T.get("--ls-display")).toBe("-0.035em");
     expect(T.get("--fw-body")).toBe("430");
-    expect(T.get("--lh-display")).toBe("1.02");
+    expect(T.get("--lh-display")).toBe("0.98");
+    expect(T.get("--fs-ready")).toBe("clamp(2rem, 1.4rem + 2.4vw, 3rem)");
+    expect(T.get("--fs-screen")).toBe("clamp(1.75rem, 1.3rem + 1.8vw, 2.5rem)");
   });
 
   it("espacements, rayons, mouvement (§5, §7.2)", () => {
@@ -148,6 +158,7 @@ describe("autres jetons (UI §4.2, §5, §7.2)", () => {
     expect(T.get("--r-md")).toBe("10px");
     expect(T.get("--r-lg")).toBe("16px");
     expect(T.get("--r-xl")).toBe("24px");
+    expect(T.get("--r-2xl")).toBe("32px");
     expect(T.get("--r-pill")).toBe("999px");
     expect(T.get("--dur-instant")).toBe("120ms");
     expect(T.get("--dur-fast")).toBe("180ms");
@@ -164,6 +175,74 @@ describe("autres jetons (UI §4.2, §5, §7.2)", () => {
     );
     expect(T.get("--e-3")).toBe("0 24px 64px -16px rgb(0 0 0 / 0.70)");
     expect(T.get("--edge")).toBe("inset 0 1px 0 rgb(255 255 255 / 0.05)");
+  });
+});
+
+describe("direction artistique v2 (UI §20.3)", () => {
+  it("valeurs exactes", () => {
+    const expected: Record<string, string> = {
+      "--bg-deep": "#07080C",
+      "--hair": "rgb(233 236 242 / 0.08)",
+      "--hair-2": "rgb(233 236 242 / 0.13)",
+      "--vessel": "rgb(17 20 27 / 0.62)",
+      "--edge-hi": "inset 0 1px 0 rgb(255 255 255 / 0.06)",
+      "--seal-light": "#C9FBE8",
+      "--seal-halo": "rgb(95 227 181 / 0.28)",
+      "--paper": "#EEF1F5",
+      "--ink": "#0B0D12",
+      "--aur-mint-o": "0.18",
+      "--aur-tide-o": "0.34",
+      "--aur-ink-o": "0.32",
+      "--r-2xl": "32px",
+      "--e-vessel": "0 40px 80px -32px rgb(0 0 0 / 0.75), 0 12px 24px -12px rgb(0 0 0 / 0.5)",
+      "--dur-press": "90ms",
+      "--dur-stagger": "45ms",
+      "--dur-view": "420ms",
+      "--dur-reveal": "560ms",
+      "--dur-orbit": "7.2s",
+      "--dur-ambient": "46s",
+      "--dur-ambient-2": "58s",
+      "--dur-ambient-3": "64s",
+      "--ease-view": "cubic-bezier(0.22, 1, 0.36, 1)",
+      "--rise": "14px",
+      "--blur-in": "6px",
+    };
+    for (const [k, v] of Object.entries(expected)) expect(T.get(k), k).toBe(v);
+  });
+
+  // K5 : l'aurore plafonne à une luminance relative de 0,050 derrière le texte. À ce plafond,
+  // --text-2 garde 4,70:1 ; --text-3 tombe à 3,4:1, d'où la règle « --text-3 jamais sur l'aurore ».
+  it("plafond K5 : --text-2 ≥ 4,70 et --text-3 < 4,5 sur une luminance de 0,050", () => {
+    expect(contrastFromLuminance(luminance(hex("--text-2")), 0.05)).toBeGreaterThanOrEqual(4.7);
+    expect(contrastFromLuminance(luminance(hex("--text-3")), 0.05)).toBeLessThan(4.5);
+  });
+
+  it("contrastFromLuminance : symétrique et cohérent avec contrast()", () => {
+    expect(contrastFromLuminance(1, 0)).toBeCloseTo(21, 5);
+    expect(contrastFromLuminance(0.2, 0.6)).toBeCloseTo(contrastFromLuminance(0.6, 0.2), 10);
+    expect(contrastFromLuminance(luminance("#E9ECF2"), luminance("#0B0D12"))).toBeCloseTo(
+      contrast("#E9ECF2", "#0B0D12"),
+      10,
+    );
+  });
+
+  it("K6 : aucune règle qui utilise --vessel n'a de backdrop-filter (src/**/*.css, *.svelte)", () => {
+    const srcDir = dirname(here);
+    const walk = (d: string): string[] =>
+      readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? walk(join(d, e.name)) : /\.(css|svelte)$/.test(e.name) ? [join(d, e.name)] : [],
+      );
+    let rules = 0;
+    for (const f of walk(srcDir)) {
+      const text = readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      // Corps de règle le plus intérieur : ce qui est entre une « { » et la « } » suivante.
+      for (const m of text.matchAll(/\{([^{}]*)\}/g)) {
+        if (!/var\(--vessel\)/.test(m[1]!)) continue;
+        rules++;
+        expect(m[1], f).not.toMatch(/backdrop-filter/);
+      }
+    }
+    expect(rules).toBeGreaterThan(0);
   });
 });
 

@@ -1,4 +1,5 @@
-/* Base : fond, lumière d'ambiance, sélection, focus, chiffres (UI §2, §3, §4). */
+/* Base : fond, sélection, focus, chiffres, transitions de vue (UI §2, §3, §4, §20). La lumière
+   d'ambiance est l'aurore (Aurora.svelte, UI §20.4). */
 *,
 *::before,
 *::after {
@@ -14,10 +15,6 @@ body {
   margin: 0;
   min-height: 100dvh;
   background-color: var(--bg);
-  /* Lumière d'ambiance : un seul champ, menthe à 6 %, 120 vw, fixe, au-dessus du haut de l'écran. */
-  background-image: radial-gradient(circle 60vw at 50% -10vh, rgb(95 227 181 / 0.06), transparent);
-  background-repeat: no-repeat;
-  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-sans);
   font-size: var(--fs-body);
@@ -37,6 +34,18 @@ body {
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+/* L'anneau s'accroche en 180 ms (UI §20.7). */
+@media (prefers-reduced-motion: no-preference) {
+  :focus-visible {
+    animation: focus-snap var(--dur-fast) var(--ease-out);
+  }
+}
+@keyframes focus-snap {
+  from {
+    outline-offset: 5px;
+    outline-color: transparent;
+  }
 }
 
 h1,
@@ -73,9 +82,51 @@ p {
   font-variant-numeric: tabular-nums;
 }
 
-@media (prefers-contrast: more), (forced-colors: active) {
-  body {
-    background-image: none;
+/* Transitions de vue du même document (UI §20.2 K2, viewTransition.ts) : l'aurore ne bouge pas,
+   la page sort en 200 ms et entre en 420 ms ; mouvement réduit : fondu de 120 ms. */
+::view-transition-group(*) {
+  animation-duration: var(--dur-view);
+  animation-timing-function: var(--ease-view);
+}
+::view-transition-old(root) {
+  animation: vt-out 200ms var(--ease-in) both;
+}
+::view-transition-new(root) {
+  animation: vt-in var(--dur-view) var(--ease-view) 80ms both;
+}
+::view-transition-group(aurora) {
+  animation: none;
+}
+::view-transition-old(aurora) {
+  display: none;
+}
+::view-transition-new(aurora) {
+  animation: none;
+}
+@keyframes vt-out {
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+@keyframes vt-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+html.vt-reduced::view-transition-group(*) {
+  animation-duration: 120ms;
+}
+html.vt-reduced::view-transition-old(root) {
+  animation: vt-fade 120ms linear both reverse;
+}
+html.vt-reduced::view-transition-new(root) {
+  animation: vt-fade 120ms linear both;
+}
+@keyframes vt-fade {
+  from {
+    opacity: 0;
   }
 }
 

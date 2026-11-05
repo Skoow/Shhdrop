@@ -39,6 +39,9 @@ export const en = {
   "countdown.at": "{duration} left",
   "countdown.expired": "The share has expired",
 
+  "compose.add.label": "Add",
+  "compose.drop.title": "Drop what you want to send",
+  "compose.drop.or": "or choose",
   "compose.add.files": "Files",
   "compose.add.photo": "Photo",
   "compose.add.voice": "Voice",
@@ -114,6 +117,9 @@ export const en = {
 
   "manage.status": "Opened {u} / {max} · Expires in {duration}",
   "manage.gone": "Deleted",
+
+  "destroyed.body":
+    "This share has been destroyed. It has been erased from the server. Anything you already saved on this device is not affected.",
 
   "err.limit": "Upload limit reached. Try again in {duration}.",
   "err.full": "The service is full right now. Try again later.",

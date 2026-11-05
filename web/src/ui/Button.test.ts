@@ -66,4 +66,25 @@ describe("Button", () => {
   it("type=button par défaut (jamais d'envoi de formulaire)", () => {
     expect(setup({}).type).toBe("button");
   });
+
+  it("pression animée (UI §20.4) : deux clics synchrones -> un seul onpress, même avec le cadenas", () => {
+    const onpress = vi.fn(() => new Promise<void>(() => undefined));
+    const b = setup({ onpress, lock: true });
+    b.click();
+    b.click();
+    expect(onpress).toHaveBeenCalledTimes(1);
+  });
+
+  it("cadenas : deux tracés (anse ouverte, anse fermée), caché aux lecteurs d'écran", () => {
+    const b = setup({ lock: true });
+    const svg = b.querySelector("svg.lk")!;
+    expect(svg.getAttribute("aria-hidden")).toBe("true");
+    expect(svg.querySelector(".lk-open")).not.toBeNull();
+    expect(svg.querySelector(".lk-closed")).not.toBeNull();
+    expect(b.textContent?.trim()).toBe("Go");
+  });
+
+  it("sans lock : aucun cadenas", () => {
+    expect(setup({}).querySelector("svg.lk")).toBeNull();
+  });
 });

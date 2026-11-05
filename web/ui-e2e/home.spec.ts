@@ -1,4 +1,5 @@
-// Accueil (UI §9.1) : titre, phrase, schéma, lien « Comment ça marche », emplacement du composeur.
+// Accueil (UI §9.1, DA v2 §20.4) : titre mot par mot, phrase, réceptacle, schéma en boucle,
+// lien « Comment ça marche ».
 import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
 
@@ -31,7 +32,7 @@ test.describe("fr-FR", () => {
     await expect(h1).toBeVisible();
     await expect(page.getByText(/^Texte, photos, vidéos, vocaux, documents\./)).toBeVisible();
 
-    const schema = page.locator('svg[role="img"]');
+    const schema = page.locator('[role="img"]');
     await expect(schema).toHaveCount(1);
     await expect(schema).toHaveAttribute("aria-label", SCHEMA_FR);
     await expect(page.getByRole("img", { name: SCHEMA_FR })).toBeVisible();
@@ -42,24 +43,27 @@ test.describe("fr-FR", () => {
     // Aucun défilement horizontal.
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await axe(page)).toEqual([]);
-    await page.waitForTimeout(700); // tracé du schéma terminé (600 ms)
+    await page.waitForTimeout(900); // entrée finie (K1)
     await capture(page, "home");
 
     await how.click();
     await expect(page).toHaveURL(shh.origin + "/securite");
   });
 
-  test("téléphone 390 × 844 : la rangée d'ajout est dans le premier écran", async ({ page, shh, isMobile }) => {
+  test("téléphone 390 × 844 : la rangée d'ajout est dans le premier écran, le schéma sous le réceptacle (S4)", async ({ page, shh, isMobile }) => {
     test.skip(!isMobile, "projets téléphone seulement");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(shh.origin + "/");
-    const slot = page.locator('[data-slot="compose"]');
-    await expect(slot).toBeAttached();
-    const box = await slot.boundingBox();
-    expect(box).not.toBeNull();
-    // Emplacement réservé (Task 10 y mettra la rangée d'ajout) : 48 px au moins, entièrement visible.
-    expect(box!.height).toBeGreaterThanOrEqual(48);
-    expect(box!.y + box!.height).toBeLessThanOrEqual(844);
+    await page.waitForTimeout(900); // positions finales (entrée finie)
+    const row = page.getByRole("group", { name: "Ajouter" });
+    await expect(row).toBeVisible();
+    const box = (await row.boundingBox())!;
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.y + box.height).toBeLessThanOrEqual(844);
+    expect(await page.evaluate(() => scrollY)).toBe(0);
+    const vessel = (await page.locator('[data-slot="compose"]').boundingBox())!;
+    const schema = (await page.locator('[role="img"]').boundingBox())!;
+    expect(schema.y).toBeGreaterThan(vessel.y + vessel.height);
   });
 
   test("320 px : rien ne déborde ; capture", async ({ page, shh }) => {
@@ -80,9 +84,9 @@ test.describe("fr-FR", () => {
     });
     await expect(page.locator("[data-label]")).toHaveCount(6);
     expect(await labelOverlaps(page)).toEqual([]);
-    // Les libellés restent dans le flux : sous le dessin, au-dessus du bloc suivant (le composeur).
-    const drawing = await page.locator('svg[role="img"]').boundingBox();
-    const next = await page.locator('[data-slot="compose"]').boundingBox();
+    // Les libellés restent dans le flux : sous le dessin, au-dessus du bloc suivant (le pied de page).
+    const drawing = await page.locator('[role="img"]').boundingBox();
+    const next = await page.locator("footer").boundingBox();
     const boxes = await page.locator(".nodes [data-label]").evaluateAll((es) => es.map((e) => e.getBoundingClientRect().toJSON()));
     for (const box of boxes) {
       expect(box.top).toBeGreaterThanOrEqual(drawing!.y + drawing!.height);
@@ -94,39 +98,94 @@ test.describe("fr-FR", () => {
     await capture(page, "home-320-200pct");
   });
 
-  test("le trait n'est tracé qu'une fois par chargement : pas au retour sur l'accueil", async ({ page, shh }) => {
+  test("K1 : toutes les animations d'entrée sont finies à 900 ms (hors ambiance)", async ({ page, shh }) => {
     await page.goto(shh.origin + "/");
-    await page.getByRole("link", { name: "Comment ça marche" }).click();
-    await expect(page).toHaveURL(shh.origin + "/securite");
-    await page.goBack();
-    await expect(page.getByRole("img", { name: SCHEMA_FR })).toBeVisible();
-    // Animations du schéma seulement (le survol du lien sous le pointeur a sa propre transition).
-    expect(await page.evaluate(() => document.querySelector(".schema")!.getAnimations({ subtree: true }).length)).toBe(0);
+    const entries = await page.evaluate(() =>
+      document
+        .getAnimations()
+        .filter((a) => !((a.effect as KeyframeEffect).target as Element).closest("[data-ambient]"))
+        .map((a) => ({ name: (a as CSSAnimation).animationName, end: Number(a.effect!.getComputedTiming().endTime) })),
+    );
+    // Le titre (9 mots), le réceptacle, la phrase et le schéma entrent bien.
+    expect(entries.length).toBeGreaterThanOrEqual(12);
+    for (const e of entries) expect(e.end, e.name).toBeLessThanOrEqual(900);
+    // L'ambiance seule boucle : aurore, lumière du réceptacle, schéma.
+    const infinite = await page.evaluate(() =>
+      document
+        .getAnimations()
+        .filter((a) => a.effect!.getComputedTiming().iterations === Infinity)
+        .every((a) => ((a.effect as KeyframeEffect).target as Element).closest("[data-ambient]") !== null),
+    );
+    expect(infinite).toBe(true);
   });
 
-  test("mouvement : le trait est tracé une fois ; en mouvement réduit, aucune animation", async ({ page, shh }) => {
+  test("K8 : le titre a pour nom la phrase entière ; la copie animée est cachée", async ({ page, shh }) => {
     await page.goto(shh.origin + "/");
-    // Mouvement normal : une animation existe au chargement (le test réduit est donc significatif).
-    expect(await page.evaluate(() => document.getAnimations().length)).toBeGreaterThan(0);
+    const h1 = page.getByRole("heading", { level: 1, name: TITLE_FR, exact: true });
+    await expect(h1).toBeVisible();
+    await expect(h1.locator(".words")).toHaveAttribute("aria-hidden", "true");
+    await expect(h1.locator(".words .w")).toHaveCount(9);
+  });
 
+  test("rien n'attend : un clic sur le réceptacle à 100 ms ouvre le sélecteur de fichiers", async ({ page, shh }) => {
+    await page.goto(shh.origin + "/", { waitUntil: "domcontentloaded" });
+    const vessel = page.locator('[data-slot="compose"] .vessel');
+    await expect(vessel).toBeAttached();
+    await page.waitForTimeout(100);
+    const chooser = page.waitForEvent("filechooser", { timeout: 2000 });
+    // force : pas d'attente de stabilité (le réceptacle monte encore de quelques pixels).
+    await page.locator(".drop-title").click({ force: true });
+    const fc = await chooser;
+    expect(fc.isMultiple()).toBe(true);
+  });
+
+  test("onglet caché : l'ambiance (aurore, réceptacle, schéma) se met en pause", async ({ page, shh }) => {
+    await page.goto(shh.origin + "/");
+    await page.waitForTimeout(100);
+    const ambient = () =>
+      page.evaluate(() =>
+        document
+          .getAnimations()
+          .filter((a) => ((a.effect as KeyframeEffect).target as Element).closest("[data-ambient]"))
+          .map((a) => a.playState),
+      );
+    const before = await ambient();
+    expect(before.length).toBeGreaterThanOrEqual(3 + 2 + 5); // nappes, lumière, schéma
+    expect(new Set(before)).toEqual(new Set(["running"]));
+    await page.evaluate(() => {
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await expect.poll(async () => [...new Set(await ambient())]).toEqual(["paused"]);
+  });
+
+  test("mouvement réduit : aucune animation infinie, aucune entrée ; capture", async ({ page, shh, isMobile }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.setViewportSize(isMobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
     await page.goto(shh.origin + "/");
     await page.waitForTimeout(100);
     expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
-    // Le trait est visible (état final), pas masqué.
-    const offset = await page.evaluate(() =>
-      getComputedStyle(document.querySelector("svg[role=img] .trace")!).strokeDashoffset,
-    );
-    expect(parseFloat(offset)).toBe(0);
+    await capture(page, "home-v2-reduced");
   });
 
-  test("contraste forcé : capture", async ({ page, shh, browserName }) => {
+  test("contraste forcé : aurore et grain retirés ; capture", async ({ page, shh, browserName, isMobile }) => {
     test.skip(browserName !== "chromium", "forcedColors : Chromium seulement");
     await page.emulateMedia({ forcedColors: "active" });
+    await page.setViewportSize(isMobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
     await page.goto(shh.origin + "/");
     await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
-    await page.waitForTimeout(700);
-    await capture(page, "home-forced-colors");
+    expect(await page.locator(".aurora").evaluate((e) => getComputedStyle(e).display)).toBe("none");
+    expect(await page.locator(".grain").evaluate((e) => getComputedStyle(e).display)).toBe("none");
+    await page.waitForTimeout(900);
+    await capture(page, "home-v2-forced");
+  });
+
+  test("captures DA v2 (à comparer à da-v2/shots/01-accueil-*.png)", async ({ page, shh, isMobile }) => {
+    await page.setViewportSize(isMobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+    await page.goto(shh.origin + "/");
+    await page.waitForTimeout(1000);
+    await capture(page, isMobile ? "home-v2-390" : "home-v2-1440");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 });
 

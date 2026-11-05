@@ -22,6 +22,33 @@ describe("dictionnaires", () => {
         for (const re of banned) expect(re.test(v), `${lang} ${k} : « ${v} » contient ${re}`).toBe(false);
   });
 
+  it("aucun nom d'algorithme ni terme technique (UI §20.8)", () => {
+    const technical = /argon|\baes\b|gcm|hkdf|hmac|sha-?\d|stream|webcrypto|libsodium|ml-?kem|x25519|\d[\s\u00a0\u202f]*bits?\b|entropie|entropy/iu;
+    // Le motif lui-même : « bits » seulement après un nombre (l'anglais « a bit » reste permis).
+    for (const bad of ["Argon2id", "AES-256", "SHA-256", "sha256", "HKDF", "STREAM", "ML-KEM", "52\u202fbits", "52 bits", "entropie"])
+      expect(technical.test(bad), bad).toBe(true);
+    for (const ok of ["a bit longer", "Préparation des clés", "chiffré de bout en bout"])
+      expect(technical.test(ok), ok).toBe(false);
+    // pages.fr.ts et pages.en.ts (Task 25) rejoindront cette liste.
+    for (const [lang, d] of [["fr", fr], ["en", en]] as const)
+      for (const [k, v] of Object.entries(d)) {
+        expect(technical.test(v), `${lang} ${k} : « ${v} »`).toBe(false);
+        expect(/100\s*%\s*(s[eé]curis|secure)/iu.test(v), `${lang} ${k}`).toBe(false);
+        expect(/ne voit rien/iu.test(v), `${lang} ${k}`).toBe(false);
+      }
+  });
+
+  it("partage détruit : texte honnête K7 (UI §20.2), titre d'accueil intact", () => {
+    expect(fr["destroyed.body"]).toBe(
+      "Ce partage a été détruit. Il a été effacé du serveur. Ce que vous avez déjà enregistré sur cet appareil n'est pas concerné.",
+    );
+    expect(en["destroyed.body"]).toBe(
+      "This share has been destroyed. It has been erased from the server. Anything you already saved on this device is not affected.",
+    );
+    expect(fr["hero.title"]).toBe("Un lien, un mot de passe, puis plus rien.");
+    expect(en["hero.title"]).toBe("One link, one password, then nothing.");
+  });
+
   it("mêmes paramètres {…} dans les deux langues", () => {
     const params = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
     for (const k of Object.keys(fr) as (keyof typeof fr)[]) expect(params(en[k]), k).toEqual(params(fr[k]));

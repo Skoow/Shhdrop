@@ -53,3 +53,32 @@ export async function flip(elements: readonly Element[], mutate: () => void): Pr
   });
   await Promise.all(runs);
 }
+
+/** Échelles de pression (UI §20.3) : boutons et bouton à icône seule. */
+export const pressScale = 0.97;
+export const iconPressScale = 0.92;
+
+/**
+ * Contour de la capsule (UI §20.4) : rectangle arrondi `w` × `h`, rayon `r` (borné à la moitié
+ * du petit côté), qui part du milieu du bord haut et tourne dans le sens horaire. Avec
+ * `pathLength="100"`, `stroke-dasharray: 83.33 100` laisse l'ouverture de 60° du logo.
+ */
+export function capPath(w: number, h: number, r: number): string {
+  const W = Math.max(0, w);
+  const H = Math.max(0, h);
+  const R = Math.max(0, Math.min(r, W / 2, H / 2));
+  const n = (v: number) => Math.round(v * 100) / 100;
+  const cx = n(W / 2);
+  return [
+    `M ${cx} 0`,
+    `H ${n(W - R)}`,
+    `A ${n(R)} ${n(R)} 0 0 1 ${n(W)} ${n(R)}`,
+    `V ${n(H - R)}`,
+    `A ${n(R)} ${n(R)} 0 0 1 ${n(W - R)} ${n(H)}`,
+    `H ${n(R)}`,
+    `A ${n(R)} ${n(R)} 0 0 1 0 ${n(H - R)}`,
+    `V ${n(R)}`,
+    `A ${n(R)} ${n(R)} 0 0 1 ${n(R)} 0`,
+    `H ${cx}`,
+  ].join(" ");
+}

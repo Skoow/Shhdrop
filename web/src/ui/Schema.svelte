@@ -1,59 +1,51 @@
-<script module lang="ts">
-  // UI §9.1 : le trait est tracé une fois par chargement de page, pas à chaque retour sur l'accueil.
-  let played = false;
-</script>
-
 <script lang="ts">
   import { t } from "../i18n/i18n.svelte";
+  import { Lock } from "./Icon";
 
-  const draw = !played;
-  played = true;
+  // UI §20.4 (K10) : boucle de 6,4 s rangée dans l'ambiance : pause onglet caché et hors écran,
+  // retirée en mouvement réduit (état fixe : paquet scellé au départ, trait plein).
+  let el: HTMLDivElement | undefined = $state();
+  let onscreen = $state(true);
+  let hidden = $state(document.hidden);
+  $effect(() => {
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([e]) => (onscreen = e!.isIntersecting));
+    io.observe(el);
+    return () => io.disconnect();
+  });
 </script>
+
+<svelte:document onvisibilitychange={() => (hidden = document.hidden)} />
 
 <!--
   UI §9.1 : le mécanisme en une ligne. Votre appareil — chiffré — serveur (ne lit rien) —
-  chiffré — destinataire. Le trait menthe passe sous la capsule opaque du serveur.
-  Le SVG ne porte que le dessin et le nom accessible (role="img", aria-label). Les libellés
-  visibles sont en HTML, en unités relatives : ils grandissent avec la taille de texte et
-  passent à la ligne au lieu de se chevaucher (WCAG 1.4.4). Ils sont cachés aux lecteurs
-  d'écran, qui lisent l'aria-label.
+  chiffré — destinataire. Un paquet scellé traverse le serveur sans jamais s'ouvrir.
+  Le dessin ne porte que le nom accessible (role="img", aria-label). Les libellés visibles sont
+  en HTML, en unités relatives : ils grandissent avec la taille de texte et passent à la ligne au
+  lieu de se chevaucher (WCAG 1.4.4). Ils sont cachés aux lecteurs d'écran, qui lisent l'aria-label.
 -->
-<div class="schema">
+<div class={["schema", { still: hidden || !onscreen }]} bind:this={el}>
   <div class="enc" aria-hidden="true">
     <span data-label>{t("schema.encrypted")}</span>
     <span data-label>{t("schema.encrypted")}</span>
   </div>
 
-  <svg class={["drawing", draw && "draw"]} role="img" aria-label={t("schema.label")} width="100%" height="32" overflow="visible">
-    <line class="track" x1="16" y1="16" x2="100%" y2="16" />
-    <line class="trace" x1="16" y1="16" x2="100%" y2="16" pathLength="100" />
-
-    <!-- Votre appareil : le contenu (carré menthe) n'est en clair qu'ici. -->
-    <rect class="device" x="0.75" y="2.75" width="15.5" height="26.5" rx="4" />
-    <rect class="content" x="4" y="11" width="9" height="10" rx="2" />
-
-    <!-- Serveur : capsule opaque, contenu masqué ; le trait passe dessous. -->
-    <svg x="50%" overflow="visible">
-      <rect class="box" x="-28" y="0" width="56" height="32" rx="16" />
-      <circle class="mask" cx="-10" cy="16" r="2.5" />
-      <circle class="mask" cx="0" cy="16" r="2.5" />
-      <circle class="mask" cx="10" cy="16" r="2.5" />
-    </svg>
-
-    <!-- Destinataire : le trait y arrive, le contenu y redevient lisible. -->
-    <svg x="100%" overflow="visible">
-      <rect class="device" x="-15.75" y="2.75" width="15.5" height="26.5" rx="4" />
-      <rect class="content arrive" x="-12" y="11" width="9" height="10" rx="2" />
-    </svg>
-  </svg>
+  <div class="track" role="img" aria-label={t("schema.label")} data-ambient>
+    <span class="line"></span>
+    <span class="trail"></span>
+    <span class="node a"><i></i></span>
+    <span class="node b"><i></i><i></i><i></i></span>
+    <span class="node c"><i></i></span>
+    <span class="packet"><Lock size={15} strokeWidth={2.2} aria-hidden="true" /></span>
+  </div>
 
   <div class="nodes" aria-hidden="true">
-    <span class="node start"><span data-label>{t("schema.device")}</span></span>
-    <span class="node mid">
+    <span class="node-l start"><span data-label>{t("schema.device")}</span></span>
+    <span class="node-l mid">
       <span data-label class="strong">{t("schema.server")}</span>
       <span data-label class="quiet">{t("schema.blind")}</span>
     </span>
-    <span class="node end"><span data-label>{t("schema.recipient")}</span></span>
+    <span class="node-l end"><span data-label>{t("schema.recipient")}</span></span>
   </div>
 </div>
 
@@ -62,6 +54,7 @@
     container-type: inline-size;
     display: grid;
     gap: var(--sp-2);
+    max-width: 560px;
     font-size: var(--fs-small);
     line-height: var(--lh-small);
     font-weight: var(--fw-small);
@@ -84,6 +77,171 @@
     font-weight: var(--fw-micro);
   }
 
+  .track {
+    position: relative;
+    height: 44px;
+  }
+  .line,
+  .trail {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    top: 21px;
+    height: 2px;
+    border-radius: 2px;
+  }
+  .line {
+    background: var(--hair-2);
+  }
+  .trail {
+    background: var(--accent);
+    transform-origin: left;
+    opacity: 0.55;
+  }
+  .node {
+    position: absolute;
+    top: 10px;
+    display: grid;
+    place-items: center;
+    height: 24px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    box-shadow: 0 0 0 1px var(--line-strong);
+  }
+  .a,
+  .c {
+    width: 18px;
+  }
+  .a {
+    left: 0;
+  }
+  .c {
+    right: 0;
+  }
+  .a i,
+  .c i {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+  /* Serveur : capsule opaque, contenu masqué. */
+  .b {
+    left: 50%;
+    top: 8px;
+    width: 56px;
+    height: 28px;
+    margin-left: -28px;
+    gap: 4px;
+    grid-auto-flow: column;
+    border-radius: 14px;
+  }
+  .b i {
+    position: relative;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--text-3);
+  }
+  /* Les points s'allument en menthe au passage du paquet (opacité seulement). */
+  .b i::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--accent);
+    opacity: 0;
+  }
+  .packet {
+    position: absolute;
+    left: 0;
+    top: 8px;
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    background: var(--accent);
+    color: var(--on-accent);
+    box-shadow: 0 6px 14px -6px rgb(0 0 0 / 0.8);
+    transform: translateX(-5px);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .packet {
+      animation: packet 6.4s var(--ease-in-out) 1.2s infinite both;
+    }
+    .trail {
+      animation: trail 6.4s var(--ease-in-out) 1.2s infinite both;
+    }
+    .b i::after {
+      animation: blink 6.4s linear 1.2s infinite both;
+    }
+    .b i:nth-child(2)::after {
+      animation-delay: 1.32s;
+    }
+    .b i:nth-child(3)::after {
+      animation-delay: 1.44s;
+    }
+    .still .packet,
+    .still .trail,
+    .still .b i::after {
+      animation-play-state: paused;
+    }
+  }
+  @keyframes packet {
+    0% {
+      transform: translateX(-5px) scale(0.6);
+      opacity: 0;
+    }
+    8% {
+      transform: translateX(-5px) scale(1);
+      opacity: 1;
+    }
+    38%,
+    52% {
+      transform: translateX(calc(50cqw - 14px)) scale(1);
+    }
+    88% {
+      transform: translateX(calc(100cqw - 23px)) scale(1);
+      opacity: 1;
+    }
+    96%,
+    100% {
+      transform: translateX(calc(100cqw - 23px)) scale(0.6);
+      opacity: 0;
+    }
+  }
+  @keyframes trail {
+    0%,
+    6% {
+      transform: scaleX(0);
+      opacity: 0.55;
+    }
+    88% {
+      transform: scaleX(1);
+      opacity: 0.55;
+    }
+    100% {
+      transform: scaleX(1);
+      opacity: 0;
+    }
+  }
+  @keyframes blink {
+    0%,
+    38% {
+      opacity: 0;
+    }
+    42%,
+    50% {
+      opacity: 1;
+    }
+    54%,
+    100% {
+      opacity: 0;
+    }
+  }
+
   /* Sous les trois nœuds : début, milieu, fin. Colonnes latérales égales : le milieu est centré. */
   .nodes {
     display: grid;
@@ -91,7 +249,7 @@
     gap: var(--sp-2);
     color: var(--text-2);
   }
-  .node {
+  .node-l {
     min-width: 0;
   }
   .end {
@@ -107,8 +265,9 @@
     color: var(--text);
     font-weight: 560;
   }
+  /* --text-3 jamais sur l'aurore (K5). */
   .quiet {
-    color: var(--text-3);
+    color: var(--text-2);
   }
 
   /* Texte agrandi (ou écran très étroit) : les libellés passent en liste, dans l'ordre du trait. */
@@ -129,93 +288,34 @@
     }
   }
 
-  .drawing {
-    display: block;
-    width: 100%;
-    height: 32px;
-    overflow: visible;
-  }
-
-  .track {
-    stroke: var(--line);
-    stroke-width: 1.5;
-  }
-  .trace {
-    stroke: var(--accent);
-    stroke-width: 1.5;
-    stroke-dasharray: 100;
-    stroke-dashoffset: 0;
-  }
-  .draw .trace {
-    animation: draw 600ms var(--ease-out) both;
-  }
-  @keyframes draw {
-    from {
-      stroke-dashoffset: 100;
-    }
-    to {
-      stroke-dashoffset: 0;
-    }
-  }
-
-  .device {
-    fill: var(--bg);
-    stroke: var(--text-2);
-    stroke-width: 1.5;
-  }
-  .content {
-    fill: var(--accent);
-  }
-  .draw .arrive {
-    transform-box: fill-box;
-    transform-origin: center;
-    animation: arrive var(--dur-fast) var(--ease-out) 540ms both;
-  }
-  @keyframes arrive {
-    from {
-      opacity: 0;
-      transform: scale(0.4);
-    }
-  }
-
-  .box {
-    fill: var(--surface-2);
-    stroke: var(--line-strong);
-    stroke-width: 1.5;
-  }
-  .mask {
-    fill: var(--text-3);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .draw .trace,
-    .draw .arrive {
-      animation: none;
-    }
-  }
   @media (prefers-contrast: more) {
-    .track {
-      stroke: var(--line-strong);
+    .line {
+      background: var(--line-strong);
     }
   }
   @media (forced-colors: active) {
-    .track,
-    .box,
-    .device {
-      stroke: CanvasText;
+    .line {
+      background: CanvasText;
     }
-    .box,
-    .device {
-      fill: Canvas;
+    .trail,
+    .packet {
+      background: Highlight;
+      color: HighlightText;
     }
-    .mask {
-      fill: CanvasText;
+    .node {
+      background: Canvas;
+      box-shadow: none;
+      border: 1px solid CanvasText;
     }
-    .trace {
-      stroke: Highlight;
+    .a i,
+    .c i {
+      background: Highlight;
     }
-    .content {
-      fill: Highlight;
+    .b i {
+      background: CanvasText;
+    }
+    .b i::after {
+      display: none;
     }
   }
 </style>

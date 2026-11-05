@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { flip, reducedMotion } from "./motion";
+import { capPath, flip, iconPressScale, pressScale, reducedMotion } from "./motion";
 
 function stubMedia(reduce: boolean) {
   vi.stubGlobal("matchMedia", (q: string) => ({ matches: reduce && q.includes("reduced-motion"), media: q }));
@@ -70,5 +70,25 @@ describe("flip", () => {
     const a = box(0);
     await expect(flip([a.el], () => { throw new Error("boom"); })).rejects.toThrow("boom");
     expect(a.animate).not.toHaveBeenCalled();
+  });
+});
+
+describe("capPath (UI §20.4)", () => {
+  it("part du milieu du bord haut, sens horaire, et y revient", () => {
+    const d = capPath(200, 100, 32);
+    expect(d.startsWith("M 100 0")).toBe(true);
+    expect(d).toBe(
+      "M 100 0 H 168 A 32 32 0 0 1 200 32 V 68 A 32 32 0 0 1 168 100 H 32 A 32 32 0 0 1 0 68 V 32 A 32 32 0 0 1 32 0 H 100",
+    );
+    // Drapeau de balayage 1 : sens horaire (y vers le bas).
+    for (const m of d.matchAll(/A [\d.]+ [\d.]+ 0 0 (\d)/g)) expect(m[1]).toBe("1");
+  });
+  it("rayon borné à la moitié du petit côté ; tailles nulles sans NaN", () => {
+    expect(capPath(200, 40, 32)).toContain("A 20 20 ");
+    expect(capPath(0, 0, 32)).not.toMatch(/NaN|-/);
+  });
+  it("échelles de pression", () => {
+    expect(pressScale).toBe(0.97);
+    expect(iconPressScale).toBe(0.92);
   });
 });

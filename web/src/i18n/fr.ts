@@ -39,6 +39,9 @@ export const fr = {
   "countdown.at": "Il reste {duration}",
   "countdown.expired": "Le partage a expiré",
 
+  "compose.add.label": "Ajouter",
+  "compose.drop.title": "Déposez ce que vous voulez envoyer",
+  "compose.drop.or": "ou choisissez",
   "compose.add.files": "Fichiers",
   "compose.add.photo": "Photo",
   "compose.add.voice": "Vocal",
@@ -118,6 +121,9 @@ export const fr = {
 
   "manage.status": "Ouvert {u} / {max} · Expire dans {duration}",
   "manage.gone": "Supprimé",
+
+  "destroyed.body":
+    "Ce partage a été détruit. Il a été effacé du serveur. Ce que vous avez déjà enregistré sur cet appareil n'est pas concerné.",
 
   "err.limit": "Limite d'envois atteinte. Réessayez dans {duration}.",
   "err.full": "Le service est plein pour le moment. Réessayez plus tard.",

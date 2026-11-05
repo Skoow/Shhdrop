@@ -18,6 +18,11 @@
      */
     onpress?: () => void | Promise<void>;
     icon?: Snippet;
+    /**
+     * Cadenas en deux tracés (UI §20.4, « Chiffrer et envoyer ») : l'anse ouverte laisse place à
+     * l'anse fermée au survol et au focus. Ignoré si `icon` est fourni.
+     */
+    lock?: boolean;
     children: Snippet;
     el?: HTMLButtonElement | undefined;
   };
@@ -29,6 +34,7 @@
     type = "button",
     onpress,
     icon,
+    lock = false,
     children,
     el = $bindable(),
     ...rest
@@ -77,47 +83,78 @@
     <span class="spin" aria-hidden="true"></span>
   {:else if icon}
     <span class="ic" aria-hidden="true">{@render icon()}</span>
+  {:else if lock}
+    <svg class="lk" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+      <path class="lk-open" d="M7 11V7a5 5 0 0 1 9.9-1" />
+      <path class="lk-closed" d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
   {/if}
   <span class="label">{@render children()}</span>
 </button>
 
 <style>
   .btn {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: var(--sp-2);
     min-height: 48px;
     min-width: 44px;
-    padding: 0 var(--sp-5);
+    padding: 0 20px;
     border: 1px solid transparent;
-    border-radius: var(--r-md);
+    /* UI §20.3 : 12 px à 48 px de haut, 10 px à 44 px. */
+    border-radius: 12px;
     font: inherit;
-    font-weight: 600;
+    font-size: 0.9375rem;
+    font-weight: 560;
+    letter-spacing: 0.005em;
     line-height: 1.2;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
     transition:
       background-color var(--dur-fast) var(--ease-out),
+      border-color var(--dur-fast) var(--ease-out),
       color var(--dur-fast) var(--ease-out),
-      transform var(--dur-instant) var(--ease-out);
+      transform var(--dur-press) var(--ease-out);
   }
   .dense {
     min-height: 44px;
-    padding: 0 var(--sp-4);
+    padding: 0 14px;
+    border-radius: 10px;
+    font-size: var(--fs-small);
   }
+  /* Pression : 0,97 (motion.ts, pressScale). */
   .btn:active:not(:disabled, [aria-disabled="true"]) {
-    transform: scale(0.98);
+    transform: scale(0.97);
   }
   .primary {
     background: var(--accent);
     color: var(--on-accent);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.4),
+      inset 0 -1px 0 rgb(0 0 0 / 0.14),
+      0 10px 24px -14px rgb(0 0 0 / 0.9);
+  }
+  /* Reflet : une bande claire traverse le bouton principal une fois au survol (transform seulement). */
+  .primary::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / 0.45) 50%, transparent 70%);
+    transform: translateX(-120%);
+    pointer-events: none;
   }
   .secondary {
-    background: var(--surface-3);
+    background: rgb(255 255 255 / 0.045);
     color: var(--text);
-    border-color: var(--line-strong);
+    border-color: var(--hair-2);
+    box-shadow: var(--edge-hi);
   }
   .ghost {
     background: transparent;
@@ -126,16 +163,22 @@
   .danger {
     background: var(--danger);
     color: var(--on-danger);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.35);
   }
   @media (hover: hover) {
     .primary:hover:not(:disabled, [aria-disabled="true"]) {
       background: var(--accent-hover);
     }
+    .primary:hover:not(:disabled, [aria-disabled="true"])::after {
+      transform: translateX(120%);
+      transition: transform 760ms var(--ease-out);
+    }
     .secondary:hover:not(:disabled, [aria-disabled="true"]) {
-      background: var(--surface-2);
+      background: rgb(255 255 255 / 0.08);
+      border-color: rgb(233 236 242 / 0.2);
     }
     .ghost:hover:not(:disabled, [aria-disabled="true"]) {
-      background: var(--surface-2);
+      background: rgb(255 255 255 / 0.05);
     }
     .danger:hover:not(:disabled, [aria-disabled="true"]) {
       filter: brightness(1.08);
@@ -146,12 +189,48 @@
     background: var(--surface-2);
     color: var(--text-disabled);
     border-color: transparent;
+    box-shadow: none;
+  }
+  .btn:disabled::after {
+    display: none;
   }
   .btn[aria-disabled="true"] {
     cursor: progress;
   }
   .ic {
     display: inline-flex;
+  }
+  .lk {
+    flex: none;
+  }
+  /* Cadenas : l'anse ouverte disparaît, l'anse fermée descend de 3 px (220 ms). */
+  .lk-open,
+  .lk-closed {
+    transition:
+      opacity var(--dur-fast) var(--ease-out),
+      transform 220ms var(--ease-out);
+  }
+  .lk-closed {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  @media (hover: hover) {
+    .btn:hover .lk-open {
+      opacity: 0;
+      transform: translateY(-2px);
+    }
+    .btn:hover .lk-closed {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .btn:focus-visible .lk-open {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  .btn:focus-visible .lk-closed {
+    opacity: 1;
+    transform: none;
   }
   .spin {
     width: 16px;
@@ -171,10 +250,19 @@
       animation: none;
     }
     .btn {
-      transition: none;
+      transition:
+        background-color var(--dur-fast) var(--ease-out),
+        color var(--dur-fast) var(--ease-out);
     }
     .btn:active:not(:disabled, [aria-disabled="true"]) {
       transform: none;
+    }
+    .primary::after {
+      display: none;
+    }
+    .lk-open,
+    .lk-closed {
+      transform: none !important;
     }
   }
   @media (forced-colors: active) {
@@ -183,6 +271,9 @@
     }
     .btn:disabled {
       border-color: GrayText;
+    }
+    .primary::after {
+      display: none;
     }
   }
 </style>

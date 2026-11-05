@@ -26,7 +26,7 @@
     height: 44px;
     padding: 0;
     border: 1px solid transparent;
-    border-radius: var(--r-md);
+    border-radius: 10px;
     background: transparent;
     color: var(--text-2);
     cursor: pointer;
@@ -34,27 +34,30 @@
     touch-action: manipulation;
     transition:
       background-color var(--dur-fast) var(--ease-out),
-      color var(--dur-fast) var(--ease-out);
+      color var(--dur-fast) var(--ease-out),
+      transform var(--dur-press) var(--ease-out);
   }
   .ic {
     display: inline-flex;
   }
   .secondary {
-    background: var(--surface-3);
+    background: rgb(255 255 255 / 0.045);
     color: var(--text);
-    border-color: var(--line-strong);
+    border-color: var(--hair-2);
   }
   .danger {
     color: var(--danger);
   }
   @media (hover: hover) {
     .ib:hover:not(:disabled) {
-      background: var(--surface-3);
+      background: rgb(255 255 255 / 0.06);
       color: var(--text);
     }
   }
+  /* Pression : 0,92 (motion.ts, iconPressScale). */
   .ib:active:not(:disabled) {
-    background: var(--surface-3);
+    background: rgb(255 255 255 / 0.06);
+    transform: scale(0.92);
   }
   .ib:disabled {
     color: var(--text-disabled);
@@ -63,6 +66,9 @@
   @media (prefers-reduced-motion: reduce) {
     .ib {
       transition: none;
+    }
+    .ib:active:not(:disabled) {
+      transform: none;
     }
   }
   @media (forced-colors: active) {

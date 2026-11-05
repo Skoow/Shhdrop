@@ -10,7 +10,7 @@ function parse(c: string | Rgb): Rgb {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-function luminance(c: string | Rgb): number {
+export function luminance(c: string | Rgb): number {
   const [r, g, b] = parse(c).map((v) => {
     const s = v / 255;
     return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
@@ -27,4 +27,9 @@ export function contrast(a: string | Rgb, b: string | Rgb): number {
 /** Couleur `fg` d'opacité `alpha` posée sur `bg` (composition sRGB simple). */
 export function composite(fg: Rgb, alpha: number, bg: Rgb): Rgb {
   return [0, 1, 2].map((i) => Math.round(fg[i]! * alpha + bg[i]! * (1 - alpha))) as unknown as Rgb;
+}
+
+/** Contraste WCAG entre deux luminances relatives (0 à 1), sans couleur : sert au plafond K5 (UI §20.2). */
+export function contrastFromLuminance(a: number, b: number): number {
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
