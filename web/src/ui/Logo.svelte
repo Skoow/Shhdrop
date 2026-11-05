@@ -1,69 +1,100 @@
 <script lang="ts" module>
-  // L'introduction se joue une fois par chargement de page, pas à chaque retour sur l'accueil.
-  let introPlayed = false;
+  // L'arrivée (« chut ») se joue une fois par chargement de page, jamais au retour sur l'accueil.
+  // En mémoire seulement : rien n'est écrit dans le navigateur.
+  let arrivalPlayed = false;
 </script>
 
 <script lang="ts">
-  // Logo « Trame » (scripts/gen-logo.mjs) : « shhd » plein, « rop » en trame de points qui s'efface.
-  // Tracés générés par scripts/gen-logo.mjs (logo-paths.ts). Animation : opacity et transform
-  // seulement (Web Animations API, aucun attribut style), rien en mouvement réduit (UI §7.5).
+  // Logo « Trame » (scripts/gen-logo.mjs) : « shhd » plein, « rop » en trame de points.
+  // Animations : opacity et transform seulement (Web Animations API, aucun attribut style),
+  // rien en mouvement réduit (UI §7.5). Chronologies (« chut », gomme) dans logoMotion.ts. Première et
+  // dernière image de chaque animation d'arrivée = le logo au repos.
+  import { tick } from "svelte";
   import { LOGO_DOTS, LOGO_HEAD, LOGO_STROKE, LOGO_TAIL, LOGO_VIEWBOX, MARK_PATH } from "./logo-paths";
+  import { CRUMBS, ERASE, ERASER_RUBBER, ERASER_SLEEVE, FINGER, WAVES, eraseTimeline, hushTimeline, type Timeline } from "./logoMotion";
   import { reducedMotion } from "./motion";
 
   type Props = {
-    /** Joue l'introduction (le mot s'assemble, puis « rop » se défait en trame) au premier affichage. */
+    /** Arrivée sur le site : le geste « chut » (une fois par chargement), du logo au repos au logo au repos. */
     animated?: boolean;
     /** Mot-symbole complet, ou marque seule (o rayé, celui du favicon). */
     variant?: "wordmark" | "mark";
   };
   let { animated = false, variant = "wordmark" }: Props = $props();
 
+  const uid = $props.id();
   let svg: SVGSVGElement | undefined = $state();
   let gone = $state(false);
+  /** Vrai pendant l'effacement : masque, gomme, miettes et trame fantôme n'existent que pendant ce temps. */
+  let erasing = $state(false);
+  /** Vrai pendant le « chut » : doigt et ondes n'existent que pendant ce temps. */
+  let hushing = $state(false);
+  let running: Animation[] = [];
 
-  const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
-  const parts = (sel: string) => [...(svg?.querySelectorAll<SVGPathElement>(sel) ?? [])];
+  const parts = (sel: string) => [...(svg?.querySelectorAll<SVGElement>(sel) ?? [])];
+  const canAnimate = () => !reducedMotion() && typeof svg?.animate === "function";
 
-  // Toute l'entrée tient en 900 ms (budget K1 de l'accueil) : tête 0–400, trame 380–890.
-  function intro() {
-    for (const el of parts(".head"))
-      el.animate([{ opacity: 0, transform: "translateY(4px)" }, { opacity: 1, transform: "none" }], {
-        duration: 400,
-        easing: EASE,
-        fill: "backwards",
-      });
-    // « rop » plein le temps de lire le mot, puis il cède la place à la trame.
-    for (const el of parts(".tail"))
-      el.animate(
-        [
-          { opacity: 0, transform: "translateY(4px)", offset: 0 },
-          { opacity: 1, transform: "none", offset: 0.36 },
-          { opacity: 1, transform: "none", offset: 0.6 },
-          { opacity: 0, transform: "none", offset: 0.86 },
-          { opacity: 0, transform: "none", offset: 1 },
-        ],
-        { duration: 860, easing: "ease-out" },
+  /** Interrompt l'animation en cours : état final immédiat. */
+  function skip() {
+    for (const a of running) a.finish();
+  }
+
+  /** Joue une chronologie ; un clic ou une touche n'importe où la termine (jamais bloquante). */
+  async function play({ duration, tracks }: Timeline): Promise<void> {
+    running = tracks.flatMap((t) => {
+      const els = parts(t.target);
+      return (t.nth === undefined ? els : els.slice(t.nth, t.nth + 1)).map((el) =>
+        el.animate(t.frames, { duration, easing: t.easing ?? "linear", fill: t.fill ?? "none" }),
       );
-    parts(".dots").forEach((el, k) =>
-      el.animate([{ opacity: 0, transform: "scale(1.5)" }, { opacity: 1, transform: "none" }], {
-        duration: 260,
-        delay: 380 + k * 50,
-        easing: EASE,
-        fill: "backwards",
-      }),
-    );
+    });
+    const opts = { capture: true, passive: true } as const;
+    addEventListener("pointerdown", skip, opts);
+    addEventListener("keydown", skip, opts);
+    try {
+      await Promise.allSettled(running.map((a) => a.finished));
+    } finally {
+      removeEventListener("pointerdown", skip, opts);
+      removeEventListener("keydown", skip, opts);
+      running = [];
+    }
+  }
+
+  async function hush(): Promise<void> {
+    hushing = true;
+    await tick();
+    try {
+      await play(hushTimeline(LOGO_DOTS.length));
+    } finally {
+      hushing = false;
+    }
   }
 
   $effect(() => {
-    if (!svg || variant !== "wordmark" || !animated || introPlayed) return;
-    introPlayed = true;
-    if (!reducedMotion() && typeof svg.animate === "function") intro();
+    if (!svg || variant !== "wordmark" || !animated || arrivalPlayed) return;
+    arrivalPlayed = true;
+    if (canAnimate()) void hush();
   });
 
-  /** Écran de destruction : la trame s'efface tranche par tranche ; résolue à la fin (tout de suite en mouvement réduit). */
+  /** Écran de destruction : la gomme efface le mot, qui reste effacé ; résolue à la fin (tout de suite en mouvement réduit). */
+  export async function erase(): Promise<void> {
+    if (!canAnimate()) {
+      gone = true;
+      return;
+    }
+    erasing = true;
+    await tick();
+    try {
+      await play(eraseTimeline(false));
+    } finally {
+      gone = true;
+      erasing = false;
+    }
+  }
+
+  /** Écran de destruction (variante sobre) : la trame s'efface tranche par tranche. */
   export async function dissolve(): Promise<void> {
     const dots = parts(".dots");
-    if (reducedMotion() || dots.some((d) => typeof d.animate !== "function")) {
+    if (!canAnimate()) {
       gone = true;
       return;
     }
@@ -86,11 +117,48 @@
   </svg>
 {:else}
   <svg bind:this={svg} class={["logo", "word", gone && "gone"]} viewBox={LOGO_VIEWBOX} role="img" aria-label="Shhdrop" focusable="false">
-    <path class="head" d={LOGO_HEAD} stroke-width={LOGO_STROKE} />
-    <path class="tail" d={LOGO_TAIL} stroke-width={LOGO_STROKE} />
-    {#each LOGO_DOTS as d, k (k)}
-      <path class="dots" {d} />
-    {/each}
+    {#if erasing}
+      <defs>
+        <linearGradient id="{uid}-g1" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0" stop-color="#000" stop-opacity="0.94" />
+          <stop offset={1 - ERASE.soft} stop-color="#000" stop-opacity="0.94" />
+          <stop offset="1" stop-color="#000" stop-opacity="0" />
+        </linearGradient>
+        <linearGradient id="{uid}-g2" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0" stop-color="#000" stop-opacity="0" />
+          <stop offset={ERASE.soft} stop-color="#000" stop-opacity="0.94" />
+          <stop offset="1" stop-color="#000" stop-opacity="0.94" />
+        </linearGradient>
+        <mask id="{uid}-m" maskUnits="userSpaceOnUse" x="-40" y="-50" width="270" height="80">
+          <rect x="-40" y="-50" width="270" height="80" fill="#fff" />
+          <rect class="m1" x={ERASE.x0 - ERASE.maskW * (1 - ERASE.soft / 2)} y={ERASE.band1.y} width={ERASE.maskW} height={ERASE.band1.h} fill="url(#{uid}-g1)" />
+          <rect class="m2" x={ERASE.x1 - ERASE.maskW * (ERASE.soft / 2)} y={ERASE.band2.y} width={ERASE.maskW} height={ERASE.band2.h} fill="url(#{uid}-g2)" />
+        </mask>
+      </defs>
+      <path class="fx ghost" d={LOGO_HEAD + LOGO_TAIL} />
+    {/if}
+    <g class="ink" mask={erasing ? `url(#${uid}-m)` : undefined}>
+      <path class="head" d={LOGO_HEAD} stroke-width={LOGO_STROKE} />
+      <path class="tail" d={LOGO_TAIL} stroke-width={LOGO_STROKE} />
+      {#each LOGO_DOTS as d, k (k)}
+        <path class="dots" {d} />
+      {/each}
+    </g>
+    {#if hushing}
+      <path class="fx finger" d={FINGER} />
+      {#each WAVES as d, i (i)}
+        <path class="fx wave wave{i}" {d} />
+      {/each}
+    {/if}
+    {#if erasing}
+      {#each CRUMBS as c, i (i)}
+        <circle class="fx crumb crumb{i}" cx={c.x} cy={c.y} r={1.1 - i * 0.1} />
+      {/each}
+      <g class="fx eraser">
+        <path class="sleeve" d={ERASER_SLEEVE} />
+        <path class="rubber" d={ERASER_RUBBER} />
+      </g>
+    {/if}
   </svg>
 {/if}
 
@@ -126,14 +194,46 @@
   .stripes {
     fill: var(--accent);
   }
-  .head,
-  .tail,
-  .dots {
+  .ink,
+  .dots,
+  .eraser,
+  .crumb,
+  .wave {
     transform-box: fill-box;
     transform-origin: center;
   }
-  .gone .dots {
+  .gone .ink {
     opacity: 0;
+  }
+  /* Effets de la gomme : invisibles hors animation ; jamais cibles du pointeur. */
+  .fx {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .ghost {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-dasharray: 0 5;
+  }
+  .crumb {
+    fill: var(--text-2);
+  }
+  .finger {
+    fill: var(--accent);
+  }
+  .wave {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+  }
+  .sleeve {
+    fill: var(--accent);
+  }
+  .rubber {
+    fill: var(--seal-light);
   }
   /* Couleurs forcées : Chromium ne force pas les couleurs dans le SVG ; on suit donc la couleur système. */
   @media (forced-colors: active) {
@@ -141,8 +241,24 @@
       color: CanvasText;
     }
     .dots,
-    .stripes {
+    .stripes,
+    .crumb {
       fill: currentColor;
+    }
+    .ghost,
+    .wave {
+      stroke: currentColor;
+    }
+    .finger {
+      fill: CanvasText;
+    }
+    .sleeve {
+      fill: CanvasText;
+    }
+    .rubber {
+      fill: Canvas;
+      stroke: CanvasText;
+      stroke-width: 1;
     }
   }
 </style>
