@@ -8,7 +8,9 @@
 
 **Tech Stack:** Svelte 5.57.3, `@sveltejs/vite-plugin-svelte` 7.3.1, Vite 8.3.5, TypeScript 7.0.2 (+ `svelte-check` 4.7.8 sur TypeScript 6.0.3 dans un paquet outil séparé), Vitest 5.1.0, `@playwright/test` 1.64.1, `@axe-core/playwright` 4.14.0, `pdfjs-dist` 6.5.438, `@lucide/svelte` 1.68.0, `uqr` 0.1.3, polices Mona Sans et JetBrains Mono (Fontsource 5.3.0, fichiers copiés). Go 1.26.
 
-**Spec:** `docs/superpowers/specs/2026-11-04-shhdrop-ui-design.md` (notée « UI ») et `docs/superpowers/specs/2026-11-03-shhdrop-design.md` (notée « spec »). Lire UI §0, §7, §9, §12, §14.3, §15, §18 et spec §2, §5, §7.4, §10, §12, §13, §18, §19, §21, §24, §25 avant toute tâche.
+**Spec:** `docs/superpowers/specs/2026-11-04-shhdrop-ui-design.md` (notée « UI », révision 4) et `docs/superpowers/specs/2026-11-03-shhdrop-design.md` (notée « spec », v2.6).
+
+**Ordre après la Task 8 (5 novembre)** : Task DA (direction artistique v2, UI §20), puis Tasks K1 à K3 (chiffrement anticipé, lien court, spec §29, §31, §32, §34), puis Tasks 9 à 24 (avec les amendements listés après la Task K3), puis Task R (droits), Task H (historique), Tasks V1 à V3 (coffre), Tasks 25 à 27, Tasks C1 à C4 (code vérifiable, C4 conditionnelle), Task 28. Référence visuelle : `docs/superpowers/design/da-v2/`. Lire UI §0, §7, §9, §12, §14.3, §15, §18 et spec §2, §5, §7.4, §10, §12, §13, §18, §19, §21, §24, §25 avant toute tâche.
 
 ## Global Constraints
 
@@ -18,12 +20,12 @@
 - Le serveur ne reçoit jamais de contenu, de nom, de clé ni de mot de passe en clair : le test « le serveur ne voit rien » du Plan 1 reste vert ; la Task 27 l'étend au navigateur.
 - **Aucune ressource tierce** sur les pages de l'application (polices, icônes, scripts, styles, images : tout est servi par le serveur) ; aucun `data:`. Seule exception, et seulement dans les Tasks 15–16 : le document du cadre de vérification, servi par l'origine `SHH_VERIF_ORIGIN`, chargé après consentement (UI §15).
 - **CSP** de la spec §10 inchangée, sauf `frame-src 'self' {SHH_VERIF_ORIGIN}` quand le repli est activé, et `frame-ancestors 'self'` (au lieu de `'none'`) sur `/pdf-frame.html` seulement. Aucun script ni style en ligne, aucun attribut `style` statique, aucun `eval` / `new Function`, aucun `{@html}`. Toute violation détectée en e2e fait échouer le test.
-- Aucun stockage navigateur ; aucun secret dans la console, le titre, l'URL après `replaceState` (sauf exception navigateur intégré, UI S4), ni dans un `postMessage`.
+- Aucun stockage navigateur, sauf deux exceptions écrites : `web/src/vault/` (coffre chiffré, spec §27) et `web/src/history/` (`S_gestion` chiffré, spec §33), contrôlées par `source-rules.test.ts` ; jamais `K_lien`, mot de passe, `R` ni clair. Aucun secret dans la console, le titre, l'URL après `replaceState` (sauf exception navigateur intégré, UI S4), ni dans un `postMessage`.
 - `translate="no"`, attributs de saisie de UI §12.3, aucune balise `<form>` sur l'envoi et l'ouverture.
 - Visionneuse par `previewKind(i)`, nom par `safeName(i)`, téléchargement en `application/octet-stream` seulement.
 - **Un seul thème, sombre** (UI §0.2 P1) : pas de jetons, tests ni captures en clair.
 - Accessibilité : WCAG 2.1 AA ; zones tactiles ≥ 44 px ; `prefers-reduced-motion` et `forced-colors` respectés.
-- Jamais « 100 % sécurisé ».
+- Jamais « 100 % sécurisé », et aucun nom d'algorithme ni terme technique dans les textes de l'interface (UI §20.8).
 - Versions exactes, `npm ci` reproductible, `npm audit --omit=dev --audit-level=high` sans alerte, licences dans `THIRD_PARTY_LICENSES.md`.
 - On n'annonce une tâche finie qu'avec la sortie des tests (et les captures quand l'écran change).
 - Commits : `git commit --author="Skoow <190851638+Skoow@users.noreply.github.com>" -m "…"` (aucune surcharge de `user.*`).
@@ -294,6 +296,151 @@ setDemo(h: DemoHooks): void;                // appelé par installDemo seulement
 - [ ] **Step 4 : e2e** (`demo.spec.ts`, projets `demo-chromium-mobile` et `demo-webkit-desktop`) : `/Shhdrop/` affiche l'accueil et le bandeau ; `/Shhdrop/s/abc#x` (adresse profonde, servie par `404.html`) est reconnue comme la route d'ouverture (`match` → `open`) et aucune requête ne porte `x` (les messages « Lien invalide » et la phrase de démo sont testés en Task 20, où l'écran existe) ; aucune violation de la CSP meta ; aucune requête hors de l'origine ; `localStorage.length === 0`. Les tâches suivantes ajoutent leur parcours à ce fichier.
 - [ ] **Step 5 : Lancer** `npm test && npm run build && node scripts/check-dist.mjs && npm run build:demo && node scripts/check-dist.mjs --demo && npx playwright test --project='demo-*'` → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(demo): démo GitHub Pages (faux serveur en mémoire, absente de la production) » et push sur `main` ; vérifier que le workflow `pages` passe et que `https://skoow.github.io/Shhdrop/` affiche l'accueil (capture jointe).
+
+---
+
+### Task DA : Direction artistique v2 — jetons, fond, composants de base, accueil (UI §20)
+
+À faire **juste après la Task 8**, avant la Task 9 : les écrans suivants se construisent sur ces composants. Référence visuelle : `docs/superpowers/design/da-v2/` ; en cas d'écart, UI §20 (corrections K1 à K14) l'emporte.
+
+**Files:**
+- Create: `web/scripts/gen-aurora.mjs`, `web/scripts/gen-aurora.test.ts`, `web/public/assets/aurora-mint.png`, `aurora-tide.png`, `aurora-ink.png`, `web/src/ui/Aurora.svelte`, `web/src/ui/decor.ts`, `decor.test.ts`, `web/src/ui/viewTransition.ts`, `viewTransition.test.ts`, `web/src/ui/Vessel.svelte` (contour seulement ; dépôt et catégories en Task 10), `web/ui-e2e/aurora.spec.ts`
+- Modify: `web/src/ui/tokens.css`, `tokens.test.ts`, `base.css`, `motion.ts`, `motion.test.ts`, `AppShell.svelte`, `Button.svelte`, `Button.test.ts`, `IconButton.svelte`, `web/src/routes/Home.svelte`, `web/src/ui/Schema.svelte`, `web/src/i18n/fr.ts`, `en.ts`, `i18n.test.ts`, `web/ui-e2e/home.spec.ts`, `web/src/source-rules.test.ts`
+
+**Interfaces:**
+```ts
+// decor.ts — texte décoratif (UI §20.2 S1) : jamais de crypto, de clé ni de lien
+rng(seed: number): () => number;                 // LCG 1664525 / 1013904223, comme da-v2/js/app.js
+cipherText(seed: number, cols: number, rows: number): string;   // alphabet base64, déterministe
+scramble(text: string, k: number, seed: number): string;        // k ∈ [0,1], même longueur
+// viewTransition.ts
+runTransition(update: () => void, opts?: { reduced?: boolean }): Promise<void>;
+  // update synchrone ; sans document.startViewTransition → update() direct ; skipTransition() au premier pointerdown/keydown (K2)
+// motion.ts (ajouts)
+capPath(w: number, h: number, r: number): string;   // contour qui part du milieu du bord haut, sens horaire
+pressScale: 0.97; iconPressScale: 0.92;
+```
+
+- [ ] **Step 1 : Tests qui échouent.**
+  - `tokens.test.ts` : valeurs exactes de UI §20.3 (`--bg-deep: #07080C`, `--vessel: rgb(17 20 27 / 0.62)`, `--seal-light: #C9FBE8`, `--aur-mint-o: 0.18`, `--aur-tide-o: 0.34`, `--aur-ink-o: 0.32`, `--r-2xl: 32px`, `--dur-press: 90ms`, `--dur-view: 420ms`, `--dur-reveal: 560ms`, `--ease-view: cubic-bezier(0.22, 1, 0.36, 1)`) ; `contrastFromLuminance(L(--text-2), 0.050) ≥ 4.70` et `contrastFromLuminance(L(--text-3), 0.050) < 4.5` (raison écrite de la règle « `--text-3` jamais sur l'aurore ») ; aucun `backdrop-filter` dans une règle qui utilise `--vessel` (K6).
+  - `gen-aurora.test.ts` : trois PNG de 128 × 128, identiques octet pour octet à deux exécutions (graine fixe), couleurs dominantes `#5FE3B5`, `#28809A`, `#3456AA`, total < 16 Ko.
+  - `decor.test.ts` : `cipherText(77, 40, 6)` stable (instantané) ; `scramble("abc", 0, 1) === "abc"`, longueur conservée pour k = 1 ; le fichier n'importe rien de `crypto/`, `transfer/` ni `index.ts` (lecture du source).
+  - `viewTransition.test.ts` (`// @vitest-environment happy-dom`) : sans `startViewTransition`, `update` appelé une fois, de façon synchrone ; avec une API simulée, `skipTransition` appelé au `pointerdown` ; `reduced: true` → classe `vt-reduced` posée.
+  - `motion.test.ts` : `capPath(200, 100, 32)` commence par `M 100 0` ; mouvement réduit → `flip` n'anime rien (inchangé).
+  - `Button.test.ts` : avec la pression animée, deux clics synchrones → un seul `onpress` (inchangé).
+  - `i18n.test.ts` : règle des mots interdits de UI §20.8 sur `fr.ts` et `en.ts` (les pages viendront en Task 25) ; `destroyed.body` = texte K7 ; `hero.title` intact.
+  - `source-rules.test.ts` : `getImageData` interdit hors `viewers/` ; `setAttribute("style"` interdit partout.
+  - e2e `home.spec.ts` (ajouts) : à 390 × 844 la rangée d'ajout est visible sans défiler (S4 : schéma sous le réceptacle) ; le `<h1>` a pour nom accessible la phrase entière et la copie animée est `aria-hidden` (K8) ; toutes les animations d'entrée sont finies à 900 ms (`document.getAnimations()` : `endTime` ≤ 900, hors ambiance) (K1) ; un clic sur le réceptacle à 100 ms ouvre le sélecteur (rien n'attend) ; mouvement réduit → aucune animation infinie ; `forced-colors` → aurore `display: none` ; captures `home-v2-390`, `home-v2-1440`, `home-v2-reduced`, `home-v2-forced`, comparées à `docs/superpowers/design/da-v2/shots/01-accueil-*.png`.
+  - e2e `aurora.spec.ts` (Chromium) : `main.style.visibility = "hidden"` par CSSOM, capture, luminance relative maximale ≤ **0,050** dans les états repos, `body.dataset.screen = "seal"`, éclat à son pic (animation `aurora-burst` mise en pause à 1 000 ms) et `destroyed` (K4, K5) ; `document.hidden` simulé → animations de l'aurore en pause ; aucune violation CSP.
+- [ ] **Step 2 : Lancer** `cd web && npm test && npx playwright test home aurora` → ÉCHEC.
+- [ ] **Step 3 : Implémenter** UI §20.3, §20.4 (« Ambiance », « Accueil et composeur » pour le titre, le réceptacle vide et le schéma), §20.7 : `gen-aurora.mjs` sur le modèle de `gen-grain.mjs` (sans dépendance), images posées à 128 px et agrandies par `transform: scale()` (K11) ; `Aurora.svelte` monté par `AppShell` (`aria-hidden`, `view-transition-name: aurora`) ; états par `body[data-screen]` ; `Button` : pression 0,97 (`--dur-press`), reflet du bouton principal, cadenas en deux tracés (anse ouverte, anse fermée), accroche du focus ; `IconButton` : 0,92 ; `Home` : titre mot par mot (K1, K8), ordre mobile (S4), suppression du `transition: font-size` ; `Schema` : boucle de 6,4 s dans l'ambiance (K10). Mesurer la mémoire des calques d'aurore (panneau Layers, Chromium, Pixel 7 émulé) : ≤ 32 Mo, valeur consignée dans le fichier de décisions.
+- [ ] **Step 4 : Lancer** `npm test && npx playwright test home aurora shell` puis la commande démo des Global Constraints → SUCCÈS ; relire les captures.
+- [ ] **Step 5 : Commit** « feat(ui): direction artistique v2 (aurore, jetons, boutons, accueil) » et push.
+
+---
+
+### Task K1 : Chiffrement v2 — clé de contenu aléatoire, enveloppe, paquet « SHH2 », API serveur (spec §29, §31, §34)
+
+Change `web/src/crypto`, `web/src/transfer` et le serveur. Aucune construction maison : HKDF, HMAC, SHA-256, AES-256-GCM (WebCrypto), Argon2id (libsodium). Pas de compatibilité v1 (aucun partage en production) ; la démo suit (faux serveur mis à jour).
+
+**Files:**
+- Modify: `web/src/crypto/kdf.ts`, `kdf.test.ts`, `container.ts`, `container.test.ts`, `passphrase.ts`, `passphrase.test.ts`, `types.ts`, `web/src/transfer/client.ts`, `client.test.ts`, `api.ts`, `api.test.ts`, `web/src/index.ts`, `web/e2e/*.ts` (dont le test « le serveur ne voit rien »), `web/src/demo/fake-server.ts`, `fake-server.test.ts`, `server/internal/share/*.go`, `server/internal/store/*.go` (schéma), `server/internal/api/handlers_share.go`, `server/internal/limits/*.go`, `server/internal/blob/*.go`, leurs `*_test.go`
+- Create: `web/src/crypto/envelope.ts`, `envelope.test.ts`, `web/src/crypto/password.ts`, `password.test.ts`
+
+**Interfaces:**
+```ts
+// envelope.ts
+type Seed = Uint8Array & { readonly __seed: unique symbol };         // R, 32 octets
+newSeed(): Seed;                                                     // crypto.getRandomValues
+contentKeys(r: Seed): Promise<{ kContenu: CryptoKey /* AES-GCM, non extractible */; engagement: Uint8Array }>;
+  // kContenu = HKDF(R, "shhdrop/v2/contenu") ; engagement = HMAC-SHA-256(R, "shhdrop/v2/engagement")
+accessKeys(kLien: KLien, kMdp: Uint8Array): Promise<{ kEnv: CryptoKey; kPreuve: KPreuve; vPreuve: Uint8Array }>;
+  // kMaitre = HKDF(kLien ‖ kMdp, "shhdrop/v2/maitre") ; kEnv = HKDF(kMaitre, "shhdrop/v2/enveloppe") ; kPreuve = HKDF(kMaitre, "shhdrop/v2/preuve")
+seal(kEnv: CryptoKey, r: Seed, id: Uint8Array, header: Uint8Array): Promise<Uint8Array>;   // 60 octets : nonce ‖ GCM(R), AAD = "shhdrop/v2/enveloppe" ‖ id ‖ header
+open(kEnv: CryptoKey, e: Uint8Array, id: Uint8Array, header: Uint8Array): Promise<Seed>;  // erreur unique "paquet_corrompu"
+shareId(kLien: KLien): Promise<Uint8Array>;                          // HKDF(kLien, "shhdrop/v2/id"), 16 octets
+// password.ts (spec §31)
+type GeneratedPassword = string & { readonly __gen: unique symbol };
+PASSWORD_ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!#$%+=?@";   // 64 symboles
+generatePassword(): GeneratedPassword;                                // 8 caractères, 4 familles présentes
+// manifeste v2 (container.ts)
+type Rights = "voir" | "enregistrer" | "coffre";
+type ManifestV2 = { v: 2; rights: Rights; keep_ttl_h?: 1 | 6 | 12 | 24; items: ManifestEntry[] };
+parseRights(m: unknown): { rights: Rights; keepTtlH: number | null };   // absent, inconnu, mal typé → "voir"
+```
+Corps serveur (spec §29.8) : création `id`, `bucket`, `access_v`, `manage_v`, preuve ; `finalize` `salt`, `kdf_ops`, `kdf_mem`, `proof_v`, `envelope` (80 caractères base64url, 60 octets), `ttl_hours`, `max_opens`, `fill_from`, `fill_to` ; `unlock` rend `envelope` ; quotas débités à `finalize` (spec §29.5).
+
+- [ ] **Step 1 : Tests TS qui échouent.**
+  - `envelope.test.ts` : aller-retour `seal`/`open` ; `open` échoue (même erreur `paquet_corrompu`) avec un autre `id`, un autre en-tête, un octet de `E` modifié, un autre mot de passe ; `E.length === 60` ; deux `seal` du même `R` → nonces différents ; `contentKeys` : `kContenu.extractable === false` ; vecteurs fixes (`K_lien` = 32 × `0x01`, `K_mdp` = 32 × `0x02`, `R` = 32 × `0x03`) : `shareId`, `vPreuve` et `engagement` égaux aux valeurs calculées par un script Node indépendant (`node:crypto` `hkdfSync`, `createHmac`), consignées dans le test ; étiquettes toutes préfixées `shhdrop/v2/`.
+  - `password.test.ts` : 10 000 tirages → longueur 8, uniquement des symboles de `PASSWORD_ALPHABET`, 4 familles présentes, aucun de `0 O 1 l I o` ; fréquence de chaque symbole dans [0,8 ; 1,2] × l'attendu ; `checkPassword` accepte un `GeneratedPassword` de 8 caractères et refuse une chaîne saisie de 8 caractères (12 au moins, inchangé) ; `generatePassphrase` reste exportée pour « Utiliser mon propre mot de passe ».
+  - `container.test.ts` : paquet v2 (« SHH2 ») : manifeste en fin de clair, longueur dans les 4 derniers octets ; palier canonique = plus petit palier ≥ fin des données + 4 + 65 536 ; aller-retour sur tous les paliers ; chaque numéro de morceau chiffré au plus une fois (espion sur `encrypt` : aucun doublon de nonce) ; `parseRights` (`{rights:"coffre", keep_ttl_h: 12}` → coffre/12 ; `"coffre"` sans `keep_ttl_h` → `"voir"` ; `"admin"`, `true`, absent → `"voir"`) ; droit par défaut de `createShare` : `"enregistrer"`.
+  - `client.test.ts` : `createShare` v2 : création sans `proof_v`, `finalize` avec `envelope`, `fill_from`/`fill_to` corrects pour un palier de 400 morceaux et 9 Mio de données (segments envoyés : 0, 1, 2 et le dernier ; `fill` = [3, 6)) ; `openShare` : `unlock` → `envelope` → lecture ; `C_engagement` faux → `paquet_corrompu` ; `R`, `K_mdp` et `K_maître` mis à zéro après usage (espions, comme en Task 0).
+- [ ] **Step 2 : Tests Go qui échouent.** `finalize` refusé si un segment hors `[fill_from, fill_to)` manque, si `fill_to` dépasse le palier, si `fill` touche le dernier segment ; bourrage rempli par `crypto/rand` (le fichier ne contient aucune suite de 4 096 zéros dans `[fill_from, fill_to)`) ; `unlock` rend `envelope` seulement en `ready` ; `proof_v` `NULL` avant `finalize` : `unlock` → 404 uniforme ; `id` existant → 409 ; quotas : 10 créations finalisées par jour (création refusée quand atteint), 2 non finalisées à la fois par connexion, octets abandonnés débités à l'effacement (6 Gio par jour, puis 429) ; JSON strict sur les nouveaux champs (longueurs exactes).
+- [ ] **Step 3 : Lancer** `cd web && npm test` et `cd server && go test ./...` → ÉCHEC.
+- [ ] **Step 4 : Implémenter** spec §29.2, §29.3, §29.5, §29.8, §31, §34 (manifeste v2). Mettre à jour le faux serveur de démo (mêmes routes et règles).
+- [ ] **Step 5 : « Le serveur ne voit rien » étendu** (`web/e2e/`) : repères dans un texte, un nom de fichier, un mot de passe saisi, `R` et `K_lien` ; aucun repère dans la base (pages libres et WAL compris), les fichiers, les journaux, les requêtes capturées ni la mémoire exportée ; le bourrage rempli par le serveur ne contient ni repère ni zéros.
+- [ ] **Step 6 : Lancer** `make test` (dont « le serveur ne voit rien ») et la commande démo → SUCCÈS.
+- [ ] **Step 7 : Commit** « feat(crypto): clé de contenu aléatoire enveloppée, paquet SHH2, mot de passe de 8 caractères, droits du destinataire » et push.
+
+---
+
+### Task K2 : Lien court et gestion par `V_gestion` (spec §32)
+
+**Files:**
+- Modify: `web/src/transfer/link.ts`, `link.test.ts`, `web/src/app/link.ts`, `link.test.ts`, `web/src/app/router.svelte.ts`, `router.test.ts`, `web/src/index.ts`, `web/ui-e2e/hygiene.spec.ts`, `server/internal/api/handlers_share.go`, `server/internal/store/*.go`, `server/cmd/shhdrop/static.go` (repli `/s/`, `/m/` retiré), tests Go
+- Create: `server/internal/api/handlers_manage.go`, `handlers_manage_test.go`
+
+**Interfaces:** `shareLink(origin, kLien)` → `${origin}/#${b64u(kLien)}` ; `manageLink(origin, sGestion)` → `${origin}/#m${b64u(sGestion)}` ; `parseLink(url)` → `{kind:"s", origin, kLien}` | `{kind:"m", origin, sGestion}` (l'`id` se calcule par `shareId`) ; `match("/")` + fragment → `open` ou `manage`. Serveur : `GET /api/manage/status`, `POST /api/manage/destroy` (en-tête `X-Shh-Manage`, 43 caractères), recherche par `manage_v`.
+
+- [ ] **Step 1 : Tests qui échouent.** `parseLink` : `/#` + 43 caractères base64url → `s` ; `/#m` + 43 → `m` ; 42 ou 44 caractères, alphabet invalide, `/x#…`, identifiants (`user:pw@`), autre origine → `lien_invalide` ; requête `?fbclid=…` ignorée ; avec la base `/Shhdrop/` (démo) ; longueur du lien de partage = `origin.length + 45`. Routeur : `/` sans fragment → `home`, `/` + fragment valide → `open`/`manage`, fragment invalide → `home` puis retrait. Go : `manage/status` et `manage/destroy` avec `S_gestion` valide / faux (404 uniforme) ; deux partages ne partagent jamais `manage_v` (index unique) ; anciennes routes `/{id}/status` → 404. e2e `hygiene.spec.ts` : `/#<clé>` → `location.hash === ""` après lecture, Retour ne réaffiche pas la clé, aucune requête ne porte la clé ; navigateur intégré : fragment gardé jusqu'à « Continuer ici ».
+- [ ] **Step 2 : Lancer** → ÉCHEC.
+- [ ] **Step 3 : Implémenter** spec §32 ; retirer `X-Robots-Tag` et le repli de `/s/`, `/m/` devenus inutiles (le préfixe `/s/` reste réservé, spec §16).
+- [ ] **Step 4 : Lancer** `make test && npx playwright test hygiene` et la commande démo → SUCCÈS.
+- [ ] **Step 5 : Commit** « feat(link): lien court à la racine, gestion par V_gestion » et push.
+
+---
+
+### Task K3 : Envoi anticipé et pré-lecture (spec §29.4, §29.6)
+
+**Files:**
+- Create: `web/src/transfer/draft.ts`, `draft.test.ts`, `web/src/transfer/prefetch.ts`, `prefetch.test.ts`
+- Modify: `web/src/transfer/client.ts`, `web/src/index.ts`, `server/internal/api/handlers_share.go` (lecture de segment par `K_accès`, budget), `server/internal/limits/*.go`, tests Go, `web/e2e/`, `web/src/demo/fake-server.ts`
+
+**Interfaces:**
+```ts
+createDraft(origin: string, deps: { solveCaptcha; prepared?; net?; now? }) → {
+  sync(items: Item[]): void;             // ajoute à la suite, ou redémarre (élément déjà chiffré retiré/remplacé, palier dépassé)
+  precomputePassword(pw: GeneratedPassword | string): void;   // Argon2id en arrière-plan, annulé par un nouvel appel
+  send(opts: { password; ttlHours; maxOpens; rights; keepTtlH? }, onBytes?): Promise<{ link; manage; expiresInS }>;
+  abort(): void;                          // destroy keepalive ; R mise à zéro
+  state(): { phase: "idle" | "uploading" | "caught_up" | "restarting" | "refused"; sentBytes: number; restarts: number };
+};
+DRAFT_IDLE_MS = 2000; DRAFT_MAX_RESTARTS = 3 /* par 10 min */; PREFETCH_MAX = 64 * 2 ** 20;
+prefetchShare(link, expectedOrigin, net?) → { segments: Map<number, Uint8Array>; stop(): void };   // segment de fin, puis données
+```
+`openShare` utilise les segments pré-lus (même vérification d'authenticité : rien n'est cru avant le déchiffrement).
+
+- [ ] **Step 1 : Tests qui échouent** (horloge et `fetch` simulés) : aucun `POST /api/shares` avant 2 s de composition stable, ni page masquée, ni `saveData` ; ajout qui tient dans le palier → aucun redémarrage, segments suivants envoyés ; retrait d'un élément dont un morceau est chiffré → `destroy` keepalive de l'ancien partage puis nouveau partage, avec **nouveaux** `K_lien`, `R` et `sel` (espions) ; retrait d'un élément jamais chiffré → aucun redémarrage ; renommage et réordonnancement → aucun redémarrage ; 4ᵉ redémarrage en 10 min → refusé, envoi au clic ; aucun numéro de morceau chiffré deux fois sous le même `R` (espion) ; `send` quand tout est rattrapé → au plus 2 `PUT` puis `finalize` ; `precomputePassword` puis `send` avec le même mot de passe → Argon2id appelé une fois ; `abort` → `R` à zéro ; 429 d'envoi anticipé → phase `refused`, `send` fait tout au clic. Pré-lecture : segment de fin d'abord, arrêt à 64 Mio, `stop()` ; Go : `GET segment` avec `K_accès` accepté en `ready`, refusé en `uploading`, `draining`, après expiration, et au-delà de 2 × palier par partage (429) ; ne consomme aucune ouverture.
+- [ ] **Step 2 : Lancer** → ÉCHEC.
+- [ ] **Step 3 : Implémenter** spec §29.4 et §29.6.
+- [ ] **Step 4 : e2e** (`web/e2e/`, vrai serveur) : composition de 20 Mio → segments partis avant le clic ; clic → « Lien prêt » en moins de 5 s sur la boucle locale ; abandon (page fermée) → partage absent du serveur ; destinataire : segments pré-lus pendant la saisie, ouverture identique ; « le serveur ne voit rien » avec un mot de passe saisi après le début de l'envoi anticipé.
+- [ ] **Step 5 : Lancer** `make test` et la commande démo → SUCCÈS.
+- [ ] **Step 6 : Commit** « feat(transfer): envoi anticipé pendant la composition, pré-lecture chez le destinataire » et push.
+
+---
+
+### Amendements aux tâches existantes (5 novembre, spec v2.6, UI révision 4)
+
+- **Task 10** : le composeur vit dans `Vessel` (UI §20.4) ; `createComposer` appelle `draft.sync(toApiItems())` à chaque changement (Task K3) ; e2e : ligne « L'envoi chiffré commence en arrière-plan » visible dès le premier élément.
+- **Task 13** : `createOptions()` : mot de passe par défaut `generatePassword()` (8 caractères), bouton « Générer un autre », `draft.precomputePassword` à chaque nouveau mot de passe ; `rights: "enregistrer"` par défaut, `RightsPicker` ; « Voir seulement » désactivé avec la raison si un élément ne s'affiche pas dans le navigateur (spec §34) ; textes de UI §10 (révision 4).
+- **Task 14** : le pré-calcul anti-robot sert d'abord à la création de l'envoi anticipé (Task K3).
+- **Task 17** : `createSender` s'appuie sur `draft.send` ; phases visibles au clic : « Préparation des clés » (souvent instantanée), envoi de ce qui reste, « Finalisation » ; capsule et fermeture du sceau de UI §20.4 (900 ms, K3), `PerformanceObserver` : aucune trame longue > 50 ms ; e2e : clic → « Lien prêt » ≤ 5 s quand l'envoi anticipé a rattrapé.
+- **Task 18** : lien court (`/#…`) ; QR en points (UI §20.2 S7) décodé en CI ; bascule « Garder dans mon historique » (Task H) ; rappel « ouvrir dans l'app » si `rights === "coffre"`.
+- **Task 19** : `manageStatus` et `manageDestroy` par `S_gestion` (Task K2).
+- **Task 20** : pré-lecture pendant la saisie (Task K3) ; note fixe « ouvrez-y ce lien » dans un navigateur de téléphone (spec §27.6).
+- **Tasks 21 et 23** : droit `"voir"` : aucun Enregistrer ni Copier, `controlsList="nodownload"`, `disablePictureInPicture`, mention de spec §34 (détails en Task R).
+- **Task 25** : page Sécurité en langage courant, liens vers `docs/securite-technique.md` (Task C3) et `/verifier` ; règle des mots interdits étendue à `pages.fr.ts` et `pages.en.ts`.
+- **Task 27** : parcours complets avec envoi anticipé, droits et lien court ; « le serveur ne voit rien » avec `R`.
 
 ---
 
@@ -668,6 +815,93 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 
 ---
 
+### Task R : Droits du destinataire (spec §34)
+
+**Files:**
+- Create: `web/src/flows/rights.ts`, `rights.test.ts`, `web/src/ui/RightsPicker.svelte`, `web/ui-e2e/rights.spec.ts`
+- Modify: `web/src/routes/Options.svelte`, `web/src/routes/Content.svelte`, `web/src/viewers/*.svelte`, `web/src/ui/SaveButton.svelte`, `web/src/i18n/fr.ts`, `en.ts`
+
+**Interfaces:** `allowedActions(rights: Rights, kind: PreviewKind)` → `{ save: boolean; copy: boolean; keep: boolean }` ; `viewOnlyBlockers(items: ComposeItem[])` → noms des éléments qui ne s'afficheraient pas (`none` ou plus de 200 Mio).
+
+- [ ] **Step 1 : Tests qui échouent** : `allowedActions("voir", "image")` → tout faux ; `("enregistrer", …)` → `save` et `copy` ; `("coffre", …)` → les trois ; droit inconnu → comme `"voir"` (le parseur l'a déjà ramené, double garde) ; `viewOnlyBlockers` avec un `.zip` et une vidéo de 300 Mio → les deux noms. e2e : partage `"voir"` → aucun bouton Enregistrer ni Copier, `<video>` avec `controlslist="nodownload"` et `disablepictureinpicture`, mention honnête visible ; Options : « Voir seulement » désactivé avec la raison quand un `.zip` est présent ; captures `rights-picker`, `content-view-only`.
+- [ ] **Step 2 : Lancer** → ÉCHEC.
+- [ ] **Step 3 : Implémenter** spec §34, textes de UI §10 (révision 4).
+- [ ] **Step 4 : Lancer** → SUCCÈS (démo comprise).
+- [ ] **Step 5 : Commit** « feat(ui): droits du destinataire (voir, enregistrer, coffre) » et push.
+
+---
+
+### Task H : Historique local des envois, sans compte (spec §33)
+
+**Files:**
+- Create: `web/src/history/store.ts`, `store.test.ts`, `web/src/history/poll.ts`, `poll.test.ts`, `web/src/routes/History.svelte`, `web/ui-e2e/history.spec.ts`
+- Modify: `web/src/routes/Ready.svelte` (bascule), `web/src/app/router.svelte.ts` (`/envois`), `web/src/source-rules.test.ts` (IndexedDB permis dans `history/` et `vault/` seulement), `web/src/i18n/*`
+
+**Interfaces:**
+```ts
+type HistoryEntry = { id: string; manage: string /* S_gestion, chiffré au repos */; label: string; expiresAt: number; maxOpens: number;
+  opens: { count: number; between: [number, number] }[]; state: "ready" | "draining" | "gone" };
+openHistory(deps?: { idb?: IDBFactory; now? }) → { list(); add(e); remove(id); clear(); update(id, patch) };
+  // AES-256-GCM, clé non extractible (generateKey extractable: false) gardée dans IndexedDB ; nonce aléatoire par écriture
+pollHistory(h, deps = { manageStatus, now, visible: () => boolean }) → { start(); stop() };   // 60 s, écran visible seulement
+HISTORY_KEEP_GONE_MS = 7 * 86_400_000;
+```
+- [ ] **Step 1 : Tests qui échouent** (`fake-indexeddb` refusé : pas de dépendance ; IndexedDB simulé en mémoire dans le test) : `add` puis lecture brute de la base → aucun octet de `S_gestion` ni du libellé en clair ; la clé enregistrée a `extractable === false` ; jamais de `K_lien` ni de mot de passe dans `HistoryEntry` (type et recherche de source) ; `pollHistory` : compteur 0 → 1 entre deux relectures à 21:00 et 21:01 → `between: [21:00, 21:01]` ; aucune relecture si `visible()` est faux ; `NotFoundError` → `gone` ; entrée `gone` retirée après 7 jours ; `clear()` vide tout.
+- [ ] **Step 2 : Lancer** → ÉCHEC.
+- [ ] **Step 3 : Implémenter** spec §33 ; Détruire en un geste (`InlineConfirm`), `manageDestroy`, dissolution de la ligne.
+- [ ] **Step 4 : e2e** : envoi → entrée « 1 élément · … » dans `/envois` ; ouverture par un autre contexte → « 1 / 1 », intervalle affiché ; Détruire → « Détruit », `fetchMeta` en Node → `NotFoundError` ; bascule désactivée sur « Lien prêt » → aucune entrée ; démo : historique en mémoire seulement (pas d'IndexedDB sur l'origine partagée) ; `axe` ; captures `history`, `history-destroy`.
+- [ ] **Step 5 : Lancer** → SUCCÈS.
+- [ ] **Step 6 : Commit** « feat(history): historique local chiffré des envois, sans compte » et push.
+
+---
+
+### Task V1 : Coffre — clés et stockage (spec §27.2 à §27.4)
+
+**Files:**
+- Create: `web/src/vault/keys.ts`, `keys.test.ts`, `web/src/vault/store.ts`, `store.test.ts`, `web/src/vault/clock.ts`, `clock.test.ts`
+- Modify: `web/src/crypto/kdf.ts` (dérivations `shhdrop/v2/coffre/*`, dans le module crypto), `web/src/index.ts` (exporte `openVault` seulement)
+
+**Interfaces:**
+```ts
+type VaultMode = "prf" | "code";
+createVault(mode: VaultMode, secret: { prf: () => Promise<Uint8Array> } | { code: string }) → Promise<Vault>;   // mode figé ensuite
+unlockVault(v, secret) → Promise<Unlocked>;      // essais_rates incrémenté AVANT l'essai ; témoin T ; 5 échecs → wipeAll()
+Unlocked: { entries(); put(pkg: ReadableStream<Uint8Array>, deadline: number, bucket: number): Promise<string>; open(id); remove(id); lock() };
+sweepExpired(now = vaultNow()): Promise<number>;  // sans déverrouillage
+vaultNow(): number;                              // max(Date.now(), derniere_heure_vue), enregistré
+VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30; VAULT_ENTRIES_MAX = 20; VAULT_IDLE_LOCK_MS = 120_000;
+```
+- [ ] **Step 1 : Tests qui échouent** (WebAuthn et OPFS simulés ; IndexedDB en mémoire) : `createVault("code", { code: "court" })` → refus (`checkPassword`) ; mode `prf` puis `unlockVault` avec un code → refus sans repli (V3) ; mauvais secret ×5 → tout effacé (fichiers, base, `sel_prf`) ; `NotAllowedError` de la passkey → compteur inchangé (V4) ; processus « tué » entre l'incrément et le résultat → le compteur reste incrémenté ; clés dérivées `extractable === false` ; `put` puis lecture brute OPFS et IndexedDB → aucun repère du contenu ni des noms ; échéance en clair reculée dans la base → `open` refuse (échéance authentifiée, V5) ; `vaultNow` ne recule pas quand `Date.now()` recule ; `sweepExpired` efface une entrée échue sans déverrouillage ; plafonds (21ᵉ entrée, 2 Gio dépassés) → refus avant tout téléchargement ; `lock()` oublie les clés (accès suivant → `verrouille`).
+- [ ] **Step 2 : Lancer** → ÉCHEC.
+- [ ] **Step 3 : Implémenter** spec §27.2 à §27.4 ; rescellement par `container.ts` (aucun format nouveau).
+- [ ] **Step 4 : Lancer** `npm test` → SUCCÈS.
+- [ ] **Step 5 : Commit** « feat(vault): clés du coffre (passkey PRF ou code), stockage chiffré, échéance, essais » et push.
+
+### Task V2 : Coffre — écrans (spec §27.6)
+
+**Files:**
+- Create: `web/src/routes/Vault.svelte`, `web/src/routes/OpenLink.svelte` (« Ouvrir un lien reçu »), `web/src/ui/KeepButton.svelte`, `web/ui-e2e/vault.spec.ts`
+- Modify: `web/src/routes/Content.svelte` (« Garder dans le coffre » si `allowedActions(...).keep` et app installée sur téléphone), `web/src/routes/Open.svelte` (note fixe), `web/src/flows/endoflife.ts` (Détruire et Signaler effacent aussi la copie), `web/src/app/env.ts` (`isInstalledPhone()` : `display-mode: standalone` et `pointer: coarse`, injectable pour les tests)
+
+- [ ] **Step 1 : Tests qui échouent** (e2e, `isInstalledPhone` forcé par un crochet de test, authentificateur virtuel WebAuthn de Chromium par CDP `WebAuthn.addVirtualAuthenticator` avec `hasPrf: true`) : partage `"coffre"` → « Garder dans le coffre » → création par passkey → « Gardé jusqu'au … » ; `/coffre` verrouillé → Déverrouiller → entrée, compte à rebours ; Ouvrir → contenu sans réseau (`context.setOffline(true)` après le chargement) ; `page.clock` au-delà de l'échéance → dissolution et « sa copie a été effacée » ; Effacer, Vider le coffre ; partage `"enregistrer"` → aucun bouton ; navigateur (pas l'app) → note fixe avant le déverrouillage, aucun bouton ; démo → coffre absent ; `axe` ; captures `vault-locked`, `vault-list`, `vault-keep`.
+- [ ] **Step 2 : Lancer** → ÉCHEC.
+- [ ] **Step 3 : Implémenter** spec §27.6, textes de UI §10 (révision 4), composants de UI §20.
+- [ ] **Step 4 : Lancer** → SUCCÈS.
+- [ ] **Step 5 : Commit** « feat(vault): garder dans le coffre, écran du coffre, comptes à rebours » et push.
+
+### Task V3 : Coffre — vérification et liste manuelle
+
+**Files:**
+- Create: `web/ui-e2e/vault-sees-nothing.spec.ts`
+- Modify: `docs/superpowers/plans/2026-11-04-shhdrop-ecrans-decisions.md` (liste manuelle)
+
+- [ ] **Step 1 : Test** : envoi `"coffre"` → garde → aucune requête supplémentaire vers le serveur pendant et après la garde (le serveur ne voit qu'une ouverture ordinaire) ; le corps de toutes les requêtes ne contient ni `rights` ni `keep` ; profil du navigateur fouillé après la garde (dossier IndexedDB et OPFS de Chromium) : aucun repère du contenu, des noms ni du texte.
+- [ ] **Step 2 : Lancer** → SUCCÈS exigé.
+- [ ] **Step 3 : Liste manuelle** : iPhone (Safari 18+, PWA installée, passkey iCloud), Android (Chrome, passkey Google) : garder, verrouiller en arrière-plan, déverrouiller, 5 échecs avec un code, effacement à l'échéance au relancement, coffre plein.
+- [ ] **Step 4 : Commit** « test(vault): le serveur n'apprend rien du coffre, liste manuelle » et push.
+
+---
+
 ### Task 25 : Pages Sécurité et Confidentialité, 404
 
 **Files:**
@@ -712,6 +946,60 @@ PAUSE_MAX_MS = 600_000; UPLOAD_WINDOW_MS = 3 * 3600_000; STALL_MS = 10_000 /* au
 - [ ] **Step 2 : Lancer** → corriger dans la tâche concernée (commit séparé par correction).
 - [ ] **Step 3 : Lancer** `make test && make test-ui` + commande démo → SUCCÈS ; joindre le nombre de tests et la liste des captures.
 - [ ] **Step 4 : Commit** « test(ui): parcours complets, garde « le serveur ne voit rien » dans le navigateur » et push.
+
+---
+
+### Tasks C1 à C4 : code vérifiable (spec §28)
+
+**Placées ici, après la Task 27 et avant la Task 28**, pour trois raisons : la reproductibilité se prouve sur le bundle final du Plan 2 ; SRI change `index.html` et doit passer sous la garde CSP des parcours complets ; la page « Vérifier cette version » est un écran que le contrôle visuel de la Task 28 doit couvrir. Ce qui touche le serveur de production (vérification dans `deploy.sh`, surveillance externe, étiquettes protégées, TLS hybride) va au Plan 3 (spec §28.7, §30).
+
+### Task C1 : Builds reproductibles et manifeste de version
+
+**Files:**
+- Create: `.node-version`, `web/scripts/release-manifest.mjs`, `release-manifest.test.ts`, `web/verif/config.prod.js`, `releases/web/.gitkeep`, `.github/workflows/release.yml`
+- Modify: `.github/workflows/ci.yml` (job `repro`), `Makefile` (`release-manifest`, `repro`), `web/vite.verif.config.ts` (lit `config.prod.js`)
+
+- [ ] **Step 1 : Tests qui échouent** : `release-manifest.mjs` sur un dossier factice → `release.json` aux clés ordonnées, fichiers triés par octets, LF final, `SHA256SUMS` lisible par `sha256sum -c` ; deux exécutions → octets identiques ; un fichier caché ou un lien symbolique → échec.
+- [ ] **Step 2 : Lancer** → ÉCHEC.
+- [ ] **Step 3 : Implémenter** spec §28.1 et §28.2. `make repro` : deux builds dans `/tmp/shh-a` et `/tmp/shh-b/x/y`, `TZ`, `LANG`, `umask` et `SOURCE_DATE_EPOCH` fixés, comparaison des `SHA256SUMS` de `dist/`, `dist-verif/`, `dist-demo/`. CI : job `repro` sur deux runners, obligatoire. `release.yml` (étiquette `web-v*`) : reconstruction, égalité avec `releases/web/<version>.json`, `cosign sign-blob` sans clé (`sigstore/cosign-installer` épinglé par empreinte), Release avec archive déterministe ; `id-token: write` et `contents: write` dans ce seul job.
+- [ ] **Step 4 : Lancer** `make repro` (identique deux fois de suite) et `npm test` → SUCCÈS ; si une différence apparaît, la corriger à sa source, jamais l'exclure de la comparaison.
+- [ ] **Step 5 : Commit** « build: builds reproductibles, manifeste de version, workflow de signature » et push.
+
+### Task C2 : SRI et absence d'import dynamique
+
+**Files:**
+- Create: `web/scripts/vite-sri.ts`, `vite-sri.test.ts`
+- Modify: `web/vite.config.ts`, `vite.pdf-frame.config.ts`, `vite.verif.config.ts`, `web/scripts/check-dist.mjs`, `check-dist.test.ts`, `web/src/ui/QrCode.svelte` (import statique)
+
+- [ ] **Step 1 : Tests qui échouent** : `index.html` construit → chaque `<script type="module">`, `<link rel="stylesheet">` et `<link rel="modulepreload">` porte `integrity="sha384-…"` égal au SHA-384 du fichier ; `check-dist.mjs` échoue sur une balise sans `integrity` et sur un `import(` dans `dist/assets/*.js` ; e2e : un octet modifié dans un JS servi → script refusé par le navigateur (événement `error`), et aucune violation CSP dans le parcours normal.
+- [ ] **Step 2 : Lancer** → ÉCHEC.
+- [ ] **Step 3 : Implémenter** spec §28.3.
+- [ ] **Step 4 : Lancer** `npm test && npm run build && node scripts/check-dist.mjs && make test-ui` → SUCCÈS.
+- [ ] **Step 5 : Commit** « build: SRI sur scripts et styles, pas d'import dynamique en production » et push.
+
+### Task C3 : Vérificateur, page « Vérifier cette version », documentation technique publique
+
+**Files:**
+- Create: `web/scripts/verify-site.mjs`, `verify-site.test.ts`, `web/src/routes/Verify.svelte`, `web/ui-e2e/verify.spec.ts`, `docs/securite-technique.md`, `docs/verifier.md`
+- Modify: `web/src/app/router.svelte.ts` (`/verifier`), `web/src/routes/PageSecurite.svelte` (liens), `web/src/i18n/*`
+
+- [ ] **Step 1 : Tests qui échouent** : `verify-site.mjs` contre un serveur de test qui sert `dist/` → code 0 ; un octet modifié, un fichier absent, une erreur réseau, `/x` qui ne rend pas `index.html` → code non nul et message nommant le fichier ; e2e `/verifier` : version et commit affichés, phrase « Cette page ne peut pas prouver sa propre intégrité », aucune empreinte affichée, lien vers la Release ; la règle des mots interdits de UI §20.8 passe (les termes techniques vivent dans `docs/securite-technique.md`, pas dans les dictionnaires).
+- [ ] **Step 2 : Lancer** → ÉCHEC.
+- [ ] **Step 3 : Implémenter** spec §28.4 ; `docs/securite-technique.md` : modèle de spec §2, §29, §30, §31 en langage technique ; `docs/verifier.md` : mode d'emploi `cosign` puis `verify-site.mjs`.
+- [ ] **Step 4 : Lancer** → SUCCÈS (démo comprise).
+- [ ] **Step 5 : Commit** « feat(verify): vérificateur, page Vérifier cette version, documentation technique publique » et push.
+
+### Task C4 : Service worker minimal d'épinglage (conditionnelle : seulement si Q-C1 est acceptée)
+
+**Files:**
+- Create: `web/src/sw/sw.ts`, `sw.test.ts`, `web/scripts/vite-sw.ts` (embarque le manifeste dans `sw.js`), `web/ui-e2e/sw.spec.ts`
+- Modify: `web/src/main.ts` (enregistrement hors démo), `web/src/vault/*` (verrou sur `controllerchange`), `web/scripts/check-dist.mjs`, `server/cmd/shhdrop/static.go` (`sw.js` sans `Service-Worker-Allowed`, `Cache-Control: no-cache`)
+
+- [ ] **Step 1 : Tests qui échouent** : `sw.ts` fait moins de 150 lignes et n'importe rien ; installation : un fichier dont l'empreinte diffère → installation en échec, rien en cache ; `/api/*` jamais intercepté ; requête hors manifeste → réseau, jamais mise en cache ; aucun `skipWaiting` ni `clients.claim` (recherche de source) ; e2e : après une première visite, `context.setOffline(true)` → l'application et le coffre démarrent ; un JS modifié sur le serveur sans changement de `sw.js` → la version en cache est servie et l'avertissement s'affiche ; nouveau `sw.js` → « Nouvelle version {x} : vérifier » ; `controllerchange` → coffre verrouillé ; démo : aucun service worker.
+- [ ] **Step 2 : Lancer** → ÉCHEC.
+- [ ] **Step 3 : Implémenter** spec §28.6. Mettre à jour spec §10 et UI §14.1 (règle « pas de service worker » remplacée) dans le même commit.
+- [ ] **Step 4 : Lancer** `make test && make test-ui` → SUCCÈS.
+- [ ] **Step 5 : Commit** « feat(pwa): service worker minimal d'épinglage (hors ligne pour le coffre) » et push.
 
 ---
 

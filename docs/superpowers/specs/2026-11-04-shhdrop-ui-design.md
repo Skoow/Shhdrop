@@ -1,7 +1,7 @@
 # Shhdrop — spécification de l'interface (Plan 2)
 
-Date : 4 novembre 2026 · Révision 3 (décisions du propriétaire du 4 novembre, analyse critique §18, pré-vol du plan P1–P43 du 5 novembre, Q2 et Q3 réglées) · Statut : à valider par le propriétaire
-Spécification de référence : `docs/superpowers/specs/2026-11-03-shhdrop-design.md` (notée « spec » ci-dessous, avec ses numéros de section, dans sa version v2.5, amendée le 5 novembre pour l'exception reCAPTCHA (§26), fusionnée sur `main`). En cas de conflit, la spec l'emporte, sauf décision du propriétaire notée en §0.2.
+Date : 4 novembre 2026 · Révision 4 (5 novembre : direction artistique v2, §20 ; textes sans termes techniques, §20.8 ; effets à l'écran des décisions spec v2.6 §27 à §34) · Révision 3 : décisions du propriétaire du 4 novembre, analyse critique §18, pré-vol du plan P1–P43, Q2 et Q3 réglées · Statut : à valider par le propriétaire
+Spécification de référence : `docs/superpowers/specs/2026-11-03-shhdrop-design.md` (notée « spec » ci-dessous, avec ses numéros de section, dans sa version v2.6 : exception reCAPTCHA (§26), coffre (§27), code vérifiable (§28), chiffrement anticipé (§29), post-quantique (§30), mot de passe de 8 caractères (§31), lien court (§32), historique local (§33), droits du destinataire (§34)). En cas de conflit, la spec l'emporte, sauf décision du propriétaire notée en §0.2.
 Plan d'exécution : `docs/superpowers/plans/2026-11-04-shhdrop-ecrans.md`.
 
 Brief du propriétaire (impératif) : « interface pro d'expert, jolie, avec animations, très belle, 2027 ». Monde visuel : **« Nuit chiffrée »**, toujours sombre. Français et anglais. PWA pensée d'abord pour le téléphone, très bonne aussi sur ordinateur.
@@ -115,7 +115,9 @@ L'interface n'importe que `web/src/index.ts`. Elle n'importe jamais `transfer/ap
 
 **Signature reconnaissable sans contenu.** Fond `#0B0D12` ; surfaces à peine plus claires, séparées par des filets fins ; un trait menthe de 1 à 2 px qui parcourt le bord de la capsule ; chiffres tabulaires ; phrase de passe en chasse fixe, mots séparés par des tirets fins ; grain discret au moment de la dissolution.
 
-**Lumière d'ambiance.** Un seul champ lumineux à l'échelle de la page : un dégradé radial menthe à 6 % d'opacité, très large (120 vw), centré au-dessus du haut de l'écran, fixe. Ce n'est pas un halo autour d'un élément. Retiré en `prefers-contrast: more` et en `forced-colors: active`.
+**Lumière d'ambiance (révision 4).** Une aurore de trois nappes très floues qui dérivent lentement (§20.4), à l'échelle de la page, jamais un halo autour d'un élément ; sa luminance derrière du texte reste ≤ 0,050 (§20.2, K5). Retirée en `prefers-contrast: more` et en `forced-colors: active`, immobile en mouvement réduit.
+
+**Forme unique (révision 4).** La capsule du logo devient le réceptacle du composeur et l'objet qui passe d'écran en écran (§20.1).
 
 ---
 
@@ -177,7 +179,7 @@ Calculés pour cette spécification ; la tâche « jetons » du plan les recalcu
 | `--text` / verre sur fond blanc (pire cas : photo claire qui défile dessous) | 8,26 | 4,5 |
 | `--text-2` / verre sur fond blanc | **4,38** | 4,5 → **interdit** |
 
-Règle : **sur le verre, seul `--text` (et les boutons opaques) est permis**. Les valeurs `--surface-3` et `--warn` / `--surface-2` sont nouvelles : le test les vérifie comme les autres.
+Règle : **sur le verre mobile, seul `--text` (et les boutons opaques) est permis**. Sur le verre statique (réceptacle, capsule : seule l'aurore est dessous), `--text-2` et `--text-3` sont permis (§20.2, S3). Jetons ajoutés par la révision 4 : §20.3. Les valeurs `--surface-3` et `--warn` / `--surface-2` sont nouvelles : le test les vérifie comme les autres.
 
 ### 3.3 Contraste forcé (`forced-colors: active`, Windows)
 
@@ -206,7 +208,7 @@ Règle : **sur le verre, seul `--text` (et les boutons opaques) est permis**. Le
 
 | Jeton | Taille / interligne | Poids | Largeur (%) | Usage |
 |---|---|---|---|---|
-| `--fs-display` | `clamp(2.5rem, 1.6rem + 4vw, 4.25rem)` / 1.02 | 620 | 118 | Titre d'accueil uniquement ; approche −0,03 em |
+| `--fs-display` | `clamp(2.625rem, 1.1rem + 4.6vw, 5.5rem)` / 0.98 (révision 4) | 600 | 116 | Titre d'accueil uniquement ; approche −0,035 em ; `max-width: 13ch` |
 | `--fs-h1` | 1.75rem / 1.15 | 650 | 108 | Titre d'écran |
 | `--fs-h2` | 1.4375rem / 1.2 | 620 | 104 | Titre de section, capsule |
 | `--fs-h3` | 1.1875rem / 1.3 | 600 | 100 | Sous-section, en-tête de catégorie |
@@ -214,7 +216,8 @@ Règle : **sur le verre, seul `--text` (et les boutons opaques) est permis**. Le
 | `--fs-small` | 0.875rem / 1.45 | 450 | 100 | Indications, méta |
 | `--fs-micro` | 0.75rem / 1.4 | 520 | 100 | Unités, compteurs ; jamais pour une phrase |
 | `--fs-mono` | 1.0625rem / 1.5 | 480 | — | Phrase de passe (en bloc : 1.25rem) |
-| `--fs-figure` | 2.75rem / 1 | 560 | 112 | Pourcentage de l'envoi, dans la capsule |
+| `--fs-figure` | `clamp(3.5rem, 2rem + 6vw, 5.5rem)` / 1 (révision 4) | 560 | 112 | Pourcentage de l'envoi, dans la capsule ; approche −0,04 em |
+| `--fs-ready`, `--fs-screen` | §20.3 (révision 4) | 600 | 114 / 112 | Titre « Lien prêt » ; titres du destinataire et de fin |
 
 - Chiffres : `font-variant-numeric: tabular-nums` pour la jauge, la progression, la vitesse, le compte à rebours, les tailles.
 - Titres : `text-wrap: balance` ; paragraphes : `text-wrap: pretty`, mesure 65 ch au plus.
@@ -230,7 +233,7 @@ Règle : **sur le verre, seul `--text` (et les boutons opaques) est permis**. Le
 
 ### 5.2 Rayons
 
-`--r-sm` 6 px (puces, badges) · `--r-md` 10 px (champs, boutons) · `--r-lg` 16 px (panneaux, lignes d'éléments) · `--r-xl` 24 px (capsule scellée, feuilles) · `--r-pill` 999 px (contrôle segmenté). Rayon intérieur = rayon extérieur − marge.
+`--r-sm` 6 px (puces, badges) · `--r-md` 10 px (champs, boutons) · `--r-lg` 16 px (panneaux, lignes d'éléments) · `--r-xl` 24 px (capsule scellée, feuilles) · `--r-pill` 999 px (contrôle segmenté) · `--r-2xl` 32 px (réceptacle, capsule ; révision 4). Rayon intérieur = rayon extérieur − marge.
 
 ### 5.3 Élévation (ombres décalées et floues, jamais un halo centré)
 
@@ -240,10 +243,11 @@ Règle : **sur le verre, seul `--text` (et les boutons opaques) est permis**. Le
 | `--e-2` | `0 8px 24px -8px rgb(0 0 0 / .60), 0 2px 6px rgb(0 0 0 / .35)` | Capsule, panneaux, ligne soulevée pendant un déplacement |
 | `--e-3` | `0 24px 64px -16px rgb(0 0 0 / .70)` | Feuilles (`<dialog>`) |
 | `--edge` | `inset 0 1px 0 rgb(255 255 255 / .05)` | Arête haute des surfaces |
+| `--e-vessel` | §20.3 (révision 4) | Réceptacle, capsule |
 
 ### 5.4 Verre : usage restreint et justifié
 
-Le verre ne sert qu'aux éléments **sous lesquels le contenu défile** : la barre d'en-tête une fois la page défilée, la barre d'actions collée en bas sur téléphone, le `::backdrop` des feuilles (`--scrim` + flou 8 px). Ailleurs : surfaces opaques. Repli si `backdrop-filter` manque, si `prefers-reduced-transparency: reduce` ou en `prefers-contrast: more` : `--surface-1` plein. Sur le verre, seul `--text` (§3.2).
+Le verre ne sert qu'aux éléments **sous lesquels le contenu défile** : la barre d'en-tête une fois la page défilée, la barre d'actions collée en bas sur téléphone, le `::backdrop` des feuilles (`--scrim` + flou 8 px). Ailleurs : surfaces opaques, sauf le **verre statique** de la révision 4 (réceptacle, capsule : remplissage translucide `--vessel`, **sans** `backdrop-filter`, §20.2 K6). Repli si `backdrop-filter` manque, si `prefers-reduced-transparency: reduce` ou en `prefers-contrast: more` : `--surface-1` plein. Sur le verre, seul `--text` (§3.2).
 
 ---
 
@@ -259,9 +263,16 @@ Le verre ne sert qu'aux éléments **sous lesquels le contenu défile** : la bar
 
 ## 7. Mouvement
 
-### 7.1 Principe
+### 7.1 Principe (révision 4, remplace la révision 3)
 
-Un seul moment écrit par geste du produit : **le scellement** (envoi) et **la dissolution** (fin de vie). Partout ailleurs, le mouvement explique un changement d'état, vite. Aucun chargement chorégraphié, aucune apparition au défilement, aucun survol qui soulève. Le réordonnancement des lignes est un changement d'état : FLIP de 180 ms, pas un moment.
+Deux moments écrits, **le scellement** et **la dissolution**, et un objet qui les relie, **la capsule**, qui passe d'écran en écran par des transitions de vue. Autour d'eux, le mouvement a quatre rôles permis, et seulement ceux-là :
+
+1. **Continuité** : transitions de vue entre les étapes (420 ms), la capsule et les lignes d'éléments gardant leur identité ; rappel synchrone, interrompu au premier geste (§20.2, K2).
+2. **Retour d'action** : chaque contrôle répond au survol (180 ms), à la pression (90 ms) et au focus (accroche de l'anneau, 180 ms).
+3. **Entrée** : un seul enchaînement à l'arrivée sur un écran, décalé de 35 à 60 ms, 6 éléments au plus, **900 ms au total au plus** (§20.2, K1), jamais d'apparition au défilement.
+4. **Ambiance** : l'aurore, la lumière du réceptacle vide et le schéma de l'accueil, lents, composés par le GPU, arrêtés onglet caché et hors écran, retirés en mouvement réduit.
+
+Un mouvement ne retarde jamais une action : tout contrôle est utilisable pendant l'animation (seule exception, la fenêtre d'une transition de vue, ≤ 420 ms, interrompue au premier geste), et aucune animation n'attend une autre pour rendre la main. Le contenu est visible par défaut (si le script échoue, l'état final est affiché). Aucune animation ne précède la réalité : le sceau ne se ferme qu'après la résolution de `createShare`, et la dissolution ne commence qu'après la réponse du serveur ou l'effacement local. Le réordonnancement des lignes reste un changement d'état (FLIP de 180 ms). Détail par moment, budget de performance et accessibilité : §20.4, §20.6, §20.7.
 
 ### 7.2 Jetons
 
@@ -277,9 +288,11 @@ Un seul moment écrit par geste du produit : **le scellement** (envoi) et **la d
 | `--ease-in` | `cubic-bezier(0.7, 0, 0.84, 0)` | Sorties (durée × 0,7) |
 | `--ease-in-out` | `cubic-bezier(0.65, 0, 0.35, 1)` | Dissolution |
 
-Aucun rebond ni ressort.
+Aucun rebond ni ressort. Jetons ajoutés par la révision 4 (`--dur-press`, `--dur-stagger`, `--dur-view`, `--dur-reveal`, `--dur-orbit`, `--dur-ambient`, `--ease-view`, `--rise`, `--blur-in`) : §20.3.
 
 ### 7.3 Le scellement (écran d'envoi, §9.4)
+
+> Révision 4 : chorégraphie remplacée par §20.4 (« Scellement »). Restent valables ci-dessous : l'ordre « jamais avant la résolution », les points 4 (pause, coupure) et 6 (échec, annulation), et le composeur masqué intact.
 
 Une **capsule** : surface `--surface-2`, rayon `--r-xl`, qui résume l'envoi (« 3 éléments · 34 Mo », icônes des catégories, noms des éléments sur une ligne chacun, 4 au plus puis « + 6 autres »). Par-dessus son bord, un `<svg>` aux dimensions de la capsule contient un `<rect>` aux mêmes rayons, `pathLength="100"`, trait `--accent`, `stroke-dasharray: 100`. Le tracé **commence et finit au milieu du bord haut**, marqué par une encoche fixe de 2 px en `--line-strong` : on lit d'où part la progression. Au centre : le pourcentage en `--fs-figure` pendant l'envoi.
 
@@ -291,6 +304,8 @@ Une **capsule** : surface `--surface-2`, rayon `--r-xl`, qui résume l'envoi («
 6. **Échec ou annulation**. Le trait s'arrête où il est et passe en `--danger` (échec) ou `--text-3` (annulation), 180 ms ; aucun tremblement. Le message apparaît sous la capsule ; les lignes reviennent au composeur (FLIP inverse, 240 ms).
 
 ### 7.4 La dissolution (fin de vie : destruction, « Terminer et effacer », « Supprimé »)
+
+> Révision 4 : masque limité à la partie visible et poussière, §20.4 (« Dissolution »). La règle « après la réponse seulement » et les replis restent.
 
 Le contenu (la liste chez le destinataire, la carte d'état sur la page de gestion, le panneau « Lien prêt » après « Supprimer ce partage ») se défait en grain du bas vers le haut, puis le message de fin apparaît à sa place.
 
@@ -337,7 +352,7 @@ Chaque composant interactif a ses états : repos, survol (`@media (hover: hover)
 | `Stepper` | Ouvertures 1 à 10 | − / +, valeur tabulaire, `aria-live="polite"` sur la valeur |
 | `TextField` / `TextArea` | Saisie | Bord `--line-strong`, focus : anneau 2 px `--accent` décalé de 2 px ; erreurs par `aria-describedby` ; attributs §12.3 ; `font-size` ≥ 16 px |
 | `PassphraseField` | Phrase générée ou mot de passe personnel | Chasse fixe ; Régénérer, Copier, « Utiliser mon propre mot de passe » |
-| `PasswordChecklist` | Indicateur honnête | Critères vrais (« 12 caractères minimum », « Absent des mots de passe courants ») ; phrase générée : « 4 mots tirés au hasard parmi 7 776 (environ 52 bits) » |
+| `PasswordChecklist` | Indicateur honnête | Critères vrais (« 12 caractères minimum », « Absent des mots de passe courants ») ; mot de passe généré : « Mot de passe tiré au hasard sur cet appareil » (révision 4 : aucun terme technique, §20.8) |
 | `CopyField` | Lien, mot de passe, lien de gestion | Valeur tronquée au milieu, copie entière, « Copié » 2 s (icône `check`), annoncé en `aria-live` |
 | `Banner` | `info`, `warn`, `danger` | Fond teinté + icône + texte ; pas de bord gauche épais ; `role="status"` ou `role="alert"` ; action facultative (un bouton au plus) |
 | `CapacityGauge` | « 34 Mo / 1 Go · 3 / 10 » | §9.2.5 |
@@ -348,7 +363,10 @@ Chaque composant interactif a ses états : repos, survol (`@media (hover: hover)
 | `DropOverlay` | Cible pleine page pendant un glisser | §9.2.2 |
 | `UndoToast` | « Retiré · Annuler » | 6 s, `role="status"`, se ferme au clavier (Échap), une seule à la fois |
 | `VoiceRecorder` | Vocal | États §9.2.7 ; niveau en 5 barres (AnalyserNode), minuteur tabulaire |
-| `SealCapsule` | Scellement | §7.3, `role="progressbar"` |
+| `SealCapsule` → `Capsule` | Scellement | §20.4, `role="progressbar"` ; couche animée `aria-hidden`, vrais noms masqués (K9) |
+| `Vessel` | Réceptacle du composeur (révision 4) | Contour SVG ajusté par `ResizeObserver`, lumière du contour vide, cible de dépôt (§20.4) |
+| `RightsPicker` | Droit du destinataire (spec §34) | `Segmented` à 3 choix (« Voir seulement », « Voir et enregistrer », « Voir, enregistrer et garder ») |
+| `VaultScreen`, `HistoryScreen`, `VerifyPage` | Coffre, historique, vérification | spec §27.6, §33, §28.4 |
 | `UploadStats` | Mesures de l'envoi | §9.4.1 |
 | `PhaseList` | Quatre phases de l'envoi | §9.4.1, liste ordonnée, état de chaque phase en texte (pas seulement en couleur) |
 | `Countdown` | Temps restant | « 4 h 15 », « 12 min », « 45 s » ; annonces §11 |
@@ -365,7 +383,7 @@ Chaque composant interactif a ses états : repos, survol (`@media (hover: hover)
 
 ## 9. Écrans et états
 
-Routes (routeur interne d'une trentaine de lignes) : `/` (accueil + envoi), `/s/:id` (ouverture), `/m/:id` (gestion), `/securite`, `/confidentialite`, toute autre adresse → page 404 de l'interface (le serveur répond 200 avec `index.html`, comportement existant de `static.go`, spec §10). Les liens de partage et de gestion ont la forme `/s/{id}#{K_lien}`, `/m/{id}#{S_gestion}`.
+Routes (routeur interne d'une trentaine de lignes) : `/` (accueil + envoi), `/s/:id` (ouverture), `/m/:id` (gestion), `/securite`, `/confidentialite`, toute autre adresse → page 404 de l'interface (le serveur répond 200 avec `index.html`, comportement existant de `static.go`, spec §10). Les liens de partage et de gestion ont la forme `/s/{id}#{K_lien}`, `/m/{id}#{S_gestion}`. **Révision 4 (spec §32)** : `/#{K_lien}` (43 caractères) et `/#m{S_gestion}` ; le routeur reconnaît ces fragments sur `/`, tout autre fragment est retiré ; routes ajoutées : `/coffre` (app installée sur téléphone, spec §27), `/envois` (historique, spec §33), `/verifier` (spec §28.4).
 
 Disposition : une colonne sur téléphone ; à partir de 960 px, deux colonnes (composer | options ; liste | visionneuse). La barre d'actions principale est collée en bas sur téléphone (zone du pouce), en fin de colonne sur ordinateur. **Clavier virtuel ouvert** (détecté par `visualViewport.height < 0,75 × innerHeight`) : la barre collée du bas passe dans le flux (plus de `position: sticky`) pour ne jamais couvrir le champ actif ; le champ qui reçoit le focus est amené au centre (`scrollIntoView({ block: "center" })`) ; `<meta name="viewport" … interactive-widget=resizes-content>`. **Paysage sur téléphone** (hauteur < 500 px) : en-tête non collé, capsule réduite (hauteur auto, pas de plein écran), barre d'actions dans le flux. **320 px** : tout tient sans défilement horizontal (contrôlé par test), les rangées de boutons passent à la ligne.
 
@@ -375,6 +393,7 @@ Navigateur pris en charge (vérifié avant toute route) : `crypto.subtle`, `cryp
 
 - Titre (`--fs-display`) : **« Un lien, un mot de passe, puis plus rien. »** / EN : « One link, one password, then nothing. »
 - Une phrase : « Texte, photos, vidéos, vocaux, documents. Chiffrés sur votre appareil avant l'envoi : le serveur ne reçoit que des données chiffrées, jamais la clé. »
+- Révision 4 : titre animé mot par mot, texte complet pour les lecteurs d'écran (§20.2, K8) ; sur téléphone, le schéma passe **sous** le réceptacle (S4).
 - Démonstration du mécanisme : un schéma en une ligne, SVG, « Votre appareil — chiffré — serveur (ne lit rien) — chiffré — destinataire », trait menthe tracé une fois (600 ms ; immobile en mouvement réduit).
 - Lien « Comment ça marche » → `/securite`.
 - Le composeur commence juste dessous ; sur téléphone (390 × 844), la rangée d'ajout est dans le premier écran. Une fois au moins un élément ajouté, le titre d'accueil se replie (hauteur réduite, `--fs-h1`) pour laisser la place à la liste : le Persuade a fait son travail.
@@ -463,7 +482,9 @@ Navigateur pris en charge (vérifié avant toute route) : `crypto.subtle`, `cryp
 
 - **Durée** : `Segmented` 1 h · 6 h · **12 h** (par défaut) · 24 h. Indication : « Comptée à partir de la fin de l'envoi. »
 - **Ouvertures** : `Stepper` 1 à 10, **1** par défaut. Indication : « Une ouverture = un déverrouillage réussi. »
-- **Mot de passe** : phrase de 4 mots (`generatePassphrase(4)`), en grand, en chasse fixe ; **Régénérer**, **Copier**. « Utiliser mon propre mot de passe » → champ (chasse fixe, Afficher/Masquer), `PasswordChecklist` en direct, erreurs de `checkPassword` (« 12 caractères minimum », « Ce mot de passe est trop courant »). Revenir à la phrase générée : « Utiliser une phrase générée ». Rappel permanent : « Envoyez-le par un autre moyen que le lien. »
+- **Mot de passe** (révision 4, spec §31) : 8 caractères générés (`generatePassword()`), en grand, en chasse fixe ; **Générer un autre** (sans limite), **Copier**. Avant : phrase de 4 mots. « Utiliser mon propre mot de passe » → champ (chasse fixe, Afficher/Masquer), `PasswordChecklist` en direct, erreurs de `checkPassword` (« 12 caractères minimum », « Ce mot de passe est trop courant »). Revenir à la phrase générée : « Utiliser une phrase générée ». Rappel permanent : « Envoyez-le par un autre moyen que le lien. »
+- **Ce que le destinataire peut faire** (révision 4, spec §34) : `RightsPicker`, « Voir et enregistrer » par défaut ; textes honnêtes de spec §27.6 et §34.
+- L'envoi chiffré a déjà commencé en arrière-plan (spec §29.4) ; une ligne le dit sous la jauge : « L'envoi chiffré commence en arrière-plan. Rien n'est partagé tant que vous n'appuyez pas sur Envoyer. »
 - Action : **Chiffrer et envoyer** (`primary`, icône `lock`). Retour possible à « Composer » sans rien perdre.
 
 ### 9.4 Envoi (scellement)
@@ -474,7 +495,7 @@ L'écran remplace le composeur (masqué, intact). La capsule (§7.3) est en haut
 
 | Phase | Détection | Libellé (FR) |
 |---|---|---|
-| `keys` | Du clic à l'appel de `solveCaptcha` | « Préparation des clés » (Argon2id, environ 1 s) |
+| `keys` | Du clic à l'appel de `solveCaptcha` (durée : environ 1 s, plus sur un vieux téléphone ; avec spec §29, quelques millisecondes quand le mot de passe généré est déjà traité) | « Préparation des clés » (aucun terme technique à l'écran, §20.8) |
 | `captcha` | Pendant `solveCaptcha`, puis jusqu'au premier `onProgress(0, total)` (comprend l'attente de 3,1 s et la création) | « Vérification anti-robot » + détail §9.4.2 |
 | `upload` | Après `onProgress(0, total)`, tant que des octets restent | « Chiffrement et envoi » + « chaque bloc est chiffré juste avant d'être envoyé » |
 | `paused` | Pause demandée (§9.4.4) | « En pause » |
@@ -646,9 +667,10 @@ Affiché seulement quand la promesse de `createShare` est résolue (spec §5.1).
 
 ### 9.12 Pages « Comment ça marche / sécurité » et « Confidentialité » (Read)
 
-- `/securite` : le mécanisme en quatre paragraphes (clé dans le `#`, mot de passe, chiffrement dans le navigateur, autodestruction), le modèle de menaces résumé (spec §2), **les limites assumées** (spec §18, intégralement, en langage simple), la phrase de §18.11. Jamais « 100 % sécurisé ».
+- `/securite` : le mécanisme en quatre paragraphes **en langage courant, sans nom d'algorithme** (§20.8), avec un lien vers la documentation technique publique du dépôt (`docs/securite-technique.md` sur GitHub) et vers « Vérifier cette version » (spec §28.4) (clé dans le `#`, mot de passe, chiffrement dans le navigateur, autodestruction), le modèle de menaces résumé (spec §2), **les limites assumées** (spec §18, intégralement, en langage simple), la phrase de §18.11. Jamais « 100 % sécurisé ».
 - `/confidentialite` : la liste exacte de ce qui est traité (spec §9) ; « Shhdrop ne dépose aucun cookie et ne mesure pas l'audience » ; l'adresse IP est vue sans être enregistrée (spec §18.3). Section `#verification` : « Vérification anti-robot. Par défaut, elle se fait sur votre appareil, sans service tiers. Si elle échoue, Shhdrop peut vous proposer la vérification de Google reCAPTCHA. Elle ne se charge qu'après votre accord, dans une page séparée (`{origine de vérification}`) qui n'a accès ni à votre contenu, ni à votre lien, ni à votre mot de passe. Dans ce cas, **Google voit votre adresse IP** et des informations sur votre navigateur, et peut déposer des cookies sur ses propres domaines ; ses règles de confidentialité s'appliquent (lien). Le serveur de Shhdrop transmet seulement à Google le jeton de vérification, jamais votre adresse IP. »
 - Mesure 68 ch, `--fs-body` 1.0625rem, titres en `--fs-h2`.
+- `/verifier` (révision 4, spec §28.4) : version, commit, lien vers la Release GitHub et le mode d'emploi, et la phrase « Cette page ne peut pas prouver sa propre intégrité… ».
 
 ---
 
@@ -707,6 +729,19 @@ Clés principales (extrait normatif ; le plan fixe la liste complète) :
 | `manage.gone` | Supprimé | Deleted |
 | `err.limit` | Limite d'envois atteinte. Réessayez dans {duree}. | Upload limit reached. Try again in {duration}. |
 | `err.full` | Le service est plein pour le moment. Réessayez plus tard. | The service is full right now. Try again later. |
+| `rights.view` | Voir seulement | View only |
+| `rights.save` | Voir et enregistrer | View and save |
+| `rights.keep` | Autoriser le destinataire à garder une copie chiffrée sur son téléphone | Allow the recipient to keep an encrypted copy on their phone |
+| `rights.view.notice` | L'expéditeur a choisi « voir seulement ». Cela n'empêche pas une capture d'écran. | The sender chose “view only”. This does not prevent a screenshot. |
+| `rights.view.sender` | Ce n'est qu'une dissuasion : le destinataire peut toujours faire une capture ou filmer l'écran. | This only deters: the recipient can still take a screenshot or film the screen. |
+| `pw.generate` | Générer un autre | Generate another |
+| `pw.generated` | Mot de passe tiré au hasard sur cet appareil | Password picked at random on this device |
+| `vault.keep` | Garder dans le coffre | Keep in the vault |
+| `vault.status` | {n} partages gardés · le prochain s'efface dans {duree} | {n} shares kept · the next one is erased in {duration} |
+| `vault.openInApp` | Si vous avez l'app Shhdrop, ouvrez-y ce lien avant de déverrouiller : c'est là seulement qu'un partage peut être gardé, quand l'expéditeur l'a permis. | If you have the Shhdrop app, open this link there before unlocking: only there can a share be kept, when the sender allowed it. |
+| `preupload.note` | L'envoi chiffré commence en arrière-plan. Rien n'est partagé tant que vous n'appuyez pas sur Envoyer. | The encrypted upload starts in the background. Nothing is shared until you press Send. |
+| `destroyed.body` | Il a été effacé du serveur. Ce que vous avez déjà enregistré sur cet appareil n'est pas concerné. | It was erased from the server. Anything you already saved on this device is not affected. |
+| `history.title` | Mes envois | My shares |
 | `err.interrupted` | Le transfert a été interrompu (le serveur a peut-être redémarré). Réessayez. | The transfer was interrupted (the server may have restarted). Try again. |
 
 ---
@@ -731,6 +766,7 @@ Clés principales (extrait normatif ; le plan fixe la liste complète) :
 
 - `parseLink(location.href)` (requête ignorée) dès le démarrage de la route, puis `history.replaceState(null, "", location.pathname)` (spec §5.3) : le `#` **et la requête** (paramètres de suivi) quittent la barre et l'historique. Sur **toute autre route** (404 comprise : lien abîmé `/s/{id}/#…`, `/S/…`, hors base de démo), un `#` non vide est retiré de la même façon, y compris quand il est collé dans la barre sur la même page (`hashchange`). Exceptions : navigateur intégré (S4) et navigateur non pris en charge (§9.11). Un dernier segment avec un point (`/s/{id}.`) est servi par l'application comme les autres (spec §10, « Fichiers du site »).
 - L'expéditeur ne voit jamais son lien dans la barre d'adresse : les liens sont affichés, pas navigués.
+- Exceptions écrites (révision 4) : coffre chiffré dans `web/src/vault/` (spec §27) et `S_gestion` chiffré dans `web/src/history/` (spec §33) ; jamais `K_lien`, mot de passe, `R` ni clair.
 - Aucun lien, clé ni mot de passe dans `localStorage`, `sessionStorage`, IndexedDB, cookies, titre de page, `console`, ni dans un message `postMessage` (cadre PDF, cadre de vérification).
 
 ### 12.2 Cache « page précédente » (spec §21)
@@ -792,6 +828,8 @@ Clés principales (extrait normatif ; le plan fixe la liste complète) :
 ## 14. PWA et serveur statique
 
 ### 14.1 Manifeste et icônes (sans service worker, spec §10)
+
+> Révision 4 : un service worker minimal d'épinglage est proposé avec le coffre (spec §28.6, question Q-C1) ; tant qu'il n'est pas accepté, la règle ci-dessous tient.
 
 - `web/public/manifest.webmanifest` : `name` et `short_name` « Shhdrop », `lang` « fr », `start_url` et `scope` « ./ » (relatifs au manifeste : racine en production, `/Shhdrop/` dans la démo ; même valeur dans les deux builds), `display` « standalone », `background_color` et `theme_color` `#0B0D12`, `description` = `hero.lede`, icônes `icon.svg` (`any`), `icon-192.png`, `icon-512.png`, `icon-maskable-512.png` (zone sûre 80 %).
 - `apple-touch-icon.png` 180 × 180 ; **une seule** `<meta name="theme-color" content="#0B0D12">` (P1) ; `<meta name="color-scheme" content="dark">`.
@@ -1004,4 +1042,124 @@ Un contrôle de cohérence du plan contre le dépôt (`.superpowers/sdd/2026-11-
 |---|---|---|
 | Q1 | Origine de vérification : domaine distinct (par exemple `shhverif.net`), organisation GitHub gratuite dédiée (`<nom>.github.io`, suffixe public, donc un site à part) ou `verif.shhdrop.app` (même site, risque résiduel écrit) ? | **Ouverte.** Code générique sur `SHH_VERIF_ORIGIN`, avec refus au démarrage d'une origine du même site que `SHH_ORIGIN` (§15.4) ; tests sur une origine distincte. Proposition à valider : une **organisation GitHub gratuite** dédiée ; le choix réel se fait à la migration (coût si faux : une valeur de configuration) |
 | Q2 | Quand renvoyer vers Google : après un délai fixe, ou seulement si la borne vraie restante est trop longue (avec pré-calcul), pour ne pas y envoyer les personnes qui créent plusieurs partages dans l'heure ? | **Décidée (5 novembre).** Preuve de travail pré-calculée dès le premier élément composé (page visible seulement, au plus deux renouvellements du défi) ; repli Google seulement si le Worker est absent ou en erreur, si le serveur refuse, ou si la borne vraie restante dépasse 60 s (mesurée après 5 s) ou 60 s écoulées. Plus de délai fixe (§9.4.2, §18 A8) |
+| Q4 | Valider la direction artistique v2 avec les corrections K1 à K14 (§20.2), dont le verre statique sans flou (K6) et le texte de fin honnête (K7) ? | Appliquées par défaut ; le prototype reste la référence visuelle |
+| Q5 | Le schéma de l'accueil en boucle (6,4 s) : garder la boucle ou le tracer une fois (révision 3) ? | Boucle, rangée dans l'ambiance (K10) |
 | Q3 | Amender CLAUDE.md (« aucune ressource tierce sur le site ») et la spec pour écrire l'exception reCAPTCHA isolée ? | **Décidée (5 novembre).** Le propriétaire a validé l'exception : spec v2.5 §26 et CLAUDE.md amendés ; les Tasks 15 et 16 ne sont plus bloquées (§18 A1) |
+
+---
+
+## 20. Direction artistique v2 « Nuit chiffrée, vivante » (amendement A1, révision 4)
+
+Retour du propriétaire (5 novembre) : l'interface est « trop simple, pas assez belle » ; il veut plus d'animation, de beauté et de raffinement. Prototype de référence : `docs/superpowers/design/da-v2/index.html` (polices lues dans `web/public/fonts/` ; à ouvrir par un serveur HTTP lancé à la racine du dépôt, par exemple `python3 -m http.server`, puis `/docs/superpowers/design/da-v2/`). Captures choisies : `docs/superpowers/design/da-v2/shots/`. Ce qui n'est pas cité ici reste inchangé. En cas d'écart entre le prototype et cette section, **cette section l'emporte** (corrections de §20.2).
+
+### 20.1 Intention
+
+La v2 garde le monde « Nuit chiffrée » et ses deux gestes, et ajoute :
+
+1. **Une forme unique, la capsule.** La capsule ouverte du logo (trait de 300° qui part du milieu du bord haut) devient le **réceptacle** du composeur ; l'envoi la referme ; on la retrouve sur chaque étape (capsule qui se remplit de texte chiffré, petite capsule scellée de « Lien prêt », capsule verrouillée du destinataire, capsule en pointillés du partage détruit). Les transitions de vue la font passer d'un écran à l'autre.
+2. **Une lumière d'ambiance vivante (aurore)** : trois nappes très floues qui dérivent lentement, composées par le GPU, dont l'intensité suit le moment.
+3. **Des micro-interactions sur chaque contrôle**, et deux moments écrits plus riches : le scellement (un volet de texte chiffré avance au rythme des octets, un éclair fait le tour du bord à la fermeture) et la dissolution (le contenu se défait en grain et en poussière).
+
+Inchangé : un seul thème sombre, un accent menthe, Mona Sans et JetBrains Mono, aucune ressource tierce, aucune bibliothèque d'animation, `style-src 'self'`.
+
+### 20.2 Contrôle de l'amendement contre les règles, et corrections apportées
+
+Contrôle fait sur le prototype et le texte de l'amendement : **CSP** (aucun attribut `style`, aucune balise `<style>` ni `<script>` en ligne, aucune URL `data:` dans `index.html`, `css/` et `js/` : conforme) ; **mouvement réduit et contraste forcé** (blocs présents, voir corrections) ; **rien qui ralentisse** ; **textes honnêtes** (spec §2, §18.11).
+
+| # | Gravité | Endroit | Problème | Correction appliquée |
+|---|---|---|---|---|
+| K1 | Moyenne | Amendement §4.2 contre sa propre règle §7.1.3 | L'entrée de l'accueil dépassait le plafond de 900 ms qu'elle fixe : réceptacle 220 + 900 = 1 120 ms, texte 380 + 720 = 1 100 ms, dernier mot du titre 390 + 720 = 1 110 ms | Retimée : mots du titre 560 ms, décalage de 35 ms (respiration de 30 ms avant « puis »), dernier mot à 310 ms → fin à 870 ms ; réceptacle sans délai, 640 ms ; texte, lien et schéma après 200 ms, 600 ms. Tout est cliquable dès l'affichage |
+| K2 | Élevée | Transitions de vue | Pendant une transition de vue, le navigateur fige le rendu jusqu'à la fin du rappel et capte les clics par ses pseudo-éléments : la règle « tout contrôle est utilisable pendant l'animation » était fausse | Rappel de `startViewTransition` **synchrone** (mutation du DOM seulement, jamais d'attente réseau) ; `skipTransition()` dès un `pointerdown` ou `keydown` ; jamais pour une mise à jour sur place (ajout d'un 2ᵉ élément, frappe) ; sans l'API (Firefox ancien), changement direct. Durée réelle bloquante ≤ 420 ms |
+| K3 | Moyenne | Fermeture du sceau (1 300 ms) puis transition vers « Lien prêt » | Le lien attendait 1,3 s + 420 ms après la résolution : le geste retardait l'action | Cœur de la fermeture ramené à 900 ms (« Scellé » entre de 560 à 900 ms) ; l'éclat d'aurore (opacité seulement) continue seul sur l'écran suivant ; « Lien prêt » commence à 900 ms ; tout appui ou touche pendant la fermeture saute à la fin (`Animation.finish()`) |
+| K4 | Moyenne | Aurore : états « scellement » (0,26) et éclat (0,55) | La règle de luminance S2 n'était mesurée qu'au repos ; ces états éclairent davantage | Le test de luminance s'applique à chaque état : repos, scellement, éclat à son pic, détruit. Une valeur qui échoue est abaissée, pas la règle |
+| K5 | Moyenne | S2 : plafond 0,045, mesuré 0,046 | L'amendement mesurait 0,046 et fixait 0,045 : il violait sa propre règle | Plafond **0,050** derrière `--text-2` (`--text-2` ≥ 4,70:1, calcul : (0,420 + 0,05) / (0,050 + 0,05)) ; `--text-3` jamais directement sur l'aurore (3,4:1 seulement) |
+| K6 | Moyenne | Verre statique (`backdrop-filter: blur(24px) saturate(1.35)`) | Sous le réceptacle, il n'y a que l'aurore, déjà floue : le flou n'ajoute rien de visible, mais l'aurore bouge, donc le flou est recalculé à chaque image sur un téléphone | Verre statique = remplissage translucide `--vessel` **sans** `backdrop-filter` ; le flou reste réservé au verre mobile (barres sous lesquelles le contenu défile, §5.4) |
+| K7 | **Élevée (honnêteté)** | Écran « Partage détruit » du prototype | « Il n'existe plus nulle part : ni sur le serveur, ni sur cet appareil. » est faux : ce que le destinataire a enregistré reste, la mémoire n'est effacée qu'au mieux (spec §18.1, §18.4, §18.7) | « Ce partage a été détruit. Il a été effacé du serveur. Ce que vous avez déjà enregistré sur cet appareil n'est pas concerné. » |
+| K8 | Moyenne | Titre d'accueil mot par mot | Une `<span>` par mot, transformée, peut être lue mot par mot par VoiceOver | Texte complet dans un `<span class="sr-only">`, copie animée en `aria-hidden="true"` (corrige T4 de l'amendement, qui interdisait `aria-hidden`) |
+| K9 | Moyenne | Noms brouillés, phrase régénérée | Le texte visible change caractère par caractère : un lecteur d'écran lirait des noms illisibles ; une copie pendant l'animation copierait du bruit | Couche animée en `aria-hidden`, vrais noms dans une liste masquée ; Copier lit l'état, jamais le DOM |
+| K10 | Faible | Schéma de l'accueil | Animation en boucle (6,4 s) absente des rôles « ambiance » : ni pause, ni arrêt hors écran | Rangée dans l'ambiance : pause onglet caché et hors écran, retirée en mouvement réduit |
+| K11 | Faible | Calques d'aurore | « Le compositeur agrandit une texture minuscule » n'est pas prouvé : agrandi par `width`/`height`, un calque peut être rastérisé à 150 vmax × DPR (des dizaines de Mo par nappe) | Image posée à 128 px et agrandie par `transform: scale()` ; budget : mémoire des calques d'aurore ≤ 32 Mo (panneau Layers de DevTools), mesurée en Task DA |
+| K12 | Faible | Poussière | Canvas pleine zone au DPR 3 du téléphone | DPR du canvas plafonné à 2 |
+| K13 | Faible | Focus après transition | « Après chaque transition, le focus va au titre » volerait le focus à qui vient d'ajouter un fichier | Seulement aux changements d'écran ou d'étape (règle §11 inchangée ailleurs) |
+| K14 | **Élevée (décision du propriétaire, 5 novembre)** | Phase « Préparation des clés » du prototype | Elle affiche « Argon2id, environ 1 s » | Aucun nom d'algorithme à l'écran (§20.8) ; libellé seul « Préparation des clés » |
+
+Signalements de l'amendement conservés : **S1** (texte « chiffré » décoratif tiré d'un générateur à graine fixe, jamais de `crypto`, d'un tampon de chiffrement, de la clé ni du lien ; test : `ui/decor.ts` n'importe rien de `crypto/`, `transfer/` ni `index.ts`) ; **S3** (verre mobile contre verre statique ; sur le verre statique, `--text-2` 5,38:1 et `--text-3` 4,7:1 au pire point, repli plein `--surface-1` en `prefers-reduced-transparency` et `prefers-contrast: more`) ; **S4** (sur téléphone, schéma sous le réceptacle ; rangée d'ajout visible à 390 × 844) ; **S5** (dissolution limitée à la partie visible) ; **S6** (CSSOM et WAAPI seulement ; jamais `setAttribute("style")`) ; **S7** (QR en points : module foncé sur `--paper`, zone de silence ≥ 4 modules, correction M, décodage du SVG rendu en CI) ; **S8** (nappes produites par `web/scripts/gen-aurora.mjs`, graine fixe, environ 11 Ko) ; **S9** (photos du prototype = exemples).
+
+### 20.3 Jetons ajoutés ou modifiés (`web/src/ui/tokens.css`)
+
+| Jeton | Valeur | Usage |
+|---|---|---|
+| `--bg-deep` | `#07080C` | Bord de la vignette |
+| `--hair` / `--hair-2` | `rgb(233 236 242 / 0.08)` / `rgb(233 236 242 / 0.13)` | Filets de verre (non porteurs d'information) |
+| `--vessel` | `rgb(17 20 27 / 0.62)` (sans `backdrop-filter`, K6) | Verre statique : réceptacle, capsule |
+| `--edge-hi` | `inset 0 1px 0 rgb(255 255 255 / 0.06)` | Arête haute du verre |
+| `--seal-light` / `--seal-halo` | `#C9FBE8` / `rgb(95 227 181 / 0.28)` | Pointe du trait et éclair ; halo de 7 px autour de la pointe seulement |
+| `--paper` / `--ink` | `#EEF1F5` / `#0B0D12` | QR |
+| `--aur-mint-o` / `--aur-tide-o` / `--aur-ink-o` | `0.18` / `0.34` / `0.32` | Opacités des nappes (plafond K5) |
+| `--fs-display` | `clamp(2.625rem, 1.1rem + 4.6vw, 5.5rem)` / 0.98 / 600 / largeur 116 %, approche −0,035 em, `max-width: 13ch` | Titre d'accueil |
+| `--fs-figure` | `clamp(3.5rem, 2rem + 6vw, 5.5rem)`, largeur 112 %, approche −0,04 em | Pourcentage dans la capsule |
+| `--fs-ready` | `clamp(2rem, 1.4rem + 2.4vw, 3rem)`, largeur 114 %, approche −0,03 em | Titre « Lien prêt » |
+| `--fs-screen` | `clamp(1.75rem, 1.3rem + 1.8vw, 2.5rem)`, largeur 112 % | Titres du destinataire et de fin |
+| `--r-2xl` | `32px` | Réceptacle, capsule. Boutons : 12 px (48 px de haut), 14 px (56 px), 10 px (44 px) |
+| `--e-vessel` | `0 40px 80px -32px rgb(0 0 0 / .75), 0 12px 24px -12px rgb(0 0 0 / .5)` | Ombre décalée, jamais centrée |
+| `--dur-press` / `--dur-stagger` / `--dur-view` | 90 ms / 35 à 60 ms / 420 ms | Pression (échelle 0,97 ; 0,92 pour `IconButton`) / décalage (6 éléments au plus) / transition de vue |
+| `--dur-reveal` | 560 ms (K1) | Entrée du titre, mot par mot |
+| `--dur-orbit` / `--dur-ambient` | 7,2 s / 46 s, 58 s, 64 s | Lumière du réceptacle vide / dérive des nappes |
+| `--ease-view` | `cubic-bezier(0.22, 1, 0.36, 1)` | Transitions de vue |
+| `--rise` / `--blur-in` | 14 px / 6 px (titre d'accueil seulement) | Montée à l'entrée |
+
+Couleurs des nappes (dans les PNG seulement) : menthe `#5FE3B5`, marée `#28809A`, encre `#3456AA`. Aucun violet. Aucun rebond ni ressort (règle v1).
+
+### 20.4 Mouvement par moment
+
+Les temps se comptent depuis l'événement déclencheur. Valeurs de référence : `da-v2/js/app.js` et `da-v2/css/*.css`, corrigées par §20.2.
+
+**Ambiance (toujours).** Trois `<img>` de 128 px (`alt=""`, `aria-hidden`), `position: fixed`, agrandies par `transform: scale()` (K11), animées en `transform` seulement, `alternate`, 46, 58 et 64 s ; vignette fixe ; grain fixe à 0,035. États par `body[data-screen]`, en opacité, 1,2 s : scellement (menthe et marée 0,26), détruit (aurore × 0,55). Pause à `document.hidden` ; retirée en `prefers-contrast: more` et `forced-colors` ; immobile en mouvement réduit. Le schéma de l'accueil en fait partie (K10).
+
+**Accueil et composeur.** Titre : chaque mot monte de 0,32 em et se défloute de 6 px (K1 pour les temps), une seule fois. Réceptacle : contour `<path pathLength="100">` sur la forme exacte (rayon 32), départ au milieu du bord haut, sens horaire, `stroke-dasharray: 83.33 100` (ouverture de 60°, celle du logo), trait `rgb(233 236 242 / .3)` de 1,5 px, ajusté par `ResizeObserver` (`capPath(w, h, r)`). Lumière qui parcourt le contour vide (deux traits de 9 et 14 unités, 7,2 s par cycle : 62 % de course puis repos, arrêtée hors écran par `IntersectionObserver`). Projecteur au pointeur fin (disque menthe à 7 %, 420 px, `transform`, une fois par image au plus). Cible de dépôt active : fond `rgb(16 42 35 / .72)`, contour `--accent` 2 px, ouverture resserrée de 60° à 14° (`stroke-dasharray` 83 → 96, 400 ms). Premier ajout : transition de vue (titre replié, groupe `hero-title` ; réceptacle agrandi, groupe `capsule` ; catégories décalées de 45 ms, 560 ms ; options après 160 ms). Badge « Nettoyé » : un reflet, une fois. Contrôle segmenté : pastille en `transform`, indice dans `data-i`. Régénérer : lettres qui défilent puis se fixent, 520 ms (K9). Jauge en `scaleX`, 600 ms. « Chiffrer et envoyer » : reflet au survol (760 ms), anse du cadenas qui descend (220 ms), pression 0,97.
+
+**Scellement (remplace §7.3).** Capsule en verre statique, rayon 32, encoche `--line-strong` au milieu du bord haut. Couches : (1) **volet de texte chiffré décoratif** (S1), JetBrains Mono 12 px, menthe à 10 %, révélé de gauche à droite au rythme des octets (enveloppe `translateX((p − 1) × 100 %)`, contenu `translateX((1 − p) × 100 %)`, filet menthe de 1 px au front) ; (2) en-tête (cadenas, « 6 éléments · 142 Mo », puce d'état) ; (3) 4 noms au plus, brouillés avec un flou de `k × 1.6px` et une opacité de 1 → 0,55, `k = clamp(p × 1.35 − i × 0.08)` (K9) ; (4) pourcentage en `--fs-figure`, à l'entier inférieur ; (5) trait `stroke-dasharray: p×100 100` de 2 px, pointe de 2,5 px en `--seal-light` et halo de 7 px placés par `getPointAtLength` (longueur en cache par taille). Phases : regroupement (transition de vue de 420 ms, FLIP du navigateur), `keys` et `captcha` (trait court de 8 unités, 1,6 s par tour), `upload` (tout suit `onBytes`, une fois par image ; point qui pulse, 1,6 s), `paused` (trait et volet en `--text-3`, pointe masquée), `final` (trait plein). **Fermeture**, après la résolution seulement, WAAPI, 900 ms (K3) : 0–640 ms éclair `--seal-light` de 3 px sur un tour, trait 2 → 3 px ; 140–300 ms l'anse ouverte disparaît ; 180–400 ms l'anse fermée descend de 3 px ; 380–560 ms la puce s'éteint ; 420–620 ms le chiffre sort ; 400–800 ms les noms passent à 50 % ; 560–900 ms « Scellé » entre ; 600–800 ms encoche en `--accent` ; 600–900 ms la capsule respire (1 → 0,985 → 1) ; 560–2 160 ms éclat d'aurore (opacité seulement, continue après l'écran). Vers « Lien prêt » à 900 ms : la capsule devient la petite capsule scellée (96 × 60). Avec l'envoi anticipé (spec §29), la capsule montre d'abord, dans le composeur, l'avancée de l'envoi en arrière-plan (trait discret, sans chiffre), puis le scellement ne joue que la fin. Captures : `shots/04-scellement-390.png`, `shots/planche-scellement.png`.
+
+**Lien prêt.** Blocs : montée de 14 px et fondu, 640 ms, décalés de 60 ms ; QR qui s'imprime (`clip-path`, 900 ms après 260 ms, une fois) ; Copier : `copy` → `check` (260 ms), « Copié » monte, reflet menthe à 16 % (700 ms), retour à 2 s ; feuille QR sur téléphone : 460 ms.
+
+**Destinataire.** Capsule verrouillée (contour menthe plein, cadenas dans un carré de 64 px), champ de texte décoratif qui dérive (48 s, en boucle, masqué sur les bords, S1). Déverrouiller : bouton occupé (« Déchiffrement… »), puis, **après** la résolution d'`openShare`, le contour se défait vers l'encoche (520 ms) et l'anse s'ouvre. Mot de passe faux : aucun tremblement (règle v1), champ en `--danger`, message en fondu de 180 ms.
+
+**Contenu.** Bandeau collé en verre mobile (`--text` seulement) ; sections décalées de 60 ms (600 ms) ; photos 1 → 1,03 au survol d'un pointeur fin ; confirmation de destruction qui monte (280 ms).
+
+**Dissolution (remplace §7.4).** Après la réponse du serveur ou `wipe()`, jamais avant. Au départ, `--a` et `--span` (≥ 120 px) posés par CSSOM pour la seule partie visible (S5) ; `--d` animée de 0 à 1 par WAAPI en 1 100 ms ; `--lo = --a + (d × 1.5 − 0.3) × --span`, `--hi = --lo + 0.18 × --span` ; masque à trois couches (plein au-dessus de `--hi`, grain de 96 px dans la bande). Contenu qui monte de 4 px, flou de 1 px sur le dernier tiers. **Poussière** : `<canvas>` (DPR ≤ 2, K12), 1 400 grains de 0,8 à 2,5 px (78 % `--text`, 22 % `--accent`) nés au passage du front, fonction pure du temps (graine fixe), **aucune** lecture de pixels du contenu (`getImageData` interdit, test de recherche). Aurore à 55 %. Fin : nœud retiré, capsule en pointillés, texte K7 et bouton décalés de 70 ms, focus sur le titre et annonce. Replis : sans `mask-composite` ou `@property`, fondu et flou de 400 ms. Captures : `shots/planche-dissolution.png`, `shots/10-detruit-390.png`.
+
+### 20.5 Remplacement de §7.1 (Principe)
+
+Voir §7.1, réécrit (révision 4).
+
+### 20.6 Budget de performance
+
+Cible : **60 images par seconde sur un téléphone de milieu de gamme** (Pixel 6a et Galaxy A34, Chrome, sans limitation de processeur), mesurée par une trace DevTools sur chaque moment.
+
+1. Composé seulement : `transform`, `opacity`, `clip-path`, `filter` sur petits éléments ; jamais `width`, `height`, `top`, `left`, `margin`, `font-size` (exception v1 : `grid-template-rows` du panneau qui se déplie, une fois). Le `transition: font-size` du titre d'accueil disparaît (transition de vue).
+2. Repeints répétés bornés : trait SVG de la capsule (680 × 320 au plus), 4 lignes de noms brouillés, canvas de poussière (1,6 s, 1 400 `fillRect` par image au plus).
+3. Aucune lecture de mise en page dans les boucles (`getBoundingClientRect` une fois au départ de la dissolution ; `getTotalLength` en cache par taille).
+4. Calques : 4 nappes d'aurore au plus, mémoire ≤ 32 Mo (K11) ; 2 `backdrop-filter` actifs au plus sur téléphone, sur du verre mobile seulement (K6) ; `will-change` permanent sur les nappes et le volet chiffré seulement.
+5. Boucles arrêtées onglet caché et hors écran ; point qui pulse seulement pendant l'envoi.
+6. Poids ajouté : 3 PNG (environ 11 Ko), aucune police, aucun script tiers, moins de 6 Ko de JS minifié pour la chorégraphie et la poussière.
+7. Aucune trame longue (Long Animation Frame) de plus de 50 ms pendant le scellement ou la dissolution : contrôlé en e2e Chromium par `PerformanceObserver({ type: "long-animation-frame" })`.
+8. **Rien n'attend une animation** : chaque contrôle répond pendant qu'elle joue, sauf la fenêtre bloquante d'une transition de vue (≤ 420 ms, interrompue au premier geste, K2).
+
+### 20.7 Accessibilité
+
+- **`prefers-reduced-motion: reduce`** : aurore, lumière du réceptacle, schéma animé, texte qui dérive, point qui pulse et poussière retirés ; titre et entrées affichés sans montée ; transitions de vue réduites à un fondu de 120 ms ; scellement : progression gardée (c'est un état), sans flou ni éclair, fermeture = couleur, icône et libellé (160 ms) ; dissolution en fondu de 240 ms ; phase indéterminée : libellé qui pulse en opacité (1 ↔ 0,6). Capture : `shots/a11y-mouvement-reduit-scellement-390.png`.
+- **`forced-colors: active`** : aurore, grain, verre, ombres, volet chiffré, éclair et poussière retirés ; contours en `CanvasText` ; progression en `Highlight` sur 4 px, piste `GrayText` de 1 px ; QR en `Canvas`/`CanvasText`. Capture : `shots/a11y-contraste-force-accueil-1440.png`.
+- **`prefers-reduced-transparency`, `prefers-contrast: more`** : verre remplacé par `--surface-1`.
+- **Contraste** : K5 et S3, mesurés en e2e (capture sans contenu, `main.style.visibility = "hidden"` par CSSOM, échantillonnage de chaque pixel, échec au-delà d'une luminance relative de 0,050), dans chaque état de K4.
+- Annonces inchangées ; les animations n'annoncent rien. Focus : anneau de 2 px en `--accent` qui s'accroche en 180 ms ; K13. Rien n'est porté par le seul mouvement. Rien ne clignote plus de 3 fois par seconde (l'éclair est un passage unique de 640 ms).
+
+### 20.8 Textes qui inspirent confiance (décision du propriétaire, 5 novembre)
+
+- **Aucun nom d'algorithme ni terme technique à l'écran** : ni « Argon2id », « AES », « GCM », « HKDF », « HMAC », « SHA-256 », « STREAM », « WebCrypto », « libsodium », « ML-KEM », « X25519 », ni « bits » ou « entropie ». La formule la plus technique permise est « chiffré de bout en bout ».
+- Les détails techniques vivent dans la documentation publique du dépôt GitHub (`docs/securite-technique.md`, à écrire en Task C3) ; la page Sécurité **renvoie** à ce document au lieu de les énumérer (§9.12).
+- Règle testée : `i18n.test.ts` échoue si `fr.ts`, `en.ts`, `pages.fr.ts` ou `pages.en.ts` contient (sans casse) `/argon|\baes\b|gcm|hkdf|hmac|sha-?\d|stream|webcrypto|libsodium|ml-?kem|x25519|\d[\s  ]*bits?\b|entropie|entropy/` (« bits » seulement après un nombre, pour ne pas refuser l'anglais « a bit »), en plus de « 100 % sécurisé » et de « ne voit rien ».
+- Textes modifiés en conséquence : `PasswordChecklist` (« 4 mots tirés au hasard parmi 7 776 (environ 52 bits) » → « Mot de passe tiré au hasard sur cet appareil ») ; phase `keys` (« Préparation des clés », sans parenthèse) ; page Sécurité (§9.12).
+
+### 20.9 Ce que le prototype ne couvre pas
+
+Version anglaise (« One link, one password, then nothing. » en 4 lignes au plus à 390 px) ; états d'erreur de l'envoi (§7.3, point 6, appliqué à la nouvelle capsule ; le volet s'arrête où il est) ; page de gestion (petite capsule et dissolution) ; écrans du coffre, de l'historique et de vérification (spec §27, §28, §33 : mêmes composants) ; PDF isolé, vérification reCAPTCHA, pages Sécurité et Confidentialité : sans changement de mouvement.

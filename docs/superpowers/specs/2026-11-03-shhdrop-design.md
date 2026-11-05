@@ -1,7 +1,7 @@
 # Shhdrop — spécification V1 (version 2, finale à valider)
 
 Date : 4 novembre 2026 · Domaine visé : **shhdrop.app**
-Historique : v1 du 3 novembre, puis revue critique indépendante et passage complet de recherche d'oublis (voir section 0). v2.4 (4 novembre) : durcissement après l'audit « sharp edges » (section 25). v2.5 (5 novembre) : repli Google reCAPTCHA isolé (section 26).
+Historique : v1 du 3 novembre, puis revue critique indépendante et passage complet de recherche d'oublis (voir section 0). v2.4 (4 novembre) : durcissement après l'audit « sharp edges » (section 25). v2.5 (5 novembre) : repli Google reCAPTCHA isolé (section 26). v2.6 (5 novembre) : décisions du propriétaire, coffre chiffré sur téléphone (27), code vérifiable (28), chiffrement anticipé (29), revue post-quantique (30), mot de passe de 8 caractères (31), lien court (32), historique local sans compte (33), droits du destinataire (34). Les sections 29 à 34 remplacent les passages signalés « → § » ci-dessous.
 
 ---
 
@@ -11,7 +11,7 @@ Historique : v1 du 3 novembre, puis revue critique indépendante et passage comp
 
 | # | Décision | Choix par défaut | Raison |
 |---|---|---|---|
-| D1 | Mode « lecture seule » | **Retiré** | Contournable (appui long, outils du navigateur) ; donnait une fausse impression de sécurité |
+| D1 | Mode « lecture seule » | **Retiré** (→ §34 : réintroduit par le propriétaire sous le nom « Voir seulement », avec un texte honnête) | Contournable (appui long, outils du navigateur) ; donnait une fausse impression de sécurité |
 | D2 | Chiffrement de la base (SQLCipher) et du disque (LUKS) | **Retirés** (option A) | Leur clé serait sur le même serveur pour qu'il redémarre seul ; la base ne contient que des données inexploitables sans le lien. Option B possible : disque chiffré déverrouillé à la main après chaque redémarrage |
 | D3 | Mise à jour automatique du site depuis GitHub | **Remplacée** par un script `deploy.sh` lancé à la main (image épinglée par empreinte) + mises à jour de sécurité automatiques du système | Moins de complexité, et le serveur ne va pas chercher du code tout seul |
 | D4 | Calcul anti-robot (preuve de travail) | **Reporté** | Peu efficace contre un attaquant équipé ; les limites par connexion et les quotas suffisent pour la V1 |
@@ -64,7 +64,7 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 | Inconnu qui tape des mots de passe | Deviner en ligne | 5 essais puis destruction ; nécessite déjà la clé d'accès |
 | Destinataire malveillant | Copier ce qu'il reçoit | **Non protégé** (limite assumée, section 18) |
 | Abuseur (spam, malware, contenus illicites) | Utiliser le service | Limites, quotas, durée maximale de 24 h, signalement, destruction par l'admin |
-| Attaquant du code du site (serveur piraté, dépôt GitHub compromis) | Servir un site piégé qui vole les clés | Comptes du propriétaire protégés (section 15.4), CSP stricte, dépendances minimales et verrouillées. **Limite résiduelle assumée** (section 18) |
+| Attaquant du code du site (serveur piraté, dépôt GitHub compromis) | Servir un site piégé qui vole les clés | Comptes du propriétaire protégés (section 15.4), CSP stricte, dépendances minimales et verrouillées, builds reproductibles et versions signées vérifiables (section 28). **Limite résiduelle assumée** (section 18) |
 | Saturation (déni de service) | Remplir le disque, épuiser la bande passante | Place réservée et bornée, quotas par connexion, limite de débit, plafond global |
 
 ---
@@ -102,7 +102,7 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 | Durée de vie | au choix 1 h, 6 h, 12 h, 24 h ; comptée **à partir de la fin de l'envoi** ; expiration arrondie au **quart d'heure supérieur** |
 | Ouvertures | au choix 1 à 10 ; **une ouverture = un déverrouillage réussi** (recharger la page en consomme une, c'est affiché) |
 | Fin de vie | le premier atteint : durée, ouvertures épuisées, destruction (expéditeur, destinataire, administrateur), signalement, 5 mots de passe faux |
-| Mot de passe | obligatoire ; généré par défaut : **4 mots** tirés d'une liste de 7 776 mots (≈ 52 bits) ; personnalisé : 12 caractères minimum et absent d'une liste noire des mots de passe courants (contrôle côté navigateur : le serveur ne peut pas le vérifier) |
+| Mot de passe | → §31 (8 caractères générés par défaut). Avant v2.6 : obligatoire ; généré par défaut : **4 mots** tirés d'une liste de 7 776 mots (≈ 52 bits) ; personnalisé : 12 caractères minimum et absent d'une liste noire des mots de passe courants (contrôle côté navigateur : le serveur ne peut pas le vérifier) |
 | Essais de mot de passe | 5 ratés → destruction |
 | Création de partages | 10 par jour par connexion (IPv4, ou bloc IPv6 /64) ; 30 par jour par bloc /48 ; 3 Gio utiles par jour par connexion et 6 Gio par bloc /48 (§24) |
 | Limite de débit | 60 requêtes par minute par connexion sur les routes publiques ; les envois et téléchargements de segments porteurs d'un jeton valide ont leur propre limite, 600 par minute par connexion (§24) ; un segment au jeton invalide compte dans les 60 |
@@ -189,6 +189,8 @@ Chaque module a une responsabilité unique et des tests propres. `web/src/crypto
 ---
 
 ## 7. Modèle cryptographique
+
+> **v2.6** : §7.1 à §7.5 décrivent le format v1. Pour tout nouveau partage, le chiffrement anticipé de la §29 les remplace (clé de contenu aléatoire `R` enveloppée par le lien et le mot de passe, paquet « SHH2 », identifiant dérivé du lien). §7.6 et §7.7 restent valables.
 
 ### 7.1 Clés
 
@@ -280,7 +282,7 @@ Toutes les réponses : JSON, `Cache-Control: no-store`, erreurs uniformes pour �
 | `GET /api/shares/{id}/segments/{n}` | Téléchargement | jeton de téléchargement |
 | `POST /api/shares/{id}/done` | Fin de téléchargement | jeton de téléchargement |
 | `POST /api/shares/{id}/destroy` | Destruction / signalement (motif) | `K_preuve` ou `S_gestion` |
-| `GET /api/shares/{id}/status` | Ouvertures, secondes restantes | `S_gestion` |
+| `GET /api/shares/{id}/status` | Ouvertures, secondes restantes (→ §29.8 : `GET /api/manage/status`) | `S_gestion` |
 | `GET /healthz` | Santé (local uniquement) | — |
 
 - Les secrets passent dans des **en-têtes ou le corps**, jamais dans l'URL.
@@ -348,8 +350,8 @@ Table `shares`, une ligne par partage vivant :
 - **Fichiers du site** : servis depuis `SHH_STATIC_DIR` sans jamais en sortir (liens symboliques compris) ; fichiers et dossiers cachés (`.env`, `.git/…`) → 404 ; aucune liste de dossier (dossier sans `index.html` → 404) ; `GET` et `HEAD` seulement. Application monopage : un chemin inconnu sans extension sert `index.html` avec les mêmes en-têtes ; un fichier absent (`x.js`) → 404. Sous `/s/` et `/m/` (préfixe sensible à la casse), **tout** chemin qui n'est pas un fichier existant sert `index.html` (avec `X-Robots-Tag: noindex`), même si son dernier segment contient un point : un lien abîmé par une messagerie (`/s/<id>.#…`) charge ainsi l'application, qui retire le `#` de la barre et de l'historique (UI §12.1). Les segments cachés et la remontée (`..`) restent refusés ; `/api/…` et les autres préfixes ne changent pas.
 - **Origine attendue** : le client ne prend jamais l'adresse du serveur dans le lien. Chaque fonction reçoit l'origine du site (`location.origin`) et refuse un lien d'une autre origine ou qui contient des identifiants (`user:pw@`) ; l'origine doit être `https://hôte[:port]` exacte (http seulement pour `localhost`, `127.0.0.1`, `[::1]`). Cela protège aussi hors navigateur (Node, future appli, §16), où la CSP ne s'applique pas.
 - **Secrets typés** : K_lien, K_accès, K_preuve et S_gestion ont des types TypeScript distincts ; envoyer K_lien au serveur ne compile pas. La couche HTTP n'est pas exportée par l'interface publique (`web/src/index.ts`).
-- **Pas de service worker** : aucun code ne reste installé dans le navigateur entre deux visites.
-- **Contenu déchiffré** : en mémoire, jamais dans le stockage du navigateur. Effacement **au mieux** (mise à zéro des tableaux, révocation des URL blob) : le navigateur ne garantit pas davantage.
+- **Pas de service worker** : aucun code ne reste installé dans le navigateur entre deux visites. → §28.5 : cette justification ne tient pas face à un serveur compromis (il peut enregistrer le sien) ; §28.6 propose un service worker minimal d'épinglage, en attente de décision (Q-C1).
+- **Contenu déchiffré** : en mémoire, jamais dans le stockage du navigateur (exceptions écrites : coffre chiffré, §27 ; historique local des liens de gestion, §33 ; jamais de clair). Effacement **au mieux** (mise à zéro des tableaux, révocation des URL blob) : le navigateur ne garantit pas davantage.
 - **Dépendances** minimales, versions verrouillées (`package-lock.json`, `go.sum`), installation reproductible (`npm ci`).
 - **Navigateur sans WebCrypto** : refus clair. Rien n'est jamais envoyé en clair.
 
@@ -525,6 +527,9 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 9. **Aperçu** limité aux éléments de 200 Mio ; au-delà, téléchargement seulement.
 10. **Clés gardées après l'ouverture** : pour permettre le signalement après la dernière ouverture, K_accès et K_preuve restent en mémoire de la page jusqu'à `wipe()` (ou jusqu'à ce que la page les oublie). Ils ne permettent pas de déchiffrer, seulement de détruire le partage.
 11. On n'écrit jamais « 100 % sécurisé ». On écrit ce qui est vrai : le contenu est chiffré de bout en bout ; le serveur ne reçoit que des données chiffrées, jamais la clé. On ne promet pas que le serveur « ne voit rien » : il voit l'adresse IP, les tailles et les heures (§2), et un site piégé reste une limite assumée (§18).
+12. **Envoi anticipé** (§29.7) : un serveur qui observe l'ordre et l'heure des segments connaît la taille du contenu à 4 Mio près, et sait qu'une composition est en cours.
+13. **Victime ciblée** (§28.8) : un serveur compromis peut servir un code piégé à une seule personne ; la vérification publique ne la protège que si elle vérifie elle-même, avec un outil qui ne vient pas du site.
+14. **Coffre** (§27.1) : captures d'écran, téléphone compromis, et confiance de l'expéditeur envers le destinataire restent hors de portée ; « Voir seulement » (§34) n'est qu'une dissuasion.
 
 ---
 
@@ -674,3 +679,310 @@ Le propriétaire a demandé un repli Google reCAPTCHA quand la preuve de travail
 - **Confidentialité** : la page Confidentialité dit que, dans ce cas seulement, Google voit l'adresse IP et peut déposer ses cookies dans son cadre ; le contenu, le lien et le mot de passe restent hors de sa portée.
 - **Tests** : le test « aucune ressource tierce » reste bloquant pour le cadre principal ; un faux `siteverify` sert aux tests ; aucune requête vers Google sans le clic.
 
+
+---
+
+## 27. Décision du propriétaire (v2.6, 5 novembre 2026) — coffre chiffré sur téléphone
+
+Le destinataire peut garder un partage reçu dans un **coffre chiffré local**, sur téléphone seulement (PWA installée, future application), **et seulement si l'expéditeur l'a permis** (droit « Voir, enregistrer et garder dans le coffre », §34). Le droit est désactivé par défaut. C'est une exception écrite à §10 (« contenu déchiffré : jamais dans le stockage du navigateur ») et à UI §12.1 : le coffre ne stocke que du chiffré, confiné au module `web/src/vault/`.
+
+### 27.1 Ce que le coffre garantit, et ce qu'il ne garantit pas
+
+| Il garantit | Il ne garantit pas |
+|---|---|
+| Le serveur n'apprend rien : le droit est dans le manifeste chiffré, la copie se fait pendant une ouverture ordinaire | **Captures d'écran**, photo de l'écran, enregistrement de l'écran (iOS et Android ne les bloquent pas pour une PWA) |
+| Rien de lisible sur le disque : paquet chiffré, clé jamais écrite en clair | **Un téléphone compromis** (logiciel espion, accès administrateur) lit ce qui s'affiche et peut capter le déverrouillage |
+| Effacement à l'échéance dès que l'application tourne, sans réseau seulement avec le service worker de §28.6 (§27.5) | **L'expéditeur fait confiance au destinataire** : un destinataire qui veut garder le contenu le gardera (capture, autre appareil) |
+| Effacement après N déverrouillages ratés, et à la main à tout moment | **Un code du site piégé** (§2, §18.2) peut demander le déverrouillage et lire le coffre : le coffre est aussi sûr que le code servi (d'où §28) |
+| | **Effacement physique** de la mémoire flash : on efface les clés (effacement cryptographique), le système décide quand les blocs sont réécrits |
+| | Effacement **pendant que l'application est fermée** : une PWA n'exécute rien quand elle est fermée ; l'effacement se fait au prochain lancement, et le déchiffrement est refusé après l'échéance |
+| | La **suppression par l'expéditeur** n'atteint pas une copie déjà gardée (aucun canal sans réseau, et une vérification en ligne trahirait la copie au serveur) |
+
+### 27.2 Clés (WebCrypto et libsodium seulement)
+
+- **Secret de déverrouillage `U`** (32 octets), au choix fixé à la création du coffre, jamais rétrogradé ensuite :
+  - **Passkey avec l'extension WebAuthn PRF** (choix par défaut quand elle existe : Safari iOS 18 et plus avec le trousseau iCloud, Chrome Android avec le gestionnaire de Google). Création : `rp.id` = hôte du site, `user.id` = 16 octets aléatoires, `user.name` « Coffre Shhdrop », `residentKey: "required"`, `userVerification: "required"`, `extensions.prf.eval.first = sel_prf` (32 octets aléatoires gardés dans le coffre). `U` = `prf.results.first`. La passkey ne sert que de source de clé : aucune signature n'est vérifiée, aucun serveur n'intervient.
+  - **Code du coffre** sinon : `U` = Argon2id(code NFC, `sel_code`, 64 Mio, 3 passes, 1 fil, 32 octets), mêmes paramètres minimaux que §7.1. Le code suit `checkPassword` (12 caractères au moins, absent de la liste noire) : un code à 4 ou 6 chiffres est refusé, car il tombe en quelques heures si quelqu'un copie le stockage du navigateur (le compteur d'essais ne protège que dans l'application).
+- `U` est importé aussitôt en clé HKDF **non extractible**, puis le tampon est mis à zéro. Clé par entrée : `K_coffre_i` = HKDF(`U`, sel = `sel_i` (32 octets aléatoires par entrée), info « shhdrop/v2/coffre/contenu ») en AES-256-GCM non extractible ; `C_coffre_i` = HKDF(`U`, `sel_i`, « shhdrop/v2/coffre/engagement »). Témoin de déverrouillage : `T` = AES-GCM(HKDF(`U`, « shhdrop/v2/coffre/temoin »), « shhdrop-coffre-ok »).
+- Le contenu gardé est **rescellé** dans un paquet Shhdrop ordinaire (§29.3, même code `container.ts`, mêmes paliers) sous `K_coffre_i` : aucun format ni construction de plus. La clé du partage (`R`, §29) n'est jamais conservée.
+- Limite honnête : `U` passe dans la mémoire de la page pendant le déverrouillage (la sortie PRF et celle d'Argon2id sont des tableaux JavaScript). « Non extractible » réduit cette fenêtre, sans protéger contre un script qui tourne sur l'origine à ce moment.
+- Une passkey synchronisée (trousseau iCloud, gestionnaire Google) existe aussi sur les autres appareils du compte. Le paquet, lui, n'est que sur ce téléphone : il faut les deux.
+
+### 27.3 Stockage
+
+- **OPFS** (`navigator.storage.getDirectory()`) : un fichier `coffre/<entree>.shh` par entrée (le paquet rescellé). **IndexedDB** (base `shh-coffre`) : `mode` (`prf` ou `code`), `sel_prf` ou `sel_code`, `credentialId`, `T`, `essais_rates`, `derniere_heure_vue`, et par entrée `{ id aléatoire, sel_i, echeance, taille du palier }`. Aucun nom, type ni texte en clair : ils sont dans le manifeste chiffré.
+- **Échéance en double** : en clair dans IndexedDB (pour effacer sans déverrouiller), et authentifiée dans un petit enregistrement chiffré sous `K_coffre_i` (pour refuser un déchiffrement après l'échéance même si quelqu'un a modifié la valeur en clair).
+- `navigator.storage.persist()` demandé à la première entrée. Plafonds : 1 Gio par entrée, 2 Gio et 20 entrées au total, et jamais plus que `storage.estimate()` moins 200 Mio.
+- Ce qu'un tiers qui accède au téléphone déverrouillé peut voir sans le code : qu'il existe N entrées, leurs tailles de palier et leurs échéances.
+
+### 27.4 Échéance, essais, effacement
+
+- **Échéance** = min(heure de l'ouverture + `expiresInS` lu par `meta`, heure de l'ouverture + `keep_ttl_h` du manifeste). Le serveur ne peut que **raccourcir** la durée, jamais l'allonger au-delà de ce que l'expéditeur a choisi. C'est l'échéance **en temps** du partage : épuiser les ouvertures ne l'avance pas (avec 1 ouverture, le partage meurt sur le serveur à la fin du téléchargement, la copie reste jusqu'à l'échéance).
+- **Horloge** : `maintenant` = max(`Date.now()`, `derniere_heure_vue`), enregistré à chaque lancement. Reculer l'horloge du téléphone ne prolonge pas une entrée déjà vue après son échéance.
+- **Effacement automatique** : au lancement, à chaque retour au premier plan, et par minuterie quand l'application est ouverte. Il efface les entrées échues **sans déverrouillage** (fichier OPFS, puis ligne IndexedDB). Une entrée échue n'est jamais déchiffrée (contrôle de l'échéance authentifiée avant tout déchiffrement).
+- **Essais ratés** : `N` = 5. Le compteur est **incrémenté avant** l'essai et remis à zéro après un succès (tuer l'application pendant un essai ne rend pas l'essai gratuit). Seul un secret faux compte (témoin `T` qui ne se déchiffre pas) ; une annulation de la passkey (`NotAllowedError`) ne compte pas. Au 5ᵉ échec, tout le coffre est effacé (fichiers, base, `sel_prf`).
+- **Effacement manuel** : « Effacer » par entrée, « Vider le coffre » (confirmation sur place). Détruire ou signaler un partage depuis le coffre (en ligne) efface aussi sa copie.
+- **Verrouillage** : à la sortie de l'écran du coffre, à `visibilitychange → hidden` et après 2 min sans geste, les clés et les aperçus sont oubliés (URL blob révoquées, tampons mis à zéro). Le contenu est masqué dès `hidden`, sans garantie que la vignette du sélecteur d'applications ne soit pas déjà prise.
+
+### 27.5 Réseau et hors-ligne : dépendance à §28.6
+
+Sans service worker et avec `Cache-Control: no-store` partout (§10), une PWA installée **ne démarre pas sans réseau** : ni lecture, ni effacement hors ligne. L'exigence « effacé à l'échéance sans réseau » n'est tenue que si le service worker minimal de §28.6 est accepté (Q-C1). Sans lui, le coffre fonctionne en ligne seulement et l'effacement a lieu au premier lancement en ligne après l'échéance (le déchiffrement reste refusé). Ce point est signalé au propriétaire.
+
+### 27.6 Parcours
+
+- **Expéditeur** (Options) : droit « Ce que le destinataire peut faire » (§34) ; le troisième choix s'intitule **« Autoriser le destinataire à garder une copie chiffrée sur son téléphone »**, avec, quand il est choisi : « Elle reste jusqu'à l'expiration ({durée}). Supprimer le partage ne l'efface pas : seul le destinataire, ou l'échéance, l'efface. Une capture d'écran reste toujours possible. » Sur « Lien prêt » : « Pour garder une copie, le destinataire doit ouvrir le lien dans l'app Shhdrop installée. »
+- **Destinataire, navigateur d'un téléphone** (pas l'app) : avant le déverrouillage, une note fixe, la même pour tous les partages (elle ne dit rien du droit, qu'on ne connaît qu'après) : « Si vous avez l'app Shhdrop, ouvrez-y ce lien avant de déverrouiller : c'est là seulement qu'un partage peut être gardé, quand l'expéditeur l'a permis. » Sur iOS, Safari et l'app installée ne partagent pas leur stockage, et l'app ne capte pas les liens : l'app propose **« Ouvrir un lien reçu »** (champ où l'on colle le lien).
+- **Destinataire, dans l'app**, si le manifeste porte `rights: "coffre"` : sur l'écran de contenu, bouton **« Garder dans le coffre »** (`secondary`, icône `lock`). Premier usage : création du coffre (passkey, ou code si PRF manque, avec la raison), puis téléchargement complet et rescellement, progression en octets ; « Gardé jusqu'au {date, heure} ». Échec (place, quota, annulation) : rien n'est gardé, aucun fichier partiel (le fichier OPFS est supprimé).
+- **Écran du coffre** (`/coffre`, dans l'app seulement) : verrouillé, « {n} partages gardés · le prochain s'efface dans {durée} » et **Déverrouiller** (passkey ou code). Déverrouillé : une ligne par entrée, « Reçu le {date} · s'efface dans 4 h 12 » (compte à rebours : `Countdown`, mêmes seuils d'annonce, à la seconde sous 5 min), **Ouvrir** (écran de contenu en mode local : pas de « Terminer », pas de réseau ; « Enregistrer » selon le droit), **Effacer**. Pied : **Vider le coffre**. À l'échéance d'une entrée ouverte : dissolution, puis « Ce partage a expiré : sa copie a été effacée de ce téléphone. »
+- Démo GitHub Pages : coffre **désactivé** (faux serveur en mémoire, et origine `skoow.github.io` partagée entre tous les dépôts Pages du propriétaire : IndexedDB et OPFS y seraient lisibles par ses autres pages).
+
+### 27.7 Lentilles « sharp edges » et « insecure defaults »
+
+| # | Gravité | Endroit | Problème | Correction (intégrée) |
+|---|---|---|---|---|
+| V1 | Élevée | Droit absent ou mal formé | Un défaut permissif ferait garder des copies sans accord | Absent, inconnu ou mal typé → `"voir"` (le plus restrictif, §34) ; seul `rights === "coffre"` avec `keep_ttl_h ∈ {1, 6, 12, 24}` ouvre le coffre |
+| V2 | Élevée | Code du coffre | Un code court tombe hors ligne après copie du stockage, quel que soit le compteur | `checkPassword` imposé (12 caractères) ; passkey proposée d'abord |
+| V3 | Élevée | PRF absente au déverrouillage | Repli silencieux vers un mode plus faible | Mode fixé à la création ; PRF absente plus tard → erreur « Ce coffre a été créé avec une passkey » ; jamais de repli |
+| V4 | Moyenne | Compteur d'essais | Incrémenté après l'essai : tuer l'app donne des essais gratuits ; une annulation compterait | Incrémenté avant ; seule une erreur du témoin compte |
+| V5 | Moyenne | Échéance en clair | Modifiable sur l'appareil pour prolonger | Échéance authentifiée vérifiée avant tout déchiffrement ; horloge monotone par `derniere_heure_vue` |
+| V6 | Moyenne | Échéance fournie par le serveur | Un serveur malveillant l'allongerait | `min(expiresInS, keep_ttl_h)` |
+| V7 | Moyenne | Démo | Origine partagée `skoow.github.io` | Coffre désactivé en démo, test |
+| V8 | Faible | Taille | Remplir le téléphone | Plafonds de §27.3, vérification avant le téléchargement |
+
+### 27.8 Questions ouvertes (défaut recommandé)
+
+| # | Question | Défaut recommandé |
+|---|---|---|
+| Q-V1 | `N` essais avant effacement | 5, comme le partage |
+| Q-V2 | Verrouillage | à la sortie de l'écran, en arrière-plan, et après 2 min sans geste |
+| Q-V3 | Indice dans le lien (« gardable ») pour prévenir avant le déverrouillage | Non : note fixe pour tous (aucun changement de format, rien n'est révélé à qui voit le lien) |
+| Q-V4 | Plafonds | 1 Gio par entrée, 2 Gio et 20 entrées au total |
+| Q-V5 | Coffre sur ordinateur (PWA installée) | Non (décision du propriétaire : téléphone seulement) ; la détection (`display-mode: standalone` et `pointer: coarse`) est un garde d'interface, pas une frontière de sécurité |
+| Q-V6 | Hors-ligne | Dépend de Q-C1 (§28.6) ; sans service worker, coffre en ligne seulement |
+
+---
+
+## 28. Décision du propriétaire (v2.6) — code vérifiable (zéro confiance, priorité)
+
+Risque visé : un serveur compromis sert un JavaScript modifié qui vole les clés (§2, §18.2). Le chiffrement de bout en bout ne vaut que ce que vaut le code qui le fait. But : que n'importe qui puisse prouver que les fichiers servis sont exactement ceux construits depuis le dépôt public, et que le propriétaire soit prévenu d'un écart. **Aucune de ces mesures n'empêche un serveur compromis de servir un code piégé à une victime choisie** sans que personne ne le voie (§28.8).
+
+### 28.1 Builds reproductibles
+
+- Node épinglé à la version exacte (`.node-version`, lu par `actions/setup-node`), `npm ci` sur le verrou commité, `SOURCE_DATE_EPOCH` = date du commit, `TZ=UTC`, `LANG=C.UTF-8`, `umask 022`. Aucun horodatage, chemin absolu ni valeur aléatoire dans `dist/` (`sourcemap: false` déjà). Les fichiers générés (polices, grain, aurore, icônes) sont commités, pas régénérés au build.
+- La configuration de déploiement n'est jamais injectée dans les fichiers servis : la clé de site reCAPTCHA (publique) et l'origine de l'application sont écrites dans `web/verif/config.prod.js`, commité (UI §15.2 disait « écrite au déploiement » : signalé, corrigé ici, sinon `dist-verif/` n'est pas reproductible).
+- Job CI `repro` : deux builds dans deux dossiers absolus différents, sur deux runners distincts, puis comparaison de `SHA256SUMS`. Toute différence fait échouer le job, qui est **obligatoire** pour une publication (jamais `continue-on-error`).
+
+### 28.2 Manifeste de version signé
+
+- `web/scripts/release-manifest.mjs` (sans dépendance, `node:crypto`) écrit `release.json` : `{ "schema": 1, "name": "shhdrop-web", "version", "commit", "files": [{ "path", "size", "sha256" }] }`, fichiers triés par chemin (ordre des octets), JSON à clés ordonnées, fin de ligne LF ; et `SHA256SUMS` (format `sha256sum -c`). Trois manifestes : `dist/`, `dist-verif/`, `dist-demo/`.
+- Le manifeste est **commité** dans `releases/web/<version>.json` avant l'étiquette (`make release-manifest`, build local) : la CI reconstruit et exige l'égalité, ce qui prouve aussi « build local = build CI ».
+- Workflow `release.yml` sur une étiquette `web-v<x.y.z>` : reconstruction, comparaison, puis signature **sans clé** par `cosign sign-blob --bundle release.json.sigstore.json` (jeton OIDC de GitHub Actions, certificat Fulcio, inscription dans le journal public Rekor). Publication dans la Release GitHub : `release.json`, son bundle, `SHA256SUMS` et l'archive `dist.tar.gz` déterministe (`tar --sort=name --mtime=@$SOURCE_DATE_EPOCH --owner=0 --group=0 --numeric-owner`, `gzip -n`). Permissions : `id-token: write` et `contents: write` dans ce seul job ; actions épinglées par empreinte.
+- Vérification : `cosign verify-blob release.json --bundle release.json.sigstore.json --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp '^https://github\.com/Skoow/Shhdrop/\.github/workflows/release\.yml@refs/tags/web-v[0-9]+\.[0-9]+\.[0-9]+$'`. Jamais d'expression ouverte (`.*`), jamais `--insecure-ignore-tlog`.
+- Étiquettes `web-v*` protégées (règle de dépôt : création réservée au propriétaire). Ce que la signature prouve : « construit par ce workflow, depuis ce commit public ». Ce qu'elle ne prouve pas : que ce code est sain. Un compte GitHub volé peut signer une version piégée : elle sera publique et visible dans Rekor (détectable, pas empêché).
+- Limite post-quantique : les signatures Sigstore sont en ECDSA P-256, forgeables par un futur ordinateur quantique ; migration quand Sigstore proposera ML-DSA (§30).
+
+### 28.3 SRI sur chaque script et style
+
+- Greffon Vite `sri` (une quarantaine de lignes, `node:crypto` SHA-384) : `integrity="sha384-…"` sur chaque `<script type="module">`, `<link rel="stylesheet">` et `<link rel="modulepreload">` de `index.html`, `pdf-frame.html` et `verif/index.html`. `check-dist.mjs` échoue si une balise de script ou de style n'a pas d'`integrity`.
+- SRI ne couvre ni `import()` dynamique, ni `new Worker(url)`. Une carte d'import avec `integrity` exigerait un script en ligne, donc un hachage dans la CSP de chaque réponse : refusé. Règle : **aucun `import()` dynamique dans le build de production** (le QR est importé statiquement ; contrôle par `check-dist.mjs`) ; le Worker anti-robot n'est couvert que par le manifeste (vérificateur, §28.4, et service worker, §28.6).
+- Honnêtement : contre un serveur compromis, SRI seul ne protège rien (il modifie aussi `index.html`). Il réduit la vérification à un fichier : avec SRI, l'empreinte de `index.html` fixe tous les scripts et styles qu'il charge.
+
+### 28.4 Vérificateur
+
+- **Ligne de commande** : `web/scripts/verify-site.mjs <origine> <release.json>` (sans dépendance) télécharge chaque fichier listé depuis l'origine, avec `Cache-Control: no-cache`, compare SHA-256 et taille, vérifie que `/index.html`, `/`, `/s/x` et `/x` (repli monopage) rendent les mêmes octets que `index.html`. Code de sortie non nul au premier écart ou à la première erreur réseau (jamais « vert » sur une erreur). Mode d'emploi : `cosign verify-blob …` (§28.2), puis `node verify-site.mjs https://shhdrop.app release.json`.
+- **Page « Vérifier cette version »** (`/verifier`, mode Read, liée depuis Sécurité et le pied de page) : numéro de version et commit, lien vers la Release GitHub et vers le mode d'emploi. Elle dit : « Cette page ne peut pas prouver sa propre intégrité : un serveur piégé pourrait la modifier aussi. Vérifiez avec un outil qui ne vient pas de ce site. » Elle n'affiche aucune empreinte calculée par elle-même (ce serait une preuve qui se certifie seule).
+- **Plus tard** : l'application native embarque l'interface (§16), signée par les magasins : le code ne vient plus du serveur à chaque visite, c'est la défense la plus forte. Une extension de navigateur de vérification (à la manière de Code Verify) est possible mais coûteuse à maintenir (Q-C2). Proposition de norme à suivre : intégrité, cohérence et transparence des applications web (WAICT), en cours de discussion.
+
+### 28.5 Ce qu'une PWA peut vérifier sans service worker
+
+Rien de fiable. Sans service worker, chaque lancement recharge le code depuis le serveur ; un code piégé désactiverait tout contrôle qu'il porte lui-même, et la page ne peut pas joindre GitHub (`connect-src 'self'`, aucune ressource tierce). Erreur dans la spécification, signalée : la §10 justifie l'absence de service worker par « aucun code piégé ne reste installé ». C'est faux face à un serveur compromis : il peut enregistrer **son propre** service worker, que notre choix n'empêche pas. Correctif proposé pour le plan d'incident (§15.5) : servir un `sw.js` qui se désinscrit lui-même et `Clear-Site-Data: "cache"` (sans `"storage"`, qui viderait les coffres).
+
+### 28.6 Service worker minimal d'épinglage : discussion et recommandation
+
+- **Ce qu'il apporte** : (1) l'application démarre sans réseau, ce qu'exige le coffre hors ligne (§27.5) ; (2) les fichiers sont servis depuis un cache vérifié : chaque fichier de la version installée est téléchargé une fois, haché (WebCrypto) et comparé à son manifeste, embarqué dans `sw.js` ; un fichier modifié sur le serveur, sans changement de `sw.js`, est refusé et signalé ; (3) un changement de version devient un événement visible (« Nouvelle version {x} : vérifier »).
+- **Ce qu'il n'apporte pas** : un serveur compromis remplace `sw.js` lui-même. Le navigateur revérifie `sw.js` en contournant le service worker (au plus toutes les 24 h, et à chaque navigation) ; le nouveau, s'il appelle `skipWaiting()`, prend la main. L'ancien code peut seulement prévenir les pages ouvertes (`controllerchange`) : il verrouille le coffre et affiche « Le code de Shhdrop vient de changer ». Ce n'est donc **pas** une garantie de sécurité.
+- **Ce qu'il coûte** : contredit §1, §10 et UI §14.1 (« pas de service worker ») ; une surface de code de plus, qui persiste ; un cache à purger correctement.
+- **Recommandation** : l'adopter **seulement si le coffre est gardé**, et seulement dans cette forme : moins de 150 lignes, aucune dépendance (ni Workbox), relu ligne à ligne ; cache des seuls fichiers du manifeste ; `/api/` jamais intercepté ni mis en cache (réseau direct) ; installation qui échoue (rien n'est mis en cache) au premier écart d'empreinte ; aucun `skipWaiting()` ni `clients.claim()` (la nouvelle version s'applique au prochain lancement, annoncée) ; navigations servies par le `index.html` en cache. Pas de service worker en démo. **Q-C1 au propriétaire** ; sans accord, la règle « pas de service worker » reste en vigueur et le coffre reste en ligne seulement.
+
+### 28.7 Impact sur le Plan 3 (déploiement)
+
+- `deploy.sh` télécharge l'archive, `release.json` et son bundle depuis la Release, exécute `cosign verify-blob` (identité exacte de §28.2) et `sha256sum -c`, décompresse dans `SHH_STATIC_DIR` (volume en lecture seule), puis lance `verify-site.mjs` contre `https://shhdrop.app` à travers Caddy, et revient en arrière au premier écart. Aucune option pour sauter la vérification.
+- Caddy ne modifie aucun corps de réponse (ni `templates`, ni réécriture) ; la compression ne change pas les octets décompressés.
+- Surveillance externe : workflow GitHub planifié (toutes les heures) qui lance `verify-site.mjs` contre la production et l'origine de vérification et ouvre une alerte au premier écart. Limite : il ne voit que ce que le serveur lui sert ; un serveur qui ne piège que certaines victimes (adresse IP, navigateur) passe inaperçu.
+- Image du serveur : build Go `-trimpath -buildvcs=false`, `CGO_ENABLED=0`, image épinglée par empreinte (D3) et attestée par cosign. Le serveur n'est pas de confiance pour le contenu (chiffrement de bout en bout) : cette attestation sert l'exploitation, pas la confidentialité.
+
+### 28.8 Lentilles et limites
+
+| # | Gravité | Endroit | Problème | Correction (intégrée) |
+|---|---|---|---|---|
+| C1 | Élevée | `cosign verify-blob` | Une identité en expression ouverte accepte la signature de n'importe quel workflow GitHub | Expression ancrée, workflow et étiquette exacts |
+| C2 | Élevée | `deploy.sh` | Une option « sauter la vérification » finirait utilisée en urgence | Aucune option ; échec = retour arrière |
+| C3 | Élevée | Service worker | Installer en cache un fichier non vérifié | Installation qui échoue au premier écart |
+| C4 | Moyenne | Job `repro` | Non bloquant, il ne prouve rien | Obligatoire pour la Release |
+| C5 | Moyenne | Vérificateur | Vert sur une erreur réseau, ou fichiers en plus non vus | Code non nul ; limite écrite : le repli monopage empêche d'énumérer des fichiers en plus, on vérifie que tout chemin inconnu rend `index.html` |
+| C6 | Moyenne | SRI | `import()` et `Worker` hors SRI | Pas d'`import()` en production ; Worker couvert par le manifeste |
+| C7 | Faible | Page `/verifier` | Une page qui certifie sa propre empreinte | Aucune empreinte affichée, texte honnête |
+
+Limite résiduelle assumée (à ajouter à §18) : une victime ciblée par un serveur compromis reçoit un code piégé ; la vérification publique ne la protège que si elle vérifie elle-même, avant d'utiliser le site, avec un outil qui ne vient pas du site.
+
+### 28.9 Questions ouvertes
+
+| # | Question | Défaut recommandé |
+|---|---|---|
+| Q-C1 | Service worker minimal d'épinglage (§28.6) | Oui, seulement avec le coffre, dans la forme de §28.6 ; sinon non |
+| Q-C2 | Extension de navigateur de vérification | Non en V1 ; application native d'abord (§16) |
+| Q-C3 | Démo signée elle aussi | Oui (même workflow, coût nul) |
+
+---
+
+## 29. Décision du propriétaire (v2.6) — chiffrement anticipé (« au plus 5 s d'attente »)
+
+Remplace §7.1 à §7.5 pour tout nouveau partage. Les étiquettes passent en `shhdrop/v2/` : toutes les clés changent (§7.1). Aucune construction maison : HKDF-SHA-256, HMAC-SHA-256, SHA-256, AES-256-GCM (WebCrypto) et Argon2id (libsodium).
+
+### 29.1 Ce qui attend vraiment, en chiffres
+
+- **Chiffrer n'est pas le goulot** : AES-256-GCM dans WebCrypto passe par l'accélération matérielle, de l'ordre de 1 à 3 Go/s sur ordinateur et de 0,3 à 1 Go/s sur téléphone récent ; la v1 chiffre déjà chaque bloc pendant l'envoi du précédent.
+- **Argon2id** (64 Mio, 3 passes) : de 0,3 à 1,5 s selon l'appareil. Dans la v1, il bloque au clic.
+- **Le réseau est de la physique** : 1 Go à 100 Mbit/s en montée prend environ 80 s (1 Gio environ 86 s) ; à 20 Mbit/s (4G courante), environ 7 min ; à 500 Mbit/s (fibre), environ 17 s. Aucun choix de chiffrement ne réduit ce temps.
+- **Ce que la v2 change** : l'envoi chiffré commence **pendant la composition**, avant tout mot de passe ; Argon2id du mot de passe généré se calcule pendant la composition. Au clic sur « Envoyer », il ne reste que : enveloppe de la clé (quelques millisecondes), envoi de ce qui n'est pas encore parti (au plus 2 segments de 4 Mio, plus ce que le réseau n'a pas encore absorbé), `finalize`. Cible : **≤ 5 s après le clic quand l'envoi anticipé a rattrapé la composition**, soit environ 1,5 s à 50 Mbit/s et 3,5 s à 20 Mbit/s ; au-dessous d'environ 15 Mbit/s, ou si l'on clique avant que l'envoi ait rattrapé, l'attente est celle du réseau, affichée honnêtement (§9.4 UI).
+- **À l'attention du propriétaire** : « tout chiffrer sur notre serveur, sans calcul sur l'appareil » est impossible en chiffrement de bout en bout : le serveur verrait le contenu en clair. On garde le chiffrement dans le navigateur et on le rend invisible.
+
+### 29.2 Clés
+
+| Élément | Création | Où il vit |
+|---|---|---|
+| `K_lien` | 32 octets aléatoires, tirés au début de l'envoi anticipé | après le `#` du lien (§32) ; jamais envoyé |
+| `id` | HKDF(`K_lien`, « shhdrop/v2/id »), 16 octets | serveur (clé primaire) ; calculé par le client (§32) |
+| `K_accès`, `V_accès` | HKDF(`K_lien`, « shhdrop/v2/acces »), SHA-256(`K_accès`) | envoyé / serveur |
+| `R` (graine de contenu) | 32 octets aléatoires, tirés au début de l'envoi anticipé | navigateur ; mis à zéro après l'enveloppe, ou à l'abandon |
+| `K_contenu` | HKDF(`R`, « shhdrop/v2/contenu »), AES-256-GCM, non extractible | navigateur |
+| `C_engagement` | HMAC-SHA-256(`R`, « shhdrop/v2/engagement ») | en-tête en clair « SHH2 » |
+| `S_gestion`, `V_gestion` | 32 octets aléatoires, SHA-256 | lien de gestion (§32) / serveur |
+| `sel` | 16 octets aléatoires, tirés au début de l'envoi anticipé | serveur (renvoyé par `meta`) |
+| `K_mdp` | Argon2id(mot de passe NFC, `sel`) : 64 Mio, 3 passes, 1 fil, 32 octets | navigateur |
+| `K_maître` | HKDF(`K_lien` ‖ `K_mdp`, « shhdrop/v2/maitre ») | navigateur |
+| `K_env` | HKDF(`K_maître`, « shhdrop/v2/enveloppe »), AES-256-GCM | navigateur |
+| `K_preuve`, `V_preuve` | HKDF(`K_maître`, « shhdrop/v2/preuve »), SHA-256(`K_preuve`) | envoyé pour déverrouiller / serveur |
+| `E` (enveloppe) | `nonce` (12 octets aléatoires) ‖ AES-256-GCM(`K_env`, `nonce`, `R`, données authentifiées = « shhdrop/v2/enveloppe » ‖ `id` ‖ en-tête de 48 octets), 60 octets | serveur ; rendue seulement après un déverrouillage réussi |
+
+À l'ouverture : `unlock` réussi → `E` → `K_env` (lien + mot de passe) → `R` → contrôle de `C_engagement` (`crypto.subtle.verify` HMAC) → `K_contenu` → lecture.
+
+### 29.3 Paquet v2
+
+- En-tête « SHH2 », version 2, `C_engagement` (48 octets). Clair du paquet de `B` morceaux : **données** (éléments dans l'ordre d'ajout, à partir de l'octet 0) ‖ zéros ‖ **manifeste** ‖ longueur du manifeste (4 octets) en toute fin. Le manifeste (JSON v2, §34) donne la position de chaque élément ; l'ordre d'affichage y est indépendant de l'ordre d'ajout, donc renommer ou réordonner ne touche pas les données déjà parties.
+- Morceaux, nonces, données authentifiées, segments de transport : inchangés (§7.3, principe STREAM). **Chaque numéro de morceau n'est chiffré qu'une fois par `R`** ; un segment réessayé renvoie les mêmes octets.
+- **Palier canonique v2** : le plus petit palier de capacité ≥ fin des données + 4 + `MANIFEST_MAX` (64 Kio). La longueur réelle des noms n'influence donc pas le palier ; `CONTENT_MAX` est inchangé.
+- **Bourrage rempli par le serveur** : les segments entièrement compris entre le dernier segment de données et le segment de fin ne sont pas envoyés ; `finalize` les désigne (`fill_from`, `fill_to`) et le serveur les remplit d'octets aléatoires (`crypto/rand`), indiscernables d'un chiffré pour qui lit le disque. Le lecteur ne lit jamais le bourrage (§7.3). Gain : jusqu'à la moitié de l'envoi en moins.
+
+### 29.4 Envoi anticipé
+
+1. **Démarrage** : composition non vide et stable depuis 2 s, page visible, en ligne, `navigator.connection.saveData` faux, preuve anti-robot disponible (pré-calculée, UI §9.4.2). `POST /api/shares` : `id`, palier, `V_accès`, `V_gestion`, preuve anti-robot. Ni durée, ni ouvertures, ni sel, ni `V_preuve` à ce stade.
+2. **Pendant la composition** : chaque segment dont les 64 morceaux sont des données complètes est chiffré puis envoyé. Ajouter un élément qui tient dans le palier : il est ajouté à la suite. Renommer, réordonner, modifier un texte (les textes sont dans le manifeste) : rien à refaire.
+3. **Redémarrage** (nouveaux `K_lien`, `R`, `sel`, nouveau partage ; l'ancien est détruit par `S_gestion` en `keepalive`) quand : un élément dont un morceau a déjà été chiffré est retiré ou remplacé (sinon le destinataire pourrait déchiffrer un élément retiré, puisqu'il recevra `R`), ou la composition dépasse le palier réservé. Au plus 3 redémarrages par 10 min ; au-delà, l'envoi attend le clic.
+4. **Au clic sur « Envoyer »** : `K_mdp` (déjà calculé pour le mot de passe généré ; sinon, Argon2id au plus tard une seconde après la dernière frappe), `K_maître`, `K_env`, `K_preuve`, `E` ; chiffrement et envoi du dernier segment de données et du segment de fin (manifeste) ; `POST finalize` : `sel`, `kdf_ops`, `kdf_mem`, `V_preuve`, `E`, durée, ouvertures, `fill_from`, `fill_to`. Le serveur vérifie que tous les autres segments sont présents, passe en `ready`, fixe `expires_at` (inchangé : à partir de la fin de l'envoi), puis remplit le bourrage.
+5. **Abandon** (page quittée, liste vidée, onglet tué) : `R` n'est jamais enveloppée et disparaît avec la page : le chiffré déjà envoyé n'est plus déchiffrable par personne (effacement cryptographique). Le partage est détruit en `keepalive` quand c'est possible, sinon effacé par les règles existantes (aucun segment en 5 à 20 min, 15 min sans segment, échéance de 3 h, §7.4).
+6. Le serveur apprend qu'une composition est en cours et voit arriver les segments.
+
+### 29.5 Quotas et anti-abus
+
+- Les quotas de la §4 (10 liens par jour et par connexion, 30 par /48, 3 Gio utiles par jour, 6 Gio par /48) sont **débités à `finalize`** ; la création est refusée s'ils sont déjà atteints.
+- Nouveaux plafonds pour les envois anticipés : au plus 2 envois non finalisés à la fois par connexion (6 par /48) ; **octets abandonnés** (envois effacés sans `finalize`) : 6 Gio par jour et par connexion, 12 Gio par /48, débités à l'effacement ; au-delà, l'envoi anticipé est refusé (429) et l'écran revient à l'envoi au clic. La place reste réservée à la création (plafond global, §4).
+- La difficulté de la preuve de travail compte toutes les créations de l'heure (finalisées ou non) : les redémarrages sont bornés (point 3).
+
+### 29.6 Pré-lecture chez le destinataire
+
+- Pendant la saisie du mot de passe, le navigateur télécharge les segments chiffrés avec `K_accès` seul : `GET /segments/{n}` avec l'en-tête `K_accès`, accepté **seulement en état `ready`**, avant l'expiration, sans consommer d'ouverture. Ordre : segment de fin (manifeste), puis les premiers segments de données, jusqu'à 64 Mio.
+- Sûr parce que `R` est aléatoire : sans `E`, rendue seulement après un `K_preuve` juste, le chiffré ne permet **aucun** essai hors ligne de mot de passe (en v1, `K_contenu` dérivait du mot de passe : la même pré-lecture aurait permis de deviner hors ligne à partir de `C_engagement`).
+- Bande passante : budget de pré-lecture par partage, en mémoire, de 2 × la taille du palier sur toute sa vie ; au-delà, 429. Les segments pré-lus comptent dans la limite de 600 par minute.
+
+### 29.7 Analyse des menaces de la v2
+
+| Adversaire | v2 |
+|---|---|
+| Voleur de la base et des fichiers, sans le lien | Rien : `K_lien` 256 bits |
+| Voleur de la base **et** du lien | Un Argon2id par mot de passe essayé, contre `V_preuve` ou `E` : même coût qu'en v1 (§31 pour le mot de passe par défaut) |
+| Détenteur du lien seul (sauvegarde de messagerie) | Pré-lecture du chiffré, inutile sans `E` ; en ligne, 5 essais puis destruction (inchangé) |
+| Serveur malveillant | N'a ni `K_lien`, ni `K_mdp`, ni `R` ; ne peut fabriquer ni `E` (il lui faudrait `K_env`) ni un paquet pour plusieurs clés (`C_engagement`) ; échanger `E` ou le chiffré d'un autre partage échoue (`id` et en-tête authentifiés) |
+| Serveur qui observe les envois | **Nouveau** : l'ordre et l'heure des segments donnent la taille du contenu à 4 Mio près, et le fait qu'une composition est en cours ; en v1, il ne connaissait que le palier. Limite assumée, à ajouter à §18 |
+| Abandon | Chiffré indéchiffrable (`R` oubliée) puis effacé |
+| `R` en mémoire | Elle vit dans la page pendant la composition, comme les fichiers en clair eux-mêmes : aucune exposition nouvelle |
+
+### 29.8 API (remplace les lignes concernées de §8)
+
+| Route | Changement |
+|---|---|
+| `POST /api/shares` | Corps : `id`, `bucket`, `access_v`, `manage_v`, preuve anti-robot. Le serveur refuse un `id` existant (clé primaire) : le client recommence avec un nouveau `K_lien` |
+| `POST /api/shares/{id}/finalize` | Corps : `salt`, `kdf_ops`, `kdf_mem`, `proof_v`, `envelope`, `ttl_hours`, `max_opens`, `fill_from`, `fill_to` (longueurs exactes, JSON strict) |
+| `POST /api/shares/{id}/unlock` | Réponse : jeton de téléchargement **et** `envelope` |
+| `GET /api/shares/{id}/segments/{n}` | Jeton de téléchargement, **ou** `K_accès` (pré-lecture, §29.6) |
+| `GET /api/manage/status`, `POST /api/manage/destroy` | Nouvelles : `S_gestion` en en-tête, recherche par `manage_v` (index unique) ; remplacent `GET /{id}/status` et la destruction par `S_gestion` (§32) |
+
+Table `shares` : `proof_v`, `salt`, `kdf_*`, `ttl_hours`, `max_opens` deviennent `NULL` jusqu'à `finalize` ; colonne `envelope` (60 octets) ; index unique sur `manage_v`. Le test « le serveur ne voit rien » ajoute un repère de mot de passe saisi **après** le début de l'envoi anticipé, et vérifie qu'aucune requête ne porte `R`, `K_contenu`, `K_mdp` ni `K_lien`.
+
+---
+
+## 30. Revue post-quantique (v2.6)
+
+- **Contenu** : aucune cryptographie à clé publique ne le protège. AES-256 garde environ 128 bits de sécurité face à l'algorithme de Grover ; HKDF-SHA-256, HMAC-SHA-256 et Argon2id restent adaptés. `K_lien` et `S_gestion` font 256 bits pour cette raison : ne pas les raccourcir (§32).
+- **Transport** : TLS protège `K_accès`, `K_preuve`, `E` et le chiffré, jamais `K_lien` ni le mot de passe. Un enregistrement « stocker maintenant, déchiffrer plus tard » ne donnerait donc pas le contenu, mais des métadonnées et des secrets d'accès. Défense en profondeur : **échange de clés hybride X25519MLKEM768 obligatoire** sur Caddy (proposé par défaut par Go 1.24 et plus, et par Caddy 2.10 et plus ; écrit explicitement dans le Caddyfile, `curves x25519mlkem768 x25519`). Repli X25519 seul toléré pour les navigateurs qui n'ont pas encore l'hybride (question Q-PQ1). **Test du Plan 3** : un client Go limité à `CurvePreferences: [X25519MLKEM768]` se connecte et `ConnectionState().CurveID` vaut `X25519MLKEM768` ; il bloque la mise en ligne.
+- **Passkeys du coffre** (§27) : la sortie PRF est un HMAC calculé dans l'authentificateur, donc symétrique ; les signatures ECDSA de la passkey ne protègent rien ici.
+- **Signatures de version** (§28.2) : ECDSA, donc à migrer vers une signature post-quantique quand Sigstore la proposera.
+- Q-PQ1 : refuser les connexions sans hybride ? Défaut recommandé : non en V1 (Safari et Firefox anciens exclus sinon), à revoir avant l'ouverture au public.
+
+---
+
+## 31. Décision du propriétaire (v2.6) — mot de passe par défaut de 8 caractères
+
+- Remplace la phrase de 4 mots de §4 comme défaut. `generatePassword()` tire 8 caractères dans un alphabet de 64 sans caractères ambigus : minuscules sans `l` ni `o` (24), majuscules sans `I` ni `O` (24), chiffres `2` à `9` (8), symboles `! # $ % + = ? @` (8). Tirage uniforme par `crypto.getRandomValues` (64 = 2⁶ : aucun biais), recommencé jusqu'à ce que les quatre familles soient présentes. Bouton **« Générer un autre »**, sans limite ; la personne peut saisir le sien.
+- **Nombre exact** : 107 294 591 287 296 mots de passe possibles (4 familles présentes), soit **2^46,6** ; ce n'est pas 50 bits (2⁴⁸ sans la contrainte des familles).
+- Le mot de passe généré a un type marqué (`GeneratedPassword`) accepté à 8 caractères ; un mot de passe saisi reste soumis à `checkPassword` (12 caractères, liste noire), un humain choisissant moins bien qu'un tirage.
+- **Attaque hors ligne (base et lien volés)** : un essai = un Argon2id de 64 Mio et 3 passes. Hypothèse prudente pour un GPU haut de gamme, bornée par la bande passante mémoire : environ 2 000 essais par seconde. En moyenne (moitié de l'espace) : environ **850 ans-GPU**, soit environ 10 mois avec 1 000 GPU, pour un coût de l'ordre de 4 millions de dollars en location. Avec 10 caractères (2^59) : environ 4,7 millions d'années-GPU. La phrase de 4 mots donnait 2^51,7, environ 34 fois plus que 8 caractères.
+- **Signalement (gravité moyenne)** : 8 caractères suffisent contre un attaquant opportuniste ; ils sont faibles contre un adversaire doté de moyens étatiques qui obtiendrait à la fois la base (serveur compromis) et le lien. La durée de vie du partage n'aide pas : le chiffré volé s'attaque à loisir. Recommandation : **10 caractères** par défaut (même alphabet, même saisie). Le propriétaire a demandé 8 : on applique 8, et la question est posée (Q-MDP1).
+- Saisie au téléphone : les symboles demandent de changer de clavier ; c'est le prix des 64 symboles.
+
+---
+
+## 32. Décision du propriétaire (v2.6) — lien court
+
+- **Lien de partage** : `https://shhdrop.app/#<K_lien en base64url, 43 caractères>` (64 caractères en tout, contre 90 environ). L'identifiant n'est plus dans le lien : `id` = HKDF(`K_lien`, « shhdrop/v2/id »), à sens unique. Le serveur ne voit même plus de chemin révélateur : la page demandée est `/`.
+- **Lien de gestion** : `https://shhdrop.app/#m<S_gestion, 43 caractères>` ; le serveur trouve le partage par `V_gestion` (index unique), donc le lien de gestion n'a pas besoin de l'identifiant (§29.8).
+- **Unicité** : `id` fait 128 bits tirés d'une clé aléatoire de 256 bits ; la probabilité d'une collision parmi n partages vaut environ n² / 2¹²⁹ (négligeable même pour 10¹² partages), et la clé primaire refuse de toute façon un doublon (le client recommence avec une nouvelle clé). Un lien n'est **jamais réutilisé** pour un nouveau partage : qui garde l'ancien lien y aurait accès. Chaque partage tire une `K_lien` neuve ; un créateur malveillant qui viserait un `id` passé sans connaître sa `K_lien` ne ferait correspondre aucun `V_accès`.
+- **Pourquoi pas plus court** : 256 bits restent nécessaires (§30). Un chemin court (`/s#…`) n'apporterait que 2 caractères ; la racine est retenue.
+- **Effets** : le routeur reconnaît `/` avec un fragment de 43 caractères base64url (partage) ou `m` + 43 (gestion) ; tout autre fragment est retiré (hygiène inchangée, UI §12.1) ; `X-Robots-Tag: noindex` et le repli `/s/`, `/m/` du serveur deviennent inutiles (le préfixe `/s/` peut rester réservé aux futurs liens universels, §16). Aucun lien ancien n'existe en production : pas de compatibilité. La démo suit le même format sous `/Shhdrop/`.
+
+---
+
+## 33. Décision du propriétaire (v2.6) — pas de compte ; historique local de l'expéditeur
+
+- Personne n'a besoin d'un compte pour envoyer ou recevoir. Le serveur ne sait jamais qui a ouvert un lien (aucune adresse IP enregistrée, §9).
+- **Historique des envois**, sur l'appareil de l'expéditeur seulement (`/envois`, téléphone et ordinateur) : pour chaque partage, état (actif, en cours d'effacement, détruit, expiré), ouvertures « 1 / 3 », **Détruire** en un geste (avec confirmation sur place). Contenu d'une entrée : `S_gestion`, échéance, maximum d'ouvertures, un libellé local (« 6 éléments · 142 Mo · 5 nov., 21 h »), et les ouvertures observées. **Jamais** `K_lien`, le mot de passe ni les noms des éléments : l'historique ne permet ni de lire le contenu, ni de le renvoyer.
+- **Heures des ouvertures** : le serveur ne stocke aucune heure d'ouverture (§9.1). L'historique note l'intervalle pendant lequel le compteur a changé, entre deux relectures de `manage/status` (« ouvert entre 21 h 00 et 21 h 15 ») ; relecture toutes les 60 s seulement quand l'écran est visible ; sans relecture, pas d'heure.
+- Exception écrite à UI §12.1 : `S_gestion` est stocké, chiffré (AES-256-GCM, clé non extractible créée par WebCrypto, gardée dans IndexedDB), dans le seul module `web/src/history/`. Honnêtement, cette clé est stockée sur le même appareil : le chiffrement ne protège que des lectures naïves du stockage ; la vraie protection est le verrouillage du téléphone. Verrou optionnel par passkey (même mécanisme que §27) : question Q-H1. Une entrée expirée ou détruite est retirée 7 jours après. « Effacer l'historique » à tout moment. Bascule « Garder dans mon historique » sur « Lien prêt », activée par défaut.
+- « Ces informations ne seront plus jamais affichées » (§5.1) reste vrai pour le lien et le mot de passe ; seul le lien de gestion est gardé.
+- **Plus tard, hors V1** : compte optionnel par passkey pour synchroniser l'historique entre appareils. Coût pour la vie privée : le serveur relierait entre eux les partages d'une même personne (même chiffrés, les envois deviennent associables à un compte), ce qui crée une identité côté serveur et relance la question de conservation des données (LCEN, §17).
+
+---
+
+## 34. Décision du propriétaire (v2.6) — droits du destinataire
+
+| Droit (`rights` du manifeste v2) | Effet chez le destinataire |
+|---|---|
+| `"voir"` — « Voir seulement » | Aucun bouton Enregistrer ni Copier ; `controlsList="nodownload"`, `disablePictureInPicture`, menu contextuel des médias neutralisé, `-webkit-touch-callout: none`. Mention : « L'expéditeur a choisi « voir seulement ». Cela n'empêche pas une capture d'écran. » |
+| `"enregistrer"` — « Voir et enregistrer » (**par défaut**) | Comportement actuel (UI §9.8, §9.9) |
+| `"coffre"` — « Voir, enregistrer et garder dans le coffre » | En plus : « Garder dans le coffre », téléphone seulement (§27) ; porte `keep_ttl_h` |
+
+- Le droit est dans le **manifeste chiffré et authentifié** : le serveur ne le voit pas et ne peut pas l'élargir. Absent, inconnu ou mal typé → `"voir"` (le plus restrictif).
+- **Contradiction signalée** avec D1 (§0, « mode lecture seule retiré : fausse impression de sécurité ») : le propriétaire le réintroduit. Appliqué avec un texte honnête des deux côtés ; à l'expéditeur : « Ce n'est qu'une dissuasion : le destinataire peut toujours faire une capture ou filmer l'écran, et un navigateur modifié peut enregistrer quand même. »
+- « Voir seulement » est refusé (choix désactivé, avec la liste des éléments en cause) si un élément ne peut pas s'afficher dans le navigateur (archives, bureautique, plus de 200 Mio) : il serait inaccessible au destinataire.
+- Manifeste v2 : `{ "v": 2, "rights": "enregistrer", "keep_ttl_h"?: 12, "items": [...] }`.
+
+### Questions ouvertes de §29 à §34 (défaut recommandé)
+
+| # | Question | Défaut recommandé |
+|---|---|---|
+| Q-K1 | Accepter la fuite de la taille à 4 Mio près vers un serveur qui observe l'envoi anticipé (§29.7) | Oui (décision de vitesse) ; bascule « Envoyer seulement quand je clique » pour qui la refuse, désactivée par défaut |
+| Q-K2 | Envoi anticipé sur données mobiles | Non si `saveData` ; oui sinon |
+| Q-MDP1 | 8 ou 10 caractères par défaut | 10 recommandé ; 8 appliqué (demande du propriétaire) |
+| Q-H1 | Verrou par passkey de l'historique | Non par défaut (destruction en un geste), proposé dans les réglages |
+| Q-H2 | Historique activé par défaut | Oui, bascule sur « Lien prêt » |
+| Q-R1 | Droit par défaut | « Voir et enregistrer » |
