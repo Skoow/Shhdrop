@@ -39,8 +39,29 @@ test("les gardes enregistrent une requête tierce et une violation CSP", async (
   await page.goto(shh.origin + "/");
   await page.evaluate(() => void fetch("http://127.0.0.1:1/x").catch(() => {}));
   await expect.poll(() => shh.cspViolations.length).toBeGreaterThan(0);
-  await page.goto("http://127.0.0.1:1/").catch(() => {});
-  expect(shh.foreignRequests).toContain("http://127.0.0.1:1/");
+  // Navigation du cadre principal vers une origine tierce, servie par route() : aucun réseau,
+  // même comportement dans tous les moteurs (WebKit attend longtemps un port fermé).
+  await page.route("http://tiers.invalid/**", (r) => r.fulfill({ contentType: "text/html", body: "<title>t</title>" }));
+  await page.goto("http://tiers.invalid/");
+  expect(shh.foreignRequests).toContain("http://tiers.invalid/");
   shh.cspViolations.length = 0;
   shh.foreignRequests.length = 0;
+});
+
+test("capture() n'avale pas une vraie violation CSP", async ({ page, shh }) => {
+  await page.goto(shh.origin + "/");
+  // Violation réelle de la page avant la capture, puis capture : elle doit rester enregistrée.
+  await page.evaluate(() => void fetch("http://127.0.0.1:1/x").catch(() => {}));
+  await expect.poll(() => shh.cspViolations.length).toBeGreaterThan(0);
+  await capture(page, "garde-violation");
+  expect(shh.cspViolations.some((v) => v.includes("connect-src"))).toBe(true);
+  shh.cspViolations.length = 0;
+  // Style en ligne de la page, après la capture : refusé et enregistré (hors fenêtre de capture).
+  await page.evaluate(() => {
+    const st = document.createElement("style");
+    st.textContent = "body{color:red}";
+    document.head.append(st);
+  });
+  await expect.poll(() => shh.cspViolations.length).toBeGreaterThan(0);
+  shh.cspViolations.length = 0;
 });

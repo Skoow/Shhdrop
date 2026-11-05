@@ -18,14 +18,38 @@ export type Shh = {
   foreignRequests: string[];
 };
 
+/**
+ * Seule violation CSP injectée par l'outil, jamais par la page : pour une capture, Playwright
+ * (WebKit seulement, `shouldToggleStyleSheetToSyncAnimations`) ajoute puis retire un
+ * `<style>body {}</style>` en ligne, que style-src refuse. Établi dans la trace CI du run
+ * 41982565598 : le message tombe pendant « taking page screenshot », après l'audit axe.
+ * Écart toléré, au plus UNE fois par canal (événement, console) et par capture, et seulement
+ * pendant capture() sous WebKit ; tout autre message, ou un second, reste une violation.
+ */
+type HarnessWindow = { capturing: boolean; event: number; console: number };
+const harness = new WeakMap<Page, HarnessWindow>();
+
+function swallowHarnessStyle(page: Page, channel: "event" | "console", text: string): boolean {
+  const w = harness.get(page);
+  if (!w?.capturing || page.context().browser()?.browserType().name() !== "webkit") return false;
+  const known =
+    channel === "event"
+      ? text.startsWith("style-src-elem inline ")
+      : text.startsWith("Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive");
+  if (!known || w[channel] >= 1) return false;
+  w[channel]++;
+  return true;
+}
+
 export const test = base.extend<{ shh: Shh }>({
   shh: async ({ page }, use) => {
     const server = await startServer({ env: { SHH_STATIC_DIR: DIST } });
     const cspViolations: string[] = [];
     const foreignRequests: string[] = [];
     try {
+      harness.set(page, { capturing: false, event: 0, console: 0 });
       await page.exposeFunction("__shhCsp", (d: string) => {
-        cspViolations.push(d);
+        if (!swallowHarnessStyle(page, "event", d)) cspViolations.push(d);
       });
       await page.addInitScript(() => {
         document.addEventListener("securitypolicyviolation", (e) => {
@@ -35,7 +59,7 @@ export const test = base.extend<{ shh: Shh }>({
         });
       });
       page.on("console", (m) => {
-        if (m.text().includes("Refused to")) cspViolations.push(m.text());
+        if (m.text().includes("Refused to") && !swallowHarnessStyle(page, "console", m.text())) cspViolations.push(m.text());
       });
       page.on("request", (r) => {
         if (r.frame() !== page.mainFrame()) return;
@@ -66,7 +90,14 @@ export async function capture(page: Page, nom: string): Promise<string> {
   const dir = `${CAPTURES}/${project}`;
   mkdirSync(dir, { recursive: true });
   const path = `${dir}/${nom}.png`;
-  await page.screenshot({ path });
+  const w = harness.get(page);
+  if (w) Object.assign(w, { capturing: true, event: 0, console: 0 });
+  try {
+    await page.screenshot({ path });
+    await page.evaluate(() => 0); // aller-retour : les messages de la capture sont arrivés
+  } finally {
+    if (w) w.capturing = false;
+  }
   return path;
 }
 
