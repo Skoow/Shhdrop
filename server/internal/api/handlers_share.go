@@ -66,7 +66,7 @@ type createBody struct {
 // POST /api/shares : format et gel → anti-robot → quotas (réservation) → création →
 // difficulté suivante. Une requête invalide ou un serveur gelé ne consomme ni le défi ni
 // le quota ; le défi est en revanche consommé si le quota ou la création échoue ensuite.
-// Un id déjà pris (en base, ou envoi en cours sous cet id) → 409, rien n'est compté.
+// Un id déjà pris (en base, ou envoi en cours sous cet id) → 400, compté comme une création.
 func (s *server) create(w http.ResponseWriter, r *http.Request) {
 	var b createBody
 	if err := readJSON(w, r, &b); err != nil {
@@ -105,15 +105,26 @@ func (s *server) create(w http.ResponseWriter, r *http.Request) {
 	}
 	// Quotas en capacité utile (données du palier, sans le morceau du manifeste), réservés ici et débités à la
 	// finalisation ; 2 envois non finalisés à la fois ; octets abandonnés (spec §29.5).
+	//
+	// Id déjà pris (en base, ou envoi en cours) : c'est une sonde, puisque les id dérivent
+	// d'une K_lien aléatoire de 256 bits (revue K1, I2). Réponse identique à une création
+	// invalide (400 bad_request), création comptée au quota et dans la difficulté anti-robot.
 	switch retry, err := s.lim.BeginUpload(ip, req.ID, share.ContentBytes(b.Bucket)); {
 	case errors.Is(err, limits.ErrDuplicate):
-		fail(w, share.ErrConflict)
+		s.cap.RecordCreate(ip)
+		fail(w, errBadRequest)
 		return
 	case err != nil:
 		writeLimit(w, retry)
 		return
 	}
 	id, segs, err := s.svc.Create(req)
+	if errors.Is(err, share.ErrConflict) {
+		s.lim.FinishUpload(req.ID) // le quota reste débité
+		s.cap.RecordCreate(ip)
+		fail(w, errBadRequest)
+		return
+	}
 	if err != nil {
 		s.lim.CancelUpload(req.ID)
 		fail(w, err)

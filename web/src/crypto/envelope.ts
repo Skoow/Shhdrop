@@ -9,7 +9,9 @@
 //   K_env         HKDF(K_maître, « shhdrop/v2/enveloppe »), AES-256-GCM non extractible
 //   K_preuve      HKDF(K_maître, « shhdrop/v2/preuve »), V_preuve = SHA-256(K_preuve)
 //   E             nonce (12 octets aléatoires) ‖ AES-256-GCM(K_env, nonce, R,
-//                 données authentifiées = « shhdrop/v2/enveloppe » ‖ id ‖ en-tête de 48 octets)
+//                 données authentifiées = « shhdrop/v2/enveloppe-ad » ‖ id ‖ en-tête de 48 octets)
+// L'info HKDF de K_env et le préfixe des données authentifiées sont deux étiquettes
+// distinctes : une étiquette, un usage (séparation des domaines).
 import { concat, utf8 } from "./encoding";
 import { checkKLien, hkdf, randomBytes, sha256 } from "./kdf";
 import type { KLien, KMdp, KPreuve } from "./types";
@@ -29,7 +31,7 @@ export const HEADER_LEN = 48;
 const NONCE_LEN = 12;
 /** Taille de E : nonce (12) ‖ R chiffrée (32) ‖ tag GCM (16). */
 export const ENVELOPE_LEN = NONCE_LEN + SEED_LEN + 16;
-const ENV_LABEL = "shhdrop/v2/enveloppe";
+const ENV_AD = "shhdrop/v2/enveloppe-ad";
 
 const corrupt = () => new Error("paquet_corrompu");
 
@@ -88,7 +90,7 @@ export async function accessKeys(kLien: KLien, kMdp: KMdp): Promise<AccessKeys> 
   let kEnvRaw: Uint8Array<ArrayBuffer> | undefined;
   try {
     kMaitre = await hkdf(ikm, "shhdrop/v2/maitre");
-    kEnvRaw = await hkdf(kMaitre, ENV_LABEL);
+    kEnvRaw = await hkdf(kMaitre, "shhdrop/v2/enveloppe");
     const kPreuve = (await hkdf(kMaitre, "shhdrop/v2/preuve")) as KPreuve;
     const kEnv = await crypto.subtle.importKey("raw", kEnvRaw, "AES-GCM", false, ["encrypt", "decrypt"]);
     return { kEnv, kPreuve, vPreuve: await sha256(kPreuve) };
@@ -101,12 +103,12 @@ export async function accessKeys(kLien: KLien, kMdp: KMdp): Promise<AccessKeys> 
 
 function aad(id: Uint8Array, header: Uint8Array): Uint8Array<ArrayBuffer> {
   if (id.length !== ID_LEN || header.length !== HEADER_LEN) throw new Error("enveloppe : id ou en-tête invalide");
-  return concat(utf8(ENV_LABEL), id, header);
+  return concat(utf8(ENV_AD), id, header);
 }
 
 /**
  * Enveloppe R sous K_env : E = nonce aléatoire (12 octets) ‖ AES-256-GCM(R), 60 octets ;
- * données authentifiées = « shhdrop/v2/enveloppe » ‖ id ‖ en-tête. Un nonce neuf à
+ * données authentifiées = « shhdrop/v2/enveloppe-ad » ‖ id ‖ en-tête. Un nonce neuf à
  * chaque appel (une K_env n'enveloppe qu'une R, mais deux appels ne réutilisent jamais un nonce).
  */
 export async function seal(kEnv: CryptoKey, r: Seed, id: Uint8Array, header: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {

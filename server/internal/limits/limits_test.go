@@ -395,13 +395,21 @@ func TestUploadQuotas(t *testing.T) {
 			t.Fatal("autre connexion touchée", err)
 		}
 	})
-	t.Run("id déjà en cours : ErrDuplicate, rien compté ni retiré", func(t *testing.T) {
+	t.Run("id déjà en cours : ErrDuplicate, compté comme une création (sonde), l'envoi existant intact", func(t *testing.T) {
 		l := New(fixed(time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)))
 		if _, err := l.BeginUpload(ip("1.2.3.4"), "d", 1); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := l.BeginUpload(ip("5.6.7.8"), "d", 1); !errors.Is(err, ErrDuplicate) {
-			t.Fatal(err)
+		for i := 0; i < CreatesPer64; i++ {
+			if _, err := l.BeginUpload(ip("5.6.7.8"), "d", 1); !errors.Is(err, ErrDuplicate) {
+				t.Fatal(i, err)
+			}
+		}
+		if _, err := l.BeginUpload(ip("5.6.7.8"), "d", 1); !errors.Is(err, ErrQuota) {
+			t.Fatal("11ᵉ sonde : le quota devrait être épuisé", err)
+		}
+		if ok, _ := l.AllowCreate(ip("5.6.7.8"), 1); ok {
+			t.Fatal("les sondes ne comptent pas dans le quota")
 		}
 		if _, err := l.BeginUpload(ip("1.2.3.4"), "e", 1); err != nil {
 			t.Fatal(err)

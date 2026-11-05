@@ -11,7 +11,9 @@ const fill = (n: number, v: number) => new Uint8Array(n).fill(v);
 
 // Vecteurs fixes calculés par un script Node indépendant (node:crypto : hkdfSync avec un sel
 // vide, createHmac, createHash, createCipheriv aes-256-gcm), pas par le code testé :
-//   K_lien = 32 × 0x01, K_mdp = 32 × 0x02, R = 32 × 0x03, nonce de E = 12 × 0x09.
+//   K_lien = 32 × 0x01, K_mdp = 32 × 0x02, R = 32 × 0x03, nonce de E = 12 × 0x09 ;
+//   données authentifiées de E = « shhdrop/v2/enveloppe-ad » ‖ id ‖ en-tête (étiquette
+//   distincte de l'info HKDF de K_env, « shhdrop/v2/enveloppe » : revue K1, m2).
 const V = {
   id: "934a65e8f83c4367f2c9e06e57102838",
   kAcces: "18554f2b3ad9a1d610c2a99ef25a76805db4e2d92893390db2b5ab3795d7af39",
@@ -23,7 +25,7 @@ const V = {
   header: "5348483202000000000000000000000041c12c1f2f51bdaf632eb1d8d7d4aa0f78cdf11fa08fab30c4863f85afc57393",
   E:
     "090909090909090909090909a82bff94be2636db6e821fb69e6fa475753c587dc8f0a75a579a9cf7a16099ff" +
-    "7d0db85e8dc8a180255de6e1d989f940",
+    "c45f3984685bb14eb29951549fbe56ec",
 };
 
 const kLien = fill(32, 1) as KLien;
@@ -51,7 +53,7 @@ describe("vecteurs fixes (script Node indépendant)", () => {
     const e = await seal(kEnv, R(), unhex(V.id), header);
     expect(e.length).toBe(60);
     const d = createDecipheriv("aes-256-gcm", unhex(V.kEnv), e.subarray(0, 12));
-    d.setAAD(Buffer.concat([Buffer.from("shhdrop/v2/enveloppe"), unhex(V.id), header]));
+    d.setAAD(Buffer.concat([Buffer.from("shhdrop/v2/enveloppe-ad"), unhex(V.id), header]));
     d.setAuthTag(e.subarray(44));
     expect(hex(Buffer.concat([d.update(e.subarray(12, 44)), d.final()]))).toBe(hex(R()));
   });
@@ -178,7 +180,11 @@ describe("étiquettes", () => {
     const srcs = ["./envelope.ts", "./kdf.ts", "./container.ts"].map((f) => readFileSync(new URL(f, import.meta.url), "utf8"));
     const labels = srcs.flatMap((s) => [...s.matchAll(/"shhdrop\/[^"]*"/g)].map((m) => m[0]));
     expect(labels.length).toBeGreaterThanOrEqual(7);
-    for (const l of labels) expect(l).toMatch(/^"shhdrop\/v2\/[a-z]+"$/);
+    for (const l of labels) expect(l).toMatch(/^"shhdrop\/v2\/[a-z]+(-ad)?"$/);
+    // Chaque étiquette n'a qu'un usage : l'info HKDF de K_env et le préfixe des données
+    // authentifiées de E sont distincts (séparation des domaines).
+    expect(srcs[0]).toContain('"shhdrop/v2/enveloppe-ad"');
+    expect(srcs[0]).toMatch(/hkdf\(kMaitre, "shhdrop\/v2\/enveloppe"\)/);
     for (const s of srcs) expect(s).not.toContain("shhdrop/v1/");
   });
 });

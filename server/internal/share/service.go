@@ -33,6 +33,8 @@ var (
 	// ErrConflict : l'id proposé par le client existe déjà (spec §29.8 : 409, le client
 	// recommence avec une nouvelle K_lien).
 	ErrConflict = errors.New("identifiant déjà pris")
+	// ErrBusy : un autre Finalize du même envoi est en cours (revue K1, I1).
+	ErrBusy = errors.New("finalisation déjà en cours")
 	// ErrBudget : l'ouverture a déjà lu son budget d'octets (ReadBudget).
 	ErrBudget = errors.New("budget de lecture épuisé")
 )
@@ -126,6 +128,12 @@ type Service struct {
 	createMu sync.Mutex   // rend atomiques « place libre ? » et la réservation
 	uploadMu sync.RWMutex // Finalize attend la fin des écritures de segments en cours
 	budget   readBudget   // octets lus par ouverture, en mémoire seulement
+	// finalizing : envois dont un Finalize est en cours ; un seul à la fois par id, pour
+	// qu'aucun appel concurrent ne réécrive le bourrage (revue K1, I1).
+	finalizing struct {
+		mu  sync.Mutex
+		ids map[string]struct{}
+	}
 }
 
 func (s *Service) now() int64 { return s.Now().Unix() }
@@ -338,6 +346,10 @@ func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 	if err := ValidateFinalize(r); err != nil {
 		return 0, err
 	}
+	if !s.claimFinalize(id) {
+		return 0, ErrBusy // aucune lecture ni écriture : réponse immédiate
+	}
+	defer s.releaseFinalize(id)
 	var bucket int
 	var mask []byte
 	err := s.DB.QueryRow(`SELECT bucket, segments_mask FROM shares WHERE id=? AND state='uploading' AND upload_deadline>?`,
@@ -371,12 +383,14 @@ func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 		return 0, ErrIncomplete
 	}
 	exp := ceil15(now + int64(r.TTLHours)*3600)
+	// segments_mask passe à « tous reçus » : la base ne garde pas la frontière du bourrage,
+	// qui donnerait la taille du contenu à 4 Mio près (revue K1, I3).
 	// upload_deadline et progress_at effacés : ils trahiraient la date de l'envoi (spec §9.1).
 	var got int64
 	err = s.DB.QueryRow(`UPDATE shares SET state='ready', expires_at=?, upload_deadline=NULL, progress_at=NULL,
-		ttl_hours=?, max_opens=?, opens_left=?, salt=?, kdf_ops=?, kdf_mem=?, proof_v=?, envelope=?
+		ttl_hours=?, max_opens=?, opens_left=?, salt=?, kdf_ops=?, kdf_mem=?, proof_v=?, envelope=?, segments_mask=?
 		WHERE id=? AND state='uploading' AND upload_deadline>? AND segments_mask=? RETURNING expires_at`,
-		exp, r.TTLHours, r.MaxOpens, r.MaxOpens, r.Salt, r.KdfOps, r.KdfMem, r.ProofV, r.Envelope,
+		exp, r.TTLHours, r.MaxOpens, r.MaxOpens, r.Salt, r.KdfOps, r.KdfMem, r.ProofV, r.Envelope, fullMask(segs),
 		id, now, mask).Scan(&got)
 	if err != nil {
 		return 0, notFound(err)
@@ -397,6 +411,38 @@ func hasAllBut(mask []byte, segs, from, to int) bool {
 	return true
 }
 
+// claimFinalize réserve l'id pour un seul Finalize à la fois ; faux s'il est déjà pris.
+func (s *Service) claimFinalize(id string) bool {
+	s.finalizing.mu.Lock()
+	defer s.finalizing.mu.Unlock()
+	if s.finalizing.ids == nil {
+		s.finalizing.ids = map[string]struct{}{}
+	}
+	if _, busy := s.finalizing.ids[id]; busy {
+		return false
+	}
+	s.finalizing.ids[id] = struct{}{}
+	return true
+}
+
+func (s *Service) releaseFinalize(id string) {
+	s.finalizing.mu.Lock()
+	delete(s.finalizing.ids, id)
+	s.finalizing.mu.Unlock()
+}
+
+// fullMask : tous les segments marqués reçus.
+func fullMask(segs int) []byte {
+	m := make([]byte, (segs+7)/8)
+	for i := 0; i < segs; i++ {
+		m[i/8] |= 1 << (i % 8)
+	}
+	return m
+}
+
+// fillWrite : écriture d'une tranche du bourrage (variable pour compter les écritures en test).
+var fillWrite = func(s *Service, id string, off int64, b []byte) error { return s.Blobs.WriteAt(id, off, b) }
+
 // fillChunk : taille des écritures du bourrage (un seul tampon, réutilisé).
 const fillChunk = 4 << 20
 
@@ -414,7 +460,7 @@ func (s *Service) fillRandom(id string, bucket, from, to int) error {
 		if _, err := rand.Read(b); err != nil {
 			return err
 		}
-		if err := s.Blobs.WriteAt(id, off, b); err != nil {
+		if err := fillWrite(s, id, off, b); err != nil {
 			return err
 		}
 		off += n

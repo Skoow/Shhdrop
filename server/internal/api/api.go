@@ -286,8 +286,8 @@ func fail(w http.ResponseWriter, err error) {
 	case errors.Is(err, share.ErrBadSegment), errors.Is(err, share.ErrBadRequest), errors.Is(err, errBadRequest),
 		errors.Is(err, captcha.ErrInvalid):
 		writeErr(w, http.StatusBadRequest, "bad_request")
-	case errors.Is(err, share.ErrConflict):
-		writeErr(w, http.StatusConflict, "conflict")
+	case errors.Is(err, share.ErrBusy):
+		writeRetry(w, http.StatusServiceUnavailable, "busy", slotRetry)
 	case errors.Is(err, share.ErrIncomplete):
 		writeErr(w, http.StatusConflict, "incomplete")
 	case errors.Is(err, share.ErrFull):

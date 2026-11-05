@@ -736,7 +736,8 @@ func TestCreateConflictAndFinalizeV2(t *testing.T) {
 	alt, shown := e.captchaFor(t, "")
 	dup := k.createBody(1, 1, alt, shown)
 	dup["id"] = c.ID
-	expect(t, e.do(req{method: "POST", path: "/api/shares", body: mustJSON(dup)}), 409, `{"error":"conflict"}`)
+	// Revue K1, I2 : un id existant ne se distingue pas d'une autre création refusée.
+	expect(t, e.do(req{method: "POST", path: "/api/shares", body: mustJSON(dup)}), 400, badRequest)
 	segs := map[int][]byte{}
 	for _, n := range []int{0, 1, 2, 6} {
 		segs[n] = rnd(share.SegmentSize(400, n))
@@ -815,6 +816,45 @@ func TestCreateConflictAndFinalizeV2(t *testing.T) {
 	if strings.Join(keys, ",") != "expires_in_s,max_opens,opens_used,state" {
 		t.Fatal(keys)
 	}
+}
+
+// Revue K1, I2 : sonder un id (existant, en envoi ou finalisé) coûte une création du
+// quota, comme une création réussie, et rend la même réponse qu'une création invalide.
+func TestCreateExistingIDIsAProbe(t *testing.T) {
+	e := newEnv(t, false, nil)
+	k := newKeys()
+	live := e.create(t, "", k, 1, 1)
+	e.upload(t, live, 1)
+	pending := e.create(t, "", k, 1, 1)
+	probe := func(id string) *httptest.ResponseRecorder {
+		alt, shown := e.captchaFor(t, "")
+		b := k.createBody(1, 1, alt, shown)
+		b["id"] = id
+		return e.do(req{method: "POST", path: "/api/shares", body: mustJSON(b)})
+	}
+	bad := func() *httptest.ResponseRecorder {
+		alt, shown := e.captchaFor(t, "")
+		b := k.createBody(1, 1, alt, shown)
+		b["bucket"] = 2
+		return e.do(req{method: "POST", path: "/api/shares", body: mustJSON(b)})
+	}
+	ref := bad()
+	for _, id := range []string{live.ID, pending.ID} {
+		for i := 0; i < 4; i++ {
+			w := probe(id)
+			if w.Code != ref.Code || w.Body.String() != ref.Body.String() || len(w.Header()) != len(ref.Header()) {
+				t.Fatalf("sonde %s : %d %q ; refus ordinaire : %d %q", id, w.Code, w.Body.String(), ref.Code, ref.Body.String())
+			}
+		}
+	}
+	// 2 créations + 8 sondes = 10 : le quota du jour est atteint (le partage en cours compte).
+	alt, shown := e.captchaFor(t, "")
+	w := e.do(req{method: "POST", path: "/api/shares", body: mustJSON(k.createBody(1, 1, alt, shown))})
+	expect(t, w, 429, "")
+	// Les sondes n'ont touché ni le partage prêt ni l'envoi en cours.
+	expect(t, e.do(req{method: "GET", path: "/api/shares/" + live.ID + "/meta", hdr: access(k)}), 200, "")
+	expect(t, e.do(req{method: "PUT", path: "/api/shares/" + pending.ID + "/segments/0", body: rnd(share.SegmentSize(1, 0)),
+		hdr: auth(pending.UploadToken)}), 204, "")
 }
 
 // Avant finalize : proof_v NULL, unlock et meta → 404 uniforme.

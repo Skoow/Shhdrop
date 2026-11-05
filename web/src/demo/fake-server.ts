@@ -2,7 +2,7 @@
 // et mêmes codes que server/internal/api (spec §8), mêmes règles visibles que
 // server/internal/share : palier et taille exacte des segments, K_accès / K_preuve / S_gestion
 // comparés par empreinte SHA-256, ouvertures, 5 essais puis destruction, « draining »,
-// expiration, 404 uniformes ; v2 (spec §29.8) : id choisi par le client (409 s'il existe),
+// expiration, 404 uniformes ; v2 (spec §29.8) : id choisi par le client (400 s'il existe),
 // sel, Argon2id, V_preuve et enveloppe à la finalisation, bourrage [fill_from, fill_to)
 // rempli d'aléa, enveloppe rendue par unlock. Il ne reçoit et ne garde que ce que reçoit le
 // vrai serveur (empreintes, sel, enveloppe, segments chiffrés), dans une Map de la page :
@@ -265,7 +265,9 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     const at = shownAt.get(shown);
     if (altcha === "" || hp !== "" || at === undefined || now() - at < MIN_FILL_S) throw badRequest();
     shownAt.delete(shown);
-    if (shares.has(id)) throw new HttpFail(409, "conflict");
+    // id existant : une sonde (id dérivé d'une K_lien de 256 bits) ; même réponse qu'une
+    // création invalide (revue K1, I2).
+    if (shares.has(id)) throw badRequest();
     const segs = segmentCount(bucket);
     shares.set(id, {
       state: "uploading",

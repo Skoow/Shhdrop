@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -187,5 +188,75 @@ func TestOnAbandon(t *testing.T) {
 	}
 	if len(got) != 2 || got[destroyed] != 16 || got[swept] != 1 {
 		t.Fatal(got)
+	}
+}
+
+// Revue K1, I1 : N finalize simultanés sur le même envoi → un seul écrit le bourrage ;
+// les autres repartent aussitôt (ErrBusy) ou trouvent l'envoi déjà finalisé (404).
+func TestFinalizeConcurrentFillsOnce(t *testing.T) {
+	s, _ := newSvc(t)
+	k := newKeys()
+	id := upload400(t, s, k, 1, 2, 3, 4, 5)
+	var writes atomic.Int64
+	orig := fillWrite
+	fillWrite = func(s *Service, id string, off int64, b []byte) error {
+		writes.Add(int64(len(b)))
+		return orig(s, id, off, b)
+	}
+	defer func() { fillWrite = orig }()
+	const N = 20
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	got := map[string]int{}
+	r := withFill(id, 1, 6)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := s.Finalize(id, r)
+			key := "ok"
+			switch {
+			case errors.Is(err, ErrBusy):
+				key = "busy"
+			case errors.Is(err, ErrNotFound):
+				key = "404"
+			case err != nil:
+				key = err.Error()
+			}
+			mu.Lock()
+			got[key]++
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	pad := int64(segOffset(400, 6) - segOffset(400, 1))
+	if got["ok"] != 1 || got["ok"]+got["busy"]+got["404"] != N {
+		t.Fatal(got)
+	}
+	if w := writes.Load(); w != pad {
+		t.Fatalf("bourrage écrit %d octets, attendu %d (une seule fois)", w, pad)
+	}
+	s.finalizing.mu.Lock()
+	left := len(s.finalizing.ids)
+	s.finalizing.mu.Unlock()
+	if left != 0 {
+		t.Fatal("verrou par id non libéré", left)
+	}
+}
+
+// Revue K1, I3 : après finalize, le masque des segments ne garde plus la frontière du bourrage.
+func TestFinalizeResetsSegmentsMask(t *testing.T) {
+	s, _ := newSvc(t)
+	k := newKeys()
+	id := upload400(t, s, k, 3, 4, 5)
+	if _, err := s.Finalize(id, withFill(id, 3, 6)); err != nil {
+		t.Fatal(err)
+	}
+	var mask []byte
+	if err := s.DB.QueryRow(`SELECT segments_mask FROM shares WHERE id=?`, id).Scan(&mask); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(mask, []byte{0x7f}) {
+		t.Fatalf("masque après finalize : %08b (le bourrage ne doit plus s'y voir)", mask)
 	}
 }

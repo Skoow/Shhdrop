@@ -224,11 +224,11 @@ describe("faux serveur de démo : requêtes brutes", () => {
     const replay = await fake.handle(new Request(`${ORIGIN}/api/shares`, { method: "POST", body: JSON.stringify(ok.body) }));
     expect(replay.status).toBe(400);
     expect(await replay.json()).toEqual({ error: "bad_request" });
-    // id existant (nouveau jeton shown_at) : 409, le client recommence avec une autre K_lien.
+    // id existant (nouveau jeton shown_at) : sonde, même réponse qu'une création invalide.
     const cap2 = (await (await fake.handle(new Request(`${ORIGIN}/api/captcha`))).json()) as Record<string, unknown>;
     offset += 4000;
     const dup = await fake.handle(new Request(`${ORIGIN}/api/shares`, { method: "POST", body: JSON.stringify({ ...ok.body, shown_at: cap2.shown_at }) }));
-    expect([dup.status, await dup.json()]).toEqual([409, { error: "conflict" }]);
+    expect([dup.status, await dup.json()]).toEqual([400, { error: "bad_request" }]);
 
     // v1 (durée, ouvertures, sel, V_preuve à la création) refusé ; id de mauvaise longueur refusé.
     for (const bad of [{ extra: 1 }, { bucket: 17 }, { max_opens: 1 }, { ttl_hours: 1 }, { proof_v: "x" }, { salt: "x" }, { hp: "x" }, { recaptcha: "t" }, { id: "abc" }, { id: undefined }]) {

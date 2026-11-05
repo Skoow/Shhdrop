@@ -152,7 +152,8 @@ var (
 	// ErrQuota : quota journalier (créations, octets, octets abandonnés) atteint, ou trop
 	// d'envois en cours ; réponse 429 avec le délai rendu.
 	ErrQuota = errors.New("limits : quota atteint")
-	// ErrDuplicate : un envoi en cours porte déjà cet id (réponse 409, rien n'est compté).
+	// ErrDuplicate : un envoi en cours porte déjà cet id (sonde) : compté comme une
+	// création, réponse identique à une création invalide (400).
 	ErrDuplicate = errors.New("limits : envoi déjà en cours sous cet id")
 )
 
@@ -167,9 +168,6 @@ func (l *Limiter) BeginUpload(ip netip.Addr, id string, bytes int64) (retryAfter
 	defer l.mu.Unlock()
 	now := l.now()
 	l.rotateLocked(now)
-	if _, dup := l.uploads[id]; dup {
-		return 0, ErrDuplicate
-	}
 	k64, k48 := l.keyLocked(ip)
 	untilMidnight := time.Unix((l.day+1)*day, 0).Sub(now)
 	switch {
@@ -177,7 +175,18 @@ func (l *Limiter) BeginUpload(ip netip.Addr, id string, bytes int64) (retryAfter
 		bytes > BytesPer64-l.bytes64[k64] || bytes > BytesPer48-l.bytes48[k48] ||
 		l.aband64[k64] >= AbandonedPer64 || l.aband48[k48] >= AbandonedPer48:
 		return untilMidnight, ErrQuota
-	case l.pend64[k64] >= PendingPer64 || l.pend48[k48] >= PendingPer48:
+	}
+	// Id d'un envoi déjà en cours : une sonde (les id dérivent d'une K_lien aléatoire de
+	// 256 bits, une vraie collision est impossible). Elle coûte une création du quota,
+	// comme une création réussie (revue K1, I2), et ne touche pas l'envoi existant.
+	if _, dup := l.uploads[id]; dup {
+		l.count64[k64]++
+		l.count48[k48]++
+		l.bytes64[k64] += bytes
+		l.bytes48[k48] += bytes
+		return 0, ErrDuplicate
+	}
+	if l.pend64[k64] >= PendingPer64 || l.pend48[k48] >= PendingPer48 {
 		return min(pendingRetry, untilMidnight), ErrQuota
 	}
 	l.count64[k64]++

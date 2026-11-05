@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { concat, unb64u, utf8 } from "../src/crypto/encoding";
 import { accessKeys } from "../src/crypto/envelope";
+import { generatePassword } from "../src/crypto/password";
 import { deriveAccess, passwordKey, sha256 } from "../src/crypto/kdf";
 import type { KAcces, KLien, KPreuve, SGestion } from "../src/crypto/types";
 
@@ -38,6 +39,7 @@ const MARKER = "MOT-REPERE-7f3a";
 const NAME = "nom-repere-91c2.pdf";
 const PASSWORD = "mdp-repere-44b8-zzzz"; // mot de passe saisi (pas généré)
 const MIB = 1048576;
+const GENERATED = generatePassword();
 const hk = (ikm: Uint8Array, info: string) => new Uint8Array(hkdfSync("sha256", ikm, new Uint8Array(0), info, 32));
 // Sous-chaînes de 8 caractères des noms et du texte saisis : aucune ne doit apparaître.
 const windows = (label: string, s: string) => Array.from({ length: s.length - 7 }, (_, i) => needle(`${label}[${i}]`, s.slice(i, i + 8)));
@@ -76,7 +78,8 @@ describe("le serveur ne voit rien", () => {
         { kind: "text", name: "", mime: "text/plain", data: utf8(`texte ${MARKER} texte`) },
         { kind: "file", name: NAME, mime: "application/pdf", data: fileData },
       ],
-      { ttlHours: 1, maxOpens: 2, password: PASSWORD, solveCaptcha: solveAltcha, fetch },
+      // Droits « coffre » + durée de garde : écrits dans le manifeste chiffré, jamais en clair.
+      { ttlHours: 1, maxOpens: 2, password: PASSWORD, rights: "coffre", keepTtlH: 12, solveCaptcha: solveAltcha, fetch },
     );
     const p = parseLink(r.link);
     if (p.kind !== "s") throw new Error("lien de partage attendu");
@@ -96,6 +99,7 @@ describe("le serveur ne voit rien", () => {
     const o = await openShare(r.link, PASSWORD, srv.origin, undefined, { fetch });
     expect(o.manifest.items[0]!.text).toBe(`texte ${MARKER} texte`);
     expect(o.manifest.items[1]!.name).toBe(NAME);
+    expect([o.manifest.rights, o.manifest.keep_ttl_h]).toEqual(["coffre", 12]);
     expect(Buffer.from(await o.item(1)).equals(Buffer.from(fileData))).toBe(true);
     await o.done();
     const st = log.length;
@@ -111,7 +115,7 @@ describe("le serveur ne voit rien", () => {
     const r2 = await createShare(srv.origin, [{ kind: "text", name: "", mime: "text/plain", data: utf8(`texte ${MARKER} texte`) }], {
       ttlHours: 1,
       maxOpens: 1,
-      password: PASSWORD,
+      password: GENERATED, // second chemin : mot de passe généré (8 caractères)
       solveCaptcha: solveAltcha,
       fetch,
     });
@@ -120,7 +124,7 @@ describe("le serveur ne voit rien", () => {
     kLien2 = p2.kLien;
     id2 = p2.id;
     kAcces2 = (await deriveAccess(kLien2)).kAcces;
-    const o2 = await openShare(r2.link, PASSWORD, srv.origin, undefined, { fetch });
+    const o2 = await openShare(r2.link, GENERATED, srv.origin, undefined, { fetch });
     expect(o2.manifest.items[0]!.text).toBe(`texte ${MARKER} texte`);
     await o2.destroy("report");
     await o2.done(); // 404 attendu et toléré : le partage est déjà effacé
@@ -139,6 +143,10 @@ describe("le serveur ne voit rien", () => {
       ...windows("nom", NAME),
       ...windows("texte", MARKER),
       ...windows("mot de passe", PASSWORD),
+      needle("mot de passe généré", GENERATED),
+      needle("droits (manifeste)", '"rights":"coffre"'),
+      needle("droit coffre", "coffre"),
+      needle("durée de garde (manifeste)", '"keep_ttl_h"'),
       needle("kLien", kLien),
       needle("kLien (signalé)", kLien2),
       needle("texte repère", MARKER),

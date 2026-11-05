@@ -1216,11 +1216,11 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
     }
   }, 30_000);
 
-  it("409 (id déjà pris) : erreur « conflict », destruction inutile (rien n'a été créé), clés à zéro", async () => {
+  it("id déjà pris (400, revue K1 I2) : erreur « bad_request », destruction inutile (rien n'a été créé), clés à zéro", async () => {
     const s = sender({ segments: 1 });
     const f = (async (input: RequestInfo | URL, init?: RequestInit) =>
-      String(input).endsWith("/api/shares") ? j(409, { error: "conflict" }) : s.fetch(input, init)) as typeof fetch;
-    await expect(drive(createShare(ORIGIN, SMALL, { ...base(s), fetch: f }))).rejects.toThrow("conflict");
+      String(input).endsWith("/api/shares") ? j(400, { error: "bad_request" }) : s.fetch(input, init)) as typeof fetch;
+    await expect(drive(createShare(ORIGIN, SMALL, { ...base(s), fetch: f }))).rejects.toThrow("bad_request");
     expect(s.destroys).toEqual([]);
     allZero();
   });

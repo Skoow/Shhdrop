@@ -304,8 +304,9 @@ function proofFields(p: CaptchaProof, cap: api.Captcha): { altcha: string } | { 
  * bourrage [fill_from, fill_to), que le serveur remplit d'aléa. La requête de création n'est
  * jamais interrompue (sinon un partage créé resterait inconnu) : l'annulation est constatée
  * juste après. En cas d'échec ou d'annulation après la création, l'envoi est détruit (au
- * mieux, en keepalive) pour libérer la place réservée. 409 (id déjà pris, probabilité
- * 2⁻¹²⁸ hors serveur malveillant) → Error("conflict") : un nouvel appel tire une autre K_lien.
+ * mieux, en keepalive) pour libérer la place réservée. Un id déjà pris (probabilité
+ * 2⁻¹²⁸ hors serveur malveillant) est refusé comme une création invalide (400 →
+ * Error("bad_request")) : un nouvel appel tire une autre K_lien.
  */
 export async function createShare(
   origin: string,
