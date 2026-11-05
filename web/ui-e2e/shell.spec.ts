@@ -11,12 +11,14 @@ test("l'accueil se charge sous la CSP, sans violation ni requête tierce", async
   await capture(page, "accueil");
 });
 
+// Spec §32 : les liens sont à la racine ; /s/ et /m/ ne sont plus des routes (404 de
+// l'interface), et X-Robots-Tag a disparu.
 for (const p of ["/s/x", "/m/x"]) {
-  test(`${p} sert l'application`, async ({ page, shh }) => {
+  test(`${p} : 404 de l'interface, sans X-Robots-Tag`, async ({ page, shh }) => {
     const res = await page.goto(shh.origin + p);
     expect(res?.status()).toBe(200);
-    expect(res?.headers()["x-robots-tag"]).toBe("noindex");
-    await expect(page.getByRole("heading", { name: "Shhdrop" })).toBeVisible();
+    expect(res?.headers()["x-robots-tag"]).toBeUndefined();
+    await expect(page.getByRole("heading", { name: /^(Cette page n'existe pas\.|This page does not exist\.)$/ })).toBeVisible();
   });
 }
 

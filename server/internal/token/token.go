@@ -81,39 +81,58 @@ func (s *Signer) CheckExp(tok string, kind byte, id string) (int, time.Time, err
 }
 
 func (s *Signer) check(tok string, kind byte, id string) (int, int64, error) {
-	if len(tok) > maxTokenLen {
+	got, n, exp, err := s.parse(tok, kind)
+	if err != nil || got != id {
 		return 0, 0, ErrInvalid
+	}
+	return n, exp, nil
+}
+
+// Subject vérifie la signature, le type et l'expiration, et rend l'id signé et le n°
+// d'ouverture : le jeton désigne lui-même le partage (spec §32 : aucun id dans le chemin).
+func (s *Signer) Subject(tok string, kind byte) (string, int, error) {
+	id, n, _, err := s.parse(tok, kind)
+	if err != nil {
+		return "", 0, err
+	}
+	return id, n, nil
+}
+
+func (s *Signer) parse(tok string, kind byte) (string, int, int64, error) {
+	fail := func() (string, int, int64, error) { return "", 0, 0, ErrInvalid }
+	if len(tok) > maxTokenLen {
+		return fail()
 	}
 	// Alphabet base64url et « . » seulement : le décodeur de Go ignore \r et \n (audit F3).
 	for i := 0; i < len(tok); i++ {
 		c := tok[i]
 		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
-			return 0, 0, ErrInvalid
+			return fail()
 		}
 	}
 	p, m, ok := strings.Cut(tok, ".")
 	if !ok {
-		return 0, 0, ErrInvalid
+		return fail()
 	}
 	raw, err := b64.DecodeString(p)
 	if err != nil {
-		return 0, 0, ErrInvalid
+		return fail()
 	}
 	sig, err := b64.DecodeString(m)
 	if err != nil || !hmac.Equal(sig, s.mac(raw)) {
-		return 0, 0, ErrInvalid
+		return fail()
 	}
 	if len(raw) < 2 || raw[0] != kind {
-		return 0, 0, ErrInvalid
+		return fail()
 	}
 	l := int(raw[1])
-	if len(raw) != 2+l+12 || string(raw[2:2+l]) != id {
-		return 0, 0, ErrInvalid
+	if len(raw) != 2+l+12 {
+		return fail()
 	}
 	openN := binary.BigEndian.Uint32(raw[2+l:])
 	exp := int64(binary.BigEndian.Uint64(raw[2+l+4:]))
 	if exp <= s.now().Unix() {
-		return 0, 0, ErrInvalid
+		return fail()
 	}
-	return int(openN), exp, nil
+	return string(raw[2 : 2+l]), int(openN), exp, nil
 }

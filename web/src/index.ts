@@ -39,7 +39,7 @@ export {
   type TtlHours,
 } from "./limits";
 export { PASSWORD_ALPHABET, PASSWORD_LEN, generatePassword, type GeneratedPassword } from "./crypto/password";
-export { manageLink, parseLink, shareLink, type ParsedLink } from "./transfer/link";
+export { MANAGE_FRAGMENT, SHARE_FRAGMENT, SHARE_LINK_SHAPE, manageLink, parseLink, shareLink, type ParsedLink } from "./transfer/link";
 export { PASSPHRASE_MIN_WORDS, PW_MIN_CHARS, checkPassword, generatePassphrase, type PwCheck } from "./crypto/passphrase";
 export type { Item, Manifest, ManifestEntry, ManifestV2 } from "./crypto/container";
 export type { KAcces, KLien, KPreuve, SGestion } from "./crypto/types";

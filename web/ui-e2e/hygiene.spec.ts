@@ -3,7 +3,6 @@
 import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
 
-const ID = Buffer.from(Uint8Array.from({ length: 16 }, (_, i) => i * 7 + 1)).toString("base64url");
 const KEY = Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => 255 - i * 3)).toString("base64url");
 const KEY2 = Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => i * 5)).toString("base64url");
 
@@ -19,38 +18,57 @@ function apiRequests(page: Page): string[] {
   return urls;
 }
 
+/** Toutes les requêtes de la page, en-têtes compris : aucune ne doit porter la clé (spec §32). */
+function allRequests(page: Page): string[] {
+  const seen: string[] = [];
+  page.on("request", (r) => {
+    seen.push(`${r.method()} ${r.url()} ${JSON.stringify(r.headers())} ${r.postData() ?? ""}`);
+  });
+  return seen;
+}
+
 test.use({ locale: "fr-FR" });
 
 const hash = (page: Page) => page.evaluate(() => location.hash);
 
-for (const kind of ["s", "m"] as const) {
-  test(`/${kind}/ : le # est retiré de l'adresse et de l'historique`, async ({ page, shh }) => {
+// Spec §32 : lien court à la racine, « /#<clé> » (partage) ou « /#m<clé> » (gestion).
+for (const [kind, frag] of [
+  ["partage", `#${KEY}`],
+  ["gestion", `#m${KEY}`],
+] as const) {
+  test(`/${frag.slice(0, 2)}… (${kind}) : le # est retiré de l'adresse et de l'historique, jamais envoyé`, async ({ page, shh }) => {
     const api = apiRequests(page);
-    await page.goto(`${shh.origin}/${kind}/${ID}#${KEY}`);
+    const all = allRequests(page);
+    await page.goto(`${shh.origin}/${frag}`);
     await expect.poll(() => hash(page)).toBe("");
-    expect(page.url()).toBe(`${shh.origin}/${kind}/${ID}`);
+    expect(page.url()).toBe(`${shh.origin}/`);
 
     // Retour / Avant : aucune entrée d'historique ne réaffiche le #.
     await page.getByRole("link", { name: "Sécurité", exact: true }).click();
     await expect(page).toHaveURL(`${shh.origin}/securite`);
     await page.goBack();
-    await expect(page).toHaveURL(`${shh.origin}/${kind}/${ID}`);
+    await expect(page).toHaveURL(`${shh.origin}/`);
     expect(await hash(page)).toBe("");
     await page.goForward();
     await page.goBack();
     expect(page.url()).not.toContain("#");
     // Rechargement : rien ne revient.
     await page.reload();
-    expect(page.url()).toBe(`${shh.origin}/${kind}/${ID}`);
+    expect(page.url()).toBe(`${shh.origin}/`);
     expect(await page.content()).not.toContain(KEY);
     expect(api).toEqual([]);
+    // La partie après « # » n'est jamais envoyée au serveur (adresse, en-têtes, corps).
+    expect(all.length).toBeGreaterThan(0);
+    for (const r of all) expect(r).not.toContain(KEY);
   });
 }
 
 test("# collé dans la barre sur la même page (navigation de fragment) : retiré aussi", async ({ page, shh }) => {
-  await page.goto(`${shh.origin}/s/${ID}#${KEY}`);
+  await page.goto(`${shh.origin}/#${KEY}`);
   await expect.poll(() => hash(page)).toBe("");
   await page.evaluate((k) => (location.hash = k), KEY2);
+  await expect.poll(() => hash(page)).toBe("");
+  await page.evaluate((k) => (location.hash = `m${k}`), KEY2);
   await expect.poll(() => hash(page)).toBe("");
   await page.goBack();
   expect(page.url()).not.toContain("#");
@@ -61,7 +79,7 @@ test.describe("navigateur intégré (Instagram)", () => {
 
   test("le # est gardé (pour « Ouvrir dans le navigateur »), aucune requête /api/", async ({ page, shh }) => {
     const api = apiRequests(page);
-    await page.goto(`${shh.origin}/s/${ID}#${KEY}`);
+    await page.goto(`${shh.origin}/#${KEY}`);
     await expect(page.locator("main#contenu")).toBeVisible();
     await page.evaluate(() => new Promise((r) => setTimeout(r, 300)));
     expect(await hash(page)).toBe(`#${KEY}`);
@@ -78,7 +96,7 @@ test.describe("navigateur sans crypto.subtle", () => {
 
   test("« non pris en charge », aucune route ne démarre, aucune requête /api/", async ({ page, shh }) => {
     const api = apiRequests(page);
-    await page.goto(`${shh.origin}/s/${ID}#${KEY}`);
+    await page.goto(`${shh.origin}/#${KEY}`);
     await expect(
       page.getByRole("heading", { name: "Ce navigateur ne permet pas de chiffrer en sécurité.", exact: false }),
     ).toBeVisible();
@@ -118,11 +136,20 @@ test("fichier déposé sur /s/x : défaut empêché, l'adresse ne change pas", a
   expect(page.url()).toBe(url);
 });
 
-// I1 : liens abîmés (barre oblique ou ponctuation ajoutées par une messagerie, majuscule,
-// adresse hors route) : le routeur les classe en 404, le « # » est retiré quand même.
-for (const path of [`/s/${ID}/`, `/s/${ID})`, `/S/${ID}`, "/", "/inconnu"]) {
-  test(`${path}#<clé> : le # est retiré sur toute route, Retour ne le rend pas`, async ({ page, shh }) => {
-    await page.goto(`${shh.origin}${path}#${KEY}`);
+// I1 : liens abîmés (ponctuation ajoutée par une messagerie, autre chemin, ancien format
+// /s/{id}, majuscule) : le routeur les classe en accueil ou en 404, le « # » est retiré quand même.
+for (const [what, path, frag] of [
+  ["point collé", "/", `#${KEY}.`],
+  ["parenthèse collée", "/", `#${KEY})`],
+  ["clé tronquée", "/", `#${KEY.slice(1)}`],
+  ["préfixe M majuscule", "/", `#M${KEY}`],
+  ["ancien format /s/{id}", "/s/AAAAAAAAAAAAAAAAAAAAAA", `#${KEY}`],
+  ["/S/ majuscule", "/S/x", `#${KEY}`],
+  ["route inconnue", "/inconnu", `#${KEY}`],
+  ["page fixe", "/securite", `#${KEY}`],
+] as const) {
+  test(`${path}#… (${what}) : le # est retiré sur toute route, Retour ne le rend pas`, async ({ page, shh }) => {
+    await page.goto(`${shh.origin}${path}${frag}`);
     await expect.poll(() => hash(page)).toBe("");
     expect(page.url()).toBe(`${shh.origin}${path}`);
     await page.getByRole("link", { name: "Sécurité", exact: true }).click();
@@ -133,38 +160,37 @@ for (const path of [`/s/${ID}/`, `/s/${ID})`, `/S/${ID}`, "/", "/inconnu"]) {
   });
 }
 
-// Dernier segment avec un point (« /s/{id}.#clé », ponctuation collée par une messagerie) :
-// le serveur sert index.html sous /s/ et /m/ (static.go), l'application retire le « # ».
-test("/s/<id>.#<clé> : servi par l'application, le # est retiré, Retour ne le rend pas", async ({ page, shh }) => {
-  const res = await page.goto(`${shh.origin}/s/${ID}.#${KEY}`);
+// Spec §32 : X-Robots-Tag et le repli particulier de /s/ et /m/ ont disparu.
+test("/ : pas de X-Robots-Tag ; /s/<id>. (ancien lien abîmé) → 404 du serveur", async ({ page, shh }) => {
+  const res = await page.goto(`${shh.origin}/#${KEY}`);
   expect(res?.status()).toBe(200);
-  expect(res?.headers()["x-robots-tag"]).toBe("noindex");
-  await expect.poll(() => hash(page)).toBe("");
-  expect(page.url()).toBe(`${shh.origin}/s/${ID}.`);
-  await page.getByRole("link", { name: "Sécurité", exact: true }).click();
-  await expect(page).toHaveURL(`${shh.origin}/securite`);
-  await page.goBack();
-  await expect(page).toHaveURL(`${shh.origin}/s/${ID}.`);
-  expect(await hash(page)).toBe("");
+  expect(res?.headers()["x-robots-tag"]).toBeUndefined();
+  const old = await page.request.get(`${shh.origin}/s/AAAAAAAAAAAAAAAAAAAAAA.`);
+  expect(old.status()).toBe(404);
 });
 
 // I2 : paramètre de suivi ajouté par l'application (Facebook, Messenger, Instagram).
-test("/s/<id>?fbclid=x#<clé> : requête et # retirés, adresse = chemin nu", async ({ page, shh }) => {
+test("/?fbclid=x#<clé> : requête et # retirés, adresse = chemin nu", async ({ page, shh }) => {
   const api = apiRequests(page);
-  await page.goto(`${shh.origin}/s/${ID}?fbclid=x#${KEY}`);
-  await expect.poll(() => page.url()).toBe(`${shh.origin}/s/${ID}`);
+  await page.goto(`${shh.origin}/?fbclid=x#${KEY}`);
+  await expect.poll(() => page.url()).toBe(`${shh.origin}/`);
   expect(api).toEqual([]);
 });
 
 test.describe("navigateur intégré (Facebook) avec ?fbclid=", () => {
   test.use({ userAgent: INSTAGRAM.replace(/Instagram .*$/, "[FBAN/FBIOS;FBDV/iPhone15,3;FBMD/iPhone;FBSN/iOS;FBSV/17.1]") });
 
-  test("rien n'est retiré (S4), même sur une route 404", async ({ page, shh }) => {
-    for (const path of [`/s/${ID}?fbclid=x`, `/s/${ID}/`]) {
-      await page.goto(`${shh.origin}${path}#${KEY}`);
+  test("rien n'est retiré (S4), même avec un fragment invalide ou sur une route 404", async ({ page, shh }) => {
+    for (const [path, frag] of [
+      ["/?fbclid=x", `#${KEY}`],
+      ["/?fbclid=x", `#m${KEY}`],
+      ["/", `#${KEY}.`],
+      ["/inconnu", `#${KEY}`],
+    ] as const) {
+      await page.goto(`${shh.origin}${path}${frag}`);
       await expect(page.locator("main#contenu")).toBeVisible();
       await page.evaluate(() => new Promise((r) => setTimeout(r, 300)));
-      expect(page.url()).toBe(`${shh.origin}${path}#${KEY}`);
+      expect(page.url()).toBe(`${shh.origin}${path}${frag}`);
     }
   });
 });

@@ -1,6 +1,7 @@
 // Couche HTTP du client (contrat : server/internal/api). Les secrets passent en en-tête
 // (X-Shh-Access, X-Shh-Manage) ou dans le corps, en base64url sans bourrage, jamais dans
-// l'URL. `fetch` est injectable (tests : capture des requêtes, coupures simulées).
+// l'URL. Aucun chemin ne porte d'identifiant (spec §29.8, §32) : le partage est désigné par
+// un jeton signé du serveur, par K_accès ou par S_gestion ; l'id dérivé du lien ne sort pas. `fetch` est injectable (tests : capture des requêtes, coupures simulées).
 // Les secrets ont des types marqués (crypto/types) : K_lien ne peut pas être envoyé (audit M1).
 // Module interne : l'interface publique est src/index.ts, sans ce module.
 import { b64u, unb64u } from "../crypto/encoding";
@@ -170,7 +171,6 @@ const readJSON = async (r: Response) => {
 const none = async (r: Response) => {
   await r.arrayBuffer();
 };
-const enc = encodeURIComponent;
 
 export type Captcha = {
   /** Défi transmis à solveCaptcha (réponse du serveur sans shown_at ni fallback). */
@@ -225,19 +225,27 @@ export async function captcha(c: Ctx): Promise<Captcha> {
   return { challenge, shownAt: shown_at, salt, fallbackOrigin: originOrNull(fallback), expiresAt: receivedAt + validMs, receivedAt };
 }
 
-/** Création (spec §29.8) : ni durée, ni ouvertures, ni sel, ni V_preuve à ce stade. */
+/** Création (spec §29.8) : ni id, ni durée, ni ouvertures, ni sel, ni V_preuve à ce stade. */
 export type CreateBody = {
-  id: string;
   bucket: number;
-  access_v: string;
-  manage_v: string;
   hp: string;
   shown_at: string;
 } & ({ altcha: string } | { recaptcha: string; captcha_salt: string });
 
-/** Réponse 201 : jeton d'envoi et nombre de segments du palier. 409 : id déjà pris. */
-export async function create(c: Ctx, b: CreateBody): Promise<{ uploadToken: string; segments: number }> {
-  const o = await send(c, { method: "POST", path: "/api/shares", ...json(b) }, readJSON);
+/**
+ * Réponse 201 : jeton d'envoi et nombre de segments du palier. K_accès et S_gestion passent en
+ * en-tête : le serveur en tire V_accès et V_gestion, clés de recherche du partage (index
+ * uniques) ; 400 si l'un d'eux existe déjà (même lien deux fois).
+ */
+export async function create(
+  c: Ctx,
+  kAcces: KAcces,
+  sGestion: SGestion,
+  b: CreateBody,
+): Promise<{ uploadToken: string; segments: number }> {
+  const q: Req = { method: "POST", path: "/api/shares", ...json(b) };
+  q.headers = { ...q.headers, "X-Shh-Access": b64u(kAcces), "X-Shh-Manage": b64u(sGestion) };
+  const o = await send(c, q, readJSON);
   return { uploadToken: str(o, "upload_token"), segments: num(o, "segments") };
 }
 
@@ -249,7 +257,6 @@ const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
  */
 export async function putSegment(
   c: Ctx,
-  id: string,
   token: string,
   n: number,
   data: Uint8Array<ArrayBuffer>,
@@ -257,7 +264,7 @@ export async function putSegment(
   signal?: AbortSignal,
 ): Promise<void> {
   const headers = { ...bearer(token), "Content-Type": "application/octet-stream" };
-  const r = await c.upload(`${c.origin}/api/shares/${enc(id)}/segments/${n}`, headers, data, onBytes, signal);
+  const r = await c.upload(`${c.origin}/api/shares/segments/${n}`, headers, data, onBytes, signal);
   if (r.status < 200 || r.status > 299) throw httpErrorOf(r.status, r.json);
 }
 
@@ -275,8 +282,8 @@ export type FinalizeBody = {
 };
 
 /** Un seul essai (le budget de coupure de createShare réessaie). */
-export async function finalize(c: Ctx, id: string, token: string, b: FinalizeBody, signal?: AbortSignal): Promise<number> {
-  const q: Req = { method: "POST", path: `/api/shares/${enc(id)}/finalize`, ...json(b), signal };
+export async function finalize(c: Ctx, token: string, b: FinalizeBody, signal?: AbortSignal): Promise<number> {
+  const q: Req = { method: "POST", path: "/api/shares/finalize", ...json(b), signal };
   q.headers = { ...q.headers, ...bearer(token) };
   const o = await send(c, q, readJSON);
   return num(o, "expires_in_s");
@@ -284,10 +291,10 @@ export async function finalize(c: Ctx, id: string, token: string, b: FinalizeBod
 
 export type Meta = { expiresInS: number; salt: string; kdf: { ops: number; mem: number }; bucket: number; segments: number };
 
-export async function meta(c: Ctx, id: string, kAcces: KAcces): Promise<Meta> {
+export async function meta(c: Ctx, kAcces: KAcces): Promise<Meta> {
   const o = await send(
     c,
-    { method: "GET", path: `/api/shares/${enc(id)}/meta`, headers: { "X-Shh-Access": b64u(kAcces) }, retry: true },
+    { method: "GET", path: "/api/shares/meta", headers: { "X-Shh-Access": b64u(kAcces) }, retry: true },
     readJSON,
   );
   const k = obj(o.kdf);
@@ -316,7 +323,6 @@ function envelopeOf(o: Record<string, unknown>): Uint8Array<ArrayBuffer> {
 // Jamais rejoué : un déverrouillage réussi consomme une ouverture, un échec compte un essai.
 export async function unlock(
   c: Ctx,
-  id: string,
   kAcces: KAcces,
   kPreuve: KPreuve,
 ): Promise<{ downloadToken: string; segments: number; envelope: Uint8Array<ArrayBuffer> }> {
@@ -324,7 +330,7 @@ export async function unlock(
     c,
     {
       method: "POST",
-      path: `/api/shares/${enc(id)}/unlock`,
+      path: "/api/shares/unlock",
       ...json({ proof: b64u(kPreuve) }),
       headers: { "Content-Type": "application/json", "X-Shh-Access": b64u(kAcces) },
     },
@@ -333,33 +339,35 @@ export async function unlock(
   return { downloadToken: str(o, "download_token"), segments: num(o, "segments"), envelope: envelopeOf(o) };
 }
 
-export async function getSegment(c: Ctx, id: string, token: string, n: number, size: number): Promise<Uint8Array<ArrayBuffer>> {
-  return send(c, { method: "GET", path: `/api/shares/${enc(id)}/segments/${n}`, headers: bearer(token), retry: true }, async (r) => {
+export async function getSegment(c: Ctx, token: string, n: number, size: number): Promise<Uint8Array<ArrayBuffer>> {
+  return send(c, { method: "GET", path: `/api/shares/segments/${n}`, headers: bearer(token), retry: true }, async (r) => {
     const b = new Uint8Array(await r.arrayBuffer());
     if (b.length !== size) throw new BadResponse(); // rejoué
     return b;
   });
 }
 
-export async function done(c: Ctx, id: string, token: string): Promise<void> {
+export async function done(c: Ctx, token: string): Promise<void> {
   // Rejouable : done_mask |= bit de l'ouverture. keepalive : envoyé même si la page se ferme.
-  await send(c, { method: "POST", path: `/api/shares/${enc(id)}/done`, headers: bearer(token), retry: true, keepalive: true }, none);
+  await send(c, { method: "POST", path: "/api/shares/done", headers: bearer(token), retry: true, keepalive: true }, none);
 }
 
 export type DestroyAuth = { kAcces: KAcces; kPreuve: KPreuve } | { sGestion: SGestion };
 
 /**
- * reason "report" : signalement (le serveur ne conserve pas le motif). keepalive : la
- * requête survit à la fermeture de la page (annulation d'un envoi, `pagehide`).
+ * Destinataire (K_accès + K_preuve) : POST /api/shares/destroy, reason "report" pour un
+ * signalement (le serveur ne conserve pas le motif). Expéditeur (S_gestion) : POST
+ * /api/manage/destroy, S_gestion en en-tête, corps vide (spec §32). keepalive : la requête
+ * survit à la fermeture de la page (annulation d'un envoi, `pagehide`).
  */
-export async function destroy(c: Ctx, id: string, a: DestroyAuth, reason?: "report", keepalive?: boolean): Promise<void> {
+export async function destroy(c: Ctx, a: DestroyAuth, reason?: "report", keepalive?: boolean): Promise<void> {
   const r = reason === undefined ? {} : { reason };
   const q: Req =
     "sGestion" in a
-      ? { method: "POST", path: `/api/shares/${enc(id)}/destroy`, ...json({ manage: b64u(a.sGestion), ...r }), keepalive }
+      ? { method: "POST", path: "/api/manage/destroy", headers: { "X-Shh-Manage": b64u(a.sGestion) }, keepalive }
       : {
           method: "POST",
-          path: `/api/shares/${enc(id)}/destroy`,
+          path: "/api/shares/destroy",
           body: JSON.stringify({ proof: b64u(a.kPreuve), ...r }),
           headers: { "Content-Type": "application/json", "X-Shh-Access": b64u(a.kAcces) },
         };
@@ -368,10 +376,10 @@ export async function destroy(c: Ctx, id: string, a: DestroyAuth, reason?: "repo
 
 export type Status = { opensUsed: number; maxOpens: number; expiresInS: number; state: string };
 
-export async function status(c: Ctx, id: string, sGestion: SGestion): Promise<Status> {
+export async function status(c: Ctx, sGestion: SGestion): Promise<Status> {
   const o = await send(
     c,
-    { method: "GET", path: `/api/shares/${enc(id)}/status`, headers: { "X-Shh-Manage": b64u(sGestion) }, retry: true },
+    { method: "GET", path: "/api/manage/status", headers: { "X-Shh-Manage": b64u(sGestion) }, retry: true },
     readJSON,
   );
   return { opensUsed: num(o, "opens_used"), maxOpens: num(o, "max_opens"), expiresInS: num(o, "expires_in_s"), state: str(o, "state") };

@@ -2,11 +2,12 @@ package main
 
 import (
 	"bufio"
+	"crypto/hkdf"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +29,7 @@ const maxStdinLink = 4096
 func runAdmin(args []string, cfg config.Config, stdin io.Reader, stdout, stderr io.Writer) int {
 	usage := func(msg string) int {
 		fmt.Fprintln(stderr, msg)
-		fmt.Fprintln(stderr, "usage: shhdrop admin freeze|unfreeze|destroy <id ou lien sans #…>|destroy -|wipe --yes")
+		fmt.Fprintln(stderr, "usage: shhdrop admin freeze|unfreeze|destroy - (lien lu sur l'entrée standard)|wipe --yes")
 		return 2
 	}
 	fail := func(err error) int {
@@ -44,8 +45,10 @@ func runAdmin(args []string, cfg config.Config, stdin io.Reader, stdout, stderr 
 			return usage(args[0] + " n'a pas d'argument")
 		}
 	case "destroy":
-		if len(args) != 2 {
-			return usage("destroy attend un identifiant, un lien, ou « - » (lien lu sur l'entrée standard)")
+		if len(args) != 2 || args[1] != "-" {
+			// Spec §32 : le lien ne contient plus que la clé (après #) ; en argument, elle irait
+			// dans l'historique du shell et dans /proc/<pid>/cmdline (audit F11).
+			return usage("destroy lit le lien signalé sur l'entrée standard : shhdrop admin destroy -")
 		}
 	case "wipe":
 		if len(args) != 2 || args[1] != "--yes" {
@@ -55,24 +58,16 @@ func runAdmin(args []string, cfg config.Config, stdin io.Reader, stdout, stderr 
 		return usage("commande admin inconnue")
 	}
 
-	// destroy : l'identifiant est lu avant d'ouvrir quoi que ce soit.
-	var id string
+	// destroy : le lien est lu avant d'ouvrir quoi que ce soit ; seule K_accès en est gardée.
+	var kAcces []byte
 	if args[0] == "destroy" {
-		arg := args[1]
-		if arg == "-" {
-			var err error
-			if arg, err = readLink(stdin); err != nil {
-				return usage(err.Error())
-			}
-		} else if strings.Contains(arg, "#") {
-			// Audit F11 : la clé (après #) est dans argv, donc dans l'historique du shell.
-			fmt.Fprintln(stderr, "attention : l'argument contient la clé du lien (partie après #) ; elle est "+
-				"maintenant dans l'historique du shell et visible des autres processus. "+
-				"Retirer la partie après #, ou passer le lien sur l'entrée standard : shhdrop admin destroy -")
+		link, err := readLink(stdin)
+		if err != nil {
+			return usage(err.Error())
 		}
 		var ok bool
-		if id, ok = extractID(arg); !ok {
-			return usage("identifiant invalide")
+		if kAcces, ok = accessKeyOf(link); !ok {
+			return usage("lien invalide (attendu : https://…/#<clé de 43 caractères>)")
 		}
 	}
 
@@ -103,7 +98,7 @@ func runAdmin(args []string, cfg config.Config, stdin io.Reader, stdout, stderr 
 		}
 		fmt.Fprintf(stdout, "créations rétablies (%s)\n", dir)
 	case "destroy":
-		if err := svc.DestroyAdmin(id); err != nil {
+		if err := svc.DestroyAdmin(kAcces); err != nil {
 			if errors.Is(err, share.ErrNotFound) {
 				fmt.Fprintf(stderr, "introuvable (%s ; 0 partage détruit)\n", dir)
 				return 1
@@ -152,7 +147,7 @@ func adminDataDir(dir string) (string, error) {
 	return dir, nil
 }
 
-// readLink lit une seule ligne non vide (le lien ou l'identifiant) sur l'entrée standard.
+// readLink lit une seule ligne non vide (le lien) sur l'entrée standard.
 func readLink(r io.Reader) (string, error) {
 	b, err := io.ReadAll(io.LimitReader(r, maxStdinLink+1))
 	if err != nil {
@@ -169,7 +164,7 @@ func readLink(r io.Reader) (string, error) {
 		}
 	}
 	if len(lines) != 1 {
-		return "", errors.New("entrée standard : une seule ligne attendue (le lien ou l'identifiant)")
+		return "", errors.New("entrée standard : une seule ligne attendue (le lien)")
 	}
 	return lines[0], nil
 }
@@ -203,34 +198,19 @@ func openService(cfg config.Config, dir string) (*share.Service, func(), error) 
 	return svc, func() { db.Close() }, nil
 }
 
-// extractID accepte un identifiant brut ou un lien …/s/<id>#… ou …/m/<id>#… ;
-// le fragment (secret) est ignoré. Rend l'identifiant s'il a 22 caractères base64url.
-func extractID(arg string) (string, bool) {
-	id := arg
-	if strings.Contains(arg, "/") {
-		u, err := url.Parse(arg)
-		if err != nil {
-			return "", false
-		}
-		rest, ok := strings.CutPrefix(u.Path, "/s/")
-		if !ok {
-			rest, ok = strings.CutPrefix(u.Path, "/m/")
-		}
-		if !ok {
-			return "", false
-		}
-		id = rest
-	} else {
-		id, _, _ = strings.Cut(arg, "#")
+// accessKeyOf : K_accès = HKDF-SHA-256(K_lien, « shhdrop/v2/acces ») (spec §29.2), K_lien
+// étant les 43 caractères base64url après le « # » d'un lien de partage (spec §32), ou la
+// clé seule. Seule K_accès sert ensuite (DestroyAdmin cherche par V_accès) ; rien n'est écrit.
+func accessKeyOf(link string) ([]byte, bool) {
+	key := link
+	if i := strings.LastIndexByte(link, '#'); i >= 0 {
+		key = link[i+1:]
 	}
-	if len(id) != 22 {
-		return "", false
+	kLien, err := share.DecodeB64(key, 32)
+	if err != nil {
+		return nil, false
 	}
-	for i := 0; i < len(id); i++ {
-		c := id[i]
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
-			return "", false
-		}
-	}
-	return id, true
+	k, err := hkdf.Key(sha256.New, kLien, nil, "shhdrop/v2/acces", 32)
+	clear(kLien)
+	return k, err == nil
 }

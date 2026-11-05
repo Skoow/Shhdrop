@@ -8,6 +8,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// id : identifiant interne tiré par le serveur (share.NewID), jamais dérivé du lien ni montré
+// dans un chemin. Les partages se trouvent par access_v (destinataire) ou manage_v
+// (expéditeur), index uniques (spec §29.8, §32) : sans K_accès ni S_gestion, aucune
+// requête ne désigne un partage, et une création ne peut heurter qu'un vérificateur dont
+// l'auteur connaît le secret (aucun oracle d'existence, revue K1, I2).
 // WITHOUT ROWID : pas de compteur d'insertion qui trahirait l'ordre de création (spec §9.1).
 // Schéma v2 (spec §29.8) : ttl_hours, max_opens, salt, kdf_*, proof_v et envelope (E,
 // 60 octets) restent NULL jusqu'à finalize ; un partage « ready » les a tous (CHECK).
@@ -21,6 +26,10 @@ const schema = `CREATE TABLE IF NOT EXISTS shares(
   upload_deadline INTEGER, expires_at INTEGER, purge_at INTEGER, progress_at INTEGER,
   CHECK(state='uploading' OR (ttl_hours IS NOT NULL AND max_opens IS NOT NULL AND salt IS NOT NULL AND
     kdf_ops IS NOT NULL AND kdf_mem IS NOT NULL AND proof_v IS NOT NULL AND envelope IS NOT NULL AND length(envelope)=60))) WITHOUT ROWID`
+
+// indexes : créés après le contrôle du format (une base v1 n'a pas les mêmes colonnes).
+const indexes = `CREATE UNIQUE INDEX IF NOT EXISTS shares_access_v ON shares(access_v);
+CREATE UNIQUE INDEX IF NOT EXISTS shares_manage_v ON shares(manage_v)`
 
 // Les PRAGMA passent par le DSN pour s'appliquer à chaque connexion.
 const pragmas = "_pragma=journal_mode(WAL)&_pragma=secure_delete(ON)" +
@@ -71,6 +80,10 @@ func Open(path string) (*sql.DB, error) {
 	if has == 0 {
 		db.Close()
 		return nil, fmt.Errorf("base au format v1 (sans colonne envelope) : à effacer avant de démarrer le serveur v2")
+	}
+	if _, err := db.Exec(indexes); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("création des index : %w", err)
 	}
 	return db, nil
 }

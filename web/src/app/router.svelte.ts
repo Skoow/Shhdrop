@@ -1,12 +1,13 @@
-// Routeur interne (UI §9). Il ne lit que le chemin : jamais le « # » (clé du lien) ni la requête.
+// Routeur interne (UI §9). Il lit le chemin et, à la racine seulement, la FORME du « # »
+// (spec §32 : « #<43> » partage, « #m<43> » gestion) sans jamais en garder le contenu : la
+// clé est lue une fois par readLink (app/link.ts), puis retirée de l'adresse.
+import { MANAGE_FRAGMENT, SHARE_FRAGMENT } from "../index";
+
 export type Route = {
   name: "home" | "open" | "manage" | "securite" | "confidentialite" | "notfound";
-  id?: string;
 };
 
-const ID = /^[A-Za-z0-9_-]+$/;
-
-export function match(pathname: string, base: string = import.meta.env.BASE_URL): Route {
+export function match(pathname: string, hash = "", base: string = import.meta.env.BASE_URL): Route {
   const prefix = base.endsWith("/") ? base.slice(0, -1) : base; // "" ou "/Shhdrop"
   let p = pathname;
   if (prefix !== "") {
@@ -14,25 +15,26 @@ export function match(pathname: string, base: string = import.meta.env.BASE_URL)
     else if (p.startsWith(prefix + "/")) p = p.slice(prefix.length);
     else return { name: "notfound" };
   }
-  if (p === "/") return { name: "home" };
+  if (p === "/") {
+    if (SHARE_FRAGMENT.test(hash)) return { name: "open" };
+    if (MANAGE_FRAGMENT.test(hash)) return { name: "manage" };
+    return { name: "home" };
+  }
   if (p === "/securite") return { name: "securite" };
   if (p === "/confidentialite") return { name: "confidentialite" };
-  const parts = p.split("/"); // ["", "s", id]
-  if (parts.length === 3 && parts[0] === "" && (parts[1] === "s" || parts[1] === "m") && ID.test(parts[2]!))
-    return { name: parts[1] === "s" ? "open" : "manage", id: parts[2]! };
+  // « /s/ » reste réservé aux futurs liens universels (spec §16) : aucune route aujourd'hui.
   return { name: "notfound" };
 }
 
 export const router = $state<{ current: Route }>({
-  current: typeof location === "undefined" ? { name: "home" } : match(location.pathname),
+  current: typeof location === "undefined" ? { name: "home" } : match(location.pathname, location.hash),
 });
 
-// Ne réaffecte que si la route change (nom ou identifiant) : un popstate sans effet
-// (changement de « # », lien vers la page courante) ne relance ni les effets ni le focus.
+// Ne réaffecte que si la route change : un popstate sans effet (lien vers la page courante,
+// « # » retiré) ne relance ni les effets ni le focus.
 function sync(): void {
-  const next = match(location.pathname);
-  const cur = router.current;
-  if (next.name !== cur.name || next.id !== cur.id) router.current = next;
+  const next = match(location.pathname, location.hash);
+  if (next.name !== router.current.name) router.current = next;
 }
 
 if (typeof window !== "undefined") window.addEventListener("popstate", sync);

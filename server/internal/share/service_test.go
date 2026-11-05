@@ -199,7 +199,7 @@ func TestFullFlow(t *testing.T) {
 	if err != nil || exp != 73*time.Minute {
 		t.Fatal(exp, err)
 	}
-	m, err := s.Meta(id, k.acces)
+	m, err := s.Meta(k.acces)
 	if err != nil || m.Bucket != 1600 || m.Segments != 25 || m.KdfOps != 3 || m.KdfMem != 67108864 ||
 		len(m.Salt) != 16 || m.ExpiresIn != 73*time.Minute {
 		t.Fatalf("%+v %v", m, err)
@@ -214,7 +214,7 @@ func TestFullFlow(t *testing.T) {
 			t.Fatal("lecture", n, err)
 		}
 	}
-	st, err := s.Status(id, k.gestion)
+	st, err := s.Status(k.gestion)
 	if err != nil || st.State != "draining" || st.OpensUsed != 1 || st.MaxOpens != 1 {
 		t.Fatalf("%+v %v", st, err)
 	}
@@ -289,7 +289,7 @@ func TestPutSegmentRules(t *testing.T) {
 		t.Fatal("après finalize", err)
 	}
 	// envoi abandonné : délai de 3 h arrondi au quart d'heure (10:02 → 13:15)
-	id2, _, _ := s.Create(k.req(1, 1, 1))
+	id2, _, _ := s.Create(newKeys().req(1, 1, 1))
 	c.Add(3*time.Hour + 12*time.Minute) // 13:14 : encore accepté
 	if err := s.PutSegment(id2, 0, segBody(1, 0, 1)); err != nil {
 		t.Fatal("avant délai", err)
@@ -327,7 +327,7 @@ func TestWrongAccessKey(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
 	id := ready(t, s, k, 1, 1, 1)
-	if _, err := s.Meta(id, rnd(32)); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Meta(rnd(32)); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	if _, _, err := s.Unlock(id, rnd(32), k.preuve); !errors.Is(err, ErrNotFound) {
@@ -341,8 +341,9 @@ func TestWrongAccessKey(t *testing.T) {
 	if fa != 0 {
 		t.Fatal("failed_attempts", fa)
 	}
-	if _, err := s.Meta("AAAAAAAAAAAAAAAAAAAAAA", k.acces); !errors.Is(err, ErrNotFound) {
-		t.Fatal(err)
+	// La bonne K_accès trouve le partage, sans aucun id (spec §29.8).
+	if m, err := s.Meta(k.acces); err != nil || m.ID != id {
+		t.Fatal(m.ID, err)
 	}
 }
 
@@ -425,7 +426,7 @@ func TestParallelCorrectUnlock(t *testing.T) {
 	if len(got) != 3 || !got[1] || !got[2] || !got[3] {
 		t.Fatal(got)
 	}
-	st, _ := s.Status(id, k.gestion)
+	st, _ := s.Status(k.gestion)
 	if st.State != "draining" || st.OpensUsed != 3 {
 		t.Fatalf("%+v", st)
 	}
@@ -476,15 +477,16 @@ func TestPurgeAt(t *testing.T) {
 	if want := time.Date(2026, 11, 4, 11, 15, 0, 0, time.UTC).Unix(); purge != want {
 		t.Fatal("purge_at = min(now+3h, expires_at)", time.Unix(purge, 0).UTC())
 	}
-	id2 := ready(t, s, k, 1, 24, 1)
-	s.Unlock(id2, k.acces, k.preuve) // 10:52 + 3 h = 13:52, arrondi au quart d'heure supérieur
+	k2, k3 := newKeys(), newKeys()
+	id2 := ready(t, s, k2, 1, 24, 1)
+	s.Unlock(id2, k2.acces, k2.preuve) // 10:52 + 3 h = 13:52, arrondi au quart d'heure supérieur
 	s.DB.QueryRow("SELECT purge_at FROM shares WHERE id=?", id2).Scan(&purge)
 	if want := time.Date(2026, 11, 4, 14, 0, 0, 0, time.UTC).Unix(); purge != want {
 		t.Fatal("purge_at = ceil15(now+3h)", time.Unix(purge, 0).UTC())
 	}
-	id3 := ready(t, s, k, 1, 6, 1) // expires_at = ceil15(10:52 + 6 h) = 17:00
-	c.Add(5 * time.Hour)           // 15:52 : now + 3 h dépasse expires_at
-	s.Unlock(id3, k.acces, k.preuve)
+	id3 := ready(t, s, k3, 1, 6, 1) // expires_at = ceil15(10:52 + 6 h) = 17:00
+	c.Add(5 * time.Hour)            // 15:52 : now + 3 h dépasse expires_at
+	s.Unlock(id3, k3.acces, k3.preuve)
 	s.DB.QueryRow("SELECT purge_at FROM shares WHERE id=?", id3).Scan(&purge)
 	if want := time.Date(2026, 11, 4, 17, 0, 0, 0, time.UTC).Unix(); purge != want {
 		t.Fatal("purge_at plafonné à expires_at", time.Unix(purge, 0).UTC())
@@ -558,7 +560,7 @@ func TestSweepEmptyUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, _, err := s.Create(k.req(16, 1, 1))
+	started, _, err := s.Create(newKeys().req(16, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -617,7 +619,7 @@ func TestReadAfterExpiry(t *testing.T) {
 	if _, err := readSegment(s, id, 0, 1); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := s.Meta(id, k.acces); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Meta(k.acces); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	if _, _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
@@ -632,7 +634,7 @@ func TestReadUploading(t *testing.T) {
 	if _, err := readSegment(s, id, 0, 1); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := s.Meta(id, k.acces); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Meta(k.acces); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 }
@@ -641,27 +643,27 @@ func TestDestroy(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
 	id := ready(t, s, k, 1, 1, 1)
-	if err := s.Destroy(id, nil, nil, rnd(32)); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyManaged(rnd(32)); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	if err := s.Destroy(id, k.acces, rnd(32), nil); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyWithProof(k.acces, rnd(32)); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	if err := s.Destroy(id, rnd(32), k.preuve, nil); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyWithProof(rnd(32), k.preuve); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	if rowCount(t, s, id) != 1 {
 		t.Fatal("détruit à tort")
 	}
-	if err := s.Destroy(id, nil, nil, k.gestion); err != nil {
+	if err := s.DestroyManaged(k.gestion); err != nil {
 		t.Fatal(err)
 	}
 	gone(t, s, id)
-	if err := s.Destroy(id, nil, nil, k.gestion); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyManaged(k.gestion); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	id2 := ready(t, s, k, 1, 1, 1)
-	if err := s.Destroy(id2, k.acces, k.preuve, nil); err != nil {
+	if err := s.DestroyWithProof(k.acces, k.preuve); err != nil {
 		t.Fatal(err)
 	}
 	gone(t, s, id2)
@@ -671,15 +673,17 @@ func TestDestroyAdmin(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
 	id := ready(t, s, k, 1, 1, 1)
-	if err := s.DestroyAdmin(id); err != nil {
+	if err := s.DestroyAdmin(rnd(32)); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+	if err := s.DestroyAdmin(k.acces); err != nil {
 		t.Fatal(err)
 	}
 	gone(t, s, id)
-	if err := s.DestroyAdmin(id); !errors.Is(err, ErrNotFound) {
-		t.Fatal(err)
-	}
-	if err := s.DestroyAdmin("../../etc/passwd"); !errors.Is(err, ErrNotFound) {
-		t.Fatal(err)
+	for _, bad := range [][]byte{k.acces, nil, []byte("../../etc/passwd"), k.acces[:31]} {
+		if err := s.DestroyAdmin(bad); !errors.Is(err, ErrNotFound) {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -687,18 +691,18 @@ func TestStatus(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
 	id, _, _ := s.Create(k.req(1, 6, 4))
-	st, err := s.Status(id, k.gestion)
+	st, err := s.Status(k.gestion)
 	// v2 : les ouvertures ne sont connues qu'à la finalisation (spec §29.8).
 	if err != nil || st.State != "uploading" || st.MaxOpens != 0 || st.OpensUsed != 0 {
 		t.Fatalf("%+v %v", st, err)
 	}
-	if _, err := s.Status(id, rnd(32)); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Status(rnd(32)); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	s.PutSegment(id, 0, segBody(1, 0, 1))
 	s.Finalize(id, fin(id))
 	s.Unlock(id, k.acces, k.preuve)
-	st, err = s.Status(id, k.gestion)
+	st, err = s.Status(k.gestion)
 	if err != nil || st.State != "ready" || st.OpensUsed != 1 || st.MaxOpens != 4 || st.ExpiresIn != 6*time.Hour+13*time.Minute {
 		t.Fatalf("%+v %v", st, err)
 	}
@@ -706,32 +710,30 @@ func TestStatus(t *testing.T) {
 
 func TestCreateLimits(t *testing.T) {
 	s, _ := newSvc(t)
-	k := newKeys()
 	s.StorageMax = 2*(48+16*65552) + 48 + 65552
-	if _, _, err := s.Create(k.req(16, 1, 1)); err != nil {
+	if _, _, err := s.Create(newKeys().req(16, 1, 1)); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Create(k.req(16, 1, 1)); err != nil {
+	if _, _, err := s.Create(newKeys().req(16, 1, 1)); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Create(k.req(16, 1, 1)); !errors.Is(err, ErrFull) {
+	if _, _, err := s.Create(newKeys().req(16, 1, 1)); !errors.Is(err, ErrFull) {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Create(k.req(1, 1, 1)); err != nil {
+	if _, _, err := s.Create(newKeys().req(1, 1, 1)); err != nil {
 		t.Fatal("encore de la place pour un petit", err)
 	}
 	if err := os.WriteFile(s.FrozenFile, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	s.StorageMax = 1 << 40
-	if _, _, err := s.Create(k.req(1, 1, 1)); !errors.Is(err, ErrFrozen) {
+	if _, _, err := s.Create(newKeys().req(1, 1, 1)); !errors.Is(err, ErrFrozen) {
 		t.Fatal(err)
 	}
 }
 
 func TestParallelCreateFull(t *testing.T) {
 	s, _ := newSvc(t)
-	k := newKeys()
 	s.StorageMax = 3 * (48 + 16*65552)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -740,7 +742,7 @@ func TestParallelCreateFull(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, err := s.Create(k.req(16, 1, 1))
+			_, _, err := s.Create(newKeys().req(16, 1, 1))
 			mu.Lock()
 			defer mu.Unlock()
 			if err == nil {
@@ -777,7 +779,7 @@ func TestCreateValidation(t *testing.T) {
 		}
 	}
 	for _, b := range Buckets[:2] { // évite de réserver 100 Mio par cas
-		if _, _, err := s.Create(k.req(b, 1, 10)); err != nil {
+		if _, _, err := s.Create(newKeys().req(b, 1, 10)); err != nil {
 			t.Fatal(b, err)
 		}
 	}
@@ -834,10 +836,10 @@ func TestFinalizeValidation(t *testing.T) {
 func TestSweep(t *testing.T) {
 	s, c := newSvc(t)
 	k := newKeys()
-	abandoned, _, _ := s.Create(k.req(1, 1, 1))
-	expired := ready(t, s, k, 1, 1, 1)  // 11:15
-	long := ready(t, s, k, 1, 24, 2)    // 10:15 le lendemain
-	drained := ready(t, s, k, 1, 24, 1) // draining, purge à ceil15(10:02 + 3 h) = 13:15
+	abandoned, _, _ := s.Create(newKeys().req(1, 1, 1))
+	expired := ready(t, s, newKeys(), 1, 1, 1) // 11:15
+	long := ready(t, s, newKeys(), 1, 24, 2)   // 10:15 le lendemain
+	drained := ready(t, s, k, 1, 24, 1)        // draining, purge à ceil15(10:02 + 3 h) = 13:15
 	s.Unlock(drained, k.acces, k.preuve)
 	if n, err := s.Sweep(); err != nil || n != 0 {
 		t.Fatal(n, err)
@@ -893,7 +895,7 @@ func TestDestroyCountsAttempts(t *testing.T) {
 	k := newKeys()
 	id := ready(t, s, k, 1, 1, 1)
 	for i := 1; i <= 4; i++ {
-		if err := s.Destroy(id, k.acces, rnd(32), nil); !errors.Is(err, ErrNotFound) {
+		if err := s.DestroyWithProof(k.acces, rnd(32)); !errors.Is(err, ErrNotFound) {
 			t.Fatal(err)
 		}
 		if failed(t, s, id) != i {
@@ -901,15 +903,15 @@ func TestDestroyCountsAttempts(t *testing.T) {
 		}
 	}
 	// kAcces faux : ne compte pas.
-	s.Destroy(id, rnd(32), rnd(32), nil)
+	s.DestroyWithProof(rnd(32), rnd(32))
 	if failed(t, s, id) != 4 {
 		t.Fatal("kAcces faux compté")
 	}
-	if err := s.Destroy(id, k.acces, rnd(32), nil); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyWithProof(k.acces, rnd(32)); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	gone(t, s, id)
-	if err := s.Destroy(id, k.acces, rnd(32), nil); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyWithProof(k.acces, rnd(32)); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	if _, _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
@@ -922,9 +924,9 @@ func TestMixedAttemptsShareCounter(t *testing.T) {
 	k := newKeys()
 	id := ready(t, s, k, 1, 1, 1)
 	s.Unlock(id, k.acces, rnd(32))
-	s.Destroy(id, k.acces, rnd(32), nil)
+	s.DestroyWithProof(k.acces, rnd(32))
 	s.Unlock(id, k.acces, rnd(32))
-	s.Destroy(id, k.acces, rnd(32), nil)
+	s.DestroyWithProof(k.acces, rnd(32))
 	_, _, err := s.Unlock(id, k.acces, rnd(32))
 	var bp *BadPassword
 	if !errors.As(err, &bp) || bp.AttemptsLeft != 0 {
@@ -937,8 +939,8 @@ func TestSweepContinuesOnError(t *testing.T) {
 	s, c := newSvc(t)
 	k := newKeys()
 	a := ready(t, s, k, 1, 1, 1)
-	b := ready(t, s, k, 1, 1, 1)
-	d := ready(t, s, k, 1, 1, 1)
+	b := ready(t, s, newKeys(), 1, 1, 1)
+	d := ready(t, s, newKeys(), 1, 1, 1)
 	defer blocage(t, s, b)()
 	c.Add(2 * time.Hour)
 	n, err := s.Sweep()
@@ -963,7 +965,7 @@ func TestFailedDestructionRetried(t *testing.T) {
 	if failed(t, s, id) != 5 || rowCount(t, s, id) != 1 {
 		t.Fatal("la destruction aurait dû échouer")
 	}
-	if _, err := s.Meta(id, k.acces); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Meta(k.acces); !errors.Is(err, ErrNotFound) {
 		t.Fatal("Meta", err)
 	}
 	if _, err := readSegment(s, id, 0, 1); !errors.Is(err, ErrNotFound) {
@@ -1047,15 +1049,15 @@ func TestReadSegmentOpenN(t *testing.T) {
 // Destroy respecte l'expiration comme Status : 404 et aucun essai compté.
 func TestDestroyExpired(t *testing.T) {
 	s, c := newSvc(t)
-	k := newKeys()
+	k, ku := newKeys(), newKeys()
 	id := ready(t, s, k, 1, 1, 1)
-	up, _, _ := s.Create(k.req(1, 1, 1))
+	up, _, _ := s.Create(ku.req(1, 1, 1))
 	c.Add(3*time.Hour + 15*time.Minute) // 13:17 : partage expiré, envoi échu (13:15)
-	for _, x := range []string{id, up} {
-		if err := s.Destroy(x, k.acces, rnd(32), nil); !errors.Is(err, ErrNotFound) {
+	for x, k := range map[string]keys{id: k, up: ku} {
+		if err := s.DestroyWithProof(k.acces, rnd(32)); !errors.Is(err, ErrNotFound) {
 			t.Fatal(err)
 		}
-		if err := s.Destroy(x, nil, nil, k.gestion); !errors.Is(err, ErrNotFound) {
+		if err := s.DestroyManaged(k.gestion); !errors.Is(err, ErrNotFound) {
 			t.Fatal("gestion après expiration", err)
 		}
 		if failed(t, s, x) != 0 || rowCount(t, s, x) != 1 {

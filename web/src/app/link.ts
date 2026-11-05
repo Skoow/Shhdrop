@@ -1,6 +1,6 @@
 // Hygiène du lien (UI §12.1, spec §5.3) : le secret du « # » est lu une fois au démarrage de
 // la route, puis retiré de la barre d'adresse et de l'entrée d'historique.
-import { parseLink } from "../index";
+import { manageLink, parseLink, shareLink } from "../index";
 
 /**
  * Résultat de la lecture. `link` contient le secret : il est passé par valeur au flux
@@ -11,29 +11,19 @@ export type LinkState = { kind: "s" | "m"; link: string } | { kind: "incomplete"
 const INCOMPLETE: LinkState = Object.freeze({ kind: "incomplete" });
 
 /**
- * Lit le lien de l'adresse courante. La base de dépôt (démo, « /Shhdrop/ ») est retirée
- * avant `parseLink`, qui n'accepte que « /s/{id} » et « /m/{id} ». La requête est ignorée :
- * nos liens n'en portent jamais, mais les applications ajoutent des paramètres de suivi
- * (`?fbclid=…`) en gardant le fragment. Tout échec (pas de « # »,
- * clé ou identifiant mal formé, type différent de `expected`) donne « incomplet » : rien n'est levé.
+ * Lit le lien de l'adresse courante (spec §32 : `${base}#<clé>` ou `${base}#m<clé>`).
+ * `parseLink` exige le chemin de la base (« / », ou « /Shhdrop/ » en démo) et ignore la
+ * requête : nos liens n'en portent jamais, mais les applications ajoutent des paramètres de
+ * suivi (`?fbclid=…`) en gardant le fragment. Le lien rendu est remis à la racine de
+ * l'origine (`${origin}/#…`), la forme qu'attendent les fonctions du client. Tout échec (pas
+ * de « # », clé mal formée, autre chemin, type différent de `expected`) donne « incomplet » :
+ * rien n'est levé.
  */
 export function readLink(href: string, expected: "s" | "m", base: string = import.meta.env.BASE_URL): LinkState {
-  let u: URL;
   try {
-    u = new URL(href);
-  } catch {
-    return INCOMPLETE;
-  }
-  const prefix = base.endsWith("/") ? base.slice(0, -1) : base;
-  if (prefix !== "") {
-    if (!u.pathname.startsWith(prefix + "/")) return INCOMPLETE;
-    u.pathname = u.pathname.slice(prefix.length);
-  }
-  u.search = "";
-  try {
-    const p = parseLink(u.href);
+    const p = parseLink(href, base);
     if (p.kind !== expected) return INCOMPLETE;
-    return { kind: p.kind, link: u.href };
+    return { kind: p.kind, link: p.kind === "s" ? shareLink(p.origin, p.kLien) : manageLink(p.origin, p.sGestion) };
   } catch {
     return INCOMPLETE;
   }

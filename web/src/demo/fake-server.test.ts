@@ -39,7 +39,7 @@ function setup(opts: FakeServerOpts = {}) {
       body: Buffer.from(await copy.arrayBuffer()),
     });
     const r = await fake.handle(req);
-    statuses.push(`${req.method} ${new URL(req.url).pathname.replace(/[A-Za-z0-9_-]{22}/, "ID")} ${r.status}`);
+    statuses.push(`${req.method} ${new URL(req.url).pathname} ${r.status}`);
     return r;
   }) as typeof globalThis.fetch;
   return { fake, seen, statuses, net: { fetch, retryDelayMs: 1 } };
@@ -117,8 +117,8 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     await o.destroy("report");
     expect(fake.shares()).toBe(0);
     await o.done();
-    expect(statuses).toContain("POST /api/shares/ID/destroy 204");
-    expect(statuses.at(-1)).toBe("POST /api/shares/ID/done 404");
+    expect(statuses).toContain("POST /api/shares/destroy 204");
+    expect(statuses.at(-1)).toBe("POST /api/shares/done 404");
   });
 
   it("dernière ouverture lue (done) : le partage « draining » est effacé", async ({ expect }) => {
@@ -171,7 +171,7 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     }).catch((x: unknown) => x);
     expect((e as Error).name).toBe("AbortError");
     expect(during).toBe(1);
-    expect(statuses).toContain("POST /api/shares/ID/destroy 204");
+    expect(statuses).toContain("POST /api/manage/destroy 204");
     expect(fake.shares()).toBe(0);
   });
 
@@ -187,29 +187,23 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
       onRetry: (x) => retries.push(x.attempt),
     });
     expect(retries).toEqual([1]);
-    expect(statuses.filter((s) => s.startsWith("PUT"))).toEqual(["PUT /api/shares/ID/segments/0 204"]); // le premier essai a échoué sans réponse
+    expect(statuses.filter((s) => s.startsWith("PUT"))).toEqual(["PUT /api/shares/segments/0 204"]); // le premier essai a échoué sans réponse
     expect(fake.shares()).toBe(1);
     const o = await openShare(r.link, PW, ORIGIN, undefined, net);
     expect(o.manifest.items[0]!.text).toBe("x");
   });
 });
 
+// K_accès = 32 × 0x02, S_gestion = 32 × 0x04 (en-têtes de création, spec §29.8).
+const HDR = { "X-Shh-Access": b64u(new Uint8Array(32).fill(2)), "X-Shh-Manage": b64u(new Uint8Array(32).fill(4)) };
+
 describe("faux serveur de démo : requêtes brutes", () => {
   async function created(fake: ReturnType<typeof createFakeServer>, advance: () => void, bucket = 16) {
     const cap = (await (await fake.handle(new Request(`${ORIGIN}/api/captcha`))).json()) as Record<string, unknown>;
     expect(cap).toMatchObject({ fallback: null, algorithm: "SHA-256" });
     advance();
-    const v = async (n: number) => b64u(new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(32).fill(n))));
-    const body = {
-      id: b64u(crypto.getRandomValues(new Uint8Array(16))),
-      bucket,
-      access_v: await v(2),
-      manage_v: await v(4),
-      altcha: "demo",
-      hp: "",
-      shown_at: cap.shown_at,
-    };
-    const r = await fake.handle(new Request(`${ORIGIN}/api/shares`, { method: "POST", body: JSON.stringify(body) }));
+    const body = { bucket, altcha: "demo", hp: "", shown_at: cap.shown_at };
+    const r = await fake.handle(new Request(`${ORIGIN}/api/shares`, { method: "POST", headers: HDR, body: JSON.stringify(body) }));
     return { r, body };
   }
 
@@ -221,35 +215,43 @@ describe("faux serveur de démo : requêtes brutes", () => {
     const ok = await created(fake, () => (offset += 4000));
     expect(ok.r.status).toBe(201);
     expect(await ok.r.json()).toMatchObject({ segments: 1 });
-    const replay = await fake.handle(new Request(`${ORIGIN}/api/shares`, { method: "POST", body: JSON.stringify(ok.body) }));
+    const replay = await fake.handle(new Request(`${ORIGIN}/api/shares`, { method: "POST", headers: HDR, body: JSON.stringify(ok.body) }));
     expect(replay.status).toBe(400);
     expect(await replay.json()).toEqual({ error: "bad_request" });
-    // id existant (nouveau jeton shown_at) : sonde, même réponse qu'une création invalide.
-    const cap2 = (await (await fake.handle(new Request(`${ORIGIN}/api/captcha`))).json()) as Record<string, unknown>;
-    offset += 4000;
-    const dup = await fake.handle(new Request(`${ORIGIN}/api/shares`, { method: "POST", body: JSON.stringify({ ...ok.body, shown_at: cap2.shown_at }) }));
-    expect([dup.status, await dup.json()]).toEqual([400, { error: "bad_request" }]);
-
-    // v1 (durée, ouvertures, sel, V_preuve à la création) refusé ; id de mauvaise longueur refusé.
-    for (const bad of [{ extra: 1 }, { bucket: 17 }, { max_opens: 1 }, { ttl_hours: 1 }, { proof_v: "x" }, { salt: "x" }, { hp: "x" }, { recaptcha: "t" }, { id: "abc" }, { id: undefined }]) {
+    const post = async (headers: Record<string, string>, extra: object = {}) => {
       const cap = (await (await fake.handle(new Request(`${ORIGIN}/api/captcha`))).json()) as Record<string, unknown>;
       offset += 4000;
-      const r = await fake.handle(
-        new Request(`${ORIGIN}/api/shares`, { method: "POST", body: JSON.stringify({ ...ok.body, shown_at: cap.shown_at, ...bad }) }),
-      );
-      expect(r.status, JSON.stringify(bad)).toBe(400);
+      return fake.handle(new Request(`${ORIGIN}/api/shares`, { method: "POST", headers, body: JSON.stringify({ ...ok.body, shown_at: cap.shown_at, ...extra }) }));
+    };
+    // Même K_accès ou même S_gestion qu'un partage existant : même réponse qu'une création invalide.
+    const other = (n: number) => b64u(new Uint8Array(32).fill(n));
+    for (const h of [HDR, { ...HDR, "X-Shh-Manage": other(9) }, { ...HDR, "X-Shh-Access": other(9) }]) {
+      const dup = await post(h);
+      expect([dup.status, await dup.json()]).toEqual([400, { error: "bad_request" }]);
     }
+    // Autres secrets : création acceptée (l'existence d'un autre partage ne change rien).
+    expect((await post({ "X-Shh-Access": other(7), "X-Shh-Manage": other(8) })).status).toBe(201);
+
+    // v1/K1 (durée, ouvertures, sel, V_preuve, id ou vérificateurs à la création) refusé ; en-têtes absents ou faux refusés.
+    const fresh = { "X-Shh-Access": other(10), "X-Shh-Manage": other(11) };
+    for (const bad of [{ extra: 1 }, { bucket: 17 }, { max_opens: 1 }, { ttl_hours: 1 }, { proof_v: "x" }, { salt: "x" }, { hp: "x" }, { recaptcha: "t" }, { id: other(1).slice(0, 22) }, { access_v: other(1) }, { manage_v: other(1) }]) {
+      expect((await post(fresh, bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    for (const h of [{}, { "X-Shh-Access": other(10) }, { "X-Shh-Manage": other(11) }, { ...fresh, "X-Shh-Access": "abc" }]) {
+      expect((await post(h as Record<string, string>)).status, JSON.stringify(h)).toBe(400);
+    }
+    expect((await post(fresh)).status).toBe(201);
   });
 
   it("segment de mauvaise taille → 400 ; numéro hors palier → 400 ; sans jeton → 400 ; jeton inconnu → 404", async () => {
     let offset = 0;
     const fake = createFakeServer({ now: () => Date.now() + offset });
     const { r, body } = await created(fake, () => (offset += 4000));
-    const id = body.id;
+    void body;
     const { upload_token } = (await r.json()) as { upload_token: string };
     const put = (n: string, len: number, auth: string | null = `Bearer ${upload_token}`) =>
       fake.handle(
-        new Request(`${ORIGIN}/api/shares/${id}/segments/${n}`, {
+        new Request(`${ORIGIN}/api/shares/segments/${n}`, {
           method: "PUT",
           headers: auth === null ? {} : { Authorization: auth },
           body: new Uint8Array(len),
@@ -261,7 +263,7 @@ describe("faux serveur de démo : requêtes brutes", () => {
     expect((await put("0", segmentSize(16, 0), null)).status).toBe(400);
     expect((await put("0", segmentSize(16, 0), "Bearer inconnu")).status).toBe(404);
     const fin = await fake.handle(
-      new Request(`${ORIGIN}/api/shares/${id}/finalize`, { method: "POST", headers: { Authorization: `Bearer ${upload_token}` }, body: JSON.stringify(FIN) }),
+      new Request(`${ORIGIN}/api/shares/finalize`, { method: "POST", headers: { Authorization: `Bearer ${upload_token}` }, body: JSON.stringify(FIN) }),
     );
     expect(fin.status).toBe(409);
     expect((await put("0", segmentSize(16, 0))).status).toBe(204);
@@ -285,7 +287,8 @@ describe("faux serveur de démo : requêtes brutes", () => {
     const { r, body } = await created(fake, () => (offset += 4000), 400); // 7 segments
     const { upload_token } = (await r.json()) as { upload_token: string };
     const auth = { Authorization: `Bearer ${upload_token}` };
-    const call = (path: string, init: RequestInit) => fake.handle(new Request(`${ORIGIN}/api/shares/${body.id}${path}`, init));
+    void body;
+    const call = (path: string, init: RequestInit) => fake.handle(new Request(`${ORIGIN}/api/shares${path}`, init));
     for (const n of [0, 1, 2, 6]) {
       expect((await call(`/segments/${n}`, { method: "PUT", headers: auth, body: new Uint8Array(segmentSize(400, n)) })).status).toBe(204);
     }
@@ -328,8 +331,14 @@ describe("faux serveur de démo : requêtes brutes", () => {
       ["GET", "/api/nope"],
       ["POST", "/api/captcha"],
       ["GET", "/api/shares"],
-      ["GET", "/api/shares/x/finalize"],
-      ["DELETE", "/api/shares/x/meta"],
+      ["GET", "/api/shares/finalize"],
+      ["DELETE", "/api/shares/meta"],
+      // Anciennes routes avec id : n'existent plus (spec §32).
+      ["GET", "/api/shares/x/meta"],
+      ["GET", "/api/shares/AAAAAAAAAAAAAAAAAAAAAA/status"],
+      ["POST", "/api/shares/AAAAAAAAAAAAAAAAAAAAAA/destroy"],
+      ["POST", "/api/manage/status"],
+      ["GET", "/api/manage/destroy"],
       ["GET", "/API/captcha"],
     ] as const) {
       const r = await fake.handle(new Request(ORIGIN + p, { method: m }));

@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { b64u, concat, utf8 } from "../crypto/encoding";
 import { CHUNK, sealStream, segmentSize, type Item, type SealOpts } from "../crypto/container";
 import { accessKeys, contentKeys, newSeed, seal, shareId } from "../crypto/envelope";
-import { KDF_MIN, passwordKey } from "../crypto/kdf";
+import { KDF_MIN, deriveAccess, passwordKey } from "../crypto/kdf";
 import type { KLien, SGestion } from "../crypto/types";
 
 const captured = vi.hoisted(() => ({ buffers: [] as Uint8Array<ArrayBuffer>[], hkdf: [] as string[], kMdp: [] as Uint8Array<ArrayBuffer>[] }));
@@ -68,17 +68,14 @@ import {
   type CaptchaCtx,
   type CaptchaProof,
 } from "./client";
-import { manageLink, shareLink } from "./link";
+import { manageLink, parseLink, shareLink } from "./link";
 import { prepareCaptcha } from "./prepare";
 import { SERVER_STALL_MS } from "./upload";
 
 const ORIGIN = "https://srv.test";
-// id = HKDF(K_lien = 32 × 0x01, « shhdrop/v2/id ») (vecteur de envelope.test.ts) : le lien
-// porte encore l'id (jusqu'à la Task K2) et openShare vérifie qu'il est bien dérivé de K_lien.
-const ID = "k0pl6Pg8Q2fyyeBuVxAoOA";
 const KLIEN = () => new Uint8Array(32).fill(1) as KLien;
-const LINK = shareLink(ORIGIN, ID, new Uint8Array(32).fill(1) as KLien);
-const MANAGE = manageLink(ORIGIN, ID, new Uint8Array(32).fill(2) as SGestion);
+const LINK = shareLink(ORIGIN, new Uint8Array(32).fill(1) as KLien);
+const MANAGE = manageLink(ORIGIN, new Uint8Array(32).fill(2) as SGestion);
 const PW = "cheval-agrafe-pile-correct";
 
 type Reply = Response | "net";
@@ -117,7 +114,7 @@ function server(route: Route) {
   const calls: string[] = [];
   const f = async (input: RequestInfo | URL, init?: RequestInit) => {
     const method = init?.method ?? "GET";
-    const path = String(input).slice(ORIGIN.length).replace(ID, "ID");
+    const path = String(input).slice(ORIGIN.length);
     calls.push(`${method} ${path}`);
     const r = route(method, path) ?? defaults(method, path);
     if (r === "net") throw new TypeError("fetch failed");
@@ -126,10 +123,10 @@ function server(route: Route) {
   return { net: { fetch: f as typeof fetch, retryDelayMs: 1 }, calls };
 }
 function defaults(method: string, path: string): Reply {
-  if (path === "/api/shares/ID/meta") return j(200, META);
-  if (path === "/api/shares/ID/unlock") return j(200, { download_token: "t", segments: 1, envelope: ENV0 });
-  if (path === "/api/shares/ID/segments/0") return new Response(new Uint8Array(segmentSize(16, 0)), { status: 200 });
-  if (path === "/api/shares/ID/done") return new Response(null, { status: 204 });
+  if (path === "/api/shares/meta") return j(200, META);
+  if (path === "/api/shares/unlock") return j(200, { download_token: "t", segments: 1, envelope: ENV0 });
+  if (path === "/api/shares/segments/0") return new Response(new Uint8Array(segmentSize(16, 0)), { status: 200 });
+  if (path === "/api/shares/done") return new Response(null, { status: 204 });
   return j(404, { error: "not_found" });
 }
 const reject = (p: Promise<unknown>) => p.then(() => { throw new Error("aurait dû échouer"); }, (e: unknown) => e);
@@ -183,10 +180,10 @@ describe("openShare : correspondance des erreurs", () => {
   it("paquet corrompu : done() appelé d'office ; KDF refusée : aucun unlock", async () => {
     const s = server(() => undefined);
     await reject(openShare(LINK, PW, ORIGIN, undefined, s.net));
-    expect(s.calls).toEqual(["GET /api/shares/ID/meta", "POST /api/shares/ID/unlock", "GET /api/shares/ID/segments/0", "POST /api/shares/ID/done"]);
+    expect(s.calls).toEqual(["GET /api/shares/meta", "POST /api/shares/unlock", "GET /api/shares/segments/0", "POST /api/shares/done"]);
     const k = server((_, p) => (p.endsWith("/meta") ? j(200, { ...META, kdf: { ops: 2, mem: 67108864 } }) : undefined));
     await reject(openShare(LINK, PW, ORIGIN, undefined, k.net));
-    expect(k.calls).toEqual(["GET /api/shares/ID/meta"]);
+    expect(k.calls).toEqual(["GET /api/shares/meta"]);
   });
   it("lien invalide : erreur locale lien_invalide", async () => {
     await expect(openShare(MANAGE, PW, ORIGIN)).rejects.toThrow("lien_invalide");
@@ -223,7 +220,7 @@ describe("fetchMeta, shareStatus, destroyShare : correspondance des erreurs", ()
     // lien de partage : meta passe, destroy refusé (mauvais mot de passe côté serveur) → NotFoundError
     const s = server(() => undefined);
     expect(await reject(destroyShare(LINK, ORIGIN, { password: PW, ...s.net }))).toBeInstanceOf(NotFoundError);
-    expect(s.calls).toEqual(["GET /api/shares/ID/meta", "POST /api/shares/ID/destroy"]);
+    expect(s.calls).toEqual(["GET /api/shares/meta", "POST /api/shares/destroy"]);
     expect(await reject(destroyShare(LINK, ORIGIN, {}))).toEqual(new Error("mot_de_passe_requis"));
   });
   it("destroyShare : mot de passe vide refusé avant toute requête (tâche M, point 2)", async () => {
@@ -315,10 +312,10 @@ describe("openShare en flux : segments à la demande, saveItem, collectToBlob", 
     const prog: [number, number][] = [];
     const o = await openShare(LINK, PW, ORIGIN, (d, t) => prog.push([d, t]), s.net);
     expect(s.calls).toEqual([
-      "GET /api/shares/ID/meta",
-      "POST /api/shares/ID/unlock",
-      "GET /api/shares/ID/segments/0",
-      "GET /api/shares/ID/segments/2",
+      "GET /api/shares/meta",
+      "POST /api/shares/unlock",
+      "GET /api/shares/segments/0",
+      "GET /api/shares/segments/2",
     ]);
     expect(o.manifest.items.map((e) => e.name)).toEqual(["", "a.png", "b.bin"]);
     const parts: Uint8Array[] = [];
@@ -327,7 +324,7 @@ describe("openShare en flux : segments à la demande, saveItem, collectToBlob", 
       parts.push(new Uint8Array(c));
     });
     expect(same(concat(...parts.map((p) => new Uint8Array(p))), b)).toBe(true);
-    expect(s.calls.at(-1)).toBe("GET /api/shares/ID/segments/1");
+    expect(s.calls.at(-1)).toBe("GET /api/shares/segments/1");
     const blob = await collectToBlob(o, 1);
     expect(blob.type).toBe("application/octet-stream");
     expect(same(new Uint8Array(await blob.arrayBuffer()), a)).toBe(true);
@@ -336,7 +333,7 @@ describe("openShare en flux : segments à la demande, saveItem, collectToBlob", 
     expect(prog).toEqual([[1, 3], [3, 3], [1, 3], [2, 3], [1, 3]]); // segment n lu → (n + 1, total)
     o.wipe();
     await o.done();
-    expect(s.calls.at(-1)).toBe("POST /api/shares/ID/done");
+    expect(s.calls.at(-1)).toBe("POST /api/shares/done");
   });
 
   it("collectToBlob replie les tranches dans un Blob tous les foldBytes (mémoire bornée)", async () => {
@@ -396,9 +393,9 @@ describe("createShare en flux", () => {
     const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input).slice(ORIGIN.length);
       if (path === "/api/captcha") return j(200, { algorithm: "SHA-256", challenge: "c", maxNumber: 1, salt: "s", signature: "g", shown_at: "t" });
-      if (path === "/api/shares") return j(201, { id: ID, upload_token: "u", segments: 3 });
+      if (path === "/api/shares") return j(201, { upload_token: "u", segments: 3 });
       if (init?.method === "PUT") {
-        puts.push([path.replace(/\/api\/shares\/[A-Za-z0-9_-]{22}\//, "/api/shares/ID/"), (init.body as Uint8Array).length]);
+        puts.push([path.replace(/\/api\/shares\/[A-Za-z0-9_-]{22}\//, "/api/shares/"), (init.body as Uint8Array).length]);
         return new Response(null, { status: 204 });
       }
       if (path.endsWith("/finalize")) return j(200, { expires_in_s: 3600 });
@@ -416,17 +413,17 @@ describe("createShare en flux", () => {
       onProgress: (d, t) => prog.push([d, t]),
     });
     expect(r.expiresInS).toBe(3600);
-    expect(puts).toEqual([0, 1, 2].map((n) => [`/api/shares/ID/segments/${n}`, segmentSize(160, n)]));
+    expect(puts).toEqual([0, 1, 2].map((n) => [`/api/shares/segments/${n}`, segmentSize(160, n)]));
     expect(prog).toEqual([[0, 3], [1, 3], [2, 3], [3, 3]]);
   }, 20_000);
 });
 
 describe("origine attendue (audit F1)", () => {
   const k = LINK.slice(LINK.indexOf("#"));
-  const evil = `https://evil.example:8443/s/${ID}${k}`;
-  const creds = `https://user:pw@srv.test/s/${ID}${k}`;
+  const evil = `https://evil.example:8443/${k}`;
+  const creds = `https://user:pw@srv.test/${k}`;
   it("lien d'une autre origine ou avec identifiants : lien_invalide, aucune requête", async () => {
-    for (const link of [evil, creds, `http://srv.test/s/${ID}${k}`]) {
+    for (const link of [evil, creds, `http://srv.test/${k}`, `${ORIGIN}/s${k}`]) {
       const s = server(() => undefined);
       await expect(fetchMeta(link, ORIGIN, s.net), link).rejects.toThrow("lien_invalide");
       await expect(openShare(link, PW, ORIGIN, undefined, s.net), link).rejects.toThrow("lien_invalide");
@@ -434,7 +431,7 @@ describe("origine attendue (audit F1)", () => {
       expect(s.calls).toEqual([]);
     }
     const m = server(() => undefined);
-    const evilManage = `https://evil.example/m/${ID}${MANAGE.slice(MANAGE.indexOf("#"))}`;
+    const evilManage = `https://evil.example/${MANAGE.slice(MANAGE.indexOf("#"))}`;
     await expect(shareStatus(evilManage, ORIGIN, m.net)).rejects.toThrow("lien_invalide");
     await expect(destroyShare(evilManage, ORIGIN, m.net)).rejects.toThrow("lien_invalide");
     expect(m.calls).toEqual([]);
@@ -491,7 +488,7 @@ describe("Opened.destroy et done en keepalive (S1)", () => {
     const pk = await pack([{ kind: "text", name: "", mime: "text/plain", data: utf8("x") }]);
     const seg = pk.segs[0]!;
     const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const p = String(input).slice(ORIGIN.length).replace(ID, "ID");
+      const p = String(input).slice(ORIGIN.length);
       if (p.endsWith("/meta")) return unlocked ? j(404, { error: "not_found" }) : j(200, { ...META, bucket: pk.bucket });
       if (p.endsWith("/unlock")) {
         unlocked = true; // maxOpens=1 : le partage passe en « draining »
@@ -557,8 +554,8 @@ function sender(o: {
   const at: Record<string, number[]> = {};
   const bodies: Record<string, unknown>[] = [];
   const finals: Record<string, unknown>[] = [];
-  const ids: string[] = [];
-  const destroys: { body: unknown; keepalive: boolean | undefined }[] = [];
+  const creates: { access: string | null; manage: string | null }[] = [];
+  const destroys: { manage: string | null; body: unknown; keepalive: boolean | undefined }[] = [];
   const attempts = new Map<number, number>();
   let finalizeN = 0;
   const log = (k: string) => {
@@ -566,8 +563,8 @@ function sender(o: {
     (at[k] ??= []).push(Date.now());
   };
   const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    // L'id est tiré par le client (HKDF de sa K_lien) : n'importe quel id de 22 caractères.
-    const path = String(input).slice(ORIGIN.length).replace(/^\/api\/shares\/[A-Za-z0-9_-]{22}\//, "/api/shares/ID/");
+    // Aucun id dans les chemins (spec §32).
+    const path = String(input).slice(ORIGIN.length);
     const method = init?.method ?? "GET";
     log(`${method} ${path}`);
     if (path === "/api/captcha") {
@@ -575,7 +572,7 @@ function sender(o: {
       const body = o.captcha?.() ?? { algorithm: "SHA-256", challenge: "c", maxNumber: 1, salt: capSalt(), signature: "g", shown_at: "jeton" };
       return new Response(JSON.stringify(body), { status: 200, headers: o.captchaDate ? { Date: o.captchaDate() } : {} });
     }
-    if (path === "/api/shares/ID/status") {
+    if (path === "/api/manage/status") {
       if (new Headers(init?.headers).get("X-Shh-Manage") === null) return j(404, { error: "not_found" });
       const r = o.status?.();
       if (r === "net") throw new TypeError("fetch failed");
@@ -584,17 +581,18 @@ function sender(o: {
     if (path === "/api/shares") {
       const b = JSON.parse(String(init?.body)) as Record<string, unknown>;
       bodies.push(b);
-      ids.push(String(b.id));
+      const h = new Headers(init?.headers);
+      creates.push({ access: h.get("X-Shh-Access"), manage: h.get("X-Shh-Manage") });
       return j(201, { upload_token: "u", segments: o.segments });
     }
-    if (path === "/api/shares/ID/finalize") {
+    if (path === "/api/shares/finalize") {
       finals.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       const r = o.finalize?.(++finalizeN);
       if (r === "net") throw new TypeError("fetch failed");
       return r ?? j(200, { expires_in_s: 3600 });
     }
-    if (path === "/api/shares/ID/destroy") {
-      destroys.push({ body: JSON.parse(String(init?.body)), keepalive: init?.keepalive });
+    if (path === "/api/manage/destroy") {
+      destroys.push({ manage: new Headers(init?.headers).get("X-Shh-Manage"), body: init?.body, keepalive: init?.keepalive });
       return new Response(null, { status: 204 });
     }
     return j(404, { error: "not_found" });
@@ -606,7 +604,7 @@ function sender(o: {
     attempts.set(n, a);
     return o.put ? o.put(n, a, onBytes, body, signal) : ok204(onBytes, body);
   };
-  return { fetch: f, upload, calls, at, bodies, finals, ids, destroys, attempts };
+  return { fetch: f, upload, calls, at, bodies, finals, creates, destroys, attempts };
 }
 
 const SMALL = [{ kind: "text" as const, name: "", mime: "text/plain", data: new Uint8Array([97]) }];
@@ -701,10 +699,11 @@ describe("createShare : annulation (signal)", () => {
       },
     });
     expect(isAbort(await reject(drive(createShare(ORIGIN, BIG, { ...base(s), signal: ac.signal }))))).toBe(true);
-    expect(s.calls.filter((c) => !c.startsWith("GET"))).toEqual(["POST /api/shares", "PUT 0", "PUT 1", "POST /api/shares/ID/destroy"]);
+    expect(s.calls.filter((c) => !c.startsWith("GET"))).toEqual(["POST /api/shares", "PUT 0", "PUT 1", "POST /api/manage/destroy"]);
     expect(s.destroys).toHaveLength(1);
-    expect(Object.keys(s.destroys[0]!.body as object)).toEqual(["manage"]);
-    expect((s.destroys[0]!.body as { manage: string }).manage).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(s.destroys[0]!.body).toBeUndefined(); // S_gestion en en-tête seulement
+    expect(s.destroys[0]!.manage).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(s.destroys[0]!.manage).toBe(s.creates[0]!.manage);
     expect(s.destroys[0]!.keepalive).toBe(true);
     wiped();
   }, 30_000);
@@ -717,7 +716,7 @@ describe("createShare : annulation (signal)", () => {
       return new Promise<void>(() => undefined);
     };
     expect(isAbort(await reject(drive(createShare(ORIGIN, SMALL, { ...base(s), signal: ac.signal, pause }))))).toBe(true);
-    expect(s.calls).toEqual(["GET /api/captcha", "POST /api/shares", "POST /api/shares/ID/destroy"]);
+    expect(s.calls).toEqual(["GET /api/captcha", "POST /api/shares", "POST /api/manage/destroy"]);
     wiped();
   });
 
@@ -857,7 +856,7 @@ describe("createShare : reprise sur coupure (budget SERVER_STALL_MS)", () => {
     expect(tries.at(-1)! - ack0).toBeGreaterThan(SERVER_STALL_MS - 30_000);
     expect(s.destroys).toHaveLength(1);
     expect(s.destroys[0]!.keepalive).toBe(true);
-    expect(s.at["POST /api/shares/ID/destroy"]![0]! - ack0).toBeLessThanOrEqual(SERVER_STALL_MS);
+    expect(s.at["POST /api/manage/destroy"]![0]! - ack0).toBeLessThanOrEqual(SERVER_STALL_MS);
   }, 30_000);
 
   it("essai qui ne répond jamais : interrompu à l'échéance → Error(\"reseau\") puis destroy", async () => {
@@ -870,7 +869,7 @@ describe("createShare : reprise sur coupure (budget SERVER_STALL_MS)", () => {
       },
     });
     expect(await reject(drive(createShare(ORIGIN, SMALL, base(s))))).toEqual(new Error("reseau"));
-    expect(s.at["POST /api/shares/ID/destroy"]![0]! - created).toBe(SERVER_STALL_MS);
+    expect(s.at["POST /api/manage/destroy"]![0]! - created).toBe(SERVER_STALL_MS);
   });
 
   it("événement online : essai immédiat ; offline signalé par navigator.onLine", async () => {
@@ -899,11 +898,11 @@ describe("createShare : reprise sur coupure (budget SERVER_STALL_MS)", () => {
     const s = sender({ segments: 1, finalize: (a) => (a === 1 ? "net" : j(404, { error: "not_found" })), status: () => j(200, READY) });
     const r = await drive(createShare(ORIGIN, SMALL, base(s)));
     expect(r.expiresInS).toBe(3500);
-    expect(r.manage).toMatch(/\/m\//);
-    expect(s.calls.filter((c) => c.startsWith("POST /api/shares/ID") || c.startsWith("GET /api/shares/ID"))).toEqual([
-      "POST /api/shares/ID/finalize",
-      "POST /api/shares/ID/finalize",
-      "GET /api/shares/ID/status",
+    expect(r.manage).toMatch(/^https:\/\/srv\.test\/#m[A-Za-z0-9_-]{43}$/);
+    expect(s.calls.filter((c) => c.startsWith("POST /api/shares/") || c.startsWith("GET /api/manage/"))).toEqual([
+      "POST /api/shares/finalize",
+      "POST /api/shares/finalize",
+      "GET /api/manage/status",
     ]);
     expect(s.destroys).toEqual([]);
   });
@@ -914,7 +913,7 @@ describe("createShare : reprise sur coupure (budget SERVER_STALL_MS)", () => {
   ])("réponse de finalize perdue, nouvel essai → 404, status %s : destruction et NotFoundError", async (_, status) => {
     const s = sender({ segments: 1, finalize: (a) => (a === 1 ? "net" : j(404, { error: "not_found" })), status });
     expect(await reject(drive(createShare(ORIGIN, SMALL, base(s))))).toBeInstanceOf(NotFoundError);
-    expect(s.calls).toContain("GET /api/shares/ID/status");
+    expect(s.calls).toContain("GET /api/manage/status");
     expect(s.destroys).toHaveLength(1);
     expect(s.destroys[0]!.keepalive).toBe(true);
   });
@@ -923,7 +922,7 @@ describe("createShare : reprise sur coupure (budget SERVER_STALL_MS)", () => {
       const s = sender({ segments: 1, finalize: () => j(code, { error: err }), status: () => j(200, READY) });
       await reject(drive(createShare(ORIGIN, SMALL, base(s))));
       expect(s.calls.filter((c) => c.endsWith("/finalize"))).toHaveLength(1);
-      expect(s.calls).not.toContain("GET /api/shares/ID/status");
+      expect(s.calls).not.toContain("GET /api/manage/status");
       expect(s.destroys).toHaveLength(1);
     }
   });
@@ -945,7 +944,7 @@ describe("createShare : preuve anti-robot typée et défi préparé", () => {
   });
   afterEach(() => vi.useRealTimers());
   const kdfSalt = () => b64u(captured.buffers.find((b) => b.length === 16)!);
-  const POW_KEYS = ["access_v", "altcha", "bucket", "hp", "id", "manage_v", "shown_at"];
+  const POW_KEYS = ["altcha", "bucket", "hp", "shown_at"];
 
   it("solveCaptcha reçoit le défi et { fallbackOrigin: null, mode: \"pow\" } ; { kind: \"pow\" } → corps altcha", async () => {
     const s = sender({ segments: 1 });
@@ -1105,10 +1104,12 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
         onProgress: (d, t) => prog.push([d, t]),
       }),
     );
-    // Création : id, palier, V_accès, V_gestion et preuve seulement (spec §29.8).
-    expect(Object.keys(s.bodies[0]!).sort()).toEqual(["access_v", "altcha", "bucket", "hp", "id", "manage_v", "shown_at"]);
+    // Création : palier et preuve dans le corps ; K_accès et S_gestion en en-tête ; ni id ni
+    // vérificateur (spec §29.8, §32 : le serveur indexe par V_accès et V_gestion qu'il calcule).
+    expect(Object.keys(s.bodies[0]!).sort()).toEqual(["altcha", "bucket", "hp", "shown_at"]);
     expect(s.bodies[0]!.bucket).toBe(400);
-    expect(s.bodies[0]!.id).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(s.creates[0]!.access).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(s.creates[0]!.manage).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect([...sent.keys()]).toEqual([0, 1, 2, 6]);
     expect(s.calls.filter((c) => c.startsWith("PUT"))).toEqual(["PUT 0", "PUT 1", "PUT 2", "PUT 6"]);
     expect(prog).toEqual([[0, 4], [1, 4], [2, 4], [3, 4], [4, 4]]);
@@ -1122,15 +1123,18 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
 
     // Le lien produit s'ouvre avec ce que le serveur a reçu (bourrage : zéros, jamais lus).
     vi.useRealTimers();
-    const p = r.link.slice(r.link.indexOf("/s/") + 3, r.link.indexOf("#"));
-    expect(p).toBe(s.bodies[0]!.id);
+    // Lien court (spec §32) : origine, « /#», K_lien ; K_accès envoyée = HKDF(K_lien).
+    expect(r.link).toMatch(/^https:\/\/srv\.test\/#[A-Za-z0-9_-]{43}$/);
+    expect(r.manage).toMatch(/^https:\/\/srv\.test\/#m[A-Za-z0-9_-]{43}$/);
+    const lk = parseLink(r.link);
+    expect(lk.kind === "s" && b64u((await deriveAccess(lk.kLien)).kAcces)).toBe(s.creates[0]!.access);
+    expect(r.manage.slice(r.manage.indexOf("#m") + 2)).toBe(s.creates[0]!.manage);
     const segs = [0, 1, 2, 3, 4, 5, 6].map((n) => sent.get(n) ?? new Uint8Array(segmentSize(400, n)));
     const rd = server(() => undefined);
-    const id = String(s.bodies[0]!.id);
     const net = {
       retryDelayMs: 1,
       fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
-        const path = String(input).slice(ORIGIN.length).replace(id, "ID");
+        const path = String(input).slice(ORIGIN.length);
         rd.calls.push(`${init?.method ?? "GET"} ${path}`);
         if (path.endsWith("/meta")) return j(200, { expires_in_s: 60, salt: fin.salt, kdf: { ops: 3, mem: 67108864 }, bucket: 400, segments: 7 });
         if (path.endsWith("/unlock")) return j(200, { download_token: "t", segments: 7, envelope: fin.envelope });
@@ -1156,10 +1160,9 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
       };
       const r = await drive(createShare(ORIGIN, t, { ...base(s), upload, ...o }));
       vi.useRealTimers();
-      const id = String(s.bodies[0]!.id);
       const fin = s.finals[0]!;
       const f = (async (input: RequestInfo | URL) => {
-        const path = String(input).slice(ORIGIN.length).replace(id, "ID");
+        const path = String(input).slice(ORIGIN.length);
         if (path.endsWith("/meta")) return j(200, { expires_in_s: 60, salt: fin.salt, kdf: { ops: 3, mem: 67108864 }, bucket: 1, segments: 1 });
         if (path.endsWith("/unlock")) return j(200, { download_token: "t", segments: 1, envelope: fin.envelope });
         if (path.endsWith("/segments/0")) return new Response(new Uint8Array(sent[0]!), { status: 200 });
@@ -1216,7 +1219,7 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
     }
   }, 30_000);
 
-  it("id déjà pris (400, revue K1 I2) : erreur « bad_request », destruction inutile (rien n'a été créé), clés à zéro", async () => {
+  it("création refusée (400) : erreur « bad_request », destruction inutile (rien n'a été créé), clés à zéro", async () => {
     const s = sender({ segments: 1 });
     const f = (async (input: RequestInfo | URL, init?: RequestInit) =>
       String(input).endsWith("/api/shares") ? j(400, { error: "bad_request" }) : s.fetch(input, init)) as typeof fetch;
@@ -1245,7 +1248,7 @@ describe("openShare v2 : enveloppe, engagement, rejeu", () => {
     const s = server(packRoute(pk));
     const o = await openShare(LINK, PW, ORIGIN, undefined, s.net);
     expect(await o.item(0)).toEqual(utf8("bonjour"));
-    expect(s.calls).toEqual(["GET /api/shares/ID/meta", "POST /api/shares/ID/unlock", "GET /api/shares/ID/segments/0"]);
+    expect(s.calls).toEqual(["GET /api/shares/meta", "POST /api/shares/unlock", "GET /api/shares/segments/0"]);
     const sec = captured.buffers.filter((b) => b.length === 32);
     const live = sec.filter((b) => b.some((x) => x !== 0));
     expect(captured.kMdp).toHaveLength(1);
@@ -1258,7 +1261,7 @@ describe("openShare v2 : enveloppe, engagement, rejeu", () => {
   const bad = async (route: Route) => {
     const s = server(route);
     expect(await reject(openShare(LINK, PW, ORIGIN, undefined, s.net))).toBeInstanceOf(NotFoundError);
-    expect(s.calls.at(-1)).toBe("POST /api/shares/ID/done"); // done() d'office
+    expect(s.calls.at(-1)).toBe("POST /api/shares/done"); // done() d'office
     return s;
   };
 
@@ -1300,9 +1303,9 @@ describe("openShare v2 : enveloppe, engagement, rejeu", () => {
     await bad(packRoute(pk, (n, seg) => (n === 2 ? (seg[seg.length - 100]! ^= 1, seg) : seg)));
   }, 30_000);
 
-  it("id du lien différent de HKDF(K_lien) : lien_invalide, aucune requête", async () => {
+  it("ancien format (/s/<id>#clé, spec §32 : aucune compatibilité) : lien_invalide, aucune requête", async () => {
     const s = server(() => undefined);
-    const forged = shareLink(ORIGIN, b64u(new Uint8Array(16).fill(5)), KLIEN());
+    const forged = `${ORIGIN}/s/${b64u(new Uint8Array(16).fill(5))}#${b64u(KLIEN())}`;
     await expect(openShare(forged, PW, ORIGIN, undefined, s.net)).rejects.toThrow("lien_invalide");
     await expect(fetchMeta(forged, ORIGIN, s.net)).rejects.toThrow("lien_invalide");
     await expect(destroyShare(forged, ORIGIN, { password: PW, ...s.net })).rejects.toThrow("lien_invalide");

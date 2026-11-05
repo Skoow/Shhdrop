@@ -26,8 +26,8 @@ func TestAdminRefusesWrongDataDir(t *testing.T) {
 	os.Mkdir(empty, 0o700)
 	for _, dir := range []string{filepath.Join(parent, "typo"), empty, "relatif/data"} {
 		cfg := config.Config{DataDir: dir, Now: time.Now, StorageMaxBytes: 1 << 40}
-		for _, a := range [][]string{{"freeze"}, {"unfreeze"}, {"destroy", "AAAAAAAAAAAAAAAAAAAAAA"}, {"wipe", "--yes"}} {
-			code, out, errOut := runIn(cfg, "", a...)
+		for _, a := range [][]string{{"freeze"}, {"unfreeze"}, {"destroy", "-"}, {"wipe", "--yes"}} {
+			code, out, errOut := runIn(cfg, "https://shhdrop.app/#AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\n", a...)
 			if code != 1 || strings.Contains(out, "suspendues") || strings.Contains(out, "effacé") || !strings.Contains(errOut, "shares.db") {
 				t.Fatalf("%s %v : code %d, %q %q", dir, a, code, out, errOut)
 			}
@@ -71,8 +71,8 @@ func TestAdminReportsPathAndCount(t *testing.T) {
 	if code != 0 || !strings.Contains(out, cfg.DataDir) {
 		t.Fatalf("unfreeze : %d %q", code, out)
 	}
-	id := mk(t, s)
-	code, out, _ = runIn(cfg, "", "destroy", id)
+	_, link := mkLink(t, s)
+	code, out, _ = runIn(cfg, link+"\n", "destroy", "-")
 	if code != 0 || !strings.Contains(out, cfg.DataDir) || !strings.Contains(out, "1 partage détruit") {
 		t.Fatalf("destroy : %d %q", code, out)
 	}
@@ -83,29 +83,17 @@ func TestAdminReportsPathAndCount(t *testing.T) {
 }
 
 // Audit F11 : le lien entier (avec K_lien) atterrissait dans argv et l'historique du shell.
+// Spec §32 : il n'est plus lu que sur l'entrée standard.
 func TestAdminDestroyStdin(t *testing.T) {
 	cfg, s := adminSetup(t)
-	secret := "SECRETSECRETSECRET"
-	id := mk(t, s)
-	code, out, errOut := runIn(cfg, "https://exemple.org/s/"+id+"#"+secret+"\n", "destroy", "-")
-	if code != 0 || count(t, s) != 0 || strings.Contains(out+errOut, secret) || strings.Contains(out+errOut, id) {
+	id, link := mkLink(t, s)
+	key := link[len(link)-43:]
+	code, out, errOut := runIn(cfg, link+"\n", "destroy", "-")
+	if code != 0 || count(t, s) != 0 || strings.Contains(out+errOut, key) || strings.Contains(out+errOut, id) {
 		t.Fatalf("destroy - : %d %q %q", code, out, errOut)
 	}
-	if strings.Contains(errOut, "historique") {
-		t.Fatal("avertissement inutile pour l'entrée standard")
-	}
-	// Argument avec « # » : avertissement (la clé est exposée), même si la destruction réussit.
-	id = mk(t, s)
-	code, out, errOut = runIn(cfg, "", "destroy", "https://exemple.org/s/"+id+"#"+secret)
-	if code != 0 || !strings.Contains(errOut, "historique") || strings.Contains(out+errOut, secret) {
-		t.Fatalf("destroy lien : %d %q %q", code, out, errOut)
-	}
-	code, _, errOut = runIn(cfg, "", "destroy", "AAAAAAAAAAAAAAAAAAAAAA#"+secret)
-	if code != 1 || !strings.Contains(errOut, "historique") || !strings.Contains(errOut, "introuvable") {
-		t.Fatalf("destroy id#clé : %d %q", code, errOut)
-	}
 	// Entrée vide, plusieurs lignes ou trop longue : erreur d'usage.
-	for _, in := range []string{"", "\n", id + "\n" + id + "\n", strings.Repeat("A", 5000)} {
+	for _, in := range []string{"", "\n", link + "\n" + link + "\n", strings.Repeat("A", 5000)} {
 		if code, _, _ := runIn(cfg, in, "destroy", "-"); code != 2 {
 			t.Fatalf("%q : code %d", in, code)
 		}

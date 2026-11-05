@@ -96,14 +96,17 @@ func newHandler(s *server, static http.Handler) http.Handler {
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/captcha", s.captcha)
 	api.HandleFunc("POST /api/shares", s.create)
-	api.HandleFunc("PUT /api/shares/{id}/segments/{n}", s.putSegment)
-	api.HandleFunc("POST /api/shares/{id}/finalize", s.finalize)
-	api.HandleFunc("GET /api/shares/{id}/meta", s.meta)
-	api.HandleFunc("POST /api/shares/{id}/unlock", s.unlock)
-	api.HandleFunc("GET /api/shares/{id}/segments/{n}", s.getSegment)
-	api.HandleFunc("POST /api/shares/{id}/done", s.done)
-	api.HandleFunc("POST /api/shares/{id}/destroy", s.destroy)
-	api.HandleFunc("GET /api/shares/{id}/status", s.status)
+	// Aucun identifiant dans les chemins (spec §29.8, §32) : le partage est désigné par un
+	// jeton signé (envoi, lecture), par K_accès (meta, unlock, destroy) ou par S_gestion.
+	api.HandleFunc("PUT /api/shares/segments/{n}", s.putSegment)
+	api.HandleFunc("POST /api/shares/finalize", s.finalize)
+	api.HandleFunc("GET /api/shares/meta", s.meta)
+	api.HandleFunc("POST /api/shares/unlock", s.unlock)
+	api.HandleFunc("GET /api/shares/segments/{n}", s.getSegment)
+	api.HandleFunc("POST /api/shares/done", s.done)
+	api.HandleFunc("POST /api/shares/destroy", s.destroy)
+	api.HandleFunc("GET /api/manage/status", s.manageStatus)
+	api.HandleFunc("POST /api/manage/destroy", s.manageDestroy)
 	api.HandleFunc("/api/", notFoundAPI)
 
 	root := http.NewServeMux()
@@ -157,15 +160,11 @@ func (s *server) guard(next http.Handler) http.Handler {
 }
 
 // validSegmentToken : requête de segment (PUT avec jeton d'envoi, GET avec jeton de
-// téléchargement) dont le jeton est signé, non expiré et lié à ce partage. Ces requêtes
-// ont leur propre limite (SegmentsPerMin) ; l'état du partage est revérifié ensuite.
+// téléchargement) dont le jeton est signé et non expiré. Ces requêtes ont leur propre
+// limite (SegmentsPerMin) ; l'état du partage est revérifié ensuite.
 func (s *server) validSegmentToken(r *http.Request) bool {
-	rest, ok := strings.CutPrefix(r.URL.Path, "/api/shares/")
-	if !ok {
-		return false
-	}
-	id, n, ok := strings.Cut(rest, "/segments/")
-	if !ok || strings.Contains(id, "/") || strings.Contains(n, "/") {
+	n, ok := strings.CutPrefix(r.URL.Path, "/api/shares/segments/")
+	if !ok || n == "" || strings.Contains(n, "/") {
 		return false
 	}
 	var kind byte
@@ -181,7 +180,7 @@ func (s *server) validSegmentToken(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	_, err = s.sig.Check(tok, kind, id)
+	_, _, err = s.sig.Subject(tok, kind)
 	return err == nil
 }
 

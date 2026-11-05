@@ -39,15 +39,16 @@ func slowGET(t *testing.T, srv *httptest.Server, id string, n int, tok, clientIP
 	if tc, ok := cn.(*net.TCPConn); ok {
 		tc.SetReadBuffer(4096)
 	}
-	fmt.Fprintf(cn, "GET /api/shares/%s/segments/%d HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer %s\r\nX-Shh-Client-IP: %s\r\n\r\n",
-		id, n, tok, clientIP)
+	_ = id // le jeton désigne le partage (spec §32)
+	fmt.Fprintf(cn, "GET /api/shares/segments/%d HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer %s\r\nX-Shh-Client-IP: %s\r\n\r\n",
+		n, tok, clientIP)
 	return cn
 }
 
 // getSeg fait un GET complet (lu jusqu'au bout) et rend la réponse et son corps.
 func getSeg(t *testing.T, srv *httptest.Server, id string, n int, tok, clientIP string) (*http.Response, []byte) {
 	t.Helper()
-	r, _ := http.NewRequest("GET", fmt.Sprintf("%s/api/shares/%s/segments/%d", srv.URL, id, n), nil)
+	r, _ := http.NewRequest("GET", fmt.Sprintf("%s/api/shares/segments/%d", srv.URL, n), nil)
 	r.Header.Set("Authorization", "Bearer "+tok)
 	r.Header.Set("X-Shh-Client-IP", clientIP)
 	resp, err := srv.Client().Do(r)
@@ -203,7 +204,7 @@ func TestDownloadBudget(t *testing.T) {
 	c := e.create(t, "", k, bucket, 2)
 	segs := e.upload(t, c, bucket)
 	dl, n := e.unlock(t, c.ID, k)
-	seg := func(i int) string { return fmt.Sprintf("/api/shares/%s/segments/%d", c.ID, i) }
+	seg := func(i int) string { return fmt.Sprintf("/api/shares/segments/%d", i) }
 	var served int64
 	for pass := 0; pass < 2; pass++ {
 		for i := 0; i < n; i++ {

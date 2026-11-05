@@ -144,30 +144,20 @@ func TestServeStaticDir(t *testing.T) {
 	if code, body, _ := get("GET", "/docs/"); code != 200 || body != "docs" {
 		t.Fatalf("/docs/ : %d %q", code, body)
 	}
-	// Repli de l'application monopage : /, /s/<id>, /m/<id> servent index.html, mêmes en-têtes.
-	for _, p := range []string{"/", "/index.html", "/s/AAAAAAAAAAAAAAAAAAAAAA", "/m/AAAAAAAAAAAAAAAAAAAAAA"} {
-		code, body, h := get("GET", p)
-		if code != 200 || !strings.Contains(body, "<title>Shhdrop</title>") ||
-			h.Get("Content-Security-Policy") == "" || h.Get("Cache-Control") != "no-store" || h.Get("X-Content-Type-Options") != "nosniff" ||
-			!strings.HasPrefix(h.Get("Content-Type"), "text/html") {
-			t.Fatalf("%s : %d %q %v", p, code, body, h)
-		}
-	}
-	// Liens abîmés sous /s/ et /m/ (point ou parenthèse collés par une messagerie, segment en
-	// trop) : index.html, même avec un point dans le dernier segment, avec noindex, pour que
-	// l'application retire le « # » (UI §12.1). Préfixe sensible à la casse.
-	for _, p := range []string{"/s/AAAAAAAAAAAAAAAAAAAAAA.", "/m/AAAAAAAAAAAAAAAAAAAAAA.", "/s/AAAAAAAAAAAAAAAAAAAAAA/", "/s/a.js", "/m/x/y.png", "/s/AAAAAAAAAAAAAAAAAAAAAA)"} {
+	// Repli de l'application monopage : /, et tout chemin sans extension, servent index.html,
+	// mêmes en-têtes, sans X-Robots-Tag (spec §32 : les liens sont à la racine, « /#clé »).
+	for _, p := range []string{"/", "/index.html", "/securite", "/s/AAAAAAAAAAAAAAAAAAAAAA", "/m/x/y"} {
 		for _, m := range []string{"GET", "HEAD"} {
 			code, body, h := get(m, p)
 			if code != 200 || (m == "GET" && !strings.Contains(body, "<title>Shhdrop</title>")) ||
-				h.Get("X-Robots-Tag") != "noindex" || h.Get("Content-Security-Policy") == "" || h.Get("Cache-Control") != "no-store" ||
-				!strings.HasPrefix(h.Get("Content-Type"), "text/html") {
+				h.Get("Content-Security-Policy") == "" || h.Get("Cache-Control") != "no-store" || h.Get("X-Content-Type-Options") != "nosniff" ||
+				!strings.HasPrefix(h.Get("Content-Type"), "text/html") || len(h.Values("X-Robots-Tag")) != 0 {
 				t.Fatalf("%s %s : %d %q %v", m, p, code, body, h)
 			}
 		}
 	}
-	// Hors de ces préfixes, rien ne change : fichier absent avec extension → 404 ; /S/ n'est pas /s/.
-	for _, p := range []string{"/assets/missing.js", "/S/AAAAAAAAAAAAAAAAAAAAAA.", "/sx/a.js", "/api/x.js"} {
+	// Plus de repli particulier sous /s/ et /m/ : un fichier absent avec extension → 404 partout.
+	for _, p := range []string{"/assets/missing.js", "/s/AAAAAAAAAAAAAAAAAAAAAA.", "/m/x/y.png", "/s/a.js", "/sx/a.js", "/api/x.js"} {
 		if code, body, _ := get("GET", p); code != 404 || strings.Contains(body, "<title>Shhdrop</title>") {
 			t.Fatalf("%s : %d %q", p, code, body)
 		}

@@ -189,12 +189,21 @@ func newKeys() keys { return keys{rnd(32), rnd(32), rnd(32)} }
 
 func v(b []byte) string { h := sha256.Sum256(b); return enc.EncodeToString(h[:]) }
 
-// createBody : création v2 (id tiré ici, comme HKDF(K_lien) côté client). `opens` n'est
-// plus envoyé à la création : il l'est à la finalisation (finBody), via created.Opens.
+// createBody : création v2, sans id ni vérificateur (spec §29.8). `opens` n'est plus envoyé
+// à la création : il l'est à la finalisation (finBody), via created.Opens.
 func (k keys) createBody(bucket, opens int, alt, shown string) map[string]any {
 	_ = opens
-	return map[string]any{"id": enc.EncodeToString(rnd(16)), "bucket": bucket,
-		"access_v": v(k.acces), "manage_v": v(k.gestion), "altcha": alt, "hp": "", "shown_at": shown}
+	return map[string]any{"bucket": bucket, "altcha": alt, "hp": "", "shown_at": shown}
+}
+
+// createHdr : K_accès et S_gestion de la création, en en-tête ; le serveur en tire V_accès
+// et V_gestion.
+func (k keys) createHdr() map[string]string {
+	return map[string]string{"X-Shh-Access": enc.EncodeToString(k.acces), "X-Shh-Manage": enc.EncodeToString(k.gestion)}
+}
+
+func manage(k keys) map[string]string {
+	return map[string]string{"X-Shh-Manage": enc.EncodeToString(k.gestion)}
 }
 
 // finBody : finalisation v2 pour les clés k (V_preuve), bourrage vide.
@@ -207,7 +216,7 @@ func (k keys) finBody(opens, ttl int) map[string]any {
 func mustJSON(x any) []byte { b, _ := json.Marshal(x); return b }
 
 type created struct {
-	ID          string `json:"-"` // tiré par le client (createBody)
+	ID          string `json:"-"` // id interne, lu dans le jeton d'envoi (jamais montré au client)
 	UploadToken string `json:"upload_token"`
 	Segments    int    `json:"segments"`
 	k           keys
@@ -218,16 +227,27 @@ func (e *env) create(t *testing.T, remote string, k keys, bucket, opens int) cre
 	t.Helper()
 	alt, shown := e.captchaFor(t, remote)
 	body := k.createBody(bucket, opens, alt, shown)
-	w := e.do(req{method: "POST", path: "/api/shares", body: mustJSON(body), remote: remote})
+	w := e.do(req{method: "POST", path: "/api/shares", hdr: k.createHdr(), body: mustJSON(body), remote: remote})
 	expect(t, w, 201, "")
-	c := created{ID: body["id"].(string), k: k, opens: opens}
+	c := created{k: k, opens: opens}
 	if err := json.Unmarshal(w.Body.Bytes(), &c); err != nil || c.UploadToken == "" {
 		t.Fatalf("création: %q", w.Body.String())
 	}
+	c.ID = e.idOf(t, c.UploadToken, token.Upload)
 	if m := jsonOf(t, w); len(m) != 2 {
 		t.Fatalf("réponse de création : %v", m) // upload_token et segments seulement
 	}
 	return c
+}
+
+// idOf : id interne désigné par un jeton (pour les contrôles en base des tests).
+func (e *env) idOf(t *testing.T, tok string, kind byte) string {
+	t.Helper()
+	id, _, err := e.sig.Subject(tok, kind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 func auth(tok string) map[string]string { return map[string]string{"Authorization": "Bearer " + tok} }
@@ -239,10 +259,10 @@ func (e *env) upload(t *testing.T, c created, bucket int) [][]byte {
 	for n := 0; n < c.Segments; n++ {
 		b := rnd(share.SegmentSize(bucket, n))
 		segs = append(segs, b)
-		expect(t, e.do(req{method: "PUT", path: fmt.Sprintf("/api/shares/%s/segments/%d", c.ID, n), body: b,
+		expect(t, e.do(req{method: "PUT", path: fmt.Sprintf("/api/shares/segments/%d", n), body: b,
 			hdr: auth(c.UploadToken)}), 204, "")
 	}
-	w := e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/finalize", hdr: auth(c.UploadToken),
+	w := e.do(req{method: "POST", path: "/api/shares/finalize", hdr: auth(c.UploadToken),
 		body: mustJSON(c.k.finBody(c.opens, 1))})
 	expect(t, w, 200, "")
 	if s := jsonOf(t, w)["expires_in_s"].(float64); s < 3600 || s > 3600+900 {
@@ -257,7 +277,7 @@ func access(k keys) map[string]string {
 
 func (e *env) unlock(t *testing.T, id string, k keys) (string, int) {
 	t.Helper()
-	w := e.do(req{method: "POST", path: "/api/shares/" + id + "/unlock", hdr: access(k),
+	w := e.do(req{method: "POST", path: "/api/shares/unlock", hdr: access(k),
 		body: mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve)})})
 	expect(t, w, 200, "")
 	var r struct {
@@ -281,7 +301,7 @@ func TestFullFlow(t *testing.T) {
 	}
 	segs := e.upload(t, c, bucket)
 
-	w := e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/meta", hdr: access(k)})
+	w := e.do(req{method: "GET", path: "/api/shares/meta", hdr: access(k)})
 	expect(t, w, 200, "")
 	m := jsonOf(t, w)
 	kdf := m["kdf"].(map[string]any)
@@ -294,7 +314,7 @@ func TestFullFlow(t *testing.T) {
 	}
 
 	// Mauvais mot de passe : 403 avec essais restants.
-	w = e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/unlock", hdr: access(k),
+	w = e.do(req{method: "POST", path: "/api/shares/unlock", hdr: access(k),
 		body: mustJSON(map[string]string{"proof": enc.EncodeToString(rnd(32))})})
 	expect(t, w, 403, `{"error":"bad_password","attempts_left":4}`)
 
@@ -303,19 +323,19 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("segments = %d", n)
 	}
 	for i, want := range segs {
-		w := e.do(req{method: "GET", path: fmt.Sprintf("/api/shares/%s/segments/%d", c.ID, i), hdr: auth(dl)})
+		w := e.do(req{method: "GET", path: fmt.Sprintf("/api/shares/segments/%d", i), hdr: auth(dl)})
 		expect(t, w, 200, "")
 		if !bytes.Equal(w.Body.Bytes(), want) || w.Header().Get("Content-Type") != "application/octet-stream" {
 			t.Fatalf("segment %d différent", i)
 		}
 	}
-	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/segments/2", hdr: auth(dl)}), 400, badRequest)
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/done", hdr: auth(dl)}), 204, "")
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/done", hdr: auth(dl)}), 204, "") // idempotent
+	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/2", hdr: auth(dl)}), 400, badRequest)
+	expect(t, e.do(req{method: "POST", path: "/api/shares/done", hdr: auth(dl)}), 204, "")
+	expect(t, e.do(req{method: "POST", path: "/api/shares/done", hdr: auth(dl)}), 204, "") // idempotent
 	// Ouverture terminée : son jeton ne lit plus rien.
-	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/segments/0", hdr: auth(dl)}), 404, notFound)
+	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/0", hdr: auth(dl)}), 404, notFound)
 
-	w = e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/status",
+	w = e.do(req{method: "GET", path: "/api/manage/status",
 		hdr: map[string]string{"X-Shh-Manage": enc.EncodeToString(k.gestion)}})
 	expect(t, w, 200, "")
 	st := jsonOf(t, w)
@@ -325,31 +345,69 @@ func TestFullFlow(t *testing.T) {
 	}
 
 	// Destruction par le destinataire (K_accès + K_preuve).
-	w = e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/destroy", hdr: access(k),
+	w = e.do(req{method: "POST", path: "/api/shares/destroy", hdr: access(k),
 		body: mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve), "reason": "malware"})})
 	expect(t, w, 204, "")
-	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/meta", hdr: access(k)}), 404, notFound)
-	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/segments/0", hdr: auth(dl)}), 404, notFound)
+	expect(t, e.do(req{method: "GET", path: "/api/shares/meta", hdr: access(k)}), 404, notFound)
+	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/0", hdr: auth(dl)}), 404, notFound)
 	if _, err := os.Stat(filepath.Join(e.dir, "blobs", c.ID)); !os.IsNotExist(err) {
 		t.Fatal("fichier encore présent")
 	}
 }
 
-func TestDestroyByManage(t *testing.T) {
+// Spec §32 : gestion par S_gestion seul (en-tête), partage trouvé par V_gestion. Aucune
+// route ne porte d'id ; l'ancienne route /api/shares/{id}/status n'existe plus.
+func TestManageRoutes(t *testing.T) {
 	e := newEnv(t, false, nil)
 	k := newKeys()
 	c := e.create(t, "", k, 1, 1)
 	e.upload(t, c, 1)
-	path := "/api/shares/" + c.ID + "/destroy"
-	expect(t, e.do(req{method: "POST", path: path, body: []byte(`{}`)}), 400, badRequest)
-	expect(t, e.do(req{method: "POST", path: path, // K_preuve sans K_accès
-		body: mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve)})}), 400, badRequest)
-	expect(t, e.do(req{method: "POST", path: path,
-		body: mustJSON(map[string]string{"manage": enc.EncodeToString(rnd(32))})}), 404, notFound)
-	expect(t, e.do(req{method: "POST", path: path,
-		body: mustJSON(map[string]string{"manage": enc.EncodeToString(k.gestion)})}), 204, "")
-	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/status",
-		hdr: map[string]string{"X-Shh-Manage": enc.EncodeToString(k.gestion)}}), 404, notFound)
+	other := newKeys()
+	e.upload(t, e.create(t, "", other, 1, 3), 1)
+	for _, r := range []req{
+		{method: "GET", path: "/api/shares/" + c.ID + "/status", hdr: manage(k)},
+		{method: "POST", path: "/api/shares/" + c.ID + "/destroy", hdr: manage(k)},
+		{method: "GET", path: "/api/shares/" + c.ID + "/meta", hdr: access(k)},
+		{method: "GET", path: "/api/manage/" + c.ID + "/status", hdr: manage(k)},
+	} {
+		expect(t, e.do(r), 404, notFound)
+	}
+	for _, path := range []string{"/api/manage/status", "/api/manage/destroy"} {
+		method := map[string]string{"/api/manage/status": "GET", "/api/manage/destroy": "POST"}[path]
+		// Format : en-tête absent, en double, trop court ou trop long, alphabet faux → 400.
+		expect(t, e.do(req{method: method, path: path}), 400, badRequest)
+		for _, bad := range []string{enc.EncodeToString(rnd(31)), enc.EncodeToString(rnd(33)),
+			strings.Repeat("*", 43), enc.EncodeToString(k.gestion)[:42] + "\n"} {
+			expect(t, e.do(req{method: method, path: path, hdr: map[string]string{"X-Shh-Manage": bad}}), 400, badRequest)
+		}
+		// Corps non vide refusé : rien d'autre que S_gestion ne transite.
+		expect(t, e.do(req{method: method, path: path, hdr: manage(k), body: []byte(`{}`)}), 400, badRequest)
+		// Faux S_gestion, ou K_accès à sa place : 404 uniforme.
+		expect(t, e.do(req{method: method, path: path, hdr: manage(newKeys())}), 404, notFound)
+		expect(t, e.do(req{method: method, path: path, hdr: map[string]string{"X-Shh-Manage": enc.EncodeToString(k.acces)}}), 404, notFound)
+		// Méthode inverse : 404 (route inconnue).
+		inv := map[string]string{"GET": "POST", "POST": "GET"}[method]
+		expect(t, e.do(req{method: inv, path: path, hdr: manage(k)}), 404, notFound)
+	}
+	w := e.do(req{method: "GET", path: "/api/manage/status", hdr: manage(k)})
+	expect(t, w, 200, "")
+	if st := jsonOf(t, w); st["max_opens"].(float64) != 1 || len(st) != 4 {
+		t.Fatalf("status: %v", st)
+	}
+	// L'autre partage a son propre statut (V_gestion distincts).
+	if st := jsonOf(t, e.do(req{method: "GET", path: "/api/manage/status", hdr: manage(other)})); st["max_opens"].(float64) != 3 {
+		t.Fatalf("status de l'autre partage: %v", st)
+	}
+	expect(t, e.do(req{method: "POST", path: "/api/manage/destroy", hdr: manage(k)}), 204, "")
+	expect(t, e.do(req{method: "GET", path: "/api/manage/status", hdr: manage(k)}), 404, notFound)
+	expect(t, e.do(req{method: "POST", path: "/api/manage/destroy", hdr: manage(k)}), 404, notFound)
+	expect(t, e.do(req{method: "GET", path: "/api/shares/meta", hdr: access(k)}), 404, notFound)
+	expect(t, e.do(req{method: "GET", path: "/api/manage/status", hdr: manage(other)}), 200, "")
+	// La destruction par le destinataire n'accepte plus S_gestion.
+	expect(t, e.do(req{method: "POST", path: "/api/shares/destroy", hdr: access(other),
+		body: mustJSON(map[string]string{"manage": enc.EncodeToString(other.gestion)})}), 400, badRequest)
+	expect(t, e.do(req{method: "POST", path: "/api/shares/destroy", body: mustJSON(map[string]string{"proof": enc.EncodeToString(other.preuve)})}),
+		400, badRequest) // K_preuve sans K_accès
 }
 
 func TestFifthBadPasswordIsNotFound(t *testing.T) {
@@ -358,14 +416,14 @@ func TestFifthBadPasswordIsNotFound(t *testing.T) {
 	c := e.create(t, "", k, 1, 1)
 	e.upload(t, c, 1)
 	for left := 4; left >= 1; left-- {
-		w := e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/unlock", hdr: access(k),
+		w := e.do(req{method: "POST", path: "/api/shares/unlock", hdr: access(k),
 			body: mustJSON(map[string]string{"proof": enc.EncodeToString(rnd(32))})})
 		expect(t, w, 403, fmt.Sprintf(`{"error":"bad_password","attempts_left":%d}`, left))
 	}
-	w := e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/unlock", hdr: access(k),
+	w := e.do(req{method: "POST", path: "/api/shares/unlock", hdr: access(k),
 		body: mustJSON(map[string]string{"proof": enc.EncodeToString(rnd(32))})})
 	expect(t, w, 404, notFound)
-	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/meta", hdr: access(k)}), 404, notFound)
+	expect(t, e.do(req{method: "GET", path: "/api/shares/meta", hdr: access(k)}), 404, notFound)
 }
 
 var wantHeaders = map[string]string{
@@ -401,7 +459,7 @@ func TestSecurityHeaders(t *testing.T) {
 	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type = %q", ct)
 	}
-	w = e.do(req{method: "GET", path: "/api/shares/" + enc.EncodeToString(rnd(16)) + "/meta",
+	w = e.do(req{method: "GET", path: "/api/shares/meta",
 		hdr: access(newKeys())})
 	expect(t, w, 404, notFound)
 	checkHeaders(t, "404", w)
@@ -428,7 +486,7 @@ func TestPutWrongSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	put := func(n string, body []byte, tok string) *httptest.ResponseRecorder {
-		return e.do(req{method: "PUT", path: "/api/shares/" + c.ID + "/segments/" + n, body: body, hdr: auth(tok)})
+		return e.do(req{method: "PUT", path: "/api/shares/segments/" + n, body: body, hdr: auth(tok)})
 	}
 	expect(t, put("0", bytes.Repeat([]byte{7}, size+1), c.UploadToken), 400, badRequest)
 	expect(t, put("0", bytes.Repeat([]byte{7}, size-1), c.UploadToken), 400, badRequest)
@@ -442,36 +500,57 @@ func TestPutWrongSize(t *testing.T) {
 		t.Fatal("fichier modifié par un envoi refusé")
 	}
 	// Finalisation incomplète.
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/finalize", hdr: auth(c.UploadToken), body: mustJSON(newKeys().finBody(1, 1))}),
+	expect(t, e.do(req{method: "POST", path: "/api/shares/finalize", hdr: auth(c.UploadToken), body: mustJSON(newKeys().finBody(1, 1))}),
 		409, `{"error":"incomplete"}`)
 	// Sans jeton, jeton malformé.
-	expect(t, e.do(req{method: "PUT", path: "/api/shares/" + c.ID + "/segments/0", body: make([]byte, size)}), 400, badRequest)
+	expect(t, e.do(req{method: "PUT", path: "/api/shares/segments/0", body: make([]byte, size)}), 400, badRequest)
 	expect(t, put("0", make([]byte, size), "n'importe.quoi"), 404, notFound)
 	// Envoi après finalisation refusé.
 	expect(t, put("0", make([]byte, size), c.UploadToken), 204, "")
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/finalize", hdr: auth(c.UploadToken), body: mustJSON(newKeys().finBody(1, 1))}), 200, "")
+	expect(t, e.do(req{method: "POST", path: "/api/shares/finalize", hdr: auth(c.UploadToken), body: mustJSON(newKeys().finBody(1, 1))}), 200, "")
 	expect(t, put("0", make([]byte, size), c.UploadToken), 404, notFound)
 }
 
-func TestTokensBoundToShare(t *testing.T) {
+// Spec §32 : aucun id dans le chemin ; le jeton signé désigne seul le partage. Le jeton de
+// A n'agit que sur A ; changer l'id signé casse la signature ; les types ne s'échangent pas.
+func TestTokenDesignatesShare(t *testing.T) {
 	e := newEnv(t, false, nil)
 	ka, kb := newKeys(), newKeys()
 	a := e.create(t, "", ka, 1, 2)
 	b := e.create(t, "", kb, 1, 2)
 	size := share.SegmentSize(1, 0)
-	// Jeton d'envoi de A refusé sur B.
-	expect(t, e.do(req{method: "PUT", path: "/api/shares/" + b.ID + "/segments/0", body: make([]byte, size),
-		hdr: auth(a.UploadToken)}), 404, notFound)
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + b.ID + "/finalize", hdr: auth(a.UploadToken), body: mustJSON(newKeys().finBody(1, 1))}), 404, notFound)
+	fileB := filepath.Join(e.dir, "blobs", b.ID)
+	beforeB, _ := os.ReadFile(fileB)
 	e.upload(t, a, 1)
+	if afterB, _ := os.ReadFile(fileB); !bytes.Equal(beforeB, afterB) {
+		t.Fatal("le jeton de A a écrit dans B")
+	}
+	// Jeton de A dont l'id signé est remplacé par celui de B : signature invalide.
+	p, sig, _ := strings.Cut(b.UploadToken, ".")
+	raw, _ := enc.DecodeString(p)
+	pa, _, _ := strings.Cut(a.UploadToken, ".")
+	rawA, _ := enc.DecodeString(pa)
+	copy(raw[2:2+16], rawA[2:2+16])
+	forged := enc.EncodeToString(raw) + "." + sig
+	expect(t, e.do(req{method: "PUT", path: "/api/shares/segments/0", body: make([]byte, size), hdr: auth(forged)}), 404, notFound)
 	e.upload(t, b, 1)
 	dlA, _ := e.unlock(t, a.ID, ka)
-	// Jeton de téléchargement de A refusé sur B ; jeton d'envoi refusé en lecture.
-	expect(t, e.do(req{method: "GET", path: "/api/shares/" + b.ID + "/segments/0", hdr: auth(dlA)}), 404, notFound)
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + b.ID + "/done", hdr: auth(dlA)}), 404, notFound)
-	expect(t, e.do(req{method: "GET", path: "/api/shares/" + a.ID + "/segments/0", hdr: auth(a.UploadToken)}), 404, notFound)
-	// Jeton de téléchargement refusé à l'envoi.
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + a.ID + "/finalize", hdr: auth(dlA), body: mustJSON(newKeys().finBody(1, 1))}), 404, notFound)
+	// Jeton d'envoi refusé en lecture ; jeton de téléchargement refusé à l'envoi.
+	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/0", hdr: auth(a.UploadToken)}), 404, notFound)
+	expect(t, e.do(req{method: "POST", path: "/api/shares/done", hdr: auth(a.UploadToken)}), 404, notFound)
+	expect(t, e.do(req{method: "POST", path: "/api/shares/finalize", hdr: auth(dlA), body: mustJSON(newKeys().finBody(1, 1))}), 404, notFound)
+	expect(t, e.do(req{method: "PUT", path: "/api/shares/segments/0", body: make([]byte, size), hdr: auth(dlA)}), 404, notFound)
+	// Le jeton de A lit A, et seulement A.
+	w := e.do(req{method: "GET", path: "/api/shares/segments/0", hdr: auth(dlA)})
+	expect(t, w, 200, "")
+	fileA, _ := os.ReadFile(filepath.Join(e.dir, "blobs", a.ID))
+	if !bytes.Equal(w.Body.Bytes(), fileA[:size]) {
+		t.Fatal("segment lu ailleurs que dans A")
+	}
+	expect(t, e.do(req{method: "POST", path: "/api/shares/done", hdr: auth(dlA)}), 204, "")
+	if doneMask(t, e, b.ID) != 0 || doneMask(t, e, a.ID) != 1 {
+		t.Fatal("done appliqué au mauvais partage")
+	}
 }
 
 func doneMask(t *testing.T, e *env, id string) int64 {
@@ -496,14 +575,14 @@ func TestForgedOpenN(t *testing.T) {
 	l := int(raw[1])
 	binary.BigEndian.PutUint32(raw[2+l:], 1)
 	forged := enc.EncodeToString(raw) + "." + sig
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/done", hdr: auth(forged)}), 404, notFound)
+	expect(t, e.do(req{method: "POST", path: "/api/shares/done", hdr: auth(forged)}), 404, notFound)
 	// Jeton bien formé mais signé avec une autre clé.
 	other := token.New(rnd(32), e.clk.Now).Issue(token.Download, c.ID, 1, e.clk.Now().Add(time.Hour))
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/done", hdr: auth(other)}), 404, notFound)
+	expect(t, e.do(req{method: "POST", path: "/api/shares/done", hdr: auth(other)}), 404, notFound)
 	if m := doneMask(t, e, c.ID); m != 0 {
 		t.Fatalf("done_mask = %b après jetons falsifiés", m)
 	}
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/done", hdr: auth(dl2)}), 204, "")
+	expect(t, e.do(req{method: "POST", path: "/api/shares/done", hdr: auth(dl2)}), 204, "")
 	if m := doneMask(t, e, c.ID); m != 0b10 {
 		t.Fatalf("done_mask = %b, attendu 10 (ouverture 2 seulement)", m)
 	}
@@ -517,7 +596,7 @@ func TestDownloadTokenCappedAtExpiry(t *testing.T) {
 	e.clk.Add(50 * time.Minute)
 	dl, _ := e.unlock(t, c.ID, k)
 	e.clk.Add(30 * time.Minute) // au-delà de expires_at, avant 1 h de jeton
-	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/segments/0", hdr: auth(dl)}), 404, notFound)
+	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/0", hdr: auth(dl)}), 404, notFound)
 }
 
 // Spec §24 : jeton d'envoi 3 h ; jeton de téléchargement min(3 h, expires_at).
@@ -526,26 +605,28 @@ func TestTokenLifetimes(t *testing.T) {
 	k := newKeys()
 	alt, shown := e.captchaFor(t, "")
 	body := k.createBody(1, 1, alt, shown)
-	w := e.do(req{method: "POST", path: "/api/shares", body: mustJSON(body)})
+	w := e.do(req{method: "POST", path: "/api/shares", hdr: k.createHdr(), body: mustJSON(body)})
 	expect(t, w, 201, "")
-	c := created{ID: body["id"].(string)}
+	var c created
 	json.Unmarshal(w.Body.Bytes(), &c)
+	c.ID = e.idOf(t, c.UploadToken, token.Upload)
 	if _, exp, err := e.sig.CheckExp(c.UploadToken, token.Upload, c.ID); err != nil || !exp.Equal(e.clk.Now().Add(3*time.Hour)) {
 		t.Fatal("jeton d'envoi", exp, err)
 	}
 	e.clk.Add(2*time.Hour + 50*time.Minute) // 12:52 : l'envoi est encore accepté (échéance 13:15)
-	expect(t, e.do(req{method: "PUT", path: "/api/shares/" + c.ID + "/segments/0", body: rnd(share.SegmentSize(1, 0)),
+	expect(t, e.do(req{method: "PUT", path: "/api/shares/segments/0", body: rnd(share.SegmentSize(1, 0)),
 		hdr: auth(c.UploadToken)}), 204, "")
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/finalize", hdr: auth(c.UploadToken),
+	expect(t, e.do(req{method: "POST", path: "/api/shares/finalize", hdr: auth(c.UploadToken),
 		body: mustJSON(k.finBody(1, 24))}), 200, "")
 	dl, _ := e.unlock(t, c.ID, k)
 	if _, exp, err := e.sig.CheckExp(dl, token.Download, c.ID); err != nil || !exp.Equal(e.clk.Now().Add(3*time.Hour)) {
 		t.Fatal("jeton de téléchargement (24 h)", exp, err)
 	}
 	// Partage d'une heure : jeton plafonné à expires_at.
-	short := e.create(t, "", k, 1, 1)
+	k2 := newKeys()
+	short := e.create(t, "", k2, 1, 1)
 	e.upload(t, short, 1)
-	dl2, _ := e.unlock(t, short.ID, k)
+	dl2, _ := e.unlock(t, short.ID, k2)
 	if _, exp, err := e.sig.CheckExp(dl2, token.Download, short.ID); err != nil ||
 		!exp.Equal(time.Date(2026, 11, 4, 14, 0, 0, 0, time.UTC)) {
 		t.Fatal("jeton de téléchargement plafonné", exp, err)
@@ -577,7 +658,7 @@ func TestSegmentRateLimit(t *testing.T) {
 	for i := 0; i < limits.RequestsPerMin-4; i++ {
 		expect(t, e.do(req{method: "GET", path: "/api/nope"}), 404, notFound)
 	}
-	seg := "/api/shares/" + c.ID + "/segments/0"
+	seg := "/api/shares/segments/0"
 	// Le budget de lecture du jeton (share.ReadBudget) s'épuise vite au palier 1 : une
 	// réponse « budget » prouve elle aussi que la limite de débit a laissé passer.
 	passed := func(w *httptest.ResponseRecorder) {
@@ -613,10 +694,9 @@ func TestCreateRefusals(t *testing.T) {
 	e := newEnv(t, false, nil)
 	k := newKeys()
 	post := func(body map[string]any) *httptest.ResponseRecorder {
-		w := e.do(req{method: "POST", path: "/api/shares", body: mustJSON(body)})
+		w := e.do(req{method: "POST", path: "/api/shares", hdr: k.createHdr(), body: mustJSON(body)})
 		if w.Code == 201 { // envoi détruit aussitôt : la limite de 2 envois en cours ne gêne pas
-			expect(t, e.do(req{method: "POST", path: "/api/shares/" + body["id"].(string) + "/destroy",
-				body: mustJSON(map[string]string{"manage": enc.EncodeToString(k.gestion)})}), 204, "")
+			expect(t, e.do(req{method: "POST", path: "/api/manage/destroy", hdr: manage(k)}), 204, "")
 		}
 		return w
 	}
@@ -656,11 +736,11 @@ func TestCreateRefusals(t *testing.T) {
 	bad := []func(m map[string]any){
 		func(m map[string]any) { m["bucket"] = 2 },
 		func(m map[string]any) { m["bucket"] = 1.5 },
-		func(m map[string]any) { m["id"] = enc.EncodeToString(rnd(15)) },
-		func(m map[string]any) { m["id"] = base64.URLEncoding.EncodeToString(rnd(16)) }, // avec bourrage
-		func(m map[string]any) { m["id"] = nil },
-		func(m map[string]any) { delete(m, "id") },
-		func(m map[string]any) { m["access_v"] = base64.StdEncoding.EncodeToString(rnd(32)) },
+		// Champs K1 : l'id et les vérificateurs ne sont plus envoyés (spec §29.8, §32).
+		func(m map[string]any) { m["id"] = enc.EncodeToString(rnd(16)) },
+		func(m map[string]any) { m["access_v"] = v(k.acces) },
+		func(m map[string]any) { m["manage_v"] = v(k.gestion) },
+		func(m map[string]any) { m["access"] = enc.EncodeToString(k.acces) }, // secret dans le corps
 		func(m map[string]any) { m["inconnu"] = 1 },
 		// Champs v1 : n'existent plus à la création (spec §29.8).
 		func(m map[string]any) { m["proof_v"] = v(rnd(32)) },
@@ -677,8 +757,30 @@ func TestCreateRefusals(t *testing.T) {
 			t.Fatalf("cas %d : %d %q", i, w.Code, w.Body.String())
 		}
 	}
-	expect(t, e.do(req{method: "POST", path: "/api/shares", body: append(mustJSON(k.createBody(1, 1, "a", "b")), '{')}), 400, badRequest)
-	expect(t, e.do(req{method: "POST", path: "/api/shares", body: bytes.Repeat([]byte(" "), 5000)}), 400, badRequest)
+	// En-têtes des secrets : absents, mal formés, en double → 400, défi non consommé.
+	alt, shown = e.captchaFor(t, "")
+	for i, h := range []map[string]string{
+		{},
+		{"X-Shh-Access": enc.EncodeToString(k.acces)},
+		{"X-Shh-Manage": enc.EncodeToString(k.gestion)},
+		{"X-Shh-Access": enc.EncodeToString(rnd(31)), "X-Shh-Manage": enc.EncodeToString(k.gestion)},
+		{"X-Shh-Access": enc.EncodeToString(k.acces), "X-Shh-Manage": base64.URLEncoding.EncodeToString(k.gestion)},
+		{"X-Shh-Access": v(k.acces)[:42] + "\n", "X-Shh-Manage": enc.EncodeToString(k.gestion)},
+	} {
+		if w := e.do(req{method: "POST", path: "/api/shares", hdr: h, body: mustJSON(k.createBody(1, 1, alt, shown))}); w.Code != 400 {
+			t.Fatalf("en-têtes %d : %d %q", i, w.Code, w.Body.String())
+		}
+	}
+	hr := httptest.NewRequest("POST", "/api/shares", bytes.NewReader(mustJSON(k.createBody(1, 1, alt, shown))))
+	hr.Header.Add("X-Shh-Access", enc.EncodeToString(k.acces))
+	hr.Header.Add("X-Shh-Access", enc.EncodeToString(rnd(32)))
+	hr.Header.Set("X-Shh-Manage", enc.EncodeToString(k.gestion))
+	dw := httptest.NewRecorder()
+	e.h.ServeHTTP(dw, hr)
+	expect(t, dw, 400, badRequest)
+	expect(t, post(k.createBody(1, 1, alt, shown)), 201, "")
+	expect(t, e.do(req{method: "POST", path: "/api/shares", hdr: k.createHdr(), body: append(mustJSON(k.createBody(1, 1, "a", "b")), '{')}), 400, badRequest)
+	expect(t, e.do(req{method: "POST", path: "/api/shares", hdr: k.createHdr(), body: bytes.Repeat([]byte(" "), 5000)}), 400, badRequest)
 }
 
 func TestCreateFrozenFull(t *testing.T) {
@@ -688,14 +790,15 @@ func TestCreateFrozenFull(t *testing.T) {
 		t.Fatal(err)
 	}
 	alt, shown := e.captchaFor(t, "")
-	expect(t, e.do(req{method: "POST", path: "/api/shares", body: mustJSON(k.createBody(1, 1, alt, shown))}),
+	expect(t, e.do(req{method: "POST", path: "/api/shares", hdr: k.createHdr(), body: mustJSON(k.createBody(1, 1, alt, shown))}),
 		503, `{"error":"frozen"}`)
 	os.Remove(e.svc.FrozenFile)
 	// Le défi n'a pas été consommé par le refus « gelé ».
-	expect(t, e.do(req{method: "POST", path: "/api/shares", body: mustJSON(k.createBody(1, 1, alt, shown))}), 201, "")
+	expect(t, e.do(req{method: "POST", path: "/api/shares", hdr: k.createHdr(), body: mustJSON(k.createBody(1, 1, alt, shown))}), 201, "")
 	e.svc.StorageMax = 1000
 	alt, shown = e.captchaFor(t, "")
-	expect(t, e.do(req{method: "POST", path: "/api/shares", body: mustJSON(k.createBody(1, 1, alt, shown))}),
+	k2 := newKeys()
+	expect(t, e.do(req{method: "POST", path: "/api/shares", hdr: k2.createHdr(), body: mustJSON(k2.createBody(1, 1, alt, shown))}),
 		507, `{"error":"full"}`)
 }
 
@@ -703,49 +806,45 @@ func TestCreateFrozenFull(t *testing.T) {
 // les créations comptent dans le quota du jour (10), qui refuse ensuite toute création.
 func TestCreateQuota(t *testing.T) {
 	e := newEnv(t, false, nil)
-	k := newKeys()
-	a := e.create(t, "", k, 1, 1)
-	b := e.create(t, "", k, 1, 1)
+	k, ka := newKeys(), newKeys()
+	e.create(t, "", ka, 1, 1)
+	b := e.create(t, "", newKeys(), 1, 1)
 	alt, shown := e.captchaFor(t, "")
-	w := e.do(req{method: "POST", path: "/api/shares", body: mustJSON(k.createBody(1, 1, alt, shown))})
+	w := e.do(req{method: "POST", path: "/api/shares", hdr: k.createHdr(), body: mustJSON(k.createBody(1, 1, alt, shown))})
 	expect(t, w, 429, "")
 	if m := jsonOf(t, w); m["error"] != "limit" || m["retry_after_s"].(float64) != 60 {
 		t.Fatalf("429: %v", m)
 	}
 	// Envoi détruit (abandon) : sa place est rendue et il ne compte pas comme création.
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + a.ID + "/destroy",
-		body: mustJSON(map[string]string{"manage": enc.EncodeToString(k.gestion)})}), 204, "")
+	expect(t, e.do(req{method: "POST", path: "/api/manage/destroy", hdr: manage(ka)}), 204, "")
 	e.upload(t, b, 1)
 	for i := 0; i < 9; i++ {
-		e.upload(t, e.create(t, "", k, 1, 1), 1)
+		e.upload(t, e.create(t, "", newKeys(), 1, 1), 1)
 	}
 	alt, shown = e.captchaFor(t, "")
-	w = e.do(req{method: "POST", path: "/api/shares", body: mustJSON(k.createBody(1, 1, alt, shown))})
+	w = e.do(req{method: "POST", path: "/api/shares", hdr: k.createHdr(), body: mustJSON(k.createBody(1, 1, alt, shown))})
 	expect(t, w, 429, "")
 	if m := jsonOf(t, w); m["retry_after_s"].(float64) <= 60 {
 		t.Fatalf("quota du jour : %v", m) // jusqu'à minuit UTC
 	}
 }
 
-// Spec §29.8 : id existant → 409 sans toucher au partage ; finalize en JSON strict,
-// longueurs exactes, bourrage contrôlé ; unlock rend l'enveloppe.
+// Spec §29.8 : mêmes K_accès et S_gestion qu'un envoi existant → 400 sans toucher au
+// partage ; finalize en JSON strict, longueurs exactes, bourrage contrôlé ; unlock rend l'enveloppe.
 func TestCreateConflictAndFinalizeV2(t *testing.T) {
 	e := newEnv(t, false, nil)
 	k := newKeys()
 	c := e.create(t, "", k, 400, 2) // 7 segments
 	alt, shown := e.captchaFor(t, "")
-	dup := k.createBody(1, 1, alt, shown)
-	dup["id"] = c.ID
-	// Revue K1, I2 : un id existant ne se distingue pas d'une autre création refusée.
-	expect(t, e.do(req{method: "POST", path: "/api/shares", body: mustJSON(dup)}), 400, badRequest)
+	expect(t, e.do(req{method: "POST", path: "/api/shares", hdr: k.createHdr(), body: mustJSON(k.createBody(1, 1, alt, shown))}), 400, badRequest)
 	segs := map[int][]byte{}
 	for _, n := range []int{0, 1, 2, 6} {
 		segs[n] = rnd(share.SegmentSize(400, n))
-		expect(t, e.do(req{method: "PUT", path: fmt.Sprintf("/api/shares/%s/segments/%d", c.ID, n), body: segs[n],
+		expect(t, e.do(req{method: "PUT", path: fmt.Sprintf("/api/shares/segments/%d", n), body: segs[n],
 			hdr: auth(c.UploadToken)}), 204, "")
 	}
 	fin := func(m map[string]any) *httptest.ResponseRecorder {
-		return e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/finalize", hdr: auth(c.UploadToken), body: mustJSON(m)})
+		return e.do(req{method: "POST", path: "/api/shares/finalize", hdr: auth(c.UploadToken), body: mustJSON(m)})
 	}
 	good := func() map[string]any {
 		m := k.finBody(2, 1)
@@ -781,7 +880,7 @@ func TestCreateConflictAndFinalizeV2(t *testing.T) {
 		func(b string) string { return strings.Replace(b, `"fill_to":6`, `"fill_to":6,"FILL_TO":5`, 1) },
 		func(b string) string { return strings.Replace(b, `"envelope"`, `"Envelope"`, 1) },
 	} {
-		w := e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/finalize", hdr: auth(c.UploadToken), body: []byte(mut(string(mustJSON(good()))))})
+		w := e.do(req{method: "POST", path: "/api/shares/finalize", hdr: auth(c.UploadToken), body: []byte(mut(string(mustJSON(good()))))})
 		expect(t, w, 400, badRequest)
 	}
 	m := good()
@@ -790,7 +889,7 @@ func TestCreateConflictAndFinalizeV2(t *testing.T) {
 	g := good()
 	expect(t, fin(g), 200, "")
 	expect(t, fin(g), 404, notFound) // rejeu
-	w := e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/unlock", hdr: access(k),
+	w := e.do(req{method: "POST", path: "/api/shares/unlock", hdr: access(k),
 		body: mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve)})})
 	expect(t, w, 200, "")
 	r := jsonOf(t, w)
@@ -799,14 +898,14 @@ func TestCreateConflictAndFinalizeV2(t *testing.T) {
 	}
 	dl := r["download_token"].(string)
 	for n := 3; n < 6; n++ {
-		w := e.do(req{method: "GET", path: fmt.Sprintf("/api/shares/%s/segments/%d", c.ID, n), hdr: auth(dl)})
+		w := e.do(req{method: "GET", path: fmt.Sprintf("/api/shares/segments/%d", n), hdr: auth(dl)})
 		expect(t, w, 200, "")
 		if bytes.Contains(w.Body.Bytes(), make([]byte, 4096)) {
 			t.Fatal("bourrage non aléatoire", n)
 		}
 	}
 	// Statut : rien d'autre que compteurs, échéance et état.
-	w = e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/status", hdr: map[string]string{"X-Shh-Manage": enc.EncodeToString(k.gestion)}})
+	w = e.do(req{method: "GET", path: "/api/manage/status", hdr: map[string]string{"X-Shh-Manage": enc.EncodeToString(k.gestion)}})
 	expect(t, w, 200, "")
 	keys := []string{}
 	for key := range jsonOf(t, w) {
@@ -818,42 +917,109 @@ func TestCreateConflictAndFinalizeV2(t *testing.T) {
 	}
 }
 
-// Revue K1, I2 : sonder un id (existant, en envoi ou finalisé) coûte une création du
-// quota, comme une création réussie, et rend la même réponse qu'une création invalide.
-func TestCreateExistingIDIsAProbe(t *testing.T) {
+// Revue K1, I2, option (a) : l'oracle d'existence est fermé. Qui ne connaît que l'id du
+// client (HKDF de K_lien) ou un vérificateur lu dans la base ne peut ni désigner un partage
+// ni provoquer un refus qui dépende de son existence : l'id et les vérificateurs ne sont plus
+// acceptés à la création, et une création avec d'autres secrets réussit pareil, partage
+// existant ou non. Seul qui détient K_accès ou S_gestion d'un partage provoque un refus
+// (400, compté au quota) : il connaît déjà le partage.
+func TestCreateCannotProbeExistence(t *testing.T) {
+	type answer struct {
+		code       int
+		body, keys string
+	}
+	shape := func(t *testing.T, w *httptest.ResponseRecorder) answer {
+		t.Helper()
+		keys := []string{}
+		for k := range jsonOf(t, w) {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		hdr := []string{}
+		for h := range w.Header() {
+			hdr = append(hdr, h)
+		}
+		sort.Strings(hdr)
+		body := ""
+		if w.Code != 201 {
+			body = w.Body.String()
+		}
+		return answer{w.Code, body, strings.Join(keys, ",") + "|" + strings.Join(hdr, ",")}
+	}
+	// Mêmes sondes face à un serveur où le partage existe, puis où il n'existe pas.
+	run := func(exists bool) []answer {
+		e := newEnv(t, false, nil)
+		victim := newKeys()
+		victimID := enc.EncodeToString(rnd(16)) // id côté client (jamais envoyé par un client honnête)
+		if exists {
+			e.upload(t, e.create(t, "", victim, 1, 1), 1)
+		}
+		var out []answer
+		for _, f := range []func(m map[string]any){
+			func(m map[string]any) { m["id"] = victimID },
+			func(m map[string]any) { m["access_v"] = v(victim.acces) },
+			func(m map[string]any) { m["manage_v"] = v(victim.gestion) },
+			func(map[string]any) {}, // création ordinaire avec ses propres secrets
+		} {
+			alt, shown := e.captchaFor(t, "")
+			atk := newKeys()
+			b := atk.createBody(1, 1, alt, shown)
+			f(b)
+			w := e.do(req{method: "POST", path: "/api/shares", hdr: atk.createHdr(), body: mustJSON(b)})
+			out = append(out, shape(t, w))
+			if w.Code == 201 {
+				expect(t, e.do(req{method: "POST", path: "/api/manage/destroy", hdr: manage(atk)}), 204, "")
+			}
+		}
+		if exists { // le partage n'a pas été touché
+			expect(t, e.do(req{method: "GET", path: "/api/shares/meta", hdr: access(victim)}), 200, "")
+		}
+		return out
+	}
+	with, without := run(true), run(false)
+	if fmt.Sprint(with) != fmt.Sprint(without) {
+		t.Fatalf("réponses différentes selon l'existence du partage :\n%v\n%v", with, without)
+	}
+	if with[3].code != 201 || with[0].code != 400 {
+		t.Fatalf("réponses inattendues : %v", with)
+	}
+
+	// Détenteur des secrets (même lien deux fois) : refus ordinaire, compté au quota.
 	e := newEnv(t, false, nil)
 	k := newKeys()
 	live := e.create(t, "", k, 1, 1)
 	e.upload(t, live, 1)
-	pending := e.create(t, "", k, 1, 1)
-	probe := func(id string) *httptest.ResponseRecorder {
+	pending := e.create(t, "", newKeys(), 1, 1)
+	dup := func(hdr map[string]string) *httptest.ResponseRecorder {
 		alt, shown := e.captchaFor(t, "")
-		b := k.createBody(1, 1, alt, shown)
-		b["id"] = id
-		return e.do(req{method: "POST", path: "/api/shares", body: mustJSON(b)})
+		return e.do(req{method: "POST", path: "/api/shares", hdr: hdr, body: mustJSON(k.createBody(1, 1, alt, shown))})
 	}
-	bad := func() *httptest.ResponseRecorder {
+	ref := func() *httptest.ResponseRecorder {
 		alt, shown := e.captchaFor(t, "")
 		b := k.createBody(1, 1, alt, shown)
 		b["bucket"] = 2
-		return e.do(req{method: "POST", path: "/api/shares", body: mustJSON(b)})
-	}
-	ref := bad()
-	for _, id := range []string{live.ID, pending.ID} {
-		for i := 0; i < 4; i++ {
-			w := probe(id)
-			if w.Code != ref.Code || w.Body.String() != ref.Body.String() || len(w.Header()) != len(ref.Header()) {
-				t.Fatalf("sonde %s : %d %q ; refus ordinaire : %d %q", id, w.Code, w.Body.String(), ref.Code, ref.Body.String())
-			}
+		return e.do(req{method: "POST", path: "/api/shares", hdr: newKeys().createHdr(), body: mustJSON(b)})
+	}()
+	sameManage := newKeys()
+	sameManage.gestion = k.gestion
+	for i := 0; i < 8; i++ {
+		h := k.createHdr()
+		if i%2 == 1 {
+			h = sameManage.createHdr()
+		}
+		w := dup(h)
+		if w.Code != ref.Code || w.Body.String() != ref.Body.String() || len(w.Header()) != len(ref.Header()) {
+			t.Fatalf("doublon %d : %d %q ; refus ordinaire : %d %q", i, w.Code, w.Body.String(), ref.Code, ref.Body.String())
 		}
 	}
-	// 2 créations + 8 sondes = 10 : le quota du jour est atteint (le partage en cours compte).
+	// 2 créations + 8 doublons = 10 : le quota du jour est atteint (l'envoi en cours compte).
 	alt, shown := e.captchaFor(t, "")
-	w := e.do(req{method: "POST", path: "/api/shares", body: mustJSON(k.createBody(1, 1, alt, shown))})
+	k3 := newKeys()
+	w := e.do(req{method: "POST", path: "/api/shares", hdr: k3.createHdr(), body: mustJSON(k3.createBody(1, 1, alt, shown))})
 	expect(t, w, 429, "")
-	// Les sondes n'ont touché ni le partage prêt ni l'envoi en cours.
-	expect(t, e.do(req{method: "GET", path: "/api/shares/" + live.ID + "/meta", hdr: access(k)}), 200, "")
-	expect(t, e.do(req{method: "PUT", path: "/api/shares/" + pending.ID + "/segments/0", body: rnd(share.SegmentSize(1, 0)),
+	// Les doublons n'ont touché ni le partage prêt ni l'envoi en cours.
+	expect(t, e.do(req{method: "GET", path: "/api/shares/meta", hdr: access(k)}), 200, "")
+	expect(t, e.do(req{method: "PUT", path: "/api/shares/segments/0", body: rnd(share.SegmentSize(1, 0)),
 		hdr: auth(pending.UploadToken)}), 204, "")
 }
 
@@ -862,11 +1028,11 @@ func TestUnlockBeforeFinalize(t *testing.T) {
 	e := newEnv(t, false, nil)
 	k := newKeys()
 	c := e.create(t, "", k, 1, 1)
-	expect(t, e.do(req{method: "PUT", path: "/api/shares/" + c.ID + "/segments/0", body: rnd(share.SegmentSize(1, 0)),
+	expect(t, e.do(req{method: "PUT", path: "/api/shares/segments/0", body: rnd(share.SegmentSize(1, 0)),
 		hdr: auth(c.UploadToken)}), 204, "")
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/unlock", hdr: access(k),
+	expect(t, e.do(req{method: "POST", path: "/api/shares/unlock", hdr: access(k),
 		body: mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve)})}), 404, notFound)
-	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/meta", hdr: access(k)}), 404, notFound)
+	expect(t, e.do(req{method: "GET", path: "/api/shares/meta", hdr: access(k)}), 404, notFound)
 }
 
 func TestSecretsFormat(t *testing.T) {
@@ -874,7 +1040,7 @@ func TestSecretsFormat(t *testing.T) {
 	k := newKeys()
 	c := e.create(t, "", k, 1, 1)
 	e.upload(t, c, 1)
-	path := "/api/shares/" + c.ID + "/meta"
+	path := "/api/shares/meta"
 	for _, h := range []string{"", "abc", base64.URLEncoding.EncodeToString(k.acces), enc.EncodeToString(rnd(31))} {
 		expect(t, e.do(req{method: "GET", path: path, hdr: map[string]string{"X-Shh-Access": h}}), 400, badRequest)
 	}
@@ -887,7 +1053,7 @@ func TestSecretsFormat(t *testing.T) {
 	expect(t, w, 400, badRequest)
 	// Corps JSON trop gros.
 	big := mustJSON(map[string]string{"proof": strings.Repeat("A", 5000)})
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/unlock", hdr: access(k), body: big}), 400, badRequest)
+	expect(t, e.do(req{method: "POST", path: "/api/shares/unlock", hdr: access(k), body: big}), 400, badRequest)
 }
 
 func TestBehindProxy(t *testing.T) {
@@ -917,19 +1083,18 @@ func TestBehindProxy(t *testing.T) {
 
 func TestUniformNotFoundAllRoutes(t *testing.T) {
 	e := newEnv(t, false, nil)
-	k := newKeys()
-	mk := func() (created, string) {
+	mk := func(k keys) (created, string) {
 		c := e.create(t, "", k, 1, 2)
 		e.upload(t, c, 1)
 		dl, _ := e.unlock(t, c.ID, k)
 		return c, dl
 	}
-	expired, expTok := mk()
-	destroyed, desTok := mk()
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + destroyed.ID + "/destroy",
-		body: mustJSON(map[string]string{"manage": enc.EncodeToString(k.gestion)})}), 204, "")
+	kExp, kDes, k := newKeys(), newKeys(), newKeys()
+	expired, expTok := mk(kExp)
+	_, desTok := mk(kDes)
+	expect(t, e.do(req{method: "POST", path: "/api/manage/destroy", hdr: manage(kDes)}), 204, "")
 	e.clk.Add(2 * time.Hour)
-	live, _ := mk()
+	live, _ := mk(k)
 
 	future := e.clk.Now().Add(time.Hour)
 	unknown, invalid := enc.EncodeToString(rnd(16)), "pas-un-id"
@@ -938,37 +1103,36 @@ func TestUniformNotFoundAllRoutes(t *testing.T) {
 		k        keys
 		tok      string
 	}{
-		{"inexistant", unknown, k, e.sig.Issue(token.Download, unknown, 1, future)},
-		{"id invalide", invalid, k, e.sig.Issue(token.Download, invalid, 1, future)},
-		{"détruit", destroyed.ID, k, desTok},
+		{"inexistant", unknown, newKeys(), e.sig.Issue(token.Download, unknown, 1, future)},
+		{"id invalide", invalid, newKeys(), e.sig.Issue(token.Download, invalid, 1, future)},
+		{"détruit", "", kDes, desTok},
 		{"mauvaise clé", live.ID, newKeys(), token.New(rnd(32), e.clk.Now).Issue(token.Download, live.ID, 1, future)},
-		{"expiré", expired.ID, k, expTok},
+		{"expiré", expired.ID, kExp, expTok},
 	}
 	routes := map[string]func(id string, k keys, tok string) req{
 		"meta": func(id string, k keys, _ string) req {
-			return req{method: "GET", path: "/api/shares/" + id + "/meta", hdr: access(k)}
+			return req{method: "GET", path: "/api/shares/meta", hdr: access(k)}
 		},
 		"unlock": func(id string, k keys, _ string) req {
-			return req{method: "POST", path: "/api/shares/" + id + "/unlock", hdr: access(k),
+			return req{method: "POST", path: "/api/shares/unlock", hdr: access(k),
 				body: mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve)})}
 		},
 		"status": func(id string, k keys, _ string) req {
-			return req{method: "GET", path: "/api/shares/" + id + "/status",
+			return req{method: "GET", path: "/api/manage/status",
 				hdr: map[string]string{"X-Shh-Manage": enc.EncodeToString(k.gestion)}}
 		},
 		"destroy gestion": func(id string, k keys, _ string) req {
-			return req{method: "POST", path: "/api/shares/" + id + "/destroy",
-				body: mustJSON(map[string]string{"manage": enc.EncodeToString(k.gestion)})}
+			return req{method: "POST", path: "/api/manage/destroy", hdr: manage(k)}
 		},
 		"destroy preuve": func(id string, k keys, _ string) req {
-			return req{method: "POST", path: "/api/shares/" + id + "/destroy", hdr: access(k),
+			return req{method: "POST", path: "/api/shares/destroy", hdr: access(k),
 				body: mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve)})}
 		},
 		"segment": func(id string, _ keys, tok string) req {
-			return req{method: "GET", path: "/api/shares/" + id + "/segments/0", hdr: auth(tok)}
+			return req{method: "GET", path: "/api/shares/segments/0", hdr: auth(tok)}
 		},
 		"done": func(id string, _ keys, tok string) req {
-			return req{method: "POST", path: "/api/shares/" + id + "/done", hdr: auth(tok)}
+			return req{method: "POST", path: "/api/shares/done", hdr: auth(tok)}
 		},
 	}
 	for rname, route := range routes {
@@ -981,7 +1145,7 @@ func TestUniformNotFoundAllRoutes(t *testing.T) {
 	}
 	// Réponses octet pour octet identiques entre elles.
 	e.clk.Add(time.Minute) // nouvelle fenêtre de débit
-	ref := e.do(routes["meta"](unknown, k, "")).Body.String()
+	ref := e.do(routes["meta"](unknown, newKeys(), "")).Body.String()
 	for rname, route := range routes {
 		for _, c := range cases {
 			if got := e.do(route(c.id, c.k, c.tok)).Body.String(); got != ref {

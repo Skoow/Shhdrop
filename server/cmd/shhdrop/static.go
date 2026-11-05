@@ -18,11 +18,9 @@ import (
 //   - tout nom qui commence par « . » (.env, .git/…) → 404 ;
 //   - un dossier n'est jamais listé : son index.html, sinon 404 ;
 //   - repli de l'application monopage : un chemin inconnu dont le dernier segment n'a pas
-//     d'extension sert index.html ; un fichier absent (x.js) → 404 ;
-//   - sous /s/ et /m/ (préfixe sensible à la casse), tout chemin qui n'est pas un fichier
-//     existant sert index.html, même avec un point dans le dernier segment : un lien abîmé
-//     par une messagerie (« /s/<id>.#clé ») doit charger l'application, qui retire le « # »
-//     de la barre et de l'historique (UI §12.1). Les segments cachés restent refusés.
+//     d'extension sert index.html ; un fichier absent (x.js) → 404. Les liens sont à la
+//     racine (« /#clé », spec §32) : plus de repli particulier sous /s/ ni /m/ ; un chemin
+//     abîmé sans extension charge l'application, qui retire le « # » (UI §12.1).
 //
 // Les en-têtes de sécurité sont posés par api.New autour de ce gestionnaire.
 func staticHandler(dir string) (http.Handler, error) {
@@ -47,7 +45,7 @@ func staticHandler(dir string) (http.Handler, error) {
 			return
 		}
 		f, fi, err := openRegular(fsys, name)
-		if errors.Is(err, fs.ErrNotExist) && (linkPath(r.URL.Path) || !strings.Contains(path.Base(name), ".") && !isDir(fsys, name)) {
+		if errors.Is(err, fs.ErrNotExist) && !strings.Contains(path.Base(name), ".") && !isDir(fsys, name) {
 			name = "index.html"
 			f, fi, err = openRegular(fsys, name)
 		}
@@ -64,11 +62,6 @@ func staticHandler(dir string) (http.Handler, error) {
 		// Date nulle : pas de Last-Modified (Cache-Control: no-store partout).
 		http.ServeContent(w, r, fi.Name(), time.Time{}, rs)
 	}), nil
-}
-
-// linkPath : chemin d'un lien de partage (/s/…) ou de gestion (/m/…).
-func linkPath(p string) bool {
-	return strings.HasPrefix(p, "/s/") || strings.HasPrefix(p, "/m/")
 }
 
 // staticName : chemin de l'URL → nom dans le dossier ; refuse les segments cachés.

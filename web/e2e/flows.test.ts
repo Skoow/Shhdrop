@@ -194,9 +194,9 @@ describe("réseau coupé pendant l'envoi", () => {
         throw new TypeError("fetch failed");
       }
       const r = await globalThis.fetch(input, init);
-      if (String(input).endsWith("/destroy")) {
+      if (String(input).endsWith("/api/manage/destroy")) {
         url = String(input);
-        manage = (JSON.parse(String(init?.body)) as { manage: string }).manage;
+        manage = new Headers(init?.headers).get("X-Shh-Manage") ?? "";
         destroyed.push({ status: r.status, keepalive: init?.keepalive });
       }
       return r;
@@ -207,7 +207,8 @@ describe("réseau coupé pendant l'envoi", () => {
     expect(n).toBe(3); // un appel par essai (1 s, puis 2 s d'attente)
     expect(destroyed).toEqual([{ status: 204, keepalive: true }]);
     // Le serveur n'a plus le partage : un second destroy avec S_gestion répond 404.
-    const again = await globalThis.fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manage }) });
+    expect(manage).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const again = await globalThis.fetch(url, { method: "POST", headers: { "X-Shh-Manage": manage } });
     expect(again.status).toBe(404);
   });
 });

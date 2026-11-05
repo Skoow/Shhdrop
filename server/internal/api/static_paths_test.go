@@ -9,14 +9,10 @@ func get(e *env, p string) map[string][]string {
 	return e.do(req{method: "GET", path: p}).Header()
 }
 
-func TestRobotsHeaderOnSharePaths(t *testing.T) {
+// Spec §32 : liens à la racine (« /#clé ») ; X-Robots-Tag n'a plus d'usage, nulle part.
+func TestNoRobotsHeader(t *testing.T) {
 	e := newEnv(t, false, nil)
-	for _, p := range []string{"/s/abc", "/m/abc", "/s/", "/m/x/y"} {
-		if got := get(e, p)["X-Robots-Tag"]; len(got) != 1 || got[0] != "noindex" {
-			t.Errorf("%s : X-Robots-Tag = %v, attendu noindex", p, got)
-		}
-	}
-	for _, p := range []string{"/", "/index.html", "/robots.txt", "/sx", "/mx/a", "/assets/s/a.js", "/api/health"} {
+	for _, p := range []string{"/", "/index.html", "/s/abc", "/m/abc", "/s/", "/m/x/y", "/api/health"} {
 		if got := get(e, p)["X-Robots-Tag"]; len(got) != 0 {
 			t.Errorf("%s : X-Robots-Tag inattendu %v", p, got)
 		}

@@ -138,3 +138,30 @@ func TestTokenRejectsNewline(t *testing.T) {
 		}
 	}
 }
+
+// Subject (spec §32 : aucun id dans le chemin) : rend l'id signé et le n° d'ouverture ;
+// refuse un autre type, une autre clé, un jeton expiré ou modifié.
+func TestSubject(t *testing.T) {
+	now := t0
+	s := newSigner(&now)
+	tok := s.Issue('d', "AAECAwQFBgcICQoLDA0ODw", 3, now.Add(time.Hour))
+	id, n, err := s.Subject(tok, 'd')
+	if err != nil || id != "AAECAwQFBgcICQoLDA0ODw" || n != 3 {
+		t.Fatalf("Subject = %q, %d, %v", id, n, err)
+	}
+	other := New(bytes.Repeat([]byte{8}, 32), func() time.Time { return now })
+	for name, bad := range map[string]string{
+		"autre type": s.Issue('u', "x", 0, now.Add(time.Hour)),
+		"autre clé":  other.Issue('d', "x", 1, now.Add(time.Hour)),
+		"modifié":    tok[:len(tok)-1] + string("AB"[strings.IndexByte("AB", tok[len(tok)-1])+1&1]),
+		"vide":       "",
+	} {
+		if id, _, err := s.Subject(bad, 'd'); err == nil || id != "" {
+			t.Fatalf("%s accepté (%q)", name, id)
+		}
+	}
+	now = t0.Add(time.Hour)
+	if _, _, err := s.Subject(tok, 'd'); err == nil {
+		t.Fatal("jeton expiré accepté")
+	}
+}

@@ -26,7 +26,6 @@ import {
   passwordKey,
   passwordKeyForCreate,
   randomBytes,
-  sha256,
 } from "../crypto/kdf";
 import type { GeneratedPassword } from "../crypto/password";
 import type { KLien } from "../crypto/types";
@@ -144,15 +143,6 @@ function parseShare(link: string, expectedOrigin: string): ShareLink {
   return p;
 }
 
-/**
- * id = HKDF(K_lien, « shhdrop/v2/id ») (spec §29.2) : un lien dont l'identifiant n'est pas
- * dérivé de sa clé est refusé (Error("lien_invalide")) avant toute requête. Rend l'id en octets.
- */
-async function checkLinkId(p: ShareLink): Promise<Uint8Array<ArrayBuffer>> {
-  const id = await shareId(p.kLien);
-  if (b64u(id) !== p.id) throw new Error("lien_invalide");
-  return id;
-}
 
 /** Preuve anti-robot : preuve de travail ALTCHA (charge utile base64) ou jeton du repli reCAPTCHA. */
 export type CaptchaProof = { kind: "pow"; payload: string } | { kind: "recaptcha"; token: string };
@@ -163,6 +153,11 @@ export type CaptchaProof = { kind: "pow"; payload: string } | { kind: "recaptcha
 export type CaptchaCtx = { fallbackOrigin: string | null; mode: "pow" | "fallback" };
 
 export type CreateOpts = api.Net & {
+  /**
+   * Base de dépôt des liens rendus (« / » par défaut ; « /Shhdrop/ » pour la démo, soit
+   * import.meta.env.BASE_URL). Le lien vaut `${origin}${base}#<K_lien>` (spec §32).
+   */
+  base?: string;
   ttlHours: TtlHours;
   maxOpens: number;
   /** Mot de passe généré (generatePassword, 8 caractères) ou saisi (checkPassword : 12 au moins). */
@@ -304,9 +299,9 @@ function proofFields(p: CaptchaProof, cap: api.Captcha): { altcha: string } | { 
  * bourrage [fill_from, fill_to), que le serveur remplit d'aléa. La requête de création n'est
  * jamais interrompue (sinon un partage créé resterait inconnu) : l'annulation est constatée
  * juste après. En cas d'échec ou d'annulation après la création, l'envoi est détruit (au
- * mieux, en keepalive) pour libérer la place réservée. Un id déjà pris (probabilité
- * 2⁻¹²⁸ hors serveur malveillant) est refusé comme une création invalide (400 →
- * Error("bad_request")) : un nouvel appel tire une autre K_lien.
+ * mieux, en keepalive) pour libérer la place réservée. L'id (HKDF de K_lien) ne sert qu'aux
+ * données authentifiées et n'est jamais envoyé : le serveur trouve le partage par V_accès et
+ * V_gestion, qu'il calcule depuis K_accès et S_gestion reçus en en-tête (spec §29.8).
  */
 export async function createShare(
   origin: string,
@@ -330,9 +325,8 @@ export async function createShare(
   try {
     return await guarded(async () => {
       const acc = await deriveAccess(kLien);
-      wipe.push(acc.kAcces); // inutile à l'expéditeur
+      wipe.push(acc.kAcces); // envoyée une fois, à la création
       const idBytes = await shareId(kLien);
-      const id = b64u(idBytes);
       const sealed = await sealStream(items, await contentKeys(r), { rights: o.rights, keepTtlH: o.keepTtlH });
       throwIfAborted(signal);
       // Refuse un mot de passe trop court ou trop courant (Error("mot_de_passe_…")).
@@ -362,11 +356,8 @@ export async function createShare(
       if (wait > 0) await sleep(wait, signal);
       throwIfAborted(signal);
 
-      const created = await api.create(c, {
-        id,
+      const created = await api.create(c, acc.kAcces, sGestion, {
         bucket: sealed.bucket,
-        access_v: b64u(acc.vAcces),
-        manage_v: b64u(await sha256(sGestion)),
         hp: "",
         shown_at: cap.shownAt,
         ...fields,
@@ -394,7 +385,7 @@ export async function createShare(
           throwIfAborted(signal);
           const data = await sealed.segment(n); // chiffré une fois ; les nouveaux essais renvoient `data`
           await withBudget(deadline, o, (s) =>
-            api.putSegment(c, id, created.uploadToken, n, data, (b) => bytes(acked + Math.min(b, data.length)), s),
+            api.putSegment(c, created.uploadToken, n, data, (b) => bytes(acked + Math.min(b, data.length)), s),
           );
           acked += data.length;
           bytes(acked);
@@ -414,21 +405,22 @@ export async function createShare(
         };
         const expiresInS = await withBudget(deadline, o, async (s, attempt) => {
           try {
-            return await api.finalize(c, id, created.uploadToken, fin, s);
+            return await api.finalize(c, created.uploadToken, fin, s);
           } catch (e) {
             // Un essai précédent a pu aboutir sur le serveur sans que la réponse arrive
             // (finalize n'y est pas rejouable : 404 ensuite). status avec S_gestion tranche :
             // « ready » → envoi terminé ; sinon (404, autre état, échec) → erreur et destruction.
             if (attempt > 1 && e instanceof api.HttpError && e.status === 404) {
-              const st = await api.status(c, id, sGestion).catch(() => undefined);
+              const st = await api.status(c, sGestion).catch(() => undefined);
               if (st?.state === "ready") return st.expiresInS;
             }
             throw e;
           }
         });
-        return { link: shareLink(origin, id, kLien), manage: manageLink(origin, id, sGestion), expiresInS };
+        const base = o.base ?? "/";
+        return { link: shareLink(origin, kLien, base), manage: manageLink(origin, sGestion, base), expiresInS };
       } catch (e) {
-        await api.destroy(c, id, { sGestion }, undefined, true).catch(() => undefined);
+        await api.destroy(c, { sGestion }, undefined, true).catch(() => undefined);
         throw e;
       }
     }, senderError);
@@ -439,11 +431,10 @@ export async function createShare(
 
 export async function fetchMeta(link: string, expectedOrigin: string, net?: api.Net): Promise<{ expiresInS: number }> {
   const p = parseShare(link, expectedOrigin);
-  await checkLinkId(p);
   return guarded(async () => {
     const { kAcces } = await deriveAccess(p.kLien);
     try {
-      const m = await api.meta(api.ctx(p.origin, net), p.id, kAcces);
+      const m = await api.meta(api.ctx(p.origin, net), kAcces);
       return { expiresInS: m.expiresInS };
     } finally {
       kAcces.fill(0);
@@ -537,7 +528,7 @@ export async function openShare(
   const p = parseShare(link, expectedOrigin);
   // Avant toute requête et toute dérivation (coûteuse) : un champ vide n'est pas un mot de passe.
   if (password === "") throw new Error("mot_de_passe_requis");
-  const idBytes = await checkLinkId(p);
+  const idBytes = await shareId(p.kLien); // données authentifiées seulement, jamais envoyé
   const c = api.ctx(p.origin, net);
   return guarded(async () => {
     const { kAcces } = await deriveAccess(p.kLien);
@@ -551,9 +542,9 @@ export async function openShare(
       keys?.kPreuve.fill(0);
     };
     try {
-      m = await api.meta(c, p.id, kAcces);
+      m = await api.meta(c, kAcces);
       keys = await keysFromMeta(p.kLien, m, password);
-      u = await api.unlock(c, p.id, kAcces, keys.kPreuve);
+      u = await api.unlock(c, kAcces, keys.kPreuve);
     } catch (e) {
       zero();
       throw e;
@@ -569,7 +560,7 @@ export async function openShare(
       if (finished) return;
       finished = true;
       try {
-        await api.done(c, p.id, u.downloadToken);
+        await api.done(c, u.downloadToken);
       } catch (e) {
         // 404 : partage déjà effacé (expiré ou détruit) ; le contenu est déjà lu.
         if (!(e instanceof api.HttpError && e.status === 404)) throw readerError(e);
@@ -578,7 +569,7 @@ export async function openShare(
     try {
       if (u.segments !== m.segments) throw new api.BadResponse();
       const get = async (n: number) => {
-        const s = await api.getSegment(c, p.id, u.downloadToken, n, segmentSize(m.bucket, n));
+        const s = await api.getSegment(c, u.downloadToken, n, segmentSize(m.bucket, n));
         onProgress?.(n + 1, m.segments);
         return s;
       };
@@ -627,7 +618,7 @@ export async function openShare(
         destroy: (reason) =>
           guarded(async () => {
             if (wiped) throw new Error("cles_effacees");
-            await api.destroy(c, p.id, { kAcces, kPreuve }, reason);
+            await api.destroy(c, { kAcces, kPreuve }, reason);
           }, (e) => (e instanceof Error && e.message === "cles_effacees" ? e : readerError(e))),
         wipe: () => {
           wiped = true;
@@ -686,16 +677,15 @@ export async function collectToBlob(open: Opened, i: number, foldBytes = FOLD_BY
 export async function destroyShare(link: string, expectedOrigin: string, opts: { password?: string } & api.Net = {}): Promise<void> {
   const p = parseFor(link, expectedOrigin);
   if (p.kind === "s" && (opts.password === undefined || opts.password === "")) throw new Error("mot_de_passe_requis");
-  if (p.kind === "s") await checkLinkId(p);
   const c = api.ctx(p.origin, opts);
   await guarded(async () => {
-    if (p.kind === "m") return api.destroy(c, p.id, { sGestion: p.sGestion });
+    if (p.kind === "m") return api.destroy(c, { sGestion: p.sGestion });
     const { kAcces } = await deriveAccess(p.kLien);
     let keys: Awaited<ReturnType<typeof keysFromMeta>> | undefined;
     try {
-      const m = await api.meta(c, p.id, kAcces);
+      const m = await api.meta(c, kAcces);
       keys = await keysFromMeta(p.kLien, m, opts.password!);
-      await api.destroy(c, p.id, { kAcces, kPreuve: keys.kPreuve });
+      await api.destroy(c, { kAcces, kPreuve: keys.kPreuve });
     } finally {
       kAcces.fill(0);
       keys?.kPreuve.fill(0);
@@ -711,5 +701,5 @@ export async function shareStatus(
 ): Promise<{ opensUsed: number; maxOpens: number; expiresInS: number; state: string }> {
   const p = parseFor(manage, expectedOrigin);
   if (p.kind !== "m") throw new Error("lien_invalide");
-  return guarded(() => api.status(api.ctx(p.origin, net), p.id, p.sGestion), readerError);
+  return guarded(() => api.status(api.ctx(p.origin, net), p.sGestion), readerError);
 }

@@ -15,14 +15,11 @@ var pdfFrameFiles = map[string]bool{
 	"/pdf-frame.css": true,
 }
 
-// pathHeaders pose les en-têtes qui dépendent du chemin, après les en-têtes communs :
-//   - X-Robots-Tag: noindex sur /s/* et /m/* (liens de partage et de gestion) ;
+// pathHeaders pose les en-têtes qui dépendent du chemin, après les en-têtes communs
+// (plus de X-Robots-Tag : les liens sont à la racine, le secret après « # », spec §32) :
 //   - Cross-Origin-Resource-Policy: cross-origin sur les trois fichiers du cadre PDF ;
 //   - frame-ancestors 'self' (au lieu de 'none') sur /pdf-frame.html seulement.
 func pathHeaders(h http.Header, p string) {
-	if strings.HasPrefix(p, "/s/") || strings.HasPrefix(p, "/m/") {
-		h.Set("X-Robots-Tag", "noindex")
-	}
 	if pdfFrameFiles[p] {
 		h.Set("Cross-Origin-Resource-Policy", "cross-origin")
 	}

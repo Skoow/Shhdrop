@@ -30,9 +30,9 @@ var (
 	ErrFull       = errors.New("stockage plein")
 	ErrFrozen     = errors.New("créations suspendues")
 	ErrBadRequest = errors.New("requête invalide")
-	// ErrConflict : l'id proposé par le client existe déjà (spec §29.8 : 409, le client
-	// recommence avec une nouvelle K_lien).
-	ErrConflict = errors.New("identifiant déjà pris")
+	// ErrConflict : V_accès ou V_gestion déjà pris (seul qui connaît K_accès ou S_gestion
+	// peut le provoquer, spec §29.8), ou id tiré par le serveur déjà pris (128 bits : jamais).
+	ErrConflict = errors.New("partage déjà présent")
 	// ErrBusy : un autre Finalize du même envoi est en cours (revue K1, I1).
 	ErrBusy = errors.New("finalisation déjà en cours")
 	// ErrBudget : l'ouverture a déjà lu son budget d'octets (ReadBudget).
@@ -54,8 +54,10 @@ const (
 	stallSweep = 900
 )
 
-// CreateReq : création v2 (spec §29.8). L'id vient du client (HKDF de sa K_lien) ; ni
-// durée, ni ouvertures, ni sel, ni V_preuve à ce stade.
+// CreateReq : création v2 (spec §29.8). ID : identifiant interne tiré par le serveur
+// (NewID), sans lien avec l'id du client (qui ne sort jamais du navigateur, spec §32) ;
+// AccessV, ManageV : SHA-256 de K_accès et de S_gestion, calculés par le serveur depuis les
+// secrets reçus. Ni durée, ni ouvertures, ni sel, ni V_preuve à ce stade.
 type CreateReq struct {
 	ID               string
 	Bucket           int
@@ -74,6 +76,7 @@ type FinalizeReq struct {
 const EnvelopeLen = 60
 
 type Meta struct {
+	ID                               string // identifiant interne (jetons, fichier)
 	ExpiresIn                        time.Duration
 	Salt                             []byte
 	KdfOps, KdfMem, Bucket, Segments int
@@ -173,6 +176,24 @@ func DecodeB64(s string, n int) ([]byte, error) {
 	return b, nil
 }
 
+// NewID tire un identifiant interne de 128 bits (crypto/rand) : clé de la ligne, nom du
+// fichier et sujet des jetons. Il n'est jamais montré dans un chemin ni dérivé d'un secret.
+func NewID() string {
+	b := make([]byte, 16)
+	rand.Read(b) // ne renvoie jamais d'erreur (Go ≥ 1.24 : échec fatal du système)
+	return b64.EncodeToString(b)
+}
+
+// Verifier : SHA-256 d'un secret de 32 octets (K_accès, S_gestion), clé de recherche de la
+// ligne (index uniques, spec §29.8) ; nil pour toute autre longueur (jamais de recherche).
+func Verifier(secret []byte) []byte {
+	if len(secret) != 32 {
+		return nil
+	}
+	h := sha256.Sum256(secret)
+	return h[:]
+}
+
 // validID : 22 caractères base64url canoniques (16 octets).
 func validID(id string) bool {
 	_, err := DecodeB64(id, 16)
@@ -236,9 +257,10 @@ func validFill(from, to, segs int) bool {
 	return from >= 0 && from <= to && to <= segs-1 && (from == to || from >= 1)
 }
 
-// Create réserve la place du palier et enregistre l'envoi sous l'id proposé par le client
-// (rendu tel quel). Un id déjà présent, en base ou sur disque, donne ErrConflict, sans
-// toucher au partage existant.
+// Create réserve la place du palier et enregistre l'envoi sous r.ID (tiré par NewID, rendu
+// tel quel). Un V_accès ou un V_gestion déjà présent (ou un id déjà pris, en base ou sur
+// disque) donne ErrConflict, sans toucher au partage existant : sans K_accès ni S_gestion,
+// personne ne peut provoquer ce refus (aucun oracle d'existence, revue K1, I2).
 func (s *Service) Create(r CreateReq) (string, int, error) {
 	if s.Frozen() {
 		return "", 0, ErrFrozen
@@ -253,7 +275,8 @@ func (s *Service) Create(r CreateReq) (string, int, error) {
 	s.createMu.Lock()
 	defer s.createMu.Unlock()
 	var one int
-	switch err := s.DB.QueryRow(`SELECT 1 FROM shares WHERE id=?`, id).Scan(&one); {
+	switch err := s.DB.QueryRow(`SELECT 1 FROM shares WHERE id=? OR access_v=? OR manage_v=?`,
+		id, r.AccessV, r.ManageV).Scan(&one); {
 	case err == nil:
 		return "", 0, ErrConflict
 	case !errors.Is(err, sql.ErrNoRows):
@@ -468,29 +491,28 @@ func (s *Service) fillRandom(id string, bucket, from, to int) error {
 	return nil
 }
 
-func (s *Service) Meta(id string, kAcces []byte) (Meta, error) {
-	if !validID(id) {
+// Meta trouve le partage par V_accès = SHA-256(K_accès) (index unique) : sans K_accès,
+// aucune requête ne désigne un partage (spec §29.8).
+func (s *Service) Meta(kAcces []byte) (Meta, error) {
+	v := Verifier(kAcces)
+	if v == nil {
 		return Meta{}, ErrNotFound
 	}
 	now := s.now()
 	var m Meta
 	var exp int64
-	var accessV []byte
-	err := s.DB.QueryRow(`SELECT expires_at, salt, kdf_ops, kdf_mem, bucket, access_v FROM shares
-		WHERE id=? AND state='ready' AND expires_at>? AND failed_attempts<?`, id, now, maxAttempts).
-		Scan(&exp, &m.Salt, &m.KdfOps, &m.KdfMem, &m.Bucket, &accessV)
+	err := s.DB.QueryRow(`SELECT id, expires_at, salt, kdf_ops, kdf_mem, bucket FROM shares
+		WHERE access_v=? AND state='ready' AND expires_at>? AND failed_attempts<?`, v, now, maxAttempts).
+		Scan(&m.ID, &exp, &m.Salt, &m.KdfOps, &m.KdfMem, &m.Bucket)
 	if err != nil {
 		return Meta{}, notFound(err)
-	}
-	if !match(kAcces, accessV) {
-		return Meta{}, ErrNotFound
 	}
 	m.ExpiresIn = secs(exp - now)
 	m.Segments = SegmentCount(m.Bucket)
 	return m, nil
 }
 
-// Unlock vérifie K_accès puis K_preuve ; juste : consomme une ouverture et rend son
+// Unlock (id rendu par Meta) vérifie K_accès puis K_preuve ; juste : consomme une ouverture et rend son
 // numéro avec l'enveloppe E (spec §29.8), seulement en « ready » (proof_v et envelope ne
 // sont posés que par Finalize).
 func (s *Service) Unlock(id string, kAcces, kPreuve []byte) (int, []byte, error) {
@@ -602,51 +624,66 @@ func (s *Service) Done(id string, openN int) error {
 	return nil
 }
 
-func (s *Service) Destroy(id string, kAcces, kPreuve, sGestion []byte) error {
-	if !validID(id) {
+// alive : condition de vie commune à la destruction et au statut. Un partage expiré (ou un
+// envoi échu) est introuvable, et aucun essai n'y est compté ; Sweep l'effacera.
+const alive = `((state='uploading' AND upload_deadline>?1) OR (state<>'uploading' AND expires_at>?1))`
+
+// DestroyWithProof : destruction par le destinataire (K_accès et K_preuve). Partage
+// trouvé par V_accès ; K_preuve faux = un essai de mot de passe (compteur commun avec Unlock).
+func (s *Service) DestroyWithProof(kAcces, kPreuve []byte) error {
+	v := Verifier(kAcces)
+	if v == nil {
 		return ErrNotFound
 	}
-	var accessV, proofV, manageV []byte
-	now := s.now()
-	// Même condition de vie que Status : un partage expiré (ou un envoi échu) est introuvable,
-	// et aucun essai n'y est compté ; Sweep l'effacera.
-	err := s.DB.QueryRow(`SELECT access_v, proof_v, manage_v FROM shares WHERE id=? AND
-		((state='uploading' AND upload_deadline>?) OR (state<>'uploading' AND expires_at>?))`, id, now, now).
-		Scan(&accessV, &proofV, &manageV)
+	var id string
+	var proofV []byte
+	err := s.DB.QueryRow(`SELECT id, proof_v FROM shares WHERE access_v=?2 AND `+alive, s.now(), v).Scan(&id, &proofV)
 	if err != nil {
 		return notFound(err)
 	}
-	// Les trois comparaisons sont toujours faites (pas de court-circuit).
-	a, p, g := match(kAcces, accessV), match(kPreuve, proofV), match(sGestion, manageV)
-	if g || a && p {
+	if match(kPreuve, proofV) { // proof_v NULL (envoi en cours) : jamais juste
 		return s.destroyOrNotFound(id)
 	}
-	if a {
-		// K_accès juste mais K_preuve faux : c'est un essai de mot de passe.
-		if _, err := s.countFailure(id); err != nil && !errors.Is(err, ErrNotFound) {
-			return err
-		}
+	if _, err := s.countFailure(id); err != nil && !errors.Is(err, ErrNotFound) {
+		return err
 	}
 	return ErrNotFound
 }
 
-func (s *Service) Status(id string, sGestion []byte) (Status, error) {
-	if !validID(id) {
+// DestroyManaged : destruction par l'expéditeur (S_gestion), partage trouvé par V_gestion.
+func (s *Service) DestroyManaged(sGestion []byte) error {
+	id, err := s.managed(sGestion)
+	if err != nil {
+		return err
+	}
+	return s.destroyOrNotFound(id)
+}
+
+// managed : id du partage vivant dont V_gestion = SHA-256(sGestion).
+func (s *Service) managed(sGestion []byte) (string, error) {
+	v := Verifier(sGestion)
+	if v == nil {
+		return "", ErrNotFound
+	}
+	var id string
+	err := s.DB.QueryRow(`SELECT id FROM shares WHERE manage_v=?2 AND `+alive, s.now(), v).Scan(&id)
+	return id, notFound(err)
+}
+
+// Status : compteurs, échéance et état, partage trouvé par V_gestion (spec §32).
+func (s *Service) Status(sGestion []byte) (Status, error) {
+	v := Verifier(sGestion)
+	if v == nil {
 		return Status{}, ErrNotFound
 	}
 	now := s.now()
 	var st Status
 	var left int
 	var exp, maxOpens sql.NullInt64
-	var manageV []byte
-	err := s.DB.QueryRow(`SELECT max_opens, opens_left, expires_at, state, manage_v FROM shares
-		WHERE id=? AND ((state='uploading' AND upload_deadline>?) OR (state<>'uploading' AND expires_at>?))`,
-		id, now, now).Scan(&maxOpens, &left, &exp, &st.State, &manageV)
+	err := s.DB.QueryRow(`SELECT max_opens, opens_left, expires_at, state FROM shares WHERE manage_v=?2 AND `+alive,
+		now, v).Scan(&maxOpens, &left, &exp, &st.State)
 	if err != nil {
 		return Status{}, notFound(err)
-	}
-	if !match(sGestion, manageV) {
-		return Status{}, ErrNotFound
 	}
 	if maxOpens.Valid { // NULL pendant l'envoi : 0 / 0
 		st.MaxOpens = int(maxOpens.Int64)
@@ -658,9 +695,16 @@ func (s *Service) Status(id string, sGestion []byte) (Status, error) {
 	return st, nil
 }
 
-func (s *Service) DestroyAdmin(id string) error {
-	if !validID(id) {
+// DestroyAdmin : destruction par l'administrateur, à partir de K_accès (dérivée du lien
+// signalé par la commande d'administration), quel que soit l'état du partage.
+func (s *Service) DestroyAdmin(kAcces []byte) error {
+	v := Verifier(kAcces)
+	if v == nil {
 		return ErrNotFound
+	}
+	var id string
+	if err := s.DB.QueryRow(`SELECT id FROM shares WHERE access_v=?`, v).Scan(&id); err != nil {
+		return notFound(err)
 	}
 	return s.destroyOrNotFound(id)
 }

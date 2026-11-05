@@ -108,7 +108,7 @@ func TestUnlockEnvelopeOnlyWhenReady(t *testing.T) {
 	if failed(t, s, id) != 0 {
 		t.Fatal("essai compté avant finalize")
 	}
-	if _, err := s.Meta(id, k.acces); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Meta(k.acces); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	r := withFill(id, 3, 6)
@@ -126,12 +126,15 @@ func TestUnlockEnvelopeOnlyWhenReady(t *testing.T) {
 	if _, env, err := s.Unlock(id, k.acces, rnd(32)); env != nil {
 		t.Fatal("enveloppe rendue à un mauvais mot de passe", err)
 	}
-	m, err := s.Meta(id, k.acces)
+	m, err := s.Meta(k.acces)
 	if err != nil || !bytes.Equal(m.Salt, r.Salt) || m.Bucket != 400 {
 		t.Fatal(m, err)
 	}
 }
 
+// Revue K1, I2 (oracle d'existence fermé) : une création ne heurte un partage existant que
+// par V_accès ou V_gestion, c'est-à-dire si son auteur connaît K_accès ou S_gestion. L'id
+// interne vient du serveur ; un id déjà pris (impossible en pratique) est refusé aussi.
 func TestCreateConflict(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
@@ -142,18 +145,31 @@ func TestCreateConflict(t *testing.T) {
 	if err := s.PutSegment(r.ID, 0, segBody(1, 0, 9)); err != nil {
 		t.Fatal(err)
 	}
-	other := newKeys().req(16, 1, 1)
-	other.ID = r.ID
-	if _, _, err := s.Create(other); !errors.Is(err, ErrConflict) {
-		t.Fatal(err)
+	sameAccess := newKeys()
+	sameAccess.acces = k.acces
+	sameManage := newKeys()
+	sameManage.gestion = k.gestion
+	sameID := newKeys().req(16, 1, 1)
+	sameID.ID = r.ID
+	for name, c := range map[string]CreateReq{"V_accès": sameAccess.req(16, 1, 1), "V_gestion": sameManage.req(16, 1, 1), "id": sameID} {
+		if _, _, err := s.Create(c); !errors.Is(err, ErrConflict) {
+			t.Fatal(name, err)
+		}
+		if _, err := os.Stat(filepath.Join(s.Blobs.Dir, c.ID)); c.ID != r.ID && !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(name, "fichier réservé malgré le conflit")
+		}
 	}
 	// Le partage existant est intact (fichier et ligne).
 	f, _ := os.ReadFile(filepath.Join(s.Blobs.Dir, r.ID))
 	if !bytes.Equal(f, segBody(1, 0, 9)) || rowCount(t, s, r.ID) != 1 {
 		t.Fatal("partage existant touché")
 	}
+	// D'autres secrets : création acceptée, quel que soit l'état du partage existant.
+	if _, _, err := s.Create(newKeys().req(1, 1, 1)); err != nil {
+		t.Fatal(err)
+	}
 	// Fichier orphelin du même nom : conflit aussi, jamais écrasé.
-	orphan := k.req(1, 1, 1)
+	orphan := newKeys().req(1, 1, 1)
 	if err := os.WriteFile(filepath.Join(s.Blobs.Dir, orphan.ID), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -172,18 +188,18 @@ func TestOnAbandon(t *testing.T) {
 	var mu sync.Mutex
 	got := map[string]int{}
 	s.OnAbandon = func(id string, bucket int) { mu.Lock(); got[id] = bucket; mu.Unlock() }
-	k := newKeys()
+	k, k2 := newKeys(), newKeys()
 	destroyed, _, _ := s.Create(k.req(16, 1, 1))
-	swept, _, _ := s.Create(k.req(1, 1, 1))
-	done := ready(t, s, k, 1, 1, 1)
-	if err := s.Destroy(destroyed, nil, nil, k.gestion); err != nil {
+	swept, _, _ := s.Create(newKeys().req(1, 1, 1))
+	ready(t, s, k2, 1, 1, 1)
+	if err := s.DestroyManaged(k.gestion); err != nil {
 		t.Fatal(err)
 	}
 	c.Add(20 * 60e9) // envoi sans segment : effacé 5 à 20 min après la création
 	if _, err := s.Sweep(); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Destroy(done, nil, nil, k.gestion); err != nil {
+	if err := s.DestroyManaged(k2.gestion); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[destroyed] != 16 || got[swept] != 1 {

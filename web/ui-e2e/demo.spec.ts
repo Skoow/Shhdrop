@@ -92,50 +92,45 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
   });
 
-  for (const [what, key] of [
-    ["« #x »", "x"],
-    ["clé de 43 caractères", KEY],
+  // Spec §32 : liens à la base de la démo, « /Shhdrop/#<clé> » et « /Shhdrop/#m<clé> » (index.html, 200).
+  for (const [what, frag] of [
+    ["partage", `#${KEY}`],
+    ["gestion", `#m${KEY}`],
   ] as const) {
-    test(`adresse profonde /Shhdrop/s/… (404.html) : route d'ouverture, ${what} retiré, jamais envoyé`, async ({ page, demo }) => {
-      const id = key === "x" ? "abc" : ID;
-      const res = await page.goto(`${demo.url}s/${id}#${key}`);
-      expect(res?.status()).toBe(404); // Pages : pas de repli monopage, 404.html avec le code 404
+    test(`lien court /Shhdrop/#… (${what}) : route d'ouverture ou de gestion, # retiré, jamais envoyé`, async ({ page, demo }) => {
+      const res = await page.goto(`${demo.url}${frag}`);
+      expect(res?.status()).toBe(200);
       await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
-      expect(page.url()).toBe(`${demo.url}s/${id}`);
-      // Route d'ouverture (match → open), pas « Cette page n'existe pas ».
+      expect(page.url()).toBe(demo.url);
+      // Route d'ouverture ou de gestion (match → open / manage), ni accueil ni « Cette page n'existe pas ».
       await expect(page.getByRole("heading", { level: 1, name: "Shhdrop" })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toHaveCount(0);
       await expect(page.getByText("Cette page n'existe pas.")).toHaveCount(0);
       await expect(page.getByRole("note")).toHaveText(BANNER_FR);
       // Le fragment n'est dans aucune requête (adresse, en-têtes, corps) ni dans l'historique.
       const sent = demo.requests.map((r) => `${r.url} ${JSON.stringify(r.headers)} ${r.postData ?? ""}`);
       expect(sent.length).toBeGreaterThan(0);
-      for (const s of sent) expect(s).not.toContain(`#${key}`);
-      if (key !== "x") for (const s of sent) expect(s).not.toContain(key);
+      for (const s of sent) {
+        expect(s).not.toContain(KEY);
+        expect(s).not.toContain("#");
+      }
       expect(demo.requests.every((r) => !("referer" in r.headers) || !r.headers.referer!.includes("#"))).toBe(true);
-      await page.goto(demo.url);
+      await page.goto(`${demo.url}securite`);
       await page.goBack();
-      await expect.poll(() => page.evaluate(() => location.href)).toBe(`${demo.url}s/${id}`);
+      await expect.poll(() => page.evaluate(() => location.href)).toBe(demo.url);
       expect(await storage(page)).toBe(0);
     });
   }
 
-  test("adresse profonde /Shhdrop/m/<id>#<secret> : # retiré, jamais envoyé, retour arrière sans #", async ({ page, demo }) => {
-    const res = await page.goto(`${demo.url}m/${ID}#${KEY}`);
-    expect(res?.status()).toBe(404); // Pages : 404.html
+  test("fragment invalide à la base (« #x ») : accueil, # retiré ; ancien lien /Shhdrop/s/<id>#… : 404 de l'interface, # retiré", async ({ page, demo }) => {
+    await page.goto(`${demo.url}#x`);
+    await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
     await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
-    expect(page.url()).toBe(`${demo.url}m/${ID}`);
-    await expect(page.getByRole("note")).toHaveText(BANNER_FR);
-    await expect(page.getByText("Cette page n'existe pas.")).toHaveCount(0);
-    const sent = demo.requests.map((r) => `${r.url} ${JSON.stringify(r.headers)} ${r.postData ?? ""}`);
-    expect(sent.length).toBeGreaterThan(0);
-    for (const s of sent) {
-      expect(s).not.toContain(KEY);
-      expect(s).not.toContain("#");
-    }
-    await page.goto(demo.url);
-    await page.goBack();
-    await expect.poll(() => page.evaluate(() => location.href)).toBe(`${demo.url}m/${ID}`);
-    expect(await storage(page)).toBe(0);
+    const res = await page.goto(`${demo.url}s/${ID}#${KEY}`);
+    expect(res?.status()).toBe(404); // Pages : 404.html
+    await expect(page.getByRole("heading", { name: "Cette page n'existe pas." })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
+    for (const r of demo.requests) expect(`${r.url} ${JSON.stringify(r.headers)} ${r.postData ?? ""}`).not.toContain(KEY);
   });
 
   test("chemin inconnu sous la base : « Cette page n'existe pas. », # retiré", async ({ page, demo }) => {
@@ -149,10 +144,10 @@ test.describe("fr-FR", () => {
     await page.goto(demo.url);
     const r = await page.evaluate(async () => {
       const cap = await (await fetch("/api/captcha")).json();
-      const nope = await fetch("/api/shares/x/status");
+      const nope = await fetch("/api/manage/status");
       const xhr = await new Promise<number>((resolve) => {
         const x = new XMLHttpRequest();
-        x.open("PUT", `${location.origin}/api/shares/x/segments/0`);
+        x.open("PUT", `${location.origin}/api/shares/segments/0`);
         x.setRequestHeader("Authorization", "Bearer t");
         x.onload = () => resolve(x.status);
         x.onerror = () => resolve(-1);

@@ -3,14 +3,15 @@
 // ouvert. On fouille ensuite, en octets bruts et en base64url/base64 : le dossier de
 // données (base, -wal, -shm, fichiers), stdout/stderr du serveur, chaque requête émise
 // et la mémoire du processus serveur. Après destruction puis arrêt du serveur, ni les
-// octets des segments, ni l'identifiant, le sel ou les vérificateurs ne doivent rester
-// dans un fichier du dossier de données.
+// octets des segments, ni l'identifiant interne, le sel ou les vérificateurs ne doivent
+// rester dans un fichier du dossier de données. Spec §32 : l'id dérivé du lien (HKDF de
+// K_lien) ne sort jamais du navigateur ; il est fouillé comme un secret.
 import { hkdfSync } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { concat, unb64u, utf8 } from "../src/crypto/encoding";
-import { accessKeys } from "../src/crypto/envelope";
+import { b64u, concat, unb64u, utf8 } from "../src/crypto/encoding";
+import { accessKeys, shareId } from "../src/crypto/envelope";
 import { generatePassword } from "../src/crypto/password";
 import { deriveAccess, passwordKey, sha256 } from "../src/crypto/kdf";
 import type { KAcces, KLien, KPreuve, SGestion } from "../src/crypto/types";
@@ -54,11 +55,13 @@ describe("le serveur ne voit rien", () => {
   let kMdp: Uint8Array<ArrayBuffer>;
   let sGestion: SGestion;
   let salt: Uint8Array<ArrayBuffer>;
-  let id: string;
+  let id: Uint8Array<ArrayBuffer>; // id du client (HKDF de K_lien) : jamais envoyé
+  let handle: string; // id interne tiré par le serveur (nom du fichier, jetons)
   let manage: string;
   let kLien2: KLien; // second partage : signalé par Opened.destroy("report")
   let kAcces2: KAcces;
-  let id2: string;
+  let id2: Uint8Array<ArrayBuffer>;
+  let handle2: string;
   let secrets: Needle[]; // jamais nulle part (kAcces à part)
   let keysOnDisk: Needle[]; // jamais sur disque ni dans les journaux ; dans les requêtes, jamais dans l'URL
   let traces: Needle[]; // présents tant que le partage vit ; plus nulle part après destruction
@@ -84,14 +87,20 @@ describe("le serveur ne voit rien", () => {
     const p = parseLink(r.link);
     if (p.kind !== "s") throw new Error("lien de partage attendu");
     kLien = p.kLien;
-    id = p.id;
+    id = await shareId(kLien);
+    // Le seul fichier du dossier blobs : son nom est l'id interne, sans rapport avec l'id du client.
+    const blobs = () => readdirSync(join(srv.dataDir, "blobs")).map(String);
+    expect(blobs()).toHaveLength(1);
+    handle = blobs()[0]!;
+    expect(handle).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(handle).not.toBe(b64u(id));
     manage = r.manage;
     kAcces = (await deriveAccess(kLien)).kAcces;
     const g = parseLink(manage);
     if (g.kind !== "m") throw new Error("lien de gestion attendu");
     sGestion = g.sGestion;
     // Hors journal des requêtes (fetch global) : le sel et les paramètres tels que le serveur les rend.
-    const m = await api.meta(api.ctx(srv.origin), id, kAcces);
+    const m = await api.meta(api.ctx(srv.origin), kAcces);
     salt = unb64u(m.salt);
     expect(m.bucket).toBe(400);
     kMdp = await passwordKey(PASSWORD, salt, m.kdf);
@@ -107,7 +116,7 @@ describe("le serveur ne voit rien", () => {
     statusKeys = Object.keys(JSON.parse(log[st]!.response.toString("utf8")) as object).sort();
     const unlockRes = log.find((x) => x.url.endsWith("/unlock"))!;
     envelope = unb64u((JSON.parse(unlockRes.response.toString("utf8")) as { envelope: string }).envelope);
-    const blobFile = readFileSync(join(srv.dataDir, "blobs", id));
+    const blobFile = readFileSync(join(srv.dataDir, "blobs", handle));
     const segOff = (n: number) => 48 + n * 64 * 65552;
     fillCopy = blobFile.subarray(segOff(3), segOff(6));
     // Second partage (une seule ouverture) : lu puis détruit par Opened.destroy("report"), qui
@@ -122,7 +131,9 @@ describe("le serveur ne voit rien", () => {
     const p2 = parseLink(r2.link);
     if (p2.kind !== "s") throw new Error("lien de partage attendu");
     kLien2 = p2.kLien;
-    id2 = p2.id;
+    id2 = await shareId(kLien2);
+    handle2 = blobs().find((n) => n !== handle)!;
+    expect(handle2).toMatch(/^[A-Za-z0-9_-]{22}$/);
     kAcces2 = (await deriveAccess(kLien2)).kAcces;
     const o2 = await openShare(r2.link, GENERATED, srv.origin, undefined, { fetch });
     expect(o2.manifest.items[0]!.text).toBe(`texte ${MARKER} texte`);
@@ -149,14 +160,16 @@ describe("le serveur ne voit rien", () => {
       needle("durée de garde (manifeste)", '"keep_ttl_h"'),
       needle("kLien", kLien),
       needle("kLien (signalé)", kLien2),
+      needle("id du client", id),
+      needle("id du client (signalé)", id2),
       needle("texte repère", MARKER),
       needle("nom repère", NAME),
       needle("mot de passe repère", PASSWORD),
     ];
     keysOnDisk = [needle("kAcces", kAcces), needle("kAcces (signalé)", kAcces2), needle("kPreuve", kPreuve), needle("sGestion", sGestion)];
     traces = [
-      needle("id", id),
-      needle("id (signalé)", id2),
+      needle("id", handle),
+      needle("id (signalé)", handle2),
       needle("sel", salt),
       needle("access_v", await sha256(kAcces)),
       needle("proof_v", await sha256(kPreuve)),
@@ -193,8 +206,8 @@ describe("le serveur ne voit rien", () => {
     expect(res.rwRegions, "aucune zone rw-p lue").toBeGreaterThan(0);
     expect(res.rwFailedBytes, `zones rw-p illisibles : ${res.rwFailedBytes} / ${res.rwBytes} octets`).toBeLessThanOrEqual(res.rwBytes / 2);
     expect(res.hits).toEqual([]);
-    // Témoin : l'identifiant du partage est retrouvé en mémoire (la lecture fonctionne).
-    const ctl = scanProcessMemory(srv.pid, [needle("id", id)]);
+    // Témoin : l'identifiant interne du partage est retrouvé en mémoire (la lecture fonctionne).
+    const ctl = scanProcessMemory(srv.pid, [needle("id", handle)]);
     expect(ctl.ok && ctl.hits).toEqual(["id"]);
   });
 
@@ -214,7 +227,7 @@ describe("le serveur ne voit rien", () => {
     await srv.stop();
     expect(scanDir(srv.dataDir, [...slices, ...secrets, ...keysOnDisk, ...traces])).toEqual([]);
     const names = readdirSync(srv.dataDir, { recursive: true }).map(String);
-    expect(names.filter((n) => n.includes(id))).toEqual([]);
+    expect(names.filter((n) => n.includes(handle))).toEqual([]);
     expect(names).toContain("shares.db"); // la base a bien été fouillée
   });
 
@@ -227,41 +240,43 @@ describe("le serveur ne voit rien", () => {
   });
 
   it("les requêtes émises ne contiennent aucun repère ; kAcces seulement dans X-Shh-Access ; aucune clé dans une URL", () => {
-    expect(log.map((r) => `${r.method} ${r.url.replace(/^https?:\/\/[^/]+/, "").replace(id, "ID").replace(id2, "ID")}`)).toEqual([
+    // Aucun identifiant dans un chemin (spec §32) : ni l'id du client, ni l'id interne.
+    expect(log.map((r) => `${r.method} ${r.url.replace(/^https?:\/\/[^/]+/, "")}`)).toEqual([
       "GET /api/captcha",
       "POST /api/shares",
       // Segments 3 à 5 : bourrage, jamais envoyés (le serveur les remplit d'aléa).
-      "PUT /api/shares/ID/segments/0",
-      "PUT /api/shares/ID/segments/1",
-      "PUT /api/shares/ID/segments/2",
-      "PUT /api/shares/ID/segments/6",
-      "POST /api/shares/ID/finalize",
-      "GET /api/shares/ID/meta",
-      "POST /api/shares/ID/unlock",
-      "GET /api/shares/ID/segments/0",
-      "GET /api/shares/ID/segments/6",
-      "GET /api/shares/ID/segments/0",
-      "GET /api/shares/ID/segments/1",
-      "GET /api/shares/ID/segments/2",
-      "POST /api/shares/ID/done",
-      "GET /api/shares/ID/status",
+      "PUT /api/shares/segments/0",
+      "PUT /api/shares/segments/1",
+      "PUT /api/shares/segments/2",
+      "PUT /api/shares/segments/6",
+      "POST /api/shares/finalize",
+      "GET /api/shares/meta",
+      "POST /api/shares/unlock",
+      "GET /api/shares/segments/0",
+      "GET /api/shares/segments/6",
+      "GET /api/shares/segments/0",
+      "GET /api/shares/segments/1",
+      "GET /api/shares/segments/2",
+      "POST /api/shares/done",
+      "GET /api/manage/status",
       // Second partage : Opened.destroy("report") puis done (404 toléré).
       "GET /api/captcha",
       "POST /api/shares",
-      "PUT /api/shares/ID/segments/0",
-      "POST /api/shares/ID/finalize",
-      "GET /api/shares/ID/meta",
-      "POST /api/shares/ID/unlock",
-      "GET /api/shares/ID/segments/0",
-      "POST /api/shares/ID/destroy",
-      "POST /api/shares/ID/done",
-      "POST /api/shares/ID/destroy",
+      "PUT /api/shares/segments/0",
+      "POST /api/shares/finalize",
+      "GET /api/shares/meta",
+      "POST /api/shares/unlock",
+      "GET /api/shares/segments/0",
+      "POST /api/shares/destroy",
+      "POST /api/shares/done",
+      "POST /api/manage/destroy",
     ]);
+    for (const r of log) expect(findIn(Buffer.from(r.url), [needle("id interne", handle), needle("id interne (signalé)", handle2)]), r.url).toEqual([]);
     const all = [...secrets, needle("kAcces", kAcces), needle("kAcces (signalé)", kAcces2)];
     const hits: string[] = [];
     for (const r of log) {
       const where = `${r.method} ${r.url}`;
-      // kPreuve et sGestion voyagent légitimement dans les corps : jamais dans une URL (journaux, historique).
+      // kPreuve voyage dans les corps, sGestion dans X-Shh-Manage : jamais dans une URL (journaux, historique).
       for (const l of findIn(Buffer.from(r.url), [...all, ...keysOnDisk])) hits.push(`${where} URL : ${l}`);
       for (const l of findIn(r.body, all)) hits.push(`${where} corps : ${l}`);
       for (const l of findIn(r.response, [...all, ...keysOnDisk])) hits.push(`${where} réponse : ${l}`);
@@ -273,9 +288,17 @@ describe("le serveur ne voit rien", () => {
     expect(hits).toEqual([]);
     // Témoin : kAcces est bien envoyé (la fouille des en-têtes n'est pas vide de sens).
     expect(log.some((r) => r.headers.some(([k, v]) => k === "x-shh-access" && findIn(Buffer.from(v), [needle("kAcces", kAcces)]).length))).toBe(true);
-    // Témoin : kPreuve et sGestion sont bien dans des corps (la fouille des URL a un sens).
+    // Témoin : kPreuve est bien dans un corps, sGestion dans X-Shh-Manage (la fouille des URL a un sens).
     expect(log.some((r) => findIn(r.body, [needle("kPreuve", kPreuve)]).length)).toBe(true);
-    expect(log.some((r) => findIn(r.body, [needle("sGestion", sGestion)]).length)).toBe(true);
+    expect(log.some((r) => r.headers.some(([k, v]) => k === "x-shh-manage" && findIn(Buffer.from(v), [needle("sGestion", sGestion)]).length))).toBe(true);
+    // sGestion jamais ailleurs que dans X-Shh-Manage (ni corps, ni autre en-tête).
+    for (const r of log) {
+      expect(findIn(r.body, [needle("sGestion", sGestion)]), r.url).toEqual([]);
+      for (const [k, v] of r.headers) if (k !== "x-shh-manage") expect(findIn(Buffer.from(v), [needle("sGestion", sGestion)]), k).toEqual([]);
+    }
+    // Témoin : K_accès part à la création (en-tête), comme à la lecture.
+    const create = log.find((r) => r.url.endsWith("/api/shares"))!;
+    expect(create.headers.some(([k, v]) => k === "x-shh-access" && findIn(Buffer.from(v), [needle("kAcces", kAcces)]).length)).toBe(true);
   });
 
   it("la réponse de statut ne contient que compteurs, échéance et état", () => {

@@ -12,7 +12,7 @@ func TestJSONStrictKeys(t *testing.T) {
 	k := newKeys()
 	c := e.create(t, "", k, 1, 3)
 	e.upload(t, c, 1)
-	unlock := "/api/shares/" + c.ID + "/unlock"
+	unlock := "/api/shares/unlock"
 	good := enc.EncodeToString(k.preuve)
 	fake := enc.EncodeToString(rnd(32))
 	for _, body := range []string{
@@ -35,12 +35,12 @@ func TestJSONStrictKeys(t *testing.T) {
 	} {
 		alt, shown := e.captchaFor(t, "")
 		body := mut(string(mustJSON(k.createBody(1, 1, alt, shown))))
-		expect(t, e.do(req{method: "POST", path: "/api/shares", body: []byte(body)}), 400, badRequest)
+		expect(t, e.do(req{method: "POST", path: "/api/shares", hdr: k.createHdr(), body: []byte(body)}), 400, badRequest)
 	}
 	// Destruction : doublon de « manage » refusé, le partage reste.
 	d := `{"manage":"` + fake + `","manage":"` + enc.EncodeToString(k.gestion) + `"}`
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/destroy", body: []byte(d)}), 400, badRequest)
-	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/meta", hdr: access(k)}), 200, "")
+	expect(t, e.do(req{method: "POST", path: "/api/shares/destroy", body: []byte(d)}), 400, badRequest)
+	expect(t, e.do(req{method: "GET", path: "/api/shares/meta", hdr: access(k)}), 200, "")
 }
 
 // Audit F3 : un « proof » contenant \n était accepté (200).
@@ -51,11 +51,11 @@ func TestSecretsRejectNewlines(t *testing.T) {
 	e.upload(t, c, 1)
 	p := enc.EncodeToString(k.preuve)
 	for _, bad := range []string{p[:20] + `\n` + p[20:], p[:20] + `\r\n` + p[20:], p + `\n`} {
-		expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/unlock", hdr: access(k),
+		expect(t, e.do(req{method: "POST", path: "/api/shares/unlock", hdr: access(k),
 			body: []byte(`{"proof":"` + bad + `"}`)}), 400, badRequest)
 	}
 	a := enc.EncodeToString(k.acces)
-	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID + "/meta",
+	expect(t, e.do(req{method: "GET", path: "/api/shares/meta",
 		hdr: map[string]string{"X-Shh-Access": a[:21] + "\r" + a[21:]}}), 400, badRequest)
 	// Identifiant avec \n dans le chemin (%0A) : introuvable, comme tout identifiant invalide.
 	expect(t, e.do(req{method: "GET", path: "/api/shares/" + c.ID[:11] + "%0A" + c.ID[11:] + "/meta", hdr: access(k)}), 404, notFound)
@@ -80,8 +80,8 @@ func TestDestroyAfterLastOpen(t *testing.T) {
 	e.upload(t, c, 1)
 	e.unlock(t, c.ID, k)
 	body := mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve), "reason": "report"})
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/destroy", hdr: access(k), body: body}), 204, "")
-	expect(t, e.do(req{method: "POST", path: "/api/shares/" + c.ID + "/destroy", hdr: access(k), body: body}), 404, notFound)
+	expect(t, e.do(req{method: "POST", path: "/api/shares/destroy", hdr: access(k), body: body}), 204, "")
+	expect(t, e.do(req{method: "POST", path: "/api/shares/destroy", hdr: access(k), body: body}), 404, notFound)
 }
 
 // Tâche M, point 9 : /API/x ou /Api tombait dans le repli SPA (index.html, 200) au lieu de

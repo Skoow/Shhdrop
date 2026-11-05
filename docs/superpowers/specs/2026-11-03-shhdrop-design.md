@@ -57,7 +57,7 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 | Adversaire | Ce qu'il peut faire | Ce que Shhdrop garantit |
 |---|---|---|
 | Observateur réseau (Wi-Fi public, FAI) | Voir le trafic | HTTPS obligatoire ; contenu déjà chiffré |
-| Proxy d'entreprise / inspection TLS | Voir le chemin du lien (identifiant), pas le `#` | Sans la clé d'accès, ni infos ni destruction possibles |
+| Proxy d'entreprise / inspection TLS | Voir le chemin du lien, pas le `#` (→ §32 : le chemin est `/`, aucun identifiant dans les adresses de l'API) ; s'il déchiffre TLS, il voit aussi les en-têtes (`K_accès`, `S_gestion`) | Sans la clé d'accès, ni infos ni destruction possibles ; aucune adresse ne permet de relier l'envoi à l'ouverture (§29.8) |
 | Hébergeur, administrateur du serveur, pirate du serveur | Lire disque, base, mémoire | Contenu, noms, mot de passe et clé jamais présents ; seules des empreintes inexploitables sans le lien |
 | Voleur de sauvegarde (WhatsApp, iCloud) qui récupère le lien | Ouvrir le lien | Mot de passe obligatoire, envoyé par un autre canal ; lien mort après usage |
 | Voleur du lien **et** de la base | Essayer des mots de passe hors ligne | Argon2id (coûteux) + mots de passe forts par défaut |
@@ -258,7 +258,7 @@ Chaque module a une responsabilité unique et des tests propres. `web/src/crypto
 
 ### 7.6 Destruction et signalement
 
-- `POST destroy` avec `K_preuve` (destinataire) ou `S_gestion` (expéditeur), ou `shhdrop admin destroy <lien>` (administrateur, pour un signalement reçu par e-mail).
+- `POST destroy` avec `K_preuve` (destinataire) ou `S_gestion` (expéditeur), ou `shhdrop admin destroy -` (administrateur, pour un signalement reçu par e-mail ; lien lu sur l'entrée standard, → §32).
 - « Signaler » = destruction, avec le motif compté **en mémoire** (compteur agrégé, pour les alertes).
 - La destruction invalide immédiatement tous les jetons. On efface d'abord le fichier, puis la ligne en base.
 
@@ -277,14 +277,17 @@ Toutes les réponses : JSON, `Cache-Control: no-store`, erreurs uniformes pour �
 | Route | Rôle | Authentification |
 |---|---|---|
 | `POST /api/shares` | Création + réservation | limites par connexion |
-| `PUT /api/shares/{id}/segments/{n}` | Envoi d'un segment | jeton d'envoi |
-| `POST /api/shares/{id}/finalize` | Activation | jeton d'envoi |
-| `GET /api/shares/{id}/meta` | Secondes restantes, sel, KDF | `K_accès` (en-tête) |
-| `POST /api/shares/{id}/unlock` | Déverrouillage | `K_accès` + `K_preuve` |
-| `GET /api/shares/{id}/segments/{n}` | Téléchargement | jeton de téléchargement |
-| `POST /api/shares/{id}/done` | Fin de téléchargement | jeton de téléchargement |
-| `POST /api/shares/{id}/destroy` | Destruction / signalement (motif) | `K_preuve` ou `S_gestion` |
-| `GET /api/shares/{id}/status` | Ouvertures, secondes restantes (→ §29.8 : `GET /api/manage/status`) | `S_gestion` |
+| `PUT /api/shares/segments/{n}` | Envoi d'un segment | jeton d'envoi |
+| `POST /api/shares/finalize` | Activation | jeton d'envoi |
+| `GET /api/shares/meta` | Secondes restantes, sel, KDF | `K_accès` (en-tête) |
+| `POST /api/shares/unlock` | Déverrouillage | `K_accès` + `K_preuve` |
+| `GET /api/shares/segments/{n}` | Téléchargement | jeton de téléchargement |
+| `POST /api/shares/done` | Fin de téléchargement | jeton de téléchargement |
+| `POST /api/shares/destroy` | Destruction / signalement par le destinataire (motif) | `K_accès` + `K_preuve` |
+| `GET /api/manage/status` | Ouvertures, secondes restantes | `S_gestion` (en-tête) |
+| `POST /api/manage/destroy` | Destruction par l'expéditeur | `S_gestion` (en-tête) |
+
+→ §29.8 (Task K2) : **aucun identifiant dans les chemins** ; le jeton signé désigne le partage, sinon `K_accès` ou `S_gestion`.
 | `GET /healthz` | Santé (local uniquement) | — |
 
 - Les secrets passent dans des **en-têtes ou le corps**, jamais dans l'URL.
@@ -312,7 +315,7 @@ Toutes les réponses : JSON, `Cache-Control: no-store`, erreurs uniformes pour �
 
 Table `shares`, une ligne par partage vivant :
 
-`id` (clé primaire, table `WITHOUT ROWID` : aucun compteur d'insertion ne trahit l'ordre de création), `state` (`uploading`, `ready`, `draining`), `bucket` (palier), `ttl_hours`, `max_opens`, `opens_left`, `opens_issued`, `done_mask` (un bit par ouverture terminée), `failed_attempts`, `segments_mask` (segments reçus), `salt`, `kdf_ops`, `kdf_mem`, `access_v`, `proof_v`, `manage_v` (SHA-256 de `K_accès`, `K_preuve`, `S_gestion`), `upload_deadline` (effacé à la finalisation), `progress_at` (pendant l'envoi seulement), `expires_at`, `purge_at`.
+`id` (clé primaire ; → §29.8 : identifiant interne tiré par le serveur, index uniques sur `access_v` et `manage_v` ; table `WITHOUT ROWID` : aucun compteur d'insertion ne trahit l'ordre de création), `state` (`uploading`, `ready`, `draining`), `bucket` (palier), `ttl_hours`, `max_opens`, `opens_left`, `opens_issued`, `done_mask` (un bit par ouverture terminée), `failed_attempts`, `segments_mask` (segments reçus), `salt`, `kdf_ops`, `kdf_mem`, `access_v`, `proof_v`, `manage_v` (SHA-256 de `K_accès`, `K_preuve`, `S_gestion`), `upload_deadline` (effacé à la finalisation), `progress_at` (pendant l'envoi seulement), `expires_at`, `purge_at`.
 
 - Toutes les dates stockées sont **arrondies au quart d'heure supérieur**, sauf `progress_at`. → §36 S5, S11, S12 (Task M2) : `progress_at`, `upload_deadline` et `purge_at` passent en mémoire, `ttl_hours` à `NULL` après `finalize` ; la base ne garde plus qu'une date, `expires_at`.
 - `progress_at` : minute du dernier segment reçu, pour effacer un envoi bloqué (§7.4). Il n'existe **que pendant l'envoi** : `NULL` à la création (la minute de création n'est donc jamais écrite), mis à jour à chaque segment, remis à `NULL` à la finalisation comme `upload_deadline`. Pendant l'envoi, il donne à la minute près l'heure du dernier segment reçu.
@@ -369,7 +372,7 @@ Ne sont **pas** des statistiques : les colonnes d'un partage vivant (`opens_left
   - `Permissions-Policy: microphone=(self), camera=(), geolocation=()`. La photo passe par le sélecteur de fichiers, sans accès direct à la caméra. `microphone=(self)` sert au vocal enregistré dans l'interface (§35.3). `/pdf-frame.html` reçoit `microphone=(), camera=(), geolocation=()` (il n'en a jamais besoin). `camera=(self)` seulement si le propriétaire accepte la vidéo enregistrée dans l'interface (Q-REC1, §35.3).
   - `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin`. Pas de COEP : inutile, Argon2id tourne sur un seul fil.
 - **Aucune ressource tierce** sur les pages de l'application (seule exception, hors de ces pages : le cadre de repli reCAPTCHA, section 26). `robots.txt` et `noindex` sur les pages de partage, sans aperçu pour les messageries.
-- **Fichiers du site** : servis depuis `SHH_STATIC_DIR` sans jamais en sortir (liens symboliques compris) ; fichiers et dossiers cachés (`.env`, `.git/…`) → 404 ; aucune liste de dossier (dossier sans `index.html` → 404) ; `GET` et `HEAD` seulement. Application monopage : un chemin inconnu sans extension sert `index.html` avec les mêmes en-têtes ; un fichier absent (`x.js`) → 404. Sous `/s/` et `/m/` (préfixe sensible à la casse), **tout** chemin qui n'est pas un fichier existant sert `index.html` (avec `X-Robots-Tag: noindex`), même si son dernier segment contient un point : un lien abîmé par une messagerie (`/s/<id>.#…`) charge ainsi l'application, qui retire le `#` de la barre et de l'historique (UI §12.1). Les segments cachés et la remontée (`..`) restent refusés ; `/api/…` et les autres préfixes ne changent pas.
+- **Fichiers du site** : servis depuis `SHH_STATIC_DIR` sans jamais en sortir (liens symboliques compris) ; fichiers et dossiers cachés (`.env`, `.git/…`) → 404 ; aucune liste de dossier (dossier sans `index.html` → 404) ; `GET` et `HEAD` seulement. Application monopage : un chemin inconnu sans extension sert `index.html` avec les mêmes en-têtes ; un fichier absent (`x.js`) → 404. ~~Sous `/s/` et `/m/`, repli particulier avec `X-Robots-Tag: noindex`~~ : retiré en Task K2 (§32, les liens sont à la racine ; un `#` abîmé par une messagerie reste sur `/`, qui charge l'application et le retire). Les segments cachés et la remontée (`..`) restent refusés ; `/api/…` et les autres préfixes ne changent pas.
 - **Origine attendue** : le client ne prend jamais l'adresse du serveur dans le lien. Chaque fonction reçoit l'origine du site (`location.origin`) et refuse un lien d'une autre origine ou qui contient des identifiants (`user:pw@`) ; l'origine doit être `https://hôte[:port]` exacte (http seulement pour `localhost`, `127.0.0.1`, `[::1]`). Cela protège aussi hors navigateur (Node, future appli, §16), où la CSP ne s'applique pas.
 - **Secrets typés** : K_lien, K_accès, K_preuve et S_gestion ont des types TypeScript distincts ; envoyer K_lien au serveur ne compile pas. La couche HTTP n'est pas exportée par l'interface publique (`web/src/index.ts`).
 - **Pas de service worker** : aucun code ne reste installé dans le navigateur entre deux visites. → §28.5 : cette justification ne tient pas face à un serveur compromis (il peut enregistrer le sien) ; §28.6 propose un service worker minimal d'épinglage, en attente de décision (Q-C1).
@@ -484,7 +487,7 @@ Messages en français et en anglais.
 
 - Les commandes **ne créent jamais rien** (sauf le fichier de gel) : `SHH_DATA_DIR` doit être un chemin absolu qui contient `shares.db`, ouverte en `mode=rw` (sans création). Sinon : message, code de sortie 1, rien de fait. Chaque réussite affiche le chemin absolu et le nombre de partages touchés. Codes : 0 réussite, 1 échec, 2 erreur d'usage.
 - `shhdrop admin freeze` / `unfreeze` : bloque ou rouvre les nouveaux envois.
-- `shhdrop admin destroy -` : traite un signalement ; le lien (ou l'identifiant) est lu sur l'**entrée standard**, pour qu'il n'aille ni dans l'historique du shell ni dans `/proc/<pid>/cmdline`. `shhdrop admin destroy <id>` reste possible : **retirer la partie après `#`** (la clé). Un argument qui contient `#` affiche un avertissement : la clé est exposée.
+- `shhdrop admin destroy -` : traite un signalement ; le lien est lu sur l'**entrée standard**, pour qu'il n'aille ni dans l'historique du shell ni dans `/proc/<pid>/cmdline`. → §32 (Task K2) : le lien ne contient plus que la clé ; la commande en tire `K_accès` (HKDF, §29.2), cherche le partage par `V_accès` et n'écrit rien. `shhdrop admin destroy <argument>` est refusé (erreur d'usage) : tout argument contiendrait la clé.
 - `shhdrop admin wipe --yes` : gèle d'abord les créations (le gel reste en place, à lever avec `unfreeze`), puis efface tout (urgence).
 - `deploy.sh` : installe une version précise (image épinglée par empreinte), contrôle la santé, et revient en arrière si le contrôle échoue (D3).
 
@@ -878,7 +881,7 @@ Remplace §7.1 à §7.5 pour tout nouveau partage. Les étiquettes passent en `s
 | Élément | Création | Où il vit |
 |---|---|---|
 | `K_lien` | 32 octets aléatoires, tirés au début de l'envoi anticipé | après le `#` du lien (§32) ; jamais envoyé |
-| `id` | HKDF(`K_lien`, « shhdrop/v2/id »), 16 octets | serveur (clé primaire) ; calculé par le client (§32) |
+| `id` | HKDF(`K_lien`, « shhdrop/v2/id »), 16 octets | navigateur seulement : données authentifiées de `E` (→ Task K2, §29.8 : jamais envoyé ; le serveur tire son propre identifiant interne) |
 | `K_accès`, `V_accès` | HKDF(`K_lien`, « shhdrop/v2/acces »), SHA-256(`K_accès`) | envoyé / serveur |
 | `R` (graine de contenu) | 32 octets aléatoires, tirés au début de l'envoi anticipé | navigateur ; mis à zéro après l'enveloppe, ou à l'abandon |
 | `K_contenu` | HKDF(`R`, « shhdrop/v2/contenu »), AES-256-GCM, non extractible | navigateur |
@@ -903,7 +906,7 @@ Remplace §7.1 à §7.5 pour tout nouveau partage. Les étiquettes passent en `s
 
 ### 29.4 Envoi anticipé
 
-1. **Démarrage** : composition non vide et stable depuis 2 s, page visible, en ligne, `navigator.connection.saveData` faux, preuve anti-robot disponible (pré-calculée, UI §9.4.2). `POST /api/shares` : `id`, palier, `V_accès`, `V_gestion`, preuve anti-robot. Ni durée, ni ouvertures, ni sel, ni `V_preuve` à ce stade.
+1. **Démarrage** : composition non vide et stable depuis 2 s, page visible, en ligne, `navigator.connection.saveData` faux, preuve anti-robot disponible (pré-calculée, UI §9.4.2). `POST /api/shares` : palier, preuve anti-robot ; `K_accès` et `S_gestion` en en-tête (→ §29.8). Ni durée, ni ouvertures, ni sel, ni `V_preuve` à ce stade.
 2. **Pendant la composition** : chaque segment dont les 64 morceaux sont des données complètes est chiffré puis envoyé. Ajouter un élément qui tient dans le palier : il est ajouté à la suite. Renommer, réordonner, modifier un texte (les textes sont dans le manifeste) : rien à refaire.
 3. **Redémarrage** (nouveaux `K_lien`, `R`, `sel`, nouveau partage ; l'ancien est détruit par `S_gestion` en `keepalive`) quand : un élément dont un morceau a déjà été chiffré est retiré ou remplacé (sinon le destinataire pourrait déchiffrer un élément retiré, puisqu'il recevra `R`), ou la composition dépasse le palier réservé. Au plus 3 redémarrages par 10 min ; au-delà, l'envoi attend le clic.
 4. **Au clic sur « Envoyer »** : `K_mdp` (déjà calculé pour le mot de passe généré ; sinon, Argon2id au plus tard une seconde après la dernière frappe), `K_maître`, `K_env`, `K_preuve`, `E` ; chiffrement et envoi du dernier segment de données et du segment de fin (manifeste) ; `POST finalize` : `sel`, `kdf_ops`, `kdf_mem`, `V_preuve`, `E`, durée, ouvertures, `fill_from`, `fill_to`. Le serveur vérifie que tous les autres segments sont présents, passe en `ready`, fixe `expires_at` (inchangé : à partir de la fin de l'envoi), puis remplit le bourrage.
@@ -940,15 +943,24 @@ Remplace §7.1 à §7.5 pour tout nouveau partage. Les étiquettes passent en `s
 
 | Route | Changement |
 |---|---|
-| `POST /api/shares` | Corps : `id`, `bucket`, `access_v`, `manage_v`, preuve anti-robot. Un `id` existant (en base ou envoi en cours) est refusé **comme une création invalide** (400 `bad_request`, même corps, même chemin rapide) et **compté au quota** de créations et dans la difficulté anti-robot (revue K1, I2) : `id` dérive d'une `K_lien` aléatoire de 256 bits, une vraie collision est impossible, ce ne peut être qu'une sonde ; le client honnête recommence avec un nouveau `K_lien` |
-| `POST /api/shares/{id}/finalize` | Corps : `salt`, `kdf_ops`, `kdf_mem`, `proof_v`, `envelope`, `ttl_hours`, `max_opens`, `fill_from`, `fill_to` (longueurs exactes, JSON strict) |
-| `POST /api/shares/{id}/unlock` | Réponse : jeton de téléchargement **et** `envelope` |
-| `GET /api/shares/{id}/segments/{n}` | Jeton de téléchargement, **ou** `K_accès` (pré-lecture, §29.6) |
-| `GET /api/manage/status`, `POST /api/manage/destroy` | Nouvelles : `S_gestion` en en-tête, recherche par `manage_v` (index unique) ; remplacent `GET /{id}/status` et la destruction par `S_gestion` (§32) |
+| `POST /api/shares` | Corps : `bucket`, preuve anti-robot (ni `id`, ni vérificateur : champ inconnu → 400). En-têtes `X-Shh-Access` (`K_accès`) et `X-Shh-Manage` (`S_gestion`), 43 caractères chacun ; le serveur calcule `access_v` et `manage_v` (SHA-256) et tire l'`id` interne (128 bits, `crypto/rand`). `access_v` ou `manage_v` déjà présent → 400 `bad_request` (même corps qu'une création invalide), **compté au quota** de créations et dans la difficulté anti-robot : seul qui connaît `K_accès` ou `S_gestion` peut le provoquer |
+| `PUT /api/shares/segments/{n}`, `POST /api/shares/finalize` | Jeton d'envoi, qui désigne le partage. Corps de `finalize` : `salt`, `kdf_ops`, `kdf_mem`, `proof_v`, `envelope`, `ttl_hours`, `max_opens`, `fill_from`, `fill_to` (longueurs exactes, JSON strict) |
+| `GET /api/shares/meta`, `POST /api/shares/unlock`, `POST /api/shares/destroy` | `K_accès` en en-tête : partage trouvé par `access_v` (index unique). Réponse d'`unlock` : jeton de téléchargement **et** `envelope` |
+| `GET /api/shares/segments/{n}`, `POST /api/shares/done` | Jeton de téléchargement, qui désigne le partage (pré-lecture par `K_accès`, §29.6 : non livrée, même règle le jour venu) |
+| `GET /api/manage/status`, `POST /api/manage/destroy` | `S_gestion` en en-tête, corps vide, recherche par `manage_v` (index unique) ; remplacent `GET /{id}/status` et la destruction par `S_gestion` (§32). Anciennes routes avec `{id}` → 404 |
 
-Table `shares` : `proof_v`, `salt`, `kdf_*`, `ttl_hours`, `max_opens` deviennent `NULL` jusqu'à `finalize` ; colonne `envelope` (60 octets) ; index unique sur `manage_v`. À `finalize`, `segments_mask` passe à « tous reçus » (la frontière du bourrage n'est pas gardée, revue K1, I3) ; un seul `finalize` à la fois par `id` (verrou en mémoire), un appel concurrent répond aussitôt 503 `busy` sans rien écrire (revue K1, I1).
+Table `shares` : `proof_v`, `salt`, `kdf_*`, `ttl_hours`, `max_opens` deviennent `NULL` jusqu'à `finalize` ; colonne `envelope` (60 octets) ; index uniques sur `access_v` et `manage_v` ; `id` = identifiant interne tiré par le serveur (clé primaire, nom du fichier, sujet des jetons), sans lien avec l'`id` du client. À `finalize`, `segments_mask` passe à « tous reçus » (la frontière du bourrage n'est pas gardée, revue K1, I3) ; un seul `finalize` à la fois par `id` (verrou en mémoire), un appel concurrent répond aussitôt 503 `busy` sans rien écrire (revue K1, I1).
 
-**Ce que révèle l'`id`** (revue K1, I2) : rien sur le contenu, la clé ni le mot de passe (HKDF à sens unique d'une `K_lien` de 256 bits). **Limite honnête** : qui connaît un `id` (proxy d'inspection TLS qui voit le chemin, §2) peut encore savoir si le partage existe, en tentant une création sous cet `id` (refus si oui, création si non). Depuis la revue, chaque sonde coûte une preuve de travail et une création du quota du jour (10 par connexion) et rend la même réponse que toute autre création refusée ; la suppression complète de l'oracle (ligne indexée par `V_accès`, l'`id` du chemin n'étant plus qu'une étiquette vérifiée) est proposée pour la Task K2. Le test « le serveur ne voit rien » ajoute un repère de mot de passe saisi **après** le début de l'envoi anticipé, et vérifie qu'aucune requête ne porte `R`, `K_contenu`, `K_mdp` ni `K_lien`.
+**Oracle d'existence fermé (revue K1, I2, option a ; Task K2)** :
+- L'`id` du client (HKDF de `K_lien`) ne sert plus qu'aux données authentifiées de `E` ; il n'est **jamais envoyé** (vérifié par « le serveur ne voit rien », qui le fouille comme un secret). Il ne permet donc plus de désigner un partage : aucune adresse de l'API n'en porte, ni d'ailleurs aucun identifiant.
+- Toute requête qui désigne un partage prouve un secret : un jeton signé par le serveur (envoi, lecture), `K_accès` (`meta`, `unlock`, `destroy` du destinataire, et **création**) ou `S_gestion` (gestion, et **création**). Le serveur cherche par SHA-256 de ce secret (index uniques), jamais par une valeur fournie telle quelle.
+- La création ne peut donc heurter un partage existant que si son auteur connaît `K_accès` ou `S_gestion` du partage (même lien envoyé deux fois) : il le connaît déjà. Qui ne connaît qu'un `id`, ou un vérificateur lu dans une base volée, obtient exactement les mêmes réponses que le partage existe ou non (test `TestCreateCannotProbeExistence`).
+- Inchangés : limites de débit et quotas (le doublon reste compté), 5 essais puis destruction (même compteur pour `unlock` et `destroy`), budget de lecture par ouverture (lié à l'`id` interne et au n° d'ouverture du jeton), un seul `finalize` à la fois par partage.
+- Recherche par empreinte et temps constant : l'index compare `SHA-256(secret)` aux valeurs stockées ; la durée de la recherche ne dépend que de cette empreinte, que l'attaquant calcule lui-même, et ne révèle rien de `K_accès` d'autrui (préimage). `K_preuve` reste comparée en temps constant (`subtle.ConstantTimeCompare`).
+- Coût honnête : `K_accès` et `S_gestion` transitent par le serveur dès la création (au lieu de leurs empreintes). Ce sont des secrets d'accès au serveur, qu'il voit de toute façon à chaque `meta` ou `manage/status` ; ils ne donnent ni le contenu ni `E`, et ne sont jamais écrits (mêmes tests).
+- Administration : `shhdrop admin destroy -` lit le lien signalé, en tire `K_accès` (HKDF-SHA-256, sel vide, « shhdrop/v2/acces ») et cherche par `V_accès` (§15.3).
+
+Le test « le serveur ne voit rien » ajoute un repère de mot de passe saisi **après** le début de l'envoi anticipé, et vérifie qu'aucune requête ne porte `R`, `K_contenu`, `K_mdp` ni `K_lien`.
 
 ---
 
@@ -976,10 +988,10 @@ Table `shares` : `proof_v`, `salt`, `kdf_*`, `ttl_hours`, `max_opens` deviennent
 ## 32. Décision du propriétaire (v2.6) — lien court
 
 - **Lien de partage** : `https://shhdrop.app/#<K_lien en base64url, 43 caractères>` (64 caractères en tout, contre 90 environ). L'identifiant n'est plus dans le lien : `id` = HKDF(`K_lien`, « shhdrop/v2/id »), à sens unique. Le serveur ne voit même plus de chemin révélateur : la page demandée est `/`.
-- **Lien de gestion** : `https://shhdrop.app/#m<S_gestion, 43 caractères>` ; le serveur trouve le partage par `V_gestion` (index unique), donc le lien de gestion n'a pas besoin de l'identifiant (§29.8).
-- **Unicité** : `id` fait 128 bits tirés d'une clé aléatoire de 256 bits ; la probabilité d'une collision parmi n partages vaut environ n² / 2¹²⁹ (négligeable même pour 10¹² partages), et la clé primaire refuse de toute façon un doublon (le client recommence avec une nouvelle clé). Un lien n'est **jamais réutilisé** pour un nouveau partage : qui garde l'ancien lien y aurait accès. Chaque partage tire une `K_lien` neuve ; un créateur malveillant qui viserait un `id` passé sans connaître sa `K_lien` ne ferait correspondre aucun `V_accès`.
+- **Lien de gestion** : `https://shhdrop.app/#m<S_gestion, 43 caractères>` ; le serveur trouve le partage par `V_gestion` (index unique), donc le lien de gestion n'a pas besoin de l'identifiant (§29.8). Le lien de partage, lui, est trouvé par `V_accès` (index unique, Task K2) : l'`id` n'est plus envoyé du tout.
+- **Unicité** : `id` fait 128 bits tirés d'une clé aléatoire de 256 bits ; la probabilité d'une collision parmi n partages vaut environ n² / 2¹²⁹ (négligeable même pour 10¹² partages). → Task K2 : le serveur n'indexe plus par cet `id` mais par `V_accès` et `V_gestion` (256 bits, index uniques) ; un doublon est refusé et le client recommence avec une nouvelle clé. Un lien n'est **jamais réutilisé** pour un nouveau partage : qui garde l'ancien lien y aurait accès. Chaque partage tire une `K_lien` neuve ; un créateur malveillant qui viserait un `id` passé sans connaître sa `K_lien` ne ferait correspondre aucun `V_accès`.
 - **Pourquoi pas plus court** : 256 bits restent nécessaires (§30). Un chemin court (`/s#…`) n'apporterait que 2 caractères ; la racine est retenue.
-- **Effets** : le routeur reconnaît `/` avec un fragment de 43 caractères base64url (partage) ou `m` + 43 (gestion) ; tout autre fragment est retiré (hygiène inchangée, UI §12.1) ; `X-Robots-Tag: noindex` et le repli `/s/`, `/m/` du serveur deviennent inutiles (le préfixe `/s/` peut rester réservé aux futurs liens universels, §16). Aucun lien ancien n'existe en production : pas de compatibilité. La démo suit le même format sous `/Shhdrop/`.
+- **Effets** : le routeur reconnaît `/` avec un fragment de 43 caractères base64url (partage) ou `m` + 43 (gestion) ; tout autre fragment est retiré (hygiène inchangée, UI §12.1) ; `X-Robots-Tag: noindex` et le repli `/s/`, `/m/` du serveur deviennent inutiles (le préfixe `/s/` peut rester réservé aux futurs liens universels, §16). Aucun lien ancien n'existe en production : pas de compatibilité. La démo suit le même format sous `/Shhdrop/` (`https://skoow.github.io/Shhdrop/#…`). Le lien ne contient jamais le mot de passe. Le navigateur intégré (UI S4) garde le `#` jusqu'à ce que la personne quitte la page (« Continuer ici », écran des tâches suivantes).
 
 ---
 

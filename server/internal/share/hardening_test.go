@@ -87,18 +87,23 @@ func TestValidateRefusesEmptyHashVerifier(t *testing.T) {
 	// Scénario de l'audit : partage dont les vérificateurs valent SHA-256("") ; rien ne
 	// le crée, et même inséré à la main, {"manage": n'importe quoi} ne le détruit pas.
 	s, _ := newSvc(t)
-	id, _, err := s.Create(k.req(1, 1, 1))
-	if err != nil {
+	if _, _, err := s.Create(k.req(1, 1, 1)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DB.Exec(`UPDATE shares SET access_v=?, proof_v=?, manage_v=?`, empty[:], empty[:], empty[:]); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Destroy(id, nil, nil, nil); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyManaged(nil); !errors.Is(err, ErrNotFound) {
 		t.Fatal("détruit avec des secrets vides", err)
 	}
-	if _, err := s.Status(id, nil); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Status(nil); !errors.Is(err, ErrNotFound) {
 		t.Fatal("statut lu avec un secret vide", err)
+	}
+	if _, err := s.Meta(nil); !errors.Is(err, ErrNotFound) {
+		t.Fatal("meta lu avec un secret vide", err)
+	}
+	if err := s.DestroyWithProof(nil, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatal("détruit avec des secrets vides", err)
 	}
 }
 
@@ -153,10 +158,10 @@ func TestDestroyWhileDraining(t *testing.T) {
 	if state != "draining" {
 		t.Fatal(state)
 	}
-	if err := s.Destroy(id, k.acces, rnd(32), nil); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyWithProof(k.acces, rnd(32)); !errors.Is(err, ErrNotFound) {
 		t.Fatal("mauvais K_preuve accepté", err)
 	}
-	if err := s.Destroy(id, k.acces, k.preuve, nil); err != nil {
+	if err := s.DestroyWithProof(k.acces, k.preuve); err != nil {
 		t.Fatal(err)
 	}
 	gone(t, s, id)

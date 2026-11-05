@@ -52,12 +52,10 @@ func (s *server) captcha(w http.ResponseWriter, r *http.Request) {
 	}{ch, s.sig.Issue(token.CaptchaShown, saltID(ch.Salt), 0, s.svc.Now().Add(captchaTTL))})
 }
 
-// createBody : création v2 (spec §29.8). Ni durée, ni ouvertures, ni sel, ni V_preuve.
+// createBody : création v2 (spec §29.8). Ni id, ni durée, ni ouvertures, ni sel, ni
+// V_preuve ; K_accès et S_gestion passent en en-tête (X-Shh-Access, X-Shh-Manage).
 type createBody struct {
-	ID      string `json:"id"`
 	Bucket  int    `json:"bucket"`
-	AccessV string `json:"access_v"`
-	ManageV string `json:"manage_v"`
 	Altcha  string `json:"altcha"`
 	HP      string `json:"hp"`
 	ShownAt string `json:"shown_at"`
@@ -66,19 +64,22 @@ type createBody struct {
 // POST /api/shares : format et gel → anti-robot → quotas (réservation) → création →
 // difficulté suivante. Une requête invalide ou un serveur gelé ne consomme ni le défi ni
 // le quota ; le défi est en revanche consommé si le quota ou la création échoue ensuite.
-// Un id déjà pris (en base, ou envoi en cours sous cet id) → 400, compté comme une création.
+//
+// Le partage est indexé par V_accès et V_gestion, que le serveur calcule lui-même depuis
+// K_accès et S_gestion (spec §29.8) : une création ne peut heurter un partage existant que
+// si son auteur connaît l'un de ces secrets. Qui ne connaît qu'un id (ou un vérificateur
+// lu dans la base) ne peut donc pas savoir si un partage existe (revue K1, I2). L'id
+// interne est tiré ici (share.NewID), jamais choisi par le client.
 func (s *server) create(w http.ResponseWriter, r *http.Request) {
 	var b createBody
 	if err := readJSON(w, r, &b); err != nil {
 		fail(w, err)
 		return
 	}
-	req := share.CreateReq{ID: b.ID, Bucket: b.Bucket}
-	var errs [3]error
-	_, errs[0] = secret(b.ID, 16)
-	req.AccessV, errs[1] = secret(b.AccessV, 32)
-	req.ManageV, errs[2] = secret(b.ManageV, 32)
-	if errs != [3]error{} || share.Validate(req) != nil {
+	ka, err1 := headerSecret(r, "X-Shh-Access")
+	sg, err2 := headerSecret(r, "X-Shh-Manage")
+	req := share.CreateReq{ID: share.NewID(), Bucket: b.Bucket, AccessV: share.Verifier(ka), ManageV: share.Verifier(sg)}
+	if err1 != nil || err2 != nil || share.Validate(req) != nil {
 		fail(w, errBadRequest)
 		return
 	}
@@ -106,13 +107,12 @@ func (s *server) create(w http.ResponseWriter, r *http.Request) {
 	// Quotas en capacité utile (données du palier, sans le morceau du manifeste), réservés ici et débités à la
 	// finalisation ; 2 envois non finalisés à la fois ; octets abandonnés (spec §29.5).
 	//
-	// Id déjà pris (en base, ou envoi en cours) : c'est une sonde, puisque les id dérivent
-	// d'une K_lien aléatoire de 256 bits (revue K1, I2). Réponse identique à une création
-	// invalide (400 bad_request), création comptée au quota et dans la difficulté anti-robot.
+	// V_accès ou V_gestion déjà pris : seul un détenteur du secret peut le provoquer (deux
+	// créations avec le même lien). Réponse identique à une création invalide (400
+	// bad_request), création comptée au quota et dans la difficulté anti-robot.
 	switch retry, err := s.lim.BeginUpload(ip, req.ID, share.ContentBytes(b.Bucket)); {
-	case errors.Is(err, limits.ErrDuplicate):
-		s.cap.RecordCreate(ip)
-		fail(w, errBadRequest)
+	case errors.Is(err, limits.ErrDuplicate): // id interne de 128 bits déjà en cours : impossible
+		fail(w, errors.New("id interne en double"))
 		return
 	case err != nil:
 		writeLimit(w, retry)
@@ -137,15 +137,14 @@ func (s *server) create(w http.ResponseWriter, r *http.Request) {
 	}{s.sig.Issue(token.Upload, id, 0, s.svc.Now().Add(uploadTTL)), segs})
 }
 
-// checkToken : jeton Bearer du type attendu, lié à l'{id} du chemin ; rend le n° d'ouverture.
+// checkToken : jeton Bearer du type attendu ; rend l'id interne qu'il désigne (signé par le
+// serveur : aucun id dans le chemin, spec §32) et le n° d'ouverture.
 func (s *server) checkToken(r *http.Request, kind byte) (string, int, error) {
 	tok, err := bearer(r)
 	if err != nil {
 		return "", 0, err
 	}
-	id := r.PathValue("id")
-	openN, err := s.sig.Check(tok, kind, id)
-	return id, openN, err
+	return s.sig.Subject(tok, kind)
 }
 
 func (s *server) putSegment(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +238,7 @@ func (s *server) meta(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	m, err := s.svc.Meta(r.PathValue("id"), ka)
+	m, err := s.svc.Meta(ka)
 	if err != nil {
 		fail(w, err)
 		return
@@ -271,14 +270,14 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	id := r.PathValue("id")
-	// Meta d'abord : expires_at (figé une fois prêt) plafonne le jeton, et le nombre de
-	// segments. Une clé d'accès fausse échoue ici sans compter d'essai, comme dans Unlock.
-	m, err := s.svc.Meta(id, ka)
+	// Meta d'abord : il trouve le partage par V_accès, et expires_at (figé une fois prêt)
+	// plafonne le jeton. Une clé d'accès fausse échoue ici sans compter d'essai.
+	m, err := s.svc.Meta(ka)
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	id := m.ID
 	openN, envelope, err := s.svc.Unlock(id, ka, kp)
 	if err != nil {
 		fail(w, err)
@@ -347,56 +346,34 @@ func (s *server) done(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// POST /api/shares/destroy : destruction ou signalement par le destinataire (K_accès en
+// en-tête, K_preuve dans le corps). L'expéditeur passe par /api/manage/destroy.
 func (s *server) destroy(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		Proof  *string `json:"proof"`
-		Manage *string `json:"manage"`
-		Reason string  `json:"reason"` // motif de signalement : non conservé
+		Proof  string `json:"proof"`
+		Reason string `json:"reason"` // motif de signalement : non conservé
 	}
 	if err := readJSON(w, r, &b); err != nil {
 		fail(w, err)
 		return
 	}
-	if (b.Proof == nil && b.Manage == nil) || len(b.Reason) > 64 {
+	if len(b.Reason) > 64 {
 		fail(w, errBadRequest)
 		return
 	}
-	var ka, kp, sg []byte
-	var err error
-	if b.Proof != nil {
-		if ka, err = headerSecret(r, "X-Shh-Access"); err == nil {
-			kp, err = secret(*b.Proof, 32)
-		}
-	}
-	if err == nil && b.Manage != nil {
-		sg, err = secret(*b.Manage, 32)
-	}
+	ka, err := headerSecret(r, "X-Shh-Access")
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	if err := s.svc.Destroy(r.PathValue("id"), ka, kp, sg); err != nil {
+	kp, err := secret(b.Proof, 32)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	if err := s.svc.DestroyWithProof(ka, kp); err != nil {
 		fail(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *server) status(w http.ResponseWriter, r *http.Request) {
-	sg, err := headerSecret(r, "X-Shh-Manage")
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	st, err := s.svc.Status(r.PathValue("id"), sg)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, struct {
-		OpensUsed int    `json:"opens_used"`
-		MaxOpens  int    `json:"max_opens"`
-		ExpiresIn int64  `json:"expires_in_s"`
-		State     string `json:"state"`
-	}{st.OpensUsed, st.MaxOpens, secs(st.ExpiresIn), st.State})
 }

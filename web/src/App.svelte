@@ -25,9 +25,10 @@
     (navigator as Navigator & { standalone?: boolean }).standalone === true;
 
   /**
-   * UI §12.1 : au démarrage d'une route /s/ ou /m/, le lien est lu, puis le « # » et la requête
-   * sont retirés de l'adresse et de l'historique. Sur toute autre route (404 comprise : lien
-   * abîmé « /s/{id}/#… », « /S/… », hors base de démo), un « # » non vide est retiré aussi.
+   * UI §12.1, spec §32 : au démarrage d'une route d'ouverture ou de gestion (racine avec un
+   * « # » de la bonne forme), le lien est lu, puis le « # » et la requête sont retirés de
+   * l'adresse et de l'historique. Sur toute autre route (accueil avec un « # » mal formé, 404,
+   * hors base de démo), un « # » non vide est retiré aussi.
    * Exception : navigateur intégré (S4), où le « # » reste pour « Ouvrir dans le navigateur ».
    * Le résultat contient le secret : il est rendu à l'appelant, jamais rangé ici. Task 20 le
    * remet par valeur au flux de la route (createReceiver, gestion).

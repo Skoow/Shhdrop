@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BadResponse, HttpError, captcha, create, ctx, destroy, finalize, getSegment, putSegment, unlock, type FinalizeBody } from "./api";
+import { BadResponse, HttpError, captcha, create, ctx, destroy, done, finalize, getSegment, meta, putSegment, status, unlock, type FinalizeBody } from "./api";
 import type { KAcces, KPreuve } from "../crypto/types";
 import type { SGestion } from "../crypto/types";
 
@@ -28,7 +28,7 @@ describe("nouveaux essais (routes rejouables hors envoi)", () => {
       at.push(Date.now());
       throw new TypeError("fetch failed");
     });
-    const p = getSegment(ctx("http://x", { fetch: f as unknown as typeof fetch }), "id", "t", 0, 1);
+    const p = getSegment(ctx("http://x", { fetch: f as unknown as typeof fetch }), "t", 0, 1);
     const r = expect(p).rejects.toThrow("reseau");
     await vi.runAllTimersAsync();
     await r;
@@ -38,21 +38,21 @@ describe("nouveaux essais (routes rejouables hors envoi)", () => {
   it("4xx : aucun nouvel essai ; 5xx : nouvel essai", async () => {
     const res = (s: number) => new Response(JSON.stringify({ error: s === 404 ? "not_found" : "internal" }), { status: s });
     const f404 = vi.fn(async () => res(404));
-    await expect(getSegment(ctx("http://x", { fetch: f404 as unknown as typeof fetch }), "id", "t", 0, 1)).rejects.toBeInstanceOf(HttpError);
+    await expect(getSegment(ctx("http://x", { fetch: f404 as unknown as typeof fetch }), "t", 0, 1)).rejects.toBeInstanceOf(HttpError);
     expect(f404).toHaveBeenCalledTimes(1);
 
     let n = 0;
     const f5xx = vi.fn(async () => (++n < 3 ? res(500) : new Response(new Uint8Array(1))));
-    await getSegment(ctx("http://x", { fetch: f5xx as unknown as typeof fetch, retryDelayMs: 1 }), "id", "t", 0, 1);
+    await getSegment(ctx("http://x", { fetch: f5xx as unknown as typeof fetch, retryDelayMs: 1 }), "t", 0, 1);
     expect(f5xx).toHaveBeenCalledTimes(3);
   });
 
   it("dernier essai : l'erreur réelle est relancée, pas « reseau »", async () => {
     const short = vi.fn(async () => new Response(new Uint8Array(3)));
-    await expect(getSegment(ctx("http://x", { fetch: short as unknown as typeof fetch, retryDelayMs: 1 }), "id", "t", 0, 10)).rejects.toBeInstanceOf(BadResponse);
+    await expect(getSegment(ctx("http://x", { fetch: short as unknown as typeof fetch, retryDelayMs: 1 }), "t", 0, 10)).rejects.toBeInstanceOf(BadResponse);
     expect(short).toHaveBeenCalledTimes(6);
     const err500 = vi.fn(async () => new Response('{"error":"internal"}', { status: 500 }));
-    const e = await getSegment(ctx("http://x", { fetch: err500 as unknown as typeof fetch, retryDelayMs: 1 }), "id", "t", 0, 10).catch((x: unknown) => x);
+    const e = await getSegment(ctx("http://x", { fetch: err500 as unknown as typeof fetch, retryDelayMs: 1 }), "t", 0, 10).catch((x: unknown) => x);
     expect(e).toBeInstanceOf(HttpError);
     expect((e as HttpError).status).toBe(500);
   });
@@ -62,12 +62,12 @@ describe("envoi : PUT de segment et finalize sans essai interne (le budget de cr
   it("putSegment : un seul appel de l'Uploader ; erreur HTTP → HttpError (retry_after_s lu) ; coupure transmise", async () => {
     const up = vi.fn(async () => ({ status: 429, json: { error: "limit", retry_after_s: 9 } }));
     const c = ctx("http://x", { upload: up });
-    const e = await putSegment(c, "i d", "t", 2, new Uint8Array(4), () => undefined).catch((x: unknown) => x);
+    const e = await putSegment(c, "t", 2, new Uint8Array(4), () => undefined).catch((x: unknown) => x);
     expect(e).toBeInstanceOf(HttpError);
     expect([(e as HttpError).status, (e as HttpError).retryAfterS]).toEqual([429, 9]);
     expect(up).toHaveBeenCalledTimes(1);
     expect(up.mock.calls[0]).toEqual([
-      "http://x/api/shares/i%20d/segments/2",
+      "http://x/api/shares/segments/2",
       { Authorization: "Bearer t", "Content-Type": "application/octet-stream" },
       new Uint8Array(4),
       expect.any(Function),
@@ -76,21 +76,21 @@ describe("envoi : PUT de segment et finalize sans essai interne (le budget de cr
     const cut = vi.fn(async () => {
       throw new TypeError("fetch failed");
     });
-    await expect(putSegment(ctx("http://x", { upload: cut }), "id", "t", 0, new Uint8Array(1), () => undefined)).rejects.toBeInstanceOf(TypeError);
+    await expect(putSegment(ctx("http://x", { upload: cut }), "t", 0, new Uint8Array(1), () => undefined)).rejects.toBeInstanceOf(TypeError);
     expect(cut).toHaveBeenCalledTimes(1);
     const ok = vi.fn(async () => ({ status: 204, json: null }));
-    await putSegment(ctx("http://x", { upload: ok }), "id", "t", 0, new Uint8Array(1), () => undefined);
+    await putSegment(ctx("http://x", { upload: ok }), "t", 0, new Uint8Array(1), () => undefined);
   });
 
   it("finalize : un seul appel ; coupure → « reseau » ; signal transmis à fetch", async () => {
     const f = vi.fn(async (_: RequestInfo | URL, _i?: RequestInit): Promise<Response> => {
       throw new TypeError("fetch failed");
     });
-    await expect(finalize(ctx("http://x", { fetch: f as unknown as typeof fetch, retryDelayMs: 1 }), "id", "t", FIN)).rejects.toThrow("reseau");
+    await expect(finalize(ctx("http://x", { fetch: f as unknown as typeof fetch, retryDelayMs: 1 }), "t", FIN)).rejects.toThrow("reseau");
     expect(f).toHaveBeenCalledTimes(1);
     const ac = new AbortController();
     const g = vi.fn(async (_: RequestInfo | URL, _i?: RequestInit) => new Response('{"expires_in_s":5}'));
-    expect(await finalize(ctx("http://x", { fetch: g as unknown as typeof fetch }), "id", "t", FIN, ac.signal)).toBe(5);
+    expect(await finalize(ctx("http://x", { fetch: g as unknown as typeof fetch }), "t", FIN, ac.signal)).toBe(5);
     expect(g.mock.calls[0]![1]!.signal).toBe(ac.signal);
   });
 
@@ -100,15 +100,15 @@ describe("envoi : PUT de segment et finalize sans essai interne (le budget de cr
       ac.abort();
       throw new DOMException("Aborted", "AbortError");
     });
-    await expect(finalize(ctx("http://x", { fetch: f as unknown as typeof fetch }), "id", "t", FIN, ac.signal)).rejects.toMatchObject({ name: "AbortError" });
+    await expect(finalize(ctx("http://x", { fetch: f as unknown as typeof fetch }), "t", FIN, ac.signal)).rejects.toMatchObject({ name: "AbortError" });
   });
 });
 
 it("destroy avec S_gestion : keepalive si demandé", async () => {
   const f = vi.fn(async (_: RequestInfo | URL, _i?: RequestInit) => new Response(null, { status: 204 }));
   const c = ctx("http://x", { fetch: f as unknown as typeof fetch });
-  await destroy(c, "id", { sGestion: new Uint8Array(32) as SGestion }, undefined, true);
-  await destroy(c, "id", { sGestion: new Uint8Array(32) as SGestion });
+  await destroy(c, { sGestion: new Uint8Array(32) as SGestion }, undefined, true);
+  await destroy(c, { sGestion: new Uint8Array(32) as SGestion });
   expect(f.mock.calls.map((x) => x[1]!.keepalive)).toEqual([true, undefined]);
 });
 
@@ -145,15 +145,58 @@ it("captcha : défi sans shown_at ni fallback, sel du défi et origine de repli 
 });
 
 describe("API v2 (spec §29.8)", () => {
-  it("create : corps id, bucket, access_v, manage_v, preuve ; réponse upload_token et segments", async () => {
+  it("create : corps bucket et preuve seulement ; K_accès et S_gestion en en-tête ; réponse upload_token et segments", async () => {
     const f = vi.fn(async (_: RequestInfo | URL, _i?: RequestInit) => new Response('{"upload_token":"u","segments":7}', { status: 201 }));
-    const body = { id: "i".repeat(22), bucket: 400, access_v: "a".repeat(43), manage_v: "m".repeat(43), hp: "", shown_at: "t", altcha: "x" };
-    expect(await create(ctx("http://x", { fetch: f as unknown as typeof fetch }), body)).toEqual({ uploadToken: "u", segments: 7 });
-    expect(JSON.parse(String(f.mock.calls[0]![1]!.body))).toEqual(body);
+    const body = { bucket: 400, hp: "", shown_at: "t", altcha: "x" };
+    const ka = new Uint8Array(32).fill(1) as KAcces, sg = new Uint8Array(32).fill(2) as SGestion;
+    expect(await create(ctx("http://x", { fetch: f as unknown as typeof fetch }), ka, sg, body)).toEqual({ uploadToken: "u", segments: 7 });
+    const [url, init] = f.mock.calls[0]!;
+    expect(url).toBe("http://x/api/shares");
+    expect(JSON.parse(String(init!.body))).toEqual(body);
+    const h = new Headers(init!.headers);
+    expect(h.get("X-Shh-Access")).toBe(Buffer.from(ka).toString("base64url"));
+    expect(h.get("X-Shh-Manage")).toBe(Buffer.from(sg).toString("base64url"));
+    expect(h.get("Content-Type")).toBe("application/json");
+  });
+  it("aucun chemin ne porte d'identifiant ; gestion par /api/manage/* (spec §32)", async () => {
+    const urls: string[] = [];
+    const bodies: unknown[] = [];
+    const heads: Headers[] = [];
+    const f = vi.fn(async (u: RequestInfo | URL, i?: RequestInit) => {
+      urls.push(`${i?.method} ${String(u)}`);
+      bodies.push(i?.body);
+      heads.push(new Headers(i?.headers));
+      const p = new URL(String(u)).pathname;
+      if (p.endsWith("/meta")) return new Response('{"expires_in_s":1,"salt":"s","kdf":{"ops":3,"mem":1},"bucket":1,"segments":1}');
+      if (p.endsWith("/status")) return new Response('{"opens_used":0,"max_opens":1,"expires_in_s":1,"state":"ready"}');
+      if (p.includes("/segments/")) return new Response(new Uint8Array(1));
+      return new Response(null, { status: 204 });
+    });
+    const c = ctx("http://x", { fetch: f as unknown as typeof fetch, retryDelayMs: 1 });
+    const ka = new Uint8Array(32) as KAcces, kp = new Uint8Array(32) as KPreuve, sg = new Uint8Array(32).fill(9) as SGestion;
+    await meta(c, ka);
+    await getSegment(c, "t", 3, 1);
+    await done(c, "t");
+    await destroy(c, { kAcces: ka, kPreuve: kp }, "report");
+    await destroy(c, { sGestion: sg });
+    await status(c, sg);
+    expect(urls).toEqual([
+      "GET http://x/api/shares/meta",
+      "GET http://x/api/shares/segments/3",
+      "POST http://x/api/shares/done",
+      "POST http://x/api/shares/destroy",
+      "POST http://x/api/manage/destroy",
+      "GET http://x/api/manage/status",
+    ]);
+    // Gestion : S_gestion en en-tête seulement, corps vide.
+    expect(bodies[4]).toBeUndefined();
+    expect(heads[4]!.get("X-Shh-Manage")).toBe(Buffer.from(sg).toString("base64url"));
+    expect(heads[5]!.get("X-Shh-Manage")).toBe(Buffer.from(sg).toString("base64url"));
+    expect(JSON.parse(String(bodies[3]))).toEqual({ proof: Buffer.from(kp).toString("base64url"), reason: "report" });
   });
   it("finalize : jeton en en-tête, corps JSON exact", async () => {
     const f = vi.fn(async (_: RequestInfo | URL, _i?: RequestInit) => new Response('{"expires_in_s":5}'));
-    await finalize(ctx("http://x", { fetch: f as unknown as typeof fetch }), "id", "t", FIN);
+    await finalize(ctx("http://x", { fetch: f as unknown as typeof fetch }), "t", FIN);
     const init = f.mock.calls[0]![1]!;
     expect(new Headers(init.headers).get("Authorization")).toBe("Bearer t");
     expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");
@@ -164,10 +207,10 @@ describe("API v2 (spec §29.8)", () => {
     const reply = (envelope: unknown) =>
       vi.fn(async () => new Response(JSON.stringify({ download_token: "d", segments: 1, envelope })));
     const k = new Uint8Array(32) as KAcces, p = new Uint8Array(32) as KPreuve;
-    const r = await unlock(ctx("http://x", { fetch: reply(env) as unknown as typeof fetch }), "id", k, p);
+    const r = await unlock(ctx("http://x", { fetch: reply(env) as unknown as typeof fetch }), k, p);
     expect(r.envelope).toEqual(new Uint8Array(60).fill(7));
     for (const bad of [undefined, 5, env.slice(1), env + "A", env.slice(0, 79) + "=", env.slice(0, 79) + "\n", env.slice(0, 78) + "+/"]) {
-      await expect(unlock(ctx("http://x", { fetch: reply(bad) as unknown as typeof fetch }), "id", k, p), String(bad)).rejects.toBeInstanceOf(BadResponse);
+      await expect(unlock(ctx("http://x", { fetch: reply(bad) as unknown as typeof fetch }), k, p), String(bad)).rejects.toBeInstanceOf(BadResponse);
     }
   });
 });
