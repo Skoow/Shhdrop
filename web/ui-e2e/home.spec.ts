@@ -139,24 +139,36 @@ test.describe("fr-FR", () => {
     expect(fc.isMultiple()).toBe(true);
   });
 
-  test("onglet caché : l'ambiance (aurore, réceptacle, schéma) se met en pause", async ({ page, shh }) => {
+  test("ambiance (aurore, réceptacle, schéma) : pause hors écran et onglet caché, reprise ensuite", async ({ page, shh }) => {
+    // Écran court : en haut de page, le schéma (sous le réceptacle) est hors écran.
+    await page.setViewportSize({ width: 390, height: 560 });
     await page.goto(shh.origin + "/");
-    await page.waitForTimeout(100);
     const ambient = () =>
-      page.evaluate(() =>
-        document
-          .getAnimations()
-          .filter((a) => ((a.effect as KeyframeEffect).target as Element).closest("[data-ambient]"))
-          .map((a) => a.playState),
-      );
-    const before = await ambient();
-    expect(before.length).toBeGreaterThanOrEqual(3 + 2 + 5); // nappes, lumière, schéma
-    expect(new Set(before)).toEqual(new Set(["running"]));
-    await page.evaluate(() => {
-      Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-    await expect.poll(async () => [...new Set(await ambient())]).toEqual(["paused"]);
+      page.evaluate(() => {
+        const out: Record<string, string[]> = { aurora: [], vessel: [], schema: [] };
+        for (const a of document.getAnimations()) {
+          const el = (a.effect as KeyframeEffect).target as Element;
+          if (!el.closest("[data-ambient]")) continue;
+          const k = el.closest(".aurora") ? "aurora" : el.closest(".vessel") ? "vessel" : "schema";
+          out[k]!.push(a.playState);
+        }
+        return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, [...new Set(v)].sort().join(",") + `×${v.length}`]));
+      });
+    // Hors écran : le schéma est en pause, l'aurore et le réceptacle (visible) tournent.
+    await expect.poll(ambient).toEqual({ aurora: "running×3", vessel: "running×2", schema: "paused×5" });
+    // Le schéma entre dans l'écran : il reprend.
+    await page.locator(".schema").evaluate((e) => e.scrollIntoView({ block: "center" }));
+    await expect.poll(ambient).toEqual({ aurora: "running×3", vessel: "running×2", schema: "running×5" });
+    // Onglet caché : toute l'ambiance se met en pause ; visible à nouveau : elle reprend.
+    const setHidden = (v: boolean) =>
+      page.evaluate((hidden) => {
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+        document.dispatchEvent(new Event("visibilitychange"));
+      }, v);
+    await setHidden(true);
+    await expect.poll(ambient).toEqual({ aurora: "paused×3", vessel: "paused×2", schema: "paused×5" });
+    await setHidden(false);
+    await expect.poll(ambient).toEqual({ aurora: "running×3", vessel: "running×2", schema: "running×5" });
   });
 
   test("mouvement réduit : aucune animation infinie, aucune entrée ; capture", async ({ page, shh, isMobile }) => {
@@ -165,7 +177,36 @@ test.describe("fr-FR", () => {
     await page.goto(shh.origin + "/");
     await page.waitForTimeout(100);
     expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
+    // m6 : l'ouverture du contour (état drop) n'est pas animée, seule sa couleur l'est.
+    const props = await page.locator(".vessel .track").evaluate((e) => getComputedStyle(e).transitionProperty);
+    expect(props).not.toMatch(/stroke-dasharray|all/);
     await capture(page, "home-v2-reduced");
+  });
+
+  test("transition de vue réduite (m5) : fondu seulement, aucun groupe déplacé ni redimensionné", async ({ page, shh, browserName }) => {
+    test.skip(browserName !== "chromium", "pseudo-éléments de transition dans getAnimations : Chromium");
+    await page.goto(shh.origin + "/");
+    const run = (reduced: boolean) =>
+      page.evaluate(async (r) => {
+        const root = document.documentElement;
+        root.classList.toggle("vt-reduced", r);
+        const doc = document as Document & { startViewTransition(cb: () => void): { ready: Promise<void>; finished: Promise<void> } };
+        // Le titre (groupe hero-title) change de taille : sans réduction, son groupe s'anime.
+        const vt = doc.startViewTransition(() => document.querySelector("h1")!.classList.toggle("compact"));
+        await vt.ready;
+        const pseudo = document
+          .getAnimations()
+          .map((a) => (a.effect as KeyframeEffect).pseudoElement)
+          .filter((p): p is string => !!p && p.startsWith("::view-transition"));
+        await vt.finished;
+        root.classList.remove("vt-reduced");
+        return pseudo;
+      }, reduced);
+    const normal = await run(false);
+    expect(normal.some((p) => p.startsWith("::view-transition-group(hero-title)"))).toBe(true);
+    const reduced = await run(true);
+    expect(reduced.filter((p) => p.startsWith("::view-transition-group"))).toEqual([]);
+    expect(reduced).toContain("::view-transition-new(root)");
   });
 
   test("contraste forcé : aurore et grain retirés ; capture", async ({ page, shh, browserName, isMobile }) => {

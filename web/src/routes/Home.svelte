@@ -22,8 +22,15 @@
   let { compact = false, children, onfiles }: Props = $props();
 
   // Décidé au montage seulement : un repli ultérieur ne rejoue pas l'entrée.
-  const reveal = !revealed && !untrack(() => compact);
+  let reveal = $state(!revealed && !untrack(() => compact));
   revealed = true;
+  // Retirée une fois l'entrée finie (870 ms, K1) : un changement de langue ou un compact qui
+  // repasse à faux ne rejoue pas l'entrée sur les nœuds recréés (§20.4 : une seule fois).
+  $effect(() => {
+    if (!reveal) return;
+    const timer = setTimeout(() => (reveal = false), 900);
+    return () => clearTimeout(timer);
+  });
 
   /**
    * K1 : 560 ms par mot, 35 ms de décalage, respiration de 30 ms après la dernière virgule

@@ -225,6 +225,10 @@
     .spot {
       display: none;
     }
+    /* L'ouverture change d'un coup (état drop) ; seule la couleur passe en fondu. */
+    .track {
+      transition: stroke var(--dur-slow) var(--ease-out);
+    }
   }
   @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
     .vessel {

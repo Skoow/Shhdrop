@@ -115,8 +115,10 @@ p {
     transform: translateY(10px);
   }
 }
+/* Mouvement réduit : les groupes nommés (titre, capsule) ne se déplacent ni ne changent de
+   taille ; seul le fondu des captures ancienne et nouvelle reste (UI §20.7). */
 html.vt-reduced::view-transition-group(*) {
-  animation-duration: 120ms;
+  animation: none;
 }
 html.vt-reduced::view-transition-old(root) {
   animation: vt-fade 120ms linear both reverse;

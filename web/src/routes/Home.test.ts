@@ -75,6 +75,37 @@ describe("Home (UI §9.1)", () => {
     expect(delays).toEqual(["0ms", "35ms", "70ms", "105ms", "140ms", "175ms", "240ms", "275ms", "310ms"]);
   });
 
+  it("entrée une seule fois (§20.4) : la classe reveal part après 900 ms, jamais rejouée", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.resetModules(); // nouveau chargement de page : le drapeau « déjà joué » repart de zéro
+      const { default: Fresh } = await import("./Home.svelte");
+      const { mount, flushSync, unmount } = await import("svelte");
+      const a = mount(Fresh as never, { target: document.body, props: {} });
+      flushSync();
+      expect(document.querySelector(".home")!.classList.contains("reveal")).toBe(true);
+      vi.advanceTimersByTime(899);
+      flushSync();
+      expect(document.querySelector(".home")!.classList.contains("reveal")).toBe(true);
+      vi.advanceTimersByTime(1);
+      flushSync();
+      expect(document.querySelector(".home")!.classList.contains("reveal")).toBe(false);
+      // Changement de langue : les mots recréés n'ont plus d'entrée.
+      setLang("en");
+      flushSync();
+      expect(document.querySelector(".home")!.classList.contains("reveal")).toBe(false);
+      void unmount(a);
+      document.body.innerHTML = "";
+      // Second montage dans le même chargement : pas d'entrée du tout.
+      const b = mount(Fresh as never, { target: document.body, props: {} });
+      flushSync();
+      expect(document.querySelector(".home")!.classList.contains("reveal")).toBe(false);
+      void unmount(b);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("réceptacle vide : Fichiers et Photo ouvrent leur sélecteur ; les fichiers choisis sont remis", () => {
     const onfiles = vi.fn();
     show({ onfiles });
