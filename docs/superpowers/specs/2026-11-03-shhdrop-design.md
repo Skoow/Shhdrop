@@ -1,7 +1,7 @@
 # Shhdrop — spécification V1 (version 2, finale à valider)
 
 Date : 4 novembre 2026 · Domaine visé : **shhdrop.app**
-Historique : v1 du 3 novembre, puis revue critique indépendante et passage complet de recherche d'oublis (voir section 0). v2.4 (4 novembre) : durcissement après l'audit « sharp edges » (section 25).
+Historique : v1 du 3 novembre, puis revue critique indépendante et passage complet de recherche d'oublis (voir section 0). v2.4 (4 novembre) : durcissement après l'audit « sharp edges » (section 25). v2.5 (5 novembre) : repli Google reCAPTCHA isolé (section 26).
 
 ---
 
@@ -89,7 +89,7 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 
 ### Jamais
 
-- Comptes, profils, contacts · publicité, analytics, traceurs, ressources tierces · tout mécanisme permettant au serveur de lire un contenu.
+- Comptes, profils, contacts · publicité, analytics, traceurs, ressources tierces (seule exception : le repli reCAPTCHA isolé de la section 26) · tout mécanisme permettant au serveur de lire un contenu.
 
 ---
 
@@ -344,7 +344,7 @@ Table `shares`, une ligne par partage vivant :
   - `Strict-Transport-Security` (déjà préchargé pour .app), `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`.
   - `Permissions-Policy: microphone=(self), camera=(), geolocation=()`. La photo passe par le sélecteur de fichiers, sans accès direct à la caméra.
   - `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-Policy: same-origin`. Pas de COEP : inutile, Argon2id tourne sur un seul fil.
-- **Aucune ressource tierce.** `robots.txt` et `noindex` sur les pages de partage, sans aperçu pour les messageries.
+- **Aucune ressource tierce** sur les pages de l'application (seule exception, hors de ces pages : le cadre de repli reCAPTCHA, section 26). `robots.txt` et `noindex` sur les pages de partage, sans aperçu pour les messageries.
 - **Fichiers du site** : servis depuis `SHH_STATIC_DIR` sans jamais en sortir (liens symboliques compris) ; fichiers et dossiers cachés (`.env`, `.git/…`) → 404 ; aucune liste de dossier (dossier sans `index.html` → 404) ; `GET` et `HEAD` seulement. Application monopage : un chemin inconnu sans extension (`/s/<id>`, `/m/<id>`) sert `index.html` avec les mêmes en-têtes ; un fichier absent (`x.js`) → 404.
 - **Origine attendue** : le client ne prend jamais l'adresse du serveur dans le lien. Chaque fonction reçoit l'origine du site (`location.origin`) et refuse un lien d'une autre origine ou qui contient des identifiants (`user:pw@`) ; l'origine doit être `https://hôte[:port]` exacte (http seulement pour `localhost`, `127.0.0.1`, `[::1]`). Cela protège aussi hors navigateur (Node, future appli, §16), où la CSP ne s'applique pas.
 - **Secrets typés** : K_lien, K_accès, K_preuve et S_gestion ont des types TypeScript distincts ; envoyer K_lien au serveur ne compile pas. La couche HTTP n'est pas exportée par l'interface publique (`web/src/index.ts`).
@@ -579,7 +579,7 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 
 ### D4 — Anti-robot fort et respectueux de la vie privée (remplace « reporté »)
 
-- **ALTCHA** (open source, MIT), **hébergé par Shhdrop** : widget servi depuis notre domaine, bibliothèque serveur Go (`altcha-lib-go`). Aucun service tiers, aucun cookie, aucun traceur (exclus : reCAPTCHA, hCaptcha, Turnstile).
+- **ALTCHA** (open source, MIT), **hébergé par Shhdrop** : widget servi depuis notre domaine, bibliothèque serveur Go (`altcha-lib-go`). Aucun service tiers, aucun cookie, aucun traceur (exclus : hCaptcha, Turnstile ; reCAPTCHA seulement en repli isolé, section 26).
 - **Preuve de travail adaptative** : environ 1 s pour une première création ; la difficulté **double à chaque création** de la même connexion dans l'heure (plafond : environ 30 s).
 - **Défis signés (HMAC), à usage unique** (consommés en mémoire), valables **2 minutes**, liés à la connexion.
 - **Pièges** : un champ caché qui ne doit pas être rempli, et un délai minimum de 3 s entre l'affichage de la page et la création.
@@ -624,7 +624,7 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 
 ### Anti-robot
 
-- ALTCHA est maintenu, après réexamen demandé par le propriétaire. reCAPTCHA exécuterait du code tiers sur la page qui détient la clé du lien (§10, §2), traçage et bandeau de cookies en plus ; ALTCHA est plus rapide pour l'utilisateur (aucune image) et ne charge rien de l'extérieur.
+- ALTCHA est maintenu, après réexamen demandé par le propriétaire (complété en v2.5 par un repli reCAPTCHA isolé, section 26). reCAPTCHA chargé dans la page exécuterait du code tiers sur la page qui détient la clé du lien (§10, §2), traçage et bandeau de cookies en plus ; ALTCHA est plus rapide pour l'utilisateur (aucune image) et ne charge rien de l'extérieur.
 
 ### Dépendances
 
@@ -657,4 +657,19 @@ Audit « sharp edges » du 4 novembre (`docs/superpowers/audits/2026-11-04-sharp
 | S1 signalement après la dernière ouverture | `Opened.destroy(reason?)` sans `meta` ; `done` en `keepalive` (§12, §18) |
 
 API du client pour le Plan 2 : `createShare(origin, items, opts)`, `openShare(link, password, expectedOrigin, onProgress?, net?)`, `fetchMeta(link, expectedOrigin, net?)`, `destroyShare(link, expectedOrigin, opts?)`, `shareStatus(manage, expectedOrigin, net?)`, `collectToBlob(opened, i, foldBytes?)`.
+
+---
+
+## 26. Décision du propriétaire (v2.5, 5 novembre 2026) — repli Google reCAPTCHA isolé
+
+Le propriétaire a demandé un repli Google reCAPTCHA quand la preuve de travail maison n'aboutit pas, et a validé l'exception écrite ici. Elle remplace l'exclusion de reCAPTCHA de D4 (section 22) et de la section 24, **pour le repli seulement**.
+
+- **Principal inchangé** : la preuve de travail maison (compatible `altcha-lib-go`), invisible, sans service tiers. Elle reste la seule vérification tant qu'elle aboutit.
+- **Repli seulement si la preuve échoue** (Worker absent ou en erreur, délai dépassé, refus du serveur). Détails côté interface : spécification UI §9.4.2 et §15.
+- **Rien n'est chargé depuis Google avant un clic explicite** sur « Continuer avec Google », après un texte qui dit que Google verra l'adresse IP.
+- **Jamais sur une page qui détient des clés** : reCAPTCHA v2 tourne dans un cadre `sandbox` servi par une **origine de vérification distincte** (`SHH_VERIF_ORIGIN`). Cette origine doit être un **site différent** de celui de l'application : un autre domaine enregistrable, ou un sous-domaine d'un suffixe public (liste Public Suffix, par exemple `*.github.io`, `*.pages.dev`). Un sous-domaine de `shhdrop.app` n'est pas accepté (même site : processus et cookies partagés possibles). Le démarrage du serveur échoue si la règle n'est pas respectée.
+- La page de l'application n'ajoute que `frame-src {SHH_VERIF_ORIGIN}` ; `script-src`, `connect-src` et `img-src` restent limités à `'self'`. Le cadre ne renvoie qu'un jeton par `postMessage` (origine vérifiée des deux côtés).
+- **Serveur** : `siteverify` avec `SHH_RECAPTCHA_SECRET`, **sans** `remoteip` ; jeton lié au défi émis, usage unique, mêmes limites que la preuve de travail (section 4, D4). Repli désactivé si le secret est vide.
+- **Confidentialité** : la page Confidentialité dit que, dans ce cas seulement, Google voit l'adresse IP et peut déposer ses cookies dans son cadre ; le contenu, le lien et le mot de passe restent hors de sa portée.
+- **Tests** : le test « aucune ressource tierce » reste bloquant pour le cadre principal ; un faux `siteverify` sert aux tests ; aucune requête vers Google sans le clic.
 
