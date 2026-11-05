@@ -5,6 +5,7 @@
   import Aurora from "./Aurora.svelte";
   import { Languages } from "./Icon";
   import LiveRegion from "./LiveRegion.svelte";
+  import Logo from "./Logo.svelte";
 
   type Props = {
     children: Snippet;
@@ -67,11 +68,8 @@
 <header class="top" class:scrolled style:--banner-h={banner ? `${bannerH}px` : undefined}>
   <div class="bar wrap">
     <a class="logo" href={href("/")} onclick={(e) => followLink(e, "/")} aria-label={t("shell.home")}>
-      <svg class="mark" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false">
-        <!-- Même dessin que public/logo.svg (UI §6) : capsule, trait ouvert de 300° depuis le milieu du haut. -->
-        <path d="M12 6H16A6 6 0 0 1 16 18H8A6 6 0 0 1 8 6H12" pathLength="100" stroke-dasharray="83.33 100" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
-      </svg>
-      <span class="word">shhdrop</span>
+      <!-- Logo « Trame » (scripts/gen-logo.mjs) ; l'introduction ne se joue que sur l'accueil, une fois par chargement. -->
+      <Logo animated={router.current.name === "home"} />
     </a>
     <button
       type="button"
@@ -201,31 +199,11 @@
   .logo {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
     min-height: 44px;
     color: var(--text);
     text-decoration: none;
     border-radius: var(--r-sm);
   }
-  .mark {
-    color: var(--accent);
-  }
-  /* La capsule du logo se referme au survol (UI §20.1). */
-  .mark path {
-    transition: stroke-dasharray var(--dur-slow) var(--ease-out);
-  }
-  @media (hover: hover) {
-    .logo:hover .mark path {
-      stroke-dasharray: 100 100;
-    }
-  }
-  .word {
-    font-weight: 650;
-    font-stretch: 112%;
-    font-size: 1.25rem;
-    letter-spacing: -0.01em;
-  }
-
   .lang {
     display: inline-flex;
     align-items: center;
@@ -311,7 +289,6 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .mark path,
     .lang {
       transition: none;
     }

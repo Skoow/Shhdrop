@@ -82,7 +82,7 @@ test.describe("fr-FR", () => {
     for (const b of await row.getByRole("button").all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect(await page.evaluate(() => scrollY)).toBe(0);
     const vessel = (await page.locator('[data-slot="compose"]').boundingBox())!;
-    const schema = (await page.locator('[role="img"]').boundingBox())!;
+    const schema = (await page.locator('main [role="img"]').boundingBox())!;
     expect(schema.y).toBeGreaterThan(vessel.y + vessel.height);
   });
 
@@ -105,7 +105,7 @@ test.describe("fr-FR", () => {
     await expect(page.locator("[data-label]")).toHaveCount(6);
     expect(await labelOverlaps(page)).toEqual([]);
     // Les libellés restent dans le flux : sous le dessin, au-dessus du lien qui le suit.
-    const drawing = (await page.locator('[role="img"]').boundingBox())!;
+    const drawing = (await page.locator('main [role="img"]').boundingBox())!;
     const next = (await page.getByRole("link", { name: "Tous les détails de sécurité" }).boundingBox())!;
     const boxes = await page.locator(".nodes [data-label]").evaluateAll((es) => es.map((e) => e.getBoundingClientRect().toJSON()));
     for (const box of boxes) {
