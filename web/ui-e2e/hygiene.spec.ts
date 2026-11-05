@@ -133,13 +133,19 @@ for (const path of [`/s/${ID}/`, `/s/${ID})`, `/S/${ID}`, "/", "/inconnu"]) {
   });
 }
 
-// Limite connue, hors de portée de l'interface : un dernier segment avec un point
-// (« /s/{id}.#clé ») est traité par le serveur comme un fichier absent (static.go) et reçoit un
-// 404 texte : aucun script ne tourne, le « # » reste. Correction proposée côté serveur (repli
-// index.html pour tout /s/… et /m/…), en attente de décision : voir task-5-report.md.
-test.fixme(`/s/<id>.#<clé> : le # est retiré (exige un repli index.html côté serveur)`, async ({ page, shh }) => {
-  await page.goto(`${shh.origin}/s/${ID}.#${KEY}`);
+// Dernier segment avec un point (« /s/{id}.#clé », ponctuation collée par une messagerie) :
+// le serveur sert index.html sous /s/ et /m/ (static.go), l'application retire le « # ».
+test("/s/<id>.#<clé> : servi par l'application, le # est retiré, Retour ne le rend pas", async ({ page, shh }) => {
+  const res = await page.goto(`${shh.origin}/s/${ID}.#${KEY}`);
+  expect(res?.status()).toBe(200);
+  expect(res?.headers()["x-robots-tag"]).toBe("noindex");
   await expect.poll(() => hash(page)).toBe("");
+  expect(page.url()).toBe(`${shh.origin}/s/${ID}.`);
+  await page.getByRole("link", { name: "Sécurité" }).click();
+  await expect(page).toHaveURL(`${shh.origin}/securite`);
+  await page.goBack();
+  await expect(page).toHaveURL(`${shh.origin}/s/${ID}.`);
+  expect(await hash(page)).toBe("");
 });
 
 // I2 : paramètre de suivi ajouté par l'application (Facebook, Messenger, Instagram).

@@ -153,6 +153,34 @@ func TestServeStaticDir(t *testing.T) {
 			t.Fatalf("%s : %d %q %v", p, code, body, h)
 		}
 	}
+	// Liens abîmés sous /s/ et /m/ (point ou parenthèse collés par une messagerie, segment en
+	// trop) : index.html, même avec un point dans le dernier segment, avec noindex, pour que
+	// l'application retire le « # » (UI §12.1). Préfixe sensible à la casse.
+	for _, p := range []string{"/s/AAAAAAAAAAAAAAAAAAAAAA.", "/m/AAAAAAAAAAAAAAAAAAAAAA.", "/s/AAAAAAAAAAAAAAAAAAAAAA/", "/s/a.js", "/m/x/y.png", "/s/AAAAAAAAAAAAAAAAAAAAAA)"} {
+		for _, m := range []string{"GET", "HEAD"} {
+			code, body, h := get(m, p)
+			if code != 200 || (m == "GET" && !strings.Contains(body, "<title>Shhdrop</title>")) ||
+				h.Get("X-Robots-Tag") != "noindex" || h.Get("Content-Security-Policy") == "" || h.Get("Cache-Control") != "no-store" ||
+				!strings.HasPrefix(h.Get("Content-Type"), "text/html") {
+				t.Fatalf("%s %s : %d %q %v", m, p, code, body, h)
+			}
+		}
+	}
+	// Hors de ces préfixes, rien ne change : fichier absent avec extension → 404 ; /S/ n'est pas /s/.
+	for _, p := range []string{"/assets/missing.js", "/S/AAAAAAAAAAAAAAAAAAAAAA.", "/sx/a.js", "/api/x.js"} {
+		if code, body, _ := get("GET", p); code != 404 || strings.Contains(body, "<title>Shhdrop</title>") {
+			t.Fatalf("%s : %d %q", p, code, body)
+		}
+	}
+	// Ni remontée ni fichier caché par /s/ ou /m/ : 404, ou index.html (le client suit la
+	// redirection du serveur vers le chemin nettoyé), jamais le fichier visé.
+	for _, p := range []string{"/s/x/../../etc/passwd", "/s/x/../../etc", "/s/../.env", "/m/../passwd", "/s/.env", "/m/.git/config"} {
+		code, body, _ := get("GET", p)
+		if strings.Contains(body, "root:") || strings.Contains(body, "SECRET") || strings.Contains(body, "[core]") ||
+			!(code == 404 || code == 200 && strings.Contains(body, "<title>Shhdrop</title>")) {
+			t.Fatalf("%s : %d %q", p, code, body)
+		}
+	}
 	if code, _, _ := get("POST", "/s/AAAAAAAAAAAAAAAAAAAAAA"); code != 405 {
 		t.Fatalf("POST statique : %d", code)
 	}
