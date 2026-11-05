@@ -46,12 +46,12 @@ func TestListenLoopbackOnly(t *testing.T) {
 }
 
 func TestTrustedProxy(t *testing.T) {
-	env(t, map[string]string{"SHH_DATA_DIR": "/d", "SHH_BEHIND_PROXY": "1", "SHH_TRUSTED_PROXY": "172.18.0.0/16, 2001:db8::/32"})
+	env(t, map[string]string{"SHH_DATA_DIR": "/d", "SHH_BEHIND_PROXY": "1", "SHH_TRUSTED_PROXY": "172.18.0.0/16, 2001:db8::/48"})
 	c, err := FromEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []netip.Prefix{netip.MustParsePrefix("172.18.0.0/16"), netip.MustParsePrefix("2001:db8::/32")}
+	want := []netip.Prefix{netip.MustParsePrefix("172.18.0.0/16"), netip.MustParsePrefix("2001:db8::/48")}
 	if len(c.TrustedProxies) != 2 || c.TrustedProxies[0] != want[0] || c.TrustedProxies[1] != want[1] {
 		t.Fatalf("%v", c.TrustedProxies)
 	}
@@ -109,7 +109,8 @@ func TestTrustedProxyShape(t *testing.T) {
 		"::ffff:10.0.0.0/104", "::ffff:172.18.0.0/112", "::ffff:0:0/96", // IPv4-dans-IPv6
 		"10.0.0.0/7", "128.0.0.0/1", "64.0.0.0/2", "192.0.0.0/4", "11.0.0.0/7", // IPv4 trop large et public
 		"2000::/3", "2001::/16", "2001:db8::/31", // IPv6 trop large et public
-		"fc00::/6", // dépasse fc00::/7
+		"fc00::/6",                                                                    // dépasse fc00::/7
+		"8.0.0.0/8", "8.0.0.0/23", "203.0.112.0/23", "2001:db8::/32", "2001:db8::/47", // réseau public trop large
 	} {
 		env(t, map[string]string{"SHH_DATA_DIR": "/d", "SHH_BEHIND_PROXY": "1", "SHH_TRUSTED_PROXY": v})
 		if _, err := FromEnv(); err == nil {
@@ -118,7 +119,7 @@ func TestTrustedProxyShape(t *testing.T) {
 	}
 	for _, v := range []string{
 		"10.0.0.0/8", "172.16.0.0/12", "172.18.0.0/16", "192.168.0.0/16", "192.168.1.5/32", "127.0.0.0/8", "127.0.0.1/32",
-		"fc00::/7", "fd12:3456::/32", "::1/128", "8.0.0.0/8", "203.0.113.0/24", "2001:db8::/32", "2001:db8:1::/48",
+		"fc00::/7", "fd12:3456::/32", "::1/128", "169.254.0.0/16", "fe80::/10", "fe80::1/128", "203.0.113.0/24", "203.0.113.7/32", "2001:db8:1::/48", "2001:db8:1:2::/64",
 	} {
 		env(t, map[string]string{"SHH_DATA_DIR": "/d", "SHH_BEHIND_PROXY": "1", "SHH_TRUSTED_PROXY": v})
 		if _, err := FromEnv(); err != nil {

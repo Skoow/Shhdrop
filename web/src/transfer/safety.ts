@@ -9,9 +9,14 @@ const EXT_MAX = 16; // au-delà, « l'extension » n'en est pas une : coupe simp
 
 // Inversions de sens d'écriture (U+202A–U+202E, U+2066–U+2069), marques LRM/RLM/ALM,
 // contrôles C0, DEL et C1, séparateurs de chemin.
-// Largeur nulle (U+200B–U+200D, U+2060) et étiquettes (U+E0000–U+E007F) : invisibles, ils
+// Largeur nulle (U+200B, U+200C, U+2060–U+2064, U+FEFF, U+180E), trait d'union conditionnel
+// (U+00AD), U+034F et étiquettes (U+E0000–U+E007F) : invisibles, ils
 // permettent de camoufler une extension ou de rendre deux noms identiques à l'œil.
-const STRIP = /[‪-‮⁦-⁩‎‏؜\u0000-\u001F\u007F-\u009F/\\\u200B-\u200D\u2060\u{E0000}-\u{E007F}]/gu;
+const STRIP = /[‪-‮⁦-⁩‎‏؜\u0000-\u001F\u007F-\u009F/\\\u200B\u200C\u2060\u2061-\u2064\uFEFF\u180E\u00AD\u034F\u{E0000}-\u{E007F}]/gu;
+
+// U+200D (liant de séquences emoji) : gardé seulement entre deux emoji (avant : pictogramme,
+// suivi au plus d'un sélecteur de variante et d'une teinte ; après : pictogramme), retiré ailleurs.
+const ZWJ_OUTSIDE_EMOJI = /(?<!\p{Extended_Pictographic}\uFE0F?[\u{1F3FB}-\u{1F3FF}]?)\u200D|\u200D(?!\p{Extended_Pictographic})/gu;
 
 /**
  * Nom à proposer au téléchargement : NFC ; sans inversion de sens, caractère de largeur nulle, contrôle ni séparateur ;
@@ -21,7 +26,7 @@ const STRIP = /[‪-‮⁦-⁩‎‏؜\u0000-\u001F\u007F-\u009F/\\\u200B-\u200D
  */
 export function safeName(raw: string): string {
   // Retrait avant la normalisation : « e » + largeur nulle + accent se compose en « é ».
-  let s = raw.replace(STRIP, "").normalize("NFC").replace(/\s+/gu, " ");
+  let s = raw.replace(STRIP, "").replace(ZWJ_OUTSIDE_EMOJI, "").normalize("NFC").replace(/\s+/gu, " ");
   s = s.replace(/^[\s.]+/u, "").replace(/[\s.]+$/u, "");
   if ([...s].length > NAME_MAX) {
     const dot = s.lastIndexOf(".");

@@ -43,6 +43,21 @@ describe("safeName", () => {
     // Le retrait précède la normalisation : e + largeur nulle + accent → « é » composé.
     expect(safeName("e\u200B\u0301.txt")).toBe("\u00E9.txt");
   });
+  it("retire aussi U+FEFF, U+2061–U+2064, U+180E, U+00AD, U+034F ; ZWJ gardé seulement entre deux emoji", () => {
+    for (const c of ["\uFEFF", "\u2061", "\u2062", "\u2063", "\u2064", "\u180E", "\u00AD", "\u034F"]) {
+      expect(safeName(`fac${c}ture.pdf`), JSON.stringify(c)).toBe("facture.pdf");
+    }
+    expect(safeName("fac\u00ADture")).toBe("facture");
+    const family = "👨\u200D👩\u200D👧";
+    expect(safeName(`${family}.png`)).toBe(`${family}.png`);
+    expect([...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(safeName(family))].length).toBe(1);
+    expect(safeName("👩🏽\u200D💻.txt")).toBe("👩🏽\u200D💻.txt"); // avec modificateur de teinte
+    expect(safeName("❤\uFE0F\u200D🔥.txt")).toBe("❤\uFE0F\u200D🔥.txt"); // avec sélecteur de variante
+    expect(safeName("a\u200Db")).toBe("ab");
+    expect(safeName("a\u200D👩")).toBe("a👩"); // avant : pas un emoji
+    expect(safeName("👩\u200Db")).toBe("👩b"); // après : pas un emoji
+    expect(safeName("👩\u200D\u200D👧")).toBe("👩👧"); // deux ZWJ de suite
+  });
   it("coupe par graphème, sans jamais dépasser 120 points de code (tâche M, point 4)", () => {
     // « x » + accent combinant (sans forme composée) : 2 points de code, 1 graphème.
     const g = "x\u0301";

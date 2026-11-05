@@ -63,8 +63,8 @@ func FromEnv() (Config, error) {
 			p, err := netip.ParsePrefix(strings.TrimSpace(s))
 			// Forme canonique (adresse de réseau), jamais « tout Internet » (point M3).
 			if err != nil || p != p.Masked() || !trustedPrefixOK(p) {
-				return Config{}, fmt.Errorf("SHH_TRUSTED_PROXY invalide (liste de CIDR canoniques, réseau privé "+
-					"ou préfixe d'au moins /8 en IPv4 et /32 en IPv6, sans notation IPv4-dans-IPv6): %q", v)
+				return Config{}, fmt.Errorf("SHH_TRUSTED_PROXY invalide (liste de CIDR canoniques, réseau local "+
+					"ou public d'au moins /24 en IPv4 et /48 en IPv6, sans notation IPv4-dans-IPv6): %q", v)
 			}
 			c.TrustedProxies = append(c.TrustedProxies, p)
 		}
@@ -81,31 +81,33 @@ func FromEnv() (Config, error) {
 	return c, nil
 }
 
-// privateNets : réseaux dont tout sous-réseau est accepté, quelle que soit sa taille
-// (RFC 1918, boucle locale, ULA IPv6).
-var privateNets = []netip.Prefix{
+// localNets : réseaux acceptés à toute longueur de préfixe (sauf /0) : boucle locale,
+// réseaux privés (RFC 1918, ULA IPv6) et lien local.
+var localNets = []netip.Prefix{
 	netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("172.16.0.0/12"),
 	netip.MustParsePrefix("192.168.0.0/16"), netip.MustParsePrefix("127.0.0.0/8"),
-	netip.MustParsePrefix("fc00::/7"), netip.MustParsePrefix("::1/128"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("fc00::/7"), netip.MustParsePrefix("::1/128"), netip.MustParsePrefix("fe80::/10"),
 }
 
-// trustedPrefixOK : un proxy de confiance est un réseau restreint. Refusés : la notation
-// IPv4-dans-IPv6 (::ffff:a.b.c.d/…, qui contourne les contrôles de taille IPv4) et les
-// préfixes plus larges que /8 (IPv4) ou /32 (IPv6), sauf s'ils tiennent dans un réseau privé.
+// trustedPrefixOK : un proxy de confiance est un réseau restreint. Acceptés : un
+// sous-réseau (jamais /0) d'un réseau local (localNets) ; sinon un réseau public d'au moins
+// /24 (IPv4) ou /48 (IPv6). Refusée aussi : la notation IPv4-dans-IPv6 (::ffff:a.b.c.d/…),
+// qui contournerait les contrôles de taille IPv4.
 func trustedPrefixOK(p netip.Prefix) bool {
 	a := p.Addr()
-	if a.Is4In6() || a.Zone() != "" {
+	if a.Is4In6() || a.Zone() != "" || p.Bits() == 0 {
 		return false
 	}
-	for _, n := range privateNets {
+	for _, n := range localNets {
 		if n.Addr().Is4() == a.Is4() && p.Bits() >= n.Bits() && n.Contains(a) {
 			return true
 		}
 	}
 	if a.Is4() {
-		return p.Bits() >= 8
+		return p.Bits() >= 24
 	}
-	return p.Bits() >= 32
+	return p.Bits() >= 48
 }
 
 // absDir : chemin absolu, nettoyé ; « ? », « # » et « % » refusés (ils changeraient le
