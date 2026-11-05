@@ -70,14 +70,13 @@
     <button
       type="button"
       class="lang"
-      lang={other}
       aria-label={t("shell.lang.switch")}
       aria-disabled={langLocked}
       aria-describedby={langLocked ? "lang-locked" : undefined}
       onclick={toggleLang}
     >
       <Languages size={20} strokeWidth={1.75} aria-hidden="true" />
-      <span>{t("shell.lang.label")}</span>
+      <span lang={other}>{t("shell.lang.label")}</span>
     </button>
     {#if langLocked}<span id="lang-locked" class="sr">{t("shell.lang.locked")}</span>{/if}
   </div>

@@ -89,3 +89,34 @@ test("le verre de l'en-tête apparaît au défilement et pas avant", async ({ pa
   await page.evaluate(() => window.scrollTo(0, 0));
   await expect(header).not.toHaveClass(/scrolled/);
 });
+
+test("bouton de langue : lang sur le texte visible seulement, pas sur le bouton (nom accessible)", async ({ page, shh }) => {
+  await page.goto(shh.origin + "/inconnu");
+  const button = page.locator("button.lang");
+  await expect(button).not.toHaveAttribute("lang", /.*/);
+  await expect(button.locator("span[lang]")).toHaveAttribute("lang", /^(fr|en)$/);
+  const html = await page.locator("html").getAttribute("lang");
+  await expect(button.locator("span[lang]")).toHaveAttribute("lang", html === "fr" ? "en" : "fr");
+  await button.click();
+  const html2 = await page.locator("html").getAttribute("lang");
+  await expect(button.locator("span[lang]")).toHaveAttribute("lang", html2 === "fr" ? "en" : "fr");
+});
+
+test("le secret du # ne fuit ni dans le DOM, ni dans le titre, ni dans la console, ni dans une requête", async ({ page, shh }) => {
+  const SECRET = "SECRETSECRET";
+  const consoleTexts: string[] = [];
+  const urls: string[] = [];
+  page.on("console", (m) => consoleTexts.push(m.text()));
+  page.on("request", (r) => urls.push(r.url()));
+  await page.goto(`${shh.origin}/s/AbCdEfGhIjKlMnOpQrStUv#${SECRET}`);
+  await expect(page.locator("main#contenu")).toBeVisible();
+  // Navigation interne et bascule de langue : le routeur travaille sous l'adresse complète.
+  await page.getByRole("button", { name: /English|Français/ }).click();
+  await page.getByRole("link", { name: /Sécurité|Security/ }).click();
+  await page.goBack();
+  await page.evaluate(() => 0);
+  expect(await page.content()).not.toContain(SECRET);
+  expect(await page.title()).not.toContain(SECRET);
+  expect(consoleTexts.join("\n")).not.toContain(SECRET);
+  expect(urls.join("\n")).not.toContain(SECRET);
+});

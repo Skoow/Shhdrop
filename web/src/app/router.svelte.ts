@@ -27,8 +27,12 @@ export const router = $state<{ current: Route }>({
   current: typeof location === "undefined" ? { name: "home" } : match(location.pathname),
 });
 
+// Ne réaffecte que si la route change (nom ou identifiant) : un popstate sans effet
+// (changement de « # », lien vers la page courante) ne relance ni les effets ni le focus.
 function sync(): void {
-  router.current = match(location.pathname);
+  const next = match(location.pathname);
+  const cur = router.current;
+  if (next.name !== cur.name || next.id !== cur.id) router.current = next;
 }
 
 if (typeof window !== "undefined") window.addEventListener("popstate", sync);

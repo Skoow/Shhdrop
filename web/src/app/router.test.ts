@@ -54,6 +54,17 @@ describe("navigate", () => {
     navigate("/");
   });
 
+  it("popstate sans changement de route : router.current n'est pas réaffecté (ni focus volé)", () => {
+    navigate("/m/abc");
+    const before = router.current;
+    history.replaceState(null, "", "/m/abc#ancre");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(router.current).toBe(before);
+    navigate("/m/abd");
+    expect(router.current).not.toBe(before);
+    navigate("/");
+  });
+
   it("href préfixe la base", () => {
     expect(href("/securite")).toBe("/securite");
   });

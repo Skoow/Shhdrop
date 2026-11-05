@@ -38,9 +38,9 @@ export function setLang(l: Lang): void {
 export function t(key: Key, params?: Record<string, string | number>): string {
   const d = dicts[lang];
   let k: string = key;
-  if (typeof params?.n === "number" && `${key}.${plural(lang, params.n)}` in d) k = `${key}.${plural(lang, params.n)}`;
-  const raw = (d as Record<string, string>)[k];
-  if (raw === undefined) return key;
+  if (typeof params?.n === "number" && Object.hasOwn(d, `${key}.${plural(lang, params.n)}`)) k = `${key}.${plural(lang, params.n)}`;
+  if (!Object.hasOwn(d, k)) return key; // jamais « constructor », « __proto__ »…
+  const raw = (d as Record<string, string>)[k]!;
   // Un seul passage : une valeur (nom de fichier) n'est jamais réinterprétée comme paramètre.
-  return raw.replace(/\{(\w+)\}/g, (m, name: string) => (params && name in params ? String(params[name]) : m));
+  return raw.replace(/\{(\w+)\}/g, (m, name: string) => (params && Object.hasOwn(params, name) ? String(params[name]) : m));
 }

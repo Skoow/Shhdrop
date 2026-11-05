@@ -98,6 +98,14 @@ describe("t et langue", () => {
     expect(detectLang(["english"])).toBe("fr");
   });
 
+  it("les clés héritées d'Object ne se résolvent jamais", () => {
+    for (const k of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+      expect(t(k as never)).toBe(k);
+      expect(t(k as never, { n: 1 })).toBe(k);
+    }
+    expect(t("compose.removed", { name: "x", __proto__: "y", constructor: "z" } as never)).toBe("x retiré");
+  });
+
   it("une clé inconnue se voit (jamais de texte vide)", () => {
     expect(t("nope.nope" as never)).toBe("nope.nope");
   });
