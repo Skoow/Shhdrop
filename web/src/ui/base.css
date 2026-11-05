@@ -78,3 +78,19 @@ p {
     background-image: none;
   }
 }
+
+/* Barre d'actions collée en bas sur téléphone (classe .dock, UI §9). Elle repasse dans le flux
+   quand le clavier virtuel est ouvert (html.kbd-open, app/viewport.ts) pour ne jamais couvrir
+   le champ actif, et en paysage sur téléphone. */
+.dock {
+  position: sticky;
+  inset-block-end: 0;
+}
+html.kbd-open .dock {
+  position: static;
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .dock {
+    position: static;
+  }
+}

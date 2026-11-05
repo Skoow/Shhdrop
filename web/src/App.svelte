@@ -1,11 +1,62 @@
 <script lang="ts">
+  import { inAppBrowser, isSupported } from "./app/env";
+  import { guardFileDrop, reloadIfRestored } from "./app/lifecycle";
+  import { readLink, scrubAddressBar, type LinkState } from "./app/link";
   import { router } from "./app/router.svelte";
+  import { watchKeyboard } from "./app/viewport";
   import NotFound from "./routes/NotFound.svelte";
+  import Unsupported from "./routes/Unsupported.svelte";
   import AppShell from "./ui/AppShell.svelte";
+
+  // UI §9 : vérifié une fois, avant toute route. Sans ces capacités, aucune route ne démarre
+  // (ni lecture du lien, ni requête).
+  const supported = isSupported(globalThis);
+
+  // UI §12.2 : une page restaurée du cache « page précédente » est rechargée.
+  reloadIfRestored(window);
+
+  const standalone = () =>
+    window.matchMedia?.("(display-mode: standalone)").matches === true ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true;
+
+  /**
+   * UI §12.1 : au démarrage d'une route /s/ ou /m/, le lien est lu puis le « # » est retiré de
+   * l'adresse et de l'historique ; dans un navigateur intégré (S4), le « # » reste pour
+   * « Ouvrir dans le navigateur ». Le résultat contient le secret : il est rendu à l'appelant,
+   * jamais rangé ici. Task 20 le remet par valeur au flux de la route (createReceiver, gestion).
+   */
+  function enterLinkRoute(): LinkState | null {
+    const r = router.current;
+    if (r.name !== "open" && r.name !== "manage") return null;
+    const state = readLink(location.href, r.name === "open" ? "s" : "m");
+    if (inAppBrowser(navigator.userAgent, standalone()) === null) scrubAddressBar(history, location.pathname);
+    return state;
+  }
+
+  // Changement de route, et « # » collé dans la barre sur la même page (navigation de fragment,
+  // sans rechargement ni changement de route).
+  $effect(() => {
+    void router.current;
+    if (supported) enterLinkRoute();
+  });
+  function onHashChange() {
+    if (supported) enterLinkRoute();
+  }
+
+  // UI §9.2.2 : hors du composeur, un fichier déposé ne fait jamais naviguer l'onglet.
+  // Task 10/11 : allow() vrai sur l'accueil hors envoi.
+  $effect(() => guardFileDrop(window, () => false));
+
+  // UI §9 : clavier virtuel ouvert → classe kbd-open sur <html> (barres collées dans le flux).
+  $effect(() => watchKeyboard(window, (open) => document.documentElement.classList.toggle("kbd-open", open)));
 </script>
 
+<svelte:window onhashchange={onHashChange} />
+
 <AppShell>
-  {#if router.current.name === "notfound"}
+  {#if !supported}
+    <Unsupported />
+  {:else if router.current.name === "notfound"}
     <NotFound />
   {:else}
     <!-- Écrans des tâches suivantes : accueil, ouverture, gestion, sécurité, confidentialité. -->
