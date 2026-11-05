@@ -136,6 +136,17 @@ export async function capture(page: Page, nom: string): Promise<string> {
 
 /** Audit axe WCAG 2.1 A et AA ; renvoie les violations (à comparer à []). */
 export async function axe(page: Page) {
+  // Contraste mesuré sur l'état final : on attend la fin des entrées (finies, ≤ 900 ms, K1). Une
+  // entrée en cours a une opacité < 1 qu'axe compterait comme un défaut de contraste. Les
+  // boucles d'ambiance et les animations liées au défilement ne sont pas attendues.
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.timeline === document.timeline && a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
+  );
   const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   return r.violations;
 }

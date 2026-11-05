@@ -41,8 +41,24 @@ describe("Home (UI §9.1)", () => {
     expect(svg.getAttribute("aria-label")).toBe(
       "Votre appareil — chiffré — serveur (ne lit rien) — chiffré — destinataire",
     );
-    const a = [...document.querySelectorAll("a")].find((x) => x.textContent?.trim() === "Comment ça marche")!;
+    const a = [...document.querySelectorAll("a")].find((x) => x.textContent?.trim() === "Tous les détails de sécurité")!;
     expect(a.getAttribute("href")).toBe("/securite");
+    // « Comment ça marche » fait défiler vers sa section : un bouton, jamais un « # » dans l'adresse.
+    const how = [...document.querySelectorAll("button")].find((x) => x.textContent?.trim() === "Comment ça marche")!;
+    expect(how).toBeDefined();
+    expect([...document.querySelectorAll("a")].some((x) => x.getAttribute("href")?.includes("#"))).toBe(false);
+    // Sections sous le pli, chacune titrée.
+    const h2 = [...document.querySelectorAll("h2")].map((h) => h.textContent!.trim());
+    expect(h2).toEqual([
+      "Glissez vos fichiers iciQue voulez-vous envoyer\u202f?",
+      "Comment ça marche",
+      "Pourquoi c'est sûr",
+      "Vos questions",
+      "Quelque chose à transmettre\u202f?",
+    ]);
+    expect(document.querySelectorAll(".claim")).toHaveLength(9);
+    expect(document.querySelectorAll("details[name=faq]")).toHaveLength(6);
+    expect(document.querySelectorAll(".certs > li")).toHaveLength(3);
     expect(document.querySelector('[data-slot="compose"]')).not.toBeNull();
   });
 
@@ -106,23 +122,81 @@ describe("Home (UI §9.1)", () => {
     }
   });
 
-  it("réceptacle vide : Fichiers et Photo ouvrent leur sélecteur ; les fichiers choisis sont remis", () => {
+  it("fenêtre de dépôt : Parcourir, Photo et Vidéo ouvrent leur sélecteur ; un clic sur le verre n'ouvre rien", () => {
     const onfiles = vi.fn();
     show({ onfiles });
     const inputs = [...document.querySelectorAll<HTMLInputElement>('input[type="file"]')];
-    expect(inputs).toHaveLength(2);
-    expect(inputs[1]!.accept).toBe("image/*");
-    expect(inputs[1]!.getAttribute("capture")).toBe("environment");
+    expect(inputs).toHaveLength(3);
+    const [files, photo, video] = inputs as [HTMLInputElement, HTMLInputElement, HTMLInputElement];
+    expect(files.multiple).toBe(true);
+    expect(files.accept).toBe("");
+    expect(photo.accept).toBe("image/*");
+    expect(photo.getAttribute("capture")).toBe("environment");
+    expect(video.accept).toBe("video/*");
+    expect(video.getAttribute("capture")).toBe("environment");
     const clicks = inputs.map((i) => vi.spyOn(i, "click").mockImplementation(() => undefined));
-    const [files, photo] = [...document.querySelectorAll<HTMLButtonElement>(".add")];
-    expect(files!.textContent!.trim()).toBe("Fichiers");
-    files!.click();
-    photo!.click();
-    expect(clicks[0]).toHaveBeenCalledTimes(1);
-    expect(clicks[1]).toHaveBeenCalledTimes(1);
-    // Un clic sur le verre (hors bouton) ouvre aussi le sélecteur de fichiers.
+    const button = (name: string) => [...document.querySelectorAll("button")].find((b) => b.textContent!.trim() === name)!;
+    button("Parcourir les fichiers").click();
+    button("Photo").click();
+    button("Vidéo").click();
+    expect(clicks.map((c) => c.mock.calls.length)).toEqual([1, 1, 1]);
+    // Le verre n'est qu'une cible de dépôt : aucun sélecteur sans contexte (décision du propriétaire).
     (document.querySelector(".empty") as HTMLElement).click();
-    expect(clicks[0]).toHaveBeenCalledTimes(2);
+    (document.querySelector(".drop-title") as HTMLElement).click();
+    expect(clicks.map((c) => c.mock.calls.length)).toEqual([1, 1, 1]);
+    // Les fichiers choisis sont remis avec leur source ; le champ est vidé.
+    const f = new File(["x"], "a.txt");
+    Object.defineProperty(video, "files", { configurable: true, value: [f] });
+    video.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(onfiles).toHaveBeenCalledWith([f], "video");
+  });
+
+  it("actions : groupe nommé ; Vocal sans MediaRecorder et Coller sans clipboard.read sont masqués (§9.2.1)", () => {
+    const clip = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: {} });
+    try {
+      show();
+    } finally {
+      if (clip) Object.defineProperty(navigator, "clipboard", clip);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+    const group = document.querySelector('[role="group"]')!;
+    expect(document.getElementById(group.getAttribute("aria-labelledby")!)!.textContent).toBe("Ou créez sur place");
+    const names = [...group.querySelectorAll("button")].map((b) => b.textContent!.trim());
+    expect(names).toEqual(["Photo", "Vidéo", "Texte"]);
+  });
+
+  it("actions : Vocal et Coller présents quand le navigateur les permet ; rappel onaction", () => {
+    vi.stubGlobal("MediaRecorder", class {});
+    const clip = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { read: async () => [] } });
+    try {
+      const onaction = vi.fn();
+      show({ onaction });
+      const group = document.querySelector('[role="group"]')!;
+      const buttons = [...group.querySelectorAll("button")];
+      expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Photo", "Vidéo", "Vocal", "Texte", "Coller"]);
+      buttons[2]!.click();
+      buttons[3]!.click();
+      buttons[4]!.click();
+      expect(onaction.mock.calls).toEqual([["vocal"], ["texte"], ["coller"]]);
+    } finally {
+      vi.unstubAllGlobals();
+      if (clip) Object.defineProperty(navigator, "clipboard", clip);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
+    }
+  });
+
+  it("sans composeur branché : un avis dit ce qui a été ajouté (en attendant Task 10)", () => {
+    show();
+    const video = document.querySelectorAll<HTMLInputElement>('input[type="file"]')[2]!;
+    Object.defineProperty(video, "files", { configurable: true, value: [new File(["a"], "a"), new File(["b"], "b")] });
+    video.dispatchEvent(new Event("change", { bubbles: true }));
+    flushSync();
+    const notice = document.querySelector(".notice")!;
+    expect(notice.classList.contains("on")).toBe(true);
+    expect(notice.textContent).toBe("2\u202féléments ajoutés");
+    expect(notice.getAttribute("aria-hidden")).toBe("true"); // les lecteurs d'écran l'entendent par announce()
   });
 
   it("anglais", () => {

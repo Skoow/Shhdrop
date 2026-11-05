@@ -31,7 +31,7 @@ for (const kind of ["s", "m"] as const) {
     expect(page.url()).toBe(`${shh.origin}/${kind}/${ID}`);
 
     // Retour / Avant : aucune entrée d'historique ne réaffiche le #.
-    await page.getByRole("link", { name: "Sécurité" }).click();
+    await page.getByRole("link", { name: "Sécurité", exact: true }).click();
     await expect(page).toHaveURL(`${shh.origin}/securite`);
     await page.goBack();
     await expect(page).toHaveURL(`${shh.origin}/${kind}/${ID}`);
@@ -125,7 +125,7 @@ for (const path of [`/s/${ID}/`, `/s/${ID})`, `/S/${ID}`, "/", "/inconnu"]) {
     await page.goto(`${shh.origin}${path}#${KEY}`);
     await expect.poll(() => hash(page)).toBe("");
     expect(page.url()).toBe(`${shh.origin}${path}`);
-    await page.getByRole("link", { name: "Sécurité" }).click();
+    await page.getByRole("link", { name: "Sécurité", exact: true }).click();
     await expect(page).toHaveURL(`${shh.origin}/securite`);
     await page.goBack();
     await expect(page).toHaveURL(`${shh.origin}${path}`);
@@ -141,7 +141,7 @@ test("/s/<id>.#<clé> : servi par l'application, le # est retiré, Retour ne le 
   expect(res?.headers()["x-robots-tag"]).toBe("noindex");
   await expect.poll(() => hash(page)).toBe("");
   expect(page.url()).toBe(`${shh.origin}/s/${ID}.`);
-  await page.getByRole("link", { name: "Sécurité" }).click();
+  await page.getByRole("link", { name: "Sécurité", exact: true }).click();
   await expect(page).toHaveURL(`${shh.origin}/securite`);
   await page.goBack();
   await expect(page).toHaveURL(`${shh.origin}/s/${ID}.`);

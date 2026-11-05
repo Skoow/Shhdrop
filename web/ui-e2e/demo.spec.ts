@@ -82,9 +82,9 @@ test.describe("fr-FR", () => {
     });
   }
 
-  test("liens internes sous la base : « Comment ça marche » → /Shhdrop/securite, logo → /Shhdrop/", async ({ page, demo }) => {
+  test("liens internes sous la base : « Tous les détails de sécurité » → /Shhdrop/securite, logo → /Shhdrop/", async ({ page, demo }) => {
     await page.goto(demo.url);
-    await page.getByRole("link", { name: "Comment ça marche" }).click();
+    await page.getByRole("link", { name: "Tous les détails de sécurité" }).click();
     await expect(page).toHaveURL(`${demo.url}securite`);
     await expect(page.getByRole("note")).toHaveText(BANNER_FR); // sur toutes les pages
     await page.getByRole("link", { name: "Shhdrop, accueil" }).click();

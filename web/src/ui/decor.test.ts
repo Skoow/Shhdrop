@@ -49,3 +49,29 @@ describe("decor (UI §20.2 S1)", () => {
     expect(code).not.toMatch(/crypto|transfer|index|getRandomValues/);
   });
 });
+
+describe("motifs d'impression (accueil v3)", () => {
+  it("guilloche : n tracés, déterministes, dans la boîte", async () => {
+    const { guilloche } = await import("./decor");
+    const a = guilloche(400, 100, 6);
+    expect(a).toHaveLength(6);
+    expect(guilloche(400, 100, 6)).toEqual(a);
+    for (const d of a) {
+      expect(d.startsWith("M0 ")).toBe(true);
+      const ys = [...d.matchAll(/[ML](\d+) (-?[\d.]+)/g)].map((m) => Number(m[2]));
+      expect(ys.length).toBe(51);
+      for (const y of ys) {
+        expect(y).toBeGreaterThanOrEqual(0);
+        expect(y).toBeLessThanOrEqual(100);
+      }
+    }
+  });
+  it("rosette : courbe fermée, bornée par R + r + d", async () => {
+    const { rosette } = await import("./decor");
+    const d = rosette(15, 1, 3, 24);
+    expect(d.endsWith("Z")).toBe(true);
+    for (const m of d.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)) {
+      expect(Math.hypot(Number(m[1]) - 24, Number(m[2]) - 24)).toBeLessThanOrEqual(19.01);
+    }
+  });
+});

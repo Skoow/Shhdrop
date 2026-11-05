@@ -127,6 +127,8 @@ describe("autres jetons (UI §4.2, §5, §7.2)", () => {
       // §20.3 mouvement v2
       "--dur-press", "--dur-stagger", "--dur-view", "--dur-reveal", "--dur-orbit", "--dur-ambient",
       "--dur-ambient-2", "--dur-ambient-3", "--ease-view", "--rise", "--blur-in",
+      // accueil v3
+      "--fs-section", "--ease-settle",
     ].sort();
     expect(names).toEqual(expected);
   });
@@ -207,6 +209,18 @@ describe("direction artistique v2 (UI §20.3)", () => {
       "--rise": "14px",
       "--blur-in": "6px",
     };
+    for (const [k, v] of Object.entries(expected)) expect(T.get(k), k).toBe(v);
+  });
+
+  it("accueil v3 : courbe qui se pose sans jamais dépasser 1 (aucun rebond, règle v1)", () => {
+    const ease = T.get("--ease-settle")!;
+    const values = [...ease.matchAll(/(?:\(|,)\s*([\d.]+)/g)].map((m) => Number(m[1]));
+    expect(values[0]).toBe(0);
+    expect(values.at(-1)).toBe(1);
+    for (let i = 1; i < values.length; i++) expect(values[i]!).toBeGreaterThanOrEqual(values[i - 1]!);
+    for (const v of values) expect(v).toBeLessThanOrEqual(1);
+    expect(T.get("--fs-section")).toBe("clamp(2rem, 1.35rem + 2.4vw, 3.25rem)");
+    const expected: Record<string, string> = {};
     for (const [k, v] of Object.entries(expected)) expect(T.get(k), k).toBe(v);
   });
 
@@ -359,6 +373,8 @@ describe("Icon.ts (UI §6)", () => {
     "eye-off", "clock", "timer", "pause", "play", "download", "file", "file-text", "image",
     "music", "audio-lines", "film", "folder-x", "trash-2", "flag", "external-link",
     "chevron-left", "languages", "wifi-off", "clipboard-x", "circle-help", "minus", "plus", "info",
+    // Accueil v3 : vidéo, sceaux de confiance, FAQ, appel final.
+    "video", "link-2", "key-round", "server", "user-x", "hard-drive", "code-xml", "chevron-down", "arrow-right", "shield-x",
   ];
   const pascal = (s: string) =>
     s.split("-").map((p) => p[0]!.toUpperCase() + p.slice(1)).join("");

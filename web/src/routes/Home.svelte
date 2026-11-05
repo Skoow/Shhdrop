@@ -1,25 +1,45 @@
 <script module lang="ts">
   // UI §20.4 : le titre entre mot par mot une seule fois par chargement de page.
   let revealed = false;
+
+  /** D'où viennent les fichiers remis à `onfiles` (composer.add, Task 10). */
+  export type Source = "fichiers" | "photo" | "video" | "depot";
+  /** Actions qui ouvrent une interface dans la page (Tasks 10 à 12). */
+  export type Action = "vocal" | "texte" | "coller";
 </script>
 
 <script lang="ts">
+  // Accueil v3 (UI §9.1) : titre, phrase et sceaux de confiance ; fenêtre de dépôt (le coffre)
+  // avec le volet de scellement, « Parcourir les fichiers » et cinq actions de création ; voile
+  // de dépôt pleine page ; sous le pli, « Comment ça marche », « Pourquoi c'est sûr », questions
+  // et appel final. Un clic sur le verre n'ouvre rien : le sélecteur part de son bouton.
   import { untrack, type Snippet } from "svelte";
-  import { followLink, href } from "../app/router.svelte";
   import { t } from "../i18n/i18n.svelte";
-  import { Camera, Paperclip } from "../ui/Icon";
-  import Schema from "../ui/Schema.svelte";
+  import { announce } from "../ui/announce";
+  import { magnet, tilt } from "../ui/attach";
+  import DropOverlay from "../ui/DropOverlay.svelte";
+  import Guilloche from "../ui/Guilloche.svelte";
+  import { Camera, ChevronDown, ClipboardPaste, Lock, Mic, Paperclip, Timer, Type, UserX, Video } from "../ui/Icon";
+  import { reducedMotion } from "../ui/motion";
+  import SealBand from "../ui/SealBand.svelte";
+  import SealMark from "../ui/SealMark.svelte";
   import Vessel from "../ui/Vessel.svelte";
+  import Closing from "./home/Closing.svelte";
+  import Faq from "./home/Faq.svelte";
+  import HowItWorks from "./home/HowItWorks.svelte";
+  import WhySafe from "./home/WhySafe.svelte";
 
   type Props = {
     /** Vrai dès qu'un élément est ajouté : le titre se replie (UI §9.1), le reste du Persuade part. */
     compact?: boolean;
     /** Le composeur (Task 10), posé dans le réceptacle. Sans lui, le réceptacle vide. */
     children?: Snippet;
-    /** Fichiers choisis dans le réceptacle vide (branché sur le composeur en Task 10). */
-    onfiles?: (files: File[], source: "fichiers" | "photo") => void;
+    /** Fichiers choisis ou déposés (branché sur composer.add en Task 10). */
+    onfiles?: (files: File[], source: Source) => void;
+    /** Vocal, Texte, Coller : ouvrent leur interface dans la page (Tasks 10 à 12). */
+    onaction?: (action: Action) => void;
   };
-  let { compact = false, children, onfiles }: Props = $props();
+  let { compact = false, children, onfiles, onaction }: Props = $props();
 
   // Décidé au montage seulement : un repli ultérieur ne rejoue pas l'entrée.
   let reveal = $state(!revealed && !untrack(() => compact));
@@ -45,97 +65,229 @@
     return list.map((w, i) => ({ w, delay: i * 35 + (breath >= 0 && i > breath ? 30 : 0) }));
   });
 
+  // UI §9.2.1 : Vocal masqué sans MediaRecorder ; Coller seulement si navigator.clipboard.read existe.
+  const canVoice = typeof MediaRecorder !== "undefined";
+  const canPaste = typeof navigator !== "undefined" && typeof navigator.clipboard?.read === "function";
+
   let files: HTMLInputElement | undefined = $state();
   let photo: HTMLInputElement | undefined = $state();
-  function picked(input: HTMLInputElement, source: "fichiers" | "photo") {
+  let video: HTMLInputElement | undefined = $state();
+  let browse: HTMLButtonElement | undefined = $state();
+  let vessel: HTMLDivElement | undefined = $state();
+
+  // Avis visible en attendant le composeur (Task 10) ; les lecteurs d'écran passent par announce().
+  let notice = $state("");
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  function tell(text: string) {
+    notice = text;
+    announce(text);
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => (notice = ""), 2800);
+  }
+  $effect(() => () => clearTimeout(noticeTimer));
+
+  function give(list: File[], source: Source) {
+    if (list.length === 0) return;
+    if (onfiles) onfiles(list, source);
+    else tell(t("compose.added", { n: list.length }));
+  }
+  function picked(input: HTMLInputElement, source: Source) {
     const list = [...(input.files ?? [])];
     input.value = "";
-    if (list.length > 0) onfiles?.(list, source);
+    give(list, source);
   }
-  // Un clic sur le verre du réceptacle ouvre le sélecteur (le clavier passe par les boutons).
-  function vesselClick(e: MouseEvent) {
-    if (children || (e.target as Element).closest("button, a, input")) return;
-    files?.click();
+  function act(a: Action) {
+    if (onaction) onaction(a);
+    else tell(t(a === "vocal" ? "compose.soon.voice" : a === "texte" ? "compose.soon.text" : "compose.soon.paste"));
+  }
+
+  // UI §9.2.2 : glisser de fichiers sur toute la page ; compteur contre le clignotement ;
+  // fermeture au dépôt, à Échap, à la fin du glisser. Les dossiers sont refusés, pas aplatis.
+  let depth = 0;
+  let over = $state(false);
+  const hasFiles = (e: DragEvent) => [...(e.dataTransfer?.types ?? [])].includes("Files");
+  function close() {
+    depth = 0;
+    over = false;
+  }
+  function dragenter(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth++;
+    over = true;
+  }
+  function dragover(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  }
+  function dragleave(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    depth = Math.max(0, depth - 1);
+    if (depth === 0) over = false;
+  }
+  function drop(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    close();
+    const dt = e.dataTransfer!;
+    const items = [...(dt.items ?? [])];
+    const out: File[] = [];
+    let folders = 0;
+    if (items.length > 0) {
+      for (const it of items) {
+        if (it.kind !== "file") continue;
+        if (it.webkitGetAsEntry?.()?.isDirectory) folders++;
+        else {
+          const f = it.getAsFile();
+          if (f) out.push(f);
+        }
+      }
+    } else out.push(...dt.files);
+    if (folders > 0) announce(t("compose.folder"));
+    give(out, "depot");
+  }
+
+  /** « Commencer » et « Comment ça marche » : défilement vers la cible, sans « # » dans l'adresse. */
+  function scrollToEl(el: Element | null | undefined, block: ScrollLogicalPosition) {
+    el?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block });
+  }
+  function start() {
+    scrollToEl(vessel, "center");
+    browse?.focus({ preventScroll: true });
   }
 </script>
 
-<div class={["home", { compact, reveal }]}>
-  <h1 tabindex="-1" class:compact>
-    <!-- K8 : phrase entière pour les lecteurs d'écran, copie animée cachée. -->
-    <span class="sr-only">{t("hero.title")}</span>
-    <span class="words" aria-hidden="true">
-      {#each words as { w, delay }, i (i)}<span class="w" style:--d="{delay}ms">{w}</span>{" "}{/each}
+<svelte:window
+  ondragenter={dragenter}
+  ondragover={dragover}
+  ondragleave={dragleave}
+  ondrop={drop}
+  ondragend={close}
+  onkeydown={(e) => e.key === "Escape" && over && close()}
+/>
+
+{#snippet tile(label: string, Icon: typeof Lock, onclick: () => void, extra: "flash" | "rec" | "bars" | "caret" | "")}
+  <button type="button" class="tile" {onclick} {@attach magnet}>
+    <span class="ic">
+      <Icon size={24} strokeWidth={1.75} aria-hidden="true" />
+      {#if extra === "bars"}<span class="bars" aria-hidden="true"><b></b><b></b><b></b></span>
+      {:else if extra}<span class={extra} aria-hidden="true"></span>{/if}
     </span>
-  </h1>
+    <span class="lb">{label}</span>
+  </button>
+{/snippet}
 
-  {#if !compact}
-    <div class="say">
-      <p class="lede">{t("hero.lede")}</p>
-      <a class="how" href={href("/securite")} onclick={(e) => followLink(e, "/securite")}>
-        {t("hero.how")}
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
-      </a>
-    </div>
-  {/if}
+<div class={["home", { compact, reveal }]}>
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="pitch">
+      <h1 id="hero-title" tabindex="-1" class:compact>
+        <!-- K8 : phrase entière pour les lecteurs d'écran, copie animée cachée. -->
+        <span class="sr-only">{t("hero.title")}</span>
+        <span class="words" aria-hidden="true">
+          {#each words as { w, delay }, i (i)}<span class="w" style:--d="{delay}ms">{w}</span>{" "}{/each}
+        </span>
+      </h1>
 
-  <div class="compose" data-slot="compose">
-    <Vessel empty={!children} onclick={vesselClick}>
-      {#if children}
-        {@render children()}
-      {:else}
-        <div class="empty">
-          <div class="drop-mark" aria-hidden="true">
-            <span class="sheet s1"></span><span class="sheet s2"></span>
-            <span class="sheet s3"><Paperclip size={22} strokeWidth={1.75} /></span>
-          </div>
-          <h2 class="drop-title">{t("compose.drop.title")}</h2>
-          <p class="drop-sub">{t("compose.drop.or")}</p>
-          <div class="add-row" role="group" aria-label={t("compose.add.label")}>
-            <button type="button" class="add" onclick={() => files?.click()}>
-              <Paperclip size={20} strokeWidth={1.75} aria-hidden="true" />
-              <span>{t("compose.add.files")}</span>
-            </button>
-            <button type="button" class="add" onclick={() => photo?.click()}>
-              <Camera size={20} strokeWidth={1.75} aria-hidden="true" />
-              <span>{t("compose.add.photo")}</span>
-            </button>
-          </div>
-          <p class="gauge-empty">{t("compose.gauge.empty")}</p>
-          <input bind:this={files} type="file" multiple hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "fichiers")} />
-          <input bind:this={photo} type="file" accept="image/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "photo")} />
-        </div>
+      {#if !compact}
+        <p class="lede">{t("hero.lede")}</p>
+        <ul class="certs" aria-label={t("home.facts.label")}>
+          <li class="cert"><SealMark icon={Lock} /><span class="cert-t">{t("home.fact.e2e")}</span><span class="cert-p">{t("home.fact.e2e.p")}</span></li>
+          <li class="cert"><SealMark icon={Timer} /><span class="cert-t">{t("home.fact.erase")}</span><span class="cert-p">{t("home.fact.erase.p")}</span></li>
+          <li class="cert"><SealMark icon={UserX} /><span class="cert-t">{t("home.fact.account")}</span><span class="cert-p">{t("home.fact.account.p")}</span></li>
+        </ul>
       {/if}
-    </Vessel>
-  </div>
+    </div>
+
+    <div class="compose" data-slot="compose" {@attach tilt}>
+      {#if !children}
+        <span class="sheet-back b2" aria-hidden="true"></span>
+        <span class="sheet-back b1" aria-hidden="true"></span>
+      {/if}
+      <Vessel empty={!children} drop={over} bind:el={vessel}>
+        {#if children}
+          {@render children()}
+        {:else}
+          <div class="empty">
+            <span class="guil-clip" aria-hidden="true"><Guilloche lines={22} /></span>
+            <div class="band-wrap">
+              <SealBand />
+              <p class="band-cap"><Lock size={13} strokeWidth={2.2} aria-hidden="true" />{t("home.band.caption")}</p>
+            </div>
+            <div class="drop-say">
+              <h2 class="drop-title">
+                <span class="t-fine">{t("compose.drop.title")}</span><span class="t-touch">{t("compose.drop.titleTouch")}</span>
+              </h2>
+              <p class="drop-sub">{t("compose.drop.or")}</p>
+            </div>
+            <button type="button" class="browse" bind:this={browse} onclick={() => files?.click()}>
+              <Paperclip size={20} strokeWidth={1.9} aria-hidden="true" />
+              <span>{t("compose.add.browse")}</span>
+            </button>
+            <div class="make" role="group" aria-labelledby="make-title">
+              <p class="make-t" id="make-title">{t("compose.add.make")}</p>
+              <div class="tiles">
+                {@render tile(t("compose.add.photo"), Camera, () => photo?.click(), "flash")}
+                {@render tile(t("compose.add.video"), Video, () => video?.click(), "rec")}
+                {#if canVoice}{@render tile(t("compose.add.voice"), Mic, () => act("vocal"), "bars")}{/if}
+                {@render tile(t("compose.add.text"), Type, () => act("texte"), "caret")}
+                {#if canPaste}{@render tile(t("compose.add.paste"), ClipboardPaste, () => act("coller"), "")}{/if}
+              </div>
+            </div>
+            <p class="proof num">{t("home.proof")}</p>
+            <input bind:this={files} type="file" multiple hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "fichiers")} />
+            <!-- Téléphone : l'appareil photo ou la caméra du système (capture) ; ordinateur : sélecteur filtré.
+                 Aucun accès direct à la caméra : Permissions-Policy camera=() reste (spec §10). -->
+            <input bind:this={photo} type="file" accept="image/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "photo")} />
+            <input bind:this={video} type="file" accept="video/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "video")} />
+          </div>
+        {/if}
+      </Vessel>
+    </div>
+
+    {#if !compact}
+      <button type="button" class="next" onclick={() => scrollToEl(document.getElementById("comment"), "start")}>
+        {t("hero.how")}<ChevronDown size={18} strokeWidth={1.75} aria-hidden="true" />
+      </button>
+    {/if}
+  </section>
 
   {#if !compact}
-    <div class="demo">
-      <Schema />
-    </div>
+    <HowItWorks />
+    <WhySafe />
+    <Faq />
+    <Closing onstart={start} />
   {/if}
 </div>
 
+<DropOverlay open={over} />
+<p class={["notice", { on: notice !== "" }]} aria-hidden="true">{notice}</p>
+
 <style>
-  /* Téléphone et tablette : titre, phrase, réceptacle, puis schéma (S4). */
   .home {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "title" "say" "compose" "demo";
-    gap: var(--sp-4);
-    padding-block-start: var(--sp-2);
-  }
-  .home.compact {
-    grid-template-areas: "title" "compose";
   }
 
+  /* ---------- Héros ---------- */
+  .hero {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-4);
+    padding-block: var(--sp-2) var(--sp-6);
+  }
+  .pitch {
+    display: contents;
+  }
   h1 {
-    grid-area: title;
-    font-size: var(--fs-display);
+    order: 1;
+    font-size: clamp(2.5rem, 1.2rem + 3.9vw, 4.5rem);
     line-height: var(--lh-display);
     font-weight: var(--fw-display);
     font-stretch: var(--wd-display);
     letter-spacing: var(--ls-display);
-    max-width: 13ch;
+    max-width: 12ch;
     /* Texte agrandi sur téléphone : un mot plus large que l'écran se coupe au lieu de déborder. */
     overflow-wrap: break-word;
     min-width: 0;
@@ -155,188 +307,493 @@
   .w {
     display: inline-block;
   }
-
-  .say {
-    grid-area: say;
-    min-width: 0;
-    display: grid;
-    gap: var(--sp-3);
-    justify-items: start;
-  }
   .lede {
+    order: 2;
     margin: 0;
+    max-width: 42ch;
     overflow-wrap: break-word;
-    max-width: 44ch;
     color: var(--text-2);
     font-size: 1rem;
     line-height: 1.55;
   }
-  .how {
-    display: inline-flex;
-    align-items: center;
+
+  /* Sceaux de confiance : cartes à double cadre, comme un certificat. */
+  .certs {
+    order: 4;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
     gap: var(--sp-2);
-    min-height: 44px;
-    color: var(--text);
-    font-weight: 520;
-    text-decoration: none;
   }
-  .how svg {
+  .cert {
+    position: relative;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    column-gap: var(--sp-3);
+    align-items: center;
+    padding: 10px 14px 10px 10px;
+    border-radius: 14px;
+    background: rgb(255 255 255 / 0.025);
+    box-shadow: inset 0 0 0 1px var(--hair);
+  }
+  .cert::after {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    border: 1px dashed rgb(233 236 242 / 0.07);
+    border-radius: 10px;
+    pointer-events: none;
+  }
+  .cert :global(.seal) {
+    grid-row: span 2;
+  }
+  .cert-t {
+    font-size: 0.9375rem;
+    line-height: 1.3;
+    font-weight: 620;
+  }
+  .cert-p {
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--text-2);
+  }
+
+  /* ---------- Le coffre : fenêtre de dépôt ---------- */
+  .compose {
+    order: 3;
+    position: relative;
+    isolation: isolate;
+    min-width: 0;
+    perspective: 1400px;
+  }
+  .compose :global(.vessel) {
+    transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+    transition:
+      transform 700ms var(--ease-settle),
+      background-color var(--dur-base) var(--ease-out);
+  }
+  .home:not(.compact) .compose {
+    padding-top: 14px;
+  }
+  /* Feuillets empilés derrière la fenêtre : la profondeur d'un coffre, d'une enveloppe. */
+  .sheet-back {
+    position: absolute;
+    z-index: -1;
+    left: 50%;
+    height: 56px;
+    border-radius: 22px 22px 0 0;
+    box-shadow:
+      inset 0 0 0 1px var(--hair),
+      var(--edge-hi);
+  }
+  .b1 {
+    top: 7px;
+    width: 92%;
+    margin-left: -46%;
+    background: #141821;
+  }
+  .b2 {
+    top: 0;
+    width: 84%;
+    margin-left: -42%;
+    background: #0f1218;
+  }
+
+  .empty {
+    position: relative;
+    display: grid;
+    gap: var(--sp-4);
+    padding: var(--sp-4) var(--sp-4) var(--sp-5);
+  }
+  .guil-clip {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    border-radius: var(--r-2xl);
+    -webkit-mask-image: radial-gradient(120% 70% at 50% 100%, #000 25%, transparent 80%);
+    mask-image: radial-gradient(120% 70% at 50% 100%, #000 25%, transparent 80%);
+  }
+  .band-wrap {
+    display: grid;
+    gap: var(--sp-2);
+  }
+  .band-cap {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-inline: 4px;
+    color: var(--text-2);
+    font-size: 0.8125rem;
+  }
+  .band-cap :global(svg) {
     flex: none;
     color: var(--accent);
-    transition: transform var(--dur-fast) var(--ease-out);
   }
-  @media (hover: hover) {
-    .how:hover {
-      text-decoration-line: underline;
-      text-decoration-thickness: 1px;
-      text-decoration-color: var(--accent);
-      text-underline-offset: 0.3em;
-    }
-    .how:hover svg {
-      transform: translateX(4px);
-    }
-  }
-
-  .compose {
-    grid-area: compose;
-    min-width: 0;
-    margin-block-start: var(--sp-2);
-  }
-  .demo {
-    grid-area: demo;
-    min-width: 0;
-    margin-block-start: var(--sp-5);
-  }
-
-  /* Réceptacle vide (contenu provisoire jusqu'au composeur, Task 10). */
-  .empty {
+  .drop-say {
     display: grid;
-    justify-items: center;
-    text-align: center;
-    gap: var(--sp-2);
-    padding: 24px 12px 20px;
-  }
-  .drop-mark {
-    display: none;
-    position: relative;
-    width: 76px;
-    height: 64px;
-    margin-bottom: var(--sp-3);
-  }
-  .sheet {
-    position: absolute;
-    left: 16px;
-    top: 4px;
-    width: 44px;
-    height: 56px;
-    border-radius: 9px;
-    background: var(--surface-1);
-    box-shadow: 0 0 0 1px var(--hair-2), var(--e-2);
-    transition: transform var(--dur-slow) var(--ease-out);
-  }
-  .s1 {
-    transform: rotate(-12deg) translateX(-10px);
-  }
-  .s2 {
-    transform: rotate(9deg) translateX(10px);
-  }
-  .s3 {
-    display: grid;
-    place-items: center;
-    color: var(--accent);
-    background: var(--surface-3);
-  }
-  @media (hover: hover) {
-    .compose:hover .s1 {
-      transform: rotate(-18deg) translate(-16px, 2px);
-    }
-    .compose:hover .s2 {
-      transform: rotate(15deg) translate(16px, 2px);
-    }
-    .compose:hover .s3 {
-      transform: translateY(-4px);
-    }
+    gap: var(--sp-1);
+    padding-inline: 4px;
   }
   .drop-title {
-    font-size: 1.0625rem;
-    line-height: 1.3;
-    font-weight: 600;
-    font-stretch: 104%;
-    letter-spacing: -0.01em;
-    max-width: 22ch;
+    font-size: 1.375rem;
+    line-height: 1.2;
+    font-weight: 640;
+    font-stretch: 108%;
+    letter-spacing: -0.015em;
   }
-  /* --text-3 jamais sur l'aurore (K5) : le verre laisse passer la lumière, d'où --text-2. */
+  .t-touch {
+    display: none;
+  }
+  @media (hover: none) and (pointer: coarse) {
+    .t-fine {
+      display: none;
+    }
+    .t-touch {
+      display: inline;
+    }
+  }
   .drop-sub {
-    margin: 0 0 var(--sp-3);
+    margin: 0;
     color: var(--text-2);
     font-size: var(--fs-small);
   }
-  .add-row {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--sp-2);
-    width: 100%;
-    max-width: 360px;
-  }
-  .add {
+
+  /* Action principale : papier sur encre, la menthe reste le signe « scellé ». */
+  .browse {
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    min-height: 72px;
-    padding: 10px 6px;
-    border: 1px solid var(--hair);
-    border-radius: var(--r-lg);
-    background: rgb(255 255 255 / 0.03);
+    gap: 10px;
+    min-height: 56px;
+    padding: 0 var(--sp-5);
+    border: 0;
+    border-radius: 14px;
+    background: var(--paper);
+    color: var(--ink);
+    font: inherit;
+    font-size: 1.0625rem;
+    font-weight: 620;
+    cursor: pointer;
+    box-shadow:
+      0 10px 24px -14px rgb(0 0 0 / 0.9),
+      inset 0 -2px 0 rgb(11 13 18 / 0.12);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      transform var(--dur-press) var(--ease-out),
+      background-color var(--dur-fast) var(--ease-out);
+  }
+  .browse :global(svg) {
+    transition: transform 500ms var(--ease-settle);
+  }
+  @media (hover: hover) {
+    .browse:hover {
+      background: #fff;
+    }
+    .browse:hover :global(svg) {
+      transform: rotate(-14deg) translateY(-1px);
+    }
+  }
+  .browse:active {
+    transform: scale(0.97);
+  }
+
+  .make {
+    display: grid;
+    gap: 10px;
+  }
+  .make-t {
+    margin: 0;
+    padding-inline: 4px;
+    color: var(--text-2);
+    font-size: var(--fs-small);
+  }
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 3.5rem), 1fr));
+    gap: var(--sp-2);
+  }
+  .tile {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: var(--sp-2);
+    min-height: 84px;
+    min-width: 0;
+    padding: var(--sp-3) var(--sp-1);
+    border: 0;
+    border-radius: 18px;
+    background: rgb(255 255 255 / 0.045);
+    box-shadow:
+      inset 0 0 0 1px var(--hair),
+      inset 0 1px 0 rgb(255 255 255 / 0.05);
     color: var(--text);
     font: inherit;
     font-size: var(--fs-small);
-    font-weight: 520;
+    font-weight: 560;
     cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transform: translate(var(--tx, 0px), var(--ty, 0px)) scale(var(--s, 1));
     transition:
+      transform 520ms var(--ease-settle),
       background-color var(--dur-fast) var(--ease-out),
-      border-color var(--dur-fast) var(--ease-out),
-      transform var(--dur-press) var(--ease-out);
+      box-shadow var(--dur-fast) var(--ease-out);
   }
-  .add :global(svg) {
+  /* Reflet sous le pointeur (magnet). */
+  .tile::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    left: 0;
+    top: 0;
+    width: 160px;
+    height: 160px;
+    margin: -80px 0 0 -80px;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgb(95 227 181 / 0.16), transparent);
+    opacity: 0;
+    transform: translate(var(--lx, 50%), var(--ly, 50%));
+    transition: opacity var(--dur-base) var(--ease-out);
+  }
+  .ic {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
     color: var(--text-2);
     transition:
       color var(--dur-fast) var(--ease-out),
-      transform var(--dur-fast) var(--ease-out);
+      transform 520ms var(--ease-settle);
+  }
+  .lb {
+    max-width: 100%;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
   }
   @media (hover: hover) {
-    .add:hover {
-      background: rgb(255 255 255 / 0.06);
-      border-color: var(--hair-2);
+    .tile:hover {
+      background: rgb(255 255 255 / 0.075);
+      box-shadow:
+        inset 0 0 0 1px var(--hair-2),
+        inset 0 1px 0 rgb(255 255 255 / 0.08);
     }
-    .add:hover :global(svg) {
+    .tile:hover::before {
+      opacity: 1;
+    }
+    .tile:hover .ic {
       color: var(--accent);
-      transform: translateY(-2px);
+      transform: translateY(-3px) scale(1.08);
     }
   }
-  .add:active {
-    transform: scale(0.96);
+  .tile:active {
+    --s: 0.95;
+    transition-duration: var(--dur-press);
   }
-  .gauge-empty {
-    margin: var(--sp-4) 0 0;
+  /* Petits gestes propres à chaque tuile, au survol seulement : déclencheur, voyant, niveaux, curseur. */
+  .flash,
+  .rec,
+  .bars,
+  .caret {
+    position: absolute;
+    opacity: 0;
+  }
+  .flash {
+    inset: -6px;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgb(201 251 232 / 0.85), transparent);
+  }
+  .rec {
+    right: -3px;
+    top: -1px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .bars {
+    left: 100%;
+    margin-left: 3px;
+    display: flex;
+    gap: 2px;
+    align-items: center;
+    height: 18px;
+  }
+  .bars b {
+    width: 2px;
+    height: 14px;
+    border-radius: 2px;
+    background: currentColor;
+    transform: scaleY(0.3);
+  }
+  .caret {
+    left: 100%;
+    margin-left: 2px;
+    top: 4px;
+    width: 2px;
+    height: 20px;
+    background: currentColor;
+  }
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .tile:hover .flash {
+      animation: flash 520ms var(--ease-out) 1;
+    }
+    .tile:hover .rec {
+      animation: rec 1s var(--ease-in-out) 2 both;
+    }
+    .tile:hover .bars {
+      opacity: 1;
+    }
+    .tile:hover .bars b {
+      animation: level 900ms var(--ease-in-out) 4 alternate;
+    }
+    .tile:hover .bars b:nth-child(2) {
+      animation-delay: -300ms;
+    }
+    .tile:hover .bars b:nth-child(3) {
+      animation-delay: -600ms;
+    }
+    .tile:hover .caret {
+      animation: caret 1s steps(1) 2;
+    }
+  }
+  @keyframes flash {
+    30% {
+      opacity: 0.9;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes rec {
+    50% {
+      opacity: 1;
+    }
+  }
+  @keyframes level {
+    to {
+      transform: scaleY(1);
+    }
+  }
+  @keyframes caret {
+    0% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0;
+    }
+  }
+
+  .proof {
+    margin: 0;
+    padding: var(--sp-3) 4px 0;
+    border-top: 1px solid var(--hair);
     color: var(--text-2);
     font-size: 0.8125rem;
   }
 
-  /* Entrée (K1) : tout est cliquable dès l'affichage ; fin à 870 ms au plus. */
+  .next {
+    display: none;
+  }
+
+  /* Avis provisoire (jusqu'au composeur, Task 10). */
+  .notice {
+    position: fixed;
+    left: 50%;
+    bottom: max(var(--sp-5), env(safe-area-inset-bottom));
+    z-index: 40;
+    max-width: calc(100vw - 32px);
+    margin: 0;
+    padding: var(--sp-3) 18px;
+    border-radius: 14px;
+    background: var(--surface-3);
+    color: var(--text);
+    font-weight: 520;
+    box-shadow: var(--e-3), inset 0 0 0 1px var(--hair-2);
+    opacity: 0;
+    visibility: hidden;
+    transform: translate(-50%, 12px);
+    transition:
+      opacity var(--dur-base) var(--ease-out),
+      transform 500ms var(--ease-settle),
+      visibility 0s linear var(--dur-base);
+  }
+  .notice.on {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, 0);
+    transition:
+      opacity var(--dur-base) var(--ease-out),
+      transform 500ms var(--ease-settle);
+  }
+
+  /* ---------- Entrée (K1 : tout fini à 900 ms au plus, tout cliquable dès l'affichage) ---------- */
   @media (prefers-reduced-motion: no-preference) {
     .reveal .w {
       animation: word-in var(--dur-reveal) var(--ease-out) var(--d) both;
     }
-    .reveal .compose {
-      animation: rise-in var(--dur-moment) var(--ease-out) both;
-    }
-    .reveal .say,
-    .reveal .demo {
+    .reveal .lede {
       animation: rise-in 600ms var(--ease-out) 200ms both;
+    }
+    .reveal .cert {
+      animation: rise-in 560ms var(--ease-out) both;
+    }
+    .reveal .cert:nth-child(1) {
+      animation-delay: 240ms;
+    }
+    .reveal .cert:nth-child(2) {
+      animation-delay: 285ms;
+    }
+    .reveal .cert:nth-child(3) {
+      animation-delay: 330ms;
+    }
+    .reveal .compose {
+      animation: vault-in var(--dur-moment) var(--ease-settle) both;
+    }
+    .reveal .band-wrap,
+    .reveal .drop-say,
+    .reveal .browse,
+    .reveal .make-t,
+    .reveal .tile,
+    .reveal .proof {
+      animation: rise-in 480ms var(--ease-settle) var(--i, 0ms) both;
+    }
+    .reveal .band-wrap {
+      --i: 100ms;
+    }
+    .reveal .drop-say {
+      --i: 150ms;
+    }
+    .reveal .browse {
+      --i: 200ms;
+    }
+    .reveal .make-t {
+      --i: 240ms;
+    }
+    .reveal .tile:nth-child(1) {
+      --i: 270ms;
+    }
+    .reveal .tile:nth-child(2) {
+      --i: 310ms;
+    }
+    .reveal .tile:nth-child(3) {
+      --i: 350ms;
+    }
+    .reveal .tile:nth-child(4) {
+      --i: 390ms;
+    }
+    .reveal .tile:nth-child(5) {
+      --i: 420ms;
+    }
+    .reveal .proof {
+      --i: 400ms;
     }
   }
   @keyframes word-in {
@@ -352,65 +809,97 @@
       transform: translateY(var(--rise));
     }
   }
-
-  @media (min-width: 600px) {
-    .empty {
-      padding: 28px 24px 24px;
+  @keyframes vault-in {
+    from {
+      opacity: 0;
+      transform: translateY(24px) scale(0.985);
     }
   }
 
-  /* Ordinateur : texte à gauche, réceptacle à droite sur toute la hauteur. */
+  @media (min-width: 600px) {
+    .empty {
+      padding: var(--sp-5) var(--sp-5) var(--sp-5);
+    }
+    .certs {
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+    }
+  }
+
+  /* Ordinateur : texte et sceaux à gauche, coffre à droite, sur le premier écran. */
   @media (min-width: 1024px) {
-    .home {
-      grid-template-columns: minmax(0, 1.42fr) minmax(400px, 1fr);
-      grid-template-rows: auto auto 1fr;
-      grid-template-areas: "title compose" "say compose" "demo compose";
-      column-gap: 72px;
-      row-gap: 28px;
-      padding-block-start: var(--sp-7);
+    .hero {
+      grid-template-columns: minmax(0, 0.92fr) minmax(460px, 580px);
+      align-items: center;
+      column-gap: 64px;
+      min-height: min(calc(100svh - 64px), 860px);
+      padding-block: var(--sp-5) 88px;
     }
-    .home.compact {
-      grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: auto;
-      grid-template-areas: "title" "compose";
-      padding-block-start: var(--sp-5);
-    }
-    .compose {
-      margin: 0;
-    }
-    .home:not(.compact) .compose :global(.vessel) {
-      height: 100%;
+    .pitch {
       display: grid;
+      gap: var(--sp-5);
       align-content: center;
     }
-    .demo {
-      margin-block-start: var(--sp-5);
-    }
     .lede {
-      font-size: 1.0625rem;
+      font-size: 1.125rem;
     }
-    .empty {
-      padding: 40px 32px 32px;
+    .certs {
+      grid-template-columns: minmax(0, 1fr);
+      max-width: 30rem;
+      margin-top: var(--sp-2);
     }
-    .drop-mark {
-      display: block;
+    .compose {
+      order: 0;
     }
     .drop-title {
-      font-size: 1.1875rem;
+      font-size: 1.625rem;
     }
-    .add {
-      min-height: 84px;
+    .tile {
+      min-height: 92px;
+    }
+    .next {
+      position: absolute;
+      left: 0;
+      bottom: var(--sp-5);
+      display: inline-flex;
+      align-items: center;
+      gap: var(--sp-2);
+      min-height: 44px;
+      padding: 0;
+      border: 0;
+      background: none;
+      color: var(--text-2);
+      font: inherit;
+      font-size: var(--fs-small);
+      cursor: pointer;
+    }
+    .next :global(svg) {
+      color: var(--accent);
+      transition: transform 500ms var(--ease-settle);
+    }
+    .next:hover {
+      color: var(--text);
+    }
+    .next:hover :global(svg) {
+      transform: translateY(3px);
+    }
+    .home.compact .hero {
+      grid-template-columns: minmax(0, 1fr);
+      min-height: 0;
+      padding-block: var(--sp-5);
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .sheet,
-    .add,
-    .add :global(svg),
-    .how svg {
+    .compose :global(.vessel),
+    .tile,
+    .ic,
+    .browse,
+    .browse :global(svg),
+    .notice {
       transition: none;
     }
-    .add:active {
+    .tile:active,
+    .browse:active {
       transform: none;
     }
   }
@@ -420,15 +909,20 @@
     h1 {
       line-height: 1.15;
     }
-    .how {
-      text-decoration-line: underline;
+    .sheet-back,
+    .guil-clip,
+    .tile::before,
+    .flash {
+      display: none;
     }
-    .add {
-      border-color: ButtonText;
-    }
-    .sheet {
+    .tile,
+    .cert,
+    .browse {
+      border: 1px solid ButtonText;
       box-shadow: none;
-      border: 1px solid CanvasText;
+    }
+    .cert::after {
+      display: none;
     }
   }
 </style>

@@ -53,9 +53,9 @@
     if (supported) enterLinkRoute();
   }
 
-  // UI §9.2.2 : hors du composeur, un fichier déposé ne fait jamais naviguer l'onglet.
-  // Task 10/11 : allow() vrai sur l'accueil hors envoi.
-  $effect(() => guardFileDrop(window, () => false));
+  // UI §9.2.2 : hors de l'accueil, un fichier déposé ne fait jamais naviguer l'onglet. Sur
+  // l'accueil, Home reçoit le dépôt (voile pleine page). Task 17 : faux pendant un envoi.
+  $effect(() => guardFileDrop(window, () => supported && router.current.name === "home"));
 
   // UI §9 : clavier virtuel ouvert → classe kbd-open sur <html> (barres collées dans le flux).
   $effect(() => watchKeyboard(window, (open) => document.documentElement.classList.toggle("kbd-open", open)));

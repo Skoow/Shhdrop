@@ -255,7 +255,7 @@ Le verre ne sert qu'aux éléments **sous lesquels le contenu défile** : la bar
 
 - **Lucide**, via `@lucide/svelte@1.68.0` (ISC), un composant par icône importé nommément. Aucun chargement extérieur, aucun `{@html}`.
 - Trait 1,75 px, taille 20 px (24 px dans les boutons principaux), `currentColor`, `aria-hidden="true"` ; le libellé est porté par le texte du bouton ou `aria-label`.
-- Jeu fermé (toute icône ajoutée passe en revue) : `paperclip` (fichiers), `camera` (photo), `mic` / `square` (vocal / arrêt), `type` (texte), `clipboard-paste` (coller), `x` (retirer), `undo-2` (annuler un retrait), `pencil` (renommer, modifier un texte), `grip-vertical` (poignée de déplacement), `arrow-up` / `arrow-down` (monter / descendre en mode déplacement), `lock` / `lock-open`, `shield-check` (nettoyé), `shield-alert` (vérification anti-robot de repli), `triangle-alert` (avertissement), `copy` / `check` (copié), `share-2`, `qr-code`, `refresh-cw` (régénérer, actualiser), `eye` / `eye-off`, `clock`, `timer` (reprise automatique), `pause` / `play`, `download`, `file`, `file-text`, `image`, `music`, `audio-lines` (vocal), `film`, `folder-x` (dossier refusé), `trash-2` (détruire, supprimer), `flag` (signaler), `external-link` (navigateur intégré), `chevron-left`, `languages`, `wifi-off`, `clipboard-x` (vider le presse-papier), `circle-help`, `minus` / `plus` (Stepper), `info` (bandeau d'information).
+- Jeu fermé (toute icône ajoutée passe en revue) : `paperclip` (fichiers), `camera` (photo), `mic` / `square` (vocal / arrêt), `type` (texte), `clipboard-paste` (coller), `x` (retirer), `undo-2` (annuler un retrait), `pencil` (renommer, modifier un texte), `grip-vertical` (poignée de déplacement), `arrow-up` / `arrow-down` (monter / descendre en mode déplacement), `lock` / `lock-open`, `shield-check` (nettoyé), `shield-alert` (vérification anti-robot de repli), `triangle-alert` (avertissement), `copy` / `check` (copié), `share-2`, `qr-code`, `refresh-cw` (régénérer, actualiser), `eye` / `eye-off`, `clock`, `timer` (reprise automatique), `pause` / `play`, `download`, `file`, `file-text`, `image`, `music`, `audio-lines` (vocal), `film`, `folder-x` (dossier refusé), `trash-2` (détruire, supprimer), `flag` (signaler), `external-link` (navigateur intégré), `chevron-left`, `languages`, `wifi-off`, `clipboard-x` (vider le presse-papier), `circle-help`, `minus` / `plus` (Stepper), `info` (bandeau d'information). Révision 5 (accueil v3) : `video` (vidéo), `link-2` (lien), `key-round` (mot de passe), `server` (serveur), `user-x` (sans compte), `hard-drive` (aucune IP sur disque), `code-xml` (code ouvert), `shield-x` (essais épuisés), `chevron-down` (question, défilement), `arrow-right` (lien vers une page).
 - Aucun emoji ni caractère Unicode (« ✕ », « ✓ », « ⋯ ») à la place d'une icône.
 - Logo : mot-symbole « shhdrop » en Mona Sans 650, largeur 112, minuscules, précédé d'un pictogramme dessiné (SVG du dépôt) : une capsule arrondie dont le contour est un trait ouvert de 300° qui se referme. Le même dessin sert aux icônes PWA (§14).
 
@@ -389,23 +389,45 @@ Disposition : une colonne sur téléphone ; à partir de 960 px, deux colonnes (
 
 Navigateur pris en charge (vérifié avant toute route) : `crypto.subtle`, `crypto.getRandomValues`, `WebAssembly`, `Blob.prototype.stream`, `TextDecoder`, `AbortController`. `Worker` n'est **pas** exigé : sans lui, la preuve de travail échoue et le repli s'applique (§9.4.2).
 
-### 9.1 Accueil (Persuade, court)
+### 9.1 Accueil (révision 5, accueil v3 : l'outil d'abord, puis l'explication)
 
-- Titre (`--fs-display`) : **« Un lien, un mot de passe, puis plus rien. »** / EN : « One link, one password, then nothing. »
-- Une phrase : « Texte, photos, vidéos, vocaux, documents. Chiffrés sur votre appareil avant l'envoi : le serveur ne reçoit que des données chiffrées, jamais la clé. »
-- Révision 4 : titre animé mot par mot, texte complet pour les lecteurs d'écran (§20.2, K8) ; sur téléphone, le schéma passe **sous** le réceptacle (S4).
-- Démonstration du mécanisme : un schéma en une ligne, SVG, « Votre appareil — chiffré — serveur (ne lit rien) — chiffré — destinataire », trait menthe tracé une fois (600 ms ; immobile en mouvement réduit).
-- Lien « Comment ça marche » → `/securite`.
-- Le composeur commence juste dessous ; sur téléphone (390 × 844), la rangée d'ajout est dans le premier écran. Une fois au moins un élément ajouté, le titre d'accueil se replie (hauteur réduite, `--fs-h1`) pour laisser la place à la liste : le Persuade a fait son travail.
+Révision 5 (5 novembre, demande du propriétaire : « l'interface n'est pas jolie », « choisir Fichiers ou Photo, c'est nul », « une fenêtre de glisser-déposer », « un site 2027 avec toutes les explications ») : l'accueil n'est plus un Persuade court. Détails de mouvement et de matière en §20.10. Code : `web/src/routes/Home.svelte` et `web/src/routes/home/*.svelte`.
+
+**Premier écran** (ordinateur : texte à gauche, coffre à droite ; téléphone : titre, phrase, coffre, sceaux).
+
+- Titre : **« Un lien, un mot de passe, puis plus rien. »** / « One link, one password, then nothing. », mot par mot, texte complet pour les lecteurs d'écran (K8). Taille propre à l'accueil : `clamp(2.5rem, 1.2rem + 3.9vw, 4.5rem)` (un peu plus petit que `--fs-display`, pour donner du poids au coffre).
+- Phrase : « Texte, photos, vidéos, vocaux, documents. Chiffrés sur votre appareil avant l'envoi : le serveur ne reçoit que des données chiffrées, jamais la clé. »
+- **Trois sceaux de confiance** (liste « En bref ») : carte à double cadre et rosace guillochée, titre et une phrase vraie : « Chiffré de bout en bout » (sur votre appareil, avant l'envoi ; le serveur ne reçoit jamais la clé), « S'efface tout seul » (24 h au plus, ou 1 à 10 ouvertures), « Sans compte » (ni pour envoyer, ni pour recevoir).
+- **Le coffre (fenêtre de dépôt)** : le réceptacle (`Vessel`) agrandi, deux feuillets empilés derrière lui, trame guillochée très pâle. Contenu, de haut en bas :
+  1. **volet de scellement** (`SealBand`) : des lignes en clair passent une ligne de scellement menthe, se brouillent juste avant elle, et deviennent du texte chiffré décoratif (S1), avec la légende honnête « En image, ce que le serveur reçoit : des données illisibles. » ;
+  2. titre « Glissez vos fichiers ici » (au doigt, `hover: none` et `pointer: coarse` : « Que voulez-vous envoyer ? »), phrase « Tout est chiffré sur votre appareil avant de partir. » ;
+  3. **« Parcourir les fichiers »** : seul bouton qui ouvre le sélecteur du système (multiple) ;
+  4. groupe « Ou créez sur place » : **Photo** (`accept="image/*" capture="environment"`), **Vidéo** (`accept="video/*" capture="environment"`), **Vocal** (si `MediaRecorder` existe), **Texte**, **Coller** (si `navigator.clipboard.read` existe) ;
+  5. preuves en chiffres : « 10 éléments · 1 Go · 24 h au plus · 5 essais, puis destruction ».
+- **Un clic sur le verre n'ouvre rien** (décision du propriétaire, 5 novembre) : le verre est la cible de dépôt, le sélecteur part de son bouton. Remplace la règle de la révision 4 (« un clic sur le réceptacle ouvre le sélecteur »).
+- **Voile de dépôt pleine page** (`DropOverlay`) dès qu'un glisser de fichiers entre dans la fenêtre (§9.2.2) ; le coffre passe en état `drop`.
+- Rappels branchés en Task 10 à 12 : `onfiles(files, source)` (`source` ∈ `fichiers`, `photo`, `video`, `depot`) et `onaction("vocal" | "texte" | "coller")`. Sans eux (avant Task 10), un avis visuel « N éléments ajoutés » (ou « … arrive bientôt ») et la même phrase par `announce()`.
+- Sur téléphone (390 × 844), le groupe d'actions entier est dans le premier écran (contrôlé par test) ; chaque contrôle fait au moins 44 px de haut.
+- « Comment ça marche » (ordinateur, bas du premier écran) : **bouton** qui fait défiler jusqu'à la section, jamais un lien en `#` (le `#` est réservé aux clés, §12.1).
+- Une fois au moins un élément ajouté (`compact`), le titre se replie (`--fs-h1`) et tout le reste de l'accueil part : seul le composeur reste.
+
+**Sous le pli**, quatre sections titrées (`h2`), chacune révélée au défilement (§20.10) :
+
+1. **« Comment ça marche »** : trois gestes en `<ol>`, chacun avec une petite scène animée (Ajoutez : trois feuillets tombent dans la capsule ouverte ; Scellez : le nom devient illisible, la capsule se ferme, le cadenas apparaît ; Partagez, puis plus rien : le lien et le mot de passe partent par deux chemins, la capsule se défait).
+2. **« Pourquoi c'est sûr »** : colonne collante (titre, phrase, **lien d'exemple** dont la partie après `#` est surlignée avec « La partie après le « # » reste dans votre navigateur : elle n'est jamais envoyée au serveur. », schéma §9.1 v2 « Votre appareil — chiffré — serveur (ne lit rien) — chiffré — destinataire », lien « Tous les détails de sécurité » → `/securite`) ; à côté, neuf affirmations, chacune une phrase vraie : chiffré de bout en bout sur l'appareil ; lien unique tiré au hasard, mot de passe ; autodestruction (1 à 24 h, 1 à 10 ouvertures, le premier atteint) ; 5 mots de passe faux, partage détruit ; le serveur ne reçoit que du chiffré, jamais la clé (le `#` n'est pas envoyé) ; aucun compte ; aucune adresse IP sur disque (vue le temps de la connexion) ; aucun pistage ni publicité, **avec l'exception écrite du repli Google** (spec §26 : seulement si la vérification habituelle échoue, après un choix, dans un cadre isolé ; Google voit alors l'adresse IP) ; code ouvert sur GitHub (lien sortant `rel="noopener noreferrer"`). Puis **« Ce que Shhdrop ne peut pas faire »** (spec §18) : capture d'écran ou copie par le destinataire ; cacher l'adresse IP au serveur pendant la connexion ; garantir qui envoie un lien ; protéger si le site lui-même était piégé.
+3. **« Vos questions »** : accordéon natif (`<details name="faq">`, une seule réponse ouverte) : Que voit le serveur ? Que se passe-t-il si je perds le lien ? Puis-je récupérer un partage détruit ? Mes fichiers sont-ils analysés ? Le destinataire peut-il garder une copie ? Faut-il installer une application ? Réponses tirées de la spec (§2, §9, §12, §18).
+4. **Appel final** « Quelque chose à transmettre ? » : grande capsule dont la lumière fait le tour, bouton « Commencer » qui ramène au coffre et met le focus sur « Parcourir les fichiers ».
+
+Aucun audit, aucun pays d'hébergement, aucun badge (benchmark B3) ; jamais « 100 % », aucun nom d'algorithme (§20.8).
 
 ### 9.2 Composer
 
 #### 9.2.1 Ajouter
 
-- Rangée d'ajout : **Fichiers**, **Photo**, **Vocal**, **Texte**, et **Coller** (seulement si `navigator.clipboard.read` existe ; surtout utile au téléphone, où Ctrl/Cmd + V n'existe pas). « Photo » = `<input type="file" accept="image/*" capture="environment">` (spec §10 : pas d'accès direct à la caméra). « Vocal » masqué si `MediaRecorder` manque ou si aucun format n'est pris en charge (§9.2.7).
+- Rangée d'ajout (révision 5, §9.1) : **Parcourir les fichiers**, puis **Photo**, **Vidéo**, **Vocal**, **Texte**, et **Coller** (seulement si `navigator.clipboard.read` existe ; surtout utile au téléphone, où Ctrl/Cmd + V n'existe pas). « Photo » = `<input type="file" accept="image/*" capture="environment">` ; « Vidéo » (révision 5) = `<input type="file" accept="video/*" capture="environment">` : sur téléphone, l'appareil photo ou la caméra du système ; sur ordinateur, le sélecteur filtré. Aucun accès direct à la caméra : la `Permissions-Policy` garde `camera=()` (spec §10), car un champ `capture` ouvre l'application du système, pas `getUserMedia`. « Vocal » masqué si `MediaRecorder` manque ou si aucun format n'est pris en charge (§9.2.7).
 - Sur ordinateur, la zone de dépôt (`DropZone`) est sous la rangée : « Déposez des fichiers ici, ou collez-les (Ctrl + V) » (« Cmd + V » sur Apple, détecté par `navigator.platform` / `userAgentData`).
 - Toute addition passe par une seule fonction (`composer.add`), quelle que soit la source (sélecteur, dépôt, collage, photo, vocal), qui applique dans l'ordre : lecture d'essai (§9.2.8) → limite de nombre → nettoyage des métadonnées (images) → détection de doublon → insertion à la fin de sa catégorie → annonce « 3 éléments ajoutés ».
-- Nommage : une photo prise par « Photo » est nommée **« Photo {n}.jpg »** (le nom d'origine, souvent « image.jpg » ou un horodatage, n'est pas gardé) ; une image collée « Image collée {n}.png » ; un vocal « Vocal {n}.m4a » (ou `.webm`) ; un texte n'a pas de nom affiché au destinataire autre que « Texte {n} ». Les fichiers choisis gardent leur nom (renommable, §9.2.4).
+- Nommage : une vidéo prise par « Vidéo » est nommée **« Vidéo {n}.{ext} »** (extension du fichier reçu, souvent `.mp4` ou `.mov`) ; une photo prise par « Photo » est nommée **« Photo {n}.jpg »** (le nom d'origine, souvent « image.jpg » ou un horodatage, n'est pas gardé) ; une image collée « Image collée {n}.png » ; un vocal « Vocal {n}.m4a » (ou `.webm`) ; un texte n'a pas de nom affiché au destinataire autre que « Texte {n} ». Les fichiers choisis gardent leur nom (renommable, §9.2.4).
 
 #### 9.2.2 Glisser-déposer
 
@@ -1163,3 +1185,27 @@ Cible : **60 images par seconde sur un téléphone de milieu de gamme** (Pixel 6
 ### 20.9 Ce que le prototype ne couvre pas
 
 Version anglaise (« One link, one password, then nothing. » en 4 lignes au plus à 390 px) ; états d'erreur de l'envoi (§7.3, point 6, appliqué à la nouvelle capsule ; le volet s'arrête où il est) ; page de gestion (petite capsule et dissolution) ; écrans du coffre, de l'historique et de vérification (spec §27, §28, §33 : mêmes composants) ; PDF isolé, vérification reCAPTCHA, pages Sécurité et Confidentialité : sans changement de mouvement.
+
+### 20.10 Accueil v3 : matière et mouvement (révision 5, 5 novembre)
+
+Retours du propriétaire : « transitions, animation » ; « le thème doit respirer la sécurité et la confidentialité » (coffre, enveloppe scellée, jamais un SaaS générique). Benchmark : `docs/superpowers/design/benchmark-2026-11.md` (motifs 1, 2, 4, 5, 13, 14, 17 retenus). Le prototype de travail est hors dépôt ; les captures sont dans `.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/home-v3/`.
+
+**Matière.** Motifs dessinés en géométrie, en ligne (aucune URL `data:`, aucune image) et purs calculs de `ui/decor.ts` : trame **guillochée** (faisceau de 22 à 28 sinusoïdes déphasées, trait `rgb(233 236 242 / 0.05)`, retirée en contraste forcé et renforcé) ; **rosace de sceau** (épitrochoïde fermée) des cartes de confiance. Menthe réservée au signe « scellé, sûr » (cadenas, ligne de scellement, sceaux, texte chiffré) ; les actions principales (« Parcourir les fichiers », « Commencer ») sont en `--paper` sur `--ink`. Feuillets empilés derrière le coffre : `#141821` et `#0f1218`, 56 px de haut.
+
+**Jetons ajoutés** (`tokens.css`) : `--fs-section` = `clamp(2rem, 1.35rem + 2.4vw, 3.25rem)` (titres de section) ; `--ease-settle` = courbe `linear()` d'un ressort très amorti, **sans dépassement** (aucune valeur > 1, testé) : la règle v1 « aucun rebond ni ressort » tient (signalement M1 du rapport : la demande « spring-like » est servie par cette courbe qui se pose, pas par un rebond).
+
+**Mouvement.**
+
+- **Entrée** (K1 inchangé, fin ≤ 900 ms, tout cliquable dès l'affichage) : mots du titre (K1), phrase à 200 ms, sceaux à 240, 285, 330 ms (560 ms), coffre 640 ms (`--ease-settle`), puis volet 100 ms, titre 150, bouton 200, libellé 240, tuiles de 270 à 420 ms, preuves 400 ms (480 ms chacun).
+- **Volet de scellement** (ambiance, 7,2 s) : quatre couches qui ne bougent qu'en `transform` (unités `cqw`) : texte en clair, bande floue de 56 px devant la ligne (`filter: blur(2.4px)` sur un petit élément, le flou ne se recalcule pas), texte chiffré, ligne et cadenas ; 0–55 % traversée, 55–88 % tout scellé, 88–100 % retour en fondu. Image fixe à mi-course en mouvement réduit.
+- **Tuiles** : pression 0,95 ; aimant au pointeur fin (±3 px) et reflet menthe sous le pointeur (`--tx`, `--ty`, `--lx`, `--ly` posés par CSSOM, une fois par image au plus, `ui/attach.ts`) ; geste propre au survol : éclair (Photo), voyant (Vidéo), niveaux (Vocal, 4 allers-retours), curseur (Texte, 2 clignements à 1 Hz). **Coffre** incliné vers le pointeur fin (±2° et ±2,5°, `--rx`, `--ry`).
+- **Voile de dépôt** : fondu 180 ms ; capsule à 16 px des bords qui se referme (60° → 14°, 520 ms) ; texte qui se pose (600 ms) ; pastille qui flotte (1,2 s, aller-retour) seulement pendant le glisser.
+- **Révélations au défilement** : `animation-timeline: view()` (`animation-range: entry 0% entry 70%`, montée de 28 px et fondu) là où le navigateur le sait ; ailleurs, repli `IntersectionObserver` (classes `rv-wait` puis `in`, une fois). Rien en mouvement réduit ; sans script ni observateur, rien n'est caché.
+- **Scènes de « Comment ça marche »** : boucles de 6 s, ambiance (pause hors écran et onglet caché), image fixe parlante en mouvement réduit. **Appel final** : la lumière fait le tour de la grande capsule (7,2 s, ambiance) ; l'anse du cadenas du bouton se ferme au survol, au focus et à l'appui (420 ms).
+- **Questions** : la réponse entre en fondu et montée de 6 px (420 ms) ; aucune hauteur animée (§20.6 point 1). Chevron qui tourne de 180°.
+- **Transitions de vue** : inchangées (repli du titre au premier ajout, changements d'écran). Aucune transition de vue pour le voile, l'accordéon ou les révélations : ce sont des mises à jour sur place (K2).
+
+**Accessibilité.** Mouvement réduit : aucune animation d'image clé (testé au chargement et après défilement) ; transitions de couleur seulement. Contraste forcé : aurore, grain, trame, feuillets, reflets retirés ; tuiles, sceaux, bouton principal et questions avec bordure système. Axe mesuré sur l'état final (le banc attend la fin des entrées). Texte à 200 % sur 320 px : aucun débordement (testé).
+
+**Budget.** JS de production : 119,4 Ko (42,5 Ko compressés) contre 84,1 Ko (31,7 Ko) avant ; l'essentiel est le texte (FR et EN) et le gabarit des sections ; le code de mouvement (`ui/attach.ts`) fait moins de 2 Ko minifié, aucune bibliothèque. CSS : 56 Ko (11,6 Ko compressés). Signalé au rapport (M4).
+

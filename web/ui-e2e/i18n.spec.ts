@@ -48,9 +48,9 @@ test.describe("français par défaut", () => {
   test("navigation interne sans rechargement, focus sur le contenu, retour arrière", async ({ page, shh }) => {
     await page.goto(shh.origin + "/");
     await page.evaluate(() => ((window as unknown as { __marque: number }).__marque = 1));
-    await page.getByRole("link", { name: "Sécurité" }).click();
+    await page.getByRole("link", { name: "Sécurité", exact: true }).click();
     await expect(page).toHaveURL(shh.origin + "/securite");
-    await expect(page.getByRole("link", { name: "Sécurité" })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("link", { name: "Sécurité", exact: true })).toHaveAttribute("aria-current", "page");
     await expect(page.locator("main#contenu")).toBeFocused();
     await page.goBack();
     await expect(page).toHaveURL(shh.origin + "/");
