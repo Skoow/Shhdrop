@@ -374,8 +374,8 @@ Navigateur pris en charge (vérifié avant toute route) : `crypto.subtle`, `cryp
 ### 9.1 Accueil (Persuade, court)
 
 - Titre (`--fs-display`) : **« Un lien, un mot de passe, puis plus rien. »** / EN : « One link, one password, then nothing. »
-- Une phrase : « Texte, photos, vidéos, vocaux, documents. Chiffrés sur votre appareil avant l'envoi : ni le serveur ni son propriétaire ne peuvent les lire. »
-- Démonstration du mécanisme : un schéma en une ligne, SVG, « Votre appareil — chiffré — serveur (ne voit rien) — chiffré — destinataire », trait menthe tracé une fois (600 ms ; immobile en mouvement réduit).
+- Une phrase : « Texte, photos, vidéos, vocaux, documents. Chiffrés sur votre appareil avant l'envoi : le serveur ne reçoit que des données chiffrées, jamais la clé. »
+- Démonstration du mécanisme : un schéma en une ligne, SVG, « Votre appareil — chiffré — serveur (ne lit rien) — chiffré — destinataire », trait menthe tracé une fois (600 ms ; immobile en mouvement réduit).
 - Lien « Comment ça marche » → `/securite`.
 - Le composeur commence juste dessous ; sur téléphone (390 × 844), la rangée d'ajout est dans le premier écran. Une fois au moins un élément ajouté, le titre d'accueil se replie (hauteur réduite, `--fs-h1`) pour laisser la place à la liste : le Persuade a fait son travail.
 
@@ -663,7 +663,7 @@ Clés principales (extrait normatif ; le plan fixe la liste complète) :
 | Clé | FR | EN |
 |---|---|---|
 | `hero.title` | Un lien, un mot de passe, puis plus rien. | One link, one password, then nothing. |
-| `hero.lede` | Texte, photos, vidéos, vocaux, documents. Chiffrés sur votre appareil avant l'envoi : ni le serveur ni son propriétaire ne peuvent les lire. | Text, photos, videos, voice notes, documents. Encrypted on your device before sending: neither the server nor its owner can read them. |
+| `hero.lede` | Texte, photos, vidéos, vocaux, documents. Chiffrés sur votre appareil avant l'envoi : le serveur ne reçoit que des données chiffrées, jamais la clé. | Text, photos, videos, voice notes, documents. Encrypted on your device before sending: the server only receives encrypted data, never the key. |
 | `compose.add.files` / `.photo` / `.voice` / `.text` / `.paste` | Fichiers / Photo / Vocal / Texte / Coller | Files / Photo / Voice / Text / Paste |
 | `compose.drop` | Déposez pour ajouter | Drop to add |
 | `compose.folder` | Les dossiers ne peuvent pas être ajoutés. Ajoutez les fichiers eux-mêmes, ou une archive .zip. | Folders can't be added. Add the files themselves, or a .zip archive. |

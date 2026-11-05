@@ -3,13 +3,13 @@ import type { fr } from "./fr";
 export const en = {
   "hero.title": "One link, one password, then nothing.",
   "hero.lede":
-    "Text, photos, videos, voice notes, documents. Encrypted on your device before sending: neither the server nor its owner can read them.",
+    "Text, photos, videos, voice notes, documents. Encrypted on your device before sending: the server only receives encrypted data, never the key.",
   "hero.how": "How it works",
-  "schema.label": "Your device — encrypted — server (sees nothing) — encrypted — recipient",
+  "schema.label": "Your device — encrypted — server (can't read it) — encrypted — recipient",
   "schema.device": "Your device",
   "schema.encrypted": "encrypted",
   "schema.server": "Server",
-  "schema.blind": "sees nothing",
+  "schema.blind": "can't read it",
   "schema.recipient": "Recipient",
 
   "shell.skip": "Skip to content",
@@ -20,7 +20,6 @@ export const en = {
   "shell.nav": "Information",
   "shell.security": "Security",
   "shell.privacy": "Privacy",
-  "shell.footer": "Encrypted on your device before sending.",
   "demo.banner": "Demo: nothing is sent, the link only works in this tab.",
 
   "notfound.title": "This page does not exist.",

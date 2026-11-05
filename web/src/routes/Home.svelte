@@ -57,6 +57,9 @@
     font-stretch: var(--wd-display);
     letter-spacing: -0.03em;
     max-width: 16ch;
+    /* Texte agrandi sur téléphone : un mot plus large que l'écran se coupe au lieu de déborder. */
+    overflow-wrap: break-word;
+    min-width: 0;
   }
   h1.compact {
     font-size: var(--fs-h1);
@@ -80,14 +83,17 @@
   .body {
     display: grid;
     gap: var(--sp-6);
+    min-width: 0;
   }
   .say {
+    min-width: 0;
     display: grid;
     gap: var(--sp-2);
     justify-items: start;
   }
   .lede {
     margin: 0;
+    overflow-wrap: break-word;
     max-width: 46ch;
     color: var(--text-2);
   }

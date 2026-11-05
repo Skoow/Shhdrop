@@ -20,6 +20,13 @@ for (const p of ["/s/x", "/m/x"]) {
   });
 }
 
+test("pied de page : seulement les liens Sécurité et Confidentialité", async ({ page, shh }) => {
+  await page.goto(shh.origin + "/");
+  const foot = page.locator("footer");
+  await expect(foot.getByRole("link")).toHaveCount(2);
+  await expect(foot.locator("p")).toHaveCount(0);
+});
+
 test("robots.txt interdit /s/ et /m/", async ({ request, shh }) => {
   const res = await request.get(shh.origin + "/robots.txt");
   expect(res.status()).toBe(200);

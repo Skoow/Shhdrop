@@ -3,13 +3,13 @@
 export const fr = {
   "hero.title": "Un lien, un mot de passe, puis plus rien.",
   "hero.lede":
-    "Texte, photos, vidéos, vocaux, documents. Chiffrés sur votre appareil avant l'envoi\u202f: ni le serveur ni son propriétaire ne peuvent les lire.",
+    "Texte, photos, vidéos, vocaux, documents. Chiffrés sur votre appareil avant l'envoi\u202f: le serveur ne reçoit que des données chiffrées, jamais la clé.",
   "hero.how": "Comment ça marche",
-  "schema.label": "Votre appareil — chiffré — serveur (ne voit rien) — chiffré — destinataire",
+  "schema.label": "Votre appareil — chiffré — serveur (ne lit rien) — chiffré — destinataire",
   "schema.device": "Votre appareil",
   "schema.encrypted": "chiffré",
   "schema.server": "Serveur",
-  "schema.blind": "ne voit rien",
+  "schema.blind": "ne lit rien",
   "schema.recipient": "Destinataire",
 
   "shell.skip": "Aller au contenu",
@@ -20,7 +20,6 @@ export const fr = {
   "shell.nav": "Informations",
   "shell.security": "Sécurité",
   "shell.privacy": "Confidentialité",
-  "shell.footer": "Chiffré sur votre appareil avant l'envoi.",
   "demo.banner": "Démo\u202f: rien n'est envoyé, le lien ne marche que dans cet onglet.",
 
   "notfound.title": "Cette page n'existe pas.",

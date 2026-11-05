@@ -14,6 +14,14 @@ describe("dictionnaires", () => {
     for (const [k, v] of Object.entries(en)) expect(v.trim(), `en ${k}`).not.toBe("");
   });
 
+  it("aucune promesse plus forte que le modèle de menaces (spec §2, §18)", () => {
+    // Le serveur voit l'adresse IP, les tailles et les heures ; un site piégé reste une limite assumée.
+    const banned = [/100\s*%/u, /ne voit rien/iu, /can'?t see/iu, /ne peuvent les lire/iu];
+    for (const [lang, d] of [["fr", fr], ["en", en]] as const)
+      for (const [k, v] of Object.entries(d))
+        for (const re of banned) expect(re.test(v), `${lang} ${k} : « ${v} » contient ${re}`).toBe(false);
+  });
+
   it("mêmes paramètres {…} dans les deux langues", () => {
     const params = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
     for (const k of Object.keys(fr) as (keyof typeof fr)[]) expect(params(en[k]), k).toEqual(params(fr[k]));

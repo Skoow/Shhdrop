@@ -89,7 +89,6 @@
 
 <footer class="foot">
   <div class="wrap foot-in">
-    <p class="note">{t("shell.footer")}</p>
     <nav aria-label={t("shell.nav")}>
       <a href={href("/securite")} aria-current={here("securite")} onclick={(e) => followLink(e, "/securite")}>{t("shell.security")}</a>
       <a href={href("/confidentialite")} aria-current={here("confidentialite")} onclick={(e) => followLink(e, "/confidentialite")}>{t("shell.privacy")}</a>
@@ -167,6 +166,7 @@
 
   .bar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     min-height: 64px;
@@ -236,11 +236,6 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--sp-3) var(--sp-5);
-  }
-  .note {
-    margin: 0;
-    color: var(--text-2);
-    font-size: var(--fs-small);
   }
   nav {
     display: flex;

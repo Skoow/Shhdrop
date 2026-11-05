@@ -1,8 +1,25 @@
 // Accueil (UI §9.1) : titre, phrase, schéma, lien « Comment ça marche », emplacement du composeur.
+import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
 
+/** Paires de libellés du schéma dont les boîtes se croisent (texte réel, pas la cellule). */
+function labelOverlaps(page: Page) {
+  return page.evaluate(() => {
+    const els = [...document.querySelectorAll("[data-label]")];
+    const r = els.map((e) => e.getBoundingClientRect());
+    const out: string[] = [];
+    for (let i = 0; i < r.length; i++)
+      for (let j = i + 1; j < r.length; j++) {
+        const a = r[i]!, b = r[j]!;
+        if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom)
+          out.push(`${els[i]!.textContent} × ${els[j]!.textContent}`);
+      }
+    return out;
+  });
+}
+
 const TITLE_FR = "Un lien, un mot de passe, puis plus rien.";
-const SCHEMA_FR = "Votre appareil — chiffré — serveur (ne voit rien) — chiffré — destinataire";
+const SCHEMA_FR = "Votre appareil — chiffré — serveur (ne lit rien) — chiffré — destinataire";
 
 test.describe("fr-FR", () => {
   test.use({ locale: "fr-FR" });
@@ -50,22 +67,41 @@ test.describe("fr-FR", () => {
     await page.goto(shh.origin + "/");
     await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    // Les libellés du schéma ne se chevauchent pas.
-    const overlaps = await page.evaluate(() => {
-      const r = [...document.querySelectorAll("svg[role=img] text")].map((t) => t.getBoundingClientRect());
-      let n = 0;
-      for (let i = 0; i < r.length; i++)
-        for (let j = i + 1; j < r.length; j++) {
-          const a = r[i]!, b = r[j]!;
-          if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) n++;
-        }
-      const svg = document.querySelector("svg[role=img]")!.getBoundingClientRect();
-      const out = r.filter((t) => t.left < svg.left - 0.5 || t.right > svg.right + 0.5).length;
-      return { n, out };
-    });
-    expect(overlaps).toEqual({ n: 0, out: 0 });
+    expect(await labelOverlaps(page)).toEqual([]);
     await page.waitForTimeout(700);
     await capture(page, "home-320");
+  });
+
+  test("texte à 200 % sur 320 px : libellés sans chevauchement, aucun débordement ; capture", async ({ page, shh }) => {
+    await page.setViewportSize({ width: 320, height: 720 });
+    await page.goto(shh.origin + "/");
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "200%"; // CSSOM : permis par la CSP
+    });
+    await expect(page.locator("[data-label]")).toHaveCount(6);
+    expect(await labelOverlaps(page)).toEqual([]);
+    // Les libellés restent dans le flux : sous le dessin, au-dessus du bloc suivant (le composeur).
+    const drawing = await page.locator('svg[role="img"]').boundingBox();
+    const next = await page.locator('[data-slot="compose"]').boundingBox();
+    const boxes = await page.locator(".nodes [data-label]").evaluateAll((es) => es.map((e) => e.getBoundingClientRect().toJSON()));
+    for (const box of boxes) {
+      expect(box.top).toBeGreaterThanOrEqual(drawing!.y + drawing!.height);
+      expect(box.bottom).toBeLessThanOrEqual(next!.y);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.locator(".schema").evaluate((e) => e.scrollIntoView({ block: "center" }));
+    await page.waitForTimeout(700);
+    await capture(page, "home-320-200pct");
+  });
+
+  test("le trait n'est tracé qu'une fois par chargement : pas au retour sur l'accueil", async ({ page, shh }) => {
+    await page.goto(shh.origin + "/");
+    await page.getByRole("link", { name: "Comment ça marche" }).click();
+    await expect(page).toHaveURL(shh.origin + "/securite");
+    await page.goBack();
+    await expect(page.getByRole("img", { name: SCHEMA_FR })).toBeVisible();
+    // Animations du schéma seulement (le survol du lien sous le pointeur a sa propre transition).
+    expect(await page.evaluate(() => document.querySelector(".schema")!.getAnimations({ subtree: true }).length)).toBe(0);
   });
 
   test("mouvement : le trait est tracé une fois ; en mouvement réduit, aucune animation", async ({ page, shh }) => {
@@ -102,7 +138,7 @@ test.describe("en-US", () => {
     await page.goto(shh.origin + "/");
     await expect(page.getByRole("heading", { level: 1, name: "One link, one password, then nothing." })).toBeVisible();
     await expect(
-      page.getByRole("img", { name: "Your device — encrypted — server (sees nothing) — encrypted — recipient" }),
+      page.getByRole("img", { name: "Your device — encrypted — server (can't read it) — encrypted — recipient" }),
     ).toBeVisible();
     await expect(page.getByRole("link", { name: "How it works" })).toBeVisible();
     expect(await axe(page)).toEqual([]);
