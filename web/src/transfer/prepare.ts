@@ -11,7 +11,11 @@ export type PreparedCaptcha = {
   readonly challenge: unknown;
   /** Origine du cadre de vérification du repli ; null si le repli est désactivé. */
   readonly fallbackOrigin: string | null;
-  /** Fin de validité du défi (ms depuis l'époque), lue dans « expires= » du sel ; 0 si illisible. */
+  /**
+   * Fin de validité du défi sur l'horloge monotone du client : à comparer à
+   * performance.now(), jamais à Date.now() ni à une heure du serveur. Réception + 2 min au
+   * plus (moins si le serveur l'indique avec un en-tête Date).
+   */
   readonly expiresAt: number;
 };
 

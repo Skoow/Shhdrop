@@ -500,6 +500,9 @@ function sender(o: {
   put?: PutPlan;
   finalize?: (attempt: number) => Reply | undefined;
   captcha?: () => Record<string, unknown>;
+  /** En-tête Date de la réponse du défi (heure du serveur) ; absent par défaut. */
+  captchaDate?: () => string;
+  status?: () => Reply;
   onCaptcha?: () => void;
 }) {
   const calls: string[] = [];
@@ -518,7 +521,14 @@ function sender(o: {
     log(`${method} ${path}`);
     if (path === "/api/captcha") {
       o.onCaptcha?.();
-      return j(200, o.captcha?.() ?? { algorithm: "SHA-256", challenge: "c", maxNumber: 1, salt: capSalt(), signature: "g", shown_at: "jeton" });
+      const body = o.captcha?.() ?? { algorithm: "SHA-256", challenge: "c", maxNumber: 1, salt: capSalt(), signature: "g", shown_at: "jeton" };
+      return new Response(JSON.stringify(body), { status: 200, headers: o.captchaDate ? { Date: o.captchaDate() } : {} });
+    }
+    if (path === "/api/shares/ID/status") {
+      if (new Headers(init?.headers).get("X-Shh-Manage") === null) return j(404, { error: "not_found" });
+      const r = o.status?.();
+      if (r === "net") throw new TypeError("fetch failed");
+      return r ?? j(404, { error: "not_found" });
     }
     if (path === "/api/shares") {
       bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
@@ -579,7 +589,7 @@ const isAbort = (e: unknown) => e instanceof DOMException && e.name === "AbortEr
 describe("createShare : annulation (signal)", () => {
   beforeEach(() => {
     captured.buffers.length = 0;
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
   });
   afterEach(() => vi.useRealTimers());
   const wiped = () => {
@@ -665,7 +675,7 @@ describe("createShare : annulation (signal)", () => {
 });
 
 describe("createShare : octets envoyés et pause", () => {
-  beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }));
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] }));
   afterEach(() => vi.useRealTimers());
 
   it("onBytes rend le maximum atteint : un nouvel essai n'émet rien avant de dépasser 60 % du segment", async () => {
@@ -718,7 +728,7 @@ describe("createShare : octets envoyés et pause", () => {
 });
 
 describe("createShare : reprise sur coupure (budget SERVER_STALL_MS)", () => {
-  beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }));
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] }));
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -828,6 +838,40 @@ describe("createShare : reprise sur coupure (budget SERVER_STALL_MS)", () => {
     expect(t[2]! - t[1]!).toBe(0); // online : sans attendre les 2 s
   });
 
+  const READY = { opens_used: 0, max_opens: 1, expires_in_s: 3500, state: "ready" };
+  it("réponse de finalize perdue, nouvel essai → 404, status « ready » : succès, aucune destruction", async () => {
+    const s = sender({ segments: 1, finalize: (a) => (a === 1 ? "net" : j(404, { error: "not_found" })), status: () => j(200, READY) });
+    const r = await drive(createShare(ORIGIN, SMALL, base(s)));
+    expect(r.expiresInS).toBe(3500);
+    expect(r.manage).toMatch(/\/m\//);
+    expect(s.calls.filter((c) => c.startsWith("POST /api/shares/ID") || c.startsWith("GET /api/shares/ID"))).toEqual([
+      "POST /api/shares/ID/finalize",
+      "POST /api/shares/ID/finalize",
+      "GET /api/shares/ID/status",
+    ]);
+    expect(s.destroys).toEqual([]);
+  });
+  it.each<[string, () => Reply]>([
+    ["404", () => j(404, { error: "not_found" })],
+    ["uploading", () => j(200, { ...READY, expires_in_s: 0, state: "uploading" })],
+    ["coupure", () => "net"],
+  ])("réponse de finalize perdue, nouvel essai → 404, status %s : destruction et NotFoundError", async (_, status) => {
+    const s = sender({ segments: 1, finalize: (a) => (a === 1 ? "net" : j(404, { error: "not_found" })), status });
+    expect(await reject(drive(createShare(ORIGIN, SMALL, base(s))))).toBeInstanceOf(NotFoundError);
+    expect(s.calls).toContain("GET /api/shares/ID/status");
+    expect(s.destroys).toHaveLength(1);
+    expect(s.destroys[0]!.keepalive).toBe(true);
+  });
+  it("finalize : réponse définitive dès le premier essai (404, 409) → aucun status, aucun nouvel essai, destruction", async () => {
+    for (const [code, err] of [[404, "not_found"], [409, "incomplete"]] as const) {
+      const s = sender({ segments: 1, finalize: () => j(code, { error: err }), status: () => j(200, READY) });
+      await reject(drive(createShare(ORIGIN, SMALL, base(s))));
+      expect(s.calls.filter((c) => c.endsWith("/finalize"))).toHaveLength(1);
+      expect(s.calls).not.toContain("GET /api/shares/ID/status");
+      expect(s.destroys).toHaveLength(1);
+    }
+  });
+
   it("finalize coupé puis rétabli → succès, par le budget seul (aucun essai interne)", async () => {
     const s = sender({ segments: 1, finalize: (a) => (a < 3 ? "net" : undefined) });
     const retries: number[] = [];
@@ -841,7 +885,7 @@ describe("createShare : reprise sur coupure (budget SERVER_STALL_MS)", () => {
 describe("createShare : preuve anti-robot typée et défi préparé", () => {
   beforeEach(() => {
     captured.buffers.length = 0;
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
   });
   afterEach(() => vi.useRealTimers());
   const kdfSalt = () => b64u(captured.buffers.find((b) => b.length === 16)!);
@@ -903,8 +947,54 @@ describe("createShare : preuve anti-robot typée et défi préparé", () => {
     expect(s.at["POST /api/shares"]![0]! - received).toBe(CAPTCHA_MIN_MS);
   });
 
+  it.each([
+    ["en avance de 10 min sur le serveur", -600_000],
+    ["en retard de 10 min sur le serveur", 600_000],
+  ])("horloge du client %s : la preuve préparée est utilisée", async (_, skew) => {
+    const server = () => Date.now() + skew; // heure du serveur
+    const s = sender({
+      segments: 1,
+      captchaDate: () => new Date(server()).toUTCString(),
+      captcha: () => ({
+        algorithm: "SHA-256",
+        challenge: "c",
+        maxNumber: 1,
+        salt: `${"a".repeat(24)}.${"b".repeat(16)}.0?expires=${Math.floor(server() / 1000) + 120}&`,
+        signature: "g",
+        shown_at: "jeton",
+      }),
+    });
+    const cap = await prepareCaptcha(ORIGIN, { fetch: s.fetch });
+    vi.advanceTimersByTime(5000);
+    const o = { ...base(s), prepared: { cap, proof: Promise.resolve<CaptchaProof>({ kind: "pow", payload: "pre" }) } };
+    await drive(createShare(ORIGIN, SMALL, o));
+    expect(s.calls.filter((c) => c === "GET /api/captcha")).toHaveLength(1);
+    expect(o.solveCaptcha).not.toHaveBeenCalled();
+    expect(s.bodies[0]!.altcha).toBe("pre");
+  });
+
+  it("validité mesurée sur l'horloge monotone : un saut de Date.now() n'y change rien ; 120 s au plus", async () => {
+    const s = sender({ segments: 1 });
+    const cap = await prepareCaptcha(ORIGIN, { fetch: s.fetch });
+    vi.setSystemTime(Date.now() + 3_600_000); // horloge murale avancée d'une heure, performance.now() inchangé
+    const o = { ...base(s), prepared: { cap, proof: Promise.resolve<CaptchaProof>({ kind: "pow", payload: "pre" }) } };
+    await drive(createShare(ORIGIN, SMALL, o));
+    expect(o.solveCaptcha).not.toHaveBeenCalled();
+    // 106 s après la réception : il reste 14 s sur les 120 s du défi → nouveau défi.
+    const s2 = sender({ segments: 1 });
+    const cap2 = await prepareCaptcha(ORIGIN, { fetch: s2.fetch });
+    vi.advanceTimersByTime(106_000);
+    const o2 = { ...base(s2), prepared: { cap: cap2, proof: Promise.resolve<CaptchaProof>({ kind: "pow", payload: "pre" }) } };
+    await drive(createShare(ORIGIN, SMALL, o2));
+    expect(o2.solveCaptcha).toHaveBeenCalledTimes(1);
+  });
+
   it("défi préparé valable moins de 15 s, déjà utilisé, ou d'une autre origine : nouveau défi et solveCaptcha", async () => {
-    const short = sender({ segments: 1, captcha: () => ({ algorithm: "SHA-256", challenge: "c", maxNumber: 1, salt: capSalt(14), signature: "g", shown_at: "jeton" }) });
+    const short = sender({
+      segments: 1,
+      captchaDate: () => new Date(Date.now()).toUTCString(),
+      captcha: () => ({ algorithm: "SHA-256", challenge: "c", maxNumber: 1, salt: capSalt(14), signature: "g", shown_at: "jeton" }),
+    });
     const cap = await prepareCaptcha(ORIGIN, { fetch: short.fetch });
     // La preuve écartée peut échouer sans rejet non géré.
     const o = { ...base(short), prepared: { cap, proof: Promise.reject<CaptchaProof>(new Error("worker")) } };

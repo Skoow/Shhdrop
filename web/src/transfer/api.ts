@@ -175,11 +175,17 @@ export type Captcha = {
   salt: string | null;
   /** Origine du cadre de vérification du repli ; null si le repli est désactivé ou si la valeur n'est pas une origine. */
   fallbackOrigin: string | null;
-  /** Fin de validité du défi (ms), lue dans « expires= » du sel ; 0 (périmé) si illisible. */
+  /**
+   * Fin de validité du défi sur l'horloge monotone du client (performance.now(), ms) :
+   * réception + CAPTCHA_LIFETIME_MS, ou moins si le serveur l'indique (voir captcha()).
+   */
   expiresAt: number;
-  /** Instant de réception (Date.now()) : départ du délai CAPTCHA_MIN_MS. */
+  /** Instant de réception (performance.now()) : départ du délai CAPTCHA_MIN_MS. */
   receivedAt: number;
 };
+
+/** Durée de vie d'un défi émis par le serveur (spec D4 : 2 min). */
+export const CAPTCHA_LIFETIME_MS = 120_000;
 
 function originOrNull(v: unknown): string | null {
   if (typeof v !== "string") return null;
@@ -190,14 +196,27 @@ function originOrNull(v: unknown): string | null {
   }
 }
 
+/**
+ * L'horloge du serveur n'est jamais comparée à celle du client (décalage possible de
+ * plusieurs minutes) : la validité se mesure sur l'horloge monotone du client à partir de la
+ * réception, 2 min au plus. Si la réponse porte un en-tête Date, la durée restante selon le
+ * serveur (« expires= » du sel − Date, deux heures du serveur) peut seulement la réduire.
+ * L'en-tête Date est à la seconde : l'écart (< 1 s) est couvert par la marge de 15 s de createShare.
+ */
 export async function captcha(c: Ctx): Promise<Captcha> {
-  const o = await send(c, { method: "GET", path: "/api/captcha", retry: true }, readJSON);
-  const receivedAt = Date.now();
+  const { o, date } = await send(c, { method: "GET", path: "/api/captcha", retry: true }, async (r) => ({
+    o: await readJSON(r),
+    date: r.headers.get("Date"),
+  }));
+  const receivedAt = performance.now();
   const { shown_at, fallback, ...challenge } = o;
   if (typeof shown_at !== "string") throw new BadResponse();
   const salt = typeof challenge.salt === "string" ? challenge.salt : null;
+  let validMs = CAPTCHA_LIFETIME_MS;
   const exp = salt === null ? null : /[?&]expires=(\d{10})(?:&|$)/.exec(salt);
-  return { challenge, shownAt: shown_at, salt, fallbackOrigin: originOrNull(fallback), expiresAt: exp ? Number(exp[1]) * 1000 : 0, receivedAt };
+  const serverNow = date === null ? NaN : Date.parse(date);
+  if (exp && Number.isFinite(serverNow)) validMs = Math.min(validMs, Number(exp[1]) * 1000 - serverNow);
+  return { challenge, shownAt: shown_at, salt, fallbackOrigin: originOrNull(fallback), expiresAt: receivedAt + validMs, receivedAt };
 }
 
 export type CreateBody = {

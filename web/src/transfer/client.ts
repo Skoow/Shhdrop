@@ -210,7 +210,7 @@ const retryable = (e: unknown) =>
  * part avant l'échéance `deadline` (dernier segment acquitté + SERVER_STALL_MS). Un essai en
  * cours à l'échéance est interrompu. Au-delà : Error("reseau"). Les autres erreurs passent.
  */
-async function withBudget<T>(deadline: number, o: CreateOpts, step: (signal: AbortSignal) => Promise<T>): Promise<T> {
+async function withBudget<T>(deadline: number, o: CreateOpts, step: (signal: AbortSignal, attempt: number) => Promise<T>): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     throwIfAborted(o.signal);
     const ac = new AbortController();
@@ -218,7 +218,7 @@ async function withBudget<T>(deadline: number, o: CreateOpts, step: (signal: Abo
     const timer = setTimeout(stop, Math.max(0, deadline - Date.now()));
     o.signal?.addEventListener("abort", stop, { once: true });
     try {
-      return await step(ac.signal);
+      return await step(ac.signal, attempt);
     } catch (e) {
       throwIfAborted(o.signal);
       if (ac.signal.aborted) throw new Error("reseau"); // échéance atteinte pendant l'essai
@@ -287,7 +287,8 @@ export async function createShare(
       throwIfAborted(signal);
 
       const pre = o.prepared;
-      let cap = pre && pre.cap.expiresAt - Date.now() > PREPARED_MIN_LEFT_MS ? takeCaptcha(pre.cap, origin) : undefined;
+      // Horloge monotone du client seulement (voir api.captcha).
+      let cap = pre && pre.cap.expiresAt - performance.now() > PREPARED_MIN_LEFT_MS ? takeCaptcha(pre.cap, origin) : undefined;
       let proof: Promise<CaptchaProof>;
       if (cap !== undefined) {
         proof = pre!.proof;
@@ -298,7 +299,7 @@ export async function createShare(
         proof = o.solveCaptcha(fresh.challenge, { fallbackOrigin: fresh.fallbackOrigin, mode: "pow" });
       }
       const fields = proofFields(await abortable(proof, signal), cap);
-      const wait = cap.receivedAt + CAPTCHA_MIN_MS - Date.now();
+      const wait = cap.receivedAt + CAPTCHA_MIN_MS - performance.now();
       if (wait > 0) await sleep(wait, signal);
       throwIfAborted(signal);
 
@@ -344,7 +345,20 @@ export async function createShare(
           deadline = Date.now() + SERVER_STALL_MS;
           o.onProgress?.(n + 1, total);
         }
-        const expiresInS = await withBudget(deadline, o, (s) => api.finalize(c, created.id, created.uploadToken, s));
+        const expiresInS = await withBudget(deadline, o, async (s, attempt) => {
+          try {
+            return await api.finalize(c, created.id, created.uploadToken, s);
+          } catch (e) {
+            // Un essai précédent a pu aboutir sur le serveur sans que la réponse arrive
+            // (finalize n'y est pas rejouable : 404 ensuite). status avec S_gestion tranche :
+            // « ready » → envoi terminé ; sinon (404, autre état, échec) → erreur et destruction.
+            if (attempt > 1 && e instanceof api.HttpError && e.status === 404) {
+              const st = await api.status(c, created.id, sGestion).catch(() => undefined);
+              if (st?.state === "ready") return st.expiresInS;
+            }
+            throw e;
+          }
+        });
         return { link: shareLink(origin, created.id, kLien), manage: manageLink(origin, created.id, sGestion), expiresInS };
       } catch (e) {
         await api.destroy(c, created.id, { sGestion }, undefined, true).catch(() => undefined);
