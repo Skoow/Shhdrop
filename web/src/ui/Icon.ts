@@ -59,3 +59,9 @@ export { default as ShieldX } from "@lucide/svelte/icons/shield-x";
 // Composeur v2 (téléphone) : menu d'un élément, bouton Options de la barre.
 export { default as Ellipsis } from "@lucide/svelte/icons/ellipsis";
 export { default as SlidersHorizontal } from "@lucide/svelte/icons/sliders-horizontal";
+// Composeur v3 : archives, dépôt, notes, programmes, nettoyage.
+export { default as FileArchive } from "@lucide/svelte/icons/file-archive";
+export { default as Upload } from "@lucide/svelte/icons/upload";
+export { default as NotebookPen } from "@lucide/svelte/icons/notebook-pen";
+export { default as FileTerminal } from "@lucide/svelte/icons/file-terminal";
+export { default as BrushCleaning } from "@lucide/svelte/icons/brush-cleaning";

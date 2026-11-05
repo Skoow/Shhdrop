@@ -2,8 +2,9 @@
 // Toute addition passe par `add` (sélecteur, dépôt, collage, photo, vidéo) ou `addText` /
 // `addVoice` : lecture d'essai → limite de nombre → nettoyage des images → doublons →
 // insertion à la fin de sa catégorie. L'ordre de `items` est l'ordre du manifeste.
-import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, STRIP_MAX, TEXT_MAX, cleanName, type Item } from "../index";
+import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, STRIP_MAX, TEXT_MAX, cleanName, isRiskyName, type Item } from "../index";
 import { CATEGORY_ORDER, categoryOf, extOf, type Category } from "./kinds";
+import { HEAD_BYTES, isExecutableSniff, sniff, type Sniffed } from "./sniff";
 
 export type Source = "fichiers" | "photo" | "video" | "depot" | "collage";
 /** nettoye : métadonnées retirées (Task 9) ; non_nettoye : le fichier peut en contenir ; sans_objet : texte, vocal. */
@@ -25,7 +26,16 @@ export type ComposeItem = {
   readonly text?: string;
   readonly clean: CleanState;
   readonly duplicate: boolean;
+  /** Type reconnu par le contenu (octets de tête), ou null. */
+  readonly sniffed?: Sniffed;
+  /** Exécutable ou script (extension à risque, ou contenu exécutable) : prévenir. */
+  readonly risky?: boolean;
+  /** Le contenu ne correspond pas à l'extension (exécutable déguisé, par exemple). */
+  readonly mismatch?: boolean;
 };
+
+/** Nettoyage d'un fichier (Task 9a, media/strip) : rend le fichier nettoyé ou l'original. */
+export type CleanFile = (file: File) => Promise<{ file: Blob; cleaned: boolean; removed: string[] }>;
 
 export type AddReport = {
   added: string[];
@@ -53,15 +63,15 @@ const FR_NAMES: Names = {
   photo: (n) => `Photo ${n}`,
   video: (n) => `Vidéo ${n}`,
   pasted: (n) => `Image collée ${n}`,
-  text: (n) => `Texte ${n}`,
-  voice: (n) => `Vocal ${n}`,
+  text: (n) => (n === 1 ? "Note" : `Note ${n}`),
+  voice: (n) => `Mémo vocal ${n}`,
 };
 
 export type ComposeDeps = {
-  /** Nettoyage des métadonnées (Task 9, media/strip.ts). Absent : rien n'est marqué « nettoyé ». */
-  strip?: (data: Blob, mime: string) => Promise<Uint8Array<ArrayBuffer>>;
+  /** Nettoyage automatique à l'ajout (Task 9a, media/strip). Absent : rien n'est marqué « nettoyé ». */
+  clean?: CleanFile;
   /** Lecture d'essai (UI §9.2.8) ; par défaut le premier octet. Rejet → « illisible ». */
-  probe?: (f: Blob) => Promise<void>;
+  probe?: (f: Blob) => Promise<Uint8Array | void>;
   /** La liste passe de 0 à 1 élément (déclencheur du pré-calcul anti-robot, Task 14). */
   onFirstItem?: () => void;
   /** La liste redevient vide. */
@@ -72,7 +82,6 @@ export type ComposeDeps = {
   online?: () => boolean;
 };
 
-const STRIPPABLE = new Set(["image/jpeg", "image/png", "image/webp"]);
 const EXT_MAX = 16;
 const FORBIDDEN = /[/\\\u0000-\u001F\u007F-\u009F]/u;
 const utf8 = new TextEncoder();
@@ -112,6 +121,16 @@ export function metaNoteKey(i: Pick<ComposeItem, "clean" | "category" | "ext" | 
 
 const PLAIN_TEXT = new Set(["txt", "md", "csv"]);
 /** Fichiers qui peuvent porter des métadonnées non retirées (un texte brut n'en a pas). */
+function takeCodePoints(s: string, n: number): string {
+  const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  let out = "";
+  for (const { segment } of seg.segment(s)) {
+    if ([...out].length + [...segment].length > n) break;
+    out += segment;
+  }
+  return out;
+}
+
 function cleanStateOf(category: Category, name: string, mime: string): CleanState {
   if (category === "documents" && (PLAIN_TEXT.has(extOf(name)) || mime.toLowerCase().startsWith("text/plain"))) return "sans_objet";
   return category === "photos" || category === "videos" || category === "documents" ? "non_nettoye" : "sans_objet";
@@ -149,7 +168,8 @@ function insertSorted(list: ComposeItem[], it: ComposeItem): ComposeItem[] {
 
 export function createComposer(deps: ComposeDeps = {}) {
   const names = deps.names ?? FR_NAMES;
-  const probe = deps.probe ?? (async (f: Blob) => void (await f.slice(0, 1).arrayBuffer()));
+  // Lecture d'essai : les premiers octets seulement (type par le contenu, sniff.ts).
+  const probe = deps.probe ?? (async (f: Blob) => new Uint8Array(await f.slice(0, HEAD_BYTES).arrayBuffer()));
   const commit = deps.commit ?? ((apply: () => void) => apply());
   const online = deps.online ?? (() => typeof navigator === "undefined" || navigator.onLine !== false);
 
@@ -182,9 +202,11 @@ export function createComposer(deps: ComposeDeps = {}) {
     let held = 0;
     try {
       const readable: File[] = [];
+      const heads = new Map<File, Sniffed>();
       for (const f of files) {
         try {
-          await probe(f);
+          const head = await probe(f);
+          heads.set(f, head ? sniff(head) : null);
           readable.push(f);
         } catch {
           report.unreadable.push(cleanName(f.name));
@@ -200,21 +222,28 @@ export function createComposer(deps: ComposeDeps = {}) {
       for (const f of accepted) {
         const mime = f.type;
         const { base, ext } = named(f, source);
-        const category = categoryOf("file", base + ext, mime);
+        const sniffed = heads.get(f) ?? null;
+        const category = categoryOf("file", base + ext, mime, sniffed);
+        const exec = isExecutableSniff(sniffed) || sniffed === "iso";
+        const risky = exec || isRiskyName(base + ext);
+        const mismatch = exec && !isRiskyName(base + ext);
         let data: Blob | Uint8Array<ArrayBuffer> = f;
         let size = f.size;
         let clean = cleanStateOf(category, base + ext, mime);
-        if (deps.strip && STRIPPABLE.has(mime.toLowerCase()) && f.size <= STRIP_MAX) {
+        if (deps.clean && clean === "non_nettoye" && (category !== "photos" || f.size <= STRIP_MAX)) {
           try {
-            data = await deps.strip(f, mime);
-            size = data.byteLength;
-            clean = "nettoye";
+            const r = await deps.clean(f);
+            if (r.cleaned) {
+              data = r.file;
+              size = r.file.size;
+              clean = "nettoye";
+            }
           } catch {
             report.failedClean.push(base + ext);
             continue;
           }
         }
-        ready.push({ id: nextId(), kind: "file", category, base, ext, mime, size, data, clean, duplicate: false });
+        ready.push({ id: nextId(), kind: "file", category, base, ext, mime, size, data, clean, duplicate: false, sniffed, risky, mismatch });
       }
       if (ready.length > 0) {
         const all = [...items, ...ready];
@@ -234,13 +263,20 @@ export function createComposer(deps: ComposeDeps = {}) {
     }
   }
 
-  function addText(text: string): string | null {
+  /** Titre d'une note : nettoyé, borné ; vide → « Note », « Note 2 »… */
+  function noteTitle(title: string | undefined): string {
+    const tt = (title ?? "").trim();
+    if (tt === "" || cleanName(`a${tt}a`) === "aa") return names.text(++counters.text);
+    return takeCodePoints(cleanName(tt), NAME_MAX);
+  }
+
+  function addText(text: string, title?: string): string | null {
     if (items.length + reserved >= MAX_ITEMS) return null;
     const it: ComposeItem = {
       id: nextId(),
       kind: "text",
       category: "texte",
-      base: names.text(++counters.text),
+      base: noteTitle(title),
       ext: "",
       mime: "text/plain;charset=utf-8",
       size: utf8.encode(text).byteLength,
@@ -253,8 +289,44 @@ export function createComposer(deps: ComposeDeps = {}) {
     return it.id;
   }
 
-  function updateText(id: string, text: string): void {
-    set(items.map((i) => (i.id === id && i.kind === "text" ? { ...i, text, size: utf8.encode(text).byteLength } : i)));
+  function updateText(id: string, text: string, title?: string): void {
+    set(
+      items.map((i) => {
+        if (i.id !== id || i.kind !== "text") return i;
+        const base = title === undefined ? i.base : title.trim() === "" ? i.base : noteTitle(title);
+        return { ...i, base, text, size: utf8.encode(text).byteLength };
+      }),
+    );
+  }
+
+  /**
+   * « Nettoyer tous les fichiers » : nettoie chaque élément « non nettoyé » ; ceux que la
+   * bibliothèque ne sait pas (encore) nettoyer, ou qui échouent, restent tels quels.
+   */
+  async function cleanAll(clean: CleanFile): Promise<{ cleaned: string[]; failed: string[] }> {
+    const out = { cleaned: [] as string[], failed: [] as string[] };
+    const todo = items.filter((i) => i.kind === "file" && i.clean === "non_nettoye");
+    pending++;
+    try {
+      for (const it of todo) {
+        const name = it.base + it.ext;
+        try {
+          const src = it.data instanceof File ? it.data : new File([it.data as BlobPart], name, { type: it.mime });
+          const r = await clean(src);
+          if (!r.cleaned) {
+            out.failed.push(name);
+            continue;
+          }
+          set(items.map((x) => (x.id === it.id ? { ...x, data: r.file, size: r.file.size, clean: "nettoye" as const } : x)));
+          out.cleaned.push(name);
+        } catch {
+          out.failed.push(name);
+        }
+      }
+    } finally {
+      pending--;
+    }
+    return out;
   }
 
   function addVoice(blob: Blob, mime: string): string | null {
@@ -402,6 +474,7 @@ export function createComposer(deps: ComposeDeps = {}) {
     add,
     addText,
     updateText,
+    cleanAll,
     addVoice,
     remove,
     clear,

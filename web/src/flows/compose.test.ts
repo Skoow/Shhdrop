@@ -3,6 +3,7 @@ import { en } from "../i18n/en";
 import { fr } from "../i18n/fr";
 import { BLOCK_REASONS, blockKey, createComposer, metaNoteKey, splitName, type ComposeDeps } from "./compose.svelte";
 import { CATEGORY_ORDER, categoryOf } from "./kinds";
+import { HEAD_BYTES } from "./sniff";
 import { CONTENT_MAX, MAX_ITEMS } from "../index";
 
 const file = (name: string, size = 3, type = "") => new File([new Uint8Array(size)], name, { type });
@@ -20,7 +21,7 @@ function make(deps: Partial<ComposeDeps> = {}) {
 
 describe("catégories (UI §9.2.4)", () => {
   it("ordre fixe et attribution", () => {
-    expect(CATEGORY_ORDER).toEqual(["texte", "photos", "videos", "audio", "documents", "autres"]);
+    expect(CATEGORY_ORDER).toEqual(["texte", "photos", "videos", "audio", "documents", "archives", "autres"]);
     expect(categoryOf("text", "x", "")).toBe("texte");
     expect(categoryOf("file", "a.HEIC", "")).toBe("photos");
     expect(categoryOf("file", "a", "image/png")).toBe("photos");
@@ -28,7 +29,8 @@ describe("catégories (UI §9.2.4)", () => {
     expect(categoryOf("file", "a.m4a", "")).toBe("audio");
     expect(categoryOf("file", "cv.pdf", "application/pdf")).toBe("documents");
     expect(categoryOf("file", "notes.md", "")).toBe("documents");
-    expect(categoryOf("file", "a.zip", "application/zip")).toBe("autres");
+    expect(categoryOf("file", "a.zip", "application/zip")).toBe("archives");
+    expect(categoryOf("file", "police.ttf", "")).toBe("autres");
   });
 
   it("splitName : extension à part, gardée seulement si c'en est une", () => {
@@ -41,17 +43,17 @@ describe("catégories (UI §9.2.4)", () => {
 
 describe("createComposer : ajout", () => {
   it("JPEG nettoyé → donnée nettoyée, clean = nettoye", async () => {
-    const strip = vi.fn(async () => new Uint8Array([0xff, 0xd8, 9]));
-    const c = make({ strip });
+    const clean = vi.fn(async () => ({ file: new Blob([new Uint8Array([0xff, 0xd8, 9])]), cleaned: true, removed: ["lieu"] }));
+    const c = make({ clean });
     const r = await c.add([jpeg()], "fichiers");
     expect(r.added).toEqual(["IMG_20261104.jpg"]);
     expect(c.items[0]!.clean).toBe("nettoye");
-    expect(c.items[0]!.data).toEqual(new Uint8Array([0xff, 0xd8, 9]));
+    expect(new Uint8Array(await (c.items[0]!.data as Blob).arrayBuffer())).toEqual(new Uint8Array([0xff, 0xd8, 9]));
     expect(c.items[0]!.size).toBe(3);
   });
 
   it("JPEG malformé → failedClean, rien d'ajouté", async () => {
-    const c = make({ strip: async () => Promise.reject(new Error("malforme")) });
+    const c = make({ clean: async () => Promise.reject(new Error("malforme")) });
     const r = await c.add([jpeg("x.jpg")], "fichiers");
     expect(r.failedClean).toEqual(["x.jpg"]);
     expect(c.count).toBe(0);
@@ -89,12 +91,12 @@ describe("createComposer : ajout", () => {
     expect(r.added).toEqual(["ok.txt"]);
   });
 
-  it("lecture d'essai par défaut : premier octet seulement", async () => {
+  it("lecture d'essai par défaut : les octets de tête seulement", async () => {
     const c = createComposer({ online: () => true });
     const f = file("a.txt", 10);
     const slice = vi.spyOn(f, "slice");
     await c.add([f], "fichiers");
-    expect(slice).toHaveBeenCalledWith(0, 1);
+    expect(slice).toHaveBeenCalledWith(0, HEAD_BYTES);
     expect(c.count).toBe(1);
   });
 
@@ -171,7 +173,7 @@ describe("ordre", () => {
     expect(c.move(b!.id, 1)).toBe("dernier");
     expect(c.move(z!.id, -1)).toBe("premier");
     expect(c.move(b!.id, -1)).toBe("ok");
-    expect(c.items.map((i) => i.base)).toEqual(["Texte 1", "b", "a", "z"]);
+    expect(c.items.map((i) => i.base)).toEqual(["Note", "b", "a", "z"]);
   });
 
   it("moveTo dans la catégorie, index borné", async () => {
@@ -193,11 +195,11 @@ describe("ordre", () => {
     c.addText("é");
     c.move(c.items[2]!.id, -1);
     const api = c.toApiItems();
-    expect(api.map((i) => i.name)).toEqual(["Texte 1", "a.jpg", "b.jpg", "z.pdf"]);
-    expect(api[0]).toEqual({ kind: "text", name: "Texte 1", mime: "text/plain;charset=utf-8", data: new TextEncoder().encode("é") });
+    expect(api.map((i) => i.name)).toEqual(["Note", "a.jpg", "b.jpg", "z.pdf"]);
+    expect(api[0]).toEqual({ kind: "text", name: "Note", mime: "text/plain;charset=utf-8", data: new TextEncoder().encode("é") });
     expect(api[3]!.data).toBe(pdf);
     expect(arrayBuffer).not.toHaveBeenCalled();
-    expect(slice.mock.calls.every((a) => a[0] === 0 && a[1] === 1)).toBe(true);
+    expect(slice.mock.calls.every((a) => a[0] === 0 && a[1] === HEAD_BYTES)).toBe(true);
   });
 });
 
@@ -289,13 +291,13 @@ describe("textes", () => {
     const c = make();
     const id = c.addText("é")!;
     expect(c.items[0]!.size).toBe(2);
-    expect(c.items[0]!.base).toBe("Texte 1");
+    expect(c.items[0]!.base).toBe("Note");
     c.updateText(id, "a".repeat(10_001));
     expect(c.blockReason()).toBe("texte_trop_long");
     c.updateText(id, "😀".repeat(10_000)); // points de code, pas unités UTF-16
     expect(c.blockReason()).toBeNull();
     expect(c.addText("b")).not.toBe(id);
-    expect(c.items[1]!.base).toBe("Texte 2");
+    expect(c.items[1]!.base).toBe("Note 2");
   });
 
   it("texte refusé au-delà de 10 éléments", async () => {
@@ -310,7 +312,7 @@ describe("blocages et textes de raison", () => {
   it("vide, hors ligne, nettoyage en cours", async () => {
     let online = true;
     let release!: () => void;
-    const c = make({ online: () => online, strip: () => new Promise((r) => (release = () => r(new Uint8Array(1)))) });
+    const c = make({ online: () => online, clean: () => new Promise((r) => (release = () => r({ file: new Blob(["x"]), cleaned: true, removed: [] }))) });
     expect(c.blockReason()).toBe("vide");
     const p = c.add([jpeg()], "fichiers");
     await Promise.resolve();
@@ -334,11 +336,11 @@ describe("blocages et textes de raison", () => {
   });
 
   it("mention des métadonnées : seulement pour ce qui n'est pas nettoyé, jamais pour un texte", async () => {
-    const c = make({ strip: async () => new Uint8Array([1]) });
+    const c = make({ clean: async (f) => ({ file: f, cleaned: f.type === "image/jpeg", removed: [] }) });
     await c.add([jpeg("a.jpg"), file("v.mp4", 3, "video/mp4"), file("d.pdf", 3, "application/pdf"), file("w.docx"), file("z.zip"), file("n.txt", 3, "text/plain"), file("m.md")], "fichiers");
     c.addText("t");
     const notes = Object.fromEntries(c.items.map((i) => [i.base, metaNoteKey(i)]));
-    expect(notes).toEqual({ "Texte 1": null, a: null, v: "compose.meta.video", d: "compose.meta.pdf", w: "compose.meta.doc", z: null, n: null, m: null });
+    expect(notes).toEqual({ "Note": null, a: null, v: "compose.meta.video", d: "compose.meta.pdf", w: "compose.meta.doc", z: null, n: null, m: null });
     const d = make();
     await d.add([jpeg("b.jpg"), new File([new Uint8Array(1)], "h.heic", { type: "image/heic" })], "fichiers");
     expect(d.items.map(metaNoteKey)).toEqual(["compose.meta.photo", "compose.meta.photo"]);
@@ -346,5 +348,63 @@ describe("blocages et textes de raison", () => {
       expect(fr[k as keyof typeof fr], k).toBeTruthy();
       expect(en[k as keyof typeof en], k).toBeTruthy();
     }
+  });
+});
+
+describe("type par le contenu, archives, exécutables (sniff)", () => {
+  const bytes = (arr: number[], name: string, type = "") => new File([new Uint8Array(arr)], name, { type });
+  const zip = [0x50, 0x4b, 0x03, 0x04, 0, 0];
+  it("archives : par extension ou par contenu ; un docx (zip) reste un document", async () => {
+    const c = make({ probe: async (f) => new Uint8Array(await f.slice(0, HEAD_BYTES).arrayBuffer()) });
+    await c.add([bytes(zip, "photos.zip"), bytes(zip, "sans-extension"), bytes(zip, "lettre.docx"), bytes([0x1f, 0x8b, 8], "a.tar.gz"), bytes([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c], "x.7z")], "fichiers");
+    expect(Object.fromEntries(c.items.map((i) => [i.base + i.ext, i.category]))).toEqual({
+      "photos.zip": "archives",
+      "sans-extension": "archives",
+      "lettre.docx": "documents",
+      "a.tar.gz": "archives",
+      "x.7z": "archives",
+    });
+    expect(c.items.find((i) => i.ext === ".zip")!.clean).toBe("sans_objet");
+  });
+  it("exécutable déguisé en photo : classé Autres, à risque, contenu ≠ extension", async () => {
+    const c = make({ probe: async (f) => new Uint8Array(await f.slice(0, HEAD_BYTES).arrayBuffer()) });
+    await c.add([bytes([0x4d, 0x5a, 0x90, 0], "vacances.jpg", "image/jpeg"), bytes([0x4d, 0x5a], "setup.exe"), bytes([0x23, 0x21], "go.sh")], "fichiers");
+    const [a, b, s] = ["vacances.jpg", "setup.exe", "go.sh"].map((n) => c.items.find((i) => i.base + i.ext === n)!);
+    expect([a!.category, a!.risky, a!.mismatch]).toEqual(["autres", true, true]);
+    expect([b!.category, b!.risky, b!.mismatch]).toEqual(["autres", true, false]);
+    expect([s!.risky, s!.mismatch]).toEqual([true, false]);
+  });
+  it("catégories : HEIC, polices, image ISO, code, tableur, présentation, CSV", () => {
+    expect(categoryOf("file", "IMG_1.HEIC", "")).toBe("photos");
+    expect(categoryOf("file", "x", "", "heic")).toBe("photos");
+    expect(categoryOf("file", "a.woff2", "", "font")).toBe("autres");
+    expect(categoryOf("file", "disk.iso", "", "iso")).toBe("autres");
+    for (const n of ["main.py", "lib.rs", "data.csv", "budget.xlsx", "slides.pptx", "conf.yaml"]) expect(categoryOf("file", n, ""), n).toBe("documents");
+    expect(categoryOf("file", "son.webm", "audio/webm", "webm")).toBe("audio");
+    expect(categoryOf("file", "clip.webm", "video/webm", "webm")).toBe("videos");
+  });
+});
+
+describe("notes (titre et contenu) et nettoyage de tous les fichiers", () => {
+  it("titre facultatif (« Note » par défaut), nettoyé ; updateText change le titre et le contenu", () => {
+    const c = make();
+    const a = c.addText("corps")!;
+    const b = c.addText("x", "  Courses\u202E  ")!;
+    expect(c.items.map((i) => i.base)).toEqual(["Note", "Courses"]);
+    c.updateText(a, "nouveau", "Code de la porte");
+    expect(c.items[0]).toMatchObject({ base: "Code de la porte", text: "nouveau" });
+    c.updateText(b, "y", "");
+    expect(c.items[1]!.base).toBe("Courses");
+    expect(c.toApiItems()[0]!.name).toBe("Code de la porte");
+  });
+  it("cleanAll : nettoie ce qui peut l'être, garde le reste et le dit", async () => {
+    const c = make();
+    await c.add([jpeg("a.jpg"), file("d.pdf", 3, "application/pdf")], "fichiers");
+    const r = await c.cleanAll(async (f) => ({ file: new Blob(["ok"]), cleaned: f.type === "image/jpeg", removed: ["lieu"] }));
+    expect(r).toEqual({ cleaned: ["a.jpg"], failed: ["d.pdf"] });
+    expect(c.items.map((i) => i.clean)).toEqual(["nettoye", "non_nettoye"]);
+    expect(c.items[0]!.size).toBe(2);
+    const r2 = await c.cleanAll(async () => Promise.reject(new Error("x")));
+    expect(r2).toEqual({ cleaned: [], failed: ["d.pdf"] });
   });
 });

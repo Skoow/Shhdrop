@@ -9,7 +9,9 @@
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { formatClock, mediaDuration } from "../media/duration";
-  import { ArrowDown, ArrowUp, AudioLines, Ellipsis, File as FileIcon, FileText, Film, Image as ImageIcon, Pencil, ShieldAlert, ShieldCheck, TriangleAlert, Type, X } from "./Icon";
+  import { ArrowDown, ArrowUp, Ellipsis, Pencil, X } from "./Icon";
+  import ItemNotes from "./ItemNotes.svelte";
+  import { canThumb as thumbable, firstLine, iconFor, thumb as thumbAttach } from "./itemView";
   import IconButton from "./IconButton.svelte";
   import ReorderHandle from "./ReorderHandle.svelte";
 
@@ -36,32 +38,10 @@
   let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, el = $bindable() }: Props = $props();
 
   const name = $derived(item.base + item.ext);
-  const Icon = $derived(
-    item.category === "texte" ? Type : item.category === "photos" ? ImageIcon : item.category === "videos" ? Film : item.category === "audio" ? AudioLines : item.category === "documents" ? FileText : FileIcon,
-  );
-  const note = $derived(metaNoteKey(item));
-  const THUMBABLE = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
-  const canThumb = $derived(item.kind === "file" && THUMBABLE.has(item.mime.toLowerCase()) && item.size <= STRIP_MAX);
+  const Icon = $derived(iconFor(item));
+  const canThumb = $derived(thumbable(item));
   let thumbFailed = $state(false);
-
-  /** Vignette : URL blob de la propre donnée de l'expéditeur, révoquée dès le chargement et à la sortie. */
-  function thumb(node: HTMLImageElement) {
-    const data = item.data;
-    const blob = data instanceof Blob ? data : new Blob([data], { type: item.mime });
-    const url = URL.createObjectURL(blob);
-    let revoked = false;
-    const revoke = () => {
-      if (!revoked) URL.revokeObjectURL(url);
-      revoked = true;
-    };
-    node.onload = revoke;
-    node.onerror = () => {
-      revoke();
-      thumbFailed = true;
-    };
-    node.src = url;
-    return revoke;
-  }
+  const thumb = $derived(thumbAttach(item, () => (thumbFailed = true)));
 
   let duration = $state<number | null>(null);
   $effect(() => {
@@ -204,20 +184,15 @@
       </div>
     {:else}
       <bdi class="nm" title={name} translate="no">
-        {#if item.kind === "text"}<span class="b">{item.text ? item.text.slice(0, 160) : item.base}</span>
-        {:else}<span class="b">{item.base}</span><span class="e">{item.ext}</span>{/if}
+        <span class="b">{item.base}</span>{#if item.kind !== "text"}<span class="e">{item.ext}</span>{/if}
       </bdi>
+      {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi>{/if}
       <span class="meta">
         <span class="num">{formatBytes(item.size, getLang())}</span>
         {#if duration !== null}<span class="sep" aria-hidden="true">·</span><span class="num">{formatClock(duration)}</span>{/if}
-        {#if item.clean === "nettoye"}
-          <span class="badge ok"><ShieldCheck size={13} strokeWidth={2} aria-hidden="true" />{t("compose.cleaned.short")}</span>
-        {:else if note}
-          <span class="badge warn" title={t(note)}><ShieldAlert size={13} strokeWidth={2} aria-hidden="true" />{t("compose.notCleaned")}<span class="sr-only">. {t(note)}</span></span>
-        {/if}
-        {#if item.duplicate}<span class="badge warn">{t("compose.duplicate")}</span>{/if}
+        <ItemNotes {item} {cannotOpen} badgesOnly />
       </span>
-      {#if cannotOpen}<span class="cant"><TriangleAlert size={14} strokeWidth={2} aria-hidden="true" />{t("compose.cannotOpen")}</span>{/if}
+      <ItemNotes {item} {cannotOpen} lines />
     {/if}
   </div>
 
@@ -267,14 +242,6 @@
     grid-template-columns: 44px minmax(0, 1fr) auto;
     min-height: 60px;
     padding: 6px 0 6px 2px;
-  }
-  .cant {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    color: var(--warn);
-    font-size: var(--fs-micro);
-    font-weight: 560;
   }
   .grip-slot {
     display: inline-flex;
@@ -334,6 +301,14 @@
     flex: none;
     white-space: nowrap;
   }
+  .sub {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-2);
+    font-size: var(--fs-small);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .meta {
     display: flex;
     flex-wrap: wrap;
@@ -344,24 +319,6 @@
   }
   .sep {
     margin-inline: -4px;
-  }
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 1px 8px;
-    border-radius: var(--r-pill);
-    font-size: var(--fs-micro);
-    font-weight: 560;
-    line-height: 1.6;
-  }
-  .badge.ok {
-    background: var(--accent-tint);
-    color: var(--accent);
-  }
-  .badge.warn {
-    background: var(--warn-tint);
-    color: var(--warn);
   }
   .acts {
     display: flex;
@@ -443,9 +400,6 @@
     }
   }
   @media (forced-colors: active) {
-    .badge {
-      border: 1px solid CanvasText;
-    }
     .row.moving {
       outline: 2px solid Highlight;
     }

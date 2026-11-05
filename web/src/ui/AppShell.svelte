@@ -104,7 +104,8 @@
 <style>
   .wrap {
     width: 100%;
-    max-width: 1240px;
+    /* Grands écrans : la largeur disponible sert (accueil et composeur), jusqu'à 1 520 px. */
+    max-width: 1520px;
     margin-inline: auto;
     padding-inline: max(var(--sp-4), env(safe-area-inset-left)) max(var(--sp-4), env(safe-area-inset-right));
   }

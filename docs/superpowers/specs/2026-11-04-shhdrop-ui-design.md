@@ -422,6 +422,17 @@ Aucun audit, aucun pays d'hébergement, aucun badge (benchmark B3) ; jamais « 1
 
 ### 9.2 Composer
 
+**Révision 6 (composeur v3, 5 novembre, demandes du propriétaire)** — remplace ce qui suit là où c'est contraire :
+
+- **Ordinateur (≥ 760 px), tout dans l'écran** : à 1440 × 900 comme à 1920 × 1080, avec jusqu'à 10 éléments, en-tête, capacité, liste, options, phrase et « Chiffrer et envoyer » tiennent sans défilement de page (testé : `scrollHeight ≤ innerHeight`). Cadre élargi (1 520 px au plus) ; trois colonnes à partir de 1 180 px : liste | réglages | phrase, estimation, textes de confiance et bouton ; deux colonnes de 760 à 1 179 px (l'envoi en pied de la colonne des options). Seules la liste et la colonne des réglages défilent, à l'intérieur. Le titre d'accueil est caché à l'œil (lu par les lecteurs d'écran) et le pied de page se resserre.
+- **Capacité en tête de liste**, à côté de « Votre envoi » : « 5 / 10 éléments · 2,3 Mo / 1 Go » et sa barre (les deux `role="meter"`). Plus de jauge en bas à droite ; au téléphone, un rappel visuel dans la barre collée.
+- **Ajouter** : plus de rangée Fichiers / Photo / Vidéo / Vocal / Texte / Coller. Une zone de dépôt (« Déposez des fichiers n'importe où sur la page », un clic ouvre le sélecteur ; au doigt « Choisir des fichiers ») et « Créer sur place » : **Note texte**, **Mémo vocal** (au doigt, aussi Photo et Vidéo). **Bouton Coller supprimé** (accueil compris) : Ctrl/Cmd + V reste, sans message d'erreur de presse-papier (§9.2.3 : seul le collage clavier subsiste).
+- **Notes** : un titre facultatif (« Note » par défaut, puis « Note 2 »…) et un contenu ; la liste montre le titre et la première ligne. Le crayon d'une note ouvre l'éditeur.
+- **Mémo vocal** : feuille qui hébergera l'enregistreur (autre chantier, `ui/VoiceRecorder.svelte`) ; en attendant, drapeau `VOICE_RECORDER_READY` et texte « arrive bientôt ».
+- **Nettoyage** : si un élément est « Non nettoyé », un seul bouton « Nettoyer tous les fichiers » au-dessus de la liste ; branché sur `cleanFile` de la Task 9a (relais `flows/clean.ts`, provisoire, qui ne nettoie rien et le dit), puis nettoyage automatique à l'ajout quand elle est livrée.
+- **Types par le contenu** (`flows/sniff.ts`, premiers octets) : catégorie **Archives** (zip, rar, 7z, tar, gz, tgz, bz2, xz, zst ; un docx, xlsx, epub… reste un document) avec la note « Archive : son contenu n'est ni vérifié ni nettoyé. » ; exécutables (MZ, ELF, Mach-O), images disque ISO et polices → Autres ; HEIC, tableurs, présentations, CSV et fichiers de code → leurs catégories. Programmes et scripts (liste `isRiskyName`, ou contenu exécutable) : badge « À risque » et une ligne d'avertissement ; un programme sous une extension d'image est signalé comme tel.
+- **Présentation sur ordinateur** : photos et vidéos en **grille de vignettes** (nom, taille, menu « … » au survol, toujours présent au clavier et au doigt) ; documents, archives et autres en **tableau** (Nom, Type, Taille, Actions ; filets fins, sans zébrures) ; notes et audio en lignes. Alt + flèches déplace partout ; le menu offre Renommer, Monter, Descendre, Retirer. Téléphone : lignes compactes et menu « … » (inchangé).
+
 #### 9.2.1 Ajouter
 
 - Rangée d'ajout (révision 5, §9.1) : **Parcourir les fichiers**, puis **Photo**, **Vidéo**, **Vocal**, **Texte**, et **Coller** (seulement si `navigator.clipboard.read` existe ; surtout utile au téléphone, où Ctrl/Cmd + V n'existe pas). « Photo » = `<input type="file" accept="image/*" capture="environment">` ; « Vidéo » (révision 5) = `<input type="file" accept="video/*" capture="environment">` : sur téléphone, l'appareil photo ou la caméra du système ; sur ordinateur, le sélecteur filtré. Aucun accès direct à la caméra : la `Permissions-Policy` garde `camera=()` (spec §10), car un champ `capture` ouvre l'application du système, pas `getUserMedia`. « Vocal » masqué si `MediaRecorder` manque ou si aucun format n'est pris en charge (§9.2.7).
@@ -501,6 +512,8 @@ Aucun audit, aucun pays d'hébergement, aucun badge (benchmark B3) ; jamais « 1
 - Le composeur garde tout en mémoire tant que la page vit ; quitter la page avec des éléments dans la liste déclenche `beforeunload` (la liste serait perdue). Aucun stockage.
 
 ### 9.3 Options
+
+**Révision 6** : réglages serrés dans leur colonne (Durée, Ouvertures, Mot de passe, Destinataire) ; la phrase « S'efface dans 12 h ou après 1 ouverture… », l'estimation et les textes de confiance passent dans la colonne de l'envoi (ordinateur large). **Mot de passe généré de 10 caractères** (spec §31, mise à jour) ; un mot de passe saisi : **10 caractères au moins**. En mode personnel, « Utiliser un mot de passe généré » (lien) et « Générer un autre » (dans le champ) rendent un mot de passe généré neuf. Destinataire : interrupteur « Autoriser le téléchargement » (spec §34.1, voir le signalement du rapport composeur sur l'écart).
 
 - **Durée** : `Segmented` 1 h · 6 h · **12 h** (par défaut) · 24 h. Indication : « Comptée à partir de la fin de l'envoi. »
 - **Ouvertures** : `Stepper` 1 à 10, **1** par défaut. Indication : « Une ouverture = un déverrouillage réussi. »

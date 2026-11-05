@@ -113,27 +113,13 @@ describe("createOptions (UI §9.3)", () => {
 });
 
 describe("mot de passe généré (spec §31)", () => {
-  it("8 caractères de l'alphabet, 4 familles, aucun ambigu, répartition uniforme", () => {
-    expect(PASSWORD_ALPHABET).toHaveLength(64);
-    expect(new Set(PASSWORD_ALPHABET).size).toBe(64);
-    const freq = new Map<string, number>();
-    const N = 20_000;
-    for (let i = 0; i < N; i++) {
+  it("10 caractères de l'alphabet, 4 familles, aucun ambigu (répartition : crypto/password.test.ts)", () => {
+    for (let i = 0; i < 500; i++) {
       const p = generatePassword();
-      expect(p).toHaveLength(8);
+      expect(p).toHaveLength(10);
+      expect([...p].every((c) => PASSWORD_ALPHABET.includes(c))).toBe(true);
       expect(/[a-z]/.test(p) && /[A-Z]/.test(p) && /[2-9]/.test(p) && /[!#$%+=?@]/.test(p)).toBe(true);
       expect(/[0O1lIo]/.test(p)).toBe(false);
-      for (const ch of p) freq.set(ch, (freq.get(ch) ?? 0) + 1);
-    }
-    // Imposer les 4 familles biaise la répartition : par rapport à 1/64, une lettre sort 0,854 fois
-    // et un chiffre ou un symbole 1,439 fois (calcul exact par inclusion-exclusion). Chaque
-    // caractère est comparé à SA valeur exacte, à ±15 % (plus de 7 écarts-types).
-    const uniform = (N * 8) / 64;
-    for (const ch of PASSWORD_ALPHABET) {
-      const expected = uniform * (/[a-zA-Z]/.test(ch) ? 0.853705 : 1.438884);
-      const f = freq.get(ch) ?? 0;
-      expect(f, ch).toBeGreaterThan(expected * 0.85);
-      expect(f, ch).toBeLessThan(expected * 1.15);
     }
   });
 

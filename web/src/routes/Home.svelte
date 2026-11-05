@@ -5,7 +5,7 @@
   /** D'où viennent les fichiers remis à `onfiles` (composer.add, Task 10). */
   export type Source = "fichiers" | "photo" | "video" | "depot";
   /** Actions qui ouvrent une interface dans la page (Tasks 10 à 12). */
-  export type Action = "vocal" | "texte" | "coller";
+  export type Action = "vocal" | "texte";
 </script>
 
 <script lang="ts">
@@ -19,7 +19,7 @@
   import { magnet, tilt } from "../ui/attach";
   import DropOverlay from "../ui/DropOverlay.svelte";
   import Guilloche from "../ui/Guilloche.svelte";
-  import { Camera, ChevronDown, ClipboardPaste, Lock, Mic, Paperclip, Timer, Type, UserX, Video } from "../ui/Icon";
+  import { Camera, ChevronDown, Lock, Mic, Paperclip, Timer, Type, UserX, Video } from "../ui/Icon";
   import { reducedMotion } from "../ui/motion";
   import SealBand from "../ui/SealBand.svelte";
   import SealMark from "../ui/SealMark.svelte";
@@ -38,7 +38,7 @@
     children?: Snippet;
     /** Fichiers choisis ou déposés (composer.add) ; `folders` : dossiers déposés, refusés. */
     onfiles?: (files: File[], source: Source, folders: string[]) => void;
-    /** Vocal, Texte, Coller : ouvrent leur interface dans la page. */
+    /** Vocal, Texte : ouvrent leur interface dans la page (le collage passe par Ctrl/Cmd + V). */
     onaction?: (action: Action) => void;
   };
   let { compact = false, children, onfiles, onaction }: Props = $props();
@@ -67,9 +67,8 @@
     return list.map((w, i) => ({ w, delay: i * 35 + (breath >= 0 && i > breath ? 30 : 0) }));
   });
 
-  // UI §9.2.1 : Vocal masqué sans MediaRecorder ; Coller seulement si navigator.clipboard.read existe.
+  // UI §9.2.1 : Vocal masqué sans MediaRecorder. Pas de bouton Coller (décision du propriétaire) : Ctrl/Cmd + V suffit.
   const canVoice = typeof MediaRecorder !== "undefined";
-  const canPaste = typeof navigator !== "undefined" && typeof navigator.clipboard?.read === "function";
 
   let files: HTMLInputElement | undefined = $state();
   let photo: HTMLInputElement | undefined = $state();
@@ -202,7 +201,6 @@
                 {@render tile(t("compose.add.video"), Video, () => video?.click(), "rec")}
                 {#if canVoice}{@render tile(t("compose.add.voice"), Mic, () => act("vocal"), "bars")}{/if}
                 {@render tile(t("compose.add.text"), Type, () => act("texte"), "caret")}
-                {#if canPaste}{@render tile(t("compose.add.paste"), ClipboardPaste, () => act("coller"), "")}{/if}
               </div>
             </div>
             <p class="proof num">{t("home.proof")}</p>
@@ -276,8 +274,8 @@
   h1:focus {
     outline: none;
   }
-  /* Téléphone, composeur ouvert : l'app prend l'écran ; le titre reste pour les lecteurs d'écran. */
-  @media (max-width: 759px) {
+  /* Composeur ouvert : l'app prend l'écran ; le titre reste pour les lecteurs d'écran. */
+  @media all {
     h1.compact {
       position: absolute;
       width: 1px;
@@ -406,7 +404,7 @@
         animation-timeline: --hero;
         animation-range: exit 0% exit 70%;
       }
-      .home:not(.reveal) .compose {
+      .home:not(.reveal):not(.compact) .compose {
         animation: recede linear both;
         animation-timeline: --hero;
         animation-range: exit 0% exit 100%;
@@ -909,7 +907,7 @@
     .home.compact .hero {
       grid-template-columns: minmax(0, 1fr);
       min-height: 0;
-      padding-block: var(--sp-5);
+      padding-block: 0;
     }
   }
 

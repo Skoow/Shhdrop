@@ -23,8 +23,13 @@
     estimate: { fastS: number; slowS: number };
     compact?: boolean;
     pwErrorId?: string;
+    /**
+     * Ordinateur large : « controls » (réglages, colonne du milieu) et « summary » (phrase et
+     * estimation, colonne de l'envoi) ; « all » ailleurs.
+     */
+    part?: "all" | "controls" | "summary";
   };
-  let { options, pwResult, unviewable, vaultShown, estimate, compact = false, pwErrorId }: Props = $props();
+  let { options, pwResult, unviewable, vaultShown, estimate, compact = false, pwErrorId, part = "all" }: Props = $props();
 
   const lang = $derived(getLang());
   const ttlLabel = (h: number) => formatDuration(h * 3600, lang);
@@ -46,13 +51,31 @@
   });
 </script>
 
-<section class={["opts", { compact }]} aria-labelledby={compact ? undefined : "opts-title"} aria-label={compact ? t("options.title") : undefined}>
+{#snippet summary()}
+  <p class="summary">
+    {#each parts as p, i (i)}{#if "b" in p}<b class="num">{p.b}</b>{:else}{p.s}{/if}{/each}
+  </p>
+{/snippet}
+{#snippet trust()}
+  <p class="line"><ShieldAlert size={16} strokeWidth={1.9} aria-hidden="true" /><span>{t("options.pw.lead")}</span></p>
+  <p class="line"><ShieldAlert size={16} strokeWidth={1.9} aria-hidden="true" /><span>{t("options.tries", { n: PW_TRIES })}</span></p>
+{/snippet}
+{#snippet est()}
+  <p class="line est num"><Timer size={16} strokeWidth={1.9} aria-hidden="true" /><span>{estimateText}</span></p>
+{/snippet}
+
+{#if part === "summary"}
+  <div class="sumpart">
+    {@render summary()}
+    {@render est()}
+    <div class="trustpart">{@render trust()}</div>
+  </div>
+{:else}
+<section class={["opts", { compact, dense: part === "controls" }]} aria-labelledby={compact ? undefined : "opts-title"} aria-label={compact ? t("options.title") : undefined}>
   {#if !compact}<h2 id="opts-title" class="h">{t("options.title")}</h2>{/if}
 
   <div class="block">
-    <p class="summary">
-      {#each parts as p, i (i)}{#if "b" in p}<b class="num">{p.b}</b>{:else}{p.s}{/if}{/each}
-    </p>
+    {#if part === "all"}{@render summary()}{/if}
     <div class="ctl">
       <span class="cl" aria-hidden="true">{t("options.ttl.label")}</span>
       <Segmented label={t("options.ttl.label")} options={ttlOptions} bind:value={() => options.ttlHours, (v) => (options.ttlHours = v)} />
@@ -68,8 +91,7 @@
   <div class="block">
     <h3 class="h3">{t("options.pw.title")}</h3>
     <PassphraseField {options} min={PW_MIN_CHARS} result={pwResult} describedby={pwErrorId} />
-    <p class="line"><ShieldAlert size={16} strokeWidth={1.9} aria-hidden="true" /><span>{t("options.pw.lead")}</span></p>
-    <p class="line"><ShieldAlert size={16} strokeWidth={1.9} aria-hidden="true" /><span>{t("options.tries", { n: PW_TRIES })}</span></p>
+    {#if part === "all"}{@render trust()}{/if}
   </div>
 
   <div class="block" role="group" aria-labelledby="rights-title">
@@ -89,8 +111,9 @@
     {/if}
   </div>
 
-  <p class="line est num"><Timer size={16} strokeWidth={1.9} aria-hidden="true" /><span>{estimateText}</span></p>
+  {#if part === "all"}{@render est()}{/if}
 </section>
+{/if}
 
 <style>
   .opts {
@@ -100,6 +123,26 @@
   }
   .compact {
     gap: var(--sp-4);
+  }
+  /* Colonne du milieu sur grand écran : réglages serrés, tout tient sans défiler. */
+  .dense {
+    gap: var(--sp-4);
+  }
+  .dense .block {
+    gap: var(--sp-2);
+  }
+  .dense .h {
+    font-size: 1.0625rem;
+  }
+  .sumpart {
+    display: grid;
+    gap: var(--sp-3);
+  }
+  .trustpart {
+    display: grid;
+    gap: var(--sp-2);
+    padding-top: var(--sp-3);
+    border-top: 1px solid var(--hair);
   }
   .h {
     font-size: var(--fs-h3);

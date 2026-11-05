@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dragDepth, filesFromDrop, fromClipboardRead, fromPasteEvent } from "./intake";
+import { dragDepth, filesFromDrop, fromPasteEvent } from "./intake";
 
 type FakeItem = { kind: string; getAsFile(): File | null; webkitGetAsEntry?: () => { isDirectory: boolean; name: string } | null };
 const fileItem = (f: File, dir = false): FakeItem => ({
@@ -44,23 +44,6 @@ describe("fromPasteEvent", () => {
   it("texte hors champ → text brut, jamais text/html", () => {
     expect(fromPasteEvent(paste({ text: "bonjour", html: "<b>bonjour</b>" }), false)).toEqual({ files: [], text: "bonjour", native: false });
     expect(fromPasteEvent(paste({ html: "<img src=x onerror=alert(1)>" }), false)).toEqual({ files: [], text: null, native: false });
-  });
-});
-
-describe("fromClipboardRead", () => {
-  const item = (types: Record<string, Blob>) => ({ types: Object.keys(types), getType: async (t: string) => types[t]! }) as unknown as ClipboardItem;
-  it("nomme les images « Image collée 1.png », garde le texte brut, ignore le reste", async () => {
-    const r = await fromClipboardRead([
-      item({ "image/png": new Blob(["p"]) }),
-      item({ "text/html": new Blob(["<b>x</b>"]), "text/plain": new Blob(["x"]) }),
-      item({ "image/jpeg": new Blob(["j"]) }),
-      item({ "application/x-thing": new Blob(["?"]) }),
-    ]);
-    expect(r.files.map((f) => [f.name, f.type])).toEqual([["Image collée 1.png", "image/png"], ["Image collée 2.jpg", "image/jpeg"]]);
-    expect(r.text).toBe("x");
-  });
-  it("vide → rien", async () => {
-    expect(await fromClipboardRead([])).toEqual({ files: [], text: null });
   });
 });
 

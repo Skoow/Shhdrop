@@ -160,7 +160,7 @@ export type CreateOpts = api.Net & {
   base?: string;
   ttlHours: TtlHours;
   maxOpens: number;
-  /** Mot de passe généré (generatePassword, 8 caractères) ou saisi (checkPassword : 12 au moins). */
+  /** Mot de passe généré (generatePassword, 10 caractères) ou saisi (checkPassword : 10 au moins). */
   password: GeneratedPassword | string;
   /** Droits du destinataire (spec §34), dans le manifeste chiffré. Par défaut « enregistrer ». */
   rights?: Rights;

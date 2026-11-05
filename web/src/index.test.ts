@@ -30,6 +30,7 @@ describe("interface publique", () => {
         "PW_MIN_CHARS",
         "SERVER_STALL_MS",
         "cleanName",
+        "isRiskyName",
         "checkPassword",
         "collectToBlob",
         "createShare",

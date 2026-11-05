@@ -8,7 +8,9 @@
   import type { Category } from "../flows/kinds";
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
+  import FileTable from "./FileTable.svelte";
   import ItemRow from "./ItemRow.svelte";
+  import MediaGrid from "./MediaGrid.svelte";
   import { reducedMotion } from "./motion";
   import { edgeScroll, shiftFor, targetIndex } from "./reorder";
 
@@ -25,9 +27,14 @@
     /** Téléphone : lignes compactes, menu « … ». */
     compact?: boolean;
     onmenu?: (id: string) => void;
+    /** Renommer depuis le tableau (feuille de renommage). */
+    onrenamesheet?: (id: string) => void;
     cannotOpen?: (item: ComposeItem) => boolean;
   };
-  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, cannotOpen }: Props = $props();
+  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, onrenamesheet, cannotOpen }: Props = $props();
+  // Ordinateur : grille de vignettes (photos, vidéos), tableau (documents, archives, autres),
+  // lignes pour les notes et l'audio. Téléphone : lignes compactes partout.
+  const view = $derived(compact ? "rows" : category === "photos" || category === "videos" ? "grid" : category === "texte" || category === "audio" ? "rows" : "table");
 
   const KEY = {
     texte: "compose.cat.text",
@@ -35,6 +42,7 @@
     videos: "compose.cat.videos",
     audio: "compose.cat.audio",
     documents: "compose.cat.documents",
+    archives: "compose.cat.archives",
     autres: "compose.cat.autres",
   } as const;
   const uid = $props.id();
@@ -120,6 +128,11 @@
     <h3 id="{uid}-h">{t(KEY[category])}</h3>
     <span class="meta num">{items.length} · {formatBytes(bytes, getLang())}</span>
   </div>
+  {#if view === "grid"}
+    <MediaGrid {items} {helpId} onmenu={(id) => onmenu?.(id)} {onmove} {cannotOpen} />
+  {:else if view === "table"}
+    <FileTable caption={t(KEY[category])} {items} {helpId} onrename={(id) => onrenamesheet?.(id)} {onremove} onmenu={(id) => onmenu?.(id)} {onmove} {cannotOpen} />
+  {:else}
   <ol bind:this={list} class="rows">
     {#each items as item (item.id)}
       <li class="li" data-row={item.id} animate:flip={{ duration: reducedMotion() ? 0 : flipMs }}>
@@ -141,6 +154,7 @@
       </li>
     {/each}
   </ol>
+  {/if}
 </section>
 
 <style>
@@ -154,6 +168,9 @@
     justify-content: space-between;
     gap: var(--sp-3);
     padding: var(--sp-2) 4px 4px var(--sp-6);
+  }
+  .group:not(.compact) .head {
+    padding-inline-start: 4px;
   }
   .compact .head {
     padding-inline-start: 4px;

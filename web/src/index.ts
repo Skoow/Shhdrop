@@ -22,7 +22,7 @@ export {
 } from "./transfer/client";
 export { prepareCaptcha, type PreparedCaptcha } from "./transfer/prepare";
 export { SERVER_STALL_MS } from "./transfer/upload";
-export { safeName as cleanName } from "./transfer/safety";
+export { isRiskyName, safeName as cleanName } from "./transfer/safety";
 export { PREVIEW_MAX, type KeepTtl, type Rights } from "./crypto/container";
 export {
   CONTENT_MAX,

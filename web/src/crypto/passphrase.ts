@@ -2,7 +2,7 @@ import { WORDS } from "./wordlist-eff";
 import { BLOCKLIST } from "./blocklist";
 import { isGeneratedPassword, type GeneratedPassword } from "./password";
 
-export const PW_MIN_CHARS = 12;
+export const PW_MIN_CHARS = 10;
 
 function defaultRand(n: number): Uint8Array<ArrayBuffer> {
   return new Uint8Array(crypto.getRandomValues(new Uint32Array(n / 4)).buffer);

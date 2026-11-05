@@ -1,7 +1,7 @@
 <script lang="ts">
   // Mot de passe de l'envoi (UI §9.3, spec §31) : un seul champ, ses boutons dedans, en fin de
   // champ (« Générer un autre », « Copier », et Afficher/Masquer pour un mot de passe écrit).
-  // Par défaut, 8 caractères générés sur l'appareil ; « Écrire mon propre mot de passe » sous
+  // Par défaut, 10 caractères générés sur l'appareil ; « Écrire mon propre mot de passe » sous
   // le champ ; « Générer un autre » rend un mot de passe généré. Attributs de UI §12.3, hors
   // de tout <form>. La copie lit l'état, jamais le DOM animé (K9).
   import { tick } from "svelte";
@@ -91,6 +91,7 @@
   </div>
   {#if custom}
     <PasswordChecklist id="pw-rules" value={options.custom} {result} {min} />
+    <button type="button" class="link" onclick={regenerate}>{t("options.pw.useGenerated")}</button>
   {:else}
     <div class="under">
       <span class="note">{t("options.pw.random")}</span>

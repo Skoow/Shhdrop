@@ -66,11 +66,11 @@ describe("checkPassword", () => {
   });
   it("phrase générée acceptée", () => expect(checkPassword(generatePassphrase())).toEqual({ ok: true }));
   it("longueur en points de code NFC", () => {
-    expect(checkPassword("é".repeat(11))).toEqual({ ok: false, reason: "trop_court" });
-    expect(checkPassword("é".repeat(11))).toEqual({ ok: false, reason: "trop_court" }); // NFC : 11
-    expect(checkPassword("é".repeat(12))).toEqual({ ok: true });
-    expect(checkPassword("😀".repeat(12))).toEqual({ ok: true });
-    expect(checkPassword("😀".repeat(11))).toEqual({ ok: false, reason: "trop_court" });
+    expect(checkPassword("\u00e9".repeat(9))).toEqual({ ok: false, reason: "trop_court" });
+    expect(checkPassword("e\u0301".repeat(9))).toEqual({ ok: false, reason: "trop_court" }); // 18 points de code, NFC : 9
+    expect(checkPassword("\u00e9".repeat(10))).toEqual({ ok: true });
+    expect(checkPassword("😀".repeat(10))).toEqual({ ok: true });
+    expect(checkPassword("😀".repeat(9))).toEqual({ ok: false, reason: "trop_court" });
   });
 });
 

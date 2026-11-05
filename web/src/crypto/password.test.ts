@@ -12,13 +12,14 @@ function exact(): { total: bigint; expectedPerSymbol: number[] } {
   const fact = (n: number): bigint => (n <= 1 ? 1n : BigInt(n) * fact(n - 1));
   let total = 0n;
   const weighted = [0n, 0n, 0n, 0n];
-  for (let a = 1; a <= 5; a++)
-    for (let b = 1; a + b <= 6; b++)
-      for (let c = 1; a + b + c <= 7; c++) {
-        const d = 8 - a - b - c;
+  const L = PASSWORD_LEN;
+  for (let a = 1; a <= L - 3; a++)
+    for (let b = 1; a + b <= L - 2; b++)
+      for (let c = 1; a + b + c <= L - 1; c++) {
+        const d = L - a - b - c;
         if (d < 1) continue;
         const n = [a, b, c, d];
-        let w = fact(8);
+        let w = fact(L);
         n.forEach((k, i) => (w = (w / fact(k)) * BigInt(sizes[i]!) ** BigInt(k)));
         total += w;
         n.forEach((k, i) => (weighted[i]! += w * BigInt(k)));
@@ -35,21 +36,21 @@ describe("PASSWORD_ALPHABET (spec §31)", () => {
     expect(FAMILIES.join("")).toBe(PASSWORD_ALPHABET);
     for (const c of "0O1lIo") expect(PASSWORD_ALPHABET).not.toContain(c);
   });
-  it("nombre exact de mots de passe : 107 294 591 287 296 (2^46,6)", () => {
+  it("nombre exact de mots de passe : 594 641 958 752 747 520 (2^59,0)", () => {
     const { total } = exact();
-    expect(total).toBe(107_294_591_287_296n);
-    expect(Math.log2(Number(total))).toBeCloseTo(46.6, 1);
+    expect(total).toBe(594_641_958_752_747_520n);
+    expect(Math.log2(Number(total))).toBeCloseTo(59.0, 1);
   });
 });
 
 describe("generatePassword", () => {
-  it("10 000 tirages : 8 caractères de l'alphabet, 4 familles, fréquences dans [0,8 ; 1,2] × l'attendu", () => {
+  it("10 000 tirages : 10 caractères de l'alphabet, 4 familles, fréquences dans [0,8 ; 1,2] × l'attendu", () => {
     const N = 10_000;
     const counts = new Map<string, number>();
     for (let i = 0; i < N; i++) {
       const p = generatePassword();
       expect([...p]).toHaveLength(PASSWORD_LEN);
-      expect(PASSWORD_LEN).toBe(8);
+      expect(PASSWORD_LEN).toBe(10);
       for (const c of p) {
         expect(PASSWORD_ALPHABET).toContain(c);
         counts.set(c, (counts.get(c) ?? 0) + 1);
@@ -69,14 +70,14 @@ describe("generatePassword", () => {
   });
 
   it("tirage par crypto.getRandomValues, octet & 63 (64 = 2⁶ : aucun biais) ; recommence sans les 4 familles", () => {
-    // Premier tirage : 8 × « a » (une seule famille) → refusé ; second : a A 2 ! a A 2 !.
-    const draws = [new Array(8).fill(0), [0, 24, 48, 56, 64 + 0, 128 + 24, 192 + 48, 255 - 7]];
+    // Premier tirage : 10 × « a » (une seule famille) → refusé ; second : a A 2 ! a A 2 ! a A.
+    const draws = [new Array(10).fill(0), [0, 24, 48, 56, 64 + 0, 128 + 24, 192 + 48, 255 - 7, 0, 24]];
     const spy = vi.spyOn(crypto, "getRandomValues").mockImplementation(<T extends ArrayBufferView | null>(a: T): T => {
       (a as unknown as Uint8Array).set(draws.shift()!);
       return a;
     });
     try {
-      expect(generatePassword()).toBe("aA2!aA2!");
+      expect(generatePassword()).toBe("aA2!aA2!aA");
       expect(draws).toHaveLength(0);
     } finally {
       spy.mockRestore();
@@ -85,21 +86,22 @@ describe("generatePassword", () => {
 });
 
 describe("checkPassword et mot de passe généré", () => {
-  it("accepte un mot de passe généré de 8 caractères, refuse une chaîne saisie de 8 caractères", () => {
+  it("accepte un mot de passe généré de 10 caractères ; une chaîne saisie : 10 caractères au moins", () => {
     const g = generatePassword();
     expect(checkPassword(g)).toEqual({ ok: true });
-    // Même forme, mais saisie (jamais produite par generatePassword) : 12 caractères exigés.
-    expect(checkPassword("aB3!aB3!")).toEqual({ ok: false, reason: "trop_court" });
+    // Saisie (jamais produite par generatePassword) : 10 caractères exigés, comme le tirage.
+    expect(checkPassword("aB3!aB3!a")).toEqual({ ok: false, reason: "trop_court" });
+    expect(checkPassword("aB3!aB3!aB")).toEqual({ ok: true });
     // Une copie construite caractère par caractère reste une chaîne saisie aux yeux du type,
     // mais égale à un mot de passe généré récent : acceptée (même force que le tirage).
     expect(checkPassword([...g].join(""))).toEqual({ ok: true });
   });
-  it("seuls les 16 derniers mots de passe générés sont reconnus", () => {
+  it("un mot de passe généré ancien (hors des 16 derniers) passe encore la règle commune des 10 caractères", () => {
     const first = generatePassword();
     for (let i = 0; i < 16; i++) generatePassword();
-    expect(checkPassword(first)).toEqual({ ok: false, reason: "trop_court" });
+    expect(checkPassword(first)).toEqual({ ok: true });
   });
-  it("un mot de passe saisi reste soumis à la règle des 12 caractères et à la liste noire", () => {
+  it("un mot de passe saisi reste soumis à la règle des 10 caractères et à la liste noire", () => {
     expect(checkPassword("cheval-agrafe")).toEqual({ ok: true });
     expect(checkPassword("unbelievable")).toEqual({ ok: false, reason: "trop_courant" });
   });

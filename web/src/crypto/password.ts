@@ -1,14 +1,14 @@
-// Mot de passe généré par défaut (spec §31) : 8 caractères tirés uniformément dans un
-// alphabet de 64 symboles sans caractères ambigus, recommencé jusqu'à ce que les quatre
-// familles soient présentes. 107 294 591 287 296 possibilités (2^46,6).
+// Mot de passe généré par défaut (spec §31, 10 caractères depuis le 5 novembre) : tirés
+// uniformément dans un alphabet de 64 symboles sans caractères ambigus, recommencé jusqu'à ce
+// que les quatre familles soient présentes. 594 641 958 752 747 520 possibilités (2^59,0).
 
-/** Mot de passe produit par generatePassword : accepté par checkPassword à 8 caractères. */
+/** Mot de passe produit par generatePassword : accepté par checkPassword (10 caractères). */
 export type GeneratedPassword = string & { readonly __gen: unique symbol };
 
 /** Minuscules sans l ni o, majuscules sans I ni O, chiffres 2 à 9, 8 symboles. */
 export const PASSWORD_FAMILIES = ["abcdefghijkmnpqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789", "!#$%+=?@"] as const;
 export const PASSWORD_ALPHABET = PASSWORD_FAMILIES.join("");
-export const PASSWORD_LEN = 8;
+export const PASSWORD_LEN = 10;
 
 // Les derniers mots de passe générés, pour que checkPassword les reconnaisse à l'exécution
 // (le type marqué ne survit pas à la compilation). Bornée : 16 au plus, les plus anciens

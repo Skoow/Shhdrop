@@ -35,28 +35,6 @@ export function fromPasteEvent(e: ClipboardEvent, focusInTextField: boolean): { 
   return { files: [], text: text === "" ? null : text, native: false };
 }
 
-const IMAGE_TYPES: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
-
-/** Bouton Coller : images (png, jpeg, webp, gif) et texte brut. */
-export async function fromClipboardRead(
-  items: readonly ClipboardItem[],
-  name: (n: number, ext: string) => string = (n, ext) => `Image collée ${n}.${ext}`,
-): Promise<{ files: File[]; text: string | null }> {
-  const files: File[] = [];
-  let text: string | null = null;
-  for (const item of items) {
-    const img = item.types.find((t) => Object.hasOwn(IMAGE_TYPES, t));
-    if (img) {
-      const blob = await item.getType(img);
-      files.push(new File([blob], name(files.length + 1, IMAGE_TYPES[img]!), { type: img }));
-    } else if (text === null && item.types.includes("text/plain")) {
-      const t = await (await item.getType("text/plain")).text();
-      if (t !== "") text = t;
-    }
-  }
-  return { files, text };
-}
-
 /** Le glisser contient-il des fichiers ? */
 export const dragHasFiles = (e: DragEvent) => [...(e.dataTransfer?.types ?? [])].includes("Files");
 

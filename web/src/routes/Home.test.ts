@@ -160,9 +160,9 @@ describe("Home (UI §9.1)", () => {
     expect(onfiles).toHaveBeenCalledWith([f], "video", []);
   });
 
-  it("actions : groupe nommé ; Vocal sans MediaRecorder et Coller sans clipboard.read sont masqués (§9.2.1)", () => {
+  it("actions : groupe nommé ; Vocal masqué sans MediaRecorder ; jamais de bouton Coller (Ctrl/Cmd + V suffit)", () => {
     const clip = Object.getOwnPropertyDescriptor(navigator, "clipboard");
-    Object.defineProperty(navigator, "clipboard", { configurable: true, value: {} });
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { read: async () => [] } });
     try {
       show();
     } finally {
@@ -175,24 +175,19 @@ describe("Home (UI §9.1)", () => {
     expect(names).toEqual(["Photo", "Vidéo", "Texte"]);
   });
 
-  it("actions : Vocal et Coller présents quand le navigateur les permet ; rappel onaction", () => {
+  it("actions : Vocal présent quand MediaRecorder existe ; rappel onaction", () => {
     vi.stubGlobal("MediaRecorder", class {});
-    const clip = Object.getOwnPropertyDescriptor(navigator, "clipboard");
-    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { read: async () => [] } });
     try {
       const onaction = vi.fn();
       show({ onaction });
       const group = document.querySelector('[role="group"]')!;
       const buttons = [...group.querySelectorAll("button")];
-      expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Photo", "Vidéo", "Vocal", "Texte", "Coller"]);
+      expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Photo", "Vidéo", "Vocal", "Texte"]);
       buttons[2]!.click();
       buttons[3]!.click();
-      buttons[4]!.click();
-      expect(onaction.mock.calls).toEqual([["vocal"], ["texte"], ["coller"]]);
+      expect(onaction.mock.calls).toEqual([["vocal"], ["texte"]]);
     } finally {
       vi.unstubAllGlobals();
-      if (clip) Object.defineProperty(navigator, "clipboard", clip);
-      else delete (navigator as { clipboard?: unknown }).clipboard;
     }
   });
 

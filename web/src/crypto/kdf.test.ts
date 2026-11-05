@@ -108,7 +108,7 @@ describe("mot de passe à la création et à l'ouverture (audit F9, spec §31)",
   });
   it("passwordKeyForCreate impose checkPassword et KDF_CREATE ; accepte un mot de passe généré", async () => {
     await expect(passwordKeyForCreate("", salt)).rejects.toThrow("mot_de_passe_trop_court");
-    await expect(passwordKeyForCreate("court-court", salt)).rejects.toThrow("mot_de_passe_trop_court");
+    await expect(passwordKeyForCreate("court-crt", salt)).rejects.toThrow("mot_de_passe_trop_court");
     await expect(passwordKeyForCreate("aB3!aB3!", salt)).rejects.toThrow("mot_de_passe_trop_court");
     await expect(passwordKeyForCreate("unbelievable", salt)).rejects.toThrow("mot_de_passe_trop_courant");
     const pw = "cheval-agrafe-pile-correct";

@@ -7,7 +7,9 @@
   import { MediaQuery } from "svelte/reactivity";
   import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, PW_MIN_CHARS, TEXT_MAX, checkPassword, generatePassword, type Item } from "../index";
   import { blockKey, createComposer, type AddReport, type Source } from "../flows/compose.svelte";
-  import { fromClipboardRead, fromPasteEvent } from "../flows/intake";
+  import { CLEANER_READY, cleanFile } from "../flows/clean";
+  import { VOICE_RECORDER_READY } from "../flows/features";
+  import { fromPasteEvent } from "../flows/intake";
   import { createOptions, estimateUpload, viewableInBrowser, viewOnlyBlockers, type Rights } from "../flows/options.svelte";
   import { formatBytes, formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
@@ -15,7 +17,8 @@
   import Button from "../ui/Button.svelte";
   import CapacityGauge from "../ui/CapacityGauge.svelte";
   import CategoryGroup from "../ui/CategoryGroup.svelte";
-  import { ArrowDown, ArrowUp, Camera, ChevronDown, ClipboardPaste, Lock, Mic, Paperclip, Pencil, ShieldAlert, SlidersHorizontal, Type, Video, X } from "../ui/Icon";
+  import { ArrowDown, ArrowUp, BrushCleaning, Camera, ChevronDown, Lock, Mic, NotebookPen, Pencil, ShieldAlert, SlidersHorizontal, Upload, Video, X } from "../ui/Icon";
+  import TextField from "../ui/TextField.svelte";
   import Sheet from "../ui/Sheet.svelte";
   import TextArea from "../ui/TextArea.svelte";
   import UndoToast from "../ui/UndoToast.svelte";
@@ -41,10 +44,12 @@
       photo: (n) => t("compose.name.photo", { n }),
       video: (n) => t("compose.name.video", { n }),
       pasted: (n) => t("compose.name.pasted", { n }),
-      text: (n) => t("compose.name.text", { n }),
+      text: (n) => (n === 1 ? t("compose.name.note") : t("compose.name.noteN", { n })),
       voice: (n) => t("compose.name.voice", { n }),
     },
     online: () => online,
+    // Nettoyage automatique à l'ajout dès que la bibliothèque (Task 9a) est là.
+    clean: CLEANER_READY ? cleanFile : undefined,
   });
   // Téléphone (< 760 px) : une vraie app (lignes compactes, menu « … », barre collée, options
   // en feuille). Ordinateur : deux colonnes. Le coffre (spec §27) : téléphone ou app installée.
@@ -52,6 +57,7 @@
   const coarseMq = new MediaQuery("pointer: coarse");
   const standaloneMq = new MediaQuery("display-mode: standalone");
   const narrow = $derived(narrowMq.current);
+  const coarse = $derived(coarseMq.current);
   const vaultShown = $derived(vaultAllowed && (coarseMq.current || standaloneMq.current));
   const options = createOptions({ generate: generatePassword, check: checkPassword, vaultAllowed: () => vaultShown });
 
@@ -115,7 +121,6 @@
 
   // ---------- Ajouts depuis le composeur ----------
   const canVoice = typeof MediaRecorder !== "undefined";
-  const canPaste = typeof navigator !== "undefined" && typeof navigator.clipboard?.read === "function";
   let filesIn: HTMLInputElement | undefined = $state();
   let photoIn: HTMLInputElement | undefined = $state();
   let videoIn: HTMLInputElement | undefined = $state();
@@ -127,24 +132,28 @@
 
   function act(a: Action) {
     if (a === "texte") openEditor(null, "");
-    else if (a === "vocal") voiceOpen = true;
-    else void pasteButton();
+    else voiceOpen = true;
   }
 
   // ---------- Texte ----------
   let editorOpen = $state(false);
   let editorId = $state<string | null>(null);
   let editorText = $state("");
+  let editorTitle = $state("");
   const editorLen = $derived([...editorText].length);
   const editorTooLong = $derived(editorLen > TEXT_MAX);
   let editorEl: HTMLTextAreaElement | undefined = $state();
-  function openEditor(id: string | null, text: string) {
+  let titleEl: HTMLInputElement | undefined = $state();
+  function openEditor(id: string | null, text: string, title = "") {
     editorId = id;
     editorText = text;
+    editorTitle = title;
     editorOpen = true;
     // Focus dans la zone de texte (showModal le mettrait sur « Fermer »), curseur à la fin.
     void tick().then(() =>
       requestAnimationFrame(() => {
+        // Nouvelle note vide : le titre d'abord ; sinon le contenu, curseur à la fin.
+        if (!id && text === "") return void titleEl?.focus();
         editorEl?.focus();
         editorEl?.setSelectionRange(editorText.length, editorText.length);
       }),
@@ -154,14 +163,15 @@
     if (editorTooLong || editorText.trim() === "") return;
     const id = editorId;
     const text = editorText;
+    const title = editorTitle;
     editorOpen = false;
-    if (id) composer.updateText(id, text);
-    else if (composer.addText(text) === null) say(t("compose.tooMany", { n: 1, max: MAX_ITEMS }));
+    if (id) composer.updateText(id, text, title);
+    else if (composer.addText(text, title) === null) say(t("compose.tooMany", { n: 1, max: MAX_ITEMS }));
     else announce(t("compose.added", { n: 1 }));
   }
   function editText(id: string) {
     const it = composer.items.find((i) => i.id === id);
-    if (it) openEditor(id, it.text ?? "");
+    if (it) openEditor(id, it.text ?? "", it.base);
   }
 
   // ---------- Vocal (Task 12) ----------
@@ -181,14 +191,51 @@
     if (r.files.length > 0) void addFiles(r.files, "collage");
     else if (r.text !== null && !editorOpen) openEditor(null, r.text);
   }
-  async function pasteButton() {
+  // ---------- Ordinateur : tout le composeur dans l'écran, sans défilement de page ----------
+  // Exigence du propriétaire : à 1440 × 900 comme à 1920 × 1080, en-tête, capacité, liste,
+  // options, phrase et bouton d'envoi tiennent dans l'écran ; seule la liste défile au besoin.
+  // Hauteur de l'app = hauteur de l'écran − ce qui est au-dessus − ce qui est en dessous (mesurés).
+  function fitViewport(node: HTMLElement) {
+    let raf = 0;
+    const fit = () => {
+      raf = 0;
+      node.style.removeProperty("--app-h");
+      const top = node.getBoundingClientRect().top + scrollY;
+      const tail = document.documentElement.scrollHeight - (top + node.offsetHeight);
+      node.style.setProperty("--app-h", `${Math.max(520, Math.floor(innerHeight - top - tail))}px`);
+    };
+    const queue = () => {
+      if (!raf) raf = requestAnimationFrame(fit);
+    };
+    fit();
+    // Après la transition de vue et le chargement des polices, la place au-dessus peut changer.
+    const late = setTimeout(queue, 500);
+    void document.fonts?.ready.then(queue);
+    addEventListener("resize", queue);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(late);
+      removeEventListener("resize", queue);
+      node.style.removeProperty("--app-h");
+    };
+  }
+  // Ordinateur, composeur ouvert : pied de page resserré (règle globale plus bas).
+  $effect(() => {
+    document.documentElement.classList.toggle("composing", filled && !narrow);
+    return () => document.documentElement.classList.remove("composing");
+  });
+
+  // ---------- Nettoyer tous les fichiers ----------
+  const anyNotCleanedFiles = $derived(composer.items.some((i) => i.kind === "file" && i.clean === "non_nettoye"));
+  let cleaning = $state(false);
+  async function cleanAll() {
+    cleaning = true;
     try {
-      const r = await fromClipboardRead(await navigator.clipboard.read(), (n, ext) => `${t("compose.name.pasted", { n })}.${ext}`);
-      if (r.files.length > 0) await addFiles(r.files, "collage");
-      else if (r.text !== null) openEditor(null, r.text);
-      else say(t("compose.paste.empty"));
-    } catch (err) {
-      say(err instanceof DOMException && err.name === "NotAllowedError" ? t("compose.paste.denied") : t("compose.paste.empty"));
+      const r = await composer.cleanAll(cleanFile);
+      if (r.cleaned.length > 0) say(t("compose.clean.done", { n: r.cleaned.length }));
+      if (r.failed.length > 0) say(t("compose.clean.failed", { names: r.failed.join(", ") }));
+    } finally {
+      cleaning = false;
     }
   }
 
@@ -259,7 +306,7 @@
     composer.moveTo(id, index);
     sayPosition(id);
   }
-  const CAT = { texte: "compose.cat.text", photos: "compose.cat.photos", videos: "compose.cat.videos", audio: "compose.cat.audio", documents: "compose.cat.documents", autres: "compose.cat.autres" } as const;
+  const CAT = { texte: "compose.cat.text", photos: "compose.cat.photos", videos: "compose.cat.videos", audio: "compose.cat.audio", documents: "compose.cat.documents", archives: "compose.cat.archives", autres: "compose.cat.autres" } as const;
   function sayPosition(id: string) {
     const it = composer.items.find((i) => i.id === id);
     const p = composer.positionOf(id);
@@ -305,6 +352,15 @@
     menuError = null;
     menuId = id;
   }
+  /** Renommer directement (tableau des documents) : la feuille s'ouvre sur le champ. */
+  function openRename(id: string) {
+    const it = composer.items.find((i) => i.id === id);
+    if (!it) return;
+    menuDraft = it.base;
+    menuError = null;
+    menuRenaming = true;
+    menuId = id;
+  }
   function menuEdit() {
     const it = menuItem;
     if (!it) return;
@@ -328,7 +384,6 @@
     menuId = null;
     if (id) void tick().then(() => remove(id));
   }
-  const anyNotCleaned = $derived(composer.items.some((i) => i.clean === "non_nettoye"));
 
   function send() {
     if (reasonText) return;
@@ -354,37 +409,55 @@
 <svelte:window ononline={() => (online = true)} onoffline={() => (online = false)} />
 <svelte:document onpaste={onPaste} />
 
-{#snippet chip(label: string, Icon: typeof Lock, onclick: () => void)}
-  <button type="button" class="chip" {onclick}>
-    <Icon size={20} strokeWidth={1.75} aria-hidden="true" />
+{#snippet create(label: string, Icon: typeof Lock, onclick: () => void)}
+  <button type="button" class="mk" {onclick}>
+    <Icon size={18} strokeWidth={1.8} aria-hidden="true" />
     <span>{label}</span>
   </button>
 {/snippet}
 
 {#snippet app()}
-  <div class={["app", { narrow }]}>
+  <div class={["app", { narrow }]} {@attach narrow ? null : fitViewport}>
     <div class="list-col">
       <div class="top">
-        <div class="tt">
-          <h2 id="compose-title" class="title" tabindex="-1" bind:this={title}>{t("compose.title")}</h2>
-          <span class="count num">{t("compose.summary", { n: composer.count, size: formatBytes(composer.totalBytes, lang) })}</span>
-        </div>
+        <h2 id="compose-title" class="title" tabindex="-1" bind:this={title}>{t("compose.title")}</h2>
         <button type="button" class="clear" onclick={clearAll}><X size={16} strokeWidth={2} aria-hidden="true" />{t("compose.clear")}</button>
+        <div class="cap"><CapacityGauge bytes={composer.totalBytes} count={composer.count} head /></div>
       </div>
 
-      <div class={["adds", { scroll: narrow }]} role="group" aria-label={t("compose.add.label")}>
-        {@render chip(t("compose.add.files"), Paperclip, () => filesIn?.click())}
-        {@render chip(t("compose.add.photo"), Camera, () => photoIn?.click())}
-        {@render chip(t("compose.add.video"), Video, () => videoIn?.click())}
-        {#if canVoice}{@render chip(t("compose.add.voice"), Mic, () => act("vocal"))}{/if}
-        {@render chip(t("compose.add.text"), Type, () => act("texte"))}
-        {#if canPaste}{@render chip(t("compose.add.paste"), ClipboardPaste, () => act("coller"))}{/if}
+      <!-- Ajouter : une zone de dépôt (un clic ouvre le sélecteur), puis « Créer sur place ». -->
+      <div class="adder">
+      <button type="button" class="dropzone" onclick={() => filesIn?.click()}>
+        <span class="dz-ic" aria-hidden="true"><Upload size={20} strokeWidth={1.8} /></span>
+        <span class="dz-tx">
+          <span class="dz-t">{coarse ? t("compose.dropzone.touch") : t("compose.dropzone.title")}</span>
+          {#if !coarse}<span class="dz-s">{t("compose.dropzone.sub", { keys: pasteKeys })}</span>{/if}
+        </span>
+      </button>
+      <div class="make" role="group" aria-label={t("compose.create.label")}>
+        {@render create(t("compose.create.note"), NotebookPen, () => act("texte"))}
+        {@render create(t("compose.create.voice"), Mic, () => act("vocal"))}
+        {#if coarse}
+          {@render create(t("compose.add.photo"), Camera, () => photoIn?.click())}
+          {@render create(t("compose.add.video"), Video, () => videoIn?.click())}
+        {/if}
+      </div>
       </div>
       <input bind:this={filesIn} type="file" multiple hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "fichiers")} />
       <input bind:this={photoIn} type="file" accept="image/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "photo")} />
       <input bind:this={videoIn} type="file" accept="video/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "video")} />
-      {#if !narrow}<p class="drop-hint">{t("compose.drop.hint", { keys: pasteKeys })}</p>{/if}
 
+      {#if anyNotCleanedFiles}
+        <div class="cleanbar">
+          <button type="button" class="cleanbtn" aria-busy={cleaning} disabled={cleaning} onclick={cleanAll}>
+            <BrushCleaning size={18} strokeWidth={1.8} aria-hidden="true" />{t("compose.clean.all")}
+          </button>
+          <span class="cl-t">{t("compose.meta.legend")}</span>
+        </div>
+      {/if}
+
+      <!-- Seule la liste défile (ordinateur) : la page, jamais. -->
+      <div class="lc-scroll">
       {#if notes.length > 0}
         <ul class="notes">
           {#each notes as n (n.id)}
@@ -412,6 +485,7 @@
             onmoveto={moveTo}
             compact={narrow}
             onmenu={openMenu}
+            onrenamesheet={openRename}
             {cannotOpen}
           />
         {/each}
@@ -419,7 +493,7 @@
 
       <div class="trust">
         <p><Lock size={15} strokeWidth={2} aria-hidden="true" />{t("compose.trust.names")}</p>
-        {#if anyNotCleaned}<p class="legend"><ShieldAlert size={15} strokeWidth={2} aria-hidden="true" />{t("compose.meta.legend")}</p>{/if}
+      </div>
       </div>
     </div>
 
@@ -435,10 +509,13 @@
         {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{/if}
       </div>
     {:else}
+      <!-- Ordinateur : colonne collée, défilement propre, pied collé : le bouton reste visible. -->
       <div class="side">
-        <Options {options} {pwResult} {unviewable} {vaultShown} {estimate} pwErrorId={optionsBlock ? "send-reason" : undefined} />
-        <div class="sendbar" bind:clientHeight={barH}>
-          <CapacityGauge bytes={composer.totalBytes} count={composer.count} />
+        <div class="side-scroll">
+          <Options {options} {pwResult} {unviewable} {vaultShown} {estimate} part="controls" pwErrorId={optionsBlock ? "send-reason" : undefined} />
+        </div>
+        <div class="sendbar foot">
+          <Options {options} {pwResult} {unviewable} {vaultShown} {estimate} part="summary" />
           <Button variant="primary" lock disabled={reasonText !== ""} aria-describedby={reasonText ? "send-reason" : undefined} onpress={send}>{t("options.submit")}</Button>
           {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{/if}
         </div>
@@ -451,6 +528,20 @@
 
 <Sheet bind:open={editorOpen} title={editorId ? t("text.title.edit") : t("text.title.new")}>
   <div class="editor">
+    <TextField
+      label={t("text.title.label")}
+      bind:value={editorTitle}
+      bind:el={titleEl}
+      placeholder={t("compose.name.note")}
+      hint={t("text.title.hint")}
+      maxlength={NAME_MAX}
+      autocomplete="off"
+      {...{ autocorrect: "off" } as Record<string, string>}
+      autocapitalize="off"
+      spellcheck={false}
+      translate="no"
+      enterkeyhint="next"
+    />
     <TextArea
       label={t("text.label")}
       bind:value={editorText}
@@ -523,7 +614,8 @@
 </Sheet>
 
 <Sheet bind:open={voiceOpen} title={t("compose.voice.title")}>
-  <p class="soon">{t("compose.soon.voice")}</p>
+  <!-- VOICE_RECORDER_READY : héberger ici <VoiceRecorder onrecorded={(file) => …} /> (autre chantier). -->
+  {#if !VOICE_RECORDER_READY}<p class="soon">{t("compose.soon.voice")}</p>{/if}
 </Sheet>
 
 {#if toast}
@@ -559,12 +651,159 @@
   .side {
     display: contents;
   }
+  /* En-tête : « Votre envoi », « Tout retirer », et la capacité bien visible (nombre et taille). */
   .top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    padding-inline: 4px;
+  }
+  .cap {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  /* Zone de dépôt : un clic ouvre le sélecteur ; on peut aussi déposer n'importe où sur la page. */
+  .dropzone {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: var(--sp-3);
-    padding-inline: 4px;
+    gap: var(--sp-4);
+    width: 100%;
+    min-height: 72px;
+    padding: var(--sp-3) var(--sp-4);
+    border: 1.5px dashed rgb(233 236 242 / 0.2);
+    border-radius: 18px;
+    background: rgb(255 255 255 / 0.025);
+    color: var(--text);
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      border-color var(--dur-fast) var(--ease-out),
+      background-color var(--dur-fast) var(--ease-out),
+      transform var(--dur-press) var(--ease-out);
+  }
+  .dropzone:active {
+    transform: scale(0.99);
+  }
+  @media (hover: hover) {
+    .dropzone:hover {
+      border-color: rgb(95 227 181 / 0.55);
+      background: rgb(95 227 181 / 0.05);
+    }
+    .dropzone:hover .dz-ic {
+      color: var(--accent);
+      transform: translateY(-2px);
+    }
+  }
+  :global(.vessel.drop) .dropzone {
+    border-color: var(--accent);
+    background: rgb(95 227 181 / 0.08);
+  }
+  .dz-ic {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: rgb(255 255 255 / 0.06);
+    color: var(--text-2);
+    transition:
+      color var(--dur-fast) var(--ease-out),
+      transform 400ms var(--ease-settle);
+  }
+  .dz-tx {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+  .dz-t {
+    font-weight: 600;
+  }
+  .dz-s {
+    color: var(--text-2);
+    font-size: var(--fs-small);
+  }
+  .make {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+  .mk {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 14px 0 12px;
+    border: 0;
+    border-radius: var(--r-pill);
+    background: rgb(255 255 255 / 0.05);
+    box-shadow: inset 0 0 0 1px var(--hair);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--fs-small);
+    font-weight: 560;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      background-color var(--dur-fast) var(--ease-out),
+      transform var(--dur-press) var(--ease-out);
+  }
+  .mk :global(svg) {
+    color: var(--text-2);
+  }
+  .mk:active {
+    transform: scale(0.96);
+  }
+  @media (hover: hover) {
+    .mk:hover {
+      background: rgb(255 255 255 / 0.09);
+    }
+    .mk:hover :global(svg) {
+      color: var(--accent);
+    }
+  }
+  .cleanbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: var(--warn-tint);
+  }
+  .cleanbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--warn);
+    color: #1d1503;
+    font: inherit;
+    font-size: var(--fs-small);
+    font-weight: 620;
+    cursor: pointer;
+    transition: transform var(--dur-press) var(--ease-out);
+  }
+  .cleanbtn:active {
+    transform: scale(0.97);
+  }
+  .cleanbtn:disabled {
+    cursor: progress;
+    opacity: 0.7;
+  }
+  .cl-t {
+    flex: 1 1 14rem;
+    color: var(--text);
+    font-size: var(--fs-small);
   }
   .title {
     font-size: var(--fs-h3);
@@ -592,67 +831,6 @@
     .clear:hover {
       color: var(--text);
       background: rgb(255 255 255 / 0.05);
-    }
-  }
-  .adds {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 2.875rem), 1fr));
-    gap: 6px;
-  }
-  .chip {
-    display: grid;
-    justify-items: center;
-    align-content: center;
-    gap: 4px;
-    min-width: 0;
-    min-height: 64px;
-    padding: var(--sp-2) 2px;
-    border: 0;
-    border-radius: 16px;
-    background: rgb(255 255 255 / 0.045);
-    box-shadow:
-      inset 0 0 0 1px var(--hair),
-      inset 0 1px 0 rgb(255 255 255 / 0.05);
-    color: var(--text);
-    font: inherit;
-    font-size: var(--fs-micro);
-    font-weight: 560;
-    cursor: pointer;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-    transition:
-      background-color var(--dur-fast) var(--ease-out),
-      transform var(--dur-press) var(--ease-out);
-  }
-  .chip span {
-    max-width: 100%;
-    overflow-wrap: anywhere;
-  }
-  .chip :global(svg) {
-    color: var(--text-2);
-    transition: color var(--dur-fast) var(--ease-out);
-  }
-  @media (hover: hover) {
-    .chip:hover {
-      background: rgb(255 255 255 / 0.075);
-    }
-    .chip:hover :global(svg) {
-      color: var(--accent);
-    }
-  }
-  .chip:active {
-    transform: scale(0.95);
-  }
-  .drop-hint {
-    display: none;
-    margin: 0;
-    padding-inline: 4px;
-    color: var(--text-3);
-    font-size: var(--fs-small);
-  }
-  @media (hover: hover) and (pointer: fine) {
-    .drop-hint {
-      display: block;
     }
   }
   .notes {
@@ -723,9 +901,6 @@
     margin-top: 2px;
     color: var(--accent);
   }
-  .trust .legend :global(svg) {
-    color: var(--warn);
-  }
 
   /* Barre d'actions : jauge, estimation, bouton ; collée en bas sur téléphone (zone du pouce). */
   .sendbar {
@@ -750,46 +925,9 @@
     font-size: 1.0625rem;
   }
 
-  /* ---------- En-tête et ajouts ---------- */
-  .tt {
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-  }
-  .count {
-    color: var(--text-2);
-    font-size: var(--fs-small);
-  }
-  /* Téléphone : rangée de pastilles qui défile à l'horizontale, comme une app. */
-  .adds.scroll {
-    display: flex;
-    gap: var(--sp-2);
-    margin-inline: calc(-1 * var(--sp-3));
-    padding: 2px var(--sp-3) 4px;
-    overflow-x: auto;
-    scroll-snap-type: x proximity;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-  }
-  /* Bords qui s'estompent : on devine qu'il y a d'autres pastilles. */
-  .adds.scroll {
-    -webkit-mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 28px), transparent);
-    mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 28px), transparent);
-  }
-  .adds.scroll::-webkit-scrollbar {
-    display: none;
-  }
-  .adds.scroll .chip {
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 44px;
-    padding: 0 16px 0 12px;
-    border-radius: var(--r-pill);
-    font-size: var(--fs-small);
-    scroll-snap-align: start;
-  }
+  
+  
+  
 
   /* ---------- Barre d'envoi du téléphone ---------- */
   .sendbar.m {
@@ -973,46 +1111,133 @@
       padding-inline: var(--sp-5);
     }
   }
-  /* Ordinateur : deux colonnes, composer | options ; le bouton en fin de colonne, collé en bas. */
+  /* Ordinateur : l'app tient dans l'écran (hauteur --app-h mesurée) ; seule la liste défile.
+     760–1179 px : deux colonnes (liste | options avec l'envoi en pied) ; ≥ 1180 px : trois
+     colonnes (liste | réglages | phrase, estimation et envoi). */
   @media (min-width: 760px) {
     .app {
-      grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
-      column-gap: 40px;
-      padding: var(--sp-6) var(--sp-6) var(--sp-6);
+      height: var(--app-h, auto);
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+      grid-template-rows: minmax(0, 1fr);
+      column-gap: 32px;
+      padding: var(--sp-5) var(--sp-5) var(--sp-5);
+    }
+    .list-col {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-3);
+      min-height: 0;
+    }
+    .adder {
+      display: flex;
+      align-items: stretch;
+      gap: var(--sp-2);
+    }
+    .adder .dropzone {
+      flex: 1 1 auto;
+      min-height: 60px;
+      padding-block: 8px;
+    }
+    .adder .make {
+      flex: none;
+      flex-direction: column;
+      flex-wrap: nowrap;
+      justify-content: center;
+      gap: 6px;
+    }
+    .adder .mk {
+      min-height: 44px;
+    }
+    /* position: relative : les éléments « sr-only » (absolus) restent dans le défilement de la liste. */
+    .lc-scroll {
+      position: relative;
+      flex: 1 1 auto;
+      min-height: 0;
+      display: grid;
+      align-content: start;
+      gap: var(--sp-2);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      margin-inline-end: -10px;
+      padding-inline-end: 10px;
+      scrollbar-width: thin;
+      scrollbar-color: rgb(233 236 242 / 0.18) transparent;
     }
     .side {
-      display: grid;
-      gap: var(--sp-5);
-      align-content: start;
-      padding-inline-start: 40px;
-      margin-inline-start: -40px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      padding-inline-start: 32px;
+      margin-inline-start: -32px;
       border-inline-start: 1px solid var(--hair);
     }
-    .sendbar {
+    .side-scroll {
+      position: relative;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      margin-inline-end: -10px;
+      padding: 2px 10px var(--sp-4) 2px;
+      scrollbar-width: thin;
+      scrollbar-color: rgb(233 236 242 / 0.18) transparent;
+    }
+    .sendbar.foot {
+      position: static;
+      flex: none;
+      display: grid;
+      gap: var(--sp-3);
       margin: 0;
-      padding: var(--sp-4) 0 var(--sp-2);
+      padding: var(--sp-4) 0 0;
       border-radius: 0;
-      background: #0f1218;
+      background: none;
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
-      box-shadow:
-        0 -28px 24px -12px #0f1218,
-        0 -1px 0 var(--hair);
+      box-shadow: 0 -1px 0 var(--hair);
     }
+  }
+  @media (min-width: 1180px) {
+    .app {
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 360px) minmax(220px, 270px);
+      column-gap: 36px;
+      padding: var(--sp-5) 32px;
+    }
+    .side {
+      display: contents;
+    }
+    .side-scroll {
+      margin: 0;
+      padding: 2px 10px 0 36px;
+      margin-inline-start: -36px;
+      border-inline-start: 1px solid var(--hair);
+    }
+    .sendbar.foot {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-4);
+      min-height: 0;
+      padding: 0 0 0 36px;
+      margin-inline-start: -36px;
+      border-inline-start: 1px solid var(--hair);
+      box-shadow: none;
+    }
+    .sendbar.foot :global(.btn) {
+      margin-top: auto;
+    }
+  }
+  /* Composeur ouvert sur ordinateur : le pied de page se resserre pour tenir dans l'écran. */
+  :global(html.composing footer.foot) {
+    margin-block-start: 0;
+    padding-block: var(--sp-2);
+  }
+  :global(html.composing main) {
+    min-height: 0;
+    padding-block: var(--sp-3) var(--sp-2);
   }
 
   .editor {
     display: grid;
     gap: var(--sp-3);
-  }
-  .count {
-    margin: -6px 0 0;
-    color: var(--text-3);
-    font-size: var(--fs-small);
-    text-align: end;
-  }
-  .count.over {
-    color: var(--danger);
   }
   .ed-acts {
     display: flex;
@@ -1055,16 +1280,11 @@
       transform 500ms var(--ease-settle);
   }
   @media (prefers-reduced-motion: reduce) {
-    .chip,
     .floating {
       transition: none;
     }
-    .chip:active {
-      transform: none;
-    }
   }
   @media (forced-colors: active) {
-    .chip,
     .cnote {
       border: 1px solid ButtonText;
       box-shadow: none;

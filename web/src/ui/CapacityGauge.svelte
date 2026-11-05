@@ -7,9 +7,9 @@
   import { getLang, t } from "../i18n/i18n.svelte";
   import { announce } from "./announce";
 
-  /** `mini` : une ligne, pour la barre d'envoi du téléphone. */
-  type Props = { bytes: number; count: number; mini?: boolean };
-  let { bytes, count, mini = false }: Props = $props();
+  /** `mini` : une ligne, pour la barre d'envoi du téléphone ; `head` : en-tête de la liste. */
+  type Props = { bytes: number; count: number; mini?: boolean; head?: boolean };
+  let { bytes, count, mini = false, head = false }: Props = $props();
 
   const lang = $derived(getLang());
   const max = $derived(formatBytes(CONTENT_MAX, lang));
@@ -38,17 +38,30 @@
 
 {#if count === 0}
   <p class="empty num">{t("compose.gauge.empty", { size: max, n: MAX_ITEMS })}</p>
-{:else if mini}
-  <div class={["mini", level]}>
+{:else if head}
+  <div class={["gh", level]}>
     <span id="{uid}-s" class="sr-only">{t("compose.gauge.sizeLabel")}</span>
     <span id="{uid}-c" class="sr-only">{t("compose.gauge.countLabel")}</span>
+    <p class="ht num">
+      <span role="meter" aria-labelledby="{uid}-c" aria-valuemin="0" aria-valuemax={MAX_ITEMS} aria-valuenow={count} aria-valuetext={countText}
+        ><b>{count}</b>{t("compose.capacity.count", { n: "", max: MAX_ITEMS })}</span
+      ><span class="dot" aria-hidden="true">{" · "}</span><span aria-hidden="true"><b>{formatBytes(bytes, lang)}</b> / {max}</span>
+    </p>
     <div class="bar" role="meter" aria-labelledby="{uid}-s" aria-valuemin="0" aria-valuemax={CONTENT_MAX} aria-valuenow={Math.min(bytes, CONTENT_MAX)} aria-valuetext={sizeText}>
       <span class="fill" style:--r={Math.min(1, ratio)}></span>
     </div>
-    <span class="v num" aria-hidden="true"><b>{formatBytes(bytes, lang)}</b> / {max}</span>
-    <span class="v num c" role="meter" aria-labelledby="{uid}-c" aria-valuemin="0" aria-valuemax={MAX_ITEMS} aria-valuenow={count} aria-valuetext={countText}><b>{count}</b> / {MAX_ITEMS}</span>
+    {#if level === "near"}<span class="near">{t("compose.gauge.near")}</span>{/if}
   </div>
   {#if level === "over"}<p class="over-msg" role="alert">{overText}</p>{/if}
+{:else if mini}
+  <!-- Rappel visuel de la barre du téléphone : les mesures accessibles sont dans l'en-tête. -->
+  <div class={["mini", level]} aria-hidden="true">
+    <div class="bar">
+      <span class="fill" style:--r={Math.min(1, ratio)}></span>
+    </div>
+    <span class="v num" aria-hidden="true"><b>{formatBytes(bytes, lang)}</b> / {max}</span>
+    <span class="v num c"><b>{count}</b> / {MAX_ITEMS}</span>
+  </div>
 {:else}
   <div class={["gauge", level]}>
     <div class="m">
@@ -83,6 +96,34 @@
 {/if}
 
 <style>
+  .gh {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .ht {
+    margin: 0;
+    color: var(--text-2);
+    font-size: 0.9375rem;
+  }
+  .ht b {
+    color: var(--text);
+    font-weight: 640;
+  }
+  .gh .bar {
+    height: 6px;
+    border-radius: 3px;
+  }
+  .gh.near .fill {
+    background: var(--warn);
+  }
+  .gh.over .fill {
+    background: var(--danger);
+  }
+  .gh.over .ht b {
+    color: var(--danger);
+  }
   .mini {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;

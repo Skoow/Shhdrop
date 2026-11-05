@@ -103,7 +103,7 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 | Durée de vie | au choix 1 h, 6 h, 12 h, 24 h ; comptée **à partir de la fin de l'envoi** ; expiration arrondie au **quart d'heure supérieur** |
 | Ouvertures | au choix 1 à 10 ; **une ouverture = un déverrouillage réussi** (recharger la page en consomme une, c'est affiché) |
 | Fin de vie | le premier atteint : durée, ouvertures épuisées, destruction (expéditeur, destinataire, administrateur), signalement, 5 mots de passe faux |
-| Mot de passe | → §31 (8 caractères générés par défaut). Avant v2.6 : obligatoire ; généré par défaut : **4 mots** tirés d'une liste de 7 776 mots (≈ 52 bits) ; personnalisé : 12 caractères minimum et absent d'une liste noire des mots de passe courants (contrôle côté navigateur : le serveur ne peut pas le vérifier) |
+| Mot de passe | → §31 (10 caractères générés par défaut, 10 au moins si saisi). Avant v2.6 : obligatoire ; généré par défaut : **4 mots** tirés d'une liste de 7 776 mots (≈ 52 bits) ; personnalisé : 12 caractères minimum et absent d'une liste noire des mots de passe courants (contrôle côté navigateur : le serveur ne peut pas le vérifier) |
 | Essais de mot de passe | 5 ratés → destruction |
 | Création de partages | 10 par jour par connexion (IPv4, ou bloc IPv6 /64) ; 30 par jour par bloc /48 ; 3 Gio utiles par jour par connexion et 6 Gio par bloc /48 (§24) |
 | Limite de débit | 60 requêtes par minute par connexion sur les routes publiques ; les envois et téléchargements de segments porteurs d'un jeton valide ont leur propre limite, 600 par minute par connexion et 6 000 par bloc /48 (§24) ; un segment au jeton invalide compte dans les 60 |
@@ -985,8 +985,9 @@ Le test « le serveur ne voit rien » ajoute un repère de mot de passe saisi **
 
 ---
 
-## 31. Décision du propriétaire (v2.6) — mot de passe par défaut de 8 caractères
+## 31. Décision du propriétaire (v2.6) — mot de passe par défaut de 8 caractères, porté à 10
 
+- **Mise à jour (5 novembre, décision du propriétaire, Q-MDP1 réglée)** : le mot de passe généré fait **10 caractères** (même alphabet, mêmes quatre familles) : 594 641 958 752 747 520 possibilités, soit **2^59,0** (environ 4,7 millions d'années-GPU en moyenne avec l'hypothèse ci-dessous). Un mot de passe saisi doit faire **10 caractères au moins** (au lieu de 12) et rester absent de la liste noire : le même seuil pour tous. `isGeneratedPassword` reste un raccourci, plus une exception de longueur. Les passages ci-dessous qui disent 8 et 12 caractères sont remplacés par cette ligne ; le code du coffre (§27.2) suit la même règle de 10 caractères.
 - Remplace la phrase de 4 mots de §4 comme défaut. `generatePassword()` tire 8 caractères dans un alphabet de 64 sans caractères ambigus : minuscules sans `l` ni `o` (24), majuscules sans `I` ni `O` (24), chiffres `2` à `9` (8), symboles `! # $ % + = ? @` (8). Tirage uniforme par `crypto.getRandomValues` (64 = 2⁶ : aucun biais), recommencé jusqu'à ce que les quatre familles soient présentes. Bouton **« Générer un autre »**, sans limite ; la personne peut saisir le sien.
 - **Nombre exact** : 107 294 591 287 296 mots de passe possibles (4 familles présentes), soit **2^46,6** ; ce n'est pas 50 bits (2⁴⁸ sans la contrainte des familles).
 - Le mot de passe généré a un type marqué (`GeneratedPassword`) accepté à 8 caractères ; un mot de passe saisi reste soumis à `checkPassword` (12 caractères, liste noire), un humain choisissant moins bien qu'un tirage.
