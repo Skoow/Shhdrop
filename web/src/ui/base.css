@@ -1,0 +1,80 @@
+/* Base : fond, lumière d'ambiance, sélection, focus, chiffres (UI §2, §3, §4). */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background-color: var(--bg);
+  /* Lumière d'ambiance : un seul champ, menthe à 6 %, 120 vw, fixe, au-dessus du haut de l'écran. */
+  background-image: radial-gradient(circle 60vw at 50% -10vh, rgb(95 227 181 / 0.06), transparent);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  font-weight: var(--fw-body);
+  font-stretch: var(--wd-body);
+  caret-color: var(--accent);
+  scrollbar-color: var(--line-strong) var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--selection);
+  color: var(--text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  text-wrap: balance;
+}
+h1 {
+  font-size: var(--fs-h1);
+  line-height: var(--lh-h1);
+  font-weight: var(--fw-h1);
+  font-stretch: var(--wd-h1);
+}
+h2 {
+  font-size: var(--fs-h2);
+  line-height: var(--lh-h2);
+  font-weight: var(--fw-h2);
+  font-stretch: var(--wd-h2);
+}
+h3 {
+  font-size: var(--fs-h3);
+  line-height: var(--lh-h3);
+  font-weight: var(--fw-h3);
+  font-stretch: var(--wd-h3);
+}
+p {
+  text-wrap: pretty;
+  max-width: 65ch;
+}
+
+/* Chiffres tabulaires : jauge, progression, vitesse, compte à rebours, tailles. */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-contrast: more), (forced-colors: active) {
+  body {
+    background-image: none;
+  }
+}

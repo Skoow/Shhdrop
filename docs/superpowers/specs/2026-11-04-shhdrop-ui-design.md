@@ -159,9 +159,9 @@ Calculés pour cette spécification ; la tâche « jetons » du plan les recalcu
 |---|---|---|
 | `--text` / `--bg` | 16,42 | 4,5 |
 | `--text` / `--surface-2` | 14,24 | 4,5 |
-| `--text` / `--surface-3` | 12,86 | 4,5 |
+| `--text` / `--surface-3` | 12,92 | 4,5 |
 | `--text-2` / `--surface-2` | 7,55 | 4,5 |
-| `--text-2` / `--surface-3` | 6,82 | 4,5 |
+| `--text-2` / `--surface-3` | 6,85 | 4,5 |
 | `--text-3` / `--surface-2` | 5,45 | 4,5 |
 | `--accent` / `--bg` | 12,16 | 3 (focus, bord) |
 | `--on-accent` / `--accent` | 11,80 | 4,5 |
@@ -170,7 +170,7 @@ Calculés pour cette spécification ; la tâche « jetons » du plan les recalcu
 | `--on-danger` / `--danger` | 8,58 | 4,5 |
 | `--danger` / `--danger-tint` | 7,61 | 4,5 |
 | `--warn` / `--warn-tint` | 9,57 | 4,5 |
-| `--warn` / `--surface-2` | 9,17 | 4,5 |
+| `--warn` / `--surface-2` | 10,34 | 4,5 |
 | `--accent` / `--accent-tint` | 9,54 | 4,5 |
 | `--info` / `--surface-2` | 7,98 | 4,5 |
 | `--line-strong` / `--surface-2` | 3,50 | 3 (bord de champ) |
