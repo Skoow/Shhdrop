@@ -12,11 +12,17 @@ export {
   fetchMeta,
   openShare,
   shareStatus,
+  type CaptchaCtx,
+  type CaptchaProof,
   type CreateOpts,
   type Net,
   type Opened,
   type PreviewKind,
 } from "./transfer/client";
+export { prepareCaptcha, type PreparedCaptcha } from "./transfer/prepare";
+export { SERVER_STALL_MS } from "./transfer/upload";
+export { safeName as cleanName } from "./transfer/safety";
+export { PREVIEW_MAX } from "./crypto/container";
 export { manageLink, parseLink, shareLink, type ParsedLink } from "./transfer/link";
 export { PASSPHRASE_MIN_WORDS, PW_MIN_CHARS, checkPassword, generatePassphrase, type PwCheck } from "./crypto/passphrase";
 export type { Item, Manifest, ManifestEntry } from "./crypto/container";

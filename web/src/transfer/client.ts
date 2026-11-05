@@ -18,9 +18,12 @@ import {
 import type { KLien } from "../crypto/types";
 import * as api from "./api";
 import { checkOrigin, manageLink, parseLink, shareLink, type ParsedLink } from "./link";
+import { readCaptcha, takeCaptcha, type PreparedCaptcha } from "./prepare";
 import { isRiskyName, previewKindOf, safeName, type PreviewKind } from "./safety";
+import { SERVER_STALL_MS, abortError } from "./upload";
 
 export type { Net } from "./api";
+export type { PreparedCaptcha } from "./prepare";
 export type { PreviewKind } from "./safety";
 
 /** Paramètres Argon2id des nouveaux partages : ceux qu'impose deriveContentForCreate. */
@@ -72,9 +75,10 @@ function readerError(e: unknown): Error {
   return new NotFoundError();
 }
 
-// Erreurs côté expéditeur (createShare) : 404 → NotFoundError (envoi échu), 429 → LimitError,
-// autre code HTTP → Error(code du serveur) ; le reste tel quel.
-function senderError(e: unknown): unknown {
+// Erreurs côté expéditeur (createShare, prepareCaptcha) : 404 → NotFoundError (envoi échu),
+// 429 → LimitError, autre code HTTP → Error(code du serveur) ; le reste tel quel
+// (Error("reseau"), AbortError, erreurs locales).
+export function senderError(e: unknown): unknown {
   if (e instanceof api.HttpError) {
     if (e.status === 404) return new NotFoundError();
     if (e.status === 429) return new LimitError(e.retryAfterS ?? 60);
@@ -110,23 +114,149 @@ function parseShare(link: string, expectedOrigin: string): Extract<ParsedLink, {
   return p;
 }
 
+/** Preuve anti-robot : preuve de travail ALTCHA (charge utile base64) ou jeton du repli reCAPTCHA. */
+export type CaptchaProof = { kind: "pow"; payload: string } | { kind: "recaptcha"; token: string };
+/**
+ * Contexte de solveCaptcha. createShare passe toujours mode "pow" ; l'écran d'envoi impose
+ * "fallback" au dernier essai (UI §9.4.6). fallbackOrigin : null si le repli est désactivé.
+ */
+export type CaptchaCtx = { fallbackOrigin: string | null; mode: "pow" | "fallback" };
+
 export type CreateOpts = api.Net & {
   ttlHours: 1 | 6 | 12 | 24;
   maxOpens: number;
   password: string;
-  /** Résout le défi ALTCHA (objet renvoyé par GET /api/captcha, sans shown_at) ; rend la charge utile base64. */
-  solveCaptcha: (c: unknown) => Promise<string>;
+  /**
+   * Résout le défi (objet renvoyé par GET /api/captcha, sans shown_at ni fallback). Doit
+   * s'arrêter lui-même sur `signal` (Worker) ; createShare n'attend plus sa réponse après
+   * une annulation.
+   */
+  solveCaptcha: (challenge: unknown, ctx: CaptchaCtx) => Promise<CaptchaProof>;
+  /**
+   * Défi récupéré à l'avance (prepareCaptcha) et sa preuve en cours de calcul : utilisés
+   * s'il reste plus de 15 s de validité (et une seule fois), sinon nouveau défi et solveCaptcha.
+   */
+  prepared?: { cap: PreparedCaptcha; proof: Promise<CaptchaProof> };
+  /** Segments acquittés (done, total). */
   onProgress?: (done: number, total: number) => void;
+  /** Octets chiffrés envoyés : maximum atteint (monotone), jusqu'au total exact du palier. */
+  onBytes?: (sent: number, total: number) => void;
+  /** Un PUT de segment ou finalize a échoué : nouvel essai dans inMs (ou dès l'événement `online`). */
+  onRetry?: (r: { attempt: number; inMs: number; offline: boolean }) => void;
+  /** Attendue avant chaque segment (pause). L'échéance SERVER_STALL_MS continue de courir. */
+  pause?: () => Promise<void> | void;
+  /** Annulation à tout moment → DOMException("AbortError") ; un partage déjà créé est détruit (keepalive). */
+  signal?: AbortSignal;
 };
+
+/** Validité minimale d'un défi préparé pour être utilisé. */
+const PREPARED_MIN_LEFT_MS = 15_000;
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError();
+}
+
+/** Attend `p`, mais rejette en AbortError dès l'annulation (p continue, son échec est absorbé). */
+function abortable<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (signal === undefined) return p;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    if (signal.aborted) onAbort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    p.then(
+      (v) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(v);
+      },
+      (e: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(e);
+      },
+    );
+  });
+}
+
+/** Attente interruptible : AbortError sur `signal` ; fin anticipée sur l'événement `online` si `wakeOnline`. */
+function sleep(ms: number, signal?: AbortSignal, wakeOnline = false): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const g = globalThis as { addEventListener?: typeof addEventListener; removeEventListener?: typeof removeEventListener };
+    const done = () => {
+      clearTimeout(t);
+      signal?.removeEventListener("abort", onAbort);
+      if (wakeOnline) g.removeEventListener?.("online", onOnline);
+    };
+    const onOnline = () => {
+      done();
+      resolve();
+    };
+    const onAbort = () => {
+      done();
+      reject(abortError());
+    };
+    const t = setTimeout(onOnline, ms);
+    if (signal?.aborted) return onAbort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (wakeOnline) g.addEventListener?.("online", onOnline);
+  });
+}
+
+const retryable = (e: unknown) =>
+  e instanceof TypeError || isNetwork(e) || (e instanceof api.HttpError && (e.status >= 500 || e.status === 429));
+
+/**
+ * Budget de coupure d'une étape de l'envoi (PUT de segment, finalize) : chaque essai est un
+ * seul appel ; coupure, 5xx ou 429 → nouvel essai après 1, 2, 4, 8, 16 puis 30 s
+ * (retry_after_s d'une 429 respecté ; essai immédiat sur `online`), tant que l'essai suivant
+ * part avant l'échéance `deadline` (dernier segment acquitté + SERVER_STALL_MS). Un essai en
+ * cours à l'échéance est interrompu. Au-delà : Error("reseau"). Les autres erreurs passent.
+ */
+async function withBudget<T>(deadline: number, o: CreateOpts, step: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    throwIfAborted(o.signal);
+    const ac = new AbortController();
+    const stop = () => ac.abort();
+    const timer = setTimeout(stop, Math.max(0, deadline - Date.now()));
+    o.signal?.addEventListener("abort", stop, { once: true });
+    try {
+      return await step(ac.signal);
+    } catch (e) {
+      throwIfAborted(o.signal);
+      if (ac.signal.aborted) throw new Error("reseau"); // échéance atteinte pendant l'essai
+      if (!retryable(e)) throw e;
+      let inMs = Math.min(30_000, 1000 * 2 ** (attempt - 1));
+      if (e instanceof api.HttpError && e.status === 429 && e.retryAfterS !== undefined) inMs = Math.max(inMs, e.retryAfterS * 1000);
+      if (Date.now() + inMs >= deadline) throw new Error("reseau");
+      const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+      o.onRetry?.({ attempt, inMs, offline });
+      await sleep(inMs, o.signal, true);
+    } finally {
+      clearTimeout(timer);
+      o.signal?.removeEventListener("abort", stop);
+    }
+  }
+}
+
+function proofFields(p: CaptchaProof, cap: api.Captcha): { altcha: string } | { recaptcha: string; captcha_salt: string } {
+  if (p.kind === "pow" && typeof p.payload === "string") return { altcha: p.payload };
+  if (p.kind === "recaptcha" && typeof p.token === "string") {
+    if (cap.salt === null) throw new api.BadResponse();
+    return { recaptcha: p.token, captcha_salt: cap.salt };
+  }
+  throw new Error("preuve_invalide");
+}
 
 /**
  * Crée un partage. Clés neuves à chaque appel (K_lien, sel, S_gestion). Le paquet est
  * chiffré en flux : chaque segment est produit juste avant son envoi, puis abandonné
- * (un seul segment chiffré en mémoire) ; en cas de nouvel essai, putSegment renvoie les
- * mêmes octets. Ordre : préparation (manifeste, palier), puis défi anti-robot (valable 2 min), puis création,
- * au plus tôt CAPTCHA_MIN_MS après la réception du défi — createShare attend lui-même
- * le temps restant (l'écran du Plan 2 peut s'y fier). En cas d'échec après la création,
- * l'envoi est détruit (au mieux) pour libérer la place réservée.
+ * (un seul segment chiffré en mémoire) ; en cas de nouvel essai, le même segment est renvoyé.
+ * Ordre : préparation (manifeste, palier), puis défi anti-robot (valable 2 min ; défi
+ * préparé s'il reste plus de 15 s), puis création, au plus tôt CAPTCHA_MIN_MS après la
+ * réception du défi — createShare attend lui-même le temps restant. Envoi : `pause` attendue
+ * avant chaque segment ; coupures réessayées jusqu'à l'échéance SERVER_STALL_MS (voir
+ * withBudget). La requête de création n'est jamais interrompue (sinon un partage créé
+ * resterait inconnu) : l'annulation est constatée juste après. En cas d'échec ou
+ * d'annulation après la création, l'envoi est détruit (au mieux, en keepalive) pour
+ * libérer la place réservée.
  */
 export async function createShare(
   origin: string,
@@ -136,7 +266,11 @@ export async function createShare(
   checkOrigin(origin);
   if (![1, 6, 12, 24].includes(o.ttlHours)) throw new Error("duree_invalide");
   if (!Number.isInteger(o.maxOpens) || o.maxOpens < 1 || o.maxOpens > 10) throw new Error("ouvertures_invalides");
+  // Une preuve préparée qui n'est pas utilisée peut échouer plus tard : jamais de rejet non géré.
+  o.prepared?.proof.catch(() => undefined);
+  throwIfAborted(o.signal);
   const c = api.ctx(origin, o);
+  const signal = o.signal;
 
   const kLien = newKLien();
   const salt = randomBytes(16);
@@ -150,12 +284,23 @@ export async function createShare(
       const keys = await deriveContentForCreate(kLien, o.password, salt);
       wipe.push(keys.kPreuve); // inutile à l'expéditeur
       const sealed = await sealStream(items, keys);
+      throwIfAborted(signal);
 
-      const cap = await api.captcha(c);
-      const shownAt = Date.now();
-      const altcha = await o.solveCaptcha(cap.challenge);
-      const wait = shownAt + CAPTCHA_MIN_MS - Date.now();
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      const pre = o.prepared;
+      let cap = pre && pre.cap.expiresAt - Date.now() > PREPARED_MIN_LEFT_MS ? takeCaptcha(pre.cap, origin) : undefined;
+      let proof: Promise<CaptchaProof>;
+      if (cap !== undefined) {
+        proof = pre!.proof;
+      } else {
+        const fresh = await abortable(readCaptcha(c), signal);
+        throwIfAborted(signal);
+        cap = takeCaptcha(fresh, origin)!;
+        proof = o.solveCaptcha(fresh.challenge, { fallbackOrigin: fresh.fallbackOrigin, mode: "pow" });
+      }
+      const fields = proofFields(await abortable(proof, signal), cap);
+      const wait = cap.receivedAt + CAPTCHA_MIN_MS - Date.now();
+      if (wait > 0) await sleep(wait, signal);
+      throwIfAborted(signal);
 
       const created = await api.create(c, {
         bucket: sealed.bucket,
@@ -166,22 +311,43 @@ export async function createShare(
         access_v: b64u(acc.vAcces),
         proof_v: b64u(keys.vPreuve),
         manage_v: b64u(await sha256(sGestion)),
-        altcha,
         hp: "",
         shown_at: cap.shownAt,
+        ...fields,
       });
+      // Le serveur efface un envoi sans segment depuis 15 min, à compter de la création.
+      let deadline = Date.now() + SERVER_STALL_MS;
       try {
+        throwIfAborted(signal);
         const total = sealed.segmentCount;
         if (created.segments !== total) throw new api.BadResponse();
+        let totalBytes = 0;
+        for (let n = 0; n < total; n++) totalBytes += segmentSize(sealed.bucket, n);
+        let acked = 0;
+        let shown = 0;
+        const bytes = (v: number) => {
+          if (v <= shown) return; // maximum atteint : un nouvel essai ne fait pas reculer
+          shown = v;
+          o.onBytes?.(v, totalBytes);
+        };
         o.onProgress?.(0, total);
+        o.onBytes?.(0, totalBytes);
         for (let n = 0; n < total; n++) {
-          await api.putSegment(c, created.id, created.uploadToken, n, await sealed.segment(n));
+          await abortable(Promise.resolve().then(() => o.pause?.()), signal);
+          throwIfAborted(signal);
+          const data = await sealed.segment(n);
+          await withBudget(deadline, o, (s) =>
+            api.putSegment(c, created.id, created.uploadToken, n, data, (b) => bytes(acked + Math.min(b, data.length)), s),
+          );
+          acked += data.length;
+          bytes(acked);
+          deadline = Date.now() + SERVER_STALL_MS;
           o.onProgress?.(n + 1, total);
         }
-        const expiresInS = await api.finalize(c, created.id, created.uploadToken);
+        const expiresInS = await withBudget(deadline, o, (s) => api.finalize(c, created.id, created.uploadToken, s));
         return { link: shareLink(origin, created.id, kLien), manage: manageLink(origin, created.id, sGestion), expiresInS };
       } catch (e) {
-        await api.destroy(c, created.id, { sGestion }).catch(() => undefined);
+        await api.destroy(c, created.id, { sGestion }, undefined, true).catch(() => undefined);
         throw e;
       }
     }, senderError);

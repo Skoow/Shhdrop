@@ -176,24 +176,39 @@ describe("réseau coupé pendant l'envoi", () => {
     const data = pseudo(5 * MIB, 4); // palier 80 → 2 segments
     const r = await share(srv(), [{ kind: "file", name: "a.bin", mime: "application/octet-stream", data }], 1, {
       fetch: flaky,
-      retryDelayMs: 20,
     });
-    expect(putAttempts).toBe(3);
+    expect(putAttempts).toBe(3); // budget de coupure : nouveaux essais après 1 s puis 2 s
     const o = await openShare(r.link, PW, srv().origin);
     expect(Buffer.from(await o.item(0)).equals(Buffer.from(data))).toBe(true);
     await o.done();
   });
-  it("abandon après 1 + 5 essais", async () => {
+  it("coupure persistante puis annulation : AbortError, le partage créé est détruit (keepalive)", async () => {
     let n = 0;
+    let manage = "";
+    let url = "";
+    const ac = new AbortController();
+    const destroyed: { status: number; keepalive: boolean | undefined }[] = [];
     const dead: typeof fetch = async (input, init) => {
       if (init?.method === "PUT") {
-        n++;
+        if (++n === 3) ac.abort(); // l'écran annule pendant la coupure
         throw new TypeError("fetch failed");
       }
-      return globalThis.fetch(input, init);
+      const r = await globalThis.fetch(input, init);
+      if (String(input).endsWith("/destroy")) {
+        url = String(input);
+        manage = (JSON.parse(String(init?.body)) as { manage: string }).manage;
+        destroyed.push({ status: r.status, keepalive: init?.keepalive });
+      }
+      return r;
     };
-    await expect(share(srv(), [textItem("x")], 1, { fetch: dead, retryDelayMs: 1 })).rejects.toThrow("reseau");
-    expect(n).toBe(6);
+    const e = await share(srv(), [textItem("x")], 1, { fetch: dead, signal: ac.signal }).catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(DOMException);
+    expect((e as DOMException).name).toBe("AbortError");
+    expect(n).toBe(3); // un appel par essai (1 s, puis 2 s d'attente)
+    expect(destroyed).toEqual([{ status: 204, keepalive: true }]);
+    // Le serveur n'a plus le partage : un second destroy avec S_gestion répond 404.
+    const again = await globalThis.fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ manage }) });
+    expect(again.status).toBe(404);
   });
 });
 
