@@ -27,7 +27,7 @@
     aria-describedby={describedBy}
   ></textarea>
   {#if hint}<p id="{uid}-hint" class="hint">{hint}</p>{/if}
-  {#if error}<p id="{uid}-err" class="err">{error}</p>{/if}
+  {#if error}<p id="{uid}-err" class="err" role="alert">{error}</p>{/if}
 </div>
 
 <style>

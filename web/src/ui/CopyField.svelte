@@ -6,13 +6,15 @@
   import Button from "./Button.svelte";
   import { Check, Copy } from "./Icon";
 
-  /** Tronque au milieu : le début (domaine) et la fin (fin de la clé) restent lisibles. */
-  function truncateMiddle(v: string, head = 24, tail = 12): string {
-    return v.length <= head + tail + 1 ? v : `${v.slice(0, head)}\u2026${v.slice(-tail)}`;
-  }
-
   type Props = { label: string; value: string };
   let { label, value }: Props = $props();
+
+  // Troncature au milieu par CSS seulement (la largeur décide) : une tête qui s'ellipse et une
+  // queue fixe. Le texte visible n'est pas sélectionnable : on ne peut pas copier une valeur
+  // tronquée ; la copie vient toujours de `value`.
+  const TAIL = 8;
+  const head = $derived(value.length > TAIL ? value.slice(0, -TAIL) : "");
+  const tail = $derived(value.length > TAIL ? value.slice(-TAIL) : value);
 
   const uid = $props.id();
   let copied = $state(false);
@@ -58,7 +60,7 @@
         aria-describedby="{uid}-hint"
       />
     {:else}
-      <span class="val" translate="no" aria-hidden="true">{truncateMiddle(value)}</span>
+      <span class="val vis" translate="no" aria-hidden="true"><span class="head">{head}</span><span class="tail">{tail}</span></span>
       <span class="sr-only">{value}</span>
     {/if}
     <Button variant="secondary" dense onpress={copy} aria-label="{t('common.copy')} {label}">
@@ -104,6 +106,19 @@
     font-size: var(--fs-small);
     white-space: nowrap;
     overflow: hidden;
+  }
+  .vis {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .head {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tail {
+    flex: none;
   }
   .manual {
     font-size: max(1rem, 16px);

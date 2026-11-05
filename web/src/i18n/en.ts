@@ -27,6 +27,7 @@ export const en = {
   "common.confirm": "Confirm",
   "common.close": "Close",
   "common.undo": "Undo",
+  "toast.announce": "{message}. To undo, press Ctrl or Cmd\u00a0+\u00a0Z.",
   "stepper.dec": "Decrease",
   "stepper.inc": "Increase",
   "copy.done": "{label} copied",

@@ -29,6 +29,7 @@
   }: Props = $props();
 
   let asking = $state(false);
+  let running = $state(false);
   let trigger: HTMLButtonElement | undefined = $state();
   let cancel: HTMLButtonElement | undefined = $state();
   const uid = $props.id();
@@ -45,9 +46,11 @@
     trigger?.focus();
   }
   async function confirm() {
+    running = true; // « Annuler » est inactif : l'action destructive ne peut plus être « annulée » à l'écran
     try {
       await onconfirm();
     } finally {
+      running = false;
       asking = false; // le parent a pu démonter ce composant : sans effet alors
     }
   }
@@ -57,7 +60,7 @@
   <div class={["confirm", kind]} role="group" aria-labelledby="{uid}-msg">
     <p id="{uid}-msg" class="msg">{message}</p>
     <div class="actions">
-      <Button variant="secondary" dense bind:el={cancel} onpress={dismiss}>{cancelLabel ?? t("common.cancel")}</Button>
+      <Button variant="secondary" dense disabled={running} bind:el={cancel} onpress={dismiss}>{cancelLabel ?? t("common.cancel")}</Button>
       <Button variant={kind === "danger" ? "danger" : "primary"} dense onpress={confirm}>{confirmLabel}</Button>
     </div>
   </div>

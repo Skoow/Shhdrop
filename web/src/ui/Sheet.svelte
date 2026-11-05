@@ -73,9 +73,25 @@
     color: var(--text);
     box-shadow: var(--e-3), var(--edge);
     overflow: auto;
+    overscroll-behavior: contain;
   }
+  /* UI §5.4 : scrim + flou de 8 px ; repli en surface pleine. */
   .sheet::backdrop {
     background: var(--scrim);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .sheet::backdrop {
+      background: var(--surface-1);
+    }
+  }
+  @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+    .sheet::backdrop {
+      background: var(--surface-1);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
   }
   .sheet[open] {
     animation: sheet-in var(--dur-slow) var(--ease-out);

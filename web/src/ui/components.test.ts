@@ -16,6 +16,8 @@ import Sheet from "./Sheet.svelte";
 import Stepper from "./Stepper.svelte";
 import TextField from "./TextField.svelte";
 import UndoToast from "./UndoToast.svelte";
+import TextArea from "./TextArea.svelte";
+import { onAnnounce } from "./announce";
 
 const text = (s: string) => createRawSnippet(() => ({ render: () => `<span>${s}</span>` }));
 const mounted: Record<string, unknown>[] = [];
@@ -91,6 +93,7 @@ describe("TextField", () => {
     expect(i.getAttribute("aria-invalid")).toBe("true");
     const ids = i.getAttribute("aria-describedby")!.split(" ");
     expect(ids.map((id) => document.getElementById(id)!.textContent)).toEqual(["12 caractères", "Trop court"]);
+    expect(document.getElementById(ids[1]!)!.getAttribute("role")).toBe("alert");
     expect(i.getAttribute("autocomplete")).toBe("one-time-code");
   });
 });
@@ -139,9 +142,11 @@ describe("CopyField", () => {
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     const value = "https://shhdrop.example/s/abcdefghijklmnop#" + "k".repeat(43);
     show(CopyField, { label: "Lien", value });
-    const shown = document.querySelector(".val")!.textContent!;
-    expect(shown).toContain("…");
-    expect(shown.length).toBeLessThan(value.length);
+    // Troncature par CSS seulement : le texte visible est la valeur entière en deux morceaux
+    // (tête qui s'ellipse, queue fixe de 8 caractères), non sélectionnable.
+    expect(document.querySelector(".head")!.textContent! + document.querySelector(".tail")!.textContent!).toBe(value);
+    expect(document.querySelector(".tail")!.textContent).toBe("k".repeat(8));
+    expect(document.querySelector(".val")!.textContent).not.toContain("…");
     const btn = document.querySelector("button")!;
     btn.click();
     await vi.advanceTimersByTimeAsync(0);
@@ -213,7 +218,7 @@ describe("UndoToast", () => {
     const onundo = vi.fn();
     const ondismiss = vi.fn();
     show(UndoToast, { message: "a.txt retiré", onundo, ondismiss });
-    expect(document.querySelector('[role="status"]')!.textContent).toContain("a.txt retiré");
+    expect(document.querySelector(".toast")!.textContent).toContain("a.txt retiré");
     await vi.advanceTimersByTimeAsync(5900);
     expect(ondismiss).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(200);
@@ -310,5 +315,135 @@ describe("Countdown", () => {
     await vi.advanceTimersByTimeAsync(1000);
     await vi.advanceTimersByTimeAsync(5000);
     expect(onexpire).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+function announcements() {
+  const got: string[] = [];
+  const off = onAnnounce((x) => got.push(x));
+  return { got, off };
+}
+
+describe("Countdown : délai déjà nul (I1)", () => {
+  it("onexpire une seule fois, une seule annonce, aucune erreur d'effet", async () => {
+    vi.useFakeTimers();
+    const { got, off } = announcements();
+    const onexpire = vi.fn();
+    expect(() => show(Countdown, { expiresInS: 0, onexpire })).not.toThrow();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(onexpire).toHaveBeenCalledTimes(1);
+    expect(got).toEqual(["Le partage a expiré"]);
+    expect(document.querySelector(".cd")!.textContent).toBe("moins d'une minute");
+    off();
+  });
+  it("recalcule dès le retour de l'onglet (visibilitychange)", () => {
+    vi.useFakeTimers();
+    let ms = 0;
+    show(Countdown, { expiresInS: 600, now: () => ms });
+    expect(document.querySelector(".cd")!.textContent).toContain("10");
+    ms = 400_000; // onglet endormi : aucun minuteur n'a tourné
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    flushSync();
+    expect(document.querySelector(".cd")!.textContent).toBe("3\u202fmin\u202f20\u202fs");
+  });
+});
+
+describe("UndoToast : accessibilité (I3)", () => {
+  it("annonce par announce() (LiveRegion partagée), sans role=status pré-rempli", async () => {
+    vi.useFakeTimers();
+    const { got, off } = announcements();
+    show(UndoToast, { message: "a.txt retiré", onundo() {}, ondismiss() {} });
+    expect(document.querySelector(".toast")!.getAttribute("role")).not.toBe("status");
+    expect(document.querySelector(".toast [aria-live]")).toBeNull();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(got.length).toBe(1);
+    expect(got[0]).toContain("a.txt retiré");
+    expect(got[0]).toMatch(/Ctrl ou Cmd/);
+    off();
+  });
+  it("Ctrl+Z et Cmd+Z annulent ; ni Maj, ni dans un champ de texte", () => {
+    const onundo = vi.fn();
+    show(UndoToast, { message: "x", onundo, ondismiss() {} });
+    const key = (init: KeyboardEventInit, target: EventTarget = window) => {
+      const e = new KeyboardEvent("keydown", { key: "z", bubbles: true, cancelable: true, ...init });
+      target.dispatchEvent(e);
+      return e;
+    };
+    const input = document.createElement("input");
+    input.type = "text";
+    document.body.append(input);
+    key({ ctrlKey: true }, input);
+    expect(onundo).not.toHaveBeenCalled(); // l'annulation de saisie appartient au champ
+    key({ ctrlKey: true, shiftKey: true });
+    key({});
+    expect(onundo).not.toHaveBeenCalled();
+    const e = key({ metaKey: true });
+    expect(e.defaultPrevented).toBe(true);
+    expect(onundo).toHaveBeenCalledTimes(1);
+  });
+  it("fermeture avec le focus dedans : focus vers la cible d'onclose", async () => {
+    const target = document.createElement("button");
+    document.body.append(target);
+    const onclose = vi.fn(() => target);
+    show(UndoToast, { message: "x", onundo() {}, ondismiss() {}, onclose });
+    const btn = document.querySelector<HTMLButtonElement>(".toast button")!;
+    btn.focus();
+    btn.click();
+    await settle();
+    expect(onclose).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(target);
+  });
+  it("sans cible : focus sur <main>, jamais body", async () => {
+    const main = document.createElement("main");
+    main.tabIndex = -1;
+    document.body.append(main);
+    show(UndoToast, { message: "x", onundo() {}, ondismiss() {} });
+    const btn = document.querySelector<HTMLButtonElement>(".toast button")!;
+    btn.focus();
+    btn.click();
+    await settle();
+    expect(document.activeElement).toBe(main);
+  });
+  it("focus ailleurs : le focus n'est pas déplacé", async () => {
+    const other = document.createElement("button");
+    document.body.append(other);
+    const target = document.createElement("button");
+    document.body.append(target);
+    show(UndoToast, { message: "x", onundo() {}, ondismiss() {}, onclose: () => target });
+    other.focus();
+    document.querySelector<HTMLButtonElement>(".toast button")!.click();
+    await settle();
+    expect(document.activeElement).toBe(other);
+  });
+});
+
+describe("InlineConfirm : Annuler inactif pendant l'action (mineur 5)", () => {
+  it("Annuler désactivé tant que onconfirm s'exécute", async () => {
+    let release!: () => void;
+    const onconfirm = vi.fn(() => new Promise<void>((r) => (release = r)));
+    show(InlineConfirm, { label: "Go", message: "Sûr ?", confirmLabel: "Oui", onconfirm });
+    document.querySelector("button")!.click();
+    await settle();
+    const [cancel, yes] = [...document.querySelectorAll<HTMLButtonElement>('[role="group"] button')];
+    yes!.click();
+    flushSync();
+    expect(cancel!.disabled).toBe(true);
+    cancel!.click();
+    expect(document.querySelector('[role="group"]')).not.toBeNull(); // pas de retour au bouton d'origine
+    release();
+    await settle();
+    expect(document.querySelector('[role="group"]')).toBeNull();
+  });
+});
+
+describe("TextArea : erreur annoncée (mineur 6)", () => {
+  it("role=alert relié par aria-describedby", () => {
+    show(TextArea, { label: "Texte", error: "Vide" });
+    const ta = document.querySelector("textarea")!;
+    const err = document.getElementById(ta.getAttribute("aria-describedby")!)!;
+    expect(err.getAttribute("role")).toBe("alert");
+    expect(err.textContent).toBe("Vide");
   });
 });

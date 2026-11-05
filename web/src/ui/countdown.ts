@@ -1,5 +1,8 @@
-// Compte à rebours (UI §8 Countdown, §11). L'horloge est injectée (millisecondes, monotone par
-// défaut : un changement d'heure du système ne rallonge ni ne raccourcit le partage affiché).
+// Compte à rebours (UI §8 Countdown, §11). Horloges injectées (millisecondes). Le temps écoulé
+// est le plus grand des deux écarts, monotone et mural : l'horloge monotone peut s'arrêter
+// pendant la veille (iOS), la murale continue ; la murale peut reculer ou sauter, la monotone
+// non. Pire cas d'un saut d'heure en avant : une expiration affichée trop tôt, sans danger (le
+// serveur reste l'autorité).
 import { formatDuration, type Lang } from "../i18n/format";
 
 /** Seuils annoncés aux lecteurs d'écran, en secondes : 1 h, 15 min, 5 min, 1 min, expiration. */
@@ -13,11 +16,15 @@ export type Countdown = {
   announceAt(): number | null;
 };
 
-export function createCountdown(expiresInS: number, now: () => number = () => performance.now()): Countdown {
+export function createCountdown(expiresInS: number, now?: () => number, wall?: () => number): Countdown {
+  const mono = now ?? (() => performance.now());
+  const clock = wall ?? (now ? now : () => Date.now()); // horloge injectée seule : elle sert aux deux
   const total = Number.isFinite(expiresInS) ? Math.max(0, expiresInS) : 0;
-  const start = now();
+  const start = mono();
+  const wallStart = clock();
   const remaining = () => {
-    const elapsed = Math.max(0, now() - start); // une horloge qui recule ne rallonge pas l'échéance
+    // Une horloge qui recule ne rallonge pas l'échéance.
+    const elapsed = Math.max(0, mono() - start, clock() - wallStart);
     return Math.max(0, Math.ceil((total * 1000 - elapsed) / 1000));
   };
   // Seuils déjà dépassés au départ : jamais annoncés (on n'annonce que ce qu'on voit franchir).

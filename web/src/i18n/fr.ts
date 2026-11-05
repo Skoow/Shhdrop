@@ -27,6 +27,7 @@ export const fr = {
   "common.confirm": "Confirmer",
   "common.close": "Fermer",
   "common.undo": "Annuler",
+  "toast.announce": "{message}. Pour annuler, Ctrl ou Cmd\u00a0+\u00a0Z.",
   "stepper.dec": "Diminuer",
   "stepper.inc": "Augmenter",
   "copy.done": "{label} copié",

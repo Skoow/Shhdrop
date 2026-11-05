@@ -70,4 +70,25 @@ describe("createCountdown", () => {
     expect(cd.announceAt()).toBe(0);
     expect(cd.announceAt()).toBeNull();
   });
+
+  it("veille : horloge monotone figée, horloge murale +10 min -> le temps écoulé compte (I2)", () => {
+    let mono = 0;
+    let wall = 1_700_000_000_000;
+    const cd = createCountdown(3600, () => mono, () => wall);
+    expect(cd.remaining()).toBe(3600);
+    wall += 600_000; // l'appareil a dormi 10 min : seule l'horloge murale a avancé
+    expect(cd.remaining()).toBe(3000);
+    mono += 30_000; // éveillé 30 s de plus : le plus grand écart gagne, sans double compte
+    wall += 30_000;
+    expect(cd.remaining()).toBe(2970);
+  });
+
+  it("horloge murale en arrière : ignorée ; monotone seule fait foi", () => {
+    let mono = 0;
+    let wall = 1_000_000;
+    const cd = createCountdown(100, () => mono, () => wall);
+    wall -= 5_000_000;
+    mono += 10_000;
+    expect(cd.remaining()).toBe(90);
+  });
 });

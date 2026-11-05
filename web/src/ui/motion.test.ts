@@ -50,6 +50,21 @@ describe("flip", () => {
     expect(frames[0]!.transform).toContain("-40px");
     expect(opts.duration).toBe(180);
   });
+  it("durée et courbe viennent des jetons --dur-fast et --ease-out", async () => {
+    stubMedia(false);
+    document.documentElement.style.setProperty("--dur-fast", "200ms");
+    document.documentElement.style.setProperty("--ease-out", "ease-in");
+    try {
+      const a = box(0);
+      await flip([a.el], () => a.moveTo(40));
+      const [, opts] = a.animate.mock.calls[0] as unknown as [Keyframe[], KeyframeAnimationOptions];
+      expect(opts.duration).toBe(200);
+      expect(opts.easing).toBe("ease-in");
+    } finally {
+      document.documentElement.style.removeProperty("--dur-fast");
+      document.documentElement.style.removeProperty("--ease-out");
+    }
+  });
   it("mutate lève : l'erreur remonte, rien n'est animé", async () => {
     stubMedia(false);
     const a = box(0);
