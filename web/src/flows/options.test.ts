@@ -2,8 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { en } from "../i18n/en";
 import { fr } from "../i18n/fr";
 import { createOptions, estimateUpload, viewOnlyBlockers, type OptionsDeps } from "./options.svelte";
-import { CONTENT_MAX, MAX_OPENS, PW_TRIES } from "./limits";
-import { generatePassword, PASSWORD_ALPHABET } from "./password";
+import { CONTENT_MAX, MAX_OPENS, PW_TRIES, generatePassword, PASSWORD_ALPHABET } from "../index";
 
 const check: OptionsDeps["check"] = (pw) =>
   [...pw].length < 12 ? { ok: false, reason: "trop_court" } : pw === "motdepasse12" ? { ok: false, reason: "trop_courant" } : { ok: true };

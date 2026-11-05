@@ -5,13 +5,30 @@
 // et la mémoire du processus serveur. Après destruction puis arrêt du serveur, ni les
 // octets des segments, ni l'identifiant, le sel ou les vérificateurs ne doivent rester
 // dans un fichier du dossier de données.
-import { readdirSync } from "node:fs";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { unb64u, utf8 } from "../src/crypto/encoding";
-import { deriveAccess, deriveContent, sha256 } from "../src/crypto/kdf";
+import { hkdfSync } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { concat, unb64u, utf8 } from "../src/crypto/encoding";
+import { accessKeys } from "../src/crypto/envelope";
+import { deriveAccess, passwordKey, sha256 } from "../src/crypto/kdf";
 import type { KAcces, KLien, KPreuve, SGestion } from "../src/crypto/types";
+
+// Graines R tirées par createShare (copie : createShare les met à zéro après l'enveloppe).
+const seeds = vi.hoisted(() => [] as Uint8Array<ArrayBuffer>[]);
+vi.mock("../src/crypto/envelope", async (orig) => {
+  const m = await orig<typeof import("../src/crypto/envelope")>();
+  return {
+    ...m,
+    newSeed: () => {
+      const r = m.newSeed();
+      seeds.push(new Uint8Array(r));
+      return r;
+    },
+  };
+});
 import * as api from "../src/transfer/api";
-import { createShare, destroyShare, openShare } from "../src/transfer/client";
+import { createShare, destroyShare, openShare, shareStatus } from "../src/transfer/client";
 import { parseLink } from "../src/transfer/link";
 import { solveAltcha } from "./altcha";
 import { capturingFetch, findIn, needle, scanDir, scanProcessMemory, type Captured, type Needle } from "./scan";
@@ -19,7 +36,11 @@ import { startServer, type TestServer } from "./server";
 
 const MARKER = "MOT-REPERE-7f3a";
 const NAME = "nom-repere-91c2.pdf";
-const PASSWORD = "mdp-repere-44b8-zzzz";
+const PASSWORD = "mdp-repere-44b8-zzzz"; // mot de passe saisi (pas généré)
+const MIB = 1048576;
+const hk = (ikm: Uint8Array, info: string) => new Uint8Array(hkdfSync("sha256", ikm, new Uint8Array(0), info, 32));
+// Sous-chaînes de 8 caractères des noms et du texte saisis : aucune ne doit apparaître.
+const windows = (label: string, s: string) => Array.from({ length: s.length - 7 }, (_, i) => needle(`${label}[${i}]`, s.slice(i, i + 8)));
 
 describe("le serveur ne voit rien", () => {
   let srv: TestServer;
@@ -28,6 +49,7 @@ describe("le serveur ne voit rien", () => {
   let kLien: KLien;
   let kAcces: KAcces;
   let kPreuve: KPreuve;
+  let kMdp: Uint8Array<ArrayBuffer>;
   let sGestion: SGestion;
   let salt: Uint8Array<ArrayBuffer>;
   let id: string;
@@ -38,10 +60,16 @@ describe("le serveur ne voit rien", () => {
   let secrets: Needle[]; // jamais nulle part (kAcces à part)
   let keysOnDisk: Needle[]; // jamais sur disque ni dans les journaux ; dans les requêtes, jamais dans l'URL
   let traces: Needle[]; // présents tant que le partage vit ; plus nulle part après destruction
+  let envelope: Uint8Array<ArrayBuffer>;
+  let statusKeys: string[];
+  let fillCopy: Buffer | undefined;
 
   beforeAll(async () => {
     srv = await startServer();
-    const fileData = utf8(`%PDF-1.4 contenu du fichier ${MARKER} fin`);
+    // 11 Mio : palier 400 (7 segments), bourrage [3, 6) rempli par le serveur (spec §29.3).
+    const fileData = new Uint8Array(11 * MIB).map((_, i) => (i * 131 + 7) & 255);
+    fileData.set(utf8(`%PDF-1.4 contenu du fichier ${MARKER} fin`), 0);
+    fileData.set(utf8(MARKER), 5 * MIB);
     const r = await createShare(
       srv.origin,
       [
@@ -62,12 +90,22 @@ describe("le serveur ne voit rien", () => {
     // Hors journal des requêtes (fetch global) : le sel et les paramètres tels que le serveur les rend.
     const m = await api.meta(api.ctx(srv.origin), id, kAcces);
     salt = unb64u(m.salt);
-    kPreuve = (await deriveContent(kLien, PASSWORD, salt, m.kdf)).kPreuve;
+    expect(m.bucket).toBe(400);
+    kMdp = await passwordKey(PASSWORD, salt, m.kdf);
+    kPreuve = (await accessKeys(kLien, kMdp as import("../src/crypto/types").KMdp)).kPreuve;
     const o = await openShare(r.link, PASSWORD, srv.origin, undefined, { fetch });
     expect(o.manifest.items[0]!.text).toBe(`texte ${MARKER} texte`);
     expect(o.manifest.items[1]!.name).toBe(NAME);
     expect(Buffer.from(await o.item(1)).equals(Buffer.from(fileData))).toBe(true);
     await o.done();
+    const st = log.length;
+    await shareStatus(manage, srv.origin, { fetch });
+    statusKeys = Object.keys(JSON.parse(log[st]!.response.toString("utf8")) as object).sort();
+    const unlockRes = log.find((x) => x.url.endsWith("/unlock"))!;
+    envelope = unb64u((JSON.parse(unlockRes.response.toString("utf8")) as { envelope: string }).envelope);
+    const blobFile = readFileSync(join(srv.dataDir, "blobs", id));
+    const segOff = (n: number) => 48 + n * 64 * 65552;
+    fillCopy = blobFile.subarray(segOff(3), segOff(6));
     // Second partage (une seule ouverture) : lu puis détruit par Opened.destroy("report"), qui
     // envoie K_accès et K_preuve ; ces requêtes et le disque sont fouillés comme les autres.
     const r2 = await createShare(srv.origin, [{ kind: "text", name: "", mime: "text/plain", data: utf8(`texte ${MARKER} texte`) }], {
@@ -87,7 +125,20 @@ describe("le serveur ne voit rien", () => {
     await o2.destroy("report");
     await o2.done(); // 404 attendu et toléré : le partage est déjà effacé
     o2.wipe();
+    expect(seeds).toHaveLength(2);
+    const seed1 = seeds[0]!, seed2 = seeds[1]!;
+    const kMaitre = hk(concat(kLien, kMdp), "shhdrop/v2/maitre");
     secrets = [
+      needle("R", seed1),
+      needle("R (signalé)", seed2),
+      needle("K_contenu", hk(seed1, "shhdrop/v2/contenu")),
+      needle("K_contenu (signalé)", hk(seed2, "shhdrop/v2/contenu")),
+      needle("K_mdp", kMdp),
+      needle("K_maître", kMaitre),
+      needle("K_env", hk(kMaitre, "shhdrop/v2/enveloppe")),
+      ...windows("nom", NAME),
+      ...windows("texte", MARKER),
+      ...windows("mot de passe", PASSWORD),
       needle("kLien", kLien),
       needle("kLien (signalé)", kLien2),
       needle("texte repère", MARKER),
@@ -102,6 +153,7 @@ describe("le serveur ne voit rien", () => {
       needle("access_v", await sha256(kAcces)),
       needle("proof_v", await sha256(kPreuve)),
       needle("manage_v", await sha256(sGestion)),
+      needle("enveloppe", envelope),
     ];
   });
   afterAll(async () => {
@@ -170,12 +222,21 @@ describe("le serveur ne voit rien", () => {
     expect(log.map((r) => `${r.method} ${r.url.replace(/^https?:\/\/[^/]+/, "").replace(id, "ID").replace(id2, "ID")}`)).toEqual([
       "GET /api/captcha",
       "POST /api/shares",
+      // Segments 3 à 5 : bourrage, jamais envoyés (le serveur les remplit d'aléa).
       "PUT /api/shares/ID/segments/0",
+      "PUT /api/shares/ID/segments/1",
+      "PUT /api/shares/ID/segments/2",
+      "PUT /api/shares/ID/segments/6",
       "POST /api/shares/ID/finalize",
       "GET /api/shares/ID/meta",
       "POST /api/shares/ID/unlock",
       "GET /api/shares/ID/segments/0",
+      "GET /api/shares/ID/segments/6",
+      "GET /api/shares/ID/segments/0",
+      "GET /api/shares/ID/segments/1",
+      "GET /api/shares/ID/segments/2",
       "POST /api/shares/ID/done",
+      "GET /api/shares/ID/status",
       // Second partage : Opened.destroy("report") puis done (404 toléré).
       "GET /api/captcha",
       "POST /api/shares",
@@ -195,6 +256,7 @@ describe("le serveur ne voit rien", () => {
       // kPreuve et sGestion voyagent légitimement dans les corps : jamais dans une URL (journaux, historique).
       for (const l of findIn(Buffer.from(r.url), [...all, ...keysOnDisk])) hits.push(`${where} URL : ${l}`);
       for (const l of findIn(r.body, all)) hits.push(`${where} corps : ${l}`);
+      for (const l of findIn(r.response, [...all, ...keysOnDisk])) hits.push(`${where} réponse : ${l}`);
       for (const [k, v] of r.headers) {
         const found = findIn(Buffer.from(`${k}: ${v}`), k === "x-shh-access" ? secrets : all);
         for (const l of found) hits.push(`${where} en-tête ${k} : ${l}`);
@@ -206,5 +268,19 @@ describe("le serveur ne voit rien", () => {
     // Témoin : kPreuve et sGestion sont bien dans des corps (la fouille des URL a un sens).
     expect(log.some((r) => findIn(r.body, [needle("kPreuve", kPreuve)]).length)).toBe(true);
     expect(log.some((r) => findIn(r.body, [needle("sGestion", sGestion)]).length)).toBe(true);
+  });
+
+  it("la réponse de statut ne contient que compteurs, échéance et état", () => {
+    expect(statusKeys).toEqual(["expires_in_s", "max_opens", "opens_used", "state"]);
+  });
+
+  it("le bourrage rempli par le serveur (segments 3 à 5) : ni repère, ni suite de 4 096 zéros", async () => {
+    // Fichier du partage lu avant sa destruction : relancer n'est pas possible, on se sert de la copie faite au début.
+    expect(fillCopy).toBeDefined();
+    let run = 0, worst = 0;
+    for (const x of fillCopy!) worst = Math.max(worst, (run = x === 0 ? run + 1 : 0));
+    expect(worst).toBeLessThan(4096);
+    expect(findIn(fillCopy!, [...secrets, ...keysOnDisk])).toEqual([]);
+    expect(fillCopy!.length).toBe(3 * 64 * 65552);
   });
 });

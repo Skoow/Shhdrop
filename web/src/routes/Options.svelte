@@ -3,7 +3,7 @@
   // 1 ouverture, au premier des deux. » et ses deux contrôles (Durée, Ouvertures) ; mot de passe ;
   // ce que le destinataire peut faire (spec §34). Chiffres lus dans les constantes.
   import type { PwCheck } from "../index";
-  import { MAX_OPENS, PW_MIN_CHARS, PW_TRIES, TTL_HOURS } from "../flows/limits";
+  import { MAX_OPENS, PW_MIN_CHARS, PW_TRIES, TTL_HOURS } from "../index";
   import type { Options, Rights } from "../flows/options.svelte";
   import { formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";

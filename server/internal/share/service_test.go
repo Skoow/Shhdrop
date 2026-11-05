@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"io"
 	"os"
@@ -38,9 +39,29 @@ func sum(b []byte) []byte { h := sha256.Sum256(b); return h[:] }
 
 func newKeys() keys { return keys{rnd(32), rnd(32), rnd(32)} }
 
+// finOf : paramètres de finalisation de chaque envoi créé par req (durée, ouvertures,
+// V_preuve), retrouvés par fin(id) au moment de Finalize.
+var (
+	finMu sync.Mutex
+	finOf = map[string]FinalizeReq{}
+)
+
+// req : création v2 (id tiré ici, comme HKDF(K_lien) côté client) ; ttl et opens servent
+// à la finalisation (fin).
 func (k keys) req(bucket, ttl, opens int) CreateReq {
-	return CreateReq{Bucket: bucket, TTLHours: ttl, MaxOpens: opens, KdfOps: 3, KdfMem: 67108864,
-		Salt: rnd(16), AccessV: sum(k.acces), ProofV: sum(k.preuve), ManageV: sum(k.gestion)}
+	id := base64.RawURLEncoding.EncodeToString(rnd(16))
+	finMu.Lock()
+	finOf[id] = FinalizeReq{TTLHours: ttl, MaxOpens: opens, KdfOps: 3, KdfMem: 67108864,
+		Salt: rnd(16), ProofV: sum(k.preuve), Envelope: rnd(EnvelopeLen)}
+	finMu.Unlock()
+	return CreateReq{ID: id, Bucket: bucket, AccessV: sum(k.acces), ManageV: sum(k.gestion)}
+}
+
+// fin : finalisation de l'envoi id (bourrage vide).
+func fin(id string) FinalizeReq {
+	finMu.Lock()
+	defer finMu.Unlock()
+	return finOf[id]
 }
 
 func newSvc(t *testing.T) (*Service, *clock) {
@@ -76,7 +97,7 @@ func ready(t *testing.T, s *Service, k keys, bucket, ttl, opens int) string {
 			t.Fatal(n, err)
 		}
 	}
-	if _, err := s.Finalize(id); err != nil {
+	if _, err := s.Finalize(id, fin(id)); err != nil {
 		t.Fatal(err)
 	}
 	return id
@@ -114,8 +135,9 @@ func TestSizing(t *testing.T) {
 	if SegmentSize(80, 1) != 16*65552 {
 		t.Fatal("dernier segment partiel", SegmentSize(80, 1))
 	}
-	// Spec §24 : paliers jusqu'à 16 384 morceaux (1 Gio utile), 256 segments.
-	want := []int{1, 16, 80, 160, 400, 800, 1600, 4000, 8000, 16384}
+	// Spec §24, §29.3 : paliers jusqu'à 16 385 morceaux (1 Gio de données + le morceau du
+	// manifeste), 257 segments.
+	want := []int{1, 16, 80, 160, 400, 800, 1600, 4000, 8000, 16385}
 	if len(Buckets) != len(want) {
 		t.Fatal("Buckets", Buckets)
 	}
@@ -124,17 +146,21 @@ func TestSizing(t *testing.T) {
 			t.Fatal("Buckets", Buckets)
 		}
 	}
-	if SegmentCount(16384) != 256 || SegmentCount(4000) != 63 || SegmentCount(8000) != 125 {
+	if SegmentCount(16385) != 257 || SegmentCount(4000) != 63 || SegmentCount(8000) != 125 {
 		t.Fatal("SegmentCount grands paliers")
 	}
-	if SegmentSize(16384, 255) != 64*65552 || SegmentSize(4000, 62) != 32*65552 || SegmentSize(8000, 124) != 64*65552 {
+	if SegmentSize(16385, 255) != 64*65552 || SegmentSize(16385, 256) != 65552 || SegmentSize(4000, 62) != 32*65552 || SegmentSize(8000, 124) != 64*65552 {
 		t.Fatal("SegmentSize grands paliers")
 	}
-	if totalSize(16384) != 48+16384*65552 || segOffset(16384, 255) != 48+255*64*65552 {
-		t.Fatal("totalSize / segOffset 16384")
+	if totalSize(16385) != 48+16385*65552 || segOffset(16385, 256) != 48+256*64*65552 {
+		t.Fatal("totalSize / segOffset 16385")
 	}
-	if m := fullMask(256); len(m) != 32 || !bytes.Equal(m, bytes.Repeat([]byte{0xff}, 32)) {
-		t.Fatal("fullMask(256)", m)
+	if ContentBytes(16385) != 1<<30 || ContentBytes(1) != 0 {
+		t.Fatal("ContentBytes")
+	}
+	if !hasAllBut([]byte{0xff, 0xff, 0xff, 0xff, 0x01}, 33, 0, 0) || hasAllBut([]byte{0xff, 0xff, 0xff, 0xff, 0x00}, 33, 0, 0) ||
+		!hasAllBut([]byte{0b10000111}, 8, 3, 7) || hasAllBut([]byte{0xff}, 9, 0, 0) {
+		t.Fatal("hasAllBut")
 	}
 	for _, b := range Buckets {
 		total := 0
@@ -169,7 +195,7 @@ func TestFullFlow(t *testing.T) {
 			t.Fatal(n, err)
 		}
 	}
-	exp, err := s.Finalize(id)
+	exp, err := s.Finalize(id, fin(id))
 	if err != nil || exp != 73*time.Minute {
 		t.Fatal(exp, err)
 	}
@@ -178,7 +204,7 @@ func TestFullFlow(t *testing.T) {
 		len(m.Salt) != 16 || m.ExpiresIn != 73*time.Minute {
 		t.Fatalf("%+v %v", m, err)
 	}
-	openN, err := s.Unlock(id, k.acces, k.preuve)
+	openN, _, err := s.Unlock(id, k.acces, k.preuve)
 	if err != nil || openN != 1 {
 		t.Fatal(openN, err)
 	}
@@ -192,7 +218,7 @@ func TestFullFlow(t *testing.T) {
 	if err != nil || st.State != "draining" || st.OpensUsed != 1 || st.MaxOpens != 1 {
 		t.Fatalf("%+v %v", st, err)
 	}
-	if _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
 		t.Fatal("2e ouverture", err)
 	}
 	if err := s.Done(id, openN); err != nil {
@@ -225,7 +251,7 @@ func TestFinalizeIncomplete(t *testing.T) {
 	k := newKeys()
 	id, _, _ := s.Create(k.req(80, 1, 1))
 	s.PutSegment(id, 1, segBody(80, 1, 1))
-	if _, err := s.Finalize(id); !errors.Is(err, ErrIncomplete) {
+	if _, err := s.Finalize(id, fin(id)); !errors.Is(err, ErrIncomplete) {
 		t.Fatal(err)
 	}
 }
@@ -250,10 +276,10 @@ func TestPutSegmentRules(t *testing.T) {
 	s.PutSegment(id, 0, segBody(80, 0, 1))
 	s.PutSegment(id, 0, segBody(80, 0, 9))
 	s.PutSegment(id, 1, segBody(80, 1, 2))
-	if _, err := s.Finalize(id); err != nil {
+	if _, err := s.Finalize(id, fin(id)); err != nil {
 		t.Fatal(err)
 	}
-	if n, _ := s.Unlock(id, k.acces, k.preuve); n != 1 {
+	if n, _, _ := s.Unlock(id, k.acces, k.preuve); n != 1 {
 		t.Fatal("unlock", n)
 	}
 	if got, _ := readSegment(s, id, 0, 1); !bytes.Equal(got, segBody(80, 0, 9)) {
@@ -292,7 +318,7 @@ func TestParallelPutSegments(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if _, err := s.Finalize(id); err != nil {
+	if _, err := s.Finalize(id, fin(id)); err != nil {
 		t.Fatal("masque incomplet après envois parallèles", err)
 	}
 }
@@ -304,10 +330,10 @@ func TestWrongAccessKey(t *testing.T) {
 	if _, err := s.Meta(id, rnd(32)); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := s.Unlock(id, rnd(32), k.preuve); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.Unlock(id, rnd(32), k.preuve); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := s.Unlock(id, rnd(32), rnd(32)); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.Unlock(id, rnd(32), rnd(32)); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	var fa int
@@ -325,14 +351,14 @@ func TestWrongPasswordSequence(t *testing.T) {
 	k := newKeys()
 	id := ready(t, s, k, 1, 1, 1)
 	for want := 4; want >= 0; want-- {
-		_, err := s.Unlock(id, k.acces, rnd(32))
+		_, _, err := s.Unlock(id, k.acces, rnd(32))
 		var bp *BadPassword
 		if !errors.As(err, &bp) || bp.AttemptsLeft != want {
 			t.Fatal(want, err)
 		}
 	}
 	gone(t, s, id)
-	if _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 }
@@ -348,7 +374,7 @@ func TestParallelWrongUnlock(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := s.Unlock(id, k.acces, rnd(32))
+			_, _, err := s.Unlock(id, k.acces, rnd(32))
 			var bp *BadPassword
 			mu.Lock()
 			defer mu.Unlock()
@@ -382,7 +408,7 @@ func TestParallelCorrectUnlock(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			n, err := s.Unlock(id, k.acces, k.preuve)
+			n, _, err := s.Unlock(id, k.acces, k.preuve)
 			mu.Lock()
 			defer mu.Unlock()
 			if err == nil {
@@ -409,14 +435,14 @@ func TestDoneIdempotent(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
 	id := ready(t, s, k, 1, 1, 2)
-	n1, _ := s.Unlock(id, k.acces, k.preuve)
+	n1, _, _ := s.Unlock(id, k.acces, k.preuve)
 	if err := s.Done(id, n1); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Done(id, n1); err != nil {
 		t.Fatal(err)
 	}
-	n2, err := s.Unlock(id, k.acces, k.preuve)
+	n2, _, err := s.Unlock(id, k.acces, k.preuve)
 	if err != nil || n2 != 2 {
 		t.Fatal(n2, err)
 	}
@@ -465,37 +491,45 @@ func TestPurgeAt(t *testing.T) {
 	}
 }
 
-// Palier 16 384 (1 Gio utile, 256 segments) : le masque des segments couvre les 256 bits.
+// Plus grand palier (16 385 morceaux : 1 Gio de données + le morceau du manifeste, 257
+// segments) : le masque des segments couvre les 257 bits ; le dernier segment fait 1 morceau.
 func TestLargestBucket(t *testing.T) {
 	if testing.Short() {
 		t.Skip("écrit 1 Gio")
 	}
 	s, _ := newSvc(t)
 	k := newKeys()
-	id, segs, err := s.Create(k.req(16384, 1, 1))
-	if err != nil || segs != 256 {
+	const b = 16385
+	id, segs, err := s.Create(k.req(b, 1, 1))
+	if err != nil || segs != 257 {
 		t.Fatal(segs, err)
 	}
-	body := make([]byte, SegmentSize(16384, 1))
-	for n := 1; n < segs; n++ {
+	body := make([]byte, SegmentSize(b, 1))
+	for n := 1; n < segs-1; n++ {
 		if err := s.PutSegment(id, n, body); err != nil {
 			t.Fatal(n, err)
 		}
 	}
-	if err := s.PutSegment(id, 256, body); !errors.Is(err, ErrBadSegment) {
-		t.Fatal("segment 256", err)
+	if err := s.PutSegment(id, segs-1, body); !errors.Is(err, ErrBadSegment) {
+		t.Fatal("dernier segment de mauvaise taille", err)
 	}
-	if _, err := s.Finalize(id); !errors.Is(err, ErrIncomplete) {
-		t.Fatal("segment 0 manquant", err)
-	}
-	if err := s.PutSegment(id, 0, make([]byte, SegmentSize(16384, 0))); err != nil {
+	if err := s.PutSegment(id, segs-1, make([]byte, ChunkCT)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Finalize(id); err != nil {
+	if err := s.PutSegment(id, segs, body); !errors.Is(err, ErrBadSegment) {
+		t.Fatal("segment 257", err)
+	}
+	if _, err := s.Finalize(id, fin(id)); !errors.Is(err, ErrIncomplete) {
+		t.Fatal("segment 0 manquant", err)
+	}
+	if err := s.PutSegment(id, 0, make([]byte, SegmentSize(b, 0))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Finalize(id, fin(id)); err != nil {
 		t.Fatal(err)
 	}
 	fi, err := os.Stat(filepath.Join(s.Blobs.Dir, id))
-	if err != nil || fi.Size() != 48+16384*65552 {
+	if err != nil || fi.Size() != 48+b*65552 {
 		t.Fatal(fi, err)
 	}
 }
@@ -586,7 +620,7 @@ func TestReadAfterExpiry(t *testing.T) {
 	if _, err := s.Meta(id, k.acces); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 }
@@ -654,17 +688,18 @@ func TestStatus(t *testing.T) {
 	k := newKeys()
 	id, _, _ := s.Create(k.req(1, 6, 4))
 	st, err := s.Status(id, k.gestion)
-	if err != nil || st.State != "uploading" || st.MaxOpens != 4 || st.OpensUsed != 0 {
+	// v2 : les ouvertures ne sont connues qu'à la finalisation (spec §29.8).
+	if err != nil || st.State != "uploading" || st.MaxOpens != 0 || st.OpensUsed != 0 {
 		t.Fatalf("%+v %v", st, err)
 	}
 	if _, err := s.Status(id, rnd(32)); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	s.PutSegment(id, 0, segBody(1, 0, 1))
-	s.Finalize(id)
+	s.Finalize(id, fin(id))
 	s.Unlock(id, k.acces, k.preuve)
 	st, err = s.Status(id, k.gestion)
-	if err != nil || st.State != "ready" || st.OpensUsed != 1 || st.ExpiresIn != 6*time.Hour+13*time.Minute {
+	if err != nil || st.State != "ready" || st.OpensUsed != 1 || st.MaxOpens != 4 || st.ExpiresIn != 6*time.Hour+13*time.Minute {
 		t.Fatalf("%+v %v", st, err)
 	}
 }
@@ -727,17 +762,11 @@ func TestCreateValidation(t *testing.T) {
 	bad := []func(*CreateReq){
 		func(r *CreateReq) { r.Bucket = 17 },
 		func(r *CreateReq) { r.Bucket = 0 },
-		func(r *CreateReq) { r.TTLHours = 2 },
-		func(r *CreateReq) { r.TTLHours = 48 },
-		func(r *CreateReq) { r.MaxOpens = 0 },
-		func(r *CreateReq) { r.MaxOpens = 11 },
-		func(r *CreateReq) { r.KdfOps = 2 },
-		func(r *CreateReq) { r.KdfOps = 11 },
-		func(r *CreateReq) { r.KdfMem = 67108863 },
-		func(r *CreateReq) { r.KdfMem = 268435457 },
-		func(r *CreateReq) { r.Salt = rnd(15) },
+		func(r *CreateReq) { r.ID = "" },
+		func(r *CreateReq) { r.ID = r.ID[:21] },
+		func(r *CreateReq) { r.ID = r.ID + "A" },
+		func(r *CreateReq) { r.ID = "../" + r.ID[3:] },
 		func(r *CreateReq) { r.AccessV = rnd(31) },
-		func(r *CreateReq) { r.ProofV = rnd(33) },
 		func(r *CreateReq) { r.ManageV = nil },
 	}
 	for i, f := range bad {
@@ -747,21 +776,58 @@ func TestCreateValidation(t *testing.T) {
 			t.Fatal(i, err)
 		}
 	}
-	for _, b := range Buckets {
-		for _, ttl := range []int{1, 6, 12, 24} {
-			r := k.req(b, ttl, 10)
-			r.KdfOps, r.KdfMem = 10, 268435456
-			if b > 16 {
-				continue // évite de réserver 100 Mio par cas
-			}
-			if _, _, err := s.Create(r); err != nil {
-				t.Fatal(b, ttl, err)
-			}
+	for _, b := range Buckets[:2] { // évite de réserver 100 Mio par cas
+		if _, _, err := s.Create(k.req(b, 1, 10)); err != nil {
+			t.Fatal(b, err)
 		}
 	}
 	ids, _ := s.Blobs.List()
-	if len(ids) != 8 {
+	if len(ids) != 2 {
 		t.Fatal("refus sans réservation", len(ids))
+	}
+}
+
+func TestFinalizeValidation(t *testing.T) {
+	s, _ := newSvc(t)
+	k := newKeys()
+	bad := []func(*FinalizeReq){
+		func(r *FinalizeReq) { r.TTLHours = 2 },
+		func(r *FinalizeReq) { r.TTLHours = 48 },
+		func(r *FinalizeReq) { r.MaxOpens = 0 },
+		func(r *FinalizeReq) { r.MaxOpens = 11 },
+		func(r *FinalizeReq) { r.KdfOps = 2 },
+		func(r *FinalizeReq) { r.KdfOps = 11 },
+		func(r *FinalizeReq) { r.KdfMem = 67108863 },
+		func(r *FinalizeReq) { r.KdfMem = 268435457 },
+		func(r *FinalizeReq) { r.Salt = rnd(15) },
+		func(r *FinalizeReq) { r.ProofV = rnd(33) },
+		func(r *FinalizeReq) { r.Envelope = rnd(59) },
+		func(r *FinalizeReq) { r.Envelope = rnd(61) },
+		func(r *FinalizeReq) { r.Envelope = nil },
+	}
+	id, _, err := s.Create(k.req(1, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutSegment(id, 0, segBody(1, 0, 1)); err != nil {
+		t.Fatal(err)
+	}
+	for i, f := range bad {
+		r := fin(id)
+		f(&r)
+		if _, err := s.Finalize(id, r); !errors.Is(err, ErrBadRequest) {
+			t.Fatal(i, err)
+		}
+	}
+	for _, ttl := range []int{1, 6, 12, 24} {
+		r := fin(id)
+		r.TTLHours, r.KdfOps, r.KdfMem = ttl, 10, 268435456
+		if err := ValidateFinalize(r); err != nil {
+			t.Fatal(ttl, err)
+		}
+	}
+	if _, err := s.Finalize(id, fin(id)); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -846,7 +912,7 @@ func TestDestroyCountsAttempts(t *testing.T) {
 	if err := s.Destroy(id, k.acces, rnd(32), nil); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	if _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 }
@@ -859,7 +925,7 @@ func TestMixedAttemptsShareCounter(t *testing.T) {
 	s.Destroy(id, k.acces, rnd(32), nil)
 	s.Unlock(id, k.acces, rnd(32))
 	s.Destroy(id, k.acces, rnd(32), nil)
-	_, err := s.Unlock(id, k.acces, rnd(32))
+	_, _, err := s.Unlock(id, k.acces, rnd(32))
 	var bp *BadPassword
 	if !errors.As(err, &bp) || bp.AttemptsLeft != 0 {
 		t.Fatal(err)
@@ -903,7 +969,7 @@ func TestFailedDestructionRetried(t *testing.T) {
 	if _, err := readSegment(s, id, 0, 1); !errors.Is(err, ErrNotFound) {
 		t.Fatal("ReadSegment", err)
 	}
-	if _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
 		t.Fatal("Unlock", err)
 	}
 	unblock()
@@ -927,7 +993,7 @@ func TestSweepRechecksFinalized(t *testing.T) {
 	if rowCount(t, s, id) != 1 {
 		t.Fatal("partage finalisé détruit")
 	}
-	if _, err := s.Unlock(id, k.acces, k.preuve); err != nil {
+	if _, _, err := s.Unlock(id, k.acces, k.preuve); err != nil {
 		t.Fatal("unlock", err)
 	}
 	if _, err := readSegment(s, id, 0, 1); err != nil {
@@ -955,8 +1021,8 @@ func TestReadSegmentOpenN(t *testing.T) {
 	if _, err := readSegment(s, id, 0, 1); !errors.Is(err, ErrNotFound) {
 		t.Fatal("avant toute ouverture", err)
 	}
-	n1, _ := s.Unlock(id, k.acces, k.preuve)
-	n2, _ := s.Unlock(id, k.acces, k.preuve)
+	n1, _, _ := s.Unlock(id, k.acces, k.preuve)
+	n2, _, _ := s.Unlock(id, k.acces, k.preuve)
 	for _, n := range []int{n1, n2} {
 		if _, err := readSegment(s, id, 0, n); err != nil {
 			t.Fatal(n, err)
@@ -1005,7 +1071,7 @@ func TestValidateAndFrozen(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := k.req(1, 1, 1)
-	bad.TTLHours = 2
+	bad.Bucket = 2
 	if err := Validate(bad); !errors.Is(err, ErrBadRequest) {
 		t.Fatal(err)
 	}

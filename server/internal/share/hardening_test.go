@@ -68,19 +68,21 @@ func TestMatchRequires32Bytes(t *testing.T) {
 func TestValidateRefusesEmptyHashVerifier(t *testing.T) {
 	k := newKeys()
 	empty := sha256.Sum256(nil)
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		r := k.req(1, 1, 1)
-		switch i {
-		case 0:
+		if i == 0 {
 			r.AccessV = empty[:]
-		case 1:
-			r.ProofV = empty[:]
-		case 2:
+		} else {
 			r.ManageV = empty[:]
 		}
 		if err := Validate(r); !errors.Is(err, ErrBadRequest) {
 			t.Fatalf("vérificateur %d = SHA-256(\"\") accepté", i)
 		}
+	}
+	f := fin(k.req(1, 1, 1).ID)
+	f.ProofV = empty[:]
+	if err := ValidateFinalize(f); !errors.Is(err, ErrBadRequest) {
+		t.Fatal("V_preuve = SHA-256(\"\") accepté")
 	}
 	// Scénario de l'audit : partage dont les vérificateurs valent SHA-256("") ; rien ne
 	// le crée, et même inséré à la main, {"manage": n'importe quoi} ne le détruit pas.
@@ -143,7 +145,7 @@ func TestDestroyWhileDraining(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
 	id := ready(t, s, k, 1, 1, 1)
-	if _, err := s.Unlock(id, k.acces, k.preuve); err != nil {
+	if _, _, err := s.Unlock(id, k.acces, k.preuve); err != nil {
 		t.Fatal(err)
 	}
 	var state string

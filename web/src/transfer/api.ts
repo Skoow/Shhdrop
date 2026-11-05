@@ -3,7 +3,7 @@
 // l'URL. `fetch` est injectable (tests : capture des requêtes, coupures simulées).
 // Les secrets ont des types marqués (crypto/types) : K_lien ne peut pas être envoyé (audit M1).
 // Module interne : l'interface publique est src/index.ts, sans ce module.
-import { b64u } from "../crypto/encoding";
+import { b64u, unb64u } from "../crypto/encoding";
 import type { KAcces, KPreuve, SGestion } from "../crypto/types";
 import { checkOrigin } from "./link";
 import { fetchUploader, xhrUploader, type Uploader } from "./upload";
@@ -45,6 +45,9 @@ export class HttpError extends Error {
     super(code);
   }
 }
+
+/** Budget de lecture de l'ouverture épuisé (429 {"error":"budget"}) : définitif. */
+export const isBudget = (e: unknown): e is HttpError => e instanceof HttpError && e.status === 429 && e.code === "budget";
 
 /** Réponse 2xx inattendue (champ manquant, taille de segment fausse…) : ce n'est pas une coupure. */
 export class BadResponse extends Error {
@@ -117,6 +120,9 @@ async function send<T>(c: Ctx, q: Req, read: (r: Response) => Promise<T>): Promi
     }
     if (!r.ok) {
       last = await httpError(r);
+      // 429 « budget » : l'ouverture a lu tout son budget d'octets ; il ne se recharge pas
+      // (seul un nouveau déverrouillage rouvre la lecture) : jamais de nouvel essai.
+      if (isBudget(last)) throw last;
       if (r.status >= 500 || r.status === 429) continue;
       throw last;
     }
@@ -219,22 +225,20 @@ export async function captcha(c: Ctx): Promise<Captcha> {
   return { challenge, shownAt: shown_at, salt, fallbackOrigin: originOrNull(fallback), expiresAt: receivedAt + validMs, receivedAt };
 }
 
+/** Création (spec §29.8) : ni durée, ni ouvertures, ni sel, ni V_preuve à ce stade. */
 export type CreateBody = {
+  id: string;
   bucket: number;
-  ttl_hours: number;
-  max_opens: number;
-  salt: string;
-  kdf: { ops: number; mem: number };
   access_v: string;
-  proof_v: string;
   manage_v: string;
   hp: string;
   shown_at: string;
 } & ({ altcha: string } | { recaptcha: string; captcha_salt: string });
 
-export async function create(c: Ctx, b: CreateBody): Promise<{ id: string; uploadToken: string; segments: number }> {
+/** Réponse 201 : jeton d'envoi et nombre de segments du palier. 409 : id déjà pris. */
+export async function create(c: Ctx, b: CreateBody): Promise<{ uploadToken: string; segments: number }> {
   const o = await send(c, { method: "POST", path: "/api/shares", ...json(b) }, readJSON);
-  return { id: str(o, "id"), uploadToken: str(o, "upload_token"), segments: num(o, "segments") };
+  return { uploadToken: str(o, "upload_token"), segments: num(o, "segments") };
 }
 
 const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });
@@ -257,9 +261,24 @@ export async function putSegment(
   if (r.status < 200 || r.status > 299) throw httpErrorOf(r.status, r.json);
 }
 
+/** Finalisation (spec §29.8) : tout ce qui dépend du mot de passe, et le bourrage [fill_from, fill_to). */
+export type FinalizeBody = {
+  salt: string;
+  kdf_ops: number;
+  kdf_mem: number;
+  proof_v: string;
+  envelope: string;
+  ttl_hours: number;
+  max_opens: number;
+  fill_from: number;
+  fill_to: number;
+};
+
 /** Un seul essai (le budget de coupure de createShare réessaie). */
-export async function finalize(c: Ctx, id: string, token: string, signal?: AbortSignal): Promise<number> {
-  const o = await send(c, { method: "POST", path: `/api/shares/${enc(id)}/finalize`, headers: bearer(token), signal }, readJSON);
+export async function finalize(c: Ctx, id: string, token: string, b: FinalizeBody, signal?: AbortSignal): Promise<number> {
+  const q: Req = { method: "POST", path: `/api/shares/${enc(id)}/finalize`, ...json(b), signal };
+  q.headers = { ...q.headers, ...bearer(token) };
+  const o = await send(c, q, readJSON);
   return num(o, "expires_in_s");
 }
 
@@ -281,8 +300,26 @@ export async function meta(c: Ctx, id: string, kAcces: KAcces): Promise<Meta> {
   };
 }
 
+/** Enveloppe E rendue par unlock : 60 octets, soit 80 caractères base64url exactement. */
+export const ENVELOPE_CHARS = 80;
+
+function envelopeOf(o: Record<string, unknown>): Uint8Array<ArrayBuffer> {
+  const s = str(o, "envelope");
+  if (s.length !== ENVELOPE_CHARS) throw new BadResponse();
+  try {
+    return unb64u(s);
+  } catch {
+    throw new BadResponse();
+  }
+}
+
 // Jamais rejoué : un déverrouillage réussi consomme une ouverture, un échec compte un essai.
-export async function unlock(c: Ctx, id: string, kAcces: KAcces, kPreuve: KPreuve): Promise<{ downloadToken: string; segments: number }> {
+export async function unlock(
+  c: Ctx,
+  id: string,
+  kAcces: KAcces,
+  kPreuve: KPreuve,
+): Promise<{ downloadToken: string; segments: number; envelope: Uint8Array<ArrayBuffer> }> {
   const o = await send(
     c,
     {
@@ -293,7 +330,7 @@ export async function unlock(c: Ctx, id: string, kAcces: KAcces, kPreuve: KPreuv
     },
     readJSON,
   );
-  return { downloadToken: str(o, "download_token"), segments: num(o, "segments") };
+  return { downloadToken: str(o, "download_token"), segments: num(o, "segments"), envelope: envelopeOf(o) };
 }
 
 export async function getSegment(c: Ctx, id: string, token: string, n: number, size: number): Promise<Uint8Array<ArrayBuffer>> {

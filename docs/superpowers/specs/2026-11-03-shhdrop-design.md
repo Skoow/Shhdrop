@@ -98,7 +98,7 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 | Règle | Valeur V1 |
 |---|---|
 | Éléments par partage | 10 maximum |
-| Taille par partage | 1 Gio de contenu utile (16 384 morceaux de 64 Kio) ; le fichier chiffré fait 48 + 16 384 × 65 552 = 1 074 004 016 octets (§24) |
+| Taille par partage | 1 Gio de contenu utile ; v2 (§29.3) : plus grand palier de 16 385 morceaux de 64 Kio (1 Gio de données + le morceau du manifeste), fichier chiffré de 48 + 16 385 × 65 552 = 1 074 069 568 octets (avant v2 : 16 384 morceaux, §24) |
 | Durée de vie | au choix 1 h, 6 h, 12 h, 24 h ; comptée **à partir de la fin de l'envoi** ; expiration arrondie au **quart d'heure supérieur** |
 | Ouvertures | au choix 1 à 10 ; **une ouverture = un déverrouillage réussi** (recharger la page en consomme une, c'est affiché) |
 | Fin de vie | le premier atteint : durée, ouvertures épuisées, destruction (expéditeur, destinataire, administrateur), signalement, 5 mots de passe faux |
@@ -877,6 +877,7 @@ Remplace §7.1 à §7.5 pour tout nouveau partage. Les étiquettes passent en `s
 - En-tête « SHH2 », version 2, `C_engagement` (48 octets). Clair du paquet de `B` morceaux : **données** (éléments dans l'ordre d'ajout, à partir de l'octet 0) ‖ zéros ‖ **manifeste** ‖ longueur du manifeste (4 octets) en toute fin. Le manifeste (JSON v2, §34) donne la position de chaque élément ; l'ordre d'affichage y est indépendant de l'ordre d'ajout, donc renommer ou réordonner ne touche pas les données déjà parties.
 - Morceaux, nonces, données authentifiées, segments de transport : inchangés (§7.3, principe STREAM). **Chaque numéro de morceau n'est chiffré qu'une fois par `R`** ; un segment réessayé renvoie les mêmes octets.
 - **Palier canonique v2** : le plus petit palier de capacité ≥ fin des données + 4 + `MANIFEST_MAX` (64 Kio). La longueur réelle des noms n'influence donc pas le palier ; `CONTENT_MAX` est inchangé.
+- **Réserve du manifeste et paliers (Task K1, demande du coordinateur)** : `MANIFEST_MAX` = 65 532 octets, pour que le manifeste et sa longueur tiennent dans **un morceau** de 64 Kio, le dernier du paquet. Palier canonique = plus petit palier dont la capacité ≥ fin des données + 64 Kio. Conséquences : un partage de texte seul (aucune donnée de fichier) prend le **palier 1** (64 Kio) ; le plus grand palier passe de 16 384 à **16 385 morceaux** (257 segments, le dernier d'un seul morceau), pour contenir **exactement 1 Gio** de données (`CONTENT_MAX` = 1 073 741 824 octets) plus le morceau du manifeste ; fichier chiffré du plus grand palier : 48 + 16 385 × 65 552 = 1 074 069 568 octets. Les quotas d'octets (§4, §24) comptent les données utiles d'un palier, (palier − 1) × 64 Kio : 0 pour le palier 1, 1 Gio pour le plus grand (3 partages de 1 Gio par jour, inchangé). Le manifeste tient dans le dernier morceau, donc le bourrage, s'il existe, se termine juste avant le dernier segment.
 - **Bourrage rempli par le serveur** : les segments entièrement compris entre le dernier segment de données et le segment de fin ne sont pas envoyés ; `finalize` les désigne (`fill_from`, `fill_to`) et le serveur les remplit d'octets aléatoires (`crypto/rand`), indiscernables d'un chiffré pour qui lit le disque. Le lecteur ne lit jamais le bourrage (§7.3). Gain : jusqu'à la moitié de l'envoi en moins.
 
 ### 29.4 Envoi anticipé
@@ -892,6 +893,8 @@ Remplace §7.1 à §7.5 pour tout nouveau partage. Les étiquettes passent en `s
 
 - Les quotas de la §4 (10 liens par jour et par connexion, 30 par /48, 3 Gio utiles par jour, 6 Gio par /48) sont **débités à `finalize`** ; la création est refusée s'ils sont déjà atteints.
 - Nouveaux plafonds pour les envois anticipés : au plus 2 envois non finalisés à la fois par connexion (6 par /48) ; **octets abandonnés** (envois effacés sans `finalize`) : 6 Gio par jour et par connexion, 12 Gio par /48, débités à l'effacement ; au-delà, l'envoi anticipé est refusé (429) et l'écran revient à l'envoi au clic. La place reste réservée à la création (plafond global, §4).
+- **Mise en œuvre (Task K1)** : les quotas journaliers comptent, à la création, les partages finalisés **et** les envois en cours de la connexion (réservation) ; un envoi effacé sans `finalize` libère sa réservation et ses octets passent dans le compteur des octets abandonnés. Le compteur se remet à zéro à minuit UTC avec le secret du jour, envois en cours compris.
+- **Note de menace (acceptée)** : pour appliquer « 2 envois non finalisés à la fois » et les octets abandonnés, le serveur garde **en mémoire seulement** la correspondance « id d'un envoi en cours → clés HMAC de la connexion » (jamais sur disque), retirée à `finalize` ou à l'effacement. Quelqu'un qui lit la mémoire du serveur en marche peut relier un envoi en cours à une adresse IPv4 (le secret du jour est aussi en mémoire et l'espace IPv4 se parcourt) ; il voit de toute façon les adresses en direct (§18.3).
 - La difficulté de la preuve de travail compte toutes les créations de l'heure (finalisées ou non) : les redémarrages sont bornés (point 3).
 
 ### 29.6 Pré-lecture chez le destinataire

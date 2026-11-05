@@ -195,20 +195,16 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
 });
 
 describe("faux serveur de démo : requêtes brutes", () => {
-  async function created(fake: ReturnType<typeof createFakeServer>, advance: () => void) {
+  async function created(fake: ReturnType<typeof createFakeServer>, advance: () => void, bucket = 16) {
     const cap = (await (await fake.handle(new Request(`${ORIGIN}/api/captcha`))).json()) as Record<string, unknown>;
     expect(cap).toMatchObject({ fallback: null, algorithm: "SHA-256" });
     advance();
-    const v = (n: number) => b64u(new Uint8Array(32).fill(n));
+    const v = async (n: number) => b64u(new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(32).fill(n))));
     const body = {
-      bucket: 16,
-      ttl_hours: 1,
-      max_opens: 1,
-      salt: b64u(new Uint8Array(16).fill(1)),
-      kdf: { ops: 3, mem: 67108864 },
-      access_v: v(2),
-      proof_v: v(3),
-      manage_v: v(4),
+      id: b64u(crypto.getRandomValues(new Uint8Array(16))),
+      bucket,
+      access_v: await v(2),
+      manage_v: await v(4),
       altcha: "demo",
       hp: "",
       shown_at: cap.shown_at,
@@ -228,8 +224,14 @@ describe("faux serveur de démo : requêtes brutes", () => {
     const replay = await fake.handle(new Request(`${ORIGIN}/api/shares`, { method: "POST", body: JSON.stringify(ok.body) }));
     expect(replay.status).toBe(400);
     expect(await replay.json()).toEqual({ error: "bad_request" });
+    // id existant (nouveau jeton shown_at) : 409, le client recommence avec une autre K_lien.
+    const cap2 = (await (await fake.handle(new Request(`${ORIGIN}/api/captcha`))).json()) as Record<string, unknown>;
+    offset += 4000;
+    const dup = await fake.handle(new Request(`${ORIGIN}/api/shares`, { method: "POST", body: JSON.stringify({ ...ok.body, shown_at: cap2.shown_at }) }));
+    expect([dup.status, await dup.json()]).toEqual([409, { error: "conflict" }]);
 
-    for (const bad of [{ extra: 1 }, { bucket: 17 }, { max_opens: 11 }, { ttl_hours: 2 }, { hp: "x" }, { recaptcha: "t" }]) {
+    // v1 (durée, ouvertures, sel, V_preuve à la création) refusé ; id de mauvaise longueur refusé.
+    for (const bad of [{ extra: 1 }, { bucket: 17 }, { max_opens: 1 }, { ttl_hours: 1 }, { proof_v: "x" }, { salt: "x" }, { hp: "x" }, { recaptcha: "t" }, { id: "abc" }, { id: undefined }]) {
       const cap = (await (await fake.handle(new Request(`${ORIGIN}/api/captcha`))).json()) as Record<string, unknown>;
       offset += 4000;
       const r = await fake.handle(
@@ -242,8 +244,9 @@ describe("faux serveur de démo : requêtes brutes", () => {
   it("segment de mauvaise taille → 400 ; numéro hors palier → 400 ; sans jeton → 400 ; jeton inconnu → 404", async () => {
     let offset = 0;
     const fake = createFakeServer({ now: () => Date.now() + offset });
-    const { r } = await created(fake, () => (offset += 4000));
-    const { id, upload_token } = (await r.json()) as { id: string; upload_token: string };
+    const { r, body } = await created(fake, () => (offset += 4000));
+    const id = body.id;
+    const { upload_token } = (await r.json()) as { upload_token: string };
     const put = (n: string, len: number, auth: string | null = `Bearer ${upload_token}`) =>
       fake.handle(
         new Request(`${ORIGIN}/api/shares/${id}/segments/${n}`, {
@@ -257,9 +260,66 @@ describe("faux serveur de démo : requêtes brutes", () => {
     expect((await put("00", segmentSize(16, 0))).status).toBe(400);
     expect((await put("0", segmentSize(16, 0), null)).status).toBe(400);
     expect((await put("0", segmentSize(16, 0), "Bearer inconnu")).status).toBe(404);
-    const fin = await fake.handle(new Request(`${ORIGIN}/api/shares/${id}/finalize`, { method: "POST", headers: { Authorization: `Bearer ${upload_token}` } }));
+    const fin = await fake.handle(
+      new Request(`${ORIGIN}/api/shares/${id}/finalize`, { method: "POST", headers: { Authorization: `Bearer ${upload_token}` }, body: JSON.stringify(FIN) }),
+    );
     expect(fin.status).toBe(409);
     expect((await put("0", segmentSize(16, 0))).status).toBe(204);
+  });
+
+  const FIN = {
+    salt: b64u(new Uint8Array(16).fill(1)),
+    kdf_ops: 3,
+    kdf_mem: 67108864,
+    proof_v: "ZIqlxXn7MPOK90TZfW7IQMepEnekmaDXgPPnMU7KCQs", // SHA-256(32 × 0x03)
+    envelope: b64u(new Uint8Array(60).fill(6)),
+    ttl_hours: 1,
+    max_opens: 1,
+    fill_from: 0,
+    fill_to: 0,
+  };
+
+  it("finalize v2 : champs exacts ; bourrage [fill_from, fill_to) rempli d'aléa ; unlock rend l'enveloppe", async () => {
+    let offset = 0;
+    const fake = createFakeServer({ now: () => Date.now() + offset });
+    const { r, body } = await created(fake, () => (offset += 4000), 400); // 7 segments
+    const { upload_token } = (await r.json()) as { upload_token: string };
+    const auth = { Authorization: `Bearer ${upload_token}` };
+    const call = (path: string, init: RequestInit) => fake.handle(new Request(`${ORIGIN}/api/shares/${body.id}${path}`, init));
+    for (const n of [0, 1, 2, 6]) {
+      expect((await call(`/segments/${n}`, { method: "PUT", headers: auth, body: new Uint8Array(segmentSize(400, n)) })).status).toBe(204);
+    }
+    const fin = (b: object) => call("/finalize", { method: "POST", headers: auth, body: JSON.stringify(b) });
+    for (const bad of [
+      { fill_to: 7 }, // touche le dernier segment
+      { fill_from: 0, fill_to: 3 }, // touche le segment 0 (en-tête)
+      { fill_from: 4, fill_to: 3 },
+      { envelope: b64u(new Uint8Array(59)) },
+      { salt: b64u(new Uint8Array(15)) },
+      { kdf_ops: 2 },
+      { max_opens: 11 },
+      { ttl_hours: 2 },
+      { extra: 1 },
+      { fill_from: undefined },
+    ]) {
+      expect((await fin({ ...FIN, fill_from: 3, fill_to: 6, ...bad })).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect((await fin({ ...FIN, fill_from: 4, fill_to: 6 })).status).toBe(409); // segment 3 manquant hors bourrage
+    expect((await fin({ ...FIN, fill_from: 3, fill_to: 6 })).status).toBe(200);
+    // Rejeu de finalize : plus en envoi → 404.
+    expect((await fin({ ...FIN, fill_from: 3, fill_to: 6 })).status).toBe(404);
+    // unlock rend l'enveloppe telle que reçue ; le bourrage lu n'a aucune suite de 4 096 zéros.
+    const k = (n: number) => b64u(new Uint8Array(32).fill(n));
+    const u = await call("/unlock", { method: "POST", headers: { "X-Shh-Access": k(2) }, body: JSON.stringify({ proof: k(3) }) });
+    const uj = (await u.json()) as { download_token: string; envelope: string; segments: number };
+    expect([u.status, uj.envelope, uj.segments]).toEqual([200, FIN.envelope, 7]);
+    for (const n of [3, 4, 5]) {
+      const seg = new Uint8Array(await (await call(`/segments/${n}`, { headers: { Authorization: `Bearer ${uj.download_token}` } })).arrayBuffer());
+      expect(seg.length).toBe(segmentSize(400, n));
+      let run = 0, worst = 0;
+      for (const x of seg) worst = Math.max(worst, (run = x === 0 ? run + 1 : 0));
+      expect(worst, `segment ${n}`).toBeLessThan(4096);
+    }
   });
 
   it("routes inconnues et méthodes fausses → 404 not_found", async () => {

@@ -1,6 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BadResponse, HttpError, captcha, ctx, destroy, finalize, getSegment, putSegment } from "./api";
+import { BadResponse, HttpError, captcha, create, ctx, destroy, finalize, getSegment, putSegment, unlock, type FinalizeBody } from "./api";
+import type { KAcces, KPreuve } from "../crypto/types";
 import type { SGestion } from "../crypto/types";
+
+const FIN: FinalizeBody = {
+  salt: "s".repeat(22),
+  kdf_ops: 3,
+  kdf_mem: 67108864,
+  proof_v: "p".repeat(43),
+  envelope: "e".repeat(80),
+  ttl_hours: 1,
+  max_opens: 2,
+  fill_from: 3,
+  fill_to: 6,
+};
 
 afterEach(() => {
   vi.useRealTimers();
@@ -73,11 +86,11 @@ describe("envoi : PUT de segment et finalize sans essai interne (le budget de cr
     const f = vi.fn(async (_: RequestInfo | URL, _i?: RequestInit): Promise<Response> => {
       throw new TypeError("fetch failed");
     });
-    await expect(finalize(ctx("http://x", { fetch: f as unknown as typeof fetch, retryDelayMs: 1 }), "id", "t")).rejects.toThrow("reseau");
+    await expect(finalize(ctx("http://x", { fetch: f as unknown as typeof fetch, retryDelayMs: 1 }), "id", "t", FIN)).rejects.toThrow("reseau");
     expect(f).toHaveBeenCalledTimes(1);
     const ac = new AbortController();
     const g = vi.fn(async (_: RequestInfo | URL, _i?: RequestInit) => new Response('{"expires_in_s":5}'));
-    expect(await finalize(ctx("http://x", { fetch: g as unknown as typeof fetch }), "id", "t", ac.signal)).toBe(5);
+    expect(await finalize(ctx("http://x", { fetch: g as unknown as typeof fetch }), "id", "t", FIN, ac.signal)).toBe(5);
     expect(g.mock.calls[0]![1]!.signal).toBe(ac.signal);
   });
 
@@ -87,7 +100,7 @@ describe("envoi : PUT de segment et finalize sans essai interne (le budget de cr
       ac.abort();
       throw new DOMException("Aborted", "AbortError");
     });
-    await expect(finalize(ctx("http://x", { fetch: f as unknown as typeof fetch }), "id", "t", ac.signal)).rejects.toMatchObject({ name: "AbortError" });
+    await expect(finalize(ctx("http://x", { fetch: f as unknown as typeof fetch }), "id", "t", FIN, ac.signal)).rejects.toMatchObject({ name: "AbortError" });
   });
 });
 
@@ -128,5 +141,33 @@ it("captcha : défi sans shown_at ni fallback, sel du défi et origine de repli 
     fallbackOrigin: "https://v.test",
     receivedAt: t,
     expiresAt: t + 30_000,
+  });
+});
+
+describe("API v2 (spec §29.8)", () => {
+  it("create : corps id, bucket, access_v, manage_v, preuve ; réponse upload_token et segments", async () => {
+    const f = vi.fn(async (_: RequestInfo | URL, _i?: RequestInit) => new Response('{"upload_token":"u","segments":7}', { status: 201 }));
+    const body = { id: "i".repeat(22), bucket: 400, access_v: "a".repeat(43), manage_v: "m".repeat(43), hp: "", shown_at: "t", altcha: "x" };
+    expect(await create(ctx("http://x", { fetch: f as unknown as typeof fetch }), body)).toEqual({ uploadToken: "u", segments: 7 });
+    expect(JSON.parse(String(f.mock.calls[0]![1]!.body))).toEqual(body);
+  });
+  it("finalize : jeton en en-tête, corps JSON exact", async () => {
+    const f = vi.fn(async (_: RequestInfo | URL, _i?: RequestInit) => new Response('{"expires_in_s":5}'));
+    await finalize(ctx("http://x", { fetch: f as unknown as typeof fetch }), "id", "t", FIN);
+    const init = f.mock.calls[0]![1]!;
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer t");
+    expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");
+    expect(JSON.parse(String(init.body))).toEqual(FIN);
+  });
+  it("unlock : envelope de 80 caractères base64url exigée (60 octets) ; sinon BadResponse", async () => {
+    const env = Buffer.alloc(60, 7).toString("base64url");
+    const reply = (envelope: unknown) =>
+      vi.fn(async () => new Response(JSON.stringify({ download_token: "d", segments: 1, envelope })));
+    const k = new Uint8Array(32) as KAcces, p = new Uint8Array(32) as KPreuve;
+    const r = await unlock(ctx("http://x", { fetch: reply(env) as unknown as typeof fetch }), "id", k, p);
+    expect(r.envelope).toEqual(new Uint8Array(60).fill(7));
+    for (const bad of [undefined, 5, env.slice(1), env + "A", env.slice(0, 79) + "=", env.slice(0, 79) + "\n", env.slice(0, 78) + "+/"]) {
+      await expect(unlock(ctx("http://x", { fetch: reply(bad) as unknown as typeof fetch }), "id", k, p), String(bad)).rejects.toBeInstanceOf(BadResponse);
+    }
   });
 });

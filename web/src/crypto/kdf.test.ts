@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { checkKdfParams, KDF_MAX, deriveAccess, deriveContent, deriveContentForCreate, hkdf, randomBytes, sha256, KDF_MIN } from "./kdf";
+import { checkKdfParams, KDF_CREATE, KDF_MAX, deriveAccess, hkdf, passwordKey, passwordKeyForCreate, randomBytes, sha256, KDF_MIN } from "./kdf";
+import { generatePassword } from "./password";
 import type { KLien } from "./types";
 import { b64u } from "./encoding";
 
@@ -44,49 +45,29 @@ describe("deriveAccess", () => {
   });
 });
 
-describe("deriveContent", () => {
+describe("passwordKey (K_mdp = Argon2id)", () => {
   it("refuse des paramètres trop faibles", async () => {
-    await expect(deriveContent(kLien, "pw", salt, { ops: 2, mem: 67108864 })).rejects.toThrow(
-      "paramètres KDF trop faibles",
-    );
-    await expect(deriveContent(kLien, "pw", salt, { ops: 3, mem: 33554432 })).rejects.toThrow(
-      "paramètres KDF trop faibles",
-    );
+    await expect(passwordKey("pw", salt, { ops: 2, mem: 67108864 })).rejects.toThrow("paramètres KDF trop faibles");
+    await expect(passwordKey("pw", salt, { ops: 3, mem: 33554432 })).rejects.toThrow("paramètres KDF trop faibles");
   });
 
-  it("déterministe, sensible au mot de passe, clé non extractible", async () => {
-    const a = await deriveContent(kLien, "motdepasse", salt, KDF_MIN);
-    const b = await deriveContent(kLien, "motdepasse", salt, KDF_MIN);
-    const c = await deriveContent(kLien, "motdepassf", salt, KDF_MIN);
-    expect(hex(a.vPreuve)).toBe(hex(b.vPreuve));
-    expect(hex(a.engagement)).toBe(hex(b.engagement));
-    expect(hex(a.vPreuve)).not.toBe(hex(c.vPreuve));
-    expect(hex(a.engagement)).not.toBe(hex(c.engagement));
-    expect(a.kPreuve.length).toBe(32);
-    expect(a.engagement.length).toBe(32);
-    expect(hex(a.vPreuve)).toBe(hex(await sha256(a.kPreuve)));
-    expect(a.kContenu.extractable).toBe(false);
-    expect(a.kContenu.algorithm.name).toBe("AES-GCM");
-    expect([...a.kContenu.usages].sort()).toEqual(["decrypt", "encrypt"]);
-    await expect(crypto.subtle.exportKey("raw", a.kContenu)).rejects.toThrow();
-  }, T);
-
-  it("dépend de kLien et du sel", async () => {
-    const a = await deriveContent(kLien, "pw", salt, KDF_MIN);
-    const b = await deriveContent(new Uint8Array(32).fill(2) as KLien, "pw", salt, KDF_MIN);
-    const c = await deriveContent(kLien, "pw", new Uint8Array(16).fill(8), KDF_MIN);
-    expect(hex(b.vPreuve)).not.toBe(hex(a.vPreuve));
-    expect(hex(c.vPreuve)).not.toBe(hex(a.vPreuve));
+  it("déterministe, sensible au mot de passe et au sel, 32 octets", async () => {
+    const a = await passwordKey("motdepasse", salt, KDF_MIN);
+    const b = await passwordKey("motdepasse", salt, KDF_MIN);
+    const c = await passwordKey("motdepassf", salt, KDF_MIN);
+    const d = await passwordKey("motdepasse", new Uint8Array(16).fill(8), KDF_MIN);
+    expect(a.length).toBe(32);
+    expect(hex(a)).toBe(hex(b));
+    expect(hex(a)).not.toBe(hex(c));
+    expect(hex(a)).not.toBe(hex(d));
+    // Ne dépend pas de K_lien : c'est accessKeys qui mêle K_lien et K_mdp.
   }, T);
 
   it("NFC : formes composée et décomposée donnent la même clé", async () => {
-    const composed = "Café-Été";
-    const decomposed = "Café-Été";
+    const composed = "Caf\u00e9-\u00c9t\u00e9";
+    const decomposed = "Cafe\u0301-E\u0301te\u0301";
     expect(composed).not.toBe(decomposed);
-    const a = await deriveContent(kLien, composed, salt, KDF_MIN);
-    const b = await deriveContent(kLien, decomposed, salt, KDF_MIN);
-    expect(hex(a.vPreuve)).toBe(hex(b.vPreuve));
-    expect(hex(a.engagement)).toBe(hex(b.engagement));
+    expect(hex(await passwordKey(composed, salt, KDF_MIN))).toBe(hex(await passwordKey(decomposed, salt, KDF_MIN)));
   }, T);
 });
 
@@ -103,36 +84,37 @@ describe("bornes et tailles", () => {
     expect(() => checkKdfParams({ ops: NaN, mem: 67108864 })).toThrow("paramètres KDF invalides");
     expect(() => checkKdfParams({ ops: Infinity, mem: 67108864 })).toThrow("paramètres KDF invalides");
   });
-  it("deriveContent rejette les paramètres hors bornes", async () => {
+  it("passwordKey rejette les paramètres hors bornes", async () => {
     for (const p of [
       { ops: 11, mem: 67108864 },
       { ops: 3, mem: 268435457 },
       { ops: 3.5, mem: 67108864 },
     ]) {
-      await expect(deriveContent(kLien, "pw", salt, p)).rejects.toThrow("paramètres KDF invalides");
+      await expect(passwordKey("pw", salt, p)).rejects.toThrow("paramètres KDF invalides");
     }
   });
   it("tailles de kLien et de sel", async () => {
     const msg = "clé ou sel de taille invalide";
     await expect(deriveAccess(new Uint8Array(31) as KLien)).rejects.toThrow(msg);
     await expect(deriveAccess(new Uint8Array(33) as KLien)).rejects.toThrow(msg);
-    await expect(deriveContent(new Uint8Array(31) as KLien, "pw", salt, KDF_MIN)).rejects.toThrow(msg);
-    await expect(deriveContent(kLien, "pw", new Uint8Array(15), KDF_MIN)).rejects.toThrow(msg);
-    await expect(deriveContent(kLien, "pw", new Uint8Array(17), KDF_MIN)).rejects.toThrow(msg);
+    await expect(passwordKey("pw", new Uint8Array(15), KDF_MIN)).rejects.toThrow(msg);
+    await expect(passwordKey("pw", new Uint8Array(17), KDF_MIN)).rejects.toThrow(msg);
   });
 });
 
-describe("mot de passe à la création et à l'ouverture (audit F9)", () => {
-  it("deriveContent refuse le mot de passe vide", async () => {
-    await expect(deriveContent(kLien, "", salt, KDF_MIN)).rejects.toThrow("mot_de_passe_vide");
+describe("mot de passe à la création et à l'ouverture (audit F9, spec §31)", () => {
+  it("passwordKey refuse le mot de passe vide", async () => {
+    await expect(passwordKey("", salt, KDF_MIN)).rejects.toThrow("mot_de_passe_vide");
   });
-  it("deriveContentForCreate impose checkPassword et KDF_MIN", async () => {
-    await expect(deriveContentForCreate(kLien, "", salt)).rejects.toThrow("mot_de_passe_trop_court");
-    await expect(deriveContentForCreate(kLien, "court-court", salt)).rejects.toThrow("mot_de_passe_trop_court");
-    await expect(deriveContentForCreate(kLien, "unbelievable", salt)).rejects.toThrow("mot_de_passe_trop_courant");
+  it("passwordKeyForCreate impose checkPassword et KDF_CREATE ; accepte un mot de passe généré", async () => {
+    await expect(passwordKeyForCreate("", salt)).rejects.toThrow("mot_de_passe_trop_court");
+    await expect(passwordKeyForCreate("court-court", salt)).rejects.toThrow("mot_de_passe_trop_court");
+    await expect(passwordKeyForCreate("aB3!aB3!", salt)).rejects.toThrow("mot_de_passe_trop_court");
+    await expect(passwordKeyForCreate("unbelievable", salt)).rejects.toThrow("mot_de_passe_trop_courant");
     const pw = "cheval-agrafe-pile-correct";
-    const a = await deriveContentForCreate(kLien, pw, salt);
-    const b = await deriveContent(kLien, pw, salt, KDF_MIN);
-    expect(hex(a.kPreuve)).toBe(hex(b.kPreuve));
-  });
+    expect(hex(await passwordKeyForCreate(pw, salt))).toBe(hex(await passwordKey(pw, salt, KDF_MIN)));
+    const g = generatePassword();
+    expect(hex(await passwordKeyForCreate(g, salt))).toBe(hex(await passwordKey(g, salt, KDF_CREATE)));
+    expect(KDF_CREATE).toEqual(KDF_MIN);
+  }, T);
 });

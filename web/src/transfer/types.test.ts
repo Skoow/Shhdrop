@@ -3,14 +3,14 @@
 // `npm test` lance `tsc --noEmit`, qui échoue si l'une d'elles compile.
 import { describe, expect, it } from "vitest";
 import { b64u } from "../crypto/encoding";
-import { deriveAccess, deriveContent, KDF_MIN, newKLien, newSGestion, randomBytes } from "../crypto/kdf";
+import { accessKeys, shareId } from "../crypto/envelope";
+import { deriveAccess, KDF_MIN, newKLien, newSGestion, passwordKey, randomBytes } from "../crypto/kdf";
 import type { KAcces, KLien, KPreuve, SGestion } from "../crypto/types";
 import * as api from "./api";
 import { fetchMeta } from "./client";
 import { parseLink, shareLink } from "./link";
 
 const ORIGIN = "https://srv.test";
-const ID = b64u(new Uint8Array(16).fill(5));
 
 describe("types marqués des secrets", () => {
   it("K_lien, S_gestion ou un tableau brut ne passent pas pour K_accès / K_preuve (tsc)", async () => {
@@ -31,7 +31,12 @@ describe("types marqués des secrets", () => {
       // @ts-expect-error tableau brut refusé
       await api.meta(c, p.id, raw);
       const { kAcces } = await deriveAccess(p.kLien);
-      const { kPreuve } = await deriveContent(p.kLien, "pw", randomBytes(16), KDF_MIN);
+      const kMdp = await passwordKey("pw", randomBytes(16), KDF_MIN);
+      // @ts-expect-error K_mdp n'est pas K_lien (arguments inversés)
+      await accessKeys(kMdp, p.kLien);
+      // @ts-expect-error K_mdp n'est pas K_accès
+      await api.meta(c, p.id, kMdp);
+      const { kPreuve } = await accessKeys(p.kLien, kMdp);
       await api.meta(c, p.id, kAcces);
       await api.unlock(c, p.id, kAcces, kPreuve);
       // @ts-expect-error arguments inversés
@@ -59,7 +64,7 @@ describe("types marqués des secrets", () => {
       sent.push(new Headers(init?.headers).get("X-Shh-Access") ?? "");
       return new Response('{"error":"not_found"}', { status: 404 });
     }) as typeof fetch;
-    await fetchMeta(shareLink(ORIGIN, ID, kLien), ORIGIN, { fetch: f }).catch(() => undefined);
+    await fetchMeta(shareLink(ORIGIN, b64u(await shareId(kLien)), kLien), ORIGIN, { fetch: f }).catch(() => undefined);
     expect(sent).toEqual([b64u((await deriveAccess(kLien)).kAcces)]);
     expect(sent[0]).not.toBe(b64u(kLien));
   });

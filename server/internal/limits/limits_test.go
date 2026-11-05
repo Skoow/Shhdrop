@@ -1,8 +1,10 @@
 package limits
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -306,3 +308,126 @@ func TestSegmentRatePer48(t *testing.T) {
 		t.Fatal("pas de remise à zéro à la minute")
 	}
 }
+
+var testUploadN atomic.Int64
+
+// AllowCreate (tests) : une création réservée puis finalisée aussitôt.
+func (l *Limiter) AllowCreate(ip netip.Addr, bytes int64) (bool, time.Duration) {
+	id := fmt.Sprintf("test-%d", testUploadN.Add(1))
+	ra, err := l.BeginUpload(ip, id, bytes)
+	if err != nil {
+		return false, ra
+	}
+	l.FinishUpload(id)
+	return true, 0
+}
+
+// Spec §29.5 : quotas débités à la finalisation (un envoi abandonné ne les consomme pas),
+// création refusée quand ils sont atteints, 2 envois en cours par connexion (6 par /48),
+// octets abandonnés débités à l'effacement (6 Gio par jour, puis 429).
+func TestUploadQuotas(t *testing.T) {
+	const gib = 1 << 30
+	t.Run("10 créations finalisées par jour, puis refus", func(t *testing.T) {
+		l := New(fixed(time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)))
+		for i := 0; i < CreatesPer64; i++ {
+			if ok, _ := l.AllowCreate(ip("1.2.3.4"), 1); !ok {
+				t.Fatal(i)
+			}
+		}
+		ra, err := l.BeginUpload(ip("1.2.3.4"), "x", 1)
+		if !errors.Is(err, ErrQuota) || ra != 14*time.Hour {
+			t.Fatal(ra, err)
+		}
+	})
+	t.Run("envoi abandonné ou annulé : ne compte pas dans les créations", func(t *testing.T) {
+		l := New(fixed(time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)))
+		for i := 0; i < 3*CreatesPer64; i++ {
+			id := fmt.Sprint("a", i)
+			if _, err := l.BeginUpload(ip("1.2.3.4"), id, 1); err != nil {
+				t.Fatal(i, err)
+			}
+			if i%2 == 0 {
+				l.AbandonUpload(id)
+			} else {
+				l.CancelUpload(id)
+			}
+		}
+		if ok, _ := l.AllowCreate(ip("1.2.3.4"), 1); !ok {
+			t.Fatal("quota consommé par des envois non finalisés")
+		}
+	})
+	t.Run("2 envois en cours par connexion, 6 par /48", func(t *testing.T) {
+		l := New(fixed(time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)))
+		for _, id := range []string{"p1", "p2"} {
+			if _, err := l.BeginUpload(ip("1.2.3.4"), id, 1); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if ra, err := l.BeginUpload(ip("1.2.3.4"), "p3", 1); !errors.Is(err, ErrQuota) || ra != time.Minute {
+			t.Fatal(ra, err)
+		}
+		l.FinishUpload("p1")
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "p3", 1); err != nil {
+			t.Fatal("place libérée par la finalisation", err)
+		}
+		for i := 0; i < PendingPer48; i++ {
+			if _, err := l.BeginUpload(ip(fmt.Sprintf("2001:db8:9:%x::1", i)), fmt.Sprint("q", i), 1); err != nil {
+				t.Fatal(i, err)
+			}
+		}
+		if _, err := l.BeginUpload(ip("2001:db8:9:ff::1"), "q-de-trop", 1); !errors.Is(err, ErrQuota) {
+			t.Fatal(err)
+		}
+	})
+	t.Run("octets abandonnés : 6 Gio par jour, puis 429", func(t *testing.T) {
+		l := New(fixed(time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)))
+		for i := 0; i < 6; i++ {
+			id := fmt.Sprint("g", i)
+			if _, err := l.BeginUpload(ip("1.2.3.4"), id, gib); err != nil {
+				t.Fatal(i, err)
+			}
+			l.AbandonUpload(id)
+		}
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "g6", 1); !errors.Is(err, ErrQuota) {
+			t.Fatal("7ᵉ Gio abandonné accepté", err)
+		}
+		if _, err := l.BeginUpload(ip("1.2.3.5"), "autre", 1); err != nil {
+			t.Fatal("autre connexion touchée", err)
+		}
+	})
+	t.Run("id déjà en cours : ErrDuplicate, rien compté ni retiré", func(t *testing.T) {
+		l := New(fixed(time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)))
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "d", 1); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.BeginUpload(ip("5.6.7.8"), "d", 1); !errors.Is(err, ErrDuplicate) {
+			t.Fatal(err)
+		}
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "e", 1); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "f", 1); !errors.Is(err, ErrQuota) {
+			t.Fatal("l'envoi d est toujours en cours", err)
+		}
+	})
+	t.Run("minuit : compteurs et envois en cours oubliés", func(t *testing.T) {
+		c := &stepClock{t: time.Date(2026, 11, 5, 23, 59, 0, 0, time.UTC)}
+		l := New(c.Now)
+		for _, id := range []string{"m1", "m2"} {
+			if _, err := l.BeginUpload(ip("1.2.3.4"), id, 1); err != nil {
+				t.Fatal(err)
+			}
+		}
+		c.t = c.t.Add(2 * time.Minute)
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "m3", 1); err != nil {
+			t.Fatal(err)
+		}
+		l.FinishUpload("m1") // inconnu depuis minuit : ignoré
+	})
+}
+
+func fixed(t time.Time) func() time.Time { return func() time.Time { return t } }
+
+type stepClock struct{ t time.Time }
+
+func (c *stepClock) Now() time.Time { return c.t }

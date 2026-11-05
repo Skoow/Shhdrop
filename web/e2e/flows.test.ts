@@ -66,7 +66,7 @@ describe("création puis ouverture (texte, image 300 Kio, fichier 5 Mio)", () =>
     expect((await fetchMeta(r.link, srv().origin)).expiresInS).toBeGreaterThan(3500);
     const dl: [number, number][] = [];
     const o = await openShare(r.link, PW, srv().origin, (d, t) => dl.push([d, t]));
-    expect(dl).toEqual([[1, 3]]); // à l'ouverture : segment 0 seulement (en-tête, manifeste)
+    expect(dl).toEqual([[1, 3], [3, 3]]); // à l'ouverture : segment 0 (en-tête) et dernier segment (manifeste)
     expect(o.manifest.items.map((e) => [e.kind, e.name, e.mime])).toEqual([
       ["text", "", "text/plain"],
       ["file", "photo.jpg", "image/jpeg"],
@@ -173,7 +173,7 @@ describe("réseau coupé pendant l'envoi", () => {
       }
       return globalThis.fetch(input, init);
     };
-    const data = pseudo(5 * MIB, 4); // palier 80 → 2 segments
+    const data = pseudo(5 * MIB, 4); // 5 Mio + réserve du manifeste → palier 160 → 3 segments
     const r = await share(srv(), [{ kind: "file", name: "a.bin", mime: "application/octet-stream", data }], 1, {
       fetch: flaky,
     });
@@ -214,12 +214,13 @@ describe("réseau coupé pendant l'envoi", () => {
 
 // Spec §24 : gros fichier (File/Blob adossé au disque) chiffré, envoyé, reçu et déchiffré en
 // flux ; la mémoire du processus ne grandit pas avec la taille du fichier. 250 Mio − 64 Kio :
-// plus grand contenu du palier 4000 (63 segments) ; 300 Mio tomberaient dans le palier 8000
+// plus grand contenu du palier 4000 en v2 (63 segments, dernier morceau réservé au manifeste) ; 300 Mio
+// tomberaient dans le palier 8000
 // (125 segments, 500 Mio envoyés). Les segments à jeton valide ont leur propre limite
 // (600 par minute) : les ~130 requêtes passent sans attente.
 describe("gros fichier en flux (250 Mio)", () => {
   const srv = useServer();
-  const SIZE = 250 * MIB - 64 * KIB;
+  const SIZE = 250 * MIB - 65536;
   let dir: string;
   let file: string;
   let sourceHash: string;

@@ -13,6 +13,7 @@ import (
 
 	altcha "github.com/altcha-org/altcha-lib-go"
 
+	"github.com/skoow/shhdrop/server/internal/limits"
 	"github.com/skoow/shhdrop/server/internal/share"
 	"github.com/skoow/shhdrop/server/internal/token"
 )
@@ -51,40 +52,33 @@ func (s *server) captcha(w http.ResponseWriter, r *http.Request) {
 	}{ch, s.sig.Issue(token.CaptchaShown, saltID(ch.Salt), 0, s.svc.Now().Add(captchaTTL))})
 }
 
+// createBody : création v2 (spec §29.8). Ni durée, ni ouvertures, ni sel, ni V_preuve.
 type createBody struct {
-	Bucket   int    `json:"bucket"`
-	TTLHours int    `json:"ttl_hours"`
-	MaxOpens int    `json:"max_opens"`
-	Salt     string `json:"salt"`
-	Kdf      struct {
-		Ops int `json:"ops"`
-		Mem int `json:"mem"`
-	} `json:"kdf"`
+	ID      string `json:"id"`
+	Bucket  int    `json:"bucket"`
 	AccessV string `json:"access_v"`
-	ProofV  string `json:"proof_v"`
 	ManageV string `json:"manage_v"`
 	Altcha  string `json:"altcha"`
 	HP      string `json:"hp"`
 	ShownAt string `json:"shown_at"`
 }
 
-// POST /api/shares : format et gel → anti-robot → quotas → création → difficulté suivante.
-// Une requête invalide ou un serveur gelé ne consomme ni le défi ni le quota ; le défi
-// est en revanche consommé si le quota ou la création échoue ensuite.
+// POST /api/shares : format et gel → anti-robot → quotas (réservation) → création →
+// difficulté suivante. Une requête invalide ou un serveur gelé ne consomme ni le défi ni
+// le quota ; le défi est en revanche consommé si le quota ou la création échoue ensuite.
+// Un id déjà pris (en base, ou envoi en cours sous cet id) → 409, rien n'est compté.
 func (s *server) create(w http.ResponseWriter, r *http.Request) {
 	var b createBody
 	if err := readJSON(w, r, &b); err != nil {
 		fail(w, err)
 		return
 	}
-	req := share.CreateReq{Bucket: b.Bucket, TTLHours: b.TTLHours, MaxOpens: b.MaxOpens,
-		KdfOps: b.Kdf.Ops, KdfMem: b.Kdf.Mem}
-	var errs [4]error
-	req.Salt, errs[0] = secret(b.Salt, 16)
+	req := share.CreateReq{ID: b.ID, Bucket: b.Bucket}
+	var errs [3]error
+	_, errs[0] = secret(b.ID, 16)
 	req.AccessV, errs[1] = secret(b.AccessV, 32)
-	req.ProofV, errs[2] = secret(b.ProofV, 32)
-	req.ManageV, errs[3] = secret(b.ManageV, 32)
-	if errs != [4]error{} || share.Validate(req) != nil {
+	req.ManageV, errs[2] = secret(b.ManageV, 32)
+	if errs != [3]error{} || share.Validate(req) != nil {
 		fail(w, errBadRequest)
 		return
 	}
@@ -109,22 +103,27 @@ func (s *server) create(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	// Quota en capacité utile (64 Kio par morceau) : 3 partages de taille max par jour.
-	if ok, retry := s.lim.AllowCreate(ip, int64(b.Bucket)*65536); !ok {
+	// Quotas en capacité utile (données du palier, sans le morceau du manifeste), réservés ici et débités à la
+	// finalisation ; 2 envois non finalisés à la fois ; octets abandonnés (spec §29.5).
+	switch retry, err := s.lim.BeginUpload(ip, req.ID, share.ContentBytes(b.Bucket)); {
+	case errors.Is(err, limits.ErrDuplicate):
+		fail(w, share.ErrConflict)
+		return
+	case err != nil:
 		writeLimit(w, retry)
 		return
 	}
 	id, segs, err := s.svc.Create(req)
 	if err != nil {
+		s.lim.CancelUpload(req.ID)
 		fail(w, err)
 		return
 	}
 	s.cap.RecordCreate(ip)
 	writeJSON(w, http.StatusCreated, struct {
-		ID       string `json:"id"`
 		Token    string `json:"upload_token"`
 		Segments int    `json:"segments"`
-	}{id, s.sig.Issue(token.Upload, id, 0, s.svc.Now().Add(uploadTTL)), segs})
+	}{s.sig.Issue(token.Upload, id, 0, s.svc.Now().Add(uploadTTL)), segs})
 }
 
 // checkToken : jeton Bearer du type attendu, lié à l'{id} du chemin ; rend le n° d'ouverture.
@@ -184,11 +183,37 @@ func (s *server) finalize(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	left, err := s.svc.Finalize(id)
+	var b struct {
+		Salt     string `json:"salt"`
+		KdfOps   int    `json:"kdf_ops"`
+		KdfMem   int    `json:"kdf_mem"`
+		ProofV   string `json:"proof_v"`
+		Envelope string `json:"envelope"`
+		TTLHours int    `json:"ttl_hours"`
+		MaxOpens int    `json:"max_opens"`
+		FillFrom *int   `json:"fill_from"`
+		FillTo   *int   `json:"fill_to"`
+	}
+	if err := readJSON(w, r, &b); err != nil {
+		fail(w, err)
+		return
+	}
+	req := share.FinalizeReq{TTLHours: b.TTLHours, MaxOpens: b.MaxOpens, KdfOps: b.KdfOps, KdfMem: b.KdfMem}
+	var errs [3]error
+	req.Salt, errs[0] = secret(b.Salt, 16)
+	req.ProofV, errs[1] = secret(b.ProofV, 32)
+	req.Envelope, errs[2] = secret(b.Envelope, share.EnvelopeLen)
+	if errs != [3]error{} || b.FillFrom == nil || b.FillTo == nil {
+		fail(w, errBadRequest)
+		return
+	}
+	req.FillFrom, req.FillTo = *b.FillFrom, *b.FillTo
+	left, err := s.svc.Finalize(id, req)
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	s.lim.FinishUpload(id)
 	writeJSON(w, http.StatusOK, map[string]int64{"expires_in_s": secs(left)})
 }
 
@@ -243,7 +268,7 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	openN, err := s.svc.Unlock(id, ka, kp)
+	openN, envelope, err := s.svc.Unlock(id, ka, kp)
 	if err != nil {
 		fail(w, err)
 		return
@@ -253,7 +278,8 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, struct {
 		Token    string `json:"download_token"`
 		Segments int    `json:"segments"`
-	}{s.sig.Issue(token.Download, id, openN, time.Unix(exp, 0)), m.Segments})
+		Envelope string `json:"envelope"`
+	}{s.sig.Issue(token.Download, id, openN, time.Unix(exp, 0)), m.Segments, b64.EncodeToString(envelope)})
 }
 
 func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {

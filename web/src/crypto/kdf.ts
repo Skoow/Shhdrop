@@ -1,20 +1,14 @@
 import sodium from "libsodium-wrappers-sumo";
-import { concat, utf8 } from "./encoding";
+import { utf8 } from "./encoding";
 import { checkPassword } from "./passphrase";
-import type { KAcces, KLien, KPreuve, SGestion } from "./types";
+import type { KAcces, KLien, KMdp, SGestion } from "./types";
 
 export const KDF_MIN = { ops: 3, mem: 67108864 } as const;
 export const KDF_MAX = { ops: 10, mem: 268435456 } as const;
 export type KdfParams = { ops: number; mem: number };
-/** Paramètres Argon2id des nouveaux partages (spec §7.1 : 64 Mio, 3 passes), imposés par deriveContentForCreate. */
+/** Paramètres Argon2id des nouveaux partages (spec §29.2 : 64 Mio, 3 passes), imposés par passwordKeyForCreate. */
 export const KDF_CREATE = { ops: KDF_MIN.ops, mem: KDF_MIN.mem } as const;
 export type AccessKeys = { kAcces: KAcces; vAcces: Uint8Array<ArrayBuffer> };
-export type ContentKeys = {
-  kContenu: CryptoKey;
-  kPreuve: KPreuve;
-  vPreuve: Uint8Array<ArrayBuffer>;
-  engagement: Uint8Array<ArrayBuffer>;
-};
 
 export function randomBytes(n: number): Uint8Array<ArrayBuffer> {
   return crypto.getRandomValues(new Uint8Array(n));
@@ -60,85 +54,43 @@ export function checkKdfParams(p: KdfParams): void {
   }
 }
 
-function checkSizes(kLien: Uint8Array<ArrayBuffer>, salt?: Uint8Array<ArrayBuffer>): void {
-  if (kLien.length !== 32 || (salt !== undefined && salt.length !== 16)) {
-    throw new Error("clé ou sel de taille invalide");
-  }
+export function checkKLien(kLien: Uint8Array): void {
+  if (kLien.length !== 32) throw new Error("clé ou sel de taille invalide");
 }
 
+/** K_accès = HKDF(K_lien, « shhdrop/v2/acces »), V_accès = SHA-256(K_accès) (spec §29.2). */
 export async function deriveAccess(kLien: KLien): Promise<AccessKeys> {
-  checkSizes(kLien);
-  const kAcces = (await hkdf(kLien, "shhdrop/v1/acces")) as KAcces;
+  checkKLien(kLien);
+  const kAcces = (await hkdf(kLien, "shhdrop/v2/acces")) as KAcces;
   return { kAcces, vAcces: await sha256(kAcces) };
 }
 
 /**
- * Clés de contenu pour CRÉER un partage : le mot de passe doit passer checkPassword
- * (sinon Error("mot_de_passe_trop_court" | "mot_de_passe_trop_courant")) et les paramètres
- * Argon2id sont fixés à KDF_CREATE (= KDF_MIN, spec §7.1 : 64 Mio, 3 passes). Audit F9.
+ * K_mdp pour CRÉER un partage (spec §29.2, §31) : un mot de passe généré par
+ * generatePassword (8 caractères) ou saisi passant checkPassword (12 caractères au moins,
+ * hors liste noire) ; sinon Error("mot_de_passe_trop_court" | "mot_de_passe_trop_courant").
+ * Paramètres Argon2id fixés à KDF_CREATE (64 Mio, 3 passes). Audit F9.
  */
-export async function deriveContentForCreate(
-  kLien: KLien,
-  password: string,
-  salt: Uint8Array<ArrayBuffer>,
-): Promise<ContentKeys> {
+export async function passwordKeyForCreate(password: string, salt: Uint8Array<ArrayBuffer>): Promise<KMdp> {
   const pw = checkPassword(password);
   if (!pw.ok) throw new Error(`mot_de_passe_${pw.reason}`);
-  return deriveContent(kLien, password, salt, KDF_CREATE);
+  return passwordKey(password, salt, KDF_CREATE);
 }
 
 /**
- * Clés de contenu pour OUVRIR un partage (paramètres lus sur le serveur, bornés par
- * checkKdfParams). Tout mot de passe non vide est accepté : il a été choisi à la création.
+ * K_mdp = Argon2id(mot de passe NFC, sel) pour OUVRIR un partage (paramètres lus sur le
+ * serveur, bornés par checkKdfParams). Tout mot de passe non vide est accepté : il a été
+ * choisi à la création. L'appelant met la clé à zéro après usage.
  */
-export async function deriveContent(
-  kLien: KLien,
-  password: string,
-  salt: Uint8Array<ArrayBuffer>,
-  params: KdfParams,
-): Promise<ContentKeys> {
+export async function passwordKey(password: string, salt: Uint8Array<ArrayBuffer>, params: KdfParams): Promise<KMdp> {
   if (password.length === 0) throw new Error("mot_de_passe_vide");
-  checkSizes(kLien, salt);
+  if (salt.length !== 16) throw new Error("clé ou sel de taille invalide");
   checkKdfParams(params);
   await sodium.ready;
-  let kMdp: Uint8Array | undefined;
-  let ikm: Uint8Array<ArrayBuffer> | undefined;
-  let kMaitre: Uint8Array<ArrayBuffer> | undefined;
-  let kContenuBrut: Uint8Array<ArrayBuffer> | undefined;
-  try {
-    // NFC : un même mot de passe saisi sur des claviers différents donne la même clé.
-    kMdp = sodium.crypto_pwhash(
-      32,
-      password.normalize("NFC"),
-      salt,
-      params.ops,
-      params.mem,
-      sodium.crypto_pwhash_ALG_ARGON2ID13,
-    );
-    ikm = concat(kLien, kMdp);
-    kMaitre = await hkdf(ikm, "shhdrop/v1/maitre");
-    kContenuBrut = await hkdf(kMaitre, "shhdrop/v1/contenu");
-    const kPreuve = (await hkdf(kMaitre, "shhdrop/v1/preuve")) as KPreuve;
-
-    const hmacKey = await crypto.subtle.importKey(
-      "raw",
-      kContenuBrut,
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"],
-    );
-    const engagement = new Uint8Array(
-      await crypto.subtle.sign("HMAC", hmacKey, utf8("shhdrop/v1/engagement")),
-    );
-    const kContenu = await crypto.subtle.importKey("raw", kContenuBrut, "AES-GCM", false, [
-      "encrypt",
-      "decrypt",
-    ]);
-    return { kContenu, kPreuve, vPreuve: await sha256(kPreuve), engagement };
-  } finally {
-    kMdp?.fill(0);
-    ikm?.fill(0);
-    kMaitre?.fill(0);
-    kContenuBrut?.fill(0);
-  }
+  // NFC : un même mot de passe saisi sur des claviers différents donne la même clé.
+  const k = sodium.crypto_pwhash(32, password.normalize("NFC"), salt, params.ops, params.mem, sodium.crypto_pwhash_ALG_ARGON2ID13);
+  // Copie dans un ArrayBuffer à nous, puis effacement de la sortie de libsodium.
+  const out = new Uint8Array(k) as KMdp;
+  k.fill(0);
+  return out;
 }

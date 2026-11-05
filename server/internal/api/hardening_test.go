@@ -30,8 +30,8 @@ func TestJSONStrictKeys(t *testing.T) {
 	for _, mut := range []func(string) string{
 		func(b string) string { return strings.Replace(b, `"bucket":1`, `"bucket":1,"Bucket":16`, 1) },
 		func(b string) string { return strings.Replace(b, `"bucket":1`, `"BUCKET":1`, 1) },
-		func(b string) string { return strings.Replace(b, `"ops":3`, `"ops":3,"OPS":10`, 1) },
-		func(b string) string { return strings.Replace(b, `"ops":3`, `"Ops":3`, 1) },
+		func(b string) string { return strings.Replace(b, `"id":`, `"ID":"AAAAAAAAAAAAAAAAAAAAAA","id":`, 1) },
+		func(b string) string { return strings.Replace(b, `"id":`, `"Id":`, 1) },
 	} {
 		alt, shown := e.captchaFor(t, "")
 		body := mut(string(mustJSON(k.createBody(1, 1, alt, shown))))

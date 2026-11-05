@@ -4,12 +4,10 @@
   // composeur dans le réceptacle : liste par catégories, jauge, options, « Chiffrer et envoyer ».
   // Tout reste en mémoire (aucun stockage) ; l'envoi lui-même est la Task 17 (`onsend`).
   import { flushSync, tick } from "svelte";
-  import { checkPassword, type Item } from "../index";
+  import { CONTENT_MAX, MAX_ITEMS, PW_MIN_CHARS, TEXT_MAX, checkPassword, generatePassword, type Item } from "../index";
   import { blockKey, createComposer, type AddReport, type Source } from "../flows/compose.svelte";
   import { fromClipboardRead, fromPasteEvent } from "../flows/intake";
-  import { CONTENT_MAX, MAX_ITEMS, PW_MIN_CHARS, TEXT_MAX } from "../flows/limits";
   import { createOptions, estimateUpload, viewOnlyBlockers, type Rights } from "../flows/options.svelte";
-  import { generatePassword } from "../flows/password";
   import { formatBytes, formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { announce } from "../ui/announce";

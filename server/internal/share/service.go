@@ -30,6 +30,9 @@ var (
 	ErrFull       = errors.New("stockage plein")
 	ErrFrozen     = errors.New("créations suspendues")
 	ErrBadRequest = errors.New("requête invalide")
+	// ErrConflict : l'id proposé par le client existe déjà (spec §29.8 : 409, le client
+	// recommence avec une nouvelle K_lien).
+	ErrConflict = errors.New("identifiant déjà pris")
 	// ErrBudget : l'ouverture a déjà lu son budget d'octets (ReadBudget).
 	ErrBudget = errors.New("budget de lecture épuisé")
 )
@@ -49,10 +52,24 @@ const (
 	stallSweep = 900
 )
 
+// CreateReq : création v2 (spec §29.8). L'id vient du client (HKDF de sa K_lien) ; ni
+// durée, ni ouvertures, ni sel, ni V_preuve à ce stade.
 type CreateReq struct {
-	Bucket, TTLHours, MaxOpens, KdfOps, KdfMem int
-	Salt, AccessV, ProofV, ManageV             []byte
+	ID               string
+	Bucket           int
+	AccessV, ManageV []byte
 }
+
+// FinalizeReq : tout ce qui dépend du mot de passe, la durée, les ouvertures, et le
+// bourrage [FillFrom, FillTo) que le serveur remplit d'aléa (spec §29.3, §29.8).
+type FinalizeReq struct {
+	TTLHours, MaxOpens, KdfOps, KdfMem int
+	FillFrom, FillTo                   int
+	Salt, ProofV, Envelope             []byte
+}
+
+// EnvelopeLen : taille de E (nonce 12 ‖ R chiffrée 32 ‖ tag 16).
+const EnvelopeLen = 60
 
 type Meta struct {
 	ExpiresIn                        time.Duration
@@ -73,6 +90,9 @@ type Config struct {
 	Now        func() time.Time
 	StorageMax int64  // octets réservables au total ; > 0
 	FrozenFile string // chemin absolu du fichier de gel ; obligatoire
+	// OnAbandon (facultatif) : appelé quand un envoi est effacé sans avoir été finalisé
+	// (quotas d'octets abandonnés, spec §29.5). Ne doit pas bloquer.
+	OnAbandon func(id string, bucket int)
 }
 
 // NewService valide la configuration : une valeur zéro ne doit jamais désactiver le gel
@@ -90,7 +110,8 @@ func NewService(c Config) (*Service, error) {
 	case c.FrozenFile == "" || !filepath.IsAbs(c.FrozenFile):
 		return nil, errors.New("share : FrozenFile doit être un chemin absolu")
 	}
-	return &Service{DB: c.DB, Blobs: c.Blobs, Now: c.Now, StorageMax: c.StorageMax, FrozenFile: c.FrozenFile}, nil
+	return &Service{DB: c.DB, Blobs: c.Blobs, Now: c.Now, StorageMax: c.StorageMax, FrozenFile: c.FrozenFile,
+		OnAbandon: c.OnAbandon}, nil
 }
 
 // Service : à construire avec NewService.
@@ -100,6 +121,7 @@ type Service struct {
 	Now        func() time.Time
 	StorageMax int64
 	FrozenFile string
+	OnAbandon  func(id string, bucket int)
 
 	createMu sync.Mutex   // rend atomiques « place libre ? » et la réservation
 	uploadMu sync.RWMutex // Finalize attend la fin des écritures de segments en cours
@@ -170,22 +192,45 @@ func (s *Service) Frozen() bool {
 	return !errors.Is(err, fs.ErrNotExist)
 }
 
+// notEmptyHash : un vérificateur égal à SHA-256("") serait satisfait par un secret vide (audit F4).
+func notEmptyHash(vs ...[]byte) bool {
+	for _, v := range vs {
+		if subtle.ConstantTimeCompare(v, emptyHash[:]) == 1 {
+			return false
+		}
+	}
+	return true
+}
+
 // Validate vérifie les champs d'une création (aussi revérifiés par Create).
 func Validate(r CreateReq) error {
-	if !validBucket(r.Bucket) || !validTTL(r.TTLHours) || r.MaxOpens < 1 || r.MaxOpens > 10 ||
-		r.KdfOps < 3 || r.KdfOps > 10 || r.KdfMem < 67108864 || r.KdfMem > 268435456 ||
-		len(r.Salt) != 16 || len(r.AccessV) != 32 || len(r.ProofV) != 32 || len(r.ManageV) != 32 {
+	if !validID(r.ID) || !validBucket(r.Bucket) || len(r.AccessV) != 32 || len(r.ManageV) != 32 ||
+		!notEmptyHash(r.AccessV, r.ManageV) {
 		return ErrBadRequest
-	}
-	// Un vérificateur égal à SHA-256("") serait satisfait par un secret vide (audit F4).
-	for _, v := range [][]byte{r.AccessV, r.ProofV, r.ManageV} {
-		if subtle.ConstantTimeCompare(v, emptyHash[:]) == 1 {
-			return ErrBadRequest
-		}
 	}
 	return nil
 }
 
+// ValidateFinalize vérifie les champs d'une finalisation qui ne dépendent pas du palier
+// (le bourrage est vérifié par Finalize, contre le palier du partage).
+func ValidateFinalize(r FinalizeReq) error {
+	if !validTTL(r.TTLHours) || r.MaxOpens < 1 || r.MaxOpens > 10 ||
+		r.KdfOps < 3 || r.KdfOps > 10 || r.KdfMem < 67108864 || r.KdfMem > 268435456 ||
+		len(r.Salt) != 16 || len(r.ProofV) != 32 || len(r.Envelope) != EnvelopeLen || !notEmptyHash(r.ProofV) {
+		return ErrBadRequest
+	}
+	return nil
+}
+
+// validFill : bourrage vide [k, k) avec 0 ≤ k ≤ segs − 1, ou [from, to) avec
+// 1 ≤ from < to ≤ segs − 1 : jamais le segment 0 (en-tête) ni le dernier (manifeste).
+func validFill(from, to, segs int) bool {
+	return from >= 0 && from <= to && to <= segs-1 && (from == to || from >= 1)
+}
+
+// Create réserve la place du palier et enregistre l'envoi sous l'id proposé par le client
+// (rendu tel quel). Un id déjà présent, en base ou sur disque, donne ErrConflict, sans
+// toucher au partage existant.
 func (s *Service) Create(r CreateReq) (string, int, error) {
 	if s.Frozen() {
 		return "", 0, ErrFrozen
@@ -193,16 +238,19 @@ func (s *Service) Create(r CreateReq) (string, int, error) {
 	if err := Validate(r); err != nil {
 		return "", 0, err
 	}
-	raw := make([]byte, 16)
-	if _, err := rand.Read(raw); err != nil {
-		return "", 0, err
-	}
-	id := base64.RawURLEncoding.EncodeToString(raw)
+	id := r.ID
 	size := int64(totalSize(r.Bucket))
 	segs := SegmentCount(r.Bucket)
 
 	s.createMu.Lock()
 	defer s.createMu.Unlock()
+	var one int
+	switch err := s.DB.QueryRow(`SELECT 1 FROM shares WHERE id=?`, id).Scan(&one); {
+	case err == nil:
+		return "", 0, ErrConflict
+	case !errors.Is(err, sql.ErrNoRows):
+		return "", 0, err
+	}
 	used, err := s.Blobs.UsedBytes()
 	if err != nil {
 		return "", 0, err
@@ -211,16 +259,18 @@ func (s *Service) Create(r CreateReq) (string, int, error) {
 		return "", 0, ErrFull
 	}
 	if err := reserveBlob(s.Blobs, id, size); err != nil {
-		if errors.Is(err, blob.ErrNoAllocate) {
+		switch {
+		case errors.Is(err, blob.ErrNoAllocate):
 			return "", 0, ErrFull // place impossible à garantir : refus, comme un disque plein
+		case errors.Is(err, fs.ErrExist):
+			return "", 0, ErrConflict // fichier orphelin du même nom : jamais écrasé
 		}
 		return "", 0, err
 	}
-	_, err = s.DB.Exec(`INSERT INTO shares(id,state,bucket,ttl_hours,max_opens,opens_left,segments_mask,
-		salt,kdf_ops,kdf_mem,access_v,proof_v,manage_v,upload_deadline)
-		VALUES(?,'uploading',?,?,?,?,?,?,?,?,?,?,?,?)`,
-		id, r.Bucket, r.TTLHours, r.MaxOpens, r.MaxOpens, make([]byte, (segs+7)/8),
-		r.Salt, r.KdfOps, r.KdfMem, r.AccessV, r.ProofV, r.ManageV, ceil15(s.now()+uploadWindow))
+	// proof_v, salt, kdf_*, ttl_hours, max_opens et envelope restent NULL jusqu'à Finalize.
+	_, err = s.DB.Exec(`INSERT INTO shares(id,state,bucket,opens_left,segments_mask,access_v,manage_v,upload_deadline)
+		VALUES(?,'uploading',?,0,?,?,?,?)`,
+		id, r.Bucket, make([]byte, (segs+7)/8), r.AccessV, r.ManageV, ceil15(s.now()+uploadWindow))
 	if err != nil {
 		return "", 0, errors.Join(err, s.Blobs.Delete(id))
 	}
@@ -229,14 +279,6 @@ func (s *Service) Create(r CreateReq) (string, int, error) {
 
 // reserveBlob : réservation de la place (variable pour tester la conversion ErrNoAllocate).
 var reserveBlob = func(b *blob.Store, id string, size int64) error { return b.Reserve(id, size) }
-
-func fullMask(segs int) []byte {
-	m := make([]byte, (segs+7)/8)
-	for i := 0; i < segs; i++ {
-		m[i/8] |= 1 << (i % 8)
-	}
-	return m
-}
 
 func (s *Service) PutSegment(id string, n int, body []byte) error {
 	if !validID(id) {
@@ -284,34 +326,100 @@ func (s *Service) PutSegment(id string, n int, body []byte) error {
 	}
 }
 
-func (s *Service) Finalize(id string) (time.Duration, error) {
+// Finalize termine un envoi (spec §29.4, point 4) : tous les segments hors bourrage
+// présents, bourrage rempli d'octets aléatoires (crypto/rand, indiscernables d'un chiffré
+// pour qui lit le disque), puis passage en « ready » avec le sel, Argon2id, V_preuve, E,
+// la durée et les ouvertures. Le bourrage est écrit hors du verrou global (jusqu'à 1 Gio) ;
+// le changement d'état revérifie les segments sous uploadMu. Rejoué après succès : 404.
+func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 	if !validID(id) {
 		return 0, ErrNotFound
 	}
-	s.uploadMu.Lock() // plus aucune écriture de segment en vol
-	defer s.uploadMu.Unlock()
-	now := s.now()
-	var bucket, ttl int
+	if err := ValidateFinalize(r); err != nil {
+		return 0, err
+	}
+	var bucket int
 	var mask []byte
-	err := s.DB.QueryRow(`SELECT bucket, ttl_hours, segments_mask FROM shares
-		WHERE id=? AND state='uploading' AND upload_deadline>?`, id, now).Scan(&bucket, &ttl, &mask)
+	err := s.DB.QueryRow(`SELECT bucket, segments_mask FROM shares WHERE id=? AND state='uploading' AND upload_deadline>?`,
+		id, s.now()).Scan(&bucket, &mask)
 	if err != nil {
 		return 0, notFound(err)
 	}
-	full := fullMask(SegmentCount(bucket))
-	if subtle.ConstantTimeCompare(mask, full) != 1 {
+	segs := SegmentCount(bucket)
+	if !validFill(r.FillFrom, r.FillTo, segs) {
+		return 0, ErrBadRequest
+	}
+	if !hasAllBut(mask, segs, r.FillFrom, r.FillTo) {
 		return 0, ErrIncomplete
 	}
-	exp := ceil15(now + int64(ttl)*3600)
+	if err := s.fillRandom(id, bucket, r.FillFrom, r.FillTo); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return 0, ErrNotFound // effacé pendant le remplissage
+		}
+		return 0, err
+	}
+
+	s.uploadMu.Lock() // plus aucune écriture de segment en vol
+	defer s.uploadMu.Unlock()
+	now := s.now()
+	err = s.DB.QueryRow(`SELECT segments_mask FROM shares WHERE id=? AND state='uploading' AND upload_deadline>?`,
+		id, now).Scan(&mask)
+	if err != nil {
+		return 0, notFound(err)
+	}
+	if !hasAllBut(mask, segs, r.FillFrom, r.FillTo) {
+		return 0, ErrIncomplete
+	}
+	exp := ceil15(now + int64(r.TTLHours)*3600)
 	// upload_deadline et progress_at effacés : ils trahiraient la date de l'envoi (spec §9.1).
 	var got int64
-	err = s.DB.QueryRow(`UPDATE shares SET state='ready', expires_at=?, upload_deadline=NULL, progress_at=NULL
+	err = s.DB.QueryRow(`UPDATE shares SET state='ready', expires_at=?, upload_deadline=NULL, progress_at=NULL,
+		ttl_hours=?, max_opens=?, opens_left=?, salt=?, kdf_ops=?, kdf_mem=?, proof_v=?, envelope=?
 		WHERE id=? AND state='uploading' AND upload_deadline>? AND segments_mask=? RETURNING expires_at`,
-		exp, id, now, full).Scan(&got)
+		exp, r.TTLHours, r.MaxOpens, r.MaxOpens, r.Salt, r.KdfOps, r.KdfMem, r.ProofV, r.Envelope,
+		id, now, mask).Scan(&got)
 	if err != nil {
 		return 0, notFound(err)
 	}
 	return secs(got - now), nil
+}
+
+// hasAllBut : tous les segments de [0, segs) sont reçus, sauf peut-être ceux de [from, to).
+func hasAllBut(mask []byte, segs, from, to int) bool {
+	if len(mask) != (segs+7)/8 {
+		return false
+	}
+	for n := 0; n < segs; n++ {
+		if (n < from || n >= to) && mask[n/8]&(1<<(n%8)) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// fillChunk : taille des écritures du bourrage (un seul tampon, réutilisé).
+const fillChunk = 4 << 20
+
+// fillRandom écrit des octets de crypto/rand dans les segments [from, to).
+func (s *Service) fillRandom(id string, bucket, from, to int) error {
+	if from >= to {
+		return nil
+	}
+	start := int64(segOffset(bucket, from))
+	end := int64(segOffset(bucket, to))
+	buf := make([]byte, fillChunk)
+	for off := start; off < end; {
+		n := min(int64(len(buf)), end-off)
+		b := buf[:n]
+		if _, err := rand.Read(b); err != nil {
+			return err
+		}
+		if err := s.Blobs.WriteAt(id, off, b); err != nil {
+			return err
+		}
+		off += n
+	}
+	return nil
 }
 
 func (s *Service) Meta(id string, kAcces []byte) (Meta, error) {
@@ -336,19 +444,22 @@ func (s *Service) Meta(id string, kAcces []byte) (Meta, error) {
 	return m, nil
 }
 
-func (s *Service) Unlock(id string, kAcces, kPreuve []byte) (int, error) {
+// Unlock vérifie K_accès puis K_preuve ; juste : consomme une ouverture et rend son
+// numéro avec l'enveloppe E (spec §29.8), seulement en « ready » (proof_v et envelope ne
+// sont posés que par Finalize).
+func (s *Service) Unlock(id string, kAcces, kPreuve []byte) (int, []byte, error) {
 	if !validID(id) {
-		return 0, ErrNotFound
+		return 0, nil, ErrNotFound
 	}
 	now := s.now()
-	var accessV, proofV []byte
-	err := s.DB.QueryRow(`SELECT access_v, proof_v FROM shares WHERE id=? AND state='ready' AND expires_at>?`,
-		id, now).Scan(&accessV, &proofV)
+	var accessV, proofV, envelope []byte
+	err := s.DB.QueryRow(`SELECT access_v, proof_v, envelope FROM shares WHERE id=? AND state='ready' AND expires_at>?
+		AND proof_v IS NOT NULL AND envelope IS NOT NULL`, id, now).Scan(&accessV, &proofV, &envelope)
 	if err != nil {
-		return 0, notFound(err)
+		return 0, nil, notFound(err)
 	}
 	if !match(kAcces, accessV) {
-		return 0, ErrNotFound // ne compte pas comme essai
+		return 0, nil, ErrNotFound // ne compte pas comme essai
 	}
 	if match(kPreuve, proofV) {
 		var openN int
@@ -358,15 +469,15 @@ func (s *Service) Unlock(id string, kAcces, kPreuve []byte) (int, error) {
 			WHERE id=? AND state='ready' AND opens_left>0 AND expires_at>? AND failed_attempts<?
 			RETURNING opens_issued`, ceil15(now+purgeWindow), id, now, maxAttempts).Scan(&openN)
 		if err != nil {
-			return 0, notFound(err)
+			return 0, nil, notFound(err)
 		}
-		return openN, nil
+		return openN, envelope, nil
 	}
 	left, err := s.countFailure(id)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	return 0, &BadPassword{AttemptsLeft: left}
+	return 0, nil, &BadPassword{AttemptsLeft: left}
 }
 
 // countFailure compte un mauvais K_preuve (Unlock et Destroy partagent le compteur)
@@ -480,18 +591,21 @@ func (s *Service) Status(id string, sGestion []byte) (Status, error) {
 	now := s.now()
 	var st Status
 	var left int
-	var exp sql.NullInt64
+	var exp, maxOpens sql.NullInt64
 	var manageV []byte
 	err := s.DB.QueryRow(`SELECT max_opens, opens_left, expires_at, state, manage_v FROM shares
 		WHERE id=? AND ((state='uploading' AND upload_deadline>?) OR (state<>'uploading' AND expires_at>?))`,
-		id, now, now).Scan(&st.MaxOpens, &left, &exp, &st.State, &manageV)
+		id, now, now).Scan(&maxOpens, &left, &exp, &st.State, &manageV)
 	if err != nil {
 		return Status{}, notFound(err)
 	}
 	if !match(sGestion, manageV) {
 		return Status{}, ErrNotFound
 	}
-	st.OpensUsed = st.MaxOpens - left
+	if maxOpens.Valid { // NULL pendant l'envoi : 0 / 0
+		st.MaxOpens = int(maxOpens.Int64)
+		st.OpensUsed = st.MaxOpens - left
+	}
 	if exp.Valid {
 		st.ExpiresIn = secs(exp.Int64 - now)
 	}
@@ -571,17 +685,25 @@ func (s *Service) sweepOne(id string, now int64) (bool, error) {
 	return s.destroy(id)
 }
 
-// destroy efface le fichier d'abord, puis la ligne ; renvoie si une ligne existait.
+// destroy efface le fichier d'abord, puis la ligne ; renvoie si une ligne existait. Un
+// envoi effacé avant Finalize est signalé à OnAbandon (octets abandonnés, spec §29.5).
 func (s *Service) destroy(id string) (bool, error) {
 	if err := s.Blobs.Delete(id); err != nil {
 		return false, err
 	}
-	res, err := s.DB.Exec(`DELETE FROM shares WHERE id=?`, id)
+	var state string
+	var bucket int
+	err := s.DB.QueryRow(`DELETE FROM shares WHERE id=? RETURNING state, bucket`, id).Scan(&state, &bucket)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	k, err := res.RowsAffected()
-	return k == 1, err
+	if state == "uploading" && s.OnAbandon != nil {
+		s.OnAbandon(id, bucket)
+	}
+	return true, nil
 }
 
 func (s *Service) destroyOrNotFound(id string) error {

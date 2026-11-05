@@ -2,12 +2,15 @@ package share
 
 import "sync"
 
-// ReadBudget : octets qu'une ouverture (un jeton de téléchargement) peut lire au total,
-// soit deux fois le fichier chiffré du palier (une lecture complète et un nouvel essai de
-// chaque segment) plus deux segments 0 de marge (relecture de l'en-tête et du manifeste).
+// ReadBudget : octets qu'une ouverture (un jeton de téléchargement) peut lire au total.
+// Paquet v2 (spec §29.3) : une ouverture complète lit le segment 0 (en-tête, avant
+// l'enveloppe), le dernier segment (manifeste), puis les segments des éléments, dont à
+// nouveau le segment 0 ; le bourrage n'est jamais lu. Budget = une ouverture complète
+// (fichier + segment 0 + dernier segment) plus un nouvel essai de chaque segment
+// (fichier), soit 2 × fichier chiffré + segment 0 + dernier segment.
 // Audit de sécurité M1 : sans borne, un jeton relit le partage pendant 3 h.
 func ReadBudget(bucket int) int64 {
-	return 2*int64(totalSize(bucket)) + 2*int64(SegmentSize(bucket, 0))
+	return 2*int64(totalSize(bucket)) + int64(SegmentSize(bucket, 0)) + int64(SegmentSize(bucket, SegmentCount(bucket)-1))
 }
 
 type openKey struct {

@@ -3,7 +3,7 @@ import { en } from "../i18n/en";
 import { fr } from "../i18n/fr";
 import { BLOCK_REASONS, blockKey, createComposer, metaNoteKey, splitName, type ComposeDeps } from "./compose.svelte";
 import { CATEGORY_ORDER, categoryOf } from "./kinds";
-import { CONTENT_MAX, MAX_ITEMS } from "./limits";
+import { CONTENT_MAX, MAX_ITEMS } from "../index";
 
 const file = (name: string, size = 3, type = "") => new File([new Uint8Array(size)], name, { type });
 /** Fichier d'une taille annoncée sans l'allouer (seule .size compte pour la jauge). */

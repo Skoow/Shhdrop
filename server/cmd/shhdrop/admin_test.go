@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -37,9 +38,9 @@ func adminSetup(t *testing.T) (config.Config, *share.Service) {
 func mk(t *testing.T, s *share.Service) string {
 	t.Helper()
 	h := func() []byte { b := make([]byte, 8); rand.Read(b); x := sha256.Sum256(b); return x[:] }
-	salt := make([]byte, 16)
-	id, _, err := s.Create(share.CreateReq{Bucket: 1, TTLHours: 1, MaxOpens: 1, KdfOps: 3, KdfMem: 67108864,
-		Salt: salt, AccessV: h(), ProofV: h(), ManageV: h()})
+	raw := make([]byte, 16)
+	rand.Read(raw)
+	id, _, err := s.Create(share.CreateReq{ID: base64.RawURLEncoding.EncodeToString(raw), Bucket: 1, AccessV: h(), ManageV: h()})
 	if err != nil {
 		t.Fatal(err)
 	}

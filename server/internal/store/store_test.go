@@ -63,8 +63,8 @@ func TestOctetsRepere(t *testing.T) {
 	}
 	defer db.Close()
 	marker := []byte("OCTETS-REPERE")
-	_, err = db.Exec(`INSERT INTO shares(id,state,bucket,ttl_hours,max_opens,opens_left,segments_mask,salt,kdf_ops,kdf_mem,access_v,proof_v,manage_v)
-		VALUES('a','ready',1,1,1,1,x'00',?,1,1,x'01',?,x'02')`, marker, marker)
+	_, err = db.Exec(`INSERT INTO shares(id,state,bucket,ttl_hours,max_opens,opens_left,segments_mask,salt,kdf_ops,kdf_mem,access_v,proof_v,manage_v,envelope)
+		VALUES('a','ready',1,1,1,1,x'00',?,1,1,x'01',?,x'02',?)`, marker, marker, append(append([]byte{}, marker...), make([]byte, 60-len(marker))...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,13 +101,31 @@ func TestStateCheck(t *testing.T) {
 	}
 }
 
-// Une base créée avant progress_at reçoit la colonne à l'ouverture (deux fois sans erreur).
-func TestMigrationProgressAt(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "shares.db")
-	old := strings.Replace(schema, ", progress_at INTEGER", "", 1)
-	if old == schema {
-		t.Fatal("schéma inattendu")
+// v2 : un envoi n'a ni sel, ni Argon2id, ni V_preuve, ni enveloppe ; un partage « ready »
+// doit les avoir tous (enveloppe de 60 octets exactement).
+func TestSchemaV2NullUntilFinalize(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO shares(id,state,bucket,opens_left,segments_mask,access_v,manage_v)
+		VALUES('u','uploading',16,0,x'00',x'01',x'02')`); err != nil {
+		t.Fatal("envoi v2 refusé :", err)
+	}
+	for name, env := range map[string]any{"sans enveloppe": nil, "enveloppe de 59 octets": make([]byte, 59)} {
+		_, err := db.Exec(`INSERT INTO shares(id,state,bucket,ttl_hours,max_opens,opens_left,segments_mask,salt,kdf_ops,kdf_mem,access_v,proof_v,manage_v,envelope)
+			VALUES(?,'ready',16,1,1,1,x'00',x'00',3,3,x'01',x'01',x'02',?)`, name, env)
+		if err == nil {
+			t.Fatal(name, "accepté")
+		}
+	}
+}
+
+// Une base v1 (sans colonne envelope) est refusée sans être modifiée.
+func TestRefusesV1Schema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shares.db")
+	old := `CREATE TABLE shares(id TEXT PRIMARY KEY, state TEXT, progress_at INTEGER) WITHOUT ROWID`
 	raw, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		t.Fatal(err)
@@ -116,14 +134,12 @@ func TestMigrationProgressAt(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw.Close()
-	for i := 0; i < 2; i++ {
-		db, err := Open(path)
-		if err != nil {
-			t.Fatal(i, err)
-		}
-		if _, err := db.Exec("SELECT progress_at FROM shares"); err != nil {
-			t.Fatal(i, err)
-		}
+	db, err := Open(path)
+	if err == nil {
 		db.Close()
+		t.Fatal("base v1 acceptée")
+	}
+	if !strings.Contains(err.Error(), "v1") {
+		t.Fatal(err)
 	}
 }

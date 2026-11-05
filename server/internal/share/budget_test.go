@@ -8,7 +8,8 @@ import (
 
 func TestReadBudgetValues(t *testing.T) {
 	for _, b := range Buckets {
-		want := 2*int64(Header+b*ChunkCT) + 2*int64(SegmentSize(b, 0))
+		last := SegmentCount(b) - 1
+		want := 2*int64(Header+b*ChunkCT) + int64(SegmentSize(b, 0)) + int64(SegmentSize(b, last))
 		if got := ReadBudget(b); got != want {
 			t.Fatalf("palier %d : %d, attendu %d", b, got, want)
 		}
@@ -30,24 +31,24 @@ func TestOpenSegmentBudget(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.Finalize(id); err != nil {
+	if _, err := s.Finalize(id, fin(id)); err != nil {
 		t.Fatal(err)
 	}
-	o1, err := s.Unlock(id, k.acces, k.preuve)
+	o1, _, err := s.Unlock(id, k.acces, k.preuve)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Deux lectures complètes, puis les deux segments 0 de marge : exactement le budget.
+	// Ouverture v2 (segment 0, dernier segment), lecture complète, puis un nouvel essai de
+	// chaque segment : exactement le budget.
+	reads := []int{0, segs - 1}
 	for pass := 0; pass < 2; pass++ {
 		for n := 0; n < segs; n++ {
-			if _, err := readSegment(s, id, n, o1); err != nil {
-				t.Fatal(pass, n, err)
-			}
+			reads = append(reads, n)
 		}
 	}
-	for i := 0; i < 2; i++ {
-		if _, err := readSegment(s, id, 0, o1); err != nil {
-			t.Fatal("marge", i, err)
+	for i, n := range reads {
+		if _, err := readSegment(s, id, n, o1); err != nil {
+			t.Fatal(i, n, err)
 		}
 	}
 	// Le plus petit segment (le dernier) ne passe plus.
@@ -55,7 +56,7 @@ func TestOpenSegmentBudget(t *testing.T) {
 		t.Fatal("au-delà du budget :", err)
 	}
 	// Une autre ouverture a son propre budget.
-	o2, err := s.Unlock(id, k.acces, k.preuve)
+	o2, _, err := s.Unlock(id, k.acces, k.preuve)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,5 +1,6 @@
 import { WORDS } from "./wordlist-eff";
 import { BLOCKLIST } from "./blocklist";
+import { isGeneratedPassword, type GeneratedPassword } from "./password";
 
 export const PW_MIN_CHARS = 12;
 
@@ -32,7 +33,13 @@ export function generatePassphrase(words = PASSPHRASE_MIN_WORDS): string {
 
 export type PwCheck = { ok: true } | { ok: false; reason: "trop_court" | "trop_courant" };
 
-export function checkPassword(pw: string): PwCheck {
+/**
+ * Mot de passe accepté à la création : un mot de passe généré récent (generatePassword,
+ * 8 caractères, spec §31), ou un mot de passe saisi de 12 caractères au moins (points de
+ * code NFC), absent de la liste noire : un humain choisit moins bien qu'un tirage.
+ */
+export function checkPassword(pw: string | GeneratedPassword): PwCheck {
+  if (isGeneratedPassword(pw)) return { ok: true };
   const nfc = pw.normalize("NFC");
   if ([...nfc].length < PW_MIN_CHARS) return { ok: false, reason: "trop_court" };
   if (BLOCKLIST.has(nfc.toLowerCase())) return { ok: false, reason: "trop_courant" };

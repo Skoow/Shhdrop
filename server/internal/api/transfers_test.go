@@ -136,7 +136,9 @@ func TestSegmentConcurrencyCap(t *testing.T) {
 	const a1, a2, a3, b = "2001:db8:1:1::1", "2001:db8:1:2::1", "2001:db8:1:3::1", "2001:db8:2::1"
 	refused := func(ip string, code int, e string) func() bool {
 		return func() bool {
-			resp, body := getSeg(t, srv, ids[9], 1, toks[9], ip)
+			// Segment hors palier : une place libre donne 400 sans rien lire, donc sans
+			// entamer le budget de lecture du jeton (qui s'épuiserait pendant l'attente).
+			resp, body := getSeg(t, srv, ids[9], 7, toks[9], ip)
 			return resp.StatusCode == code && strings.Contains(string(body), `"error":"`+e+`"`) &&
 				resp.Header.Get("Retry-After") == "5"
 		}

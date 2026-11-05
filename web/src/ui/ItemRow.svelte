@@ -5,7 +5,7 @@
   import { tick } from "svelte";
   import type { ComposeItem } from "../flows/compose.svelte";
   import { metaNoteKey } from "../flows/compose.svelte";
-  import { NAME_MAX, STRIP_MAX } from "../flows/limits";
+  import { NAME_MAX, STRIP_MAX } from "../index";
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { formatClock, mediaDuration } from "../media/duration";

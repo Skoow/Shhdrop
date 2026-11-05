@@ -2,8 +2,11 @@
 // et mêmes codes que server/internal/api (spec §8), mêmes règles visibles que
 // server/internal/share : palier et taille exacte des segments, K_accès / K_preuve / S_gestion
 // comparés par empreinte SHA-256, ouvertures, 5 essais puis destruction, « draining »,
-// expiration, 404 uniformes. Il ne reçoit et ne garde que ce que reçoit le vrai serveur
-// (empreintes, sel, segments chiffrés), dans une Map de la page : rien n'est écrit ailleurs.
+// expiration, 404 uniformes ; v2 (spec §29.8) : id choisi par le client (409 s'il existe),
+// sel, Argon2id, V_preuve et enveloppe à la finalisation, bourrage [fill_from, fill_to)
+// rempli d'aléa, enveloppe rendue par unlock. Il ne reçoit et ne garde que ce que reçoit le
+// vrai serveur (empreintes, sel, enveloppe, segments chiffrés), dans une Map de la page :
+// rien n'est écrit ailleurs.
 // Non simulés : limites par connexion, quotas, place disque, gel. Aucune preuve anti-robot
 // n'est vérifiée (anti-robot désactivé en démo ; `fallback: null`).
 import { BUCKETS, segmentCount, segmentSize } from "../crypto/container";
@@ -21,20 +24,22 @@ const MIN_FILL_S = 3; // création refusée moins de 3 s après l'émission du d
 
 type State = "uploading" | "ready" | "draining";
 
+// Champs « null » jusqu'à la finalisation (spec §29.8).
 type Share = {
   state: State;
   bucket: number;
-  ttlHours: number;
-  maxOpens: number;
+  ttlHours: number | null;
+  maxOpens: number | null;
   opensLeft: number;
   opensIssued: number;
   doneMask: number;
   failed: number;
-  salt: Uint8Array;
-  kdf: { ops: number; mem: number };
+  salt: Uint8Array | null;
+  kdf: { ops: number; mem: number } | null;
   accessV: Uint8Array;
-  proofV: Uint8Array;
+  proofV: Uint8Array | null;
   manageV: Uint8Array;
+  envelope: Uint8Array | null;
   segments: (Uint8Array | undefined)[];
   uploadDeadline: number; // s ; 0 hors envoi
   progressAt: number | null; // s, à la minute ; null hors envoi
@@ -243,57 +248,47 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     });
   }
 
-  const CREATE_KEYS = ["bucket", "ttl_hours", "max_opens", "salt", "kdf", "access_v", "proof_v", "manage_v", "altcha", "hp", "shown_at"];
+  const CREATE_KEYS = ["id", "bucket", "access_v", "manage_v", "altcha", "hp", "shown_at"];
 
   async function create(req: Request): Promise<Response> {
     const b = await readJSON(req, CREATE_KEYS);
-    const kdf = b.kdf === undefined ? {} : b.kdf;
-    if (typeof kdf !== "object" || kdf === null || Array.isArray(kdf)) throw badRequest();
-    for (const k of Object.keys(kdf)) if (k !== "ops" && k !== "mem") throw badRequest();
-    const k = kdf as Record<string, unknown>;
-    const bucket = int(b.bucket), ttl = int(b.ttl_hours), maxOpens = int(b.max_opens), ops = int(k.ops), mem = int(k.mem);
+    const bucket = int(b.bucket);
     const altcha = str(b.altcha), hp = str(b.hp), shown = str(b.shown_at);
-    if (altcha === null || hp === null || shown === null) throw badRequest();
-    const salt = decodeB64(b.salt, 16);
-    const accessV = decodeB64(b.access_v, 32), proofV = decodeB64(b.proof_v, 32), manageV = decodeB64(b.manage_v, 32);
+    if (altcha === null || hp === null || shown === null || typeof b.id !== "string") throw badRequest();
+    decodeB64(b.id, 16);
+    const id = b.id;
+    const accessV = decodeB64(b.access_v, 32), manageV = decodeB64(b.manage_v, 32);
     emptyHash ??= await sha256(new Uint8Array(0));
-    if (
-      !(BUCKETS as readonly number[]).includes(bucket) ||
-      ![1, 6, 12, 24].includes(ttl) ||
-      !(maxOpens >= 1 && maxOpens <= 10) ||
-      !(ops >= 3 && ops <= 10) ||
-      !(mem >= 67108864 && mem <= 268435456) ||
-      [accessV, proofV, manageV].some((v) => equal(v, emptyHash!))
-    )
-      throw badRequest();
+    if (!(BUCKETS as readonly number[]).includes(bucket) || [accessV, manageV].some((v) => equal(v, emptyHash!))) throw badRequest();
     // Anti-robot : aucune preuve vérifiée ; seuls le jeton shown_at (émis ici, usage unique,
     // valable 2 min) et le délai de 3 s sont contrôlés, comme le fait le vrai serveur.
     const at = shownAt.get(shown);
     if (altcha === "" || hp !== "" || at === undefined || now() - at < MIN_FILL_S) throw badRequest();
     shownAt.delete(shown);
-    const id = randomId(16);
+    if (shares.has(id)) throw new HttpFail(409, "conflict");
     const segs = segmentCount(bucket);
     shares.set(id, {
       state: "uploading",
       bucket,
-      ttlHours: ttl,
-      maxOpens,
-      opensLeft: maxOpens,
+      ttlHours: null,
+      maxOpens: null,
+      opensLeft: 0,
       opensIssued: 0,
       doneMask: 0,
       failed: 0,
-      salt,
-      kdf: { ops, mem },
+      salt: null,
+      kdf: null,
       accessV,
-      proofV,
+      proofV: null,
       manageV,
+      envelope: null,
       segments: new Array(segs).fill(undefined),
       uploadDeadline: ceil15(now() + UPLOAD_WINDOW_S),
       progressAt: null,
       expiresAt: 0,
       purgeAt: 0,
     });
-    return json(201, { id, upload_token: issue("upload", id, 0, now() + UPLOAD_WINDOW_S), segments: segs });
+    return json(201, { upload_token: issue("upload", id, 0, now() + UPLOAD_WINDOW_S), segments: segs });
   }
 
   async function putSegment(req: Request, id: string, nStr: string): Promise<Response> {
@@ -313,13 +308,38 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     return empty(204);
   }
 
-  function finalize(req: Request, id: string): Response {
+  const FINALIZE_KEYS = ["salt", "kdf_ops", "kdf_mem", "proof_v", "envelope", "ttl_hours", "max_opens", "fill_from", "fill_to"];
+
+  async function finalize(req: Request, id: string): Promise<Response> {
     checkToken(req, "upload", id);
+    const b = await readJSON(req, FINALIZE_KEYS);
+    const ttl = int(b.ttl_hours), maxOpens = int(b.max_opens), ops = int(b.kdf_ops), mem = int(b.kdf_mem);
+    if (typeof b.fill_from !== "number" || typeof b.fill_to !== "number") throw badRequest();
+    const from = int(b.fill_from), to = int(b.fill_to);
+    const salt = decodeB64(b.salt, 16), proofV = decodeB64(b.proof_v, 32), envelope = decodeB64(b.envelope, 60);
+    emptyHash ??= await sha256(new Uint8Array(0));
+    if (
+      ![1, 6, 12, 24].includes(ttl) ||
+      !(maxOpens >= 1 && maxOpens <= 10) ||
+      !(ops >= 3 && ops <= 10) ||
+      !(mem >= 67108864 && mem <= 268435456) ||
+      equal(proofV, emptyHash)
+    )
+      throw badRequest();
     const s = live(id);
     if (s.state !== "uploading" || s.uploadDeadline <= now()) throw notFound();
-    if (s.segments.some((x) => x === undefined)) throw new HttpFail(409, "incomplete");
+    const segs = s.segments.length;
+    // Bourrage : vide [k, k), ou [from, to) avec 1 ≤ from < to ≤ dernier segment (exclu).
+    if (!(from >= 0 && from <= to && to <= segs - 1 && (from === to || from >= 1))) throw badRequest();
+    if (s.segments.some((x, n) => x === undefined && (n < from || n >= to))) throw new HttpFail(409, "incomplete");
+    for (let n = from; n < to; n++) {
+      const pad = new Uint8Array(segmentSize(s.bucket, n));
+      for (let o = 0; o < pad.length; o += 65536) crypto.getRandomValues(pad.subarray(o, o + 65536));
+      s.segments[n] = pad;
+    }
+    Object.assign(s, { salt, kdf: { ops, mem }, proofV, envelope, ttlHours: ttl, maxOpens, opensLeft: maxOpens });
     s.state = "ready";
-    s.expiresAt = ceil15(now() + s.ttlHours * 3600);
+    s.expiresAt = ceil15(now() + ttl * 3600);
     s.uploadDeadline = 0;
     s.progressAt = null;
     return json(200, { expires_in_s: s.expiresAt - now() });
@@ -337,8 +357,8 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     const s = await readable(id, headerSecret(req, "X-Shh-Access"));
     return json(200, {
       expires_in_s: s.expiresAt - now(),
-      salt: b64(s.salt),
-      kdf: { ...s.kdf },
+      salt: b64(s.salt!),
+      kdf: { ...s.kdf! },
       bucket: s.bucket,
       segments: segmentCount(s.bucket),
     });
@@ -349,7 +369,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     const b = await readJSON(req, ["proof"]);
     const kp = decodeB64(b.proof, 32);
     const s = await readable(id, ka); // clé d'accès fausse : 404, aucun essai compté
-    if (await matches(kp, s.proofV)) {
+    if (s.proofV !== null && (await matches(kp, s.proofV))) {
       if (s.opensLeft <= 0) throw notFound();
       s.opensLeft--;
       s.opensIssued++;
@@ -358,7 +378,11 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
         s.purgeAt = Math.min(ceil15(now() + PURGE_WINDOW_S), s.expiresAt);
       }
       const exp = Math.min(now() + PURGE_WINDOW_S, s.expiresAt);
-      return json(200, { download_token: issue("download", id, s.opensIssued, exp), segments: segmentCount(s.bucket) });
+      return json(200, {
+        download_token: issue("download", id, s.opensIssued, exp),
+        segments: segmentCount(s.bucket),
+        envelope: b64(s.envelope!),
+      });
     }
     const left = await countFailure(id, s);
     if (left > 0) throw new HttpFail(403, "bad_password", { attempts_left: left });
@@ -414,7 +438,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     if (b.manage !== undefined) sg = decodeB64(b.manage, 32);
     const s = alive(id);
     // Les trois comparaisons sont toujours faites.
-    const [a, p, g] = await Promise.all([matches(ka, s.accessV), matches(kp, s.proofV), matches(sg, s.manageV)]);
+    const [a, p, g] = await Promise.all([matches(ka, s.accessV), s.proofV !== null && matches(kp, s.proofV), matches(sg, s.manageV)]);
     if (g || (a && p)) {
       shares.delete(id);
       return empty(204);
@@ -428,8 +452,8 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     const s = alive(id);
     if (!(await matches(sg, s.manageV))) throw notFound();
     return json(200, {
-      opens_used: s.maxOpens - s.opensLeft,
-      max_opens: s.maxOpens,
+      opens_used: s.maxOpens === null ? 0 : s.maxOpens - s.opensLeft,
+      max_opens: s.maxOpens ?? 0,
       expires_in_s: s.state === "uploading" ? 0 : s.expiresAt - now(),
       state: s.state,
     });
@@ -456,7 +480,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
       case "GET segments":
         return getSegment(req, id, r[3]!);
       case "POST finalize":
-        return finalize(req, id);
+        return await finalize(req, id);
       case "GET meta":
         return meta(req, id);
       case "POST unlock":

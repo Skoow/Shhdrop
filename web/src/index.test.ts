@@ -8,6 +8,21 @@ describe("interface publique", () => {
       [
         "BadPasswordError",
         "CAPTCHA_MIN_MS",
+        "CONTENT_MAX",
+        "MAX_ITEMS",
+        "MAX_OPENS",
+        "NAME_MAX",
+        "OPENS_DEFAULT",
+        "STRIP_MAX",
+        "TEXT_MAX",
+        "TTL_DEFAULT",
+        "PASSWORD_ALPHABET",
+        "PASSWORD_LEN",
+        "PW_TRIES",
+        "ReadBudgetError",
+        "TTL_HOURS",
+        "TTL_MAX_HOURS",
+        "generatePassword",
         "LimitError",
         "NotFoundError",
         "PASSPHRASE_MIN_WORDS",
@@ -38,4 +53,4 @@ describe("interface publique", () => {
 });
 
 // Types exportés (contrôle à la compilation par tsc).
-export type _Types = [pub.CaptchaProof, pub.CaptchaCtx, pub.PreparedCaptcha];
+export type _Types = [pub.CaptchaProof, pub.CaptchaCtx, pub.PreparedCaptcha, pub.GeneratedPassword, pub.Rights, pub.KeepTtl, pub.ManifestV2, pub.TtlHours];

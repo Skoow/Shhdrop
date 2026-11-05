@@ -9,17 +9,18 @@ import (
 )
 
 // WITHOUT ROWID : pas de compteur d'insertion qui trahirait l'ordre de création (spec §9.1).
+// Schéma v2 (spec §29.8) : ttl_hours, max_opens, salt, kdf_*, proof_v et envelope (E,
+// 60 octets) restent NULL jusqu'à finalize ; un partage « ready » les a tous (CHECK).
 const schema = `CREATE TABLE IF NOT EXISTS shares(
   id TEXT PRIMARY KEY, state TEXT NOT NULL CHECK(state IN ('uploading','ready','draining')),
-  bucket INTEGER NOT NULL, ttl_hours INTEGER NOT NULL, max_opens INTEGER NOT NULL,
+  bucket INTEGER NOT NULL, ttl_hours INTEGER, max_opens INTEGER,
   opens_left INTEGER NOT NULL, opens_issued INTEGER NOT NULL DEFAULT 0, done_mask INTEGER NOT NULL DEFAULT 0,
   failed_attempts INTEGER NOT NULL DEFAULT 0, segments_mask BLOB NOT NULL,
-  salt BLOB NOT NULL, kdf_ops INTEGER NOT NULL, kdf_mem INTEGER NOT NULL,
-  access_v BLOB NOT NULL, proof_v BLOB NOT NULL, manage_v BLOB NOT NULL,
-  upload_deadline INTEGER, expires_at INTEGER, purge_at INTEGER, progress_at INTEGER) WITHOUT ROWID`
-
-// progress_at (minute du dernier segment reçu, NULL hors envoi) : ajouté aux bases créées avant lui.
-const addProgressAt = `ALTER TABLE shares ADD COLUMN progress_at INTEGER`
+  salt BLOB, kdf_ops INTEGER, kdf_mem INTEGER,
+  access_v BLOB NOT NULL, proof_v BLOB, manage_v BLOB NOT NULL, envelope BLOB,
+  upload_deadline INTEGER, expires_at INTEGER, purge_at INTEGER, progress_at INTEGER,
+  CHECK(state='uploading' OR (ttl_hours IS NOT NULL AND max_opens IS NOT NULL AND salt IS NOT NULL AND
+    kdf_ops IS NOT NULL AND kdf_mem IS NOT NULL AND proof_v IS NOT NULL AND envelope IS NOT NULL AND length(envelope)=60))) WITHOUT ROWID`
 
 // Les PRAGMA passent par le DSN pour s'appliquer à chaque connexion.
 const pragmas = "_pragma=journal_mode(WAL)&_pragma=secure_delete(ON)" +
@@ -60,16 +61,16 @@ func Open(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("création du schéma : %w", err)
 	}
+	// Base d'un serveur v1 (sans colonne envelope) : refus, sans rien toucher. Aucun partage
+	// v1 n'existe en production ; un partage v1 serait illisible par le client v2.
 	var has int
-	if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info('shares') WHERE name='progress_at'`).Scan(&has); err != nil {
+	if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info('shares') WHERE name='envelope'`).Scan(&has); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("lecture du schéma : %w", err)
 	}
 	if has == 0 {
-		if _, err := db.Exec(addProgressAt); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("migration progress_at : %w", err)
-		}
+		db.Close()
+		return nil, fmt.Errorf("base au format v1 (sans colonne envelope) : à effacer avant de démarrer le serveur v2")
 	}
 	return db, nil
 }

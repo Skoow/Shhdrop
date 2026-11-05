@@ -2,7 +2,7 @@
   // Jauge de capacité (UI §9.2.5) : taille (proportion de CONTENT_MAX) et nombre (10 crans).
   // Les chiffres viennent des constantes, jamais des textes (benchmark M5). Le dépassement de
   // taille est permis dans la liste, pour voir quoi retirer ; l'envoi est alors bloqué.
-  import { CONTENT_MAX, MAX_ITEMS } from "../flows/limits";
+  import { CONTENT_MAX, MAX_ITEMS } from "../index";
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { announce } from "./announce";

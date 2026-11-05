@@ -2,9 +2,8 @@
 // Toute addition passe par `add` (sélecteur, dépôt, collage, photo, vidéo) ou `addText` /
 // `addVoice` : lecture d'essai → limite de nombre → nettoyage des images → doublons →
 // insertion à la fin de sa catégorie. L'ordre de `items` est l'ordre du manifeste.
-import { cleanName, type Item } from "../index";
+import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, STRIP_MAX, TEXT_MAX, cleanName, type Item } from "../index";
 import { CATEGORY_ORDER, categoryOf, extOf, type Category } from "./kinds";
-import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, STRIP_MAX, TEXT_MAX } from "./limits";
 
 export type Source = "fichiers" | "photo" | "video" | "depot" | "collage";
 /** nettoye : métadonnées retirées (Task 9) ; non_nettoye : le fichier peut en contenir ; sans_objet : texte, vocal. */

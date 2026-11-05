@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -47,8 +48,8 @@ func sum(b []byte) []byte { h := sha256.Sum256(b); return h[:] }
 
 func create(t *testing.T, s *share.Service) (string, int) {
 	t.Helper()
-	id, segs, err := s.Create(share.CreateReq{Bucket: 1, TTLHours: 1, MaxOpens: 1, KdfOps: 3, KdfMem: 67108864,
-		Salt: rnd(16), AccessV: sum(rnd(8)), ProofV: sum(rnd(8)), ManageV: sum(rnd(8))})
+	id, segs, err := s.Create(share.CreateReq{ID: base64.RawURLEncoding.EncodeToString(rnd(16)), Bucket: 1,
+		AccessV: sum(rnd(8)), ManageV: sum(rnd(8))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +64,8 @@ func ready(t *testing.T, s *share.Service) string {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.Finalize(id); err != nil {
+	if _, err := s.Finalize(id, share.FinalizeReq{TTLHours: 1, MaxOpens: 1, KdfOps: 3, KdfMem: 67108864,
+		Salt: rnd(16), ProofV: sum(rnd(8)), Envelope: rnd(share.EnvelopeLen)}); err != nil {
 		t.Fatal(err)
 	}
 	return id

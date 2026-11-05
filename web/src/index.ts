@@ -6,6 +6,7 @@ export {
   CAPTCHA_MIN_MS,
   LimitError,
   NotFoundError,
+  ReadBudgetError,
   collectToBlob,
   createShare,
   destroyShare,
@@ -22,8 +23,23 @@ export {
 export { prepareCaptcha, type PreparedCaptcha } from "./transfer/prepare";
 export { SERVER_STALL_MS } from "./transfer/upload";
 export { safeName as cleanName } from "./transfer/safety";
-export { PREVIEW_MAX } from "./crypto/container";
+export { PREVIEW_MAX, type KeepTtl, type Rights } from "./crypto/container";
+export {
+  CONTENT_MAX,
+  MAX_ITEMS,
+  MAX_OPENS,
+  NAME_MAX,
+  OPENS_DEFAULT,
+  PW_TRIES,
+  STRIP_MAX,
+  TEXT_MAX,
+  TTL_DEFAULT,
+  TTL_HOURS,
+  TTL_MAX_HOURS,
+  type TtlHours,
+} from "./limits";
+export { PASSWORD_ALPHABET, PASSWORD_LEN, generatePassword, type GeneratedPassword } from "./crypto/password";
 export { manageLink, parseLink, shareLink, type ParsedLink } from "./transfer/link";
 export { PASSPHRASE_MIN_WORDS, PW_MIN_CHARS, checkPassword, generatePassphrase, type PwCheck } from "./crypto/passphrase";
-export type { Item, Manifest, ManifestEntry } from "./crypto/container";
+export type { Item, Manifest, ManifestEntry, ManifestV2 } from "./crypto/container";
 export type { KAcces, KLien, KPreuve, SGestion } from "./crypto/types";
