@@ -34,12 +34,14 @@ const files = walk(srcDir)
 // Motifs des règles, testés sur des exemples (voir « motifs des règles ») pour ne pas dériver.
 const Q = "[\"'`]"; // guillemet simple, double ou accent grave (import() en gabarit)
 const NQ = "[^\"'`]";
-const RE_STYLE_ATTR = /\bstyle\s*=\s*["'`{]/;
+// Attribut style dans une balise : style="…", style={…}, style=x, raccourci {style}, style nu.
+// Les directives style:prop (CSSOM) et data-style ne comptent pas.
+const RE_STYLE_ATTR = /<[a-zA-Z][^<>]*?(?<![-\w:.])style(?=\s*[={}/>\s])/;
 const RE_FORBIDDEN_IMPORT = new RegExp(
-  `(?:from\\s*|import\\s*\\(\\s*|import\\s+)${Q}${NQ}*\\/(?:transfer|crypto)(?:\\/${NQ}*)?${Q}`,
+  `(?:from\\s*|import\\s*\\(\\s*|import\\s+)${Q}${NQ}*\\/(?:transfer|crypto)(?:\\/${NQ}*|\\.[a-z]+)?${Q}`,
 );
 const RE_DEMO_IMPORT = new RegExp(
-  `(?:from\\s*|import\\s*\\(\\s*|import\\s+)${Q}${NQ}*\\bdemo(?:\\/${NQ}*)?${Q}\\s*\\)?`,
+  `(?:from\\s*|import\\s*\\(\\s*|import\\s+)${Q}${NQ}*\\bdemo(?:\\/${NQ}*|\\.[a-z]+)?${Q}\\s*\\)?`,
   "g",
 );
 
@@ -91,9 +93,9 @@ describe("motifs des règles", () => {
   const matches = (re: RegExp, text: string) => new RegExp(re.source, re.flags.replace("g", "")).test(text);
 
   it("style : attribut texte ou expression", () => {
-    for (const t of ['<div style="color:red">', "<div style='x'>", "<div style={s}>", "<div style = {`a:${b}`}>", "<div style=`x`>"])
+    for (const t of ['<div style="color:red">', "<div style='x'>", "<div style={s}>", "<div style = {`a:${b}`}>", "<div style=`x`>", "<div style=color:red>", "<div {style}>", "<div class=\"a\" {style} id=\"b\">"])
       expect(matches(RE_STYLE_ATTR, t), t).toBe(true);
-    for (const t of ["<div class:on={x}>", "<div style:color={c}>", "<style>a{}</style>", "const lifestyle = 1"])
+    for (const t of ["<div class:on={x}>", "<div style:color={c}>", "<style>a{}</style>", "const lifestyle = 1", "const style = { a: 1 };", "let { style } = $props();", "<div data-style=\"a\">"])
       expect(matches(RE_STYLE_ATTR, t), t).toBe(false);
   });
 
@@ -107,6 +109,9 @@ describe("motifs des règles", () => {
       'import { a } from "../transfer"',
       'import("../crypto")',
       "import(`../crypto`)",
+      'import { a } from "../transfer.ts"',
+      'import("../crypto.js")',
+      "import(`../transfer/api.ts`)",
     ])
       expect(matches(RE_FORBIDDEN_IMPORT, t), t).toBe(true);
     for (const t of ['import { a } from "../ui/transfer-badge"', 'import { a } from "./transferred"', 'import { a } from "node:crypto"'])
@@ -122,6 +127,9 @@ describe("motifs des règles", () => {
       "import(`./demo`)",
       'import { x } from "./demo"',
       'import "../demo/install"',
+      'import("./demo.ts")',
+      "import(`./demo.js`)",
+      'import { x } from "./demo/install.ts"',
     ])
       expect(matches(RE_DEMO_IMPORT, t), t).toBe(true);
     for (const t of ['import { x } from "./demographie"', 'import { x } from "./ui/predemo"'])

@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// PW_LOCAL_CHROMIUM=1 : poste de développement où le Chromium préinstallé
+// PW_LOCAL_CHROMIUM=1 : poste (chemin local de cette machine, jamais utilisé en CI) de développement où le Chromium préinstallé
 // n'est pas celui qu'attend @playwright/test (on ne lance jamais `playwright install` ici).
 // En CI : `npx playwright install --with-deps chromium webkit`, sans cette variable.
 const launchOptions = process.env.PW_LOCAL_CHROMIUM === "1" ? { executablePath: "/opt/pw-browsers/chromium" } : {};
@@ -15,7 +15,8 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: true,
   retries: 0,
-  use: { trace: "off", screenshot: "off", video: "off" },
+  forbidOnly: !!process.env.CI,
+  use: { trace: "retain-on-failure", screenshot: "off", video: "off" },
   projects: [
     {
       name: "chromium-desktop",
