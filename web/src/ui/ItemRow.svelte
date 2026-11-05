@@ -1,0 +1,430 @@
+<script lang="ts">
+  // Ligne du composeur (UI §9.2.4) : vignette ou icône, nom (<bdi>, troncature au milieu qui
+  // garde l'extension), taille et durée, badges, actions (renommer ou modifier, retirer),
+  // poignée et mode déplacement. Le nom affiché est déjà passé par cleanName.
+  import { tick } from "svelte";
+  import type { ComposeItem } from "../flows/compose.svelte";
+  import { metaNoteKey } from "../flows/compose.svelte";
+  import { NAME_MAX, STRIP_MAX } from "../flows/limits";
+  import { formatBytes } from "../i18n/format";
+  import { getLang, t } from "../i18n/i18n.svelte";
+  import { formatClock, mediaDuration } from "../media/duration";
+  import { ArrowDown, ArrowUp, AudioLines, File as FileIcon, FileText, Film, Image as ImageIcon, Pencil, ShieldAlert, ShieldCheck, Type, X } from "./Icon";
+  import IconButton from "./IconButton.svelte";
+  import ReorderHandle from "./ReorderHandle.svelte";
+
+  type Props = {
+    item: ComposeItem;
+    /** La catégorie a au moins deux éléments : poignée et déplacement. */
+    movable: boolean;
+    helpId: string;
+    onremove: () => void;
+    onrename: (base: string) => null | "vide" | "trop_long" | "interdit";
+    onedit: () => void;
+    onmove: (delta: -1 | 1) => void;
+    ondragstart: (y: number) => void;
+    ondragmove: (y: number) => void;
+    ondragend: (commit: boolean) => void;
+    /** Bouton « Retirer » (le parent y remet le focus après un déplacement ou une annulation). */
+    el?: HTMLDivElement | undefined;
+  };
+  let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, el = $bindable() }: Props = $props();
+
+  const name = $derived(item.base + item.ext);
+  const Icon = $derived(
+    item.category === "texte" ? Type : item.category === "photos" ? ImageIcon : item.category === "videos" ? Film : item.category === "audio" ? AudioLines : item.category === "documents" ? FileText : FileIcon,
+  );
+  const note = $derived(metaNoteKey(item));
+  const THUMBABLE = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
+  const canThumb = $derived(item.kind === "file" && THUMBABLE.has(item.mime.toLowerCase()) && item.size <= STRIP_MAX);
+  let thumbFailed = $state(false);
+
+  /** Vignette : URL blob de la propre donnée de l'expéditeur, révoquée dès le chargement et à la sortie. */
+  function thumb(node: HTMLImageElement) {
+    const data = item.data;
+    const blob = data instanceof Blob ? data : new Blob([data], { type: item.mime });
+    const url = URL.createObjectURL(blob);
+    let revoked = false;
+    const revoke = () => {
+      if (!revoked) URL.revokeObjectURL(url);
+      revoked = true;
+    };
+    node.onload = revoke;
+    node.onerror = () => {
+      revoke();
+      thumbFailed = true;
+    };
+    node.src = url;
+    return revoke;
+  }
+
+  let duration = $state<number | null>(null);
+  $effect(() => {
+    if (item.kind !== "file" || (item.category !== "videos" && item.category !== "audio") || !(item.data instanceof Blob)) return;
+    let live = true;
+    void mediaDuration(item.data, item.category === "videos" ? "video" : "audio").then((d) => {
+      if (live) duration = d;
+    });
+    return () => {
+      live = false;
+    };
+  });
+
+  // Renommage en place : base sélectionnée, extension à part et non modifiable.
+  let editing = $state(false);
+  let draft = $state("");
+  let error = $state<null | "vide" | "trop_long" | "interdit">(null);
+  let input: HTMLInputElement | undefined = $state();
+  let renameBtn: HTMLButtonElement | undefined = $state();
+  const uid = $props.id();
+
+  async function startRename() {
+    draft = item.base;
+    error = null;
+    editing = true;
+    await tick();
+    input?.focus();
+    input?.select();
+  }
+  async function finishRename(commit: boolean) {
+    if (!editing) return;
+    if (commit && draft !== item.base) {
+      const r = onrename(draft);
+      if (r) {
+        error = r;
+        return;
+      }
+    }
+    editing = false;
+    error = null;
+    await tick();
+    renameBtn?.focus();
+  }
+  function renameKey(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void finishRename(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      void finishRename(false);
+    }
+  }
+  function renameBlur() {
+    // Perte de focus : valide si le nom est bon, sinon revient au nom d'avant (jamais de piège).
+    if (!editing) return;
+    if (draft !== item.base) onrename(draft);
+    editing = false;
+    error = null;
+  }
+
+  // Mode déplacement (lecteurs d'écran au toucher, sans Alt).
+  let moving = $state(false);
+  let upBtn: HTMLButtonElement | undefined = $state();
+  let grip: HTMLSpanElement | undefined = $state();
+  async function openMove() {
+    if (!movable) return;
+    moving = true;
+    await tick();
+    upBtn?.focus();
+  }
+  async function closeMove() {
+    moving = false;
+    await tick();
+    grip?.querySelector("button")?.focus();
+  }
+
+  function key(e: KeyboardEvent) {
+    if (editing) return;
+    if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      e.preventDefault();
+      if (movable) onmove(e.key === "ArrowUp" ? -1 : 1);
+    } else if (moving && e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      void closeMove();
+    }
+  }
+  $effect(() => {
+    if (!movable && moving) moving = false;
+  });
+</script>
+
+<!-- Alt + ↑/↓ depuis la poignée ou un bouton de la ligne (l'événement remonte). -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div bind:this={el} class={["row", { editing, moving }]} onkeydown={key}>
+  {#if movable}
+    <span class="grip-slot" bind:this={grip}>
+      <ReorderHandle {name} describedby={helpId} onactivate={() => (moving ? closeMove() : openMove())} onstart={ondragstart} onmove={ondragmove} onend={ondragend} />
+    </span>
+  {:else}
+    <span class="grip-slot" aria-hidden="true"></span>
+  {/if}
+
+  <span class="pic" aria-hidden="true">
+    {#if canThumb && !thumbFailed}
+      <img alt="" decoding="async" {@attach thumb} />
+    {:else}
+      <Icon size={20} strokeWidth={1.6} />
+    {/if}
+    {#if duration !== null && item.category === "videos"}<span class="dur num">{formatClock(duration)}</span>{/if}
+  </span>
+
+  <div class="main">
+    {#if editing}
+      <div class="rename">
+        <label class="sr-only" for="{uid}-in">{t("compose.rename.field", { name })}</label>
+        <span class="field">
+          <input
+            id="{uid}-in"
+            bind:this={input}
+            bind:value={draft}
+            type="text"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            translate="no"
+            enterkeyhint="done"
+            aria-invalid={error ? "true" : undefined}
+            aria-describedby={error ? `${uid}-err` : undefined}
+            onkeydown={renameKey}
+            onblur={renameBlur}
+          />
+          {#if item.ext}<span class="ext" translate="no">{item.ext}</span>{/if}
+        </span>
+        {#if error}<p id="{uid}-err" class="err" role="alert">{t(`compose.rename.${error}`, { max: NAME_MAX })}</p>{/if}
+      </div>
+    {:else}
+      <bdi class="nm" title={name} translate="no">
+        {#if item.kind === "text"}<span class="b">{item.text ? item.text.slice(0, 160) : item.base}</span>
+        {:else}<span class="b">{item.base}</span><span class="e">{item.ext}</span>{/if}
+      </bdi>
+      <span class="meta">
+        <span class="num">{formatBytes(item.size, getLang())}</span>
+        {#if duration !== null}<span class="sep" aria-hidden="true">·</span><span class="num">{formatClock(duration)}</span>{/if}
+        {#if item.clean === "nettoye"}
+          <span class="badge ok"><ShieldCheck size={13} strokeWidth={2} aria-hidden="true" />{t("compose.cleaned.short")}</span>
+        {:else if note}
+          <span class="badge warn" title={t(note)}><ShieldAlert size={13} strokeWidth={2} aria-hidden="true" />{t("compose.notCleaned")}<span class="sr-only">. {t(note)}</span></span>
+        {/if}
+        {#if item.duplicate}<span class="badge warn">{t("compose.duplicate")}</span>{/if}
+      </span>
+    {/if}
+  </div>
+
+  <div class="acts">
+    {#if moving}
+      <button bind:this={upBtn} type="button" class="mv" onclick={() => onmove(-1)}><ArrowUp size={18} strokeWidth={1.75} aria-hidden="true" /><span class="sr-only">{t("compose.move.up")}</span></button>
+      <button type="button" class="mv" onclick={() => onmove(1)}><ArrowDown size={18} strokeWidth={1.75} aria-hidden="true" /><span class="sr-only">{t("compose.move.down")}</span></button>
+      <button type="button" class="done" onclick={closeMove}>{t("compose.move.done")}</button>
+    {:else if !editing}
+      {#if item.kind === "text"}
+        <IconButton label={t("compose.edit", { name: item.base })} onpress={onedit}><Pencil size={18} strokeWidth={1.75} /></IconButton>
+      {:else}
+        <IconButton bind:el={renameBtn} label={t("compose.rename", { name })} onpress={startRename}><Pencil size={18} strokeWidth={1.75} /></IconButton>
+      {/if}
+      <IconButton label={t("compose.remove", { name })} onpress={onremove} data-remove><X size={18} strokeWidth={1.75} /></IconButton>
+    {/if}
+  </div>
+</div>
+
+<style>
+  .row {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto 44px minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: var(--sp-3);
+    min-height: 64px;
+    padding: 6px 4px 6px 0;
+    border-radius: 16px;
+    background: transparent;
+    transition:
+      background-color var(--dur-fast) var(--ease-out),
+      box-shadow var(--dur-fast) var(--ease-out);
+  }
+  @media (hover: hover) {
+    .row:hover {
+      background: rgb(255 255 255 / 0.025);
+    }
+  }
+  .row.moving {
+    background: var(--surface-3);
+    box-shadow: var(--e-2), inset 0 0 0 1px var(--hair-2);
+  }
+  .grip-slot {
+    display: inline-flex;
+    width: 32px;
+    justify-content: center;
+    margin-inline-start: -6px;
+  }
+  .grip-slot :global(.grip) {
+    margin-inline: -6px;
+  }
+  .pic {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    overflow: hidden;
+    border-radius: 12px;
+    background: rgb(255 255 255 / 0.045);
+    box-shadow: inset 0 0 0 1px var(--hair);
+    color: var(--text-2);
+  }
+  .pic img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .dur {
+    position: absolute;
+    inset-inline-end: 3px;
+    inset-block-end: 3px;
+    padding: 0 3px;
+    border-radius: 4px;
+    background: rgb(5 7 10 / 0.78);
+    color: var(--text);
+    font-size: 0.625rem;
+    line-height: 1.4;
+  }
+  .main {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+  .nm {
+    display: flex;
+    min-width: 0;
+    font-weight: 560;
+    line-height: 1.35;
+  }
+  .b {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .e {
+    flex: none;
+    white-space: nowrap;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    color: var(--text-2);
+    font-size: var(--fs-small);
+  }
+  .sep {
+    margin-inline: -4px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    border-radius: var(--r-pill);
+    font-size: var(--fs-micro);
+    font-weight: 560;
+    line-height: 1.6;
+  }
+  .badge.ok {
+    background: var(--accent-tint);
+    color: var(--accent);
+  }
+  .badge.warn {
+    background: var(--warn-tint);
+    color: var(--warn);
+  }
+  .acts {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .mv,
+  .done {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    height: 44px;
+    padding: 0 10px;
+    border: 1px solid var(--hair-2);
+    border-radius: 10px;
+    background: rgb(255 255 255 / 0.045);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--fs-small);
+    font-weight: 560;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .done {
+    background: var(--accent);
+    border-color: transparent;
+    color: var(--on-accent);
+  }
+  .rename {
+    display: grid;
+    gap: 4px;
+  }
+  .field {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background: var(--surface-1);
+  }
+  .field:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .field input {
+    flex: 1;
+    min-width: 0;
+    height: 44px;
+    padding: 0 10px;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: max(1rem, 16px);
+    outline: none;
+  }
+  .field input[aria-invalid="true"] {
+    color: var(--danger);
+  }
+  .ext {
+    padding-inline-end: 10px;
+    color: var(--text-3);
+  }
+  .err {
+    margin: 0;
+    color: var(--danger);
+    font-size: var(--fs-small);
+  }
+  /* Très petit écran : la taille passe sous le nom, déjà le cas ; les actions se serrent. */
+  @media (max-width: 359px) {
+    .row {
+      column-gap: var(--sp-2);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .row {
+      transition: none;
+    }
+  }
+  @media (forced-colors: active) {
+    .badge {
+      border: 1px solid CanvasText;
+    }
+    .row.moving {
+      outline: 2px solid Highlight;
+    }
+  }
+</style>

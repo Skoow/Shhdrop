@@ -179,7 +179,7 @@ test.describe("fr-FR", () => {
     expect((await chooser).isMultiple()).toBe(true);
   });
 
-  test("Photo et Vidéo : sélecteur filtré (capture sur téléphone) ; les fichiers choisis sont annoncés", async ({ page, shh }) => {
+  test("Photo et Vidéo : sélecteur filtré (capture sur téléphone) ; les fichiers choisis ouvrent le composeur", async ({ page, shh }) => {
     await page.goto(shh.origin + "/");
     await page.waitForTimeout(900);
     for (const [name, accept] of [["Photo", "image/*"], ["Vidéo", "video/*"]] as const) {
@@ -196,7 +196,7 @@ test.describe("fr-FR", () => {
       { name: "a.txt", mimeType: "text/plain", buffer: Buffer.from("a") },
       { name: "b.txt", mimeType: "text/plain", buffer: Buffer.from("b") },
     ]);
-    await expect(page.locator(".notice.on")).toHaveText("2 éléments ajoutés");
+    await expect(page.locator("[data-row]")).toHaveCount(2); // le composeur s'ouvre (compose.spec.ts)
   });
 
   test("glisser-déposer : voile pleine page, Échap le ferme, un dépôt ajoute ; capture", async ({ page, shh }) => {
@@ -218,7 +218,7 @@ test.describe("fr-FR", () => {
     await expect(overlay).toBeVisible();
     await drag(page, "drop", ["a.txt", "b.txt", "c.txt"]);
     await expect(overlay).toBeHidden();
-    await expect(page.locator(".notice.on")).toHaveText("3 éléments ajoutés");
+    await expect(page.locator("[data-row]")).toHaveCount(3);
     expect(page.url()).toBe(shh.origin + "/");
   });
 

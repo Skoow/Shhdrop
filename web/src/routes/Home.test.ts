@@ -148,7 +148,7 @@ describe("Home (UI §9.1)", () => {
     const f = new File(["x"], "a.txt");
     Object.defineProperty(video, "files", { configurable: true, value: [f] });
     video.dispatchEvent(new Event("change", { bubbles: true }));
-    expect(onfiles).toHaveBeenCalledWith([f], "video");
+    expect(onfiles).toHaveBeenCalledWith([f], "video", []);
   });
 
   it("actions : groupe nommé ; Vocal sans MediaRecorder et Coller sans clipboard.read sont masqués (§9.2.1)", () => {
@@ -187,16 +187,21 @@ describe("Home (UI §9.1)", () => {
     }
   });
 
-  it("sans composeur branché : un avis dit ce qui a été ajouté (en attendant Task 10)", () => {
-    show();
-    const video = document.querySelectorAll<HTMLInputElement>('input[type="file"]')[2]!;
-    Object.defineProperty(video, "files", { configurable: true, value: [new File(["a"], "a"), new File(["b"], "b")] });
-    video.dispatchEvent(new Event("change", { bubbles: true }));
-    flushSync();
-    const notice = document.querySelector(".notice")!;
-    expect(notice.classList.contains("on")).toBe(true);
-    expect(notice.textContent).toBe("2\u202féléments ajoutés");
-    expect(notice.getAttribute("aria-hidden")).toBe("true"); // les lecteurs d'écran l'entendent par announce()
+  it("dépôt : les fichiers vont à onfiles, les dossiers sont remis à part (refusés, pas aplatis)", async () => {
+    const onfiles = vi.fn();
+    show({ onfiles });
+    const a = new File(["a"], "a.txt");
+    const dir = new File([], "Vacances");
+    const items = [
+      { kind: "file", getAsFile: () => a, webkitGetAsEntry: () => ({ isDirectory: false, name: "a.txt" }) },
+      { kind: "file", getAsFile: () => null, webkitGetAsEntry: () => ({ isDirectory: true, name: dir.name }) },
+    ];
+    const e = new Event("drop", { bubbles: true, cancelable: true }) as unknown as DragEvent;
+    Object.defineProperty(e, "dataTransfer", { value: { types: ["Files"], items, files: [] } });
+    window.dispatchEvent(e as unknown as Event);
+    await Promise.resolve();
+    expect(e.defaultPrevented).toBe(true);
+    expect(onfiles).toHaveBeenCalledWith([a], "depot", ["Vacances"]);
   });
 
   it("anglais", () => {

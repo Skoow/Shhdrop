@@ -5,15 +5,17 @@
     label: string;
     options: readonly Option[];
     value: T;
+    /** Grille de N colonnes (passe à la ligne) au lieu d'une rangée unique. */
+    columns?: number;
   };
-  let { label, options, value = $bindable() }: Props = $props();
+  let { label, options, value = $bindable(), columns }: Props = $props();
 
   // Vrais boutons radio natifs : flèches, tabulation unique sur le groupe et lecteurs d'écran
   // viennent du navigateur ; role="radiogroup" nomme le groupe.
   const group = $props.id();
 </script>
 
-<div class="seg" role="radiogroup" aria-label={label}>
+<div class={["seg", { grid: !!columns }]} role="radiogroup" aria-label={label} style:--cols={columns}>
   {#each options as o (o.value)}
     <label class="opt">
       <input type="radio" class="sr-only" name={group} value={o.value} bind:group={value} />
@@ -30,6 +32,10 @@
     border: 1px solid var(--line-strong);
     border-radius: var(--r-md);
     background: var(--surface-1);
+  }
+  .seg.grid {
+    display: grid;
+    grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
   }
   .opt {
     flex: 1;

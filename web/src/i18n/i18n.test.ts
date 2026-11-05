@@ -74,8 +74,9 @@ describe("dictionnaires", () => {
         if (k in EXCEPTIONS) continue;
         expect(v, `${lang} ${k}`).not.toMatch(re);
       }
-    expect(fr["compose.gauge.empty"]).toContain("1\u202fGo et 10\u202féléments");
-    expect(en["compose.gauge.empty"]).toContain("1\u00a0GB and 10\u00a0items");
+    // Chiffres lus dans les constantes (benchmark M5) : l'unité suit {n} par une espace insécable.
+    expect(fr["compose.gauge.empty"]).toContain("{size} et {n}\u202féléments");
+    expect(en["compose.gauge.empty"]).toContain("{size} and {n}\u00a0items");
   });
 
   it("jamais « ≈ » ni « 100 % sécurisé »", () => {

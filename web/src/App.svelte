@@ -5,7 +5,7 @@
   import { readLink, scrubAddressBar, type LinkState } from "./app/link";
   import { href, router } from "./app/router.svelte";
   import { watchKeyboard } from "./app/viewport";
-  import Home from "./routes/Home.svelte";
+  import Compose from "./routes/Compose.svelte";
   import NotFound from "./routes/NotFound.svelte";
   import Unsupported from "./routes/Unsupported.svelte";
   import AppShell from "./ui/AppShell.svelte";
@@ -73,7 +73,8 @@
   {:else if router.current.name === "notfound"}
     <NotFound />
   {:else if router.current.name === "home"}
-    <Home />
+    <!-- Accueil, puis composeur dès le premier élément (UI §9.1, §9.2). Coffre : jamais en démo (spec §27.6). -->
+    <Compose vaultAllowed={demo === null} />
   {:else}
     <!-- Écrans des tâches suivantes : ouverture, gestion, sécurité, confidentialité. -->
     <h1 tabindex="-1">Shhdrop</h1>

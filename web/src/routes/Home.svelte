@@ -14,8 +14,8 @@
   // de dépôt pleine page ; sous le pli, « Comment ça marche », « Pourquoi c'est sûr », questions
   // et appel final. Un clic sur le verre n'ouvre rien : le sélecteur part de son bouton.
   import { untrack, type Snippet } from "svelte";
+  import { dragDepth, dragHasFiles, filesFromDrop } from "../flows/intake";
   import { t } from "../i18n/i18n.svelte";
-  import { announce } from "../ui/announce";
   import { magnet, tilt } from "../ui/attach";
   import DropOverlay from "../ui/DropOverlay.svelte";
   import Guilloche from "../ui/Guilloche.svelte";
@@ -34,9 +34,9 @@
     compact?: boolean;
     /** Le composeur (Task 10), posé dans le réceptacle. Sans lui, le réceptacle vide. */
     children?: Snippet;
-    /** Fichiers choisis ou déposés (branché sur composer.add en Task 10). */
-    onfiles?: (files: File[], source: Source) => void;
-    /** Vocal, Texte, Coller : ouvrent leur interface dans la page (Tasks 10 à 12). */
+    /** Fichiers choisis ou déposés (composer.add) ; `folders` : dossiers déposés, refusés. */
+    onfiles?: (files: File[], source: Source, folders: string[]) => void;
+    /** Vocal, Texte, Coller : ouvrent leur interface dans la page. */
     onaction?: (action: Action) => void;
   };
   let { compact = false, children, onfiles, onaction }: Props = $props();
@@ -75,21 +75,8 @@
   let browse: HTMLButtonElement | undefined = $state();
   let vessel: HTMLDivElement | undefined = $state();
 
-  // Avis visible en attendant le composeur (Task 10) ; les lecteurs d'écran passent par announce().
-  let notice = $state("");
-  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
-  function tell(text: string) {
-    notice = text;
-    announce(text);
-    clearTimeout(noticeTimer);
-    noticeTimer = setTimeout(() => (notice = ""), 2800);
-  }
-  $effect(() => () => clearTimeout(noticeTimer));
-
-  function give(list: File[], source: Source) {
-    if (list.length === 0) return;
-    if (onfiles) onfiles(list, source);
-    else tell(t("compose.added", { n: list.length }));
+  function give(list: File[], source: Source, folders: string[] = []) {
+    if (list.length > 0 || folders.length > 0) onfiles?.(list, source, folders);
   }
   function picked(input: HTMLInputElement, source: Source) {
     const list = [...(input.files ?? [])];
@@ -97,55 +84,36 @@
     give(list, source);
   }
   function act(a: Action) {
-    if (onaction) onaction(a);
-    else tell(t(a === "vocal" ? "compose.soon.voice" : a === "texte" ? "compose.soon.text" : "compose.soon.paste"));
+    onaction?.(a);
   }
 
   // UI §9.2.2 : glisser de fichiers sur toute la page ; compteur contre le clignotement ;
   // fermeture au dépôt, à Échap, à la fin du glisser. Les dossiers sont refusés, pas aplatis.
-  let depth = 0;
+  const depth = dragDepth();
   let over = $state(false);
-  const hasFiles = (e: DragEvent) => [...(e.dataTransfer?.types ?? [])].includes("Files");
   function close() {
-    depth = 0;
+    depth.reset();
     over = false;
   }
   function dragenter(e: DragEvent) {
-    if (!hasFiles(e)) return;
+    if (!dragHasFiles(e)) return;
     e.preventDefault();
-    depth++;
-    over = true;
+    over = depth.enter(e);
   }
   function dragover(e: DragEvent) {
-    if (!hasFiles(e)) return;
+    if (!dragHasFiles(e)) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
   }
   function dragleave(e: DragEvent) {
-    if (!hasFiles(e)) return;
-    depth = Math.max(0, depth - 1);
-    if (depth === 0) over = false;
+    if (!dragHasFiles(e)) return;
+    over = depth.leave(e);
   }
   function drop(e: DragEvent) {
-    if (!hasFiles(e)) return;
+    if (!dragHasFiles(e)) return;
     e.preventDefault();
     close();
-    const dt = e.dataTransfer!;
-    const items = [...(dt.items ?? [])];
-    const out: File[] = [];
-    let folders = 0;
-    if (items.length > 0) {
-      for (const it of items) {
-        if (it.kind !== "file") continue;
-        if (it.webkitGetAsEntry?.()?.isDirectory) folders++;
-        else {
-          const f = it.getAsFile();
-          if (f) out.push(f);
-        }
-      }
-    } else out.push(...dt.files);
-    if (folders > 0) announce(t("compose.folder"));
-    give(out, "depot");
+    void filesFromDrop(e.dataTransfer!).then(({ files, folders }) => give(files, "depot", folders));
   }
 
   /** « Commencer » et « Comment ça marche » : défilement vers la cible, sans « # » dans l'adresse. */
@@ -199,7 +167,7 @@
       {/if}
     </div>
 
-    <div class="compose" data-slot="compose" {@attach tilt}>
+    <div class="compose" data-slot="compose" {@attach !children && tilt}>
       {#if !children}
         <span class="sheet-back b2" aria-hidden="true"></span>
         <span class="sheet-back b1" aria-hidden="true"></span>
@@ -261,7 +229,6 @@
 </div>
 
 <DropOverlay open={over} />
-<p class={["notice", { on: notice !== "" }]} aria-hidden="true">{notice}</p>
 
 <style>
   .home {
@@ -703,37 +670,6 @@
     display: none;
   }
 
-  /* Avis provisoire (jusqu'au composeur, Task 10). */
-  .notice {
-    position: fixed;
-    left: 50%;
-    bottom: max(var(--sp-5), env(safe-area-inset-bottom));
-    z-index: 40;
-    max-width: calc(100vw - 32px);
-    margin: 0;
-    padding: var(--sp-3) 18px;
-    border-radius: 14px;
-    background: var(--surface-3);
-    color: var(--text);
-    font-weight: 520;
-    box-shadow: var(--e-3), inset 0 0 0 1px var(--hair-2);
-    opacity: 0;
-    visibility: hidden;
-    transform: translate(-50%, 12px);
-    transition:
-      opacity var(--dur-base) var(--ease-out),
-      transform 500ms var(--ease-settle),
-      visibility 0s linear var(--dur-base);
-  }
-  .notice.on {
-    opacity: 1;
-    visibility: visible;
-    transform: translate(-50%, 0);
-    transition:
-      opacity var(--dur-base) var(--ease-out),
-      transform 500ms var(--ease-settle);
-  }
-
   /* ---------- Entrée (K1 : tout fini à 900 ms au plus, tout cliquable dès l'affichage) ---------- */
   @media (prefers-reduced-motion: no-preference) {
     .reveal .w {
@@ -894,8 +830,7 @@
     .tile,
     .ic,
     .browse,
-    .browse :global(svg),
-    .notice {
+    .browse :global(svg) {
       transition: none;
     }
     .tile:active,

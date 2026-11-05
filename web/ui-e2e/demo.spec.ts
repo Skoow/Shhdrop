@@ -218,6 +218,39 @@ test.describe("fr-FR", () => {
     demo.foreignRequests.length = 0;
     demo.requests.length = 0;
   });
+
+  // Composeur (Tasks 10, 11, 13) : ajouter (dépôt, collage), réordonner, retirer ; pas de coffre en démo (spec §27.6).
+  test("composeur : dépôt, collage, réordonner, retirer et annuler ; aucun droit « coffre » ; rien n'est stocké", async ({ page, demo }) => {
+    await page.goto(demo.url);
+    await page.evaluate(() => {
+      const dt = new DataTransfer();
+      for (const n of ["a.txt", "b.txt"]) dt.items.add(new File([n], n, { type: "text/plain" }));
+      const fire = (type: string) => document.querySelector("main")!.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+      fire("dragenter");
+      fire("drop");
+    });
+    const rows = page.locator("[data-row]");
+    await expect(rows).toHaveCount(2);
+    await page.evaluate(() => {
+      (document.activeElement as HTMLElement | null)?.blur();
+      const dt = new DataTransfer();
+      dt.items.add(new File(["c"], "c.txt", { type: "text/plain" }));
+      document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+    });
+    await expect(rows).toHaveCount(3);
+    await page.getByRole("button", { name: "Déplacer a.txt" }).focus();
+    await page.keyboard.press("Alt+ArrowDown");
+    await expect(page.locator("[data-row] .nm")).toHaveText(["b.txt", "a.txt", "c.txt"]);
+    await page.getByRole("button", { name: "Retirer a.txt" }).click();
+    await expect(rows).toHaveCount(2);
+    await page.getByRole("button", { name: "Annuler" }).click();
+    await expect(page.locator("[data-row] .nm")).toHaveText(["b.txt", "a.txt", "c.txt"]);
+    await expect(page.getByRole("radio", { name: /garder une copie chiffrée/ })).toHaveCount(0);
+    await expect(page.getByRole("radio", { name: "Voir et enregistrer" })).toBeChecked();
+    expect(await storage(page)).toBe(0);
+    expect(await axe(page)).toEqual([]);
+    await capture(page, "demo-compose");
+  });
 });
 
 test.describe("en-US", () => {
