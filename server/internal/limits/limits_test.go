@@ -279,3 +279,30 @@ func TestSegmentRate(t *testing.T) {
 		t.Fatal("pas de remise à zéro à la minute")
 	}
 }
+
+// Audit M1 : les /64 d'un même /48 partagent un compteur de 6 000 segments par minute.
+func TestSegmentRatePer48(t *testing.T) {
+	now := t0
+	l := newLim(&now)
+	if SegmentsPer48Min != 6000 {
+		t.Fatal(SegmentsPer48Min)
+	}
+	for p := 0; p < SegmentsPer48Min/SegmentsPerMin; p++ {
+		a := ip(fmt.Sprintf("2001:db8:7:%x::1", p))
+		for i := 0; i < SegmentsPerMin; i++ {
+			if !l.AllowSegment(a) {
+				t.Fatalf("/64 n° %d, segment %d refusé", p, i+1)
+			}
+		}
+	}
+	if l.AllowSegment(ip("2001:db8:7:ff::1")) {
+		t.Fatal("/48 plein mais segment accepté depuis un /64 neuf")
+	}
+	if !l.AllowSegment(ip("2001:db8:8::1")) {
+		t.Fatal("autre /48 refusé")
+	}
+	now = now.Add(time.Minute)
+	if !l.AllowSegment(ip("2001:db8:7:ff::1")) {
+		t.Fatal("pas de remise à zéro à la minute")
+	}
+}

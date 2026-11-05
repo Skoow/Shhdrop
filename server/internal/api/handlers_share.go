@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -154,6 +155,17 @@ func (s *server) putSegment(w http.ResponseWriter, r *http.Request) {
 		fail(w, errBadRequest)
 		return
 	}
+	release, ok := s.slot(w, r, s.xfer.ul)
+	if !ok {
+		return
+	}
+	defer release()
+	// Échéance de lecture du corps proportionnelle au plus grand segment possible.
+	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(s.xfer.deadline(maxSegmentLen))); err != nil &&
+		!errors.Is(err, http.ErrNotSupported) {
+		fail(w, err)
+		return
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSegmentLen))
 	if err != nil {
 		fail(w, errBadRequest)
@@ -256,15 +268,32 @@ func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	b, err := s.svc.ReadSegment(id, n, openN)
+	release, ok := s.slot(w, r, s.xfer.dl)
+	if !ok {
+		return
+	}
+	defer release()
+	sec, err := s.svc.OpenSegment(id, n, openN)
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	defer sec.Close()
+	// Échéance propre à la requête (remplace le WriteTimeout de 300 s) : un client trop
+	// lent est coupé et rend sa place. Absente des tests en mémoire (ErrNotSupported).
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(s.xfer.deadline(sec.Size()))); err != nil &&
+		!errors.Is(err, http.ErrNotSupported) {
+		fail(w, err)
+		return
+	}
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+	w.Header().Set("Content-Length", strconv.FormatInt(sec.Size(), 10))
 	w.WriteHeader(http.StatusOK)
-	w.Write(b)
+	// En flux depuis le fichier (audit E1). Une copie incomplète (client coupé, échéance,
+	// erreur de lecture) coupe la connexion : une réponse tronquée ne passe pas pour complète.
+	if k, err := io.Copy(w, sec); err != nil || k != sec.Size() {
+		panic(http.ErrAbortHandler)
+	}
 }
 
 func (s *server) done(w http.ResponseWriter, r *http.Request) {

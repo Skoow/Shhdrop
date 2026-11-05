@@ -22,7 +22,10 @@ const (
 	BytesPer48     = 6 << 30 // 6 Gio utiles par jour et par /48 (anti-saturation du disque)
 	RequestsPerMin = 60
 	SegmentsPerMin = 600 // requêtes de segments à jeton valide, compteur à part
-	day            = 86400
+	// SegmentsPer48Min : même compteur par bloc /48 (10 × la connexion), pour qu'un /48
+	// découpé en /64 ne multiplie pas le débit par 65 536 (audit M1).
+	SegmentsPer48Min = 10 * SegmentsPerMin
+	day              = 86400
 )
 
 // Prefixes rend la connexion et le bloc d'une adresse : IPv4 (y compris ::ffff:a.b.c.d)
@@ -54,6 +57,7 @@ type Limiter struct {
 	minute  int64 // minute courante (minutes depuis 1970)
 	req     map[string]int
 	seg     map[string]int
+	seg48   map[string]int
 }
 
 func New(now func() time.Time) *Limiter {
@@ -78,11 +82,13 @@ func (l *Limiter) rotateLocked(now time.Time) {
 		l.bytes48 = map[string]int64{}
 		l.req = map[string]int{}
 		l.seg = map[string]int{}
+		l.seg48 = map[string]int{}
 	}
 	if m := floorDiv(t, 60); m != l.minute {
 		l.minute = m
 		l.req = map[string]int{}
 		l.seg = map[string]int{}
+		l.seg48 = map[string]int{}
 	}
 }
 
@@ -145,16 +151,18 @@ func (l *Limiter) AllowRequest(ip netip.Addr) bool {
 	return true
 }
 
-// AllowSegment : 600 requêtes de segments par minute (fenêtre fixe) et par connexion,
-// pour les seules requêtes de segments dont le jeton est valide (vérifié avant l'appel).
+// AllowSegment : 600 requêtes de segments par minute (fenêtre fixe) et par connexion, et
+// 6 000 par bloc /48, pour les seules requêtes de segments dont le jeton est valide
+// (vérifié avant l'appel). Une requête refusée n'est comptée nulle part.
 func (l *Limiter) AllowSegment(ip netip.Addr) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.rotateLocked(l.now())
-	k64, _ := l.keyLocked(ip)
-	if l.seg[k64] >= SegmentsPerMin {
+	k64, k48 := l.keyLocked(ip)
+	if l.seg[k64] >= SegmentsPerMin || l.seg48[k48] >= SegmentsPer48Min {
 		return false
 	}
 	l.seg[k64]++
+	l.seg48[k48]++
 	return true
 }

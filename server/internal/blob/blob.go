@@ -151,29 +151,40 @@ func (s *Store) WriteAt(id string, off int64, p []byte) (err error) {
 	return err
 }
 
-// ReadAt lit exactement n octets à partir de off.
-func (s *Store) ReadAt(id string, off int64, n int) ([]byte, error) {
+// Section : n octets d'un fichier, lus en flux (sans tampon de la taille du segment).
+// À fermer par l'appelant.
+type Section struct {
+	*io.SectionReader
+	f *os.File
+}
+
+// Close ferme le fichier sous-jacent.
+func (s *Section) Close() error { return s.f.Close() }
+
+// Open ouvre exactement n octets à partir de off, pour une lecture en flux. Le fichier est
+// ouvert sans mise à jour de la date d'accès quand le système le permet (openRead) :
+// l'atime trahirait l'heure de la première lecture (audit de confidentialité P5).
+// La taille est vérifiée sur le fichier ouvert : un fichier plus court que la zone
+// demandée est refusé avant d'envoyer quoi que ce soit.
+func (s *Store) Open(id string, off int64, n int64) (*Section, error) {
 	path, err := s.path(id)
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(path)
+	f, err := openRead(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil {
+		f.Close()
 		return nil, err
 	}
-	if off < 0 || n < 0 || off > fi.Size() || int64(n) > fi.Size()-off {
+	if off < 0 || n < 0 || off > fi.Size() || n > fi.Size()-off {
+		f.Close()
 		return nil, errors.New("blob : lecture hors du fichier")
 	}
-	buf := make([]byte, n)
-	if _, err := io.ReadFull(io.NewSectionReader(f, off, int64(n)), buf); err != nil {
-		return nil, err
-	}
-	return buf, nil
+	return &Section{SectionReader: io.NewSectionReader(f, off, n), f: f}, nil
 }
 
 // Delete supprime le fichier ; sans erreur s'il est déjà absent.

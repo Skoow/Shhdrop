@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/netip"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,39 @@ const (
 	maxSegmentLen = share.Header + share.SegChunks*share.ChunkCT
 )
 
+// Transferts de segments simultanés (audit E1) : un GET se sert en flux (quelques dizaines
+// de Kio de mémoire), un PUT garde son corps entier (≤ 4 Mio) jusqu'à l'écriture, d'où
+// une borne plus basse. Au-delà : 429 (connexion ou /48) ou 503 (serveur), avec Retry-After.
+const (
+	dlTotal, dlPer64, dlPer48 = 256, 16, 64
+	ulTotal, ulPer64, ulPer48 = 64, 8, 32
+	// Échéance d'un transfert : xferBase + taille / xferMinRate. Un lecteur plus lent que
+	// 32 Kio/s est coupé (segment de 4 Mio : 138 s au lieu des 300 s du serveur).
+	xferBase    = 10 * time.Second
+	xferMinRate = 32 << 10 // octets par seconde
+	slotRetry   = 5 * time.Second
+	// budgetRetry : Retry-After d'une ouverture qui a lu tout son budget (share.ReadBudget).
+	// Le budget ne se recharge pas : seul un nouveau déverrouillage rouvre la lecture.
+	budgetRetry = 60 * time.Second
+)
+
+// transfers : places et échéances des segments (réglables par les tests).
+type transfers struct {
+	dl, ul  *limits.Slots
+	base    time.Duration
+	minRate int64 // octets par seconde
+}
+
+func defaultTransfers() transfers {
+	return transfers{dl: limits.NewSlots(dlTotal, dlPer64, dlPer48), ul: limits.NewSlots(ulTotal, ulPer64, ulPer48),
+		base: xferBase, minRate: xferMinRate}
+}
+
+// deadline : durée accordée pour transférer size octets.
+func (t transfers) deadline(size int64) time.Duration {
+	return t.base + time.Duration(size)*time.Second/time.Duration(t.minRate)
+}
+
 var b64 = base64.RawURLEncoding.Strict()
 
 type server struct {
@@ -43,6 +77,7 @@ type server struct {
 	cap         *captcha.Captcha
 	behindProxy bool
 	proxies     []netip.Prefix
+	xfer        transfers
 }
 
 type ctxIP struct{}
@@ -53,7 +88,11 @@ type ctxIP struct{}
 // valide, reçoit 500 au lieu de partager les limites du proxy (échec fermé).
 func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
 	static http.Handler, behindProxy bool, proxies []netip.Prefix) http.Handler {
-	s := &server{svc: svc, sig: sig, lim: lim, cap: capt, behindProxy: behindProxy, proxies: proxies}
+	return newHandler(&server{svc: svc, sig: sig, lim: lim, cap: capt, behindProxy: behindProxy, proxies: proxies,
+		xfer: defaultTransfers()}, static)
+}
+
+func newHandler(s *server, static http.Handler) http.Handler {
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/captcha", s.captcha)
 	api.HandleFunc("POST /api/shares", s.create)
@@ -206,10 +245,30 @@ func writeErr(w http.ResponseWriter, code int, e string) {
 }
 
 func writeLimit(w http.ResponseWriter, retry time.Duration) {
-	writeJSON(w, http.StatusTooManyRequests, struct {
+	writeRetry(w, http.StatusTooManyRequests, "limit", retry)
+}
+
+// writeRetry : refus temporaire, délai dans Retry-After et dans retry_after_s.
+func writeRetry(w http.ResponseWriter, code int, e string, retry time.Duration) {
+	secs := max(1, int64(math.Ceil(retry.Seconds())))
+	w.Header().Set("Retry-After", strconv.FormatInt(secs, 10))
+	writeJSON(w, code, struct {
 		Error string `json:"error"`
 		Retry int64  `json:"retry_after_s"`
-	}{"limit", max(1, int64(math.Ceil(retry.Seconds())))})
+	}{e, secs})
+}
+
+// slot prend une place de transfert pour le client de r, ou répond 429/503 et rend false.
+func (s *server) slot(w http.ResponseWriter, r *http.Request, sl *limits.Slots) (release func(), ok bool) {
+	k64, k48 := s.lim.Key(ipOf(r))
+	release, err := sl.Acquire(k64, k48)
+	switch {
+	case errors.Is(err, limits.ErrBusy):
+		writeRetry(w, http.StatusServiceUnavailable, "busy", slotRetry)
+	case err != nil:
+		writeLimit(w, slotRetry)
+	}
+	return release, err == nil
 }
 
 // fail traduit une erreur du service ; toute erreur inattendue → 500 sans détail.
@@ -231,6 +290,8 @@ func fail(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusConflict, "incomplete")
 	case errors.Is(err, share.ErrFull):
 		writeErr(w, http.StatusInsufficientStorage, "full")
+	case errors.Is(err, share.ErrBudget):
+		writeRetry(w, http.StatusTooManyRequests, "budget", budgetRetry)
 	case errors.Is(err, share.ErrFrozen):
 		writeErr(w, http.StatusServiceUnavailable, "frozen")
 	default:

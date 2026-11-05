@@ -2,6 +2,7 @@ package blob
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -40,7 +41,17 @@ func TestReserve(t *testing.T) {
 	}
 }
 
-func TestWriteReadAt(t *testing.T) {
+// readAll lit une section entière avec Open.
+func readAll(s *Store, id string, off, n int64) ([]byte, error) {
+	sec, err := s.Open(id, off, n)
+	if err != nil {
+		return nil, err
+	}
+	defer sec.Close()
+	return io.ReadAll(sec)
+}
+
+func TestWriteOpen(t *testing.T) {
 	s := newStore(t)
 	s.Reserve(id1, 10)
 	if err := s.WriteAt(id1, 2, []byte("abcd")); err != nil {
@@ -50,7 +61,7 @@ func TestWriteReadAt(t *testing.T) {
 	if !fi.ModTime().Equal(time.Unix(0, 0)) {
 		t.Fatalf("mtime = %v", fi.ModTime())
 	}
-	got, err := s.ReadAt(id1, 2, 4)
+	got, err := readAll(s, id1, 2, 4)
 	if err != nil || !bytes.Equal(got, []byte("abcd")) {
 		t.Fatalf("%q %v", got, err)
 	}
@@ -67,11 +78,24 @@ func TestWriteReadAt(t *testing.T) {
 	if !bytes.Equal(before, after) || len(after) != 10 {
 		t.Fatal("fichier modifié")
 	}
-	if _, err := s.ReadAt(id1, 8, 5); err == nil {
+	if _, err := s.Open(id1, 8, 5); err == nil {
 		t.Fatal("lecture hors bornes acceptée")
 	}
-	if _, err := s.ReadAt(id1, -1, 2); err == nil {
+	if _, err := s.Open(id1, -1, 2); err == nil {
 		t.Fatal("offset négatif accepté")
+	}
+	if _, err := s.Open(id1, 0, -1); err == nil {
+		t.Fatal("longueur négative acceptée")
+	}
+	// Taille annoncée = taille demandée ; rien au-delà de la zone n'est lu.
+	sec, err := s.Open(id1, 2, 3)
+	if err != nil || sec.Size() != 3 {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(sec)
+	sec.Close()
+	if string(b) != "abc" {
+		t.Fatalf("%q", b)
 	}
 }
 
@@ -108,7 +132,7 @@ func TestInvalidID(t *testing.T) {
 		if s.Reserve(id, 1) == nil || s.WriteAt(id, 0, []byte("x")) == nil || s.Delete(id) == nil {
 			t.Fatalf("id invalide accepté: %q", id)
 		}
-		if _, err := s.ReadAt(id, 0, 1); err == nil {
+		if _, err := s.Open(id, 0, 1); err == nil {
 			t.Fatalf("lecture id invalide %q", id)
 		}
 	}

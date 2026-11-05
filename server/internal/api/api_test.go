@@ -73,6 +73,11 @@ func newEnvProxies(t *testing.T, proxies []netip.Prefix) *env {
 
 func newEnvWith(t *testing.T, behindProxy bool, proxies []netip.Prefix, static http.Handler) *env {
 	t.Helper()
+	return newEnvFull(t, behindProxy, proxies, static, defaultTransfers())
+}
+
+func newEnvFull(t *testing.T, behindProxy bool, proxies []netip.Prefix, static http.Handler, x transfers) *env {
+	t.Helper()
 	dir := t.TempDir()
 	db, err := store.Open(filepath.Join(dir, "shares.db"))
 	if err != nil {
@@ -89,7 +94,8 @@ func newEnvWith(t *testing.T, behindProxy bool, proxies []netip.Prefix, static h
 		static = htmlStatic()
 	}
 	sig := token.New(rnd(32), c.Now)
-	h := New(svc, sig, limits.New(c.Now), captcha.New(rnd(32), c.Now), static, behindProxy, proxies)
+	h := newHandler(&server{svc: svc, sig: sig, lim: limits.New(c.Now), cap: captcha.New(rnd(32), c.Now),
+		behindProxy: behindProxy, proxies: proxies, xfer: x}, static)
 	return &env{h: h, svc: svc, sig: sig, clk: c, dir: dir}
 }
 
@@ -137,6 +143,7 @@ func expect(t *testing.T, w *httptest.ResponseRecorder, code int, body string) {
 }
 
 const (
+	budgetBody = `{"error":"budget","retry_after_s":60}`
 	notFound   = `{"error":"not_found"}`
 	badRequest = `{"error":"bad_request"}`
 )
@@ -553,8 +560,16 @@ func TestSegmentRateLimit(t *testing.T) {
 		expect(t, e.do(req{method: "GET", path: "/api/nope"}), 404, notFound)
 	}
 	seg := "/api/shares/" + c.ID + "/segments/0"
+	// Le budget de lecture du jeton (share.ReadBudget) s'épuise vite au palier 1 : une
+	// réponse « budget » prouve elle aussi que la limite de débit a laissé passer.
+	passed := func(w *httptest.ResponseRecorder) {
+		t.Helper()
+		if w.Code != 200 && strings.TrimSpace(w.Body.String()) != budgetBody {
+			t.Fatalf("segment refusé par la limite de débit : %d %q", w.Code, w.Body.String())
+		}
+	}
 	for i := 0; i < 100; i++ {
-		expect(t, e.do(req{method: "GET", path: seg, hdr: auth(dl)}), 200, "")
+		passed(e.do(req{method: "GET", path: seg, hdr: auth(dl)}))
 	}
 	expect(t, e.do(req{method: "GET", path: "/api/captcha"}), 429, "")
 	// Jeton invalide (autre partage, mauvais type, illisible) : limite générale, épuisée.
@@ -565,11 +580,14 @@ func TestSegmentRateLimit(t *testing.T) {
 
 	e.clk.Add(time.Minute)
 	for i := 0; i < limits.SegmentsPerMin-1; i++ { // 1 de moins : le PUT ci-dessous
-		expect(t, e.do(req{method: "GET", path: seg, hdr: auth(dl)}), 200, "")
+		passed(e.do(req{method: "GET", path: seg, hdr: auth(dl)}))
 	}
 	// PUT avec un jeton d'envoi valide : même compteur des segments (refusé après finalisation).
 	expect(t, e.do(req{method: "PUT", path: seg, hdr: auth(c.UploadToken), body: rnd(share.SegmentSize(1, 0))}), 404, notFound)
-	expect(t, e.do(req{method: "GET", path: seg, hdr: auth(dl)}), 429, "")
+	w := e.do(req{method: "GET", path: seg, hdr: auth(dl)})
+	if expect(t, w, 429, ""); jsonOf(t, w)["error"] != "limit" {
+		t.Fatalf("attendu la limite de débit : %q", w.Body.String())
+	}
 	expect(t, e.do(req{method: "GET", path: "/api/captcha"}), 200, "") // limite générale intacte
 }
 

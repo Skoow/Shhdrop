@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -182,7 +183,7 @@ func TestFullFlow(t *testing.T) {
 		t.Fatal(openN, err)
 	}
 	for _, n := range []int{0, 7, 24} {
-		got, err := s.ReadSegment(id, n, openN)
+		got, err := readSegment(s, id, n, openN)
 		if err != nil || !bytes.Equal(got, segBody(1600, n, byte(n+1))) {
 			t.Fatal("lecture", n, err)
 		}
@@ -255,7 +256,7 @@ func TestPutSegmentRules(t *testing.T) {
 	if n, _ := s.Unlock(id, k.acces, k.preuve); n != 1 {
 		t.Fatal("unlock", n)
 	}
-	if got, _ := s.ReadSegment(id, 0, 1); !bytes.Equal(got, segBody(80, 0, 9)) {
+	if got, _ := readSegment(s, id, 0, 1); !bytes.Equal(got, segBody(80, 0, 9)) {
 		t.Fatal("remplacement")
 	}
 	if err := s.PutSegment(id, 0, segBody(80, 0, 1)); !errors.Is(err, ErrNotFound) {
@@ -572,14 +573,14 @@ func TestReadAfterExpiry(t *testing.T) {
 	k := newKeys()
 	id := ready(t, s, k, 16, 1, 2)
 	s.Unlock(id, k.acces, k.preuve)
-	if _, err := s.ReadSegment(id, 1, 1); !errors.Is(err, ErrBadSegment) {
+	if _, err := readSegment(s, id, 1, 1); !errors.Is(err, ErrBadSegment) {
 		t.Fatal("n hors palier", err)
 	}
-	if _, err := s.ReadSegment(id, 0, 1); err != nil {
+	if _, err := readSegment(s, id, 0, 1); err != nil {
 		t.Fatal(err)
 	}
 	c.Add(73 * time.Minute) // = expires_at
-	if _, err := s.ReadSegment(id, 0, 1); !errors.Is(err, ErrNotFound) {
+	if _, err := readSegment(s, id, 0, 1); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	if _, err := s.Meta(id, k.acces); !errors.Is(err, ErrNotFound) {
@@ -594,7 +595,7 @@ func TestReadUploading(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
 	id, _, _ := s.Create(k.req(1, 1, 1))
-	if _, err := s.ReadSegment(id, 0, 1); !errors.Is(err, ErrNotFound) {
+	if _, err := readSegment(s, id, 0, 1); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	if _, err := s.Meta(id, k.acces); !errors.Is(err, ErrNotFound) {
@@ -899,7 +900,7 @@ func TestFailedDestructionRetried(t *testing.T) {
 	if _, err := s.Meta(id, k.acces); !errors.Is(err, ErrNotFound) {
 		t.Fatal("Meta", err)
 	}
-	if _, err := s.ReadSegment(id, 0, 1); !errors.Is(err, ErrNotFound) {
+	if _, err := readSegment(s, id, 0, 1); !errors.Is(err, ErrNotFound) {
 		t.Fatal("ReadSegment", err)
 	}
 	if _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
@@ -929,7 +930,7 @@ func TestSweepRechecksFinalized(t *testing.T) {
 	if _, err := s.Unlock(id, k.acces, k.preuve); err != nil {
 		t.Fatal("unlock", err)
 	}
-	if _, err := s.ReadSegment(id, 0, 1); err != nil {
+	if _, err := readSegment(s, id, 0, 1); err != nil {
 		t.Fatal("fichier détruit", err)
 	}
 }
@@ -951,28 +952,28 @@ func TestReadSegmentOpenN(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
 	id := ready(t, s, k, 1, 24, 3)
-	if _, err := s.ReadSegment(id, 0, 1); !errors.Is(err, ErrNotFound) {
+	if _, err := readSegment(s, id, 0, 1); !errors.Is(err, ErrNotFound) {
 		t.Fatal("avant toute ouverture", err)
 	}
 	n1, _ := s.Unlock(id, k.acces, k.preuve)
 	n2, _ := s.Unlock(id, k.acces, k.preuve)
 	for _, n := range []int{n1, n2} {
-		if _, err := s.ReadSegment(id, 0, n); err != nil {
+		if _, err := readSegment(s, id, 0, n); err != nil {
 			t.Fatal(n, err)
 		}
 	}
 	for _, n := range []int{0, -1, 3, 11} {
-		if _, err := s.ReadSegment(id, 0, n); !errors.Is(err, ErrNotFound) {
+		if _, err := readSegment(s, id, 0, n); !errors.Is(err, ErrNotFound) {
 			t.Fatal("ouverture non émise", n, err)
 		}
 	}
 	if err := s.Done(id, n1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReadSegment(id, 0, n1); !errors.Is(err, ErrNotFound) {
+	if _, err := readSegment(s, id, 0, n1); !errors.Is(err, ErrNotFound) {
 		t.Fatal("jeton mort après done", err)
 	}
-	if _, err := s.ReadSegment(id, 0, n2); err != nil {
+	if _, err := readSegment(s, id, 0, n2); err != nil {
 		t.Fatal("autre ouverture", err)
 	}
 }
@@ -1096,4 +1097,14 @@ func TestCreateNoAllocateIsFull(t *testing.T) {
 	if _, _, err := s.Create(k.req(1, 1, 1)); !errors.Is(err, boom) || errors.Is(err, ErrFull) {
 		t.Fatal(err)
 	}
+}
+
+// readSegment lit un segment entier avec OpenSegment.
+func readSegment(s *Service, id string, n, openN int) ([]byte, error) {
+	sec, err := s.OpenSegment(id, n, openN)
+	if err != nil {
+		return nil, err
+	}
+	defer sec.Close()
+	return io.ReadAll(sec)
 }

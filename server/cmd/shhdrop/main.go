@@ -150,8 +150,9 @@ func tightenPerms(dataDir string) error {
 // shutdownTimeout : délai laissé aux requêtes en cours à l'arrêt (variable pour les tests).
 var shutdownTimeout = 30 * time.Second
 
-// newHTTPServer : délais contre les connexions lentes (un segment de 4 Mio en 300 s
-// demande environ 14 Ko/s) et en-têtes plafonnés à 16 Kio.
+// newHTTPServer : délais contre les connexions lentes et en-têtes plafonnés à 16 Kio.
+// Les 300 s ne sont qu'un filet : chaque transfert de segment pose sa propre échéance,
+// plus courte (api, xferMinRate).
 func newHTTPServer(h http.Handler) *http.Server {
 	return &http.Server{
 		Handler:           h,

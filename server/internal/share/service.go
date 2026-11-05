@@ -30,6 +30,8 @@ var (
 	ErrFull       = errors.New("stockage plein")
 	ErrFrozen     = errors.New("créations suspendues")
 	ErrBadRequest = errors.New("requête invalide")
+	// ErrBudget : l'ouverture a déjà lu son budget d'octets (ReadBudget).
+	ErrBudget = errors.New("budget de lecture épuisé")
 )
 
 // BadPassword : mot de passe faux, avec les essais restants (0 = partage détruit).
@@ -101,6 +103,7 @@ type Service struct {
 
 	createMu sync.Mutex   // rend atomiques « place libre ? » et la réservation
 	uploadMu sync.RWMutex // Finalize attend la fin des écritures de segments en cours
+	budget   readBudget   // octets lus par ouverture, en mémoire seulement
 }
 
 func (s *Service) now() int64 { return s.Now().Unix() }
@@ -384,9 +387,13 @@ func (s *Service) countFailure(id string) (int, error) {
 	return maxAttempts - failed, nil
 }
 
-// ReadSegment lit un segment pour l'ouverture openN (venue d'un jeton signé) : elle doit
-// avoir été émise et ne pas être terminée (done), sinon ErrNotFound.
-func (s *Service) ReadSegment(id string, n, openN int) ([]byte, error) {
+// OpenSegment ouvre un segment en lecture en flux pour l'ouverture openN (venue d'un jeton
+// signé) : elle doit avoir été émise et ne pas être terminée (done), sinon ErrNotFound.
+// Seul un partage « ready » ou « draining » est lisible : Finalize attend la fin de toute
+// écriture (uploadMu) avant de quitter « uploading », et PutSegment n'écrit plus ensuite,
+// donc aucun segment en cours d'écriture n'est jamais servi. Chaque ouverture a un budget
+// de lecture (ReadBudget) ; au-delà, ErrBudget. L'appelant ferme la section.
+func (s *Service) OpenSegment(id string, n, openN int) (*blob.Section, error) {
 	if !validID(id) || openN < 1 || openN > 10 {
 		return nil, ErrNotFound
 	}
@@ -401,11 +408,20 @@ func (s *Service) ReadSegment(id string, n, openN int) ([]byte, error) {
 	if n < 0 || n >= SegmentCount(bucket) {
 		return nil, ErrBadSegment
 	}
-	b, err := s.Blobs.ReadAt(id, int64(segOffset(bucket, n)), SegmentSize(bucket, n))
+	size := int64(SegmentSize(bucket, n))
+	sec, err := s.Blobs.Open(id, int64(segOffset(bucket, n)), size)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, ErrNotFound // détruit entre-temps
 	}
-	return b, err
+	if err != nil {
+		return nil, err
+	}
+	// Compté après l'ouverture réussie : une erreur du serveur ne consomme pas le budget.
+	if !s.budget.charge(openKey{id, openN}, size, ReadBudget(bucket), now) {
+		sec.Close()
+		return nil, ErrBudget
+	}
+	return sec, nil
 }
 
 func (s *Service) Done(id string, openN int) error {

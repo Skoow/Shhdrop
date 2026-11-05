@@ -105,7 +105,8 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 | Mot de passe | → §31 (8 caractères générés par défaut). Avant v2.6 : obligatoire ; généré par défaut : **4 mots** tirés d'une liste de 7 776 mots (≈ 52 bits) ; personnalisé : 12 caractères minimum et absent d'une liste noire des mots de passe courants (contrôle côté navigateur : le serveur ne peut pas le vérifier) |
 | Essais de mot de passe | 5 ratés → destruction |
 | Création de partages | 10 par jour par connexion (IPv4, ou bloc IPv6 /64) ; 30 par jour par bloc /48 ; 3 Gio utiles par jour par connexion et 6 Gio par bloc /48 (§24) |
-| Limite de débit | 60 requêtes par minute par connexion sur les routes publiques ; les envois et téléchargements de segments porteurs d'un jeton valide ont leur propre limite, 600 par minute par connexion (§24) ; un segment au jeton invalide compte dans les 60 |
+| Limite de débit | 60 requêtes par minute par connexion sur les routes publiques ; les envois et téléchargements de segments porteurs d'un jeton valide ont leur propre limite, 600 par minute par connexion et 6 000 par bloc /48 (§24) ; un segment au jeton invalide compte dans les 60 |
+| Transferts de segments | au plus 16 téléchargements simultanés par connexion, 64 par /48 et 256 au total ; envois : 8, 32 et 64 ; au-delà 429 (connexion, /48) ou 503 (serveur), avec `Retry-After` ; une ouverture lit au plus 2 × le fichier chiffré de son palier + 2 segments 0, puis 429 `budget` (§24) |
 | Stockage total | plafond configurable (100 Gio par défaut), **réservé à la création** ; au-delà, nouveaux envois refusés |
 
 ---
@@ -299,7 +300,8 @@ Toutes les réponses : JSON, `Cache-Control: no-store`, erreurs uniformes pour �
 | `SHH_TRUSTED_PROXY` | liste de CIDR canoniques séparés par des virgules (ex. `172.18.0.0/16`). Acceptés : un sous-réseau (jamais `/0`) d'un réseau local (RFC 1918, `127.0.0.0/8`, `169.254.0.0/16`, `fc00::/7`, `::1`, `fe80::/10`), ou un réseau public d'au moins `/24` en IPv4 et `/48` en IPv6 ; refusés : `/0`, les réseaux publics plus larges, les préfixes NAT64 (`64:ff9b::/96`, `64:ff9b:1::/48`) et la notation IPv4-dans-IPv6 (`::ffff:a.b.c.d/…`) ; exige `SHH_BEHIND_PROXY=1`. La boucle locale reste toujours de confiance |
 | `SHH_STORAGE_MAX` | entier décimal > 0 (chiffres seuls), 100 Gio par défaut. Au démarrage : `SHH_STORAGE_MAX` ≤ espace libre (`statfs`) + place déjà réservée − 1 Gio, sinon refus. Avec `SHH_BEHIND_PROXY=1`, une sonde vérifie que `fallocate` fonctionne ; sans allocation réelle, les créations sont refusées (507) |
 | `SHH_STATIC_DIR` | chemin absolu ; le dossier et son `index.html` doivent exister. Vide : page d'attente |
-- **Délais réseau** : lecture et écriture limitées (protection contre les connexions lentes), corps de requête plafonnés à la taille exacte attendue.
+- **Délais réseau** : lecture et écriture limitées (protection contre les connexions lentes), corps de requête plafonnés à la taille exacte attendue. Chaque transfert de segment a sa propre échéance, 10 s + taille ÷ 32 Kio/s (138 s pour un segment de 4 Mio) : un client plus lent est coupé et rend sa place (§24).
+- **Segments servis en flux** depuis le fichier (aucun tampon de la taille du segment), avec `Content-Length` ; une copie incomplète coupe la connexion. Seul un partage `ready` ou `draining` est lu : aucun segment en cours d'écriture n'est servi.
 
 ---
 
@@ -451,6 +453,7 @@ Messages en français et en anglais.
 - Vérifier le **volume de trafic sortant inclus** : un partage de 1 Gio ouvert 10 fois = 10 Gio sortants.
 - Aucun intermédiaire qui déchiffre le trafic (pas de CDN-proxy), TLS terminé par Caddy.
 - **Disque : au moins `SHH_STORAGE_MAX` + 1 Gio libres** (100 Gio par défaut, donc 101 Gio) pour que le serveur démarre : sinon refus au démarrage (voir `SHH_STORAGE_MAX`, §8). La place déjà réservée par les partages existants compte comme libre. Réduire `SHH_STORAGE_MAX` ou agrandir le disque avant la mise en ligne. L'espace est lu avec `Frsize` (unité de `Bavail`) quand il est non nul, sinon `Bsize`.
+- **Volume de données monté en `noatime`** (à appliquer au Plan 3) : sinon la date d'accès d'un fichier révèle l'heure de la première lecture (audit de confidentialité P5). Le serveur ouvre déjà les fichiers en lecture avec `O_NOATIME` sous Linux (repli silencieux si refusé) ; le montage couvre les autres lectures (sauvegarde, outils). Il ne remet pas les dates à zéro après une lecture : `chtimes` mettrait le `ctime`, que nul ne peut fixer, à l'heure de la lecture.
 
 ### 15.2 Au quotidien (automatique)
 
@@ -625,7 +628,9 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
   - téléchargement **en flux** : déchiffrement segment par segment, écriture directe sur le disque via l'API d'accès aux fichiers (`showSaveFilePicker`) quand elle existe (Chrome, Edge sur ordinateur) ; sinon, assemblage en `Blob` (le navigateur peut alors placer des morceaux déchiffrés dans son stockage temporaire : limite assumée, ajoutée à la §18).
 - **Délais** : jeton d'envoi et `upload_deadline` **3 h** ; jeton de téléchargement `min(3 h, expires_at)` ; `purge_at` = `min(ceil15(now + 3 h), expires_at)`.
 - **Quotas** : 10 liens par jour par connexion (inchangé), 30 par /48 (inchangé), **3 Gio par jour** par connexion et **6 Gio par jour par /48** (anti-saturation du disque) ; stockage total par défaut **100 Gio** (`SHH_STORAGE_MAX`).
-- **Limite de débit des segments** : un `PUT`/`GET` de segment dont le jeton est valide est exclu des 60 requêtes par minute et compte dans une limite à part de 600 par minute et par connexion ; un jeton invalide compte dans les 60.
+- **Limite de débit des segments** : un `PUT`/`GET` de segment dont le jeton est valide est exclu des 60 requêtes par minute et compte dans une limite à part de 600 par minute et par connexion, et de 6 000 par minute et par /48 (audit du 5 novembre, M1) ; un jeton invalide compte dans les 60.
+- **Transferts simultanés** (audit du 5 novembre, E1) : téléchargements de segments au plus 16 par connexion, 64 par /48, 256 au total ; envois (corps gardé en mémoire, ≤ 4 Mio) 8, 32 et 64. Refus immédiat, sans file d'attente : 429 `limit` (connexion ou /48) ou 503 `busy` (serveur), `Retry-After: 5`. Compteurs en mémoire, sur les clés HMAC du jour, jamais d'adresse.
+- **Budget de lecture par ouverture** (audit du 5 novembre, M1) : un jeton de téléchargement lit au plus 2 × la taille du fichier chiffré de son palier + 2 segments 0 (une lecture complète, un nouvel essai de chaque segment, deux relectures de l'en-tête) ; au-delà, 429 `budget` (`Retry-After: 60`) jusqu'à l'expiration du jeton. Compté en mémoire par (identifiant, n° d'ouverture), sans adresse, oublié 3 h après la première lecture.
 - **Envoi bloqué** : aucun nouveau segment depuis 15 min → effacé (`progress_at`, §9.1), en plus de l'échéance de 3 h et de la règle « aucun segment en 5 min ».
 
 ### Anti-robot

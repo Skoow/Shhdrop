@@ -1,14 +1,23 @@
 version: 2
 updates:
+  # cooldown : une version n'est proposée que 7 jours après sa publication, le temps que
+  # les paquets piégés soient repérés et retirés (audit du 5 novembre, M2). Les mises à
+  # jour de sécurité de Dependabot n'attendent pas.
   - package-ecosystem: npm
     directory: /web
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: gomod
     directory: /server
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
