@@ -1,4 +1,4 @@
-.PHONY: test test-go test-web test-e2e
+.PHONY: test test-go test-web test-e2e test-ui
 
 test: test-go test-web test-e2e
 
@@ -11,3 +11,6 @@ test-web:
 test-e2e:
 	cd server && go build -o shhdrop ./cmd/shhdrop
 	cd web && npm run test:e2e
+
+test-ui:
+	cd web && npm run test:ui

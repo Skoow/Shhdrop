@@ -17,11 +17,19 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 
 ## Dépendances npm de l'interface (Plan 2)
 
-Toutes sous licence MIT, versions exactes dans `web/package-lock.json` et `web/tools/svelte-check/package-lock.json` :
+Versions exactes dans `web/package-lock.json` et `web/tools/svelte-check/package-lock.json`. Licences lues dans le `package.json` de chaque paquet installé (`node_modules`).
 
-- `svelte` 5.57.3 (exécution, compilée dans le bundle) : MIT, Copyright (c) Svelte contributors
-- `@sveltejs/vite-plugin-svelte` 7.3.1 (build) : MIT
-- `@playwright/test` 1.64.1 (tests) : Apache-2.0
-- `@axe-core/playwright` 4.14.0 (tests) : MPL-2.0
-- `happy-dom` 21.0.4 (tests) : MIT
-- `svelte-check` 4.7.8, `typescript` 6.0.3 (contrôle de types, `web/tools/svelte-check`) : MIT et Apache-2.0
+Exécution (le bundle ne contient que le code d'exécution de Svelte et libsodium ; le reste de la liste est installé comme dépendance de `svelte`) :
+
+- `svelte` 5.57.3 : MIT, Copyright (c) Svelte contributors
+- `libsodium-wrappers-sumo` 0.8.4 et `libsodium-sumo` 0.8.4 : ISC
+- Dépendances de `svelte` (fermeture complète, outils de compilation compris) :
+  - MIT : `@jridgewell/remapping` 2.3.5, `@jridgewell/gen-mapping` 0.3.13, `@jridgewell/sourcemap-codec` 1.6.0, `@jridgewell/trace-mapping` 0.3.31, `@jridgewell/resolve-uri` 3.1.2, `@sveltejs/acorn-typescript` 1.0.13, `@types/estree` 1.0.10, `acorn` 8.19.0, `clsx` 2.1.1, `devalue` 5.9.4, `esm-env` 1.2.2, `esrap` 2.4.0, `is-reference` 3.0.3, `locate-character` 3.0.0, `magic-string` 0.30.21, `zimmerframe` 1.1.5
+  - Apache-2.0 : `aria-query` 5.3.1, `axobject-query` 4.1.0
+
+Construction et tests (hors bundle) :
+
+- `@sveltejs/vite-plugin-svelte` 7.3.1, `vite` 8.3.5, `vitest` 5.1.0, `happy-dom` 21.0.4 : MIT
+- `typescript` 7.0.2 (`web`) et 6.0.3 (`web/tools/svelte-check`), `@playwright/test` 1.64.1 : Apache-2.0
+- `svelte-check` 4.7.8 : MIT
+- `@axe-core/playwright` 4.14.0 et `axe-core` 4.14.0 : MPL-2.0

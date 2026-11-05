@@ -17,6 +17,8 @@
   "include": [
     "src",
     "e2e",
+    "ui-e2e",
+    "playwright.config.ts",
     "scripts"
   ]
 }

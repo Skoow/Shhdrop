@@ -7,7 +7,8 @@
     "build": "vite build",
     "check": "tsc --noEmit && npm --prefix tools/svelte-check exec -- svelte-check --workspace . --tsconfig ./tsconfig.json --fail-on-warnings",
     "test": "tsc --noEmit && vitest run src scripts",
-    "test:e2e": "vitest run e2e --testTimeout=120000 --hookTimeout=120000"
+    "test:e2e": "vitest run e2e --testTimeout=120000 --hookTimeout=120000",
+    "test:ui": "playwright test"
   },
   "dependencies": {
     "libsodium-wrappers-sumo": "0.8.4",

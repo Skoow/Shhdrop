@@ -31,6 +31,18 @@ const files = walk(srcDir)
   .filter((f) => isScanned(f.rel))
   .map((f) => ({ ...f, text: readFileSync(f.abs, "utf8") }));
 
+// Motifs des règles, testés sur des exemples (voir « motifs des règles ») pour ne pas dériver.
+const Q = "[\"'`]"; // guillemet simple, double ou accent grave (import() en gabarit)
+const NQ = "[^\"'`]";
+const RE_STYLE_ATTR = /\bstyle\s*=\s*["'`{]/;
+const RE_FORBIDDEN_IMPORT = new RegExp(
+  `(?:from\\s*|import\\s*\\(\\s*|import\\s+)${Q}${NQ}*\\/(?:transfer|crypto)(?:\\/${NQ}*)?${Q}`,
+);
+const RE_DEMO_IMPORT = new RegExp(
+  `(?:from\\s*|import\\s*\\(\\s*|import\\s+)${Q}${NQ}*\\bdemo(?:\\/${NQ}*)?${Q}\\s*\\)?`,
+  "g",
+);
+
 const UI_DIRS = ["routes", "ui", "flows", "viewers", "media", "captcha", "app"];
 const inUiDir = (rel: string) => UI_DIRS.includes(rel.split("/")[0]!);
 
@@ -49,14 +61,12 @@ describe("règles de sources", () => {
   });
 
   it("pas de {@html", () => expect(offenders(/\{@html/)).toEqual([]));
-  it("pas d'attribut style=\" dans un .svelte", () =>
-    expect(offenders(/\bstyle\s*=\s*["']/, (r) => r.endsWith(".svelte"))).toEqual([]));
+  it("pas d'attribut style (style=\"…\" ni style={…}) dans un .svelte", () =>
+    expect(offenders(RE_STYLE_ATTR, (r) => r.endsWith(".svelte"))).toEqual([]));
   it("pas d'eval ni de new Function", () =>
     expect(offenders(/\beval\s*\(|new\s+Function\b/)).toEqual([]));
   it("pas d'import de transfer/ ni crypto/ dans les écrans", () =>
-    expect(
-      offenders(/(?:from\s*|import\s*\(\s*|import\s+)["'][^"']*\/(?:transfer|crypto)\//, inUiDir),
-    ).toEqual([]));
+    expect(offenders(RE_FORBIDDEN_IMPORT, inUiDir)).toEqual([]));
   it("pas de fetch( ni XMLHttpRequest dans les écrans", () =>
     expect(offenders(/\bfetch\s*\(|XMLHttpRequest/, inUiDir)).toEqual([]));
   it("aucun stockage navigateur", () =>
@@ -66,15 +76,61 @@ describe("règles de sources", () => {
   it("pas de console.log", () => expect(offenders(/console\.log/)).toEqual([]));
 
   it("demo/ importé seulement par main.ts, sous la forme import(\"./demo/install\")", () => {
-    const re = /(?:from\s*|import\s*\(\s*|import\s+)["'][^"']*\bdemo\/[^"']*["']\s*\)?/g;
     for (const f of files) {
-      const found = f.text.match(re) ?? [];
+      const found = f.text.match(RE_DEMO_IMPORT) ?? [];
       if (f.rel === "main.ts") {
         for (const m of found) expect(m).toBe('import("./demo/install")');
       } else {
         expect({ file: f.rel, found }).toEqual({ file: f.rel, found: [] });
       }
     }
+  });
+});
+
+describe("motifs des règles", () => {
+  const matches = (re: RegExp, text: string) => new RegExp(re.source, re.flags.replace("g", "")).test(text);
+
+  it("style : attribut texte ou expression", () => {
+    for (const t of ['<div style="color:red">', "<div style='x'>", "<div style={s}>", "<div style = {`a:${b}`}>", "<div style=`x`>"])
+      expect(matches(RE_STYLE_ATTR, t), t).toBe(true);
+    for (const t of ["<div class:on={x}>", "<div style:color={c}>", "<style>a{}</style>", "const lifestyle = 1"])
+      expect(matches(RE_STYLE_ATTR, t), t).toBe(false);
+  });
+
+  it("imports interdits dans les écrans : toutes les écritures", () => {
+    for (const t of [
+      'import { a } from "../transfer/api"',
+      "import x from '../crypto/keys'",
+      'import("../transfer/api")',
+      "import(`../transfer/api`)",
+      'import "../crypto/boot"',
+      'import { a } from "../transfer"',
+      'import("../crypto")',
+      "import(`../crypto`)",
+    ])
+      expect(matches(RE_FORBIDDEN_IMPORT, t), t).toBe(true);
+    for (const t of ['import { a } from "../ui/transfer-badge"', 'import { a } from "./transferred"', 'import { a } from "node:crypto"'])
+      expect(matches(RE_FORBIDDEN_IMPORT, t), t).toBe(false);
+  });
+
+  it("demo : import avec ou sans barre finale, guillemets ou gabarit", () => {
+    for (const t of [
+      'import("./demo/install")',
+      "import(`./demo/install`)",
+      'import("./demo")',
+      "import('./demo')",
+      "import(`./demo`)",
+      'import { x } from "./demo"',
+      'import "../demo/install"',
+    ])
+      expect(matches(RE_DEMO_IMPORT, t), t).toBe(true);
+    for (const t of ['import { x } from "./demographie"', 'import { x } from "./ui/predemo"'])
+      expect(matches(RE_DEMO_IMPORT, t), t).toBe(false);
+  });
+
+  it("demo : le motif capture l'import entier (forme exacte exigée dans main.ts)", () => {
+    expect("import(`./demo`)".match(RE_DEMO_IMPORT)).toEqual(["import(`./demo`)"]);
+    expect('import("./demo/install")'.match(RE_DEMO_IMPORT)).toEqual(['import("./demo/install")']);
   });
 });
 

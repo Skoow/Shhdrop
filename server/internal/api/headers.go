@@ -25,6 +25,7 @@ func withHeaders(next http.Handler) http.Handler {
 		for _, kv := range securityHeaders {
 			h.Set(kv[0], kv[1])
 		}
+		pathHeaders(h, r.URL.Path)
 		next.ServeHTTP(w, r)
 	})
 }
