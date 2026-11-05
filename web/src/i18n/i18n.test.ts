@@ -71,15 +71,16 @@ describe("t et langue", () => {
     expect(document.cookie).toBe("");
   });
 
-  it("detectLang : français si une langue du navigateur commence par fr, sinon anglais", () => {
+  it("detectLang : la première langue fr ou en décide ; sinon français", () => {
+    expect(detectLang(["en-US", "fr"])).toBe("en");
     expect(detectLang(["fr-FR", "en"])).toBe("fr");
-    expect(detectLang(["fr"])).toBe("fr");
-    expect(detectLang(["de", "fr-CA"])).toBe("fr");
-    expect(detectLang(["en-US"])).toBe("en");
-    expect(detectLang(["de"])).toBe("en");
-    expect(detectLang([])).toBe("en");
+    expect(detectLang(["de", "fr-CH", "en"])).toBe("fr");
+    expect(detectLang(["de", "EN-gb"])).toBe("en");
     expect(detectLang(["FR-be"])).toBe("fr");
-    expect(detectLang(["frobnicate"])).toBe("en");
+    expect(detectLang(["de"])).toBe("fr");
+    expect(detectLang([])).toBe("fr");
+    expect(detectLang(["frobnicate", "en"])).toBe("en");
+    expect(detectLang(["english"])).toBe("fr");
   });
 
   it("une clé inconnue se voit (jamais de texte vide)", () => {
@@ -88,51 +89,60 @@ describe("t et langue", () => {
 });
 
 describe("formats", () => {
-  it("durées FR", () => {
-    expect(formatDuration(4 * 3600 + 15 * 60, "fr")).toBe("4 h 15");
-    expect(formatDuration(4 * 3600, "fr")).toBe("4 h");
-    expect(formatDuration(4 * 3600 + 5 * 60, "fr")).toBe("4 h 05");
-    expect(formatDuration(12 * 60, "fr")).toBe("12 min");
-    expect(formatDuration(45, "fr")).toBe("45 s");
+  const N = "\u202f"; // FR : espace fine insécable entre nombre et unité
+  const B = "\u00a0"; // EN : espace insécable
+
+  it("durées FR (U+202F)", () => {
+    expect(formatDuration(4 * 3600 + 15 * 60, "fr")).toBe(`4${N}h${N}15`);
+    expect(formatDuration(4 * 3600, "fr")).toBe(`4${N}h`);
+    expect(formatDuration(4 * 3600 + 5 * 60, "fr")).toBe(`4${N}h${N}05`);
+    expect(formatDuration(12 * 60, "fr")).toBe(`12${N}min`);
+    expect(formatDuration(45, "fr")).toBe(`45${N}s`);
     expect(formatDuration(45, "fr", { coarse: true })).toBe("moins d'une minute");
     expect(formatDuration(0, "fr")).toBe("moins d'une minute");
     expect(formatDuration(-3, "fr")).toBe("moins d'une minute");
   });
 
-  it("durées EN", () => {
-    expect(formatDuration(4 * 3600 + 15 * 60, "en")).toBe("4h 15m");
+  it("durées EN (U+00A0)", () => {
+    expect(formatDuration(4 * 3600 + 15 * 60, "en")).toBe(`4h${B}15m`);
     expect(formatDuration(4 * 3600, "en")).toBe("4h");
-    expect(formatDuration(12 * 60, "en")).toBe("12 min");
-    expect(formatDuration(45, "en")).toBe("45 s");
+    expect(formatDuration(12 * 60, "en")).toBe(`12${B}min`);
+    expect(formatDuration(45, "en")).toBe(`45${B}s`);
     expect(formatDuration(0, "en")).toBe("less than a minute");
     expect(formatDuration(30, "en", { coarse: true })).toBe("less than a minute");
   });
 
   it("arrondit toujours vers le haut (jamais « 0 » avant l'échéance)", () => {
-    expect(formatDuration(0.2, "fr")).toBe("1 s");
-    expect(formatDuration(61, "fr")).toBe("2 min");
-    expect(formatDuration(3601, "fr")).toBe("1 h 01");
+    expect(formatDuration(0.2, "fr")).toBe(`1${N}s`);
+    expect(formatDuration(61, "fr")).toBe(`2${N}min`);
+    expect(formatDuration(3601, "fr")).toBe(`1${N}h${N}01`);
   });
 
   it("tailles", () => {
-    expect(formatBytes(34 * 1024 * 1024, "fr")).toBe("34 Mo");
-    expect(formatBytes(1024 ** 3, "fr")).toBe("1 Go");
-    expect(formatBytes(0, "fr")).toBe("0 octet");
-    expect(formatBytes(1, "fr")).toBe("1 octet");
-    expect(formatBytes(5, "fr")).toBe("5 octets");
-    expect(formatBytes(1536, "fr")).toBe("1,5 Ko");
-    expect(formatBytes(1536, "en")).toBe("1.5 KB");
-    expect(formatBytes(0, "en")).toBe("0 bytes");
-    expect(formatBytes(1, "en")).toBe("1 byte");
-    expect(formatBytes(1024 ** 3, "en")).toBe("1 GB");
-    expect(formatBytes(-5, "fr")).toBe("0 octet");
-    expect(formatBytes(Number.NaN, "fr")).toBe("0 octet");
+    expect(formatBytes(34 * 1024 * 1024, "fr")).toBe(`34${N}Mo`);
+    expect(formatBytes(1024 ** 3, "fr")).toBe(`1${N}Go`);
+    expect(formatBytes(0, "fr")).toBe(`0${N}octet`);
+    expect(formatBytes(1, "fr")).toBe(`1${N}octet`);
+    expect(formatBytes(5, "fr")).toBe(`5${N}octets`);
+    expect(formatBytes(1536, "fr")).toBe(`1,5${N}Ko`);
+    expect(formatBytes(1536, "en")).toBe(`1.5${B}KB`);
+    expect(formatBytes(0, "en")).toBe(`0${B}bytes`);
+    expect(formatBytes(1, "en")).toBe(`1${B}byte`);
+    expect(formatBytes(1024 ** 3, "en")).toBe(`1${B}GB`);
+    expect(formatBytes(-5, "fr")).toBe(`0${N}octet`);
+    expect(formatBytes(Number.NaN, "fr")).toBe(`0${N}octet`);
   });
 
   it("débits", () => {
-    expect(formatRate(4404019, "fr")).toBe("4,2 Mo/s");
-    expect(formatRate(4404019, "en")).toBe("4.2 MB/s");
-    expect(formatRate(0, "fr")).toBe("0 octet/s");
+    expect(formatRate(4404019, "fr")).toBe(`4,2${N}Mo/s`);
+    expect(formatRate(4404019, "en")).toBe(`4.2${B}MB/s`);
+    expect(formatRate(0, "fr")).toBe(`0${N}octet/s`);
+  });
+
+  it("aucune espace ordinaire dans un nombre suivi d'une unité", () => {
+    for (const lang of ["fr", "en"] as const)
+      for (const s of [formatDuration(15300, lang), formatDuration(720, lang), formatDuration(45, lang), formatBytes(35651584, lang), formatRate(4404019, lang)])
+        expect(s).not.toContain(" ");
   });
 
   it("pluriels", () => {

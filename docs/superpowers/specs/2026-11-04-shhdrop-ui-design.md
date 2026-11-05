@@ -654,8 +654,8 @@ Affiché seulement quand la promesse de `createShare` est résolue (spec §5.1).
 
 ## 10. Textes (FR / EN)
 
-- Dictionnaires typés : `web/src/i18n/fr.ts` (référence, `as const`) et `en.ts` (`satisfies Record<keyof typeof fr, …>`). Paramètres nommés, pluriels par `Intl.PluralRules`, nombres et tailles par `Intl.NumberFormat`, durées par un formateur testé (FR « 4 h 15 », « 12 min », « 45 s », « moins d'une minute » ; EN « 4h 15m », « 12 min », « 45 s », « less than a minute »), vitesses (« 4,2 Mo/s » / « 4.2 MB/s »).
-- Langue : `navigator.languages` (premier qui commence par `fr` → français, sinon anglais) ; bascule dans l'en-tête, sans mémorisation. `<html lang>` mis à jour. La bascule est désactivée pendant un envoi (elle ne change rien d'utile et ferait sauter les libellés).
+- Dictionnaires typés : `web/src/i18n/fr.ts` (référence, `as const`) et `en.ts` (`satisfies Record<keyof typeof fr, …>`). Paramètres nommés, pluriels par `Intl.PluralRules`, nombres et tailles par `Intl.NumberFormat`, durées par un formateur testé (FR « 4 h 15 », « 12 min », « 45 s », « moins d'une minute » ; EN « 4h 15m », « 12 min », « 45 s », « less than a minute »), vitesses (« 4,2 Mo/s » / « 4.2 MB/s »). Les formateurs produisent eux-mêmes des espaces insécables entre un nombre et son unité : U+202F en français, U+00A0 en anglais (les écrans n'ont pas besoin de CSS pour éviter la coupure).
+- Langue : `navigator.languages` (la première langue de la liste dont la langue primaire est `fr` ou `en` décide ; aucune des deux → français) ; bascule dans l'en-tête, sans mémorisation. `<html lang>` mis à jour. La bascule est désactivée pendant un envoi (elle ne change rien d'utile et ferait sauter les libellés).
 - Aucun texte venu du serveur n'est affiché.
 
 Clés principales (extrait normatif ; le plan fixe la liste complète) :

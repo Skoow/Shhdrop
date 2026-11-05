@@ -9,9 +9,13 @@ const dicts: Record<Lang, Dict> = { fr, en };
 type Strip<K> = K extends `${infer B}.${"one" | "other"}` ? B : K;
 export type Key = Strip<keyof typeof fr>;
 
-/** Premier choix de UI §10 : une langue du navigateur qui commence par « fr » → français, sinon anglais. */
+/** UI §10 : la première langue du navigateur dont la langue primaire est fr ou en décide ; sinon français. */
 export function detectLang(languages: readonly string[] = typeof navigator === "undefined" ? [] : navigator.languages): Lang {
-  return languages.some((l) => /^fr(?![a-z])/i.test(l)) ? "fr" : "en";
+  for (const l of languages) {
+    const primary = l.split("-")[0]!.toLowerCase();
+    if (primary === "fr" || primary === "en") return primary;
+  }
+  return "fr";
 }
 
 // Sans mémorisation (aucun stockage) : la langue est recalculée à chaque visite.
