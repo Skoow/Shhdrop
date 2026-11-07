@@ -63,11 +63,12 @@
       <span class="val vis" translate="no" aria-hidden="true"><span class="head">{head}</span><span class="tail">{tail}</span></span>
       <span class="sr-only">{value}</span>
     {/if}
-    <Button variant="secondary" dense onpress={copy} aria-label="{t('common.copy')} {label}">
+    <!-- Nom accessible = texte visible + suffixe masqué (WCAG 2.5.3 : le nom commence par le libellé visible). -->
+    <Button variant="secondary" dense onpress={copy}>
       {#snippet icon()}
         {#if copied}<Check size={20} strokeWidth={1.75} />{:else}<Copy size={20} strokeWidth={1.75} />{/if}
       {/snippet}
-      {copied ? t("common.copied") : t("common.copy")}
+      {copied ? t("common.copied") : t("common.copy")}<span class="sr-only">{` ${label}`}</span>
     </Button>
   </div>
   {#if manual}<p id="{uid}-hint" class="hint">{t("copy.manual")}</p>{/if}

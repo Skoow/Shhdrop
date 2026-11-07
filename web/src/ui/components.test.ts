@@ -275,9 +275,15 @@ describe("langue : aucun libellé visible hors de t()", () => {
   it("FR : CopyField, UndoToast, Countdown", () => {
     setLang("fr");
     show(CopyField, { label: "Lien", value: "abc" });
+    expect(document.querySelector("button")!.textContent!.trim()).toBe("Copier Lien");
     show(UndoToast, { message: "x", onundo() {}, ondismiss() {} });
     show(Countdown, { expiresInS: 15300 });
-    const btns = [...document.querySelectorAll("button")].map((b) => b.textContent!.trim());
+    // Texte visible seulement : le suffixe masqué de CopyField (nom accessible, WCAG 2.5.3) est le libellé passé par l'appelant.
+    const btns = [...document.querySelectorAll("button")].map((b) => {
+      const c = b.cloneNode(true) as Element;
+      c.querySelectorAll(".sr-only").forEach((e) => e.remove());
+      return c.textContent!.trim();
+    });
     expect(btns).toEqual(["Copier", "Annuler"]);
     expect(document.querySelector(".cd")!.textContent).toBe("4\u202fh\u202f15");
   });
@@ -286,7 +292,12 @@ describe("langue : aucun libellé visible hors de t()", () => {
     show(CopyField, { label: "Link", value: "abc" });
     show(UndoToast, { message: "x", onundo() {}, ondismiss() {} });
     show(Countdown, { expiresInS: 15300 });
-    const btns = [...document.querySelectorAll("button")].map((b) => b.textContent!.trim());
+    // Texte visible seulement : le suffixe masqué de CopyField (nom accessible, WCAG 2.5.3) est le libellé passé par l'appelant.
+    const btns = [...document.querySelectorAll("button")].map((b) => {
+      const c = b.cloneNode(true) as Element;
+      c.querySelectorAll(".sr-only").forEach((e) => e.remove());
+      return c.textContent!.trim();
+    });
     expect(btns).toEqual(["Copy", "Undo"]);
     expect(document.querySelector(".cd")!.textContent).toBe("4h\u00a015m");
   });
