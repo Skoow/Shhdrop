@@ -8,9 +8,9 @@
 
 **Tech Stack:** Svelte 5.57.3, `@sveltejs/vite-plugin-svelte` 7.3.1, Vite 8.3.5, TypeScript 7.0.2 (+ `svelte-check` 4.7.8 sur TypeScript 6.0.3 dans un paquet outil séparé), Vitest 5.1.0, `@playwright/test` 1.64.1, `@axe-core/playwright` 4.14.0, `pdfjs-dist` 6.5.438, `@lucide/svelte` 1.68.0, `uqr` 0.1.3, polices Mona Sans et JetBrains Mono (Fontsource 5.3.0, fichiers copiés). Go 1.26.
 
-**Spec:** `docs/superpowers/specs/2026-11-04-shhdrop-ui-design.md` (notée « UI », révision 4) et `docs/superpowers/specs/2026-11-03-shhdrop-design.md` (notée « spec », v2.7 : §37 compte facultatif, §38 offre payante).
+**Spec:** `docs/superpowers/specs/2026-11-04-shhdrop-ui-design.md` (notée « UI », révision 4) et `docs/superpowers/specs/2026-11-03-shhdrop-design.md` (notée « spec », v2.8 : §37 compte facultatif, complété en §37.11 ; §38 offre payante, formules Plus et Pro en §38.8 ; §39 salon de discussion ; §40 envoi direct).
 
-**Ordre après la Task 8 (5 novembre)** : Task DA (direction artistique v2, UI §20), puis Tasks K1 à K3 (chiffrement anticipé, lien court, spec §29, §31, §32, §34), puis Task M2 (minimisation serveur, aucune statistique, spec §35.1, §36), puis Tasks 9a à 9c (nettoyage des métadonnées, spec §35.2) et 10 à 24, avec la Task 12b conditionnelle (Q-REC1) et les amendements listés après la Task M2, puis Task R (droits), Task H (historique), Tasks A1 à A3 (compte facultatif, spec §37), Tasks V1 à V3 (coffre), Tasks 25 à 27, Tasks C1 à C4 (code vérifiable, C4 conditionnelle), Task 28. Référence visuelle : `docs/superpowers/design/da-v2/`. Lire UI §0, §7, §9, §12, §14.3, §15, §18 et spec §2, §5, §7.4, §10, §12, §13, §18, §19, §21, §24, §25, §35, §36 avant toute tâche. Tasks P1 à P3 (offre payante, spec §38) : **après la mise en ligne de la V1**, selon le moyen de paiement choisi (Q-P1).
+**Ordre après la Task 8 (5 novembre)** : Task DA (direction artistique v2, UI §20), puis Tasks K1 à K3 (chiffrement anticipé, lien court, spec §29, §31, §32, §34), puis Task M2 (minimisation serveur, aucune statistique, spec §35.1, §36), puis Tasks 9a à 9c (nettoyage des métadonnées, spec §35.2) et 10 à 24, avec la Task 12b conditionnelle (Q-REC1) et les amendements listés après la Task M2, puis Task R (droits), Task H (historique), Tasks A1 à A3 (compte facultatif, spec §37 et §37.11), Tasks C-1 à C-6 (salon de discussion, spec §39), Tasks D-1 et D-2 (envoi direct, spec §40), Tasks V1 à V3 (coffre), Tasks 25 à 27, Tasks C1 à C4 (code vérifiable, C4 conditionnelle), Task 28. Référence visuelle : `docs/superpowers/design/da-v2/`. Lire UI §0, §7, §9, §12, §14.3, §15, §18 et spec §2, §5, §7.4, §10, §12, §13, §18, §19, §21, §24, §25, §35, §36 avant toute tâche. Tasks P1 à P3 (offre payante, spec §38) : **après la mise en ligne de la V1**, selon le moyen de paiement choisi (Q-P1).
 
 ## Global Constraints
 
@@ -1116,13 +1116,13 @@ HISTORY_KEEP_GONE_MS = 7 * 86_400_000;
 
 ### Tasks A1 à A3 : compte facultatif (spec §37)
 
-Après la Task H, qui fournit l'historique à synchroniser. Prérequis : réponses du propriétaire à Q-A1 à Q-A5 (défauts de spec §37.10 appliqués sinon) ; avis du juriste (spec §37.9) avant d'activer `SHH_ACCOUNTS=1` en public, pas avant de coder. Compte désactivé dans la démo (test). Revues : `golang-backend`, `golang-testing`, `constant-time-analysis` (comparaisons de `V_s` et des jetons de session), `supply-chain-risk-auditor` (go-webauthn), `privacy-review`.
+Après la Task H, qui fournit l'historique à synchroniser. Prérequis : réponses du propriétaire à Q-A1 à Q-A7 (défauts de spec §37.10 et §37.11.5 appliqués sinon) ; **routes, corps et réponses exacts : spec §37.11.1** (ils font foi sur les interfaces ci-dessous) ; avis du juriste (spec §37.9) avant d'activer `SHH_ACCOUNTS=1` en public, pas avant de coder. Compte désactivé dans la démo (test). Revues : `golang-backend`, `golang-testing`, `constant-time-analysis` (comparaisons de `V_s` et des jetons de session), `supply-chain-risk-auditor` (go-webauthn), `privacy-review`.
 
 ### Task A1 : Serveur — passkeys (go-webauthn), base `accounts.db`, sessions en mémoire (spec §37.1, §37.3 à §37.5, §37.8)
 
 **Files:**
 - Create: `server/internal/account/service.go`, `service_test.go`, `server/internal/account/store.go`, `store_test.go`, `server/internal/account/session.go`, `session_test.go`, `server/internal/account/testauthn_test.go` (authentificateur logiciel de test : attestation `none`, ES256, PRF absent côté serveur), `server/internal/api/handlers_account.go`, `handlers_account_test.go`, `server/internal/account/unlinkable_test.go`
-- Modify: `server/go.mod`, `go.sum` (`github.com/go-webauthn/webauthn`, **version exacte**, dernière stable publiée depuis au moins 7 jours, spec §24), `THIRD_PARTY_LICENSES.md` (BSD-3-Clause, à vérifier dans le dépôt de la version choisie), `server/internal/config/config.go` (`SHH_ACCOUNTS`, `SHH_ACCOUNTS_MAX`), `server/internal/limits/*` (compteurs de spec §9.5), `server/internal/api/headers.go` (`Permissions-Policy` : `publickey-credentials-create=(self), publickey-credentials-get=(self)` ; `()` sur `/pdf-frame.html`), test de sources de spec §36 S2 (`X-Shh-Session` ajouté à la liste blanche), `server/cmd/shhdrop/*` (nettoyeur : comptes abandonnés)
+- Modify: `server/go.mod`, `go.sum` (`github.com/go-webauthn/webauthn`, **version exacte**, dernière stable publiée depuis au moins 7 jours, spec §24), `THIRD_PARTY_LICENSES.md` (BSD-3-Clause, à vérifier dans le dépôt de la version choisie), `server/internal/config/config.go` (`SHH_ACCOUNTS`, `SHH_ACCOUNTS_MAX`, `SHH_ORIGIN` : origine exacte, obligatoire si `SHH_ACCOUNTS=1`, spec §37.11 A-G10), `server/internal/limits/*` (compteurs de spec §9.5), `server/internal/api/headers.go` (`Permissions-Policy` : `publickey-credentials-create=(self), publickey-credentials-get=(self)` ; `()` sur `/pdf-frame.html`), test de sources de spec §36 S2 (`X-Shh-Session` ajouté à la liste blanche), `server/cmd/shhdrop/*` (nettoyeur : comptes abandonnés)
 
 **Interfaces:**
 ```go
@@ -1134,13 +1134,17 @@ func (s *Service) BeginLogin() (options []byte, err error)                      
 func (s *Service) FinishLogin(body []byte) (session string, env []byte, blob []byte, gen uint64, err error)
 func (s *Service) Recover(aS [32]byte) (session string, envS []byte, blob []byte, gen uint64, err error)
 func (s *Service) PutBlob(session string, ifGen uint64, b []byte) error                    // ErrConflict, ErrTooLarge ; palier exact exigé
-func (s *Service) AddCredential / RemoveCredential / RenewRecovery / Logout / Delete
-// store : accounts(h, created_month, seen_month, blob, gen, v_s, env_s), credentials(cred_id, h, public_key, alg, env) ; WITHOUT ROWID
+func (s *Service) BeginAddCredential(session string) (options []byte, err error)          // excludeCredentials = passkeys du compte
+func (s *Service) FinishAddCredential(session string, body []byte) error               // env facultative
+func (s *Service) SetEnvelope(session string, credID []byte, env []byte) error         // PRF obtenue après le create
+func (s *Service) RemoveCredential / RenewRecovery / Rekey / Logout / Delete             // session récente (< 5 min) exigée, sinon ErrRecent
+func (s *Service) ListCredentials(session string) ([]CredInfo, bool /*secours*/, error)
+// store : accounts(h, created_month, seen_month, blob, gen, v_s, env_s), credentials(cred_id, h, public_key, alg, env, added_month) ; WITHOUT ROWID
 ```
-- [ ] **Step 1 : Tests qui échouent** : cérémonie complète avec l'authentificateur de test (création, connexion découvrable par `userHandle`) ; défi rejoué → refus ; défi de plus de 2 min → refus ; `userVerification` absente → refus ; origine ou `rp.id` différents → refus ; après création, `accounts.db` ne contient ni AAGUID, ni compteur de signatures, ni transports, ni attestation (lecture des colonnes et recherche d'octets repères dans le fichier et le WAL) ; `created_month` et `seen_month` sont des premiers du mois à 00:00 UTC ; `PutBlob` : `if_gen` périmé → `ErrConflict`, taille hors palier ou > 1 Mio → refus, 61ᵉ écriture de l'heure → `limit` ; `Recover` avec un `A_s` faux → réponse identique à « inconnu », 11ᵉ essai de l'heure → `limit` ; comparaison de `V_s` en temps constant (`subtle.ConstantTimeCompare`) ; 4ᵉ compte du jour par connexion → `limit` ; `SHH_ACCOUNTS_MAX` atteint → 503 ; sessions : absentes du disque, perdues au redémarrage, expirées à 15 min sans usage et à 2 h ; `Delete` → lignes supprimées, `wal_checkpoint(TRUNCATE)`, aucun octet repère de `B` dans le fichier après arrêt ; nettoyeur : `seen_month` de plus de 13 mois → compte effacé ; `SHH_ACCOUNTS=0` → toutes les routes `/api/compte/*` en 404.
+- [ ] **Step 1 : Tests qui échouent** : cérémonie complète avec l'authentificateur de test (création, connexion découvrable par `userHandle`) ; défi rejoué → refus ; défi de plus de 2 min → refus ; `userVerification` absente → refus ; origine ou `rp.id` différents → refus ; après création, `accounts.db` ne contient ni AAGUID, ni compteur de signatures, ni transports, ni attestation (lecture des colonnes et recherche d'octets repères dans le fichier et le WAL) ; `created_month` et `seen_month` sont des premiers du mois à 00:00 UTC ; `PutBlob` : `if_gen` périmé → `ErrConflict`, taille hors palier ou > 1 Mio → refus, 61ᵉ écriture de l'heure → `limit` ; `Recover` avec un `A_s` faux → réponse identique à « inconnu », 11ᵉ essai de l'heure → `limit` ; recherche de `V_s` par l'index unique sur SHA-256(`A_s`) (spec §37.11 A-G11), jamais par une valeur fournie telle quelle ; `env` absente à `inscription/fin` puis `appareils/enveloppe` → acceptée ; compte sans `env` ni `env_s` à la fin de sa première session → effacé ; `RemoveCredential`, `RenewRecovery`, `Rekey`, `Delete` avec une session de plus de 5 min → `ErrRecent` (403 `recent`), avec une session de 4 min 59 s → acceptés ; retrait de la dernière passkey sans clé de secours → `bad_request` ; `Rekey` remplace `blob` et toutes les `env` en une transaction (échec au milieu → rien de changé) ; `added_month` = premier du mois UTC ; `ListCredentials` ne rend ni clé publique ni enveloppe ; 11ᵉ passkey → `bad_request` ; 4ᵉ compte du jour par connexion → `limit` ; `SHH_ACCOUNTS_MAX` atteint → 503 ; sessions : absentes du disque, perdues au redémarrage, expirées à 15 min sans usage et à 2 h ; `Delete` → lignes supprimées, `wal_checkpoint(TRUNCATE)`, aucun octet repère de `B` dans le fichier après arrêt ; nettoyeur : `seen_month` de plus de 13 mois → compte effacé ; `SHH_ACCOUNTS=0` → toutes les routes `/api/compte/*` en 404.
 - [ ] **Step 2 : `unlinkable_test.go` (« le serveur ne voit rien », étendu au compte)** : un partage créé et finalisé, un compte dont `B` est un tampon opaque ; IP, User-Agent, Referer repères (spec §36) → aucun repère sur disque, stdout, stderr ni dans les réponses ; aucune valeur commune entre `accounts.db` et `shares.db` (recherche de chaque `V_accès`, `V_gestion` et identifiant de partage dans les octets de `accounts.db`) ; aucune route de partage ne lit `X-Shh-Session` (test de sources) ; aucune requête SQL ne nomme les deux bases.
 - [ ] **Step 3 : Lancer** `make test-go` → ÉCHEC.
-- [ ] **Step 4 : Implémenter** spec §37.1, §37.3 à §37.5, §37.8 ; JSON strict de spec §8 ; erreurs uniformes ; aucun journal qui contienne `H`, un identifiant de passkey ou un jeton.
+- [ ] **Step 4 : Implémenter** spec §37.1, §37.3 à §37.5, §37.11 (routes de §37.11.1, création de §37.11.2, connexion de §37.11.3) ; compteur de signatures ni lu ni stocké (avertissement de clonage de go-webauthn ignoré) ; JSON strict de spec §8 ; erreurs uniformes ; aucun journal qui contienne `H`, un identifiant de passkey ou un jeton.
 - [ ] **Step 5 : Lancer** `make test-go` (avec `-race`, `GOARCH=386 go build ./...`), `govulncheck ./...` → SUCCÈS.
 - [ ] **Step 6 : Commit** « feat(account): compte facultatif par passkey, base séparée, sessions en mémoire » et push.
 
@@ -1155,13 +1159,15 @@ func (s *Service) AddCredential / RemoveCredential / RenewRecovery / Logout / De
 const PRF_INPUT = sha256("shhdrop/v2/compte/prf/1");
 deriveKek(prf: Uint8Array): Promise<CryptoKey>;                 // HKDF, info "shhdrop/v2/compte/enveloppe", non extractible
 wrapAccountKey(kek, kCompte, h, credId) / unwrapAccountKey(...)  // AES-256-GCM, AAD "SHH-ENV1" ‖ H ‖ SHA-256(credId)
-recoveryFromKey(rk) → { kekS, aS };  formatRecovery(rk): string;  parseRecovery(s): Uint8Array  // base32 Crockford, normalisation
+recoveryFromKey(rk) → { kekS, aS };  formatRecovery(rk): string;  parseRecovery(s): Uint8Array | "controle" | "longueur"
+  // base32 Crockford, 52 caractères + 1 caractère de contrôle (valeur des 32 octets, gros-boutiste, mod 37 ; symboles 32–36 = * ~ $ = U),
+  // affichée en 13 groupes de 4 puis le contrôle ; normalisation (majuscules, espaces et tirets retirés, I/L → 1, O → 0)
 sealBlob(kBlob, h, gen, json) / openBlob(kBlob, h, b, minGen)   // "SHH-ACCT1", paliers 4 Ki…1 Mi ; minGen : refus d'un retour en arrière
 mergeBlobs(a, b): BlobJson;                                     // union par id, tombstones 7 j, gone l'emporte
 openAccount(deps?: { webauthn?, fetch?, idb?, now?, random? }) → { create(opts); login(); recover(code); logout(); remove(destroyShares: boolean); addDevice(); renewRecovery(); status() };
-scheduleSync(delayMs = randomBetween(120_000, 1_800_000));      // jamais immédiat après un envoi
+scheduleSync(delayMs = randomBetween(120_000, 720_000));        // 2 à 12 min (spec §37.11 A-G2), jamais immédiat après un envoi ; session expirée → en attente de connexion
 ```
-- [ ] **Step 1 : Tests qui échouent** (WebAuthn simulé, avec et sans PRF ; IndexedDB en mémoire ; `fetch` intercepté) : vecteurs fixes HKDF et AES-GCM (enveloppe, coffre) recalculés par un script Node indépendant ; toutes les clés `extractable === false` ; corps de toutes les requêtes interceptées : aucun repère de libellé, de `S_gestion` ni de réglage, aucun `P_i`, `RK`, `K_compte` (recherche d'octets) ; `B` toujours à la taille exacte d'un palier ; `openBlob` avec `gen` < `minGen` → refus ; données authentifiées modifiées (`H`, `gen`) → refus ; `parseRecovery` accepte espaces, tirets, minuscules, `I`/`L`/`O`, refuse une longueur fausse ; sans PRF, création sans clé de secours → refus (Q-A1) ; PRF absente au `create` → `get` enchaîné ; 409 → relecture, fusion, réécriture `gen + 1` ; fusion : une entrée `gone` sur un appareil l'emporte, une tombstone de plus de 7 jours disparaît ; `scheduleSync` : aucune écriture dans les 2 min qui suivent un `add` d'historique (horloge simulée) ; jeton de session jamais envoyé vers `/api/shares/*` ni `/api/manage/*` ; `logout()` oublie clés, clair et copie locale ; `remove(true)` appelle `manageDestroy` pour chaque `S_gestion` avant `supprimer`.
+- [ ] **Step 1 : Tests qui échouent** (WebAuthn simulé, avec et sans PRF ; IndexedDB en mémoire ; `fetch` intercepté) : vecteurs fixes HKDF et AES-GCM (enveloppe, coffre) recalculés par un script Node indépendant ; toutes les clés `extractable === false` ; corps de toutes les requêtes interceptées : aucun repère de libellé, de `S_gestion` ni de réglage, aucun `P_i`, `RK`, `K_compte` (recherche d'octets) ; `B` toujours à la taille exacte d'un palier ; `openBlob` avec `gen` < `minGen` → refus ; données authentifiées modifiées (`H`, `gen`) → refus ; `parseRecovery` accepte espaces, tirets, minuscules, `I`/`L`/`O`, refuse une longueur fausse (`longueur`) et un caractère de contrôle faux (`controle`) **sans aucun appel réseau** ; `formatRecovery(32 × 0x00)` === « 0000-0000-…-0000 » suivi du contrôle « 0 », `formatRecovery(32 × 0xff)` se termine par le contrôle calculé par `BigInt` dans le test ; sans PRF, création sans clé de secours → refus (Q-A1) ; PRF absente au `create` → `get` enchaîné ; 409 → relecture, fusion, réécriture `gen + 1` ; fusion : une entrée `gone` sur un appareil l'emporte, une tombstone de plus de 7 jours disparaît ; `scheduleSync` : aucune écriture dans les 2 min qui suivent un `add` d'historique, une écriture avant 12 min (horloge simulée) ; session expirée à l'échéance → aucune requête, état `en_attente`, écriture faite au `login()` suivant ; jeton de session jamais envoyé vers `/api/shares/*` ni `/api/manage/*` ; `logout()` oublie clés et clair, retire de l'historique local les seules entrées `origine: "compte"` reçues d'autres appareils et garde celles créées ici (spec §37.11 A-G8) ; `remove(true)` appelle `manageDestroy` pour chaque `S_gestion` avant `supprimer`.
 - [ ] **Step 2 : Lancer** `npm test` → ÉCHEC.
 - [ ] **Step 3 : Implémenter** spec §37.2, §37.4, §37.6 ; WebCrypto seulement (aucune dépendance nouvelle).
 - [ ] **Step 4 : Lancer** `npm test` (avec `tsc`) → SUCCÈS.
@@ -1173,11 +1179,266 @@ scheduleSync(delayMs = randomBetween(120_000, 1_800_000));      // jamais imméd
 - Create: `web/src/routes/Account.svelte` (`/compte`), `web/src/routes/RecoveryKey.svelte`, `web/ui-e2e/account.spec.ts`, `web/ui-e2e/account-sees-nothing.spec.ts`
 - Modify: `web/src/ui/AppShell.svelte` (lien « Compte (facultatif) » du menu), `web/src/routes/History.svelte` (« Créer un compte (facultatif) », état de synchronisation), `web/src/routes/Ready.svelte` (lien texte sous la bascule), `web/src/routes/PageSecurite.svelte` (paragraphe « Le compte facultatif », limites de spec §18.18), `web/src/i18n/*` (« Aucun compte nécessaire, ni pour envoyer, ni pour recevoir. » remplace la formule de la Task V2), `web/src/app/router.svelte.ts`
 
-- [ ] **Step 1 : Tests qui échouent** (e2e, authentificateur virtuel de Chromium par CDP `WebAuthn.addVirtualAuthenticator`, une fois avec `hasPrf: true`, une fois sans) : texte exact « Facultatif. Sans e-mail. Votre historique est chiffré : nous ne pouvons pas le lire. » suivi du lien « Ce que le compte ne protège pas » ; annulation de la passkey → retour sans erreur, aucun compte ; création avec PRF → clé de secours refusable ; sans PRF → clé de secours exigée et message de spec §37.7 ; deux contextes (deux « appareils ») avec la même passkey virtuelle : un envoi sur le premier apparaît dans `/envois` du second après la synchronisation (horloge avancée) ; récupération par la clé de secours dans un troisième contexte sans passkey ; Se déconnecter → `/envois` ne montre plus les entrées synchronisées ; Supprimer le compte (case décochée) → le partage vit encore, `GET blob` → 404 ; case cochée → partages détruits ; pages d'ouverture et de contenu : aucune mention du compte (balayage du texte) ; aucune entrée de compte sur le chemin de l'envoi hors du lien texte de « Lien prêt » ; démo → aucune entrée de compte ; `axe` ; captures `account-intro`, `account-recovery`, `account-status`.
+- [ ] **Step 1 : Tests qui échouent** (e2e, authentificateur virtuel de Chromium par CDP `WebAuthn.addVirtualAuthenticator`, une fois avec `hasPrf: true`, une fois sans) : hors session, trois entrées visibles dans cet ordre : « Créer avec une passkey », « Se connecter », « J'ai ma clé de secours » (spec §37.11.4) ; connexion avec la passkey virtuelle → écran du compte ; clé de secours mal recopiée d'un caractère → « Clé mal recopiée : vérifiez chaque groupe » sans requête ; création : saisie des 4 derniers caractères exigée avant de continuer ; « Supprimer le compte » plus de 5 min après la connexion → la passkey est redemandée ; messages d'erreur exacts de spec §37.11.4 ; texte exact « Facultatif. Sans e-mail. Votre historique est chiffré : nous ne pouvons pas le lire. » suivi du lien « Ce que le compte ne protège pas » ; annulation de la passkey → retour sans erreur, aucun compte ; création avec PRF → clé de secours refusable ; sans PRF → clé de secours exigée et message de spec §37.7 ; deux contextes (deux « appareils ») avec la même passkey virtuelle : un envoi sur le premier apparaît dans `/envois` du second après la synchronisation (horloge avancée) ; récupération par la clé de secours dans un troisième contexte sans passkey ; Se déconnecter → `/envois` ne montre plus les entrées synchronisées ; Supprimer le compte (case décochée) → le partage vit encore, `GET blob` → 404 ; case cochée → partages détruits ; pages d'ouverture et de contenu : aucune mention du compte (balayage du texte) ; aucune entrée de compte sur le chemin de l'envoi hors du lien texte de « Lien prêt » ; démo → aucune entrée de compte ; `axe` ; captures `account-intro`, `account-recovery`, `account-status`.
 - [ ] **Step 2 : `account-sees-nothing.spec.ts`** (SUCCÈS exigé, bloquant comme le test du Plan 1) : parcours complet (création, envoi, synchronisation, second appareil, suppression) ; repères dans les libellés, réglages et `S_gestion` ; exige : aucun repère dans le corps d'une requête ni dans `accounts.db` / WAL après arrêt ; aucune requête de partage avec `X-Shh-Session` ; aucune requête de compte avec un identifiant ou un secret de partage ; écriture de `B` jamais dans les 2 min d'un `finalize`.
 - [ ] **Step 3 : Lancer** → ÉCHEC, **implémenter** spec §37.7 et les textes ci-dessus, **relancer** `make test-ui`, la démo (`npm run build:demo && node scripts/check-dist.mjs --demo && npx playwright test --project='demo-*'`) → SUCCÈS.
 - [ ] **Step 4 : Liste manuelle** (fichier de décisions) : iPhone (Safari 18+, trousseau iCloud), Android (Chrome, gestionnaire Google), ordinateur avec clé de sécurité sans PRF : créer, second appareil, récupération, suppression.
 - [ ] **Step 5 : Commit** « feat(account): écrans du compte facultatif, le serveur ne voit rien étendu au compte » et push.
+
+---
+
+### Tasks C-1 à C-6 : salon de discussion éphémère (spec §39)
+
+Après les Tasks 20 à 24 (ouverture, visionneuses, enregistrement, fin de vie : le salon réutilise leurs composants) et les Tasks A1 à A3 (compte). Prérequis : réponses du propriétaire à Q-SAL1 à Q-SAL8 (défauts de spec §39.12 appliqués sinon) ; avis du juriste (spec §39.7) **avant** `SHH_SALONS=1` en public, pas avant de coder. Salon **désactivé par défaut** côté serveur (`SHH_SALONS=0` → toutes les routes `/api/salons/*` en 404, bloc de l'accueil masqué) ; dans la démo, faux serveur en mémoire, trois « participants » simulés dans la même page. **Nom des tâches** : `C-1` à `C-6` (avec un tiret), à ne pas confondre avec les Tasks `C1` à `C4` (code vérifiable) ; renommage en `S1`–`S6` possible si le propriétaire le préfère.
+
+Revues par tâche : `constant-time-analysis` et `sharp-edges` (C-1, C-2), `golang-backend` + `golang-testing` (C-2), `svelte` (C-3 à C-6), `privacy-review` (C-2, C-6), `accessibility-review` (C-4, C-6). Relecture cryptographique extérieure de spec §39.2 avant l'ouverture au public (signalement de §39.2).
+
+**Contraintes propres au salon** (en plus des Global Constraints, qui s'appliquent toutes) :
+- Rien du salon dans le stockage du navigateur (ni IndexedDB, ni `localStorage`, ni OPFS) : clés, pseudonymes, messages, « récents » des émojis vivent en mémoire de la page ; seule exception : l'entrée `S_gestion` du créateur dans `web/src/history/` (Task H), si la bascule est activée.
+- Primitives : `crypto/room/*.ts` est le seul endroit qui appelle `sodium.*` hors d'Argon2id (`kdf.ts`) ; contrôlé par `source-rules.test.ts`. Les écrans n'importent que `web/src/index.ts` (`createRoom`, `joinRoom`, `RoomLink`).
+- Réseau du salon : seul `web/src/chat/net.ts` appelle `fetch` (exception ajoutée à `source-rules.test.ts`, comme `account/session.ts`) ; jamais de jeton de membre, de `K_accès_s` ou de `S_gestion` dans une URL ; aucun `EventSource`, aucun `WebSocket`.
+- Toute trame montante fait exactement 4 140 octets (test de sources : une seule fonction `sealFrame` construit les corps de `POST /api/salons/trame`).
+- Aucun contenu reçu (texte, pseudonyme, nom de fichier) n'est rendu autrement qu'en nœud texte.
+
+### Task C-1 : Chiffrement et protocole du salon, vecteurs de test (spec §39.2, §39.4 points 4 et 5)
+
+**Files:**
+- Create: `web/src/crypto/room/keys.ts`, `keys.test.ts` (dérivations de §39.2.1), `web/src/crypto/room/chain.ts`, `chain.test.ts` (cliquet HMAC, clés sautées), `web/src/crypto/room/frame.ts`, `frame.test.ts` (trame de 4 140 octets, enveloppe extérieure, message signé), `web/src/crypto/room/epoch.ts`, `epoch.test.ts` (identité, clé de réception, distribution scellée, annonces), `web/src/crypto/room/vectors.json`, `web/scripts/room-vectors.mjs` (recalcul indépendant par `node:crypto`), `web/src/chat/payload.ts`, `payload.test.ts` (schéma strict de `M`), `web/src/chat/pseudo.ts`, `pseudo.test.ts`, `web/src/chat/palette.ts`, `palette.test.ts`, `web/src/chat/protocol.ts`, `protocol.test.ts` (machine d'un participant : époques, rotation, rattrapage), `web/src/chat/fuzz.test.ts`
+- Modify: `web/src/transfer/link.ts`, `link.test.ts` (`ROOM_FRAGMENT`, `roomLink`, `parseLink` → `kind: "c"`), `web/src/app/link.ts` (`readLink(href, "c")`), `web/src/crypto/types.ts` (types marqués `KLienSalon`, `KAccesSalon`, `KPreuveSalon`), `web/src/index.ts` (exporte `roomLink` et les types seulement à ce stade), `web/src/source-rules.test.ts` (`sodium.` permis dans `crypto/kdf.ts` et `crypto/room/` seulement)
+
+**Interfaces:**
+```ts
+// keys.ts (HKDF WebCrypto, sel vide, comme kdf.ts)
+deriveRoomAccess(kLien): Promise<{ kAcces: KAccesSalon; vAcces: Uint8Array }>;          // "shhdrop/v2/salon/acces"
+deriveRoomKeys(kLien, kMdp): Promise<{ kPreuve: KPreuveSalon; vPreuve; kTrame: Uint8Array /*32*/; tag: Uint8Array /*16*/ }>;
+  // maitre = HKDF(kLien ‖ kMdp, ".../maitre") ; preuve = HKDF(maitre, ".../preuve") ; cle = HKDF(maitre, ".../cle")
+  // trame = HKDF(cle, ".../trame") ; tag = HKDF(cle, ".../id", 16) ; maitre et cle mis à zéro
+// chain.ts (libsodium crypto_auth_hmacsha256)
+class SendChain { constructor(ck0: Uint8Array, epoch: number); next(): { i: number; mk: Uint8Array } }   // efface CK_i
+class RecvChain { constructor(ck: Uint8Array, epoch: number, i0: number); keyFor(i: number, now: number): Uint8Array | null }
+SKIP_MAX = 2000; SKIP_TTL_MS = 900_000;
+// frame.ts
+FRAME_LEN = 4140; OUTER_PLAIN = 4096; MSG_MAX = 3949;
+sealFrame(kTrame, tag, outer: { type: 1 | 2; ik: Uint8Array; epoch: number; i: number; body: Uint8Array }): Uint8Array;  // "SHC1" ‖ nonce24 ‖ XChaCha20-Poly1305
+openFrame(kTrame, tag, frame: Uint8Array): Outer;                        // FrameError("taille" | "magie" | "chiffre" | "longueur")
+sealMessage(mk, ikSecret, tag, ikPub, epoch, i, m: Uint8Array): Uint8Array;  // nonce24 ‖ ct ‖ sig64
+openMessage(mk, ikPub, tag, epoch, i, body): Uint8Array;                 // signature vérifiée AVANT le déchiffrement
+// epoch.ts
+newIdentity(): { pk: Uint8Array; sk: Uint8Array };                     // crypto_sign_keypair
+newReceiveKey(): { pk; sk };                                           // crypto_box_keypair
+sealSenderKey(ck0, epoch, tag, ikExp, ikDest, rkDest): Uint8Array;     // crypto_box_seal("SHCK1" ‖ tag ‖ ikExp ‖ ikDest ‖ epoch ‖ ck0)
+openSenderKey(sealed, tag, ikExp, ikMe, rk: { pk; sk }): { ck0; epoch };
+signControl(ikSk, json: Uint8Array): Uint8Array; verifyControl(ikPk, body): Uint8Array;   // JSON ‖ sig64
+// protocol.ts
+type RoomEvent = { k: "message"; from: Member; m: Payload; seq: number } | { k: "arrivee" | "depart"; member: Member }
+  | { k: "trou" } | { k: "fin"; reason: "expire" | "detruit" } | { k: "pseudo_pris" };
+createParticipant(deps: { kTrame; tag; now; random? }) → { onRecord(rec): RoomEvent[]; send(m: Payload): Uint8Array /*trame*/;
+  announce(pseudo, color): Uint8Array; members(): Member[]; rotate(reason): Uint8Array[]; wipe(): void };
+ROTATE_MSGS = 100; ROTATE_MS = 3_600_000; OLD_RK_KEEP_MS = 600_000; SEAT_IDLE_MS = 600_000;
+// pseudo.ts, palette.ts
+cleanPseudo(s): { ok: true; value: string; key: string } | { ok: false; why: "longueur" | "caracteres" | "ecritures" };
+ROOM_COLORS = ["#5FE3B5","#7CC4FF","#B79CFF","#FF8FC7","#FF9A7A","#F2C46D","#D8E86A","#4FD8E0","#E0A8F0","#D9C3A0"];
+nextColor(taken: number[]): number;                                    // plus petit indice libre
+```
+
+- [ ] **Step 1 : Vecteurs** : `web/scripts/room-vectors.mjs` (sans dépendance, `node:crypto` seulement) écrit `vectors.json` ; avec `K_lien` = 32 × `0x11` et, à la place de la sortie d'Argon2id, `K_mdp` = 32 × `0x22` :
+  - `K_accès_s` = `43689b66439f29004d7c2d201f4f140512b5c7aaf62ee850787888202608d1d2` ;
+  - `K_maître_s` = `65ada1cd561dc5bdb40046e9d6c6be22f4f2acc3249f7fa53c5b4705969b86d1` ;
+  - `K_preuve_s` = `ed40b4c2fed848c29e776e8ffeb131ffa11a13fcd88d55d3c5bd189974d62239` ;
+  - `K_salon` = `352239bbd3f6aa311009e41418db5f79aa6f28178a6a029c054c683598d528ac` ;
+  - `K_trame` = `ff6707e94d7382dcfc87207443049ac0e7eea5bf030cd0407e80e4a398e1eb73` ;
+  - `tag_salon` = `5b70bbeb8a16484773f2610b1de4cac3` ;
+  - chaîne avec `CK_0` = octets `00 01 … 1f` : `MK_0` = `9b4c8120a4823a95f47cde17a244f4507244ee6e3957d1fab9fa29b44d3829b7`, `CK_1` = `4304c22c84a53755ab08ead8d97a8d429be5efa480682d7ad1da27f73e1fbe1d`, `MK_1` = `f7703c39dea9feb30cb6369304ad7b847b9aca58c1152af317aa78a91beddda1`, `CK_2` = `26fc86b9b1303ea2e66f53ed0f1de753407e5428caf5e440e6b51c48d4bd4949`, `MK_2` = `5d2042bf4c603cf3aa7194739ed08bc1c698a7ec7fb8e77d3ea2588c6fe78ce1` ;
+  - XChaCha20-Poly1305 : vecteur A.3.1 de draft-irtf-cfrg-xchacha-03 (clé `80…9f`, nonce `404142…57`, texte « Ladies and Gentlemen of the class of '99… », données authentifiées `50515253c0c1c2c3c4c5c6c7`) ; Ed25519 : RFC 8032 §7.1, test 1 (message vide).
+  Le script est relancé en CI et comparé au fichier commité (`node scripts/room-vectors.mjs --check`).
+- [ ] **Step 2 : Tests qui échouent** :
+  - `keys.test.ts` : les sept valeurs ci-dessus exactement ; `K_maître_s` et `K_salon` mis à zéro après usage (espion sur le tampon) ; étiquettes toutes préfixées `shhdrop/v2/salon/` et distinctes de celles des partages, du coffre et du compte (liste lue dans `kdf.ts`).
+  - `chain.test.ts` : `MK_0`, `MK_1`, `MK_2` de Step 1 ; `CK_i` mis à zéro après `next()` ; `RecvChain.keyFor(5)` puis `keyFor(3)` rendent les bonnes clés (clés sautées) ; `keyFor(3)` une seconde fois → `null` (usage unique) ; saut de 2 001 → `null` et la chaîne reste utilisable ; clé sautée de plus de 15 min (horloge injectée) → `null`.
+  - `frame.test.ts` : `sealFrame(...)`.length === 4 140 pour un corps de 0 et de 4 053 octets ; corps de 4 054 → `RangeError` ; `openFrame` d'une trame de 4 139 ou 4 141 octets → `FrameError("taille")` ; un bit inversé n'importe où → `FrameError("chiffre")` ; `tag` d'un autre salon → `chiffre` ; `long` > 4 053 dans un clair valide → `longueur` ; `sealMessage` avec `M` de 3 949 octets accepté, 3 950 → `RangeError` ; signature d'un autre `IK` → refus **sans** appel au déchiffrement (espion sur `crypto_aead_xchacha20poly1305_ietf_decrypt`) ; `epoch` ou `i` modifiés dans l'en-tête → refus ; vecteur XChaCha de Step 1.
+  - `epoch.test.ts` : `openSenderKey` refuse un scellé destiné à un autre `IK_dest` (contrôle du clair « SHCK1 » ‖ … ), à un autre `tag`, ou ouvert avec une ancienne `RK` effacée ; Ed25519 RFC 8032 test 1.
+  - `protocol.test.ts` (trois participants A, B, C simulés, horloge injectée, flux d'enregistrements fabriqué) : A envoie, B et C lisent ; C part (enregistrement 0x03) → A et B changent d'époque **avant** leur message suivant, et C, qui garde ses anciennes clés, ne déchiffre pas ce message (`openMessage` → `null`) ; C envoie une trame de contrôle « départ » signée avant de partir → A et B produisent `{ k: "depart", member }` avec le pseudonyme de l'annonce ; enregistrement 0x07 → état en ligne du siège mis à jour ; D arrive → D ne déchiffre aucun message d'avant (`k: "message"` absent pour les `seq` antérieurs) ; 100ᵉ message de A → nouvelle époque ; distribution à 9 destinataires → 1 trame de contrôle, à 19 (salon Pro, spec §38.8) → 2 trames (12 + 7) ; 60 min sans rotation → nouvelle époque au message suivant ; ancienne `RK` effacée 10 min après (tampon à zéro) ; annonce de B rejouée depuis le siège de C (`nonce_arrivée` différent) → ignorée ; deux annonces du même pseudonyme (clé NFKC égale) → la seconde dans l'ordre `seq` reçoit `pseudo_pris` ; enregistrement 0x04 → `trou` ; 0x05 → `fin` ; distribution manquée → trame « demande de clé » émise, puis rattrapage.
+  - `pseudo.test.ts` : « Alice » ok ; « A » → `longueur` ; 25 graphèmes → `longueur` ; « Zoé-Lou » ok ; « Аlice » (А cyrillique U+0410 + latin) → `ecritures` ; « Борис » ok ; « Al‮ice » → nettoyé en « Alice » ; « Al​ice » → « Alice » ; « 🐱 » → `caracteres` ; `key("Alice")` === `key(" alice ")` === `key("ALICE")` ; `key("Ａｌｉｃｅ")` (pleine chasse) === `key("Alice")`.
+  - `palette.test.ts` : 10 couleurs distinctes ; contraste ≥ 6,7:1 sur `#202533`, ≥ 4,5:1 sur `#0B0D12`, `#12151C`, `#191D27`, `#202533` (fonction `contrast` de `ui/contrast.ts`) ; `nextColor([0, 1, 3])` === 2 ; `nextColor([])` === 0.
+  - `payload.test.ts` : schéma exact de `M` : `texte { k, id, t, ephemere? }`, `piece { k, id, piece, r, bucket, name, mime, size, vocal_ms?, ephemere? }`, `reaction { k, id, cible, emoji, on }`, `reponse { k, id, cible, extrait, t }`, `retrait { k, id, cible, seq }`, `ecrit { k, id }`, `lu { k, id, jusqu_a }`, `effacer_lu { k, id, cible }` ; clé inconnue, en double ou de casse différente → refus ; `t` de 2 001 graphèmes ou 3 501 octets → refus ; `emoji` hors de la liste → refus ; `extrait` > 140 graphèmes → refus ; bidi retirés de `t`.
+  - `fuzz.test.ts` : graine fixe `0x5A11`, 10 000 trames mutées (bits, troncature, `long`, JSON) passées à `openFrame`, `onRecord` et `parsePayload` : seules des erreurs typées, aucun `RoomEvent` « message » hors d'une trame valide.
+  - `link.test.ts` : `roomLink(origin, k)` === `${origin}/#c` + 43 caractères ; `parseLink` reconnaît `#c…` (44 caractères après `#`) → `kind: "c"` ; `#c` + 42 → incomplet ; un lien `#m…` n'est jamais pris pour `#c`.
+- [ ] **Step 3 : Lancer** `npm test -- room chat link` → ÉCHEC.
+- [ ] **Step 4 : Implémenter** spec §39.2 et §39.4 (points 4 et 5) ; aucune dépendance nouvelle ; tampons secrets mis à zéro (`sodium.memzero`) dès qu'ils ne servent plus.
+- [ ] **Step 5 : Lancer** `npm test` (avec `tsc`) et `node scripts/room-vectors.mjs --check` → SUCCÈS.
+- [ ] **Step 6 : Commit** « feat(salon): clés, cliquet par expéditeur, trames de taille unique, vecteurs de test » et push.
+
+### Task C-2 : Serveur — relais en mémoire, sièges, pièces jointes, limites (spec §39.1, §39.3)
+
+**Files:**
+- Create: `server/internal/room/service.go`, `service_test.go` (création, entrée, sièges, fin de vie), `server/internal/room/relay.go`, `relay_test.go` (file bornée, flux, rattrapage), `server/internal/room/pieces.go`, `pieces_test.go`, `server/internal/room/store.go`, `store_test.go` (tables `salons`, `salon_pieces`), `server/internal/room/fuzz_test.go` (`FuzzTrame`, `FuzzFlux`), `server/internal/api/handlers_room.go`, `handlers_room_test.go`, `server/internal/room/seesnothing_test.go`
+- Modify: `server/internal/config/config.go`, `config_test.go` (`SHH_SALONS` 0/1, `SHH_SALONS_MAX` = 200), `server/internal/api/api.go` (routes de spec §39.3.9), `server/internal/limits/*` (compteurs de spec §39.3.6), `server/internal/janitor/*` (salons expirés : fichiers des pièces puis lignes), `server/cmd/shhdrop/main.go` (`admin destroy -` reconnaît `#c`), test de sources de spec §36 S2 (`X-Shh-Membre`, `X-Shh-Depuis`, `X-Shh-Piece` en liste blanche), `server/internal/api/stats_test.go` (tables et `map` autorisées), `deploy/Caddyfile` (note pour le Plan 3 : `flush_interval -1` sur `/api/salons/flux`)
+
+**Interfaces:**
+```go
+const FrameLen = 4140; const Budget = 1 << 30; const QueueFrames = 200; const QueueTTL = 15 * time.Minute
+const SeatIdle = 10 * time.Minute; const StreamMax = 2 * time.Hour; const KeepAlive = 25 * time.Second
+const MaxWrongPasswords = 10; const MaxPieceBucket = 8000
+type Service struct{ /* store, rooms map[id]*Room (mémoire), limits, blob, now */ }
+func (s *Service) Create(conn limits.Key, access, manage [32]byte, p CreateParams) (expiresIn int64, err error)
+func (s *Service) Meta(access [32]byte) (Meta, error)
+func (s *Service) Join(conn limits.Key, access [32]byte, proof [32]byte) (Join, error)   // ErrBadPassword{Left}, ErrFull, ErrNotFound
+func (s *Service) Post(token [32]byte, frame []byte) (seq uint64, err error)            // ErrBudget, ErrLimit
+func (s *Service) Stream(ctx context.Context, token [32]byte, since uint64, w RecordWriter) error
+func (s *Service) Retract(token [32]byte, seq uint64) error
+func (s *Service) Leave(token [32]byte) error
+func (s *Service) Destroy(byManage *[32]byte, byMember *[32]byte, report bool) error
+func (s *Service) NewPiece(token [32]byte, bucket int) (pieceID [16]byte, uploadToken string, err error)
+// enregistrements : 0x01 seq‖siège‖trame (4 150 o), 0x02 seq‖siège‖nonce16, 0x03 seq‖siège, 0x04 seq, 0x05 seq‖raison, 0x06 seq=0, 0x07 seq‖siège‖état
+```
+- [ ] **Step 1 : Tests qui échouent** (horloge injectée, `-race`) :
+  - création : `ttl_hours` 3 → 400 ; `max_members` 1 ou 11 → 400 ; `expires_at` en base = ceil15(maintenant + ttl) ; aucune colonne de durée (lecture de `PRAGMA table_info(salons)` : exactement `id, access_v, manage_v, proof_v, salt, kdf_ops, kdf_mem, expires_at, max_members, members_can_destroy, failed_attempts, pieces_bytes`) ; 6ᵉ salon du jour par connexion → `limit` ; 201ᵉ salon vivant → 503 `busy` ; `SHH_SALONS=0` → 404 sur toutes les routes.
+  - entrée : bonne preuve → siège 0, puis 1 ; `max_members` = 2 → troisième → 409 `full` ; 20 entrées concurrentes sur un salon à 10 places → exactement 10 sièges (`-race`) ; preuve fausse → `tries_left` 9, …, 10ᵉ → salon détruit (ligne et pièces absentes) ; `11 × max_members`ᵉ arrivée → `full` ; siège sans flux depuis 10 min → libéré, enregistrement 0x03 diffusé.
+  - trames : corps de 4 139 ou 4 141 octets → 400 sans rien relayer ; 4 140 → `seq` croissant, relayé à tous les flux du salon (y compris l'expéditeur) ; 61ᵉ trame de la minute du siège → 429 ; budget : après `floor(2^30 / 4140)` = 259 357 trames → la suivante `budget` ; 201ᵉ trame → la plus ancienne quitte la file ; `X-Shh-Depuis` plus ancien que la file → 0x04 puis la file ; trame de plus de 15 min oubliée.
+  - flux : ouverture et fermeture du flux d'un siège → 0x07 (état 1 puis 0) chez les autres ; maintien toutes les 25 s ; nouveau flux du même siège → l'ancien reçoit 0x05 raison 4 ; 2 h → fermeture ; 5ᵉ flux de la connexion → 429 ; échéance d'écriture repoussée à chaque écriture (client qui ne lit plus → coupé après 60 s).
+  - retrait : `retirer` d'une trame d'un autre siège → `{}` et la trame reste ; de la sienne → absente du rattrapage suivant.
+  - fin : expiration → 0x05 raison 1 sur tous les flux, file vidée (mémoire relâchée : `rooms` sans l'entrée), fichiers des pièces effacés puis lignes ; `detruire` par `X-Shh-Manage` juste → 0x05 raison 2 ; par un membre avec `members_can_destroy` faux → 403 ; vrai → détruit ; `reason: "report"` → compteur horaire des signalements +1 ; `admin destroy -` avec un lien `#c` sur l'entrée standard → salon détruit, rien d'écrit.
+  - pièces : palier 16 385 → 400 (`MaxPieceBucket`) ; palier 8 000 deux fois → la seconde réservée (1 048 832 096 octets), puis une troisième de palier 1 (65 600 octets) → acceptée seulement si `pieces_bytes + trames × 4 140 + 65 600 ≤ 2^30` ; segment hors palier ou de mauvaise taille refusé (mêmes tests que les partages) ; `GET` sans `X-Shh-Membre` valide → 404 ; budget de lecture 2 × fichier par membre et par pièce → 429 `budget` ; `pieces/retirer` par un autre siège → 404 ; octets utiles débités des quotas journaliers de spec §4.
+  - redémarrage : sièges, files et jetons perdus ; salons et pièces `ready` gardés ; pièces `uploading` effacées.
+  - `FuzzTrame` (corps arbitraires) et `FuzzFlux` (lecture d'enregistrements par le client de test) : aucune panique, aucune trame relayée hors de 4 140 octets.
+- [ ] **Step 2 : `seesnothing_test.go`** (bloquant) : un salon, trois membres de test, trames opaques contenant des repères **en clair** volontairement (pour prouver que le serveur ne les écrit nulle part) ; IP, User-Agent, Referer repères ; exige : aucun repère dans `shares.db`, son WAL, `blobs/`, stdout, stderr ; aucune trame sur disque (recherche des 4 140 octets d'une trame dans tous les fichiers du dossier de données) ; après destruction et arrêt, aucun octet d'une pièce ; `sqlite_master` = `shares`, `salons`, `salon_pieces` et leurs index ; aucun journal ne contient de jeton, d'`id` ni de `seq`.
+- [ ] **Step 3 : Lancer** `make test-go` → ÉCHEC.
+- [ ] **Step 4 : Implémenter** spec §39.1, §39.3 ; `net/http` seulement (flux par `http.ResponseController` et `Flush`) ; JSON strict (§8) ; erreurs uniformes ; réutiliser `blob/` et le code des segments des partages, sans copier.
+- [ ] **Step 5 : Lancer** `make test-go` (avec `-race`, `GOARCH=386 go build ./...`), `govulncheck ./...`, `go test -fuzz=FuzzTrame -fuzztime=60s ./internal/room/` → SUCCÈS.
+- [ ] **Step 6 : Commit** « feat(salon): relais en mémoire, sièges plafonnés, pièces jointes, fin de vie » et push.
+
+### Task C-3 : Création et entrée — accueil, création, salon prêt, mot de passe, explication et pseudonyme (spec §39.4, §39.6)
+
+**Files:**
+- Create: `web/src/chat/net.ts`, `net.test.ts` (seul `fetch` du salon : routes de §39.3.9, lecture du flux), `web/src/chat/room.svelte.ts`, `room.test.ts` (`createRoom`, `joinRoom` : machine d'état), `web/src/routes/RoomNew.svelte` (`/salon/nouveau`), `web/src/routes/RoomJoin.svelte` (mot de passe, explication, pseudonyme), `web/src/ui/HomeRoomCard.svelte`, `web/ui-e2e/room-join.spec.ts`
+- Modify: `web/src/index.ts` (exporte `createRoom`, `joinRoom`), `web/src/routes/Home.svelte` (bloc à part), `web/src/routes/Compose.svelte` et `web/src/flows/features.ts` (retrait de « Conversation (bientôt) » et de `CHAT_READY`), `web/src/routes/Ready.svelte` (variante salon), `web/src/app/router.svelte.ts` (`/salon/nouveau`, `/salon`, fragment `#c`), `web/src/history/store.ts` (`kind: "salon"`), `web/src/ui/Icon.ts` (`messages-square`), `web/src/demo/fake-server.ts` (routes du salon en mémoire), `web/src/source-rules.test.ts` (`fetch` permis dans `chat/net.ts`), `fr.ts`, `en.ts`
+
+**Interfaces:**
+```ts
+createRoom(origin, opts: { ttlHours: 1 | 6 | 12 | 24; maxMembers: number | "ouvert"; membersCanDestroy: boolean; password: string; captcha }, net?)
+  → Promise<{ link: string; manage: SGestion; password: string; expiresInS: number }>;   // "ouvert" → max_members 10
+joinRoom(link, expectedOrigin, net?) → { state: "meta" | "inapp" | "locked" | "entering" | "pseudo" | "in" | "full" | "invalid"
+  | "destroyed_by_password" | "error"; expiresInS; triesLeft?; taken: string[] /* clés des pseudonymes présents */;
+  unlock(password): Promise<void>; choosePseudo(p): Promise<"ok" | "pris" | "invalide">; leave(): void };
+```
+- [ ] **Step 1 : Tests qui échouent** (`room.test.ts`, réseau simulé) : `createRoom` envoie `X-Shh-Access` et `X-Shh-Manage` en en-têtes, jamais `K_lien` ni le mot de passe (recherche d'octets dans tous les corps et en-têtes) ; corps exact `{ ttl_hours, max_members, members_can_destroy, salt, kdf_ops, kdf_mem, proof_v, captcha… }` ; « ouvert » → `max_members: 10` ; `joinRoom` : `meta` puis `unlock` ; 403 → `triesLeft` ; 409 → `full` ; `choosePseudo("alice")` quand « Alice » est présent → `pris` sans trame ; jeton de membre jamais dans une URL (espion sur `fetch`) ; `leave()` appelé à `pagehide` en `keepalive`.
+- [ ] **Step 2 : e2e qui échouent** (`room-join.spec.ts`, vrai serveur, deux contextes) : accueil → bouton « Créer un salon de discussion » visible sans défilement à 1280 × 800 et à 390 × 844, dans un bloc distinct du réceptacle (aucun ancêtre commun plus proche que `main`) ; création 24 h, ouvert, mot de passe généré de 10 caractères → « Salon prêt » : lien de 65 caractères commençant par `${origin}/#c`, mot de passe, rappel « autre moyen », « Entrer dans le salon » ; second contexte : lien → `location.hash === ""` après lecture → texte « On vous invite dans un salon de discussion chiffré » → mot de passe faux → « 9 essais restants » → bon → page « Un salon qui s'efface » avec les cinq phrases de spec §39.4 (point 3) mot pour mot → pseudonyme « A » → message de longueur ; « Alice » pris par le créateur → « Déjà pris dans ce salon » ; « Bob » → salon ; plafond 2 et troisième contexte → « Ce salon est complet » ; « Conversation (bientôt) » absent du composeur ; démo : parcours complet avec le faux serveur ; `axe` ; captures `room-home`, `room-new`, `room-ready`, `room-password`, `room-pseudo` (ordinateur et téléphone).
+- [ ] **Step 3 : Lancer** `npm test -- chat && npx playwright test room-join` → ÉCHEC.
+- [ ] **Step 4 : Implémenter** spec §39.4 et §39.6 (accueil, création, salon prêt) ; réutiliser `PasswordField`, `CopyField`, `QrCode`, `Countdown`, l'écran d'ouverture (Task 20) et son avertissement du navigateur intégré.
+- [ ] **Step 5 : Lancer** `npm test && make test-ui` puis la commande démo → SUCCÈS.
+- [ ] **Step 6 : Commit** « feat(salon): création, lien prêt, mot de passe, explication et pseudonyme » et push.
+
+### Task C-4 : Écran du salon — messages, couleurs, « écrit… », arrivées et départs, en-tête, émojis, réponses, réactions (spec §39.3.7, §39.5, §39.6)
+
+**Files:**
+- Create: `web/src/routes/Room.svelte` (`/salon`), `web/src/ui/chat/MessageList.svelte`, `Bubble.svelte`, `Composer.svelte`, `EmojiPicker.svelte`, `Participants.svelte`, `TypingLine.svelte`, `RoomHeader.svelte`, `web/src/chat/emoji-data.ts` (généré), `web/scripts/gen-emoji.mjs`, `web/scripts/unicode/emoji-test-15.0.txt` (source commitée, empreinte SHA-256 vérifiée par le script), `web/src/chat/view.svelte.ts`, `view.test.ts` (liste, regroupement des annonces, extraits, retraits), `web/src/chat/linkify.ts`, `linkify.test.ts`, `web/src/chat/typing.ts`, `typing.test.ts`, `web/ui-e2e/room-chat.spec.ts`
+- Modify: `web/src/chat/room.svelte.ts` (envoi, réception, réglage « Accusés de lecture » ; « écrit » toujours actif, sans réglage), `THIRD_PARTY_LICENSES.md` (données Unicode, licence Unicode v3), `fr.ts`, `en.ts`
+
+**Interfaces:**
+```ts
+linkify(text): ({ t: "text"; v: string } | { t: "link"; href: string; v: string })[];   // https?:// seulement, adresse affichée entière
+TYPING_TICK_MS = 2_500;
+typingSender(deps: { now /* monotone */; joinedAt; send }) → { keystroke(): void; stop(): void };
+  // trame `ecrit` seulement aux tops joinedAt + k × 2 500 ms qui suivent au moins une frappe ; jamais d'arrêt ; aucun réglage pour le couper
+presenceLine(ev: { k: "arrivee" | "depart"; pseudo: string }): string;   // « Léa a rejoint le salon » / « Léa a quitté le salon »
+headerText(online: number, seats: number, max: number): string;           // « 3 en ligne · 2 places libres »
+TYPING_SHOW_MS = 6_000; TEXT_MAX_GRAPHEMES = 2000; TEXT_MAX_BYTES = 3500; EXCERPT_MAX = 140;
+EMOJI: { group: string; list: { e: string; tone: boolean }[] }[];   // 9 groupes, émoji 15.0 pleinement qualifiés, sans variantes de ton
+announcer(deps: { now; live }) → { push(from, text) };          // > 3 en 2 s → « N nouveaux messages »
+```
+- [ ] **Step 1 : Tests qui échouent** : `linkify("voir https://exemple.fr/a?b et javascript:alert(1)")` → un seul lien, `href` = `https://exemple.fr/a?b` ; `ftp://`, `data:`, `javascript:` jamais liens ; `typingSender` (horloge injectée, `joinedAt` = 0) : frappes à 0,1 s, 1 s, 2 s, 7 s, 7,4 s → trames exactement à 2,5 s et 7,5 s (aucune à 5 s : pas de frappe entre 2,5 s et 5 s), et jamais deux trames dans le même intervalle ; aucune option ne le désactive (recherche de source : aucun réglage `typing` dans `room.svelte.ts`) ; `presenceLine` FR et EN ; `headerText(3, 3, 5)` === « 3 en ligne · 2 places libres », `headerText(2, 3, 10)` === « 2 en ligne · 7 places libres », `headerText(1, 1, 2)` === « 1 en ligne · 1 place libre » ; le pseudonyme d'une ligne système vient de l'annonce chiffrée (un enregistrement 0x03 seul, sans annonce connue, donne « Un participant a quitté le salon ») ; `view` : un `retrait` vide le message et tous les extraits qui le citent ; une réaction hors liste ignorée ; `announcer` : 5 messages en 1 s → une seule annonce « 5 nouveaux messages » ; `gen-emoji.mjs --check` : empreinte du fichier source et sortie identiques au commit ; texte de 2 001 graphèmes → proposition « Texte long : envoyer comme fichier ? ».
+- [ ] **Step 2 : e2e qui échouent** (`room-chat.spec.ts`, trois contextes) : Alice, Bob, Chloé ; messages reçus dans le même ordre chez les trois ; couleurs : Alice `#5FE3B5`, Bob `#7CC4FF`, Chloé `#B79CFF` (ordre d'arrivée), pseudonyme écrit à côté de chaque bulle ; « Bob écrit… » visible chez Alice et Chloé moins de 3 s après la première frappe de Bob, sans aucun réglage, éteint 6 s après la dernière trame ; intervalles entre trames `ecrit` de Bob multiples de 2 500 ms (± 50 ms, horodatage des requêtes interceptées) ; arrivée de Chloé → ligne « Chloé a rejoint le salon » chez Alice et Bob, et aucune requête ni réponse en clair ne contient « Chloé » (interception) ; Chloé ferme sa page → « Chloé a quitté le salon » ; en-tête chez Alice avec plafond 5 : « 3 en ligne · 2 places libres » puis « 2 en ligne · 3 places libres » après le départ, et le compte à rebours diminue d'une seconde sous 5 min (horloge du navigateur avancée) ; corps de chaque `POST /api/salons/trame` = 4 140 octets (interception) ; émoji choisi dans le sélecteur → affiché tel quel, aucune requête d'image (interception : aucune requête hors de l'origine, aucune hors de `/api/`) ; réaction 👍 sur un message → compteur 1 chez les trois ; réponse → extrait affiché ; « Retirer » par Alice → « Message retiré » chez tous ; « Retirer » absent sur un message d'un autre ; texte `<img src=x onerror=alert(1)>` affiché littéralement, aucune boîte de dialogue ; lien `https://exemple.invalid` cliquable avec `rel="noopener noreferrer"`, aucune requête vers lui sans clic ; clavier seul : Tab vers la saisie, Entrée envoie (ordinateur), Maj+Entrée va à la ligne, `Échap` ferme le sélecteur et rend le focus ; `role="log"` présent ; `reducedMotion: "reduce"` → aucune animation d'entrée (`animationName === "none"`) ; `forcedColors: "active"` → pseudonymes lisibles ; 200 % → aucun débordement horizontal ; titre de l'onglet en arrière-plan « (2) Shhdrop » sans texte de message ; `axe` ; captures `room-desktop`, `room-mobile`, `room-emoji`, `room-typing`, `room-presence`.
+- [ ] **Step 3 : Lancer** → ÉCHEC.
+- [ ] **Step 4 : Implémenter** spec §39.3.7 (grille de 2,5 s), §39.5 (texte, émojis, réponses, réactions, retrait, lignes d'arrivée et de départ, en-tête « en ligne · places libres » et compte à rebours) et §39.6 (écran du salon, accessibilité) ; page d'explication : phrase « Les autres voient quand vous écrivez… » (spec §39.4).
+- [ ] **Step 5 : Lancer** `npm test && make test-ui` puis la commande démo → SUCCÈS.
+- [ ] **Step 6 : Commit** « feat(salon): écran du salon, couleurs, émojis, réponses, réactions, retrait » et push.
+
+### Task C-5 : Pièces jointes et messages vocaux (spec §39.2.5, §39.3.4, §39.5)
+
+**Files:**
+- Create: `web/src/chat/pieces.ts`, `pieces.test.ts` (scellement SHH2 d'un élément, envoi par segments, téléchargement, vérification du manifeste), `web/src/ui/chat/PieceBubble.svelte`, `VoiceBubble.svelte`, `BudgetGauge.svelte`, `web/ui-e2e/room-files.spec.ts`
+- Modify: `web/src/chat/net.ts` (routes des pièces), `web/src/ui/chat/Composer.svelte` (joindre, glisser-déposer, coller, vocal), `web/src/media/recorder.ts` (option `maxMs` = 600 000 pour le salon), `fr.ts`, `en.ts`
+
+**Interfaces:**
+```ts
+ROOM_BUDGET = 1_073_741_824; ROOM_PIECE_MAX_BUCKET = 8000; ROOM_PIECE_MAX_DATA = 524_222_464; AUTO_SHOW_MAX = 16 * 1048576;
+fileCost(bucket: number): number;                      // 48 + bucket × 65 552
+sendPiece(room, file: File | Blob, meta: { name; mime; vocalMs?; ephemere? }, onBytes, signal): Promise<"sent" | "budget" | "cancelled" | "failed">;
+openPiece(room, msg: PiecePayload, onBytes, signal): Promise<Opened>;   // même Opened que les partages (safeName, previewKind, isRiskyFile)
+```
+- [ ] **Step 1 : Tests qui échouent** : `fileCost(1)` === 65 600, `fileCost(8000)` === 524 416 048, `fileCost(16385)` === 1 074 069 568 > `ROOM_BUDGET` → `budget` sans requête ; fichier de 524 222 465 octets → refusé (« 500 Mo au plus par fichier ») ; budget restant 100 000 octets et fichier de palier 16 (1 048 880 octets de chiffré) → `budget` avant tout envoi ; le message `piece` porte `r` (32 octets), `piece`, `bucket`, `name`, `mime`, `size` ; `R` n'apparaît dans aucune requête (recherche d'octets) ; nom ou taille du message différents du manifeste du paquet → `Error("corrompu")`, rien d'affiché ; `C_engagement` faux (pièce échangée par le serveur) → `corrompu` ; image de 10 Mio → affichée d'office, de 20 Mio → au clic ; nettoyage (Tasks 9a–9c) appelé avant le scellement ; `echec` → choix « Envoyer tel quel » / « Retirer » comme le composeur ; vocal arrêté à 10 min.
+- [ ] **Step 2 : e2e qui échouent** (`room-files.spec.ts`, trois contextes) : Alice envoie un PDF de 5 Mio, une photo JPEG avec position GPS repère, une archive `.zip`, un `.exe` ; Bob : photo affichée sans position (`exiftool` absent : contrôle par l'analyseur de la Task 9a sur les octets reçus), PDF dans la visionneuse isolée (Task 22), `.zip` en téléchargement seul, `.exe` avec l'avertissement de `isRiskyFile` ; jauge « 6 Mo sur 1 Go » chez tous ; vocal de 3 s (faux micro) lu par `<audio>` chez Chloé ; « Retirer » d'une pièce → `GET` de ses segments → 404 ; glisser-déposer de 12 fichiers → 12 messages (aucune limite de nombre) ; budget simulé presque plein (serveur de test, `SHH_TEST_ROOM_BUDGET` = 10 Mio, lu seulement par le binaire de test) → « Le salon est plein : 1 Go atteint » ; `axe` ; captures `room-files`, `room-voice`.
+- [ ] **Step 3 : Lancer** → ÉCHEC.
+- [ ] **Step 4 : Implémenter** spec §39.2.5, §39.3.4, §39.5 (pièces, vocal, aperçu d'office, budget) en réutilisant `container.ts`, `transfer/upload.ts`, `viewers/*` et `media/recorder.ts`.
+- [ ] **Step 5 : Lancer** `npm test && make test-ui` puis la commande démo → SUCCÈS.
+- [ ] **Step 6 : Commit** « feat(salon): pièces jointes de tout type, vocaux, budget de 1 Go » et push.
+
+### Task C-6 : Fin de vie, lecture unique, signalement, coupures, finitions (spec §39.1, §39.5, §39.7, §39.8)
+
+**Files:**
+- Create: `web/src/chat/endoflife.ts`, `endoflife.test.ts`, `web/src/ui/chat/EphemeralBubble.svelte`, `RoomEnd.svelte`, `RoomReport.svelte`, `web/ui-e2e/room-end.spec.ts`, `web/ui-e2e/room-sees-nothing.spec.ts`
+- Modify: `web/src/routes/Room.svelte` (menu : Détruire, Signaler, Quitter ; notice de trou), `web/src/routes/History.svelte` (entrée « Salon » : Détruire par `S_gestion`), `web/src/routes/PageSecurite.svelte` (« Le salon de discussion » : §39.2.4 « ce que ce choix ne donne pas », §18.20 à §18.22), `web/src/routes/PageConfidentialite.svelte` (sièges en mémoire, pièces jointes, durées), pages CGU (usage illicite interdit), `fr.ts`, `en.ts`
+
+**Interfaces:**
+```ts
+EPHEMERAL_SHOW_MS = 30_000;
+destroyRoom(room, report: boolean): Promise<"destroyed" | "gone" | "forbidden" | "network">;
+wipeRoom(room): void;   // clés à zéro (sodium.memzero), URL blob révoquées, liste vidée, flux coupé
+```
+- [ ] **Step 1 : Tests qui échouent** : message à lecture unique : affiché au clic, retiré après 30 s (horloge injectée) de la liste **et** de la mémoire de la vue, URL blob révoquée ; chez l'expéditeur, contenu remplacé dès l'envoi ; 0x05 raison 1 → `wipeRoom` puis écran « Le salon a expiré. Tout a été effacé du serveur. » ; raison 2 → « Le salon a été détruit. » ; `destroyRoom` par un membre sans droit → `forbidden`, bouton absent de l'écran ; `pagehide` → `quitter` en `keepalive`, `wipeRoom` ; 0x04 → notice « Des messages ont pu vous échapper pendant la coupure. » ; redémarrage du serveur simulé (jeton refusé) → nouvelle entrée automatique avec `K_preuve_s` gardée, nouvelle époque, sans redemander le mot de passe.
+- [ ] **Step 2 : `room-sees-nothing.spec.ts`** (bloquant, comme le test du Plan 1) : parcours complet à trois contextes avec les repères de spec §39.8 (pseudonyme, texte, nom et contenu de fichier, vocal, émoji de réaction, mot de passe, `K_lien`) ; exige : aucun repère dans un corps ou un en-tête de requête (interception de toutes les requêtes des trois contextes), dans `shares.db`, son WAL, `blobs/`, stdout ni stderr du serveur ; chaque trame montante de 4 140 octets ; après destruction et arrêt, aucune ligne `salons` ni `salon_pieces`, dossier des pièces vide.
+- [ ] **Step 3 : e2e qui échouent** (`room-end.spec.ts`, trois contextes) : créateur → « Détruire le salon » → confirmation sur place → les trois voient l'écran de fin avec la dissolution (Task 24), `fetch` du flux fermé ; « Signaler » : feuille avec les deux chemins de spec §39.5 et la phrase sur le mot de passe ; « Quitter et signaler » → `/healthz` local → `reports_alert` passe à vrai après le seuil ; coupure réseau de 30 s chez Bob (`context.setOffline`) pendant 5 messages → rattrapés sans notice ; coupure pendant 250 messages → notice de trou ; destruction depuis `/envois` du créateur → les membres voient la fin ; `axe` ; captures `room-end`, `room-report`, `room-ephemeral`.
+- [ ] **Step 4 : Implémenter** spec §39.1 (fin de vie), §39.5 (lecture unique, signalement), textes des pages Sécurité, Confidentialité et CGU ; ajouter les lignes du salon à la liste manuelle : iPhone et Android (vocal, photo de l'appareil, mise en veille puis retour, clavier qui ne masque pas la saisie), VoiceOver et TalkBack (annonces des nouveaux messages).
+- [ ] **Step 5 : Lancer** `npm test && make test-go && make test-ui` puis la commande démo → SUCCÈS.
+- [ ] **Step 6 : Commit** « feat(salon): fin de vie, lecture unique, signalement, rattrapage, le serveur ne voit rien étendu au salon » et push.
+
+---
+
+### Tasks D-1 et D-2 : envoi direct, pair à pair (spec §40)
+
+Après les Tasks C-1 à C-6 (le salon fournit la signalisation par trames et le flux `fetch`). Prérequis : Q-D1 à Q-D3 (défauts de spec §40.9 sinon) ; `SHH_DIRECT=0` par défaut ; désactivé dans la démo (aucun serveur TURN). Revues : `golang-backend`, `golang-testing`, `supply-chain-risk-auditor` (pion/turn et ses dépendances `pion/stun`, `pion/transport`, `pion/dtls` éventuelle), `privacy-review` (adresses IP), `sharp-edges` (politique ICE). Global Constraints applicables, plus : aucun serveur ICE autre que les nôtres dans le code (test de sources sur `iceServers`) ; `iceTransportPolicy` vaut `"relay"` sauf accord explicite des deux côtés.
+
+### Task D-1 : Serveur — partage direct, signalisation en mémoire, relais TURN (spec §40.3, §40.4, §40.5)
+
+**Files:**
+- Create: `server/internal/direct/signal.go`, `signal_test.go` (boîtes aux lettres, présence de l'expéditeur), `server/internal/direct/turncred.go`, `turncred_test.go`, `server/cmd/shhdrop-turn/main.go`, `turn_test.go`, `server/internal/api/handlers_direct.go`, `handlers_direct_test.go`, `server/internal/direct/fuzz_test.go` (`FuzzSignal`)
+- Modify: `server/go.mod`, `go.sum` (`github.com/pion/turn/v4`, version exacte, MIT, dernière stable publiée depuis au moins 7 jours), `THIRD_PARTY_LICENSES.md`, `server/internal/share/*` (colonne `mode` : `stored` | `direct`, aucune réservation en direct, `unlock` → `sender_offline` sans rien consommer), `server/internal/store/*` (migration `mode`), `server/internal/config/config.go` (`SHH_DIRECT`, `SHH_TURN_SECRET` 32 octets en base64url, `SHH_TURN_URLS`), `server/internal/limits/*` (identifiants de l'heure, octets relayés du jour), test de sources de spec §36 S2
+
+**Interfaces:**
+```go
+const SignalLen = 12 + 8192 + 16; // 8 220 octets : nonce ‖ 8 Kio chiffrés ‖ étiquette const MailboxMax = 32; const MailboxTTL = 10 * time.Minute
+const TurnCredTTL = 600 * time.Second; const MaxServedOpens = 3
+func IssueTurnCred(secret [32]byte, now time.Time, rnd io.Reader) (username, credential string) // username = échéance Unix ":" 22 car. ; credential = base64url(HMAC-SHA-256(secret, username))
+func CheckTurnCred(secret [32]byte, now time.Time, username, credential string) bool             // hmac.Equal ; échéance dépassée → false
+// shhdrop-turn : turn.NewServer avec AuthHandler (CheckTurnCred), RelayAddressGenerator qui refuse les pairs privés,
+// LoggerFactory vers io.Discard, écoute UDP 3478 et TLS 5349
+```
+- [ ] **Step 1 : Tests qui échouent** : `mode: "direct"` → aucune réservation (`SHH_STORAGE_MAX` inchangé), aucun fichier dans `blobs/` après `finalize` ; `unlock` juste sans flux de l'expéditeur → `sender_offline`, `opens_left` et `failed_attempts` inchangés ; avec le flux → jeton de téléchargement ; signal de 8 219 ou 8 221 octets → 400 ; 33ᵉ message d'une ouverture → 429 ; boîte oubliée après 10 min et à la fin de l'ouverture (`done`) ; aucun signal sur disque (recherche des octets d'un signal repère dans tout le dossier de données) ; `IssueTurnCred` puis `CheckTurnCred` à t + 599 s → vrai, à t + 601 s → faux, `credential` modifié d'un caractère → faux ; 31ᵉ identifiant de l'heure → 429 ; `turn_test.go` : client `pion/turn` de test autorisé → allocation ; allocation puis permission vers `10.1.2.3`, `127.0.0.1`, `169.254.1.1`, `[fc00::1]`, `[::1]` → refusée ; relais entre deux clients de test : 10 Mio transmis à l'identique ; aucune écriture sur stdout ni stderr ; 5 Go relayés du jour atteints par connexion → nouvelle allocation refusée.
+- [ ] **Step 2 : Lancer** `make test-go` → ÉCHEC.
+- [ ] **Step 3 : Implémenter** spec §40.4 ; aucun journal ; erreurs uniformes ; `go test -fuzz=FuzzSignal -fuzztime=60s`.
+- [ ] **Step 4 : Lancer** `make test-go` (avec `-race`, `GOARCH=386 go build ./...`), `govulncheck ./...` → SUCCÈS.
+- [ ] **Step 5 : Commit** « feat(direct): partage direct, signalisation en mémoire, relais TURN (pion) » et push.
+
+### Task D-2 : Client — WebRTC, option « Envoi direct », pièces directes du salon (spec §40.1 à §40.3, §40.6, §40.8)
+
+**Files:**
+- Create: `web/src/direct/peer.ts`, `peer.test.ts` (connexion, politique ICE, canal de segments, contre-pression), `web/src/direct/signal.ts`, `signal.test.ts` (chiffrement des SDP), `web/src/direct/serve.svelte.ts`, `serve.test.ts` (expéditeur qui sert jusqu'à 3 ouvertures), `web/ui-e2e/direct.spec.ts`, `web/ui-e2e/direct-sees-nothing.spec.ts`, `web/ui-e2e/turn-server.ts` (lance `shhdrop-turn` dans le banc)
+- Modify: `web/src/crypto/kdf.ts` (« shhdrop/v2/direct/signal »), `web/src/index.ts` (`createShare(..., { mode: "direct" })`, `openShare` accepte une source de segments directe), `web/src/routes/Compose.svelte` et options (« Envoi direct », « Connexion directe (plus rapide) »), `web/src/routes/Ready.svelte` (« Gardez cette page ouverte jusqu'à la fin », état des ouvertures servies), `web/src/routes/Open.svelte` (« L'expéditeur n'est pas connecté », accord pour la connexion directe), `web/src/chat/pieces.ts` (pièce directe si ≤ 4 destinataires en ligne, bascule stockée après 30 s), `web/src/source-rules.test.ts` (`RTCPeerConnection` permis dans `direct/` seulement ; `iceServers` construits seulement depuis la réponse de `/api/direct/turn`), `fr.ts`, `en.ts`
+
+**Interfaces:**
+```ts
+SIGNAL_PAD = 8192; DIRECT_ROOM_MAX_PEERS = 4; DIRECT_ROOM_FALLBACK_MS = 30_000;
+iceConfig(turn: TurnCred, directAgreed: { sender: boolean; receiver: boolean }): RTCConfiguration;
+  // iceTransportPolicy "all" seulement si les deux sont vrais ; sinon "relay" ; iceServers = turn.urls seulement
+sealSignal(kSig, id, openNo, dir: "s2r" | "r2s", msg: object): Promise<Uint8Array>;   // AES-256-GCM, 8 192 + 12 + 16 octets ; refuse un SDP > 8 192 − 4
+openSignal(kSig, id, openNo, dir, bytes): Promise<object>;
+segmentChannel(pc, opts: { bufferedLow: 1 << 20 }) → { send(n, bytes): Promise<void>; onSegment(cb) };
+```
+- [ ] **Step 1 : Tests qui échouent** : `iceConfig(c, { sender: true, receiver: false }).iceTransportPolicy` === `"relay"`, `{ true, true }` → `"all"`, `{ false, true }` → `"relay"` ; `iceServers` ne contient que les URL reçues (aucune `stun:stun.l.google.com`) ; `sealSignal` rend toujours 8 220 octets ; `openSignal` avec un autre `openNo` ou un autre sens → refus ; SDP de l'expéditeur avec l'empreinte DTLS modifiée en route → refus (authentification) ; l'expéditeur envoie aussi les segments de bourrage (nombre de segments envoyés = `segmentCount(bucket)`) ; contre-pression : jamais plus de 16 Mio en attente dans `bufferedAmount` ; fermeture du canal en cours → `writable.abort()` chez le destinataire, jamais « Enregistré » ; `navigator.wakeLock.request("screen")` demandé pendant le service, relâché à la fin.
+- [ ] **Step 2 : e2e qui échouent** (`direct.spec.ts`, Chromium, deux contextes, `shhdrop-turn` de test) : envoi direct d'un fichier de 50 Mio → ouverture dans l'autre contexte → SHA-256 identique ; `getStats` : paire de candidats `relay` des deux côtés ; `blobs/` vide pendant et après ; expéditeur fermé avant l'ouverture → « L'expéditeur n'est pas connecté pour l'instant », ouvertures inchangées (`manage/status`) ; « Connexion directe » acceptée des deux côtés → paire `host` ou `srflx` permise ; acceptée d'un seul côté → `relay` ; salon : 3 membres en ligne, pièce de 20 Mio → reçue en direct (aucun `POST /api/salons/pieces`), 6 membres → pièce stockée ; un membre hors ligne 30 s → bascule stockée pour lui seul ; `axe` ; captures `direct-ready`, `direct-open`, `direct-consent`. WebKit : à la liste manuelle si TURN indisponible dans le banc.
+- [ ] **Step 3 : `direct-sees-nothing.spec.ts`** (bloquant) : repères de contenu, de nom, de mot de passe, `K_lien` et une empreinte DTLS repère ; exige : aucun repère dans un corps reçu par le serveur ou par `shhdrop-turn` en clair (le relais ne voit que du DTLS : recherche dans les octets relayés), ni sur disque, stdout, stderr ; aucun SDP en clair dans une requête.
+- [ ] **Step 4 : Implémenter** spec §40.1 à §40.3 et §40.6 ; textes honnêtes de §40.1 (en ligne, adresses, arrière-plan du téléphone).
+- [ ] **Step 5 : Lancer** `npm test && make test-go && make test-ui` → SUCCÈS (démo : option masquée, test).
+- [ ] **Step 6 : Commit** « feat(direct): envoi direct par WebRTC, relais par défaut, pièces directes du salon » et push.
 
 ---
 
@@ -1402,6 +1663,8 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 ---
 
 ### Tasks P1 à P3 : offre payante facultative (spec §38) — **après la mise en ligne de la V1**
+
+> **v2.8** : deux formules, Plus et Pro (spec §38.8 : limites, prix proposés, modèle de coûts) ; deux clés d'émission de jetons, une par formule ; les limites Plus et Pro des salons (spec §39.11) et du relais de l'envoi direct (spec §40.4) s'ajoutent à la Task P2. Prix : Q-P8.
 
 **Bloquées** tant que le propriétaire n'a pas tranché Q-P1 (moyen de paiement), Q-P2 (exception crypto pour Privacy Pass), Q-P5 (statut juridique), et que le juriste et le comptable n'ont pas validé spec §38.5. La fonction « Demander des fichiers » (Q-P6) exige d'abord sa propre section de spec. Ces tâches ne font pas partie du Plan 2 livrable ; elles sont écrites ici pour que le reste du code ne les rende pas impossibles (aucune dépendance de V1 sur elles). Revues : `golang-backend`, `constant-time-analysis`, `supply-chain-risk-auditor` (circl, blindrsa-ts), `privacy-review`, `sharp-edges`.
 
