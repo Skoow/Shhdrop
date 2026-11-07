@@ -119,7 +119,8 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("button", { name: "Nettoyer tous les fichiers" })).toHaveCount(0);
     await expect(page.locator(".badge.warn").filter({ hasText: "Non nettoyé" }).first()).toBeVisible();
     await expect(page.locator("[data-row]").filter({ hasText: "plage-nuit.jpg" }).locator("img")).toHaveAttribute("src", /^blob:/);
-    await expect(page.locator("[data-row]").filter({ hasText: "anniversaire-lou.webm" })).toContainText("1:12");
+    // Légende raccourcie au milieu (« anniversair…-lou.webm ») : la vignette se trouve par son nom accessible.
+    await expect(page.locator("[data-row]").filter({ has: page.getByRole("button", { name: "Actions pour anniversaire-lou.webm" }) })).toContainText("1:12");
     expect(await noHScroll(page)).toBe(true);
 
     if (isMobile) {
@@ -259,7 +260,7 @@ test.describe("fr-FR", () => {
     // Le champ et son contour de focus (2 + 2 px) tiennent dans la colonne (scan UX B4).
     const inside = await page.evaluate(() => {
       const box = document.querySelector(".pf .box")!.getBoundingClientRect();
-      const col = (document.querySelector(".side-scroll") ?? document.querySelector("[role=dialog]"))!;
+      const col = (document.querySelector(".side-scroll") ?? document.querySelector("dialog[open]"))!;
       const c = col.getBoundingClientRect();
       // Zone visible du conteneur qui défile : bord gauche intérieur + clientWidth (sans barre).
       const left = c.left + col.clientLeft;
