@@ -243,7 +243,7 @@ test.describe("fr-FR", () => {
     // Règles de forme (audit M1) : une raison claire pour chacune.
     await field.fill("azertyuiop");
     await expect(reason).toHaveText("Ce mot de passe suit les touches du clavier (comme «\u00a0azerty\u00a0»). Choisissez-en un autre.");
-    await expect(opts.getByText("Suit les touches du clavier")).toBeVisible();
+    await expect(opts.getByText("Suit les touches du clavier", { exact: true })).toBeVisible();
     await field.fill("aaaaaaaaaa");
     await expect(reason).toHaveText(/^Ce mot de passe répète trop les mêmes caractères/);
     await field.fill("1234567890");
@@ -254,6 +254,18 @@ test.describe("fr-FR", () => {
     await expect(reason).toHaveCount(0);
     await field.fill("court");
     await settle(page);
+    // Le champ et son contour de focus (2 + 2 px) tiennent dans la colonne (scan UX B4).
+    const inside = await page.evaluate(() => {
+      const box = document.querySelector(".pf .box")!.getBoundingClientRect();
+      const col = (document.querySelector(".side-scroll") ?? document.querySelector("[role=dialog]"))!;
+      const c = col.getBoundingClientRect();
+      // Zone visible du conteneur qui défile : bord gauche intérieur + clientWidth (sans barre).
+      const left = c.left + col.clientLeft;
+      return { boxL: box.left, boxR: box.right, colL: left, colR: left + col.clientWidth, scrollW: col.scrollWidth, clientW: col.clientWidth };
+    });
+    expect(inside.boxL - 4).toBeGreaterThanOrEqual(inside.colL - 0.5);
+    expect(inside.boxR + 4).toBeLessThanOrEqual(inside.colR + 0.5);
+    expect(inside.scrollW).toBeLessThanOrEqual(inside.clientW);
     expect(await axe(page)).toEqual([]);
     await capture(page, "compose-password-custom");
     await opts.getByRole("button", { name: "Utiliser un mot de passe généré" }).click();

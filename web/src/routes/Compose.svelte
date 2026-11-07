@@ -1274,8 +1274,9 @@
       min-height: 0;
       overflow-y: auto;
       overscroll-behavior: contain;
-      margin-inline-end: -10px;
-      padding: 2px 10px var(--sp-4) 2px;
+      /* 4 px de marge intérieure : le contour de focus (2 + 2 px) n'est pas rogné (scan UX B4). */
+      margin-inline: -4px -10px;
+      padding: 4px 10px var(--sp-4) 4px;
       scrollbar-width: thin;
       scrollbar-color: rgb(233 236 242 / 0.18) transparent;
     }

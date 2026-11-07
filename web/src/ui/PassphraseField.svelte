@@ -101,7 +101,10 @@
 </div>
 
 <style>
+  /* min-width: 0 partout : le champ saisi (largeur propre d'un <input>) ne doit pas élargir la
+     colonne des options (scan UX B4). */
   .pf {
+    min-width: 0;
     display: grid;
     gap: 6px;
   }
@@ -111,6 +114,7 @@
     font-weight: 600;
   }
   .box {
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 2px;
@@ -161,6 +165,7 @@
   }
   .in {
     flex: 1;
+    width: 0;
     min-width: 0;
     height: 50px;
     padding: 0;
