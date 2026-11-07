@@ -33,7 +33,6 @@ Exécution (le bundle ne contient que le code d'exécution de Svelte et libsodiu
 - `svelte` 5.57.3 : MIT, Copyright (c) Svelte contributors
 - `libsodium-wrappers-sumo` 0.8.4 et `libsodium-sumo` 0.8.4 : ISC
 - `@lucide/svelte` 1.68.0 : ISC, Copyright (c) 2026 Lucide Icons and Contributors (icônes importées une à une, voir `web/src/ui/Icon.ts`)
-- `uqr` 0.1.3 : MIT, Copyright (c) Project Nayuki, Copyright (c) 2023 Anthony Fu (QR du lien, « Lien prêt », chargé à la demande ; aucune dépendance)
 - Dépendances de `svelte` (fermeture complète, outils de compilation compris) :
   - MIT : `@jridgewell/remapping` 2.3.5, `@jridgewell/gen-mapping` 0.3.13, `@jridgewell/sourcemap-codec` 1.6.0, `@jridgewell/trace-mapping` 0.3.31, `@jridgewell/resolve-uri` 3.1.2, `@sveltejs/acorn-typescript` 1.0.13, `@types/estree` 1.0.10, `acorn` 8.19.0, `clsx` 2.1.1, `devalue` 5.9.4, `esm-env` 1.2.2, `esrap` 2.4.0, `is-reference` 3.0.3, `locate-character` 3.0.0, `magic-string` 0.30.21, `zimmerframe` 1.1.5
   - Apache-2.0 : `aria-query` 5.3.1, `axobject-query` 4.1.0
@@ -142,3 +141,9 @@ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 ```
+
+## uqr 0.1.3 (recopié dans `web/src/qr/vendor/`)
+
+- Source : archive npm `uqr-0.1.3.tgz` (https://github.com/unjs/uqr), intégrité sha512 `0rjE8iEJe4YmT9TOhwsZtqCMRLc5DXZUI2UEYUUg63ikBkqqE5EYWaI0etFe/5KUcmcYwLih2RND1kq+hrUJXA==` ; `dist/index.mjs`, `dist/index.d.mts` et `LICENSE` recopiés sans modification, empreintes SHA-256 vérifiées par `web/src/qr/qr.test.ts`. Portage du générateur de QR de Project Nayuki ; seule `encode` est utilisée (QR du lien, « Lien prêt »).
+- Licence : MIT, Copyright (c) Project Nayuki, Copyright (c) 2023 Anthony Fu (texte complet : `web/src/qr/vendor/LICENSE`)
+- Mise à jour : relire le diff (`npm diff --diff=uqr@0.1.3 --diff=uqr@<nouvelle>`), recopier, changer les empreintes du test (audit F3 du 7 novembre).

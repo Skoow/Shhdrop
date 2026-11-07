@@ -65,6 +65,18 @@ describe("check-dist.mjs, production", () => {
     expect(checkDist(site({ "index.html": PROD_INDEX, "404.html": PROD_INDEX }), false)).toEqual(["404.html : propre à la démo"]);
   });
 
+  it("échoue sur un import() dynamique dans un script (spec §28.3, audit F1) ; import.meta reste permis", () => {
+    const d = site({
+      "index.html": PROD_INDEX,
+      "assets/index-a.js": "const u=import.meta.url;a(()=>import(`./QrCode-x.js`));b(()=>import ('./y.js'))",
+      "assets/w.css": "a{content:'import('}",
+    });
+    const r = run([d]);
+    expect(r.code).toBe(1);
+    expect(r.err.trim().split("\n")).toEqual(["check-dist : assets/index-a.js : import() dynamique (2 fois), interdit en production"]);
+    expect(run([site({ "index.html": PROD_INDEX, "assets/index-a.js": "const u=import.meta.url;x.reimport(1)" })])).toEqual({ code: 0, err: "" });
+  });
+
   it("échoue si le build manque", () => {
     expect(run([join(tmpdir(), "absent-check-dist")]).code).toBe(1);
   });

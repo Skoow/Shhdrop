@@ -1,6 +1,6 @@
 <script lang="ts">
   // QR du lien (UI §9.5, S7) : modules sombres sur papier clair, zone de silence de 4 modules,
-  // correction M. Chargé par import() dynamique, seulement quand on le demande.
+  // correction M. Importé statiquement (spec §28.3, audit F1) ; affiché seulement à la demande.
   import { qrPath } from "../qr/qr";
 
   type Props = { text: string; label: string };

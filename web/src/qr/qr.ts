@@ -1,7 +1,8 @@
-// QR du lien de partage (UI §9.5, §20.2 S7) : matrice uqr (correction M), dessinée en un seul
+// QR du lien de partage (UI §9.5, §20.2 S7) : matrice uqr 0.1.3 recopié dans vendor/ (audit F3 ;
+// empreintes vérifiées par qr.test.ts), correction M, dessinée en un seul
 // chemin SVG (M h v z) avec une zone de silence de 4 modules. Le QR contient la clé du lien :
 // il n'est montré qu'à la demande, et jamais avec le mot de passe.
-import { encode } from "uqr";
+import { encode } from "./vendor/uqr.mjs";
 
 export const QUIET = 4;
 

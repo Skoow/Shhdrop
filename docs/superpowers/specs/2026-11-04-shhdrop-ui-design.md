@@ -964,7 +964,7 @@ v2 case à cocher plutôt que v3 invisible :
 | `@sveltejs/vite-plugin-svelte` | 7.3.1 (dev) | MIT | Build | Compatible Vite 8 |
 | `pdfjs-dist` | 6.5.438 | Apache-2.0 | PDF isolé | Spec §6 |
 | `@lucide/svelte` | 1.68.0 | ISC | Icônes | §6 |
-| `uqr` | 0.1.3 | MIT | Matrice du QR code | 27 Ko, sans dépendance, chargé à la demande ; rendu SVG par notre code |
+| `uqr` (recopié) | 0.1.3 | MIT | Matrice du QR code | recopié dans `web/src/qr/vendor/` sans modification, empreintes vérifiées par test (audit F3) ; importé statiquement (spec §28.3) ; rendu SVG par notre code |
 | `@fontsource-variable/mona-sans`, `@fontsource-variable/jetbrains-mono` | 5.3.0 (dev) | OFL-1.1 | Source des polices copiées | §4.1 |
 | `@playwright/test` | 1.64.1 (dev) | Apache-2.0 | Parcours e2e | Spec §14 |
 | `@axe-core/playwright` | 4.14.0 (dev) | MPL-2.0 | Accessibilité | §11 |

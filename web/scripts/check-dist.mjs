@@ -49,6 +49,13 @@ export function checkDist(dir, demo) {
   if (!demo) {
     for (const f of all)
       for (const s of FORBIDDEN_IN_PROD) if (f.data.includes(s)) problems.push(`${f.rel} : trace de démo « ${s} »`);
+    // Spec §28.3 (audit F1) : aucun import() dynamique, que l'empreinte SRI de index.html ne
+    // couvrirait pas. La démo en garde un (son faux serveur, chargé à part).
+    for (const f of all) {
+      if (!/\.m?js$/.test(f.rel)) continue;
+      const n = f.data.toString("utf8").match(/(?<![\w$.])import\s*\(/g)?.length ?? 0;
+      if (n > 0) problems.push(`${f.rel} : import() dynamique (${n} fois), interdit en production`);
+    }
     if (existsSync(join(dir, "404.html"))) problems.push("404.html : propre à la démo");
     return problems;
   }
