@@ -1,6 +1,6 @@
 # Shhdrop — spécification de l'interface (Plan 2)
 
-Date : 4 novembre 2026 · Révision 4 (5 novembre : direction artistique v2, §20 ; textes sans termes techniques, §20.8 ; effets à l'écran des décisions spec v2.6 §27 à §34) · Révision 3 : décisions du propriétaire du 4 novembre, analyse critique §18, pré-vol du plan P1–P43, Q2 et Q3 réglées · Statut : à valider par le propriétaire
+Date : 4 novembre 2026 · **Révision 6 (7 novembre, spec v2.9)** : limites gratuites 15 éléments et 2 Go (§9.2.5, §10.1), tableau de bord de l'expéditeur (§9.6), rechargement sans ouverture de plus (§9.7.1, §12.1), page de contenu « 2027 » avec galerie, visionneuse et archive .zip (§9.8.x), illustration de l'écran « détruit » (§9.10.1), salon : exclusion et explication des clés (§10.1) · Révision 4 (5 novembre : direction artistique v2, §20 ; textes sans termes techniques, §20.8 ; effets à l'écran des décisions spec v2.6 §27 à §34) · Révision 3 : décisions du propriétaire du 4 novembre, analyse critique §18, pré-vol du plan P1–P43, Q2 et Q3 réglées · Statut : à valider par le propriétaire
 Spécification de référence : `docs/superpowers/specs/2026-11-03-shhdrop-design.md` (notée « spec » ci-dessous, avec ses numéros de section, dans sa version v2.6 : exception reCAPTCHA (§26), coffre (§27), code vérifiable (§28), chiffrement anticipé (§29), post-quantique (§30), mot de passe de 8 caractères (§31), lien court (§32), historique local (§33), droits du destinataire (§34)). En cas de conflit, la spec l'emporte, sauf décision du propriétaire notée en §0.2.
 Plan d'exécution : `docs/superpowers/plans/2026-11-04-shhdrop-ecrans.md`.
 
@@ -22,7 +22,7 @@ L'interface n'importe que `web/src/index.ts`. Elle n'importe jamais `transfer/ap
 |---|---|
 | `createShare(origin, items, opts)` → `{ link, manage, expiresInS }` | Envoi. `items` : `Item[]` (`{ kind: "text" \| "file", name, mime, data: Uint8Array \| Blob }`) dans l'**ordre** voulu (l'ordre du manifeste est celui du tableau). `opts` : `ttlHours`, `maxOpens`, `password`, `solveCaptcha(challenge, ctx)`, `prepared?` (défi et preuve pré-calculés, voir les compléments ci-dessous), `onProgress(done, total)` en segments de 4 Mio |
 | `fetchMeta(link, expectedOrigin)` → `{ expiresInS }` | Écran d'ouverture, sans consommer d'ouverture |
-| `openShare(link, password, expectedOrigin, onProgress?)` → `Opened` | Déverrouillage (consomme une ouverture). `onProgress(n, total)` compte les segments lus, tous éléments confondus |
+| `openShare(link, password, expectedOrigin, onProgress?)` → `Opened` | Déverrouillage (consomme une ouverture, sauf rouverture avec un octroi valable : spec §41.4, v2.9 ; `openShare` accepte l'octroi gardé par `web/src/session/open-grant.ts`). `onProgress(n, total)` compte les segments lus, tous éléments confondus |
 | `Opened.manifest` | Liste des éléments (textes inclus) |
 | `Opened.safeName(i)` | **Seul** nom affiché ou proposé à l'enregistrement |
 | `Opened.previewKind(i)` | `"image" \| "audio" \| "video" \| "text" \| "pdf" \| "none"` : **seule** source du choix de visionneuse (`none` au-delà de 200 Mio) |
@@ -100,7 +100,7 @@ L'interface n'importe que `web/src/index.ts`. Elle n'importe jamais `transfer/ap
 | S11 | Moyen | Recharger avant de déverrouiller perd la clé | Maintenu (« Lien incomplet », §9.11) |
 | S12 | Moyen | `done()` pendant `pagehide` | **Réglé** (`keepalive`, spec §25) |
 | S13 | Mineur | Thème clair | **Tranché** : toujours sombre (P1) |
-| S14 | Mineur | Jauge « 34 / 100 Mo » périmée | Maintenu : « 34 Mo / 1 Go · 3 / 10 » |
+| S14 | Mineur | Jauge « 34 / 100 Mo » périmée | Maintenu : « 34 Mo / 2 Go · 3 / 15 » (v2.9) |
 | S15 | Mineur | Spec §22 « 300 Mio par jour » contre §24 | Maintenu, à aligner dans la spec |
 | S16 | Mineur | Pages légales | Maintenu : Plan 3, avant toute ouverture au public |
 | S17 | Mineur | Progression de lecture | **Réglé** : `openShare(…, onProgress)` existe ; l'interface compte aussi les octets du `sink` |
@@ -355,7 +355,7 @@ Chaque composant interactif a ses états : repos, survol (`@media (hover: hover)
 | `PasswordChecklist` | Indicateur honnête | Critères vrais (« 12 caractères minimum », « Absent des mots de passe courants ») ; mot de passe généré : « Mot de passe tiré au hasard sur cet appareil » (révision 4 : aucun terme technique, §20.8) |
 | `CopyField` | Lien, mot de passe, lien de gestion | Valeur tronquée au milieu, copie entière, « Copié » 2 s (icône `check`), annoncé en `aria-live` |
 | `Banner` | `info`, `warn`, `danger` | Fond teinté + icône + texte ; pas de bord gauche épais ; `role="status"` ou `role="alert"` ; action facultative (un bouton au plus) |
-| `CapacityGauge` | « 34 Mo / 1 Go · 3 / 10 » | §9.2.5 |
+| `CapacityGauge` | « 34 Mo / 2 Go · 3 / 15 » | §9.2.5 |
 | `CategoryGroup` | En-tête de catégorie + ses lignes | `<section aria-labelledby>`, titre `--fs-h3` « Photos », méta « 3 · 12 Mo » |
 | `ItemRow` | Élément du composeur ou du contenu | Poignée (composeur), vignette ou icône, nom (`<bdi>`, troncature au milieu, extension toujours visible), taille, badges, actions (retirer, renommer / ouvrir, enregistrer) |
 | `ReorderHandle` | Poignée de déplacement | §9.2.4 |
@@ -375,6 +375,9 @@ Chaque composant interactif a ses états : repos, survol (`@media (hover: hover)
 | `VerifFrame` | Cadre reCAPTCHA isolé | §15 |
 | `QrCode` | QR du lien | SVG produit par code (chemins), importé statiquement (spec §28.3), affiché à la demande |
 | `Viewer*` | Image, Audio, Vidéo, Texte, Pdf | §9.8 |
+| `ShareCard`, `StateChip`, `ActiveSharesStrip` | Carte de partage (état, ouvertures, compte à rebours, taille, création, éléments, actions), bande « Vos partages actifs » | §9.6 |
+| `Lightbox`, `WaveformPlayer`, `DownloadBar` | Visionneuse plein écran, lecteur audio à forme d'onde, Télécharger / Tout télécharger / .zip | §9.8.x |
+| `DestroyedArt`, `EmptyArt` | Illustration « détruit » (document qui se défait en points de la Trame) et état vide | §9.10.1, §9.6.5 |
 | `SaveButton` | Enregistrement en flux | Progression en octets, Annuler, états §9.9 |
 | `Dissolve` | Enveloppe la zone qui se dissout | §7.4 |
 | `LiveRegion` | Annonces polies | Une seule région par page, file d'attente, une annonce par seconde au plus |
@@ -403,7 +406,7 @@ Révision 5 (5 novembre, demande du propriétaire : « l'interface n'est pas jol
   2. titre « Glissez vos fichiers ici » (au doigt, `hover: none` et `pointer: coarse` : « Que voulez-vous envoyer ? »), phrase « Tout est chiffré sur votre appareil avant de partir. » ;
   3. **« Parcourir les fichiers »** : seul bouton qui ouvre le sélecteur du système (multiple) ;
   4. groupe « Ou créez sur place » : **Photo** (`accept="image/*" capture="environment"`), **Vidéo** (`accept="video/*" capture="environment"`), **Vocal** (si `MediaRecorder` existe), **Texte**, **Coller** (si `navigator.clipboard.read` existe) ;
-  5. preuves en chiffres : « 10 éléments · 1 Go · 24 h au plus · 5 essais, puis destruction ».
+  5. preuves en chiffres : « 15 éléments · 2 Go · 24 h au plus · 5 essais, puis destruction ».
 - **Un clic sur le verre n'ouvre rien** (décision du propriétaire, 5 novembre) : le verre est la cible de dépôt, le sélecteur part de son bouton. Remplace la règle de la révision 4 (« un clic sur le réceptacle ouvre le sélecteur »).
 - **Voile de dépôt pleine page** (`DropOverlay`) dès qu'un glisser de fichiers entre dans la fenêtre (§9.2.2) ; le coffre passe en état `drop`.
 - Rappels branchés en Task 10 à 12 : `onfiles(files, source)` (`source` ∈ `fichiers`, `photo`, `video`, `depot`) et `onaction("vocal" | "texte" | "coller")`. Sans eux (avant Task 10), un avis visuel « N éléments ajoutés » (ou « … arrive bientôt ») et la même phrase par `announce()`.
@@ -424,8 +427,8 @@ Aucun audit, aucun pays d'hébergement, aucun badge (benchmark B3) ; jamais « 1
 
 **Révision 6 (composeur v3, 5 novembre, demandes du propriétaire)** — remplace ce qui suit là où c'est contraire :
 
-- **Ordinateur (≥ 760 px), tout dans l'écran** : à 1440 × 900 comme à 1920 × 1080, avec jusqu'à 10 éléments, en-tête, capacité, liste, options, phrase et « Chiffrer et envoyer » tiennent sans défilement de page (testé : `scrollHeight ≤ innerHeight`). Cadre élargi (1 520 px au plus) ; trois colonnes à partir de 1 180 px : liste | réglages | phrase, estimation, textes de confiance et bouton ; deux colonnes de 760 à 1 179 px (l'envoi en pied de la colonne des options). Seules la liste et la colonne des réglages défilent, à l'intérieur. Le titre d'accueil est caché à l'œil (lu par les lecteurs d'écran) et le pied de page se resserre.
-- **Capacité en tête de liste**, à côté de « Votre envoi » : « 5 / 10 éléments · 2,3 Mo / 1 Go » et sa barre (les deux `role="meter"`). Plus de jauge en bas à droite ; au téléphone, un rappel visuel dans la barre collée.
+- **Ordinateur (≥ 760 px), tout dans l'écran** : à 1440 × 900 comme à 1920 × 1080, avec jusqu'à 15 éléments, en-tête, capacité, liste, options, phrase et « Chiffrer et envoyer » tiennent sans défilement de page (testé : `scrollHeight ≤ innerHeight`). Cadre élargi (1 520 px au plus) ; trois colonnes à partir de 1 180 px : liste | réglages | phrase, estimation, textes de confiance et bouton ; deux colonnes de 760 à 1 179 px (l'envoi en pied de la colonne des options). Seules la liste et la colonne des réglages défilent, à l'intérieur. Le titre d'accueil est caché à l'œil (lu par les lecteurs d'écran) et le pied de page se resserre.
+- **Capacité en tête de liste**, à côté de « Votre envoi » : « 5 / 15 éléments · 2,3 Mo / 2 Go » et sa barre (les deux `role="meter"`). Plus de jauge en bas à droite ; au téléphone, un rappel visuel dans la barre collée.
 - **Ajouter** : plus de rangée Fichiers / Photo / Vidéo / Vocal / Texte / Coller. Une zone de dépôt (« Déposez des fichiers n'importe où sur la page », un clic ouvre le sélecteur ; au doigt « Choisir des fichiers ») et « Créer sur place » : **Note texte**, **Mémo vocal** (au doigt, aussi Photo et Vidéo). **Bouton Coller supprimé** (accueil compris) : Ctrl/Cmd + V reste, sans message d'erreur de presse-papier (§9.2.3 : seul le collage clavier subsiste).
 - **Notes** : un titre facultatif (« Note » par défaut, puis « Note 2 »…) et un contenu ; la liste montre le titre et la première ligne. Le crayon d'une note ouvre l'éditeur.
 - **Mémo vocal** : feuille qui hébergera l'enregistreur (autre chantier, `ui/VoiceRecorder.svelte`) ; en attendant, drapeau `VOICE_RECORDER_READY` et texte « arrive bientôt ».
@@ -443,9 +446,9 @@ Aucun audit, aucun pays d'hébergement, aucun badge (benchmark B3) ; jamais « 1
 
 #### 9.2.2 Glisser-déposer
 
-- **Cible pleine page** : dès qu'un glisser contenant des fichiers (`dataTransfer.types` inclut `"Files"`) entre dans la fenêtre, `DropOverlay` couvre la page : voile `--scrim`, cadre en tirets `--accent` à 16 px des bords, texte centré « Déposez pour ajouter » + « 10 éléments, 1 Go au plus ». Compteur `dragenter`/`dragleave` pour ne pas clignoter entre éléments enfants ; fermeture sur `drop`, `dragend`, Échap ou sortie de la fenêtre.
+- **Cible pleine page** : dès qu'un glisser contenant des fichiers (`dataTransfer.types` inclut `"Files"`) entre dans la fenêtre, `DropOverlay` couvre la page : voile `--scrim`, cadre en tirets `--accent` à 16 px des bords, texte centré « Déposez pour ajouter » + « 15 éléments, 2 Go au plus ». Compteur `dragenter`/`dragleave` pour ne pas clignoter entre éléments enfants ; fermeture sur `drop`, `dragend`, Échap ou sortie de la fenêtre.
 - **Sur toutes les autres routes** (ouverture, contenu, gestion, envoi en cours, lien prêt), `AppShell` appelle `preventDefault()` sur `dragover` et `drop` **sans rien ajouter** : sans cela, déposer un fichier par erreur fait naviguer l'onglet vers ce fichier, ce qui consommerait une ouverture sur la page de contenu ou abandonnerait un envoi (§18, A11).
-- **Dossiers : refusés**, avec un message, pas aplatis. Raison : un dossier dépasse vite 10 éléments, sa structure serait perdue sans le dire, et l'aplatir demande un parcours récursif (`webkitGetAsEntry`) pour un cas rare. Détection : `item.webkitGetAsEntry()?.isDirectory` quand il existe, sinon l'échec de la lecture d'essai (Safari présente un dossier comme un `File` illisible). Message (`warn`, icône `folder-x`) : « Les dossiers ne peuvent pas être ajoutés. Ajoutez les fichiers eux-mêmes, ou une archive .zip. »
+- **Dossiers : refusés**, avec un message, pas aplatis. Raison : un dossier dépasse vite 15 éléments, sa structure serait perdue sans le dire, et l'aplatir demande un parcours récursif (`webkitGetAsEntry`) pour un cas rare. Détection : `item.webkitGetAsEntry()?.isDirectory` quand il existe, sinon l'échec de la lecture d'essai (Safari présente un dossier comme un `File` illisible). Message (`warn`, icône `folder-x`) : « Les dossiers ne peuvent pas être ajoutés. Ajoutez les fichiers eux-mêmes, ou une archive .zip. »
 - Plusieurs fichiers d'un coup : acceptés dans l'ordre du dépôt.
 
 #### 9.2.3 Coller
@@ -476,10 +479,10 @@ Aucun audit, aucun pays d'hébergement, aucun badge (benchmark B3) ; jamais « 1
 
 #### 9.2.5 Jauge de capacité
 
-- `CapacityGauge` toujours visible au-dessus de la barre d'actions (collée avec elle sur téléphone). Deux mesures sur une ligne : **taille** « 340 Mo / 1 Go » et **nombre** « 3 / 10 », chacune avec sa barre fine de 4 px (taille : proportion de `CONTENT_MAX` ; nombre : 10 crans).
-- Liste vide : la jauge affiche « Rien à envoyer pour l'instant · 1 Go et 10 éléments au plus » (pas de « 0 o / 1 Go »).
-- États : < 90 % : `--accent` ; ≥ 90 % : `--warn` + « Presque plein » ; **dépassement** (> `CONTENT_MAX`) : barre pleine `--danger`, valeur en `--danger` et en gras, texte « Trop gros : 1,2 Go sur 1 Go. Retirez 200 Mo. » (`role="alert"` au moment où l'état apparaît), bouton d'envoi désactivé avec la même raison en `aria-describedby`. Le dépassement de taille est **permis dans la liste** pour que la personne voie quoi retirer.
-- Nombre : le 11ᵉ élément et suivants sont **refusés à l'ajout** (« 2 éléments n'ont pas été ajoutés : 10 au plus. » avec leurs noms). Un onzième élément n'a jamais besoin d'exister, contrairement à un dépassement de taille, qu'on règle en choisissant quoi retirer (§18, A27).
+- `CapacityGauge` toujours visible au-dessus de la barre d'actions (collée avec elle sur téléphone). Deux mesures sur une ligne : **taille** « 340 Mo / 2 Go » et **nombre** « 3 / 15 », chacune avec sa barre fine de 4 px (taille : proportion de `CONTENT_MAX` ; nombre : 15 crans).
+- Liste vide : la jauge affiche « Rien à envoyer pour l'instant · 2 Go et 15 éléments au plus » (pas de « 0 o / 2 Go »).
+- États : < 90 % : `--accent` ; ≥ 90 % : `--warn` + « Presque plein » ; **dépassement** (> `CONTENT_MAX`) : barre pleine `--danger`, valeur en `--danger` et en gras, texte « Trop gros : 2,2 Go sur 2 Go. Retirez 200 Mo. » (`role="alert"` au moment où l'état apparaît), bouton d'envoi désactivé avec la même raison en `aria-describedby`. Le dépassement de taille est **permis dans la liste** pour que la personne voie quoi retirer.
+- Nombre : le 16ᵉ élément et suivants sont **refusés à l'ajout** (« 2 éléments n'ont pas été ajoutés : 15 au plus. » avec leurs noms). Un seizième élément n'a jamais besoin d'exister, contrairement à un dépassement de taille, qu'on règle en choisissant quoi retirer (§18, A27).
 - `CONTENT_MAX = 1 073 741 824 − 65 540` octets (capacité du plus grand palier moins la place maximale du manifeste) ; `createShare` reste l'arbitre (`trop_gros`). La taille affichée est la somme des tailles des éléments (texte compté en octets UTF-8).
 - Mise à jour à chaque ajout, retrait, nettoyage terminé (une image nettoyée est un peu plus petite) ; annonce polie seulement aux franchissements de seuil (90 %, dépassement, retour sous la limite).
 
@@ -503,7 +506,7 @@ Aucun audit, aucun pays d'hébergement, aucun badge (benchmark B3) ; jamais « 1
 
 - Chaque fichier ajouté est lu sur son premier octet (`file.slice(0, 1).arrayBuffer()`, ou le fichier entier s'il est vide). Échec : « Impossible de lire « {nom} » (dossier, fichier déplacé ou inaccessible). » et rien n'est ajouté. Cela attrape les dossiers de Safari et les fichiers en nuage non téléchargés.
 - **Fichier vide** (0 octet) : accepté, taille « 0 octet ».
-- **Très gros fichier unique** (jusqu'à 1 Go) : accepté sans lecture complète (seules les images ≤ 50 Mo sont lues pour le nettoyage) ; `createShare` lit par tranches.
+- **Très gros fichier unique** (jusqu'à 2 Go ; sur un navigateur sans `showSaveFilePicker`, l'enregistrement assemble en mémoire, spec §18.7 : l'écran prévient au-delà de 200 Mo) : accepté sans lecture complète (seules les images ≤ 50 Mo sont lues pour le nettoyage) ; `createShare` lit par tranches.
 - **Noms très longs ou de droite à gauche** : affichés via `cleanName` dans `<bdi>`, troncature au milieu.
 
 #### 9.2.9 Envoyer
@@ -627,15 +630,35 @@ Ordre (révisé le 7 novembre, scan UX « Lien prêt ») : avertissement en têt
 6. **Terminé** (`primary`, dernier bloc ; **collé en bas sur téléphone**, sous le pouce) → `InlineConfirm` « Vous ne pourrez plus les afficher. Terminer ? » → efface l'état (chaînes oubliées, références nulles) et revient au composeur vide.
 - **`beforeunload`** reste actif sur cet écran jusqu'à « Terminé » ou « Supprimer » : recharger ou fermer par erreur ferait perdre le lien et le mot de passe d'un partage qui existe (§18, A12).
 
-### 9.6 Gestion (`/m/:id`)
+### 9.6 Gestion de l'expéditeur : tableau de bord (révision 6, 7 novembre 2026, spec §33.1)
 
-- Au chargement : `parseLink(location.href)` puis `history.replaceState` (§12.1) ; squelette pendant `shareStatus`.
-- `ready` : « Ouvert 1 / 3 · Expire dans 4 h 15 » (tabulaire), **Supprimer maintenant** (`danger`, `InlineConfirm` « Supprimer ce partage pour tout le monde ? C'est immédiat et définitif. »).
-- `draining` : « Toutes les ouvertures sont utilisées · effacement à la fin du dernier téléchargement » ; Supprimer reste possible.
-- `uploading` : « Envoi en cours » (cas d'un second onglet), Supprimer possible (arrête l'envoi de l'autre onglet, qui affichera « Le transfert a été interrompu »).
-- `NotFoundError` ou après suppression : dissolution puis **« Supprimé »**, sans raison (spec §5.1).
-- Actualisation : bouton `refresh-cw` et relecture toutes les 60 s tant que la page est visible ; `LimitError` suspend la relecture jusqu'à `retryAfterS` ; `Error("reseau")` : bandeau « Connexion impossible » + Réessayer ; hors ligne : relecture suspendue jusqu'à `online`.
-- Le compte à rebours local continue entre deux relectures ; à zéro : relecture immédiate (qui rendra « Supprimé »).
+Refonte « application » de la gestion. **Pas d'empreinte d'appareil** (refusée, spec §33.1) : tout vient de l'historique local chiffré (`web/src/history/`, Task H) et du secret de gestion de chaque entrée. Le même composant `ShareCard` sert à l'accueil, à `/envois` et à la vue `#m…`.
+
+**9.6.1 Accueil : « Vos partages actifs ».** Sous le composeur (au-dessus sur téléphone quand le composeur est vide), une bande `ActiveSharesStrip` n'apparaît que s'il existe au moins une entrée **active** (ou en cours d'effacement) dans l'historique local : titre « Vos partages actifs », jusqu'à trois `ShareCard` compactes, lien « Tout voir (n) » vers `/envois`. Aucune requête au serveur au chargement : état et compte à rebours viennent des données locales (« mis à jour il y a 3 min ») ; une relecture n'a lieu que sur « Actualiser » ou quand la carte est ouverte (§9.6.5). Historique vide, désactivé ou tout terminé : **rien** à l'accueil.
+
+**9.6.2 `/envois` : le tableau de bord.** `AppShell` ; titre « Vos envois » ; sous le titre, une ligne de chiffres locale (« 2 actifs · 5 terminés ») ; filtres `Segmented` « Actifs » / « Terminés » / « Tous » (`role="radiogroup"`) ; liste de cartes (une colonne sur téléphone, deux colonnes à partir de 960 px) triées : en cours d'effacement, actifs par échéance croissante, puis terminés par date de fin ; en pied « Effacer l'historique » (`InlineConfirm`, spec §33) et, avec un compte (spec §37), « Synchronisé avec votre compte (Paramètres) ». Bouton principal « Nouvel envoi ». Squelette de cartes pendant la lecture d'IndexedDB.
+
+**9.6.3 La carte `ShareCard`** (données **locales seulement**, sauf ouvertures et état, relus du serveur sur demande) :
+- En-tête : `StateChip` (icône + mot : Actif, En cours d'effacement, Détruit, Expiré ; jamais la couleur seule) et l'heure de création locale (« il y a 2 h · 5 nov., 21 h 14 », `<time>`).
+- Corps, quatre mesures en chiffres tabulaires : **ouvertures** « 1 / 3 » avec encoches (`TimeRim`, Task 20) ; **compte à rebours** « Expire dans 4 h 15 » (`Countdown`) avec le contour de temps ; **taille** « 142 Mo » ; **éléments** « 6 éléments ». Aucun nom d'élément, jamais (spec §33).
+- Actions (boutons de 44 px, au clavier dans l'ordre) : **Copier le lien de gestion** (`IconButton` `copy` + libellé ; copie `https://…/#m…` ; sous le bouton après copie : « Gardez-le pour vous : il permet de suivre et de supprimer ce partage. ») ; **Détruire** (`ghost` `danger`, `trash-2`, `InlineConfirm` « Détruire pour tout le monde ? C'est immédiat et définitif. ») ; **Détails** (`chevron-down`, déplie la carte, `aria-expanded`).
+- Détails (déplié) : « Ce que voit le serveur » (`serverCard(status)`, Task 19 : « un bloc illisible d'environ 142 Mo · s'efface vers 9 h 45 · 1 ouverture sur 3 · aucun nom, aucun texte, aucune clé »), intervalles d'ouverture observés (« ouvert entre 21 h 00 et 21 h 15 », spec §33), échéance « vers 9 h 45 » (arrondie au quart d'heure), bouton **Actualiser** (`refresh-cw`) et « dernière mise à jour il y a 3 min ». Mention honnête : « Le lien de partage n'est pas conservé : il n'a été montré qu'une fois. »
+- Densité : carte compacte (une ligne de mesures) à l'accueil, carte complète à `/envois`.
+
+**9.6.4 Vue de gestion `#m…`.** Même carte, en grand, centrée (ouvertures, contour de temps, actions) ; si le secret n'est pas dans l'historique de ce navigateur, les mesures locales (taille, éléments, création) sont remplacées par « — » avec la note « Ce partage n'a pas été créé sur cet appareil » et un bouton **Ajouter à mes envois** (chiffre `S_gestion` dans l'historique). États `ready`, `draining`, `uploading`, `gone` et relectures : comportement inchangé (toutes les 60 s tant que la page est visible, `LimitError`, hors ligne, `reseau`). Supprimer maintenant → dissolution → écran « détruit » (§9.10.1).
+
+**9.6.5 États.**
+| État | Carte | Notes |
+|---|---|---|
+| Chargement | squelette (mesures grisées) | lecture locale d'abord |
+| Actif | complète | « mis à jour il y a n min » ; relecture ≤ 1 fois / 5 min / partage, étalée de 0,5 à 4 s, jamais en arrière-plan |
+| En cours d'effacement | « Toutes les ouvertures sont utilisées · effacement à la fin du dernier téléchargement » | Détruire reste possible |
+| **Expiré** | carte atténuée, `StateChip` « Expiré », « Effacé du serveur à l'échéance » ; mesures locales gardées ; action **Retirer de la liste** | retirée seule 7 jours après (spec §33) |
+| **Détruit** | carte atténuée, « Détruit », `DestroyReceipt` (« Effacé du serveur : le contenu chiffré et son entrée »), **Retirer de la liste** | idem 7 jours |
+| **Vide** | page `/envois` : petite illustration neutre `EmptyArt` (un document intact, en trait, sans points), « Aucun envoi pour l'instant », phrase « Vos envois récents apparaissent ici, sur cet appareil seulement. Ils sont gardés chiffrés dans ce navigateur. », bouton « Envoyer quelque chose » | si l'historique est désactivé : « L'historique est désactivé » + « L'activer pour les prochains envois » |
+| Hors ligne ou erreur | dernier état connu avec « non mis à jour », jamais un chiffre « frais » inventé | `Error("reseau")` : bandeau et Réessayer |
+
+**9.6.6 Mouvement et accessibilité.** Cartes décalées de 40 ms à l'arrivée (12 au plus), dissolution de la carte à la destruction (§7.4), `prefers-reduced-motion` : aucune entrée animée. La liste est un `<ul>` ; chaque carte un `<li>` avec `aria-labelledby` (état + création) ; changements d'état annoncés poliment (`LiveRegion`) ; `forced-colors` : mot d'état souligné ; zones tactiles ≥ 44 px ; 390 px sans défilement horizontal.
 
 ### 9.7 Ouverture (`/s/:id`)
 
@@ -659,9 +682,16 @@ Ordre (révisé le 7 novembre, scan UX « Lien prêt ») : avertissement en têt
 
 **Navigateur intégré** (table testée dans `env.ts` : Instagram, FBAN/FBAV/FB_IAB, Messenger, LinkedInApp, Snapchat, TikTok `musical_ly`/`BytedanceWebview`, Line, Telegram, WeChat `MicroMessenger`) : bandeau `warn` avant tout le reste : « Vous êtes dans le navigateur intégré de {app}, qui peut lire cette page. Ouvrez ce lien dans votre navigateur habituel (menu de l'app, puis « Ouvrir dans le navigateur »). » Boutons **Copier le lien** et **Continuer ici quand même**. Le champ n'apparaît qu'après « Continuer ici ». Une PWA installée n'est jamais signalée.
 
+**9.7.1 Rechargement et autres onglets (révision 6, spec §41.4).** Après un déverrouillage réussi, recharger la page ou ouvrir le même partage dans un autre onglet du même navigateur **ne consomme pas d'ouverture de plus** pendant les 30 min de l'octroi d'ouverture.
+- **État `reopen`** (rechargement : plus de `#` dans l'adresse, mais `sessionStorage["shh.og"]` présent) : même écran que `locked`, titre « Rouvrir ce partage », phrase « Vous avez déjà déverrouillé ce partage. Entrez le mot de passe pour le rouvrir : cela ne compte pas une ouverture de plus. » Le mot de passe est **ressaisi** (jamais gardé). Le bouton s'appelle « Rouvrir ». Un mauvais mot de passe compte comme un essai (« n essais restants »), l'octroi ne contourne rien.
+- **Autre onglet** : au chargement d'un lien valide, `BroadcastChannel` (400 ms, en mémoire) ; si un onglet de ce navigateur détient un octroi valable, l'écran dit « Ce partage est déjà ouvert dans un autre onglet : l'ouvrir ici ne compte pas une ouverture de plus. » ; sinon la phrase M9 de la Task 20 : « Ce partage peut être ouvert encore **N fois**. Ouvrir ce partage compte une ouverture. Recharger la page ou l'ouvrir dans un autre onglet de ce navigateur n'en compte pas d'autre pendant 30 minutes. »
+- **Octroi refusé** (`grant_invalid` : expiré, redémarrage du serveur, ouverture terminée) : l'écran revient à `locked` avec « L'ouverture précédente a expiré. Déverrouiller en utilisera une nouvelle. » ; **jamais** de consommation silencieuse. Après 10 rechargements : « Trop de rechargements : une nouvelle ouverture sera comptée. »
+- Effacement de `shh.og` : « Terminer et effacer », destruction, échéance, 30 min d'inactivité, `grant_invalid`, fermeture de l'onglet. La page renouvelle l'octroi toutes les 10 min tant qu'elle est visible et active.
+- **Risque dit** (page Sécurité) : le stockage d'onglet est lisible par qui a accès à l'appareil déverrouillé et à l'onglet, ou par un script injecté ; le mot de passe n'y est pas ; la CSP stricte limite le risque ; Trusted Types ne sont pas invoqués (S8).
+
 ### 9.8 Contenu
 
-- Bandeau collé en haut (verre) : `Countdown` « Disponible encore 5 h 31 · disparaît quand vous quittez la page · recharger consomme une ouverture ».
+- Bandeau collé en haut (verre) : `Countdown` « Disponible encore 5 h 31 · disparaît quand vous quittez la page · recharger ne compte pas une ouverture de plus pendant 30 min » (v2.9, §9.7.1). **Page de contenu « 2027 »** : voir §9.8.x ci-dessous (galerie, visionneuse, actions) ; la liste de lignes décrite ici en est la version de repli (mêmes règles de lecture).
 - Éléments regroupés par catégorie, dans l'ordre du manifeste (§9.2.4), catégorie déduite de `previewKind(i)` et de l'extension de `safeName(i)` (purement visuel). Chaque ligne : `safeName(i)`, taille, actions selon `previewKind(i)` et la taille :
 
 | `previewKind` | ≤ 200 Mio | > 200 Mio |
@@ -678,9 +708,36 @@ Ordre (révisé le 7 novembre, scan UX « Lien prêt ») : avertissement en têt
 - Images : l'URL blob est **révoquée dès `load`** (§12.4).
 - Erreurs de lecture : `Error("reseau")` → « Téléchargement interrompu. » + Réessayer (le jeton vaut 3 h) ; `NotFoundError` → « Ce partage n'est plus disponible (expiré ou détruit). Ce qui est déjà affiché reste visible jusqu'à ce que vous quittiez la page. » et tous les boutons de lecture et d'enregistrement sont désactivés.
 - **Expiration pendant la lecture** : compte à rebours à zéro → bandeau « Expiré · ce qui est affiché disparaît quand vous quittez la page », boutons d'aperçu et d'enregistrement désactivés, téléchargements en cours arrêtés par le serveur (message « Téléchargement interrompu : le partage a expiré. »).
-- **`beforeunload`** actif seulement pendant un aperçu ou un enregistrement en cours (recharger couperait le téléchargement et consommerait une ouverture) ; jamais le reste du temps (quitter la page est la fin normale).
+- **`beforeunload`** actif seulement pendant un aperçu ou un enregistrement en cours (recharger couperait le téléchargement ; depuis la v2.9 il ne consomme plus d'ouverture de plus, §9.7.1) ; jamais le reste du temps (quitter la page est la fin normale).
 - Pied de la liste : **Terminer et effacer** (`secondary`) → `done()`, `wipe()`, révocation des URL blob, dissolution, « Effacé de cet appareil. » ; **Détruire maintenant** (`danger`, §9.10) ; **Signaler** (`ghost`, `flag`, §9.10).
 - Mémoire : avant un aperçu vidéo ou un enregistrement par Blob de plus de 200 Mio sur un appareil où `navigator.deviceMemory` < 4, ou sur iPhone/iPad, bandeau « Cet appareil risque de manquer de mémoire pour un fichier de cette taille. »
+
+### 9.8.x Page de contenu « 2027 » (révision 6, 7 novembre 2026, spec §41.6)
+
+Remplace la liste simple de lignes par une **galerie**. Les règles de lecture, de sûreté et d'erreur ci-dessus (types de blob, échec de décodage, expiration, `NotFoundError`, mémoire, `beforeunload`) restent valables ; les ajouts :
+
+**9.8.1 Disposition.** En-tête collé (capsule ouverte, `TimeRim`, « Partage reçu · 6 éléments · 142 Mo », compte à rebours). Sous lui, la **barre d'actions** (§9.8.6) puis la galerie : une grille `repeat(auto-fill, minmax(160px, 1fr))` (2 colonnes à 390 px, jusqu'à 5 à 1440 px), groupée par catégorie dans l'ordre du manifeste, tuiles de rayon 20 sur `--surface-1`, filet fin. Chaque **tuile** (`<li>`) montre : l'aperçu (image réduite, première image d'une vidéo avec badge lecture et durée, forme d'onde miniature d'un audio, premières lignes d'un texte, icône et extension d'un autre fichier), le nom (`<bdi>`, extension toujours visible), la taille, et deux boutons de 44 px : **Afficher/Lire** et **Télécharger** (`download`, absent en « voir seulement »). Les éléments sans aperçu possible (`none`, plus de 200 Mio) ont une tuile de fichier avec Télécharger seulement.
+
+**9.8.2 Images et visionneuse plein écran.** Les images sont décodées par `createImageBitmap(blob)` **sans URL blob** (réduction à 480 px de large pour la tuile, `<canvas role="img" aria-label="{nom}">`) ; l'original reste en `Blob` en mémoire, décodé en pleine taille seulement dans la visionneuse (voisines ±1 préchargées, les autres libérées). Chargement automatique des images ≤ 20 Mio jusqu'à 256 Mio cumulés, puis « Afficher ». GIF et WebP animés : `<img>` dont l'URL blob est révoquée dès `load` (§12.4). Format illisible (HEIC sur Chromium) : message et Télécharger.
+`Lightbox.svelte` (`<dialog>` natif, `showModal()`, `aria-roledescription="carousel"`) :
+- **Clavier** : ← → pour naviguer, Début/Fin, `+` `-` `0` pour le zoom et le retour, Échap ferme (focus rendu à la tuile), Tab piégé dans la boîte ; **souris** : molette et double-clic pour zoomer, glisser pour déplacer ; **tactile** : pincement pour zoomer, double-appui, **balayage horizontal** (seuil de 48 px ou vitesse) pour passer à l'image suivante, balayage vers le bas pour fermer (non zoomé) ; `touch-action: none` sur la scène, `overscroll-behavior: contain`.
+- Pied : « 3 / 12 », le nom, **Télécharger** (absent en « voir seulement »). Annonce polie : « Image 3 sur 12, {nom} ».
+- Ouverture par transition de vue depuis la tuile (repli : fondu de 180 ms) ; mouvement réduit : aucun glissement, changement instantané.
+
+**9.8.3 Vidéo en ligne.** La tuile devient un lecteur à sa place après le téléchargement complet (progression « 48 Mo / 142 Mo », Annuler) : `<video controls playsinline>` dans un cadre de rayon 20 ; plein écran natif ; une seule vidéo à la fois (la précédente est mise en pause). « Voir seulement » : `controlsList="nodownload"`, `disablePictureInPicture`, menu contextuel neutralisé.
+
+**9.8.4 Audio avec forme d'onde.** `WaveformPlayer.svelte` : bouton lecture/pause de 48 px, 96 barres SVG calculées à partir de `decodeAudioData` (audio ≤ 50 Mio ; calcul par tranches pour ne jamais bloquer plus de 50 ms ; au-delà ou en cas d'échec, simple barre de progression), temps « 1:23 / 4:05 » tabulaire, **recherche** par clic ou glissé sur la forme d'onde et au clavier (`role="slider"`, ← → ±5 s, Début/Fin). La lecture elle-même est un `<audio>` sur URL blob (révoquée à la fin) ; l'`AudioContext` est fermé après le calcul.
+
+**9.8.5 Texte.** Tuile de carte : premières lignes, « Tout afficher » (déplie sur place, `<pre dir="auto">`), **Copier** (absent en « voir seulement »).
+
+**9.8.6 Barre d'actions de téléchargement** (`DownloadBar`, absente en « voir seulement » ; désactivée à l'expiration) :
+- **Télécharger** (par tuile) : flux de §9.9.
+- **Tout télécharger** : enregistrements **à la suite**, un par un. Avec `showDirectoryPicker` (Chrome, Edge sur ordinateur) : un seul choix de dossier, puis chaque fichier y est écrit ; un nom déjà présent reçoit « (2) » (jamais d'écrasement). Sans lui : un `<a download>` après l'autre, 1 s entre deux ; si le navigateur bloque les téléchargements multiples, l'écran l'explique (« Autorisez les téléchargements multiples pour ce site, ou utilisez l'archive .zip ») et laisse les boutons de chaque tuile. Progression « 3 / 6 · 120 Mo / 800 Mo », Annuler, une erreur sur un élément n'arrête pas les autres (liste des échecs à la fin). Éléments déjà en mémoire réutilisés sans nouvelle lecture.
+- **Télécharger en une archive (.zip)** : écrivain ZIP « stocké » maison (spec §41.6, `web/src/zip/store-zip.ts`, importé statiquement, jamais d'`import()`), noms sûrs sans dossier, date fixe, ZIP64 au-delà de 4 Gio ; écrit en flux dans `showSaveFilePicker` quand il existe, sinon assemblé en `Blob` jusqu'à 512 Mio (200 Mio sur iPhone/iPad ou `deviceMemory` < 4), au-delà de quoi le bouton est remplacé par « Tout télécharger » avec la raison. Progression en octets, Annuler (`writable.abort()`, fichier partiel supprimé, §9.9), « Enregistré » seulement après `close()`. Si un élément `isRiskyFile` est inclus : `InlineConfirm` `warn` listant les noms avant de commencer.
+
+**9.8.7 « Voir seulement »** (`rights: "voir"`) : **aucune** action de téléchargement n'existe dans le DOM : ni Télécharger sur les tuiles, ni dans la visionneuse, ni Tout télécharger, ni .zip, ni Copier ; la mention « L'expéditeur a choisi « voir seulement ». Cela n'empêche pas une capture d'écran. » reste en haut de la page et dans la visionneuse.
+
+**9.8.8 Style et performance.** Surfaces `--surface-1`, filets `--line`, lueur `--accent` à 10 % au focus ; entrée des tuiles décalée de 40 ms (12 au plus), léger agrandissement 1,02 au survol d'un pointeur fin ; `content-visibility: auto` sur les tuiles hors écran ; aucune image externe ; pas de bibliothèque de galerie. Mouvement réduit : aucune animation d'entrée ; contraste forcé : filets en `CanvasText`. Tests : unit (`gallery.test.ts` : classement, quotas de chargement automatique ; `store-zip.test.ts` : vecteur CRC-32, relecture par `python3 -m zipfile` et `unzip -t`, noms hostiles, doublons, ZIP64 sur flux creux) et e2e (`gallery.spec.ts` : lightbox au clavier et au balayage simulé, zoom, aucune URL blob d'image après `load`, « voir seulement » sans bouton dans le DOM, archive reçue identique octet par octet).
 
 ### 9.9 Enregistrer (fichiers lourds compris)
 
@@ -696,6 +753,15 @@ Ordre (révisé le 7 novembre, scan UX « Lien prêt ») : avertissement en têt
 - `NotFoundError` (déjà détruit ou expiré) : même fin (« Ce partage n'existe plus. »), `wipe()`.
 - `Error("reseau")` : « Connexion impossible : le partage n'a pas été détruit. » + Réessayer (rien n'est effacé localement).
 - Après `wipe()`, les boutons de destruction disparaissent (`cles_effacees` ne peut pas être atteint par l'interface).
+
+### 9.10.1 L'écran « partage détruit » : l'illustration (révision 6, décision du propriétaire du 7 novembre)
+
+Le cadenas ouvert dans une boîte en pointillés ne voulait rien dire : **il est retiré** de tous les états « détruit » (pas de `lock-open`, pas de capsule en pointillés). Remplacement, dans la maison de style (géométrie, trait fin, Trame de points) :
+- **`DestroyedArt.svelte`** : un **document** (rectangle de rayon 12, coin plié, trois lignes de texte) dont le bord droit et bas se **défont en points carrés de la Trame** (la matrice de points du logo « rop ») qui dérivent vers le haut et à droite en s'effaçant. Partie intacte : remplissage `--surface-1`, filet `--line-strong`. Points : 48, sur une grille de 8 px, `--text-3` (22 % en `--accent`), positions et délais par une fonction pure à graine fixe (`ui/decor.ts`).
+- **Mouvement** : après la dissolution du contenu (§7.4, jamais avant la réponse), les points se détachent colonne par colonne en 900 ms (`transform` et `opacity` seulement), pendant que le logo de l'en-tête joue **`erase()`** (`web/src/ui/logoMotion.ts`, une seule fois). Mouvement réduit : image finale fixe, logo effacé sans animation. Contraste forcé : traits en `CanvasText`, points pleins.
+- Accessibilité : l'illustration est `aria-hidden` ; le titre « Ce partage a été détruit. » porte le sens ; `data-state="destroyed"` sur le composant (remplace celui de la capsule).
+- Emplacements : fin chez le destinataire (§9.10), « Supprimé/Détruit » côté expéditeur (§9.5, §9.6), carte détruite. L'état « Lien invalide » (§9.11) garde sa capsule dissoute ; l'état vide de `/envois` utilise `EmptyArt` (même document, intact).
+- Tests : positions déterministes (`decor.test.ts`), aucun `lock-open` dans le DOM de l'état détruit, `logoMotion.erase` appelé une fois, captures `destroyed-art` (début, milieu, fin), `axe`.
 
 ### 9.11 Lien invalide, lien incomplet, navigateur non pris en charge, 404
 
@@ -734,10 +800,10 @@ Clés principales (extrait normatif ; le plan fixe la liste complète) :
 | `compose.moved` | {nom} : position {i} sur {n} dans {categorie}. | {name}: position {i} of {n} in {category}. |
 | `compose.removed` | {nom} retiré | {name} removed |
 | `compose.duplicate` | En double ? | Duplicate? |
-| `compose.gauge` | {taille} / 1 Go · {n} / 10 | {size} / 1 GB · {n} / 10 |
-| `compose.gauge.empty` | Rien à envoyer pour l'instant · 1 Go et 10 éléments au plus | Nothing to send yet · up to 1 GB and 10 items |
-| `compose.tooBig` | Trop gros : {taille} sur 1 Go. Retirez {exces}. | Too big: {size} of 1 GB. Remove {excess}. |
-| `compose.tooMany` | {n} éléments n'ont pas été ajoutés : 10 au plus. | {n} items were not added: 10 at most. |
+| `compose.gauge` | {taille} / 2 Go · {n} / 15 | {size} / 2 GB · {n} / 15 |
+| `compose.gauge.empty` | Rien à envoyer pour l'instant · 2 Go et 15 éléments au plus | Nothing to send yet · up to 2 GB and 15 items |
+| `compose.tooBig` | Trop gros : {taille} sur 2 Go. Retirez {exces}. | Too big: {size} of 2 GB. Remove {excess}. |
+| `compose.tooMany` | {n} éléments n'ont pas été ajoutés : 15 au plus. | {n} items were not added: 15 at most. |
 | `compose.cleaned` | Nettoyé · lieu, appareil et date de prise de vue retirés | Cleaned · location, device and capture date removed |
 | `options.ttl.hint` | Comptée à partir de la fin de l'envoi. | Counted from the end of the upload. |
 | `options.opens.hint` | Une ouverture = un déverrouillage réussi. | One open = one successful unlock. |
@@ -756,11 +822,11 @@ Clés principales (extrait normatif ; le plan fixe la liste complète) :
 | `ready.delete.confirm` | Supprimer ce partage pour tout le monde ? Le lien ne mènera plus à rien. | Delete this share for everyone? The link will lead nowhere. |
 | `ready.never` | Ce lien et ce mot de passe ne seront plus jamais affichés. | This link and this password will never be shown again. |
 | `open.intro` | Quelqu'un vous a envoyé un partage chiffré. Shhdrop ne vérifie pas l'identité de l'expéditeur. | Someone sent you an encrypted share. Shhdrop does not verify who the sender is. |
-| `open.cost` | Déverrouiller utilise une ouverture. Si le téléchargement échoue ensuite, cette ouverture est perdue. | Unlocking uses one open. If the download then fails, that open is lost. |
+| `open.cost` | Ouvrir ce partage compte une ouverture. Recharger la page ou l'ouvrir dans un autre onglet de ce navigateur n'en compte pas d'autre pendant 30 minutes. | Opening this share uses one open. Reloading the page or opening it in another tab of this browser does not use another for 30 minutes. |
 | `open.badPw` | Mot de passe incorrect · {n} essai restant / {n} essais restants | Wrong password · {n} attempt left / {n} attempts left |
 | `open.lastTry` | Au prochain échec, le partage sera détruit. | One more failure and the share will be destroyed. |
 | `open.destroyedByPw` | Mot de passe incorrect. Le partage a été détruit. | Wrong password. The share has been destroyed. |
-| `content.banner` | Disponible encore {duree} · disparaît quand vous quittez la page · recharger consomme une ouverture | Available for {duration} · disappears when you leave the page · reloading uses an open |
+| `content.banner` | Disponible encore {duree} · disparaît quand vous quittez la page · recharger ne compte pas une ouverture de plus pendant 30 min | Available for {duration} · disappears when you leave the page · reloading does not use another open for 30 min |
 | `content.finish` | Terminer et effacer | Finish and erase |
 | `content.undecodable` | Ce fichier ne peut pas être lu sur cet appareil. Enregistrez-le pour l'ouvrir avec une autre application. | This file can't be played on this device. Save it to open it with another app. |
 | `content.risky` | « {nom} » peut exécuter du code sur votre appareil. N'ouvrez ce fichier que si vous faites confiance à l'expéditeur. | “{name}” can run code on your device. Only open it if you trust the sender. |
@@ -782,8 +848,45 @@ Clés principales (extrait normatif ; le plan fixe la liste complète) :
 | `vault.openInApp` | Si vous avez l'app Shhdrop, ouvrez-y ce lien avant de déverrouiller : c'est là seulement qu'un partage peut être gardé, quand l'expéditeur l'a permis. | If you have the Shhdrop app, open this link there before unlocking: only there can a share be kept, when the sender allowed it. |
 | `preupload.note` | L'envoi chiffré commence en arrière-plan. Rien n'est partagé tant que vous n'appuyez pas sur Envoyer. | The encrypted upload starts in the background. Nothing is shared until you press Send. |
 | `destroyed.body` | Il a été effacé du serveur. Ce que vous avez déjà enregistré sur cet appareil n'est pas concerné. | It was erased from the server. Anything you already saved on this device is not affected. |
-| `history.title` | Mes envois | My shares |
+| `history.title` | Vos envois | Your sends |
 | `err.interrupted` | Le transfert a été interrompu (le serveur a peut-être redémarré). Réessayez. | The transfer was interrupted (the server may have restarted). Try again. |
+
+### 10.1 Textes ajoutés ou changés (révision 6, 7 novembre 2026)
+
+| Clé | FR | EN |
+|---|---|---|
+| `compose.gauge` | {taille} / 2 Go · {n} / 15 | {size} / 2 GB · {n} / 15 |
+| `compose.gauge.empty` | Rien à envoyer pour l'instant · 2 Go et 15 éléments au plus | Nothing to send yet · up to 2 GB and 15 items |
+| `compose.tooBig` | Trop gros : {taille} sur 2 Go. Retirez {exces}. | Too big: {size} of 2 GB. Remove {excess}. |
+| `compose.tooMany` | {n} éléments n'ont pas été ajoutés : 15 au plus. | {n} items were not added: 15 at most. |
+| `home.proof` | 15 éléments · 2 Go · 24 h au plus · 5 essais, puis destruction | 15 items · 2 GB · 24 h at most · 5 tries, then destruction |
+| `content.banner` | Disponible encore {duree} · disparaît quand vous quittez la page · recharger ne compte pas une ouverture de plus pendant 30 min | Available for {duration} · disappears when you leave the page · reloading does not use another open for 30 min |
+| `open.cost` | Ouvrir ce partage compte une ouverture. Recharger la page ou l'ouvrir dans un autre onglet de ce navigateur n'en compte pas d'autre pendant 30 minutes. | Opening this share uses one open. Reloading the page or opening it in another tab of this browser does not use another for 30 minutes. |
+| `open.reopen.title` | Rouvrir ce partage | Reopen this share |
+| `open.reopen.body` | Vous avez déjà déverrouillé ce partage. Entrez le mot de passe pour le rouvrir : cela ne compte pas une ouverture de plus. | You already unlocked this share. Enter the password to reopen it: this does not use another open. |
+| `open.reopen.otherTab` | Ce partage est déjà ouvert dans un autre onglet : l'ouvrir ici ne compte pas une ouverture de plus. | This share is already open in another tab: opening it here does not use another open. |
+| `open.reopen.expired` | L'ouverture précédente a expiré. Déverrouiller en utilisera une nouvelle. | The previous open has expired. Unlocking will use a new one. |
+| `open.reopen.limit` | Trop de rechargements : une nouvelle ouverture sera comptée. | Too many reloads: a new open will be used. |
+| `mine.title` | Vos envois | Your sends |
+| `mine.active` | Vos partages actifs | Your active shares |
+| `mine.all` | Tout voir ({n}) | See all ({n}) |
+| `mine.empty` | Aucun envoi pour l'instant | Nothing sent yet |
+| `mine.empty.body` | Vos envois récents apparaissent ici, sur cet appareil seulement. Ils sont gardés chiffrés dans ce navigateur. | Your recent sends appear here, on this device only. They are kept encrypted in this browser. |
+| `mine.copyManage` | Copier le lien de gestion | Copy management link |
+| `mine.copyManage.note` | Gardez-le pour vous : il permet de suivre et de supprimer ce partage. | Keep it to yourself: it lets you follow and delete this share. |
+| `mine.noLink` | Le lien de partage n'est pas conservé : il n'a été montré qu'une fois. | The share link is not kept: it was only shown once. |
+| `mine.notHere` | Ce partage n'a pas été créé sur cet appareil. | This share was not created on this device. |
+| `mine.remove` | Retirer de la liste | Remove from list |
+| `mine.stale` | non mis à jour | not updated |
+| `gallery.downloadAll` | Tout télécharger | Download all |
+| `gallery.zip` | Télécharger en une archive (.zip) | Download as one archive (.zip) |
+| `gallery.zip.tooBig` | Cet appareil ne peut pas assembler une archive de cette taille. Utilisez « Tout télécharger ». | This device cannot build an archive this large. Use "Download all". |
+| `gallery.multi.blocked` | Autorisez les téléchargements multiples pour ce site, ou utilisez l'archive .zip. | Allow multiple downloads for this site, or use the .zip archive. |
+| `room.kick.confirm` | Exclure {nom} ? Elle ou il garde ce qui a déjà été vu et ne lira rien ensuite. L'invitation change : l'ancien lien et l'ancien mot de passe ne marchent plus. | Remove {name}? They keep what they already saw and will read nothing afterwards. The invitation changes: the old link and password stop working. |
+| `room.kicked` | {nom} a été exclu du salon | {name} was removed from the room |
+| `room.kicked.you` | Vous avez été exclu de ce salon. Ce que vous avez déjà vu reste sur votre écran. | You were removed from this room. What you already saw stays on your screen. |
+| `room.invite.new` | Nouvelle invitation : l'ancien lien et l'ancien mot de passe ne fonctionnent plus pour personne. Les personnes déjà dans le salon ne sont pas touchées. | New invitation: the old link and password no longer work for anyone. People already in the room are not affected. |
+| `room.keys` | Votre salon change de clés de chiffrement toutes les 100 messages, toutes les heures et à chaque arrivée ou départ. C'est automatique et invisible : cela ne limite ni le nombre de messages, ni la durée de la conversation. | Your room changes encryption keys every 100 messages, every hour and whenever someone joins or leaves. It is automatic and invisible: it limits neither the number of messages nor how long the conversation lasts. |
 
 ---
 
@@ -808,11 +911,11 @@ Clés principales (extrait normatif ; le plan fixe la liste complète) :
 - `parseLink(location.href)` (requête ignorée) dès le démarrage de la route, puis `history.replaceState(null, "", location.pathname)` (spec §5.3) : le `#` **et la requête** (paramètres de suivi) quittent la barre et l'historique. Sur **toute autre route** (404 comprise : lien abîmé `/s/{id}/#…`, `/S/…`, hors base de démo), un `#` non vide est retiré de la même façon, y compris quand il est collé dans la barre sur la même page (`hashchange`). Exceptions : navigateur intégré (S4) et navigateur non pris en charge (§9.11). Un dernier segment avec un point (`/s/{id}.`) est servi par l'application comme les autres (spec §10, « Fichiers du site »).
 - L'expéditeur ne voit jamais son lien dans la barre d'adresse : les liens sont affichés, pas navigués.
 - Exceptions écrites (révision 4) : coffre chiffré dans `web/src/vault/` (spec §27) et `S_gestion` chiffré dans `web/src/history/` (spec §33) ; jamais `K_lien`, mot de passe, `R` ni clair.
-- Aucun lien, clé ni mot de passe dans `localStorage`, `sessionStorage`, IndexedDB, cookies, titre de page, `console`, ni dans un message `postMessage` (cadre PDF, cadre de vérification).
+- Aucun lien, clé ni mot de passe dans `localStorage`, `sessionStorage`, IndexedDB, cookies, titre de page, `console`, ni dans un message `postMessage` (cadre PDF, cadre de vérification), **sauf l'exception écrite de la révision 6** : `web/src/session/open-grant.ts` garde dans le `sessionStorage` de l'onglet `K_lien` et l'octroi d'ouverture (jamais le mot de passe, `R` ni le clair), effacés à « Terminer », à la destruction, à l'échéance, après 30 min d'inactivité et à la fermeture de l'onglet (spec §41.4) ; le salon y garde le jeton de membre et la clé courante (spec §39.13.3). Risque dit honnêtement : lisible par qui a accès à l'appareil déverrouillé et à l'onglet, ou par un script injecté ; la CSP stricte le limite, Trusted Types ne sont pas invoqués (S8).
 
 ### 12.2 Cache « page précédente » (spec §21)
 
-- `pagehide` : arrêt de l'envoi en cours (§9.4.6), `opened.wipe()`, révocation de toutes les URL blob, remise à zéro de l'état (lien, mot de passe, manifeste, composeur oubliés), `done()` (en `keepalive`), arrêt du micro.
+- `pagehide` : arrêt de l'envoi en cours (§9.4.6), `opened.wipe()`, révocation de toutes les URL blob, remise à zéro de l'état en mémoire (lien, mot de passe, manifeste, composeur oubliés), arrêt du micro. **`done()` n'est plus envoyé à `pagehide` (v2.9, spec §41.4)** : recharger terminerait l'ouverture, qui, pour un partage à une ouverture, effacerait le partage avant la saisie du mot de passe ; `done()` part à « Terminer et effacer », à la destruction et au signalement, et l'ouverture se termine sinon à l'expiration de l'octroi (30 min). `sessionStorage` n'est pas effacé par `pagehide`.
 - `pageshow` avec `event.persisted` : `location.reload()`.
 - Test e2e : contenu ouvert → navigation → Retour → la page recharge et le contenu n'est plus là.
 
@@ -1023,9 +1126,9 @@ Gravité : **Critique** (bloque les tâches concernées), **Important** (à corr
 | A1 | **Critique** (P0) | CLAUDE.md « Aucune ressource tierce sur le site » ; spec §22 D4 et §24 (« exclus : reCAPTCHA ») | La décision P3 contredit une règle du projet et deux décisions écrites de la spec. Appliquer P3 sans amendement viole CLAUDE.md | Conception qui garde **la page de l'application** sans aucune ressource tierce (Google seulement dans un cadre d'une autre origine, après consentement). **Réglé le 5 novembre (Q3)** : le propriétaire a validé l'exception ; CLAUDE.md et la spec v2.5 (§26) sont amendés ; les Tasks 15 et 16 ne sont plus bloquées |
 | A2 | **Critique** (P0) | §15.2, origine `verif.shhdrop.app` proposée | Un sous-domaine est le **même site** : l'isolement des processus du navigateur se fait par site ; le code de Google pourrait partager le processus de la page qui détient les clés (attaques par canaux auxiliaires), et les cookies de domaine seraient communs | Recommandation d'un domaine enregistrable distinct ; à défaut, `Origin-Agent-Cluster: ?1`, aucun cookie de domaine, risque résiduel écrit. Question Q1. **Reste ouverte (Q1)** : code générique sur `SHH_VERIF_ORIGIN`, refus au démarrage d'une origine du même site ; proposition d'une organisation GitHub gratuite |
 | A3 | Important (P1) | §9.4 (rév. 1) : « coupure si aucun `onProgress` depuis 15 s » | Les segments font 4 Mio : à 1 Mbit/s, un segment prend 32 s ; l'écran aurait annoncé une coupure à tort, et vitesse et temps restant n'auraient été mis à jour que tous les 4 Mio | `onBytes` par `XMLHttpRequest.upload.onprogress` (§0.1) ; coupure = 10 s sans **octet** ou `onRetry` ou `offline` |
-| A4 | Important (P1) | API : `RETRIES = 5` (0,5 à 8 s) puis `Error("reseau")`, et `createShare` détruit le partage | Une coupure de plus de 15,5 s (tunnel, ascenseur) perd un envoi de 1 Go ; contredit spec §13 « reprise automatique » et rend impossible le compte à rebours demandé | Échéance de coupure de 13 min (`SERVER_STALL_MS`, après le dernier segment acquitté) avec `onRetry`, essai immédiat à `online` (§0.1, §9.4.3) |
+| A4 | Important (P1) | API : `RETRIES = 5` (0,5 à 8 s) puis `Error("reseau")`, et `createShare` détruit le partage | Une coupure de plus de 15,5 s (tunnel, ascenseur) perd un envoi de 2 Go ; contredit spec §13 « reprise automatique » et rend impossible le compte à rebours demandé | Échéance de coupure de 13 min (`SERVER_STALL_MS`, après le dernier segment acquitté) avec `onRetry`, essai immédiat à `online` (§0.1, §9.4.3) |
 | A5 | Important (P1) | Pause (P6) | Une pause illimitée dépasse le délai d'effacement d'un envoi bloqué (15 min, `progress_at` à la minute) et la limite de 3 h | Pause bornée à 10 min et par l'échéance de 13 min, avec reprise automatique visible ; refusée à moins de 15 min de la limite (§9.4.4) |
-| A6 | Important (P1) | Envoi de 1 Go sur réseau lent | Jeton d'envoi de 3 h : à moins de 0,8 Mbit/s, 1 Go ne peut pas finir ; l'échec n'arriverait qu'au bout de 3 h | Bandeau dès que le temps restant estimé dépasse le temps disponible (§9.4.1) |
+| A6 | Important (P1) | Envoi de 2 Go sur réseau lent | Jeton d'envoi de 6 h depuis la v2.9 (3 h avant) : à moins de 0,8 Mbit/s, 2 Go ne peuvent pas finir ; l'échec n'arriverait qu'au bout de 6 h | Bandeau dès que le temps restant estimé dépasse le temps disponible (§9.4.1) |
 | A7 | Important (P1) | Annuler (P6) : « DELETE /api/shares/{id} avec le jeton d'envoi » proposé | Inutile : `POST destroy` avec `S_gestion` accepte déjà un partage `uploading`, et `createShare` détruit déjà le partage dans son chemin d'échec. Une nouvelle route ajouterait une surface d'attaque et un second moyen d'authentification | `AbortSignal` dans `createShare`, destruction existante envoyée en `keepalive` ; même chemin pour `pagehide` (§0.1, §9.4.5). Aucune route ajoutée |
 | A8 | Important (P1) | Borne de la preuve de travail (P3, rév. 1 : délai fixe) contre difficulté adaptative jusqu'à environ 30 s (spec §22) | Une personne qui envoie plusieurs fois dans l'heure, sur téléphone, aurait été renvoyée vers Google alors que la preuve aurait abouti ; et le repli pourrait servir à contourner le doublement de difficulté | **Réglé (Q2, 5 novembre)** : plus de délai fixe ; preuve pré-calculée dès le premier élément composé ; repli seulement si la borne vraie restante dépasse 60 s (mesurée après 5 s) ou après 60 s ; le serveur compte les créations par repli dans la même fenêtre (pas de contournement des quotas ni du doublement) ; l'écran affiche la borne vraie (§9.4.2) |
 | A9 | Important (P1) | P4 : « regroupé par catégorie » **et** « réordonnancement, ordre conservé dans le manifeste » | Contradiction : si l'on peut placer une vidéo entre deux photos, l'affichage par catégorie ne montre plus l'ordre réel | Ordre du manifeste = catégories dans un ordre fixe, puis ordre dans chaque catégorie ; réordonnancement à l'intérieur d'une catégorie ; même affichage chez le destinataire (§9.2.4, §9.8) |
@@ -1046,13 +1149,13 @@ Gravité : **Critique** (bloque les tâches concernées), **Important** (à corr
 | A24 | Moyen (P2) | Contraste forcé (Windows) | Anneau de focus, trait de la capsule et jauge personnalisés disparaissent | Règles `forced-colors` (§3.3) |
 | A25 | Moyen (P2) | P1 (toujours sombre) contre spec §3 et §19 (« clair et sombre ») | Écart avec la spec | Appliqué ; `color-scheme: dark` ; à reporter dans la spec v2.5 avec A1 |
 | A26 | Moyen (P2) | Vidéo d'iPhone (HEVC) sur Android ou Firefox | Lecteur noir sans explication | Échec de décodage traité comme `none` avec message (§9.8) |
-| A27 | Moyen (P2) | Limite de 10 éléments | « Dépassement visible » (P5) appliqué au nombre ferait exister des éléments inenvoyables | Nombre refusé à l'ajout avec la liste des refusés ; taille permise en dépassement pour choisir quoi retirer (§9.2.5) |
+| A27 | Moyen (P2) | Limite de 15 éléments (10 avant la v2.9) | « Dépassement visible » (P5) appliqué au nombre ferait exister des éléments inenvoyables | Nombre refusé à l'ajout avec la liste des refusés ; taille permise en dépassement pour choisir quoi retirer (§9.2.5) |
 | A28 | Moyen (P2) | Écran d'envoi | Jusqu'à 9 informations et 3 actions : surcharge (charge cognitive) | Hiérarchie : pourcentage, puis une ligne (octets · vitesse · temps), puis détail en petit ; Annuler en `ghost`, Pause en `secondary` ; `PhaseList` comme repère (§9.4.1) |
 | A29 | Moyen (P2) | Annuler pendant `finalize` | Annulation ambiguë : le partage est peut-être déjà actif | Annuler masqué pendant `finalize` ; « Supprimer ce partage » ensuite (§9.4.5) |
 | A30 | Moyen (P2) | « Terminé » et « Supprimer ce partage » voisins | Confusion entre fermer l'écran et détruire le partage | Séparés, styles différents, confirmations différentes (§9.5) |
 | A31 | Mineur (P3) | Noms côté expéditeur | Un nom contenant des caractères d'inversion (fichier téléchargé ailleurs) s'affichait tel quel | `cleanName` exporté et appliqué (§0.1, §9.2.8) |
 | A32 | Mineur (P3) | Page 404 | La rév. 1 exigeait un code HTTP 404 pour les routes inconnues ; `static.go` rend 200 (spec §10) et rien ne l'exige | Code 200 conservé, page 404 de l'interface, `noindex` sur `/s/` et `/m/` (§9, §14.2) |
-| A33 | Mineur (P3) | Jauge vide | « 0 o / 1 Go · 0 / 10 » est du bruit | Texte d'état vide (§9.2.5) |
+| A33 | Mineur (P3) | Jauge vide | « 0 o / 2 Go · 0 / 15 » est du bruit | Texte d'état vide (§9.2.5) |
 | A34 | Mineur (P3) | Onglet en arrière-plan sur ordinateur | Aucun repère de progression | « 42 % · Shhdrop » dans le titre pendant l'envoi (§9.4) |
 | A35 | Mineur (P3) | Bascule de langue pendant l'envoi | Libellés qui sautent, annonces doublées | Bascule désactivée pendant l'envoi (§10) |
 | A36 | Mineur (P3) | Paysage sur téléphone | Capsule plein écran et barres collées qui mangent la hauteur | Règles paysage (§9) |
@@ -1098,7 +1201,7 @@ Retour du propriétaire (5 novembre) : l'interface est « trop simple, pas assez
 
 La v2 garde le monde « Nuit chiffrée » et ses deux gestes, et ajoute :
 
-1. **Une forme unique, la capsule.** La capsule ouverte du logo (trait de 300° qui part du milieu du bord haut) devient le **réceptacle** du composeur ; l'envoi la referme ; on la retrouve sur chaque étape (capsule qui se remplit de texte chiffré, petite capsule scellée de « Lien prêt », capsule verrouillée du destinataire, capsule en pointillés du partage détruit). Les transitions de vue la font passer d'un écran à l'autre.
+1. **Une forme unique, la capsule.** La capsule ouverte du logo (trait de 300° qui part du milieu du bord haut) devient le **réceptacle** du composeur ; l'envoi la referme ; on la retrouve sur chaque étape (capsule qui se remplit de texte chiffré, petite capsule scellée de « Lien prêt », capsule verrouillée du destinataire, illustration du document qui se défait, §9.10.1, du partage détruit). Les transitions de vue la font passer d'un écran à l'autre.
 2. **Une lumière d'ambiance vivante (aurore)** : trois nappes très floues qui dérivent lentement, composées par le GPU, dont l'intensité suit le moment.
 3. **Des micro-interactions sur chaque contrôle**, et deux moments écrits plus riches : le scellement (un volet de texte chiffré avance au rythme des octets, un éclair fait le tour du bord à la fermeture) et la dissolution (le contenu se défait en grain et en poussière).
 
@@ -1168,7 +1271,7 @@ Les temps se comptent depuis l'événement déclencheur. Valeurs de référence 
 
 **Contenu.** Bandeau collé en verre mobile (`--text` seulement) ; sections décalées de 60 ms (600 ms) ; photos 1 → 1,03 au survol d'un pointeur fin ; confirmation de destruction qui monte (280 ms).
 
-**Dissolution (remplace §7.4).** Après la réponse du serveur ou `wipe()`, jamais avant. Au départ, `--a` et `--span` (≥ 120 px) posés par CSSOM pour la seule partie visible (S5) ; `--d` animée de 0 à 1 par WAAPI en 1 100 ms ; `--lo = --a + (d × 1.5 − 0.3) × --span`, `--hi = --lo + 0.18 × --span` ; masque à trois couches (plein au-dessus de `--hi`, grain de 96 px dans la bande). Contenu qui monte de 4 px, flou de 1 px sur le dernier tiers. **Poussière** : `<canvas>` (DPR ≤ 2, K12), 1 400 grains de 0,8 à 2,5 px (78 % `--text`, 22 % `--accent`) nés au passage du front, fonction pure du temps (graine fixe), **aucune** lecture de pixels du contenu (`getImageData` interdit, test de recherche). Aurore à 55 %. Fin : nœud retiré, capsule en pointillés, texte K7 et bouton décalés de 70 ms, focus sur le titre et annonce. Replis : sans `mask-composite` ou `@property`, fondu et flou de 400 ms. Captures : `shots/planche-dissolution.png`, `shots/10-detruit-390.png`.
+**Dissolution (remplace §7.4).** Après la réponse du serveur ou `wipe()`, jamais avant. Au départ, `--a` et `--span` (≥ 120 px) posés par CSSOM pour la seule partie visible (S5) ; `--d` animée de 0 à 1 par WAAPI en 1 100 ms ; `--lo = --a + (d × 1.5 − 0.3) × --span`, `--hi = --lo + 0.18 × --span` ; masque à trois couches (plein au-dessus de `--hi`, grain de 96 px dans la bande). Contenu qui monte de 4 px, flou de 1 px sur le dernier tiers. **Poussière** : `<canvas>` (DPR ≤ 2, K12), 1 400 grains de 0,8 à 2,5 px (78 % `--text`, 22 % `--accent`) nés au passage du front, fonction pure du temps (graine fixe), **aucune** lecture de pixels du contenu (`getImageData` interdit, test de recherche). Aurore à 55 %. Fin : nœud retiré, illustration `DestroyedArt` (§9.10.1) et mouvement `erase()` du logo, texte K7 et bouton décalés de 70 ms, focus sur le titre et annonce. Replis : sans `mask-composite` ou `@property`, fondu et flou de 400 ms. Captures : `shots/planche-dissolution.png`, `shots/10-detruit-390.png`.
 
 ### 20.5 Remplacement de §7.1 (Principe)
 
