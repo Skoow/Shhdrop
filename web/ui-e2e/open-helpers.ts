@@ -5,7 +5,7 @@ import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { expect } from "./fixtures";
-import { addText, readyHeading, sendButton } from "./send-helpers";
+import { addText, openFilePicker, readyHeading, sendButton } from "./send-helpers";
 
 const FILES = fileURLToPath(new URL("./files/", import.meta.url));
 export const file = (name: string) => join(FILES, name);
@@ -41,10 +41,7 @@ export async function sendShare(
   await page.goto(url);
   if (o.text !== undefined) await addText(page, o.text);
   if (o.files?.length) {
-    const home = page.getByRole("button", { name: "Parcourir les fichiers" });
-    const chooser = page.waitForEvent("filechooser");
-    if (await home.isVisible()) await home.click();
-    else await page.locator(".dropzone").click();
+    const chooser = openFilePicker(page);
     await (await chooser).setFiles(o.files.map(upload));
     await expect(page.locator("[data-row]")).toHaveCount(o.files.length + (o.text !== undefined ? 1 : 0));
   }

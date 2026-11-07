@@ -12,7 +12,9 @@ var securityHeaders = [][2]string{
 		"base-uri 'none'; form-action 'self'; frame-ancestors 'none'"},
 	{"Referrer-Policy", "no-referrer"},
 	{"X-Content-Type-Options", "nosniff"},
-	{"Permissions-Policy", "microphone=(self), camera=(), geolocation=()"},
+	// camera=(self) : photo et vidéo prises dans l'interface (Q-REC1 acceptée par le propriétaire,
+	// spec §35.3) ; /pdf-frame.html n'a besoin ni du micro ni de la caméra (pathHeaders).
+	{"Permissions-Policy", "microphone=(self), camera=(self), geolocation=()"},
 	{"Cross-Origin-Opener-Policy", "same-origin"},
 	{"Cross-Origin-Resource-Policy", "same-origin"},
 	{"Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload"},

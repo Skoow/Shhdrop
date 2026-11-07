@@ -178,4 +178,16 @@
   .num {
     font-variant-numeric: tabular-nums;
   }
+  /* Téléphone : deux actions pleine largeur, empilées et alignées (zone du pouce). */
+  @media (max-width: 759px) {
+    .acts {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .acts > :global(.btn),
+    .acts > :global(* > .btn) {
+      width: 100%;
+      justify-content: center;
+    }
+  }
 </style>

@@ -117,7 +117,7 @@
   </section>
 {:else}
   <section class="manage" aria-labelledby="m-title" aria-busy={phase === "loading" ? "true" : undefined}>
-    <h1 id="m-title" class="title" tabindex="-1" bind:this={title}>{t("manage.title")}</h1>
+    <h1 id="m-title" class="title" tabindex="-1" data-large-title bind:this={title}>{t("manage.title")}</h1>
     <div class="card" bind:this={card} data-capsule data-state="open">
       {#if status}
         {#key reads}
@@ -215,5 +215,37 @@
     min-height: 44px;
     color: var(--accent);
     text-underline-offset: 0.2em;
+  }
+  /* Téléphone : actions pleine largeur et alignées ; grand titre natif (réduit dans la barre). */
+  @media (max-width: 899px) {
+    .manage {
+      padding: var(--sp-2) 0 var(--sp-6);
+      justify-items: stretch;
+      gap: var(--sp-4);
+    }
+    .card {
+      padding: var(--sp-4);
+      border-radius: var(--r-lg);
+    }
+    .actions,
+    .danger-zone {
+      display: grid;
+      justify-items: stretch;
+    }
+    .actions :global(.btn),
+    .danger-zone :global(.btn) {
+      width: 100%;
+      justify-content: center;
+    }
+    .send {
+      justify-content: center;
+      width: 100%;
+      min-height: 52px;
+      border-radius: 14px;
+      background: var(--surface-3);
+      color: var(--text);
+      font-weight: 600;
+      text-decoration: none;
+    }
   }
 </style>

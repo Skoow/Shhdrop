@@ -54,7 +54,7 @@ test.describe("fr-FR", () => {
     await expect(manage).toHaveAttribute("open");
     await expect(manage.getByRole("button", { name: /^Copier/ })).toBeVisible();
     await expect(manage.locator(".sr-only").first()).toHaveText(/#m[A-Za-z0-9_-]{43}$/);
-    await expect(page.locator(".ready").getByText("Un mot de passe en plus du lien. Envoyez-les par deux moyens différents.")).toBeVisible();
+    await expect(page.locator(".ready").getByText("Envoyez le mot de passe par un autre moyen que le lien.", { exact: false })).toBeVisible();
 
     const link = await valueOf(page, linkCard(page));
     const password = await valueOf(page, pwCard(page));
@@ -70,8 +70,11 @@ test.describe("fr-FR", () => {
     expect(await clip(page)).toBe(password);
 
     // Partager : { url } seulement.
-    await linkCard(page).getByRole("button", { name: "Partager" }).click();
+    await linkCard(page).getByRole("button", { name: "Partager le lien" }).click();
     expect(await page.evaluate(() => (window as unknown as { __shared: unknown[] }).__shared)).toEqual([{ url: link }]);
+    // Mot de passe : un second partage, distinct, le texte seul (jamais avec le lien).
+    await pwCard(page).getByRole("button", { name: "Partager le mot de passe" }).click();
+    expect(await page.evaluate(() => (window as unknown as { __shared: unknown[] }).__shared)).toEqual([{ url: link }, { text: password }]);
 
     // QR : le lien, rien d'autre (même chemin que qrPath(link)).
     await linkCard(page).getByRole("button", { name: "QR code" }).click();
@@ -94,7 +97,7 @@ test.describe("fr-FR", () => {
     await page.getByRole("button", { name: "Terminé" }).click();
     await expect(page.getByText("Vous ne pourrez plus les afficher. Terminer ?")).toBeVisible();
     await page.getByRole("button", { name: "Terminer" }).click();
-    await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
     await expect(page.locator("[data-row]")).toHaveCount(0);
     const body = await page.evaluate(() => document.body.innerText);
     expect(body).not.toContain(link);
@@ -120,7 +123,7 @@ test.describe("fr-FR", () => {
     await page.waitForTimeout(2600); // gomme du logo
     await capture(page, "ready-deleted");
     await page.getByRole("button", { name: "Nouvel envoi" }).click();
-    await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
     expect(await armed(page)).toBe(false);
   });
 
@@ -130,7 +133,10 @@ test.describe("fr-FR", () => {
     await toReady(page, context, shh.origin);
     const gen = await valueOf(page, pwCard(page));
     expect(gen).toHaveLength(10);
-    expect(await pwCard(page).locator(".val.vis").innerText()).toBe(gen);
+    // Affiché par groupes de 4 (« K7m4 · Xq2p · 9r ») ; recollé sans séparateurs = la copie.
+    const shown = await pwCard(page).locator(".val.vis .g").allInnerTexts();
+    expect(shown).toEqual([gen.slice(0, 4), gen.slice(4, 8), gen.slice(8)]);
+    expect(shown.join("")).toBe(gen);
     await pwCard(page).getByRole("button", { name: /^Copier/ }).click();
     expect(await clip(page)).toBe(gen);
   });
@@ -167,19 +173,18 @@ test.describe("fr-FR", () => {
     await expect(p2.getByText(/^Actif · s'efface vers 3\sh\s30$/)).toBeVisible();
   });
 
-  test("dictée : un caractère à la fois avec son mot d'aide ; Échap ferme ; rien dans la console ni le stockage", async ({ page, shh, context }) => {
+  test("Épeler : chaque caractère en alphabet radio (« K comme Kilo ») ; Échap ferme ; rien dans la console ni le stockage", async ({ page, shh, context }) => {
     test.setTimeout(120_000);
     const logs: string[] = [];
     page.on("console", (m) => logs.push(m.text()));
     await toReady(page, context, shh.origin);
     const password = await valueOf(page, pwCard(page));
-    await pwCard(page).getByRole("button", { name: "Lire à voix haute" }).click();
-    const dlg = page.getByRole("dialog", { name: "Mot de passe, caractère par caractère" });
+    await pwCard(page).getByRole("button", { name: "Épeler" }).click();
+    const dlg = page.getByRole("dialog", { name: "Épeler le mot de passe" });
     await expect(dlg).toBeVisible();
-    await expect(dlg.getByText(`1 sur ${password.length}`)).toBeVisible();
-    await expect(dlg.locator(".lab")).toHaveText(/(minuscule|majuscule|chiffre|point|dièse|dollar|pour cent|plus|égal|arobase)/);
-    await dlg.getByRole("button", { name: "Suivant" }).click();
-    await expect(dlg.getByText(`2 sur ${password.length}`)).toBeVisible();
+    await expect(dlg.locator(".spell li")).toHaveCount(password.length);
+    const first = password[0]!;
+    if (/[a-z]/i.test(first)) await expect(dlg.locator(".spell li .w").first()).toHaveText(new RegExp(`^${first} comme [A-Z][a-z-]+, (minuscule|majuscule)$`));
     await page.keyboard.press("Escape");
     await expect(dlg).toBeHidden();
     expect(logs.join("\n")).not.toContain(password);
@@ -256,13 +261,16 @@ test.describe("en-US", () => {
   test("Link ready in English ; capture", async ({ page, shh }) => {
     test.setTimeout(120_000);
     await page.goto(shh.origin + "/");
-    await page.getByRole("group", { name: "Or create one here" }).getByRole("button", { name: "Text", exact: true }).click();
+    if (await page.getByRole("button", { name: /^Add/ }).filter({ visible: true }).first().isVisible()) {
+      await page.getByRole("button", { name: /^Add/ }).filter({ visible: true }).first().click();
+      await page.getByRole("dialog", { name: "Add" }).getByRole("button", { name: /^Write a note/ }).click();
+    } else await page.getByRole("group", { name: "Or create one here" }).getByRole("button", { name: "Note", exact: true }).click();
     const dlg = page.getByRole("dialog");
     await dlg.locator("textarea").fill("The door code is 4471.");
     await dlg.getByRole("button", { name: "Add", exact: true }).click();
     await page.getByRole("button", { name: "Encrypt and send" }).click();
     await expect(page.getByRole("heading", { name: "Link ready" })).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByText("A password on top of the link. Send them two different ways.").last()).toBeVisible();
+    await expect(page.getByText("Send the password by a different channel than the link.", { exact: false }).last()).toBeVisible();
     await page.waitForTimeout(700);
     await capture(page, "ready-en");
   });

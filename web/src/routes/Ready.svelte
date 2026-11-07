@@ -17,12 +17,12 @@
   import Button from "../ui/Button.svelte";
   import { clearClipboard } from "../ui/clipboard";
   import CopyField from "../ui/CopyField.svelte";
-  import { AudioLines, ChevronDown, ClipboardX, Eye, Lock, QrCode as QrIcon, Share2, Trash2 } from "../ui/Icon";
+  import { AudioLines, ChevronDown, ClipboardX, Eye, Lock, QrCode as QrIcon, Share2, ShieldCheck, Trash2 } from "../ui/Icon";
   import InlineConfirm from "../ui/InlineConfirm.svelte";
   import Logo from "../ui/Logo.svelte";
   import QrCode from "../ui/QrCode.svelte";
   import { reducedMotion } from "../ui/motion";
-  import { canShareLink, haptic, shareLink } from "../ui/native";
+  import { canShareLink, haptic, shareLink, sharePassword } from "../ui/native";
   import Sheet from "../ui/Sheet.svelte";
   import "../ui/seal.css";
 
@@ -100,11 +100,9 @@
 
   // ---------- Dictée du mot de passe (S5) ----------
   let dictating = $state(false);
-  let pos = $state(0);
   const chars = $derived(result ? dictate(result.password, lang) : []);
-  function dictKey(e: KeyboardEvent) {
-    if (e.key === "ArrowRight") pos = Math.min(chars.length - 1, pos + 1);
-    else if (e.key === "ArrowLeft") pos = Math.max(0, pos - 1);
+  async function sharePw() {
+    if (result) await sharePassword(result.password); // le mot de passe seul, jamais avec le lien
   }
 
   async function clearClip() {
@@ -170,7 +168,7 @@
       <header class="hd" data-fan>
         <span class="mini" aria-hidden="true" data-capsule><Lock size={22} strokeWidth={1.9} /></span>
         <div class="hd-tx">
-          <h2 id="ready-title" class="title" tabindex="-1" bind:this={heading}>{t("ready.title")}</h2>
+          <h2 id="ready-title" class="title" tabindex="-1" data-large-title bind:this={heading}>{t("ready.title")}</h2>
           <p class="meta num">{summary}</p>
           <p class="active num"><span class="dot" aria-hidden="true"></span>{t("ready.active", { time: around })}</p>
           <p class="self">{selfDestruct}</p>
@@ -207,19 +205,21 @@
         {/if}
       </div>
 
-      <p class="two" data-fan>{t("ready.two")}</p>
+      <p class="two" data-fan><ShieldCheck size={18} strokeWidth={1.9} aria-hidden="true" />{t("ready.two")}</p>
 
       <div class="card" role="group" aria-label={t("ready.pw.title")} data-fan>
-        <CopyField label={t("ready.pw.title")} value={result.password} whole />
-        <p class="hint">{t("ready.pw.reminder")}</p>
+        <CopyField label={t("ready.pw.title")} value={result.password} whole grouped />
         <div class="row">
-          <Button variant="ghost" dense onpress={() => {
-            pos = 0;
-            dictating = true;
-          }}>
+          <Button variant="secondary" dense onpress={() => void (dictating = true)}>
             {#snippet icon()}<AudioLines size={20} strokeWidth={1.75} />{/snippet}
             {t("ready.dictate")}
           </Button>
+          {#if canShare}
+            <Button variant="secondary" dense onpress={sharePw}>
+              {#snippet icon()}<Share2 size={20} strokeWidth={1.75} />{/snippet}
+              {t("ready.share.pw")}
+            </Button>
+          {/if}
         </div>
       </div>
 
@@ -273,22 +273,12 @@
   </Sheet>
 
   <Sheet bind:open={dictating} title={t("ready.dictate.title")}>
-    {#if chars.length > 0}
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="dict" onkeydown={dictKey}>
-        <p class="big" translate="no" aria-hidden="true">{chars[pos]!.ch}</p>
-        <p class="lab" aria-live="polite">{chars[pos]!.label}</p>
-        <p class="pos num">{t("ready.dictate.pos", { pos: pos + 1, count: chars.length })}</p>
-        <div class="row">
-          <Button variant="secondary" disabled={pos === 0} onpress={() => {
-            pos = Math.max(0, pos - 1);
-          }}>{t("ready.dictate.prev")}</Button>
-          <Button variant="primary" disabled={pos >= chars.length - 1} onpress={() => {
-            pos = Math.min(chars.length - 1, pos + 1);
-          }}>{t("ready.dictate.next")}</Button>
-        </div>
-      </div>
-    {/if}
+    <!-- Épeler : tout le mot de passe d'un coup, un caractère par ligne, en alphabet radio. -->
+    <ol class="spell" translate="no">
+      {#each chars as c, i (i)}
+        <li><span class="ch" aria-hidden="true">{c.ch}</span><span class="w">{c.label}</span></li>
+      {/each}
+    </ol>
   </Sheet>
 {/if}
 
@@ -386,10 +376,19 @@
   }
   .two {
     margin: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-2);
     padding: var(--sp-3) var(--sp-4);
-    border-left: 2px solid var(--accent);
+    border-radius: var(--r-md);
+    background: var(--accent-tint);
     color: var(--text);
     font-weight: 560;
+  }
+  .two :global(svg) {
+    flex: none;
+    margin-top: 3px;
+    color: var(--accent);
   }
   .hint {
     margin: 0;
@@ -418,8 +417,7 @@
     align-items: center;
     gap: var(--sp-2);
     padding: var(--sp-3) var(--sp-4);
-    border-left: 2px solid var(--warn);
-    border-radius: 0 var(--r-md) var(--r-md) 0;
+    border-radius: var(--r-md);
     background: var(--warn-tint);
     color: var(--text);
     font-weight: 560;
@@ -480,12 +478,40 @@
     color: var(--danger);
   }
   @media (max-width: 759px) {
-    .hd {
+    .ready {
+      padding: var(--sp-2) 0 0;
+    }
+    .panel {
       gap: var(--sp-4);
     }
+    .hd {
+      gap: var(--sp-4);
+      align-items: center;
+    }
+    .hd-tx {
+      gap: var(--sp-2);
+    }
     .mini {
-      width: 72px;
-      height: 46px;
+      width: 56px;
+      height: 56px;
+      align-self: flex-start;
+    }
+    .card {
+      padding: var(--sp-4);
+      border-radius: var(--r-lg);
+    }
+    /* Actions d'une carte : deux colonnes égales, pleine largeur (pouce, alignement). */
+    .card .row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    }
+    .card .row :global(.btn) {
+      width: 100%;
+      justify-content: center;
+    }
+    .clip,
+    .danger-zone {
+      justify-items: stretch;
     }
     /* Terminé, l'action principale, sous le pouce ; la suppression reste dans le fil. */
     .done {
@@ -498,25 +524,31 @@
       background: var(--bg);
     }
   }
-  .dict {
+  .spell {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-radius: var(--r-lg);
+    background: var(--surface-1);
+    box-shadow: inset 0 0 0 1px var(--hair);
+  }
+  .spell li {
     display: grid;
-    justify-items: center;
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+    align-items: center;
     gap: var(--sp-3);
-    padding: var(--sp-4) 0;
+    min-height: 52px;
+    padding: var(--sp-2) var(--sp-4);
   }
-  .big {
-    margin: 0;
+  .spell li + li {
+    border-block-start: 1px solid var(--hair);
+  }
+  .ch {
     font-family: var(--font-mono);
-    font-size: 6rem;
-    line-height: 1;
-  }
-  .lab {
-    margin: 0;
-    font-size: var(--fs-h3);
-  }
-  .pos {
-    margin: 0;
-    color: var(--text-2);
+    font-size: var(--fs-mono-block);
+    font-weight: 600;
+    color: var(--accent);
+    text-align: center;
   }
   .gone {
     display: grid;

@@ -2,7 +2,7 @@
 // Titre de l'onglet (scan UX B9) : « écran · Shhdrop », traduit, jamais de secret ; préfixe de la démo.
 import { afterEach, describe, expect, it } from "vitest";
 import { setLang } from "../i18n/i18n.svelte";
-import { demoPrefixed, routeTitle, setScreenTitle } from "./title";
+import { demoPrefixed, progressTitle, routeTitle, setProgressTitle, setScreenTitle } from "./title";
 
 afterEach(() => setLang("fr"));
 
@@ -21,6 +21,15 @@ describe("titre de l'onglet", () => {
     expect(routeTitle("ready")).toBe("Link ready · Shhdrop");
     expect(routeTitle("open")).toBe("Open a share · Shhdrop");
     expect(routeTitle("confidentialite")).toBe("Privacy · Shhdrop");
+  });
+  it("progression : « 42 % · Shhdrop », pourcentage d'abord, borné, jamais de nom ; puis le titre de l'écran revient", () => {
+    expect(progressTitle(42.7, "fr")).toBe("42\u202f% · Shhdrop");
+    expect(progressTitle(150, "en")).toBe("100% · Shhdrop");
+    setScreenTitle("open");
+    setProgressTitle(42, "fr");
+    expect(document.title).toBe("42\u202f% · Shhdrop");
+    setProgressTitle(null, "fr");
+    expect(document.title).toBe(routeTitle("open"));
   });
   it("setScreenTitle écrit document.title", () => {
     setScreenTitle("sealing");

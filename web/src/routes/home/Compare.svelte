@@ -1,32 +1,36 @@
 <script lang="ts">
-  // Accueil, « Pourquoi Shhdrop » : comparaison PAR CATÉGORIES, sans aucun nom de marque. Seul
-  // ce qui est vrai aujourd'hui est affirmé (le nettoyage des métadonnées n'y figure pas).
-  // Ordinateur (≥ 900 px) : vrai <table> (<th scope>) ; téléphone : une carte par critère.
-  import { getLang, t, type Key } from "../../i18n/i18n.svelte";
-  import { limitParams } from "../../i18n/limit-params";
+  // Accueil, « Pourquoi Shhdrop » : tourné vers ce que Shhdrop permet. Une seule comparaison,
+  // avec les services de transfert de fichiers habituels (même usage), SANS nom de marque
+  // (publicité comparative). Chaque case est défendable pour toute la catégorie : une croix
+  // seulement si c'est faux en général ; sinon « Parfois » ou « Rarement », en gris.
+  // Ordinateur (≥ 900 px) : vrai <table> (<th scope>), Shhdrop d'abord ; téléphone : une carte par critère.
+  import { t, type Key } from "../../i18n/i18n.svelte";
   import { reveal } from "../../ui/attach";
-  import { Check, Minus, X } from "../../ui/Icon";
 
   type Level = "yes" | "some" | "no";
-  type Col = "msg" | "xfer" | "shh";
-  const COLS: readonly Col[] = ["msg", "xfer", "shh"];
-  // Niveau de chaque case (icône) ; le texte dit toujours la nuance, l'icône n'est jamais seule.
+  type Col = "shh" | "xfer";
+  const COLS: readonly Col[] = ["shh", "xfer"];
   const ROWS: readonly { k: string; lv: Record<Col, Level> }[] = [
-    { k: "account", lv: { msg: "no", xfer: "some", shh: "yes" } },
-    { k: "e2e", lv: { msg: "some", xfer: "no", shh: "yes" } },
-    { k: "quality", lv: { msg: "no", xfer: "yes", shh: "yes" } },
-    { k: "password", lv: { msg: "no", xfer: "some", shh: "yes" } },
-    { k: "erase", lv: { msg: "some", xfer: "some", shh: "yes" } },
-    { k: "code", lv: { msg: "some", xfer: "some", shh: "yes" } },
-    { k: "size", lv: { msg: "some", xfer: "some", shh: "yes" } },
+    { k: "account", lv: { shh: "yes", xfer: "some" } },
+    { k: "e2e", lv: { shh: "yes", xfer: "some" } },
+    { k: "password", lv: { shh: "yes", xfer: "some" } },
+    { k: "erase", lv: { shh: "yes", xfer: "some" } },
+    { k: "quality", lv: { shh: "yes", xfer: "yes" } },
+    { k: "trackers", lv: { shh: "yes", xfer: "some" } },
+    { k: "code", lv: { shh: "yes", xfer: "some" } },
   ];
-  const cell = (k: string, c: Col) => t(`home.cmp.${k}.${c}` as Key, limitParams(getLang()));
+  const cell = (k: string, c: Col) => t(`home.cmp.${k}.${c}` as Key);
   const colName = (c: Col) => t(`home.cmp.col.${c}` as Key);
+  const levelName = (lv: Level) => t(`home.cmp.level.${lv}` as Key);
 </script>
 
-{#snippet mark(lv: Level)}
-  <span class={["mk", lv]} aria-hidden="true">
-    {#if lv === "yes"}<Check size={16} strokeWidth={2.4} />{:else if lv === "some"}<Minus size={16} strokeWidth={2.4} />{:else}<X size={16} strokeWidth={2.4} />{/if}
+<!-- Icônes maison ; jamais la couleur seule : « Oui », « Non », « Parfois » lus avant le texte. -->
+{#snippet mark(lv: Level, shh: boolean)}
+  <span class="sr-only">{levelName(lv)}, </span>
+  <span class={["mk", lv, { shh }]} aria-hidden="true">
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      {#if lv === "yes"}<path d="M3 7.4 5.8 10 11 4" />{:else if lv === "no"}<path d="M4 4l6 6M10 4l-6 6" />{:else}<path d="M3.5 7h7" />{/if}
+    </svg>
   </span>
 {/snippet}
 
@@ -50,7 +54,7 @@
           <tr>
             <th scope="row">{t(`home.cmp.${r.k}` as Key)}</th>
             {#each COLS as c (c)}
-              <td class={{ shh: c === "shh" }}><span class="v">{@render mark(r.lv[c])}<span>{cell(r.k, c)}</span></span></td>
+              <td class={{ shh: c === "shh" }}><span class="v">{@render mark(r.lv[c], c === "shh")}<span>{cell(r.k, c)}</span></span></td>
             {/each}
           </tr>
         {/each}
@@ -65,8 +69,8 @@
         <dl>
           {#each COLS as c (c)}
             <div class={["line", { shh: c === "shh" }]}>
-              <dt>{colName(c)}</dt>
-              <dd>{@render mark(r.lv[c])}<span>{cell(r.k, c)}</span></dd>
+              <dt>{c === "xfer" ? t("home.cmp.col.xfer.short") : colName(c)}</dt>
+              <dd>{@render mark(r.lv[c], c === "shh")}<span>{cell(r.k, c)}</span></dd>
             </div>
           {/each}
         </dl>
@@ -92,7 +96,7 @@
   .lede,
   .note {
     min-width: 0;
-    overflow-wrap: break-word;
+    overflow-wrap: anywhere;
   }
   h3 {
     min-width: 0;
@@ -173,9 +177,14 @@
     margin-top: 1px;
     border-radius: var(--r-pill);
   }
+  /* Coche verte pour Shhdrop ; un « oui » d'ailleurs reste gris (sobre, toujours vrai). */
   .mk.yes {
+    color: var(--text-2);
+    background: rgb(233 236 242 / 0.08);
+  }
+  .mk.yes.shh {
     color: var(--accent);
-    background: rgb(95 227 181 / 0.14);
+    background: rgb(95 227 181 / 0.16);
   }
   .mk.some {
     color: var(--text-2);
@@ -196,13 +205,13 @@
   }
   .card {
     min-width: 0;
-    padding: 18px 18px 8px;
+    padding: var(--sp-4) var(--sp-2) var(--sp-2);
     border-radius: var(--r-lg);
     background: var(--surface-1);
     box-shadow: inset 0 0 0 1px var(--hair);
   }
   h3 {
-    margin-bottom: var(--sp-2);
+    margin: 0 var(--sp-3) var(--sp-3);
     font-size: 1.0625rem;
   }
   dl {
@@ -211,18 +220,28 @@
   }
   .line {
     display: grid;
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    /* Libellé de colonne court, sur une ligne ; la valeur prend le reste. */
+    grid-template-columns: minmax(0, min(8.75rem, 45%)) minmax(0, 1fr);
     gap: var(--sp-3);
     align-items: start;
-    padding-block: 10px;
+    padding-block: var(--sp-3);
     border-block-start: 1px solid var(--hair);
   }
-  .line.shh {
-    padding-inline: 10px;
+  /* Toutes les lignes ont le même retrait : la ligne Shhdrop (teintée) reste alignée. */
+  .line {
+    padding-inline: var(--sp-3);
     border-radius: var(--r-md);
+  }
+  .line.shh {
+    background: var(--accent-tint);
+    border-block-start-color: transparent;
+  }
+  .line.shh + .line {
     border-block-start-color: transparent;
   }
   dt {
+    /* Centré sur la première ligne de la valeur (24 px) : 14 px × 1.45 + 2 + 2. */
+    padding-block-start: 2px;
     color: var(--text-2);
     font-size: var(--fs-small);
     overflow-wrap: anywhere;
@@ -234,7 +253,7 @@
   dd {
     margin: 0;
     display: flex;
-    gap: 8px;
+    gap: var(--sp-2);
     align-items: flex-start;
     min-width: 0;
     overflow-wrap: anywhere;
@@ -253,7 +272,7 @@
       display: none;
     }
     thead th:first-child {
-      width: 28%;
+      width: 38%;
     }
   }
   @media (forced-colors: active) {

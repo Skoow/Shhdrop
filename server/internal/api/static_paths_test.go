@@ -77,12 +77,26 @@ func TestSecurityHeadersKept(t *testing.T) {
 			}
 			switch {
 			case kv[0] == "Content-Security-Policy" && p == "/pdf-frame.html":
+			case kv[0] == "Permissions-Policy" && p == "/pdf-frame.html":
 			case kv[0] == "Cross-Origin-Resource-Policy" && strings.HasPrefix(p, "/pdf-frame."):
 			default:
 				if got[0] != kv[1] {
 					t.Errorf("%s : %s = %q, attendu %q", p, kv[0], got[0], kv[1])
 				}
 			}
+		}
+	}
+}
+
+// Caméra et micro : permis à la page (vocal, photo et vidéo prises dans l'interface), jamais au cadre PDF.
+func TestPermissionsPolicy(t *testing.T) {
+	e := newEnv(t, false, nil)
+	if got := get(e, "/")["Permissions-Policy"]; len(got) != 1 || got[0] != "microphone=(self), camera=(self), geolocation=()" {
+		t.Errorf("/ : Permissions-Policy = %v", got)
+	}
+	for _, p := range []string{"/pdf-frame.html"} {
+		if got := get(e, p)["Permissions-Policy"]; len(got) != 1 || got[0] != "microphone=(), camera=(), geolocation=()" {
+			t.Errorf("%s : Permissions-Policy = %v", p, got)
 		}
 	}
 }

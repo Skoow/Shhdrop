@@ -4,7 +4,7 @@
   // « Lien prêt » n'est jamais monté ici : l'écran parent l'affiche après onsealed(), c'est-à-
   // dire après la résolution de createShare puis la fermeture du sceau.
   import { tick } from "svelte";
-  import { setScreenTitle } from "../app/title";
+  import { setProgressTitle, setScreenTitle } from "../app/title";
   import { UPLOAD_WINDOW_MS, type Sender, type Step } from "../flows/send.svelte";
   import type { Category } from "../flows/kinds";
   import { formatBytes, formatDuration } from "../i18n/format";
@@ -214,8 +214,8 @@
   // La démo y ajoute son préfixe (demo/install.ts).
   const sending = $derived(phase === "upload" || phase === "paused" || phase === "offline" || phase === "finalize");
   $effect(() => {
-    void getLang();
-    if (sending) document.title = `${s.percent} % · Shhdrop`;
+    const lang = getLang();
+    if (sending) setProgressTitle(s.percent, lang);
     else setScreenTitle("sealing");
   });
   let lastDecile = 0;
@@ -477,5 +477,15 @@
   .foot :global(svg) {
     flex: none;
     margin-top: 2px;
+  }
+  @media (max-width: 759px) {
+    .actions {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .actions :global(.btn) {
+      width: 100%;
+      justify-content: center;
+    }
   }
 </style>

@@ -5,7 +5,7 @@
   /** D'où viennent les fichiers remis à `onfiles` (composer.add, Task 10). */
   export type Source = "fichiers" | "photo" | "video" | "depot";
   /** Actions qui ouvrent une interface dans la page (Tasks 10 à 12). */
-  export type Action = "vocal" | "texte";
+  export type Action = "photo" | "video" | "vocal" | "texte";
 </script>
 
 <script lang="ts">
@@ -20,7 +20,7 @@
   import { magnet, tilt } from "../ui/attach";
   import DropOverlay from "../ui/DropOverlay.svelte";
   import Guilloche from "../ui/Guilloche.svelte";
-  import { Camera, ChevronDown, Lock, Mic, Paperclip, Timer, Type, UserX, Video } from "../ui/Icon";
+  import { Camera, ChevronDown, Lock, Mic, Paperclip, Plus, Timer, Type, UserX, Video } from "../ui/Icon";
   import { reducedMotion } from "../ui/motion";
   import SealBand from "../ui/SealBand.svelte";
   import SealMark from "../ui/SealMark.svelte";
@@ -44,8 +44,10 @@
     onaction?: (action: Action) => void;
     /** Faux pendant un envoi : le glisser-déposer n'ouvre pas le voile et n'ajoute rien (S9). */
     active?: boolean;
+    /** Téléphone (< 760 px) : le grand bouton « Ajouter » ouvre la feuille d'ajout (Compose). */
+    onadd?: () => void;
   };
-  let { compact = false, children, onfiles, onaction, active = true }: Props = $props();
+  let { compact = false, children, onfiles, onaction, active = true, onadd }: Props = $props();
 
   // Décidé au montage seulement : un repli ultérieur ne rejoue pas l'entrée.
   let reveal = $state(!revealed && !untrack(() => compact));
@@ -75,9 +77,8 @@
   const canVoice = typeof MediaRecorder !== "undefined";
 
   let files: HTMLInputElement | undefined = $state();
-  let photo: HTMLInputElement | undefined = $state();
-  let video: HTMLInputElement | undefined = $state();
   let browse: HTMLButtonElement | undefined = $state();
+  let addBig: HTMLButtonElement | undefined = $state();
   let vessel: HTMLDivElement | undefined = $state();
 
   function give(list: File[], source: Source, folders: string[] = []) {
@@ -127,7 +128,8 @@
   }
   function start() {
     scrollToEl(vessel, "center");
-    browse?.focus({ preventScroll: true });
+    // Le bouton visible : « Ajouter » sur téléphone, « Parcourir les fichiers » ailleurs.
+    (addBig?.offsetParent ? addBig : browse)?.focus({ preventScroll: true });
   }
 </script>
 
@@ -201,18 +203,19 @@
             <div class="make" role="group" aria-labelledby="make-title">
               <p class="make-t" id="make-title">{t("compose.add.make")}</p>
               <div class="tiles">
-                {@render tile(t("compose.add.photo"), Camera, () => photo?.click(), "flash")}
-                {@render tile(t("compose.add.video"), Video, () => video?.click(), "rec")}
+                {@render tile(t("compose.add.photo"), Camera, () => act("photo"), "flash")}
+                {@render tile(t("compose.add.video"), Video, () => act("video"), "rec")}
                 {#if canVoice}{@render tile(t("compose.add.voice"), Mic, () => act("vocal"), "bars")}{/if}
                 {@render tile(t("compose.add.text"), Type, () => act("texte"), "caret")}
               </div>
             </div>
             <p class="proof num">{t("home.proof", limitParams(getLang()))}</p>
+            <!-- Téléphone : une seule action, « Ajouter », qui ouvre la feuille (Compose). -->
+            <button type="button" class="add-big" bind:this={addBig} aria-haspopup="dialog" onclick={() => onadd?.()}>
+              <span class="ab-ic" aria-hidden="true"><Plus size={26} strokeWidth={2.2} /></span>
+              <span class="ab-tx"><span class="ab-t">{t("add.open")}</span><span class="ab-s">{t("add.big.sub")}</span></span>
+            </button>
             <input bind:this={files} type="file" multiple hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "fichiers")} />
-            <!-- Téléphone : l'appareil photo ou la caméra du système (capture) ; ordinateur : sélecteur filtré.
-                 Aucun accès direct à la caméra : Permissions-Policy camera=() reste (spec §10). -->
-            <input bind:this={photo} type="file" accept="image/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "photo")} />
-            <input bind:this={video} type="file" accept="video/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "video")} />
           </div>
         {/if}
       </Vessel>
@@ -555,6 +558,78 @@
   .make {
     display: grid;
     gap: 10px;
+  }
+
+  /* Téléphone : « Ajouter » remplace « Parcourir » et la rangée de tuiles (aucun doublon). */
+  .add-big {
+    display: none;
+  }
+  @media (max-width: 759px) {
+    .browse,
+    .make,
+    .band-wrap,
+    .guil-clip {
+      display: none;
+    }
+    .add-big {
+      display: grid;
+      grid-template-columns: 56px minmax(0, 1fr);
+      align-items: center;
+      gap: var(--sp-4);
+      width: 100%;
+      min-height: 80px;
+      padding: var(--sp-3) var(--sp-4) var(--sp-3) var(--sp-3);
+      border: 0;
+      border-radius: var(--r-xl);
+      background: var(--paper);
+      color: var(--ink);
+      font: inherit;
+      text-align: start;
+      cursor: pointer;
+      box-shadow:
+        0 14px 30px -18px rgb(0 0 0 / 0.9),
+        inset 0 -2px 0 rgb(11 13 18 / 0.12);
+      transition: transform var(--dur-press) var(--ease-out);
+    }
+    .add-big:active {
+      transform: scale(0.98);
+    }
+    .ab-ic {
+      display: grid;
+      place-items: center;
+      width: 56px;
+      height: 56px;
+      border-radius: 18px;
+      background: var(--ink);
+      color: var(--accent);
+    }
+    .ab-tx {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+    .ab-t {
+      font-size: 1.25rem;
+      font-weight: 650;
+      font-stretch: 108%;
+    }
+    .ab-s {
+      color: rgb(11 13 18 / 0.68);
+      font-size: var(--fs-small);
+      line-height: var(--lh-small);
+    }
+    .empty {
+      gap: var(--sp-5);
+    }
+    /* Composeur : un écran d'app, pas une carte dans la page (ni cadre, ni liseré). */
+    .home.compact .compose :global(.vessel) {
+      background: transparent;
+      box-shadow: none;
+    }
+    .home.compact .compose :global(.vessel > .line),
+    .home.compact .compose :global(.vessel > .spot-clip) {
+      display: none;
+    }
   }
   .make-t {
     margin: 0;
@@ -949,6 +1024,11 @@
     }
     .cert::after {
       display: none;
+    }
+  }
+  @media (forced-colors: active) {
+    .add-big {
+      border: 1px solid ButtonText;
     }
   }
 </style>

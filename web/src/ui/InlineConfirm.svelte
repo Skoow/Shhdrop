@@ -112,11 +112,11 @@
     border-radius: var(--r-md);
     background: var(--surface-2);
   }
-  .danger {
+  .confirm.danger {
     background: var(--danger-tint);
     border-color: var(--danger);
   }
-  .warn {
+  .confirm.warn {
     background: var(--warn-tint);
     border-color: var(--warn);
   }

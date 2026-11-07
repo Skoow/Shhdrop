@@ -17,6 +17,7 @@
   import { browserWatchDeps, startWatch } from "../flows/watch";
   import { formatBytes, formatDuration } from "../i18n/format";
   import { getLang, t, type Key } from "../i18n/i18n.svelte";
+  import { setProgressTitle } from "../app/title";
   import type { ItemSink } from "../flows/downloads.svelte";
   import type { Opened } from "../index";
   import { announce } from "../ui/announce";
@@ -219,6 +220,17 @@
     return { ...s, bytes: s.done, n: items.length, finished: s.count.done, running: s.count.downloading + s.count.queued, paused: s.count.paused };
   };
   const allSum = $derived(sum(all.filter((i) => entries[i]!.kind === "file")));
+  // Titre de l'onglet pendant un téléchargement : « 42 % · Shhdrop » (jamais un nom de fichier),
+  // puis le titre de l'écran revient.
+  const dlPct = $derived.by(() => {
+    const z = dl.zip;
+    if (z && (z.state === "downloading" || z.state === "queued" || z.state === "paused")) return z.total > 0 ? (z.done * 100) / z.total : 0;
+    const busy = all.filter((i) => entries[i]!.kind === "file" && dl.rows[i] && dl.rows[i]!.state !== "idle" && dl.rows[i]!.state !== "failed");
+    const s0 = summarize(dl.rows, busy);
+    return s0.active > 0 && s0.total > 0 ? (s0.done * 100) / s0.total : null;
+  });
+  $effect(() => setProgressTitle(dlPct, lang));
+  $effect(() => () => setProgressTitle(null, getLang()));
   const totalBytes = totals.reduce((a, n) => a + n, 0);
   const risky = entries.flatMap((_, i) => (o.isRiskyFile(i) ? [names[i]!] : []));
 
@@ -339,7 +351,7 @@
 
 <div class="content" bind:this={panel}>
   <header class="top">
-    <h1 class="title" tabindex="-1" bind:this={heading}>{t("content.title")}</h1>
+    <h1 class="title" tabindex="-1" data-large-title bind:this={heading}>{t("content.title")}</h1>
     <p class="sum num">
       {viewOnly
         ? t("content.summary.view", { n: entries.length, size: formatBytes(totalBytes, lang) })

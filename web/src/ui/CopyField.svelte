@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { groups } from "../flows/dictate";
   import { tick } from "svelte";
   import { t } from "../i18n/i18n.svelte";
   import { announce } from "./announce";
@@ -8,8 +9,9 @@
   import { Check, Copy } from "./Icon";
 
   /** `whole` : valeur montrée en entier, sur plusieurs lignes au besoin (mot de passe : ce qu'on lit = ce qu'on copie). */
-  type Props = { label: string; value: string; whole?: boolean };
-  let { label, value, whole = false }: Props = $props();
+  type Props = { label: string; value: string; whole?: boolean; grouped?: boolean };
+  /** `grouped` (avec `whole`) : lu par groupes de 4 (« K7m4 · Xq2p · 9r ») ; la copie reste sans séparateurs. */
+  let { label, value, whole = false, grouped = false }: Props = $props();
 
   // Troncature au milieu par CSS seulement (la largeur décide) : une tête qui s'ellipse et une
   // queue fixe. Le texte visible n'est pas sélectionnable : on ne peut pas copier une valeur
@@ -64,7 +66,11 @@
         aria-describedby="{uid}-hint"
       />
     {:else}
-      {#if whole}
+      {#if whole && grouped}
+        <span class="val vis whole grouped" translate="no" aria-hidden="true">
+          {#each groups(value) as g, i (i)}{#if i > 0}<span class="gsep">·</span>{/if}<span class="g">{g}</span>{/each}
+        </span>
+      {:else if whole}
         <span class="val vis whole" translate="no" aria-hidden="true">{value}</span>
       {:else}
         <span class="val vis" translate="no" aria-hidden="true"><span class="head">{head}</span><span class="tail">{tail}</span></span>
@@ -137,6 +143,15 @@
   }
   .tail {
     flex: none;
+  }
+  .grouped {
+    gap: var(--sp-2);
+    white-space: nowrap;
+    font-size: var(--fs-mono);
+    letter-spacing: 0.02em;
+  }
+  .gsep {
+    color: var(--text-3);
   }
   .manual {
     font-size: max(1rem, 16px);

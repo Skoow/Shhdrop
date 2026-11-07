@@ -8,6 +8,7 @@
   // balayage horizontal au doigt (48 px), balayage vers le bas pour fermer. Images, vidéos,
   // sons et textes seulement (previewKind) ; SVG, HTML et PDF n'arrivent jamais ici.
   // « Voir seulement » : aucun bouton de téléchargement, mention honnête dans le panneau.
+  import { midSplitName } from "../ui/midname";
   import { untrack } from "svelte";
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
@@ -137,7 +138,7 @@
 <dialog bind:this={dlg} class="vp" aria-labelledby="{uid}-t" aria-roledescription="carousel" onclose={closed} onclick={backdrop} onkeydown={key}>
   {#if cur}
     <div class="head">
-      <h2 id="{uid}-t" class="nm"><bdi translate="no">{cur.name}</bdi></h2>
+      <h2 id="{uid}-t" class="nm" title={cur.name}><span class="sr-only">{cur.name}</span><bdi translate="no" aria-hidden="true"><span class="h">{midSplitName(cur.name).head}</span><span class="tl">{midSplitName(cur.name).tail}</span></bdi></h2>
       <span class="count num" aria-hidden="true">{t("viewer.count", { k: (at ?? 0) + 1, n: items.length })}</span>
       <IconButton label={t("common.close")} onpress={() => dlg?.close()}><X size={20} strokeWidth={1.75} /></IconButton>
     </div>
@@ -223,9 +224,20 @@
     margin: 0;
     font-size: var(--fs-small);
     font-weight: 600;
+    white-space: nowrap;
+  }
+  .nm bdi {
+    display: flex;
+    min-width: 0;
+  }
+  .nm .h {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+  }
+  .nm .tl {
+    flex: none;
+    white-space: pre;
   }
   .count {
     color: var(--text-2);
@@ -312,10 +324,18 @@
     font-size: var(--fs-micro);
     max-width: 48ch;
   }
-  @media (max-width: 560px) {
+  /* Téléphone : visionneuse plein écran, comme une app (zones sûres respectées). */
+  @media (max-width: 759px) {
     .vp {
-      width: calc(100vw - 16px);
-      height: min(86dvh, 720px);
+      width: 100vw;
+      height: 100dvh;
+      border: 0;
+      border-radius: 0;
+      background: var(--bg-deep);
+      box-shadow: none;
+    }
+    .head {
+      padding-top: max(var(--sp-2), env(safe-area-inset-top));
     }
     .stage {
       padding: var(--sp-2);

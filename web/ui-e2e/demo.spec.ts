@@ -89,7 +89,10 @@ test.describe("fr-FR", () => {
     await page.getByRole("link", { name: "Tous les détails de sécurité" }).click();
     await expect(page).toHaveURL(`${demo.url}securite`);
     await expect(page.getByRole("note")).toHaveText(BANNER_FR); // sur toutes les pages
-    await page.getByRole("link", { name: "Shhdrop, accueil" }).click();
+    // Téléphone : en-tête natif, « Retour » à la place du logo ; ordinateur : le logo.
+    const logo = page.getByRole("link", { name: "Shhdrop, accueil" });
+    if (await logo.isVisible()) await logo.click();
+    else await page.getByRole("banner").getByRole("button", { name: "Retour" }).click();
     await expect(page).toHaveURL(demo.url);
     await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
   });

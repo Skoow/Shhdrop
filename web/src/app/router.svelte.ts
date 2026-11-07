@@ -1,7 +1,9 @@
 // Routeur interne (UI §9). Il lit le chemin et, à la racine seulement, la FORME du « # »
 // (spec §32 : « #<43> » partage, « #m<43> » gestion) sans jamais en garder le contenu : la
 // clé est lue une fois par readLink (app/link.ts), puis retirée de l'adresse.
+import { flushSync } from "svelte";
 import { MANAGE_FRAGMENT, SHARE_FRAGMENT } from "../index";
+import { runTransition } from "../ui/viewTransition";
 
 /**
  * Marque de l'entrée d'historique d'une ouverture déverrouillée (aucun secret) : un
@@ -59,7 +61,14 @@ function sync(): void {
   if (next.name !== router.current.name) router.current = next;
 }
 
-if (typeof window !== "undefined") window.addEventListener("popstate", sync);
+// Retour du système (geste, bouton) : même glissement, vers la droite, sur téléphone.
+if (typeof window !== "undefined")
+  window.addEventListener("popstate", () => {
+    // Un « # » (lien collé, clé) se lit tout de suite, sans transition : l'écran qui le lit et
+    // le gestionnaire hashchange d'App doivent voir la route à jour dans le même tour.
+    if (phone() && location.hash === "") void runTransition(() => flushSync(sync), { back: true });
+    else sync();
+  });
 
 const base = () => import.meta.env.BASE_URL;
 
@@ -69,12 +78,18 @@ export function href(path: string): string {
 }
 
 /** Chemin interne seulement : « /… », sans « // », « \ », « # » ni « ? » (aucun secret ne transite ici). */
-export function navigate(path: string): void {
+export function navigate(path: string, opts: { back?: boolean } = {}): void {
   if (!/^\/(?!\/)[^\\#?]*$/.test(path)) throw new Error("chemin interne attendu");
-  history.pushState(null, "", href(path));
-  sync();
-  if (typeof window.scrollTo === "function") window.scrollTo(0, 0);
+  const go = () => {
+    history.pushState(null, "", href(path));
+    sync();
+    if (typeof window.scrollTo === "function") window.scrollTo(0, 0);
+  };
+  // Téléphone : l'écran glisse (en arrière : vers la droite ; fondu en mouvement réduit).
+  if (phone()) void runTransition(() => flushSync(go), { back: opts.back });
+  else go();
 }
+const phone = () => typeof matchMedia === "function" && matchMedia("(max-width: 899px)").matches;
 
 /** Gestionnaire de clic pour un <a href> interne : navigation sans rechargement, sauf clic modifié. */
 export function followLink(e: MouseEvent, path: string): void {

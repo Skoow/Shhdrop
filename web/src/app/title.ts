@@ -7,6 +7,25 @@ import type { Route } from "./router.svelte";
 export type TitleScreen = Route["name"] | "ready" | "sealing" | "unsupported" | "offline" | "server" | "limit" | "maintenance" | "invalid" | "incomplete" | "gone";
 const BRAND = "Shhdrop";
 
+/**
+ * Pendant un envoi ou un téléchargement : « 42 % · Shhdrop », comme les autres services (le
+ * pourcentage d'abord, lisible dans un onglet étroit ; aucun nom de fichier). Espace fine
+ * insécable en français.
+ */
+export function progressTitle(percent: number, lang: string): string {
+  const p = Math.max(0, Math.min(100, Math.floor(percent)));
+  return `${p}${lang === "fr" ? "\u202f" : ""}% · ${BRAND}`;
+}
+
+/** Écrit le titre de progression ; null : rend le titre de l'écran (ou de la page d'état). */
+export function setProgressTitle(percent: number | null, lang: string): void {
+  if (percent === null) {
+    if (screenNow !== null || claimed !== null) document.title = routeTitle(claimed ?? screenNow!);
+    return;
+  }
+  document.title = progressTitle(percent, lang);
+}
+
 export function routeTitle(screen: TitleScreen): string {
   return `${t(`title.${screen}`)} · ${BRAND}`;
 }

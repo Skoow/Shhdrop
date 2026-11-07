@@ -140,4 +140,38 @@
       background: Canvas;
     }
   }
+  /* Téléphone : l'écran respire, l'action principale descend sous le pouce, en vrai bouton. */
+  @media (max-width: 899px) {
+    .status {
+      min-height: calc(100dvh - 160px - env(safe-area-inset-bottom, 0px));
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-4);
+      padding: var(--sp-6) 0 var(--sp-4);
+    }
+    .visual {
+      align-self: flex-start;
+    }
+    .act {
+      margin-top: auto;
+      padding-top: var(--sp-5);
+    }
+    .act :global(a),
+    .act :global(button) {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      min-height: 52px;
+      border-radius: 14px;
+      background: var(--surface-3);
+      box-shadow: inset 0 0 0 1px var(--hair-2);
+      color: var(--text);
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .act :global(a:active) {
+      transform: scale(0.98);
+    }
+  }
 </style>

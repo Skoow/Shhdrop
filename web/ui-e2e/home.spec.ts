@@ -49,7 +49,8 @@ test.describe("fr-FR", () => {
     await expect(page.getByText(/^Texte, photos, vidéos, vocaux, documents\./)).toBeVisible();
     const certs = page.getByRole("list", { name: "En bref" }).getByRole("listitem");
     await expect(certs).toHaveCount(3);
-    await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
+    // Ordinateur : « Parcourir les fichiers » ; téléphone : une seule action, « Ajouter ».
+    await expect(page.getByRole("button", { name: isMobile ? /^Ajouter/ : "Parcourir les fichiers" })).toBeVisible();
     // Limites gratuites (spec §41.2), lues des constantes.
     await expect(page.locator("p.proof")).toHaveText("200\u202féléments · 2\u202fGo · 24\u202fh au plus · 5\u202fessais, puis destruction");
     for (const h of ["Comment ça marche", "Pourquoi c'est sûr", "Vos questions", "Quelque chose à transmettre ?"])
@@ -78,13 +79,12 @@ test.describe("fr-FR", () => {
     await page.waitForTimeout(900); // positions finales (entrée finie)
     // Au doigt, le titre ne parle pas de glisser.
     await expect(page.getByRole("heading", { level: 2, name: "Que voulez-vous envoyer ?" })).toBeVisible();
-    const row = page.getByRole("group", { name: "Ou créez sur place" });
-    await expect(row).toBeVisible();
-    const box = (await row.boundingBox())!;
-    expect(box.y + box.height).toBeLessThanOrEqual(844);
-    const browse = (await page.getByRole("button", { name: "Parcourir les fichiers" }).boundingBox())!;
-    expect(browse.height).toBeGreaterThanOrEqual(44);
-    for (const b of await row.getByRole("button").all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    // Une seule action (feuille d'ajout), grande, dans le premier écran ; ni « Parcourir » ni tuiles en double.
+    await expect(page.getByRole("group", { name: "Ou créez sur place" })).toBeHidden();
+    await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeHidden();
+    const add = (await page.getByRole("button", { name: /^Ajouter/ }).boundingBox())!;
+    expect(add.height).toBeGreaterThanOrEqual(56);
+    expect(add.y + add.height).toBeLessThanOrEqual(844 - 64); // au-dessus de la barre d'onglets
     expect(await page.evaluate(() => scrollY)).toBe(0);
     const vessel = (await page.locator('[data-slot="compose"]').boundingBox())!;
     const schema = (await page.locator('main [role="img"]').boundingBox())!;
@@ -141,7 +141,7 @@ test.describe("fr-FR", () => {
     await capture(page, "home-320-200pct-securite");
   });
 
-  test("K1 : toutes les animations d'entrée sont finies à 900 ms (hors ambiance et défilement)", async ({ page, shh }) => {
+  test("K1 : toutes les animations d'entrée sont finies à 900 ms (hors ambiance et défilement)", async ({ page, shh, isMobile }) => {
     // Cause de l'instabilité : document.getAnimations() ne liste que les animations vivantes. Sur une
     // machine chargée, le chargement dure plus de 900 ms, les entrées sont déjà finies (donc retirées
     // de la liste) au moment de l'échantillon, et il en restait 0. On enregistre donc chaque animation
@@ -173,9 +173,9 @@ test.describe("fr-FR", () => {
     await page.goto(shh.origin + "/");
     type Rec = { name: string; end: number; ambient: boolean; infinite: boolean };
     const recorded = () => page.evaluate(() => (window as unknown as { __anims: Rec[] }).__anims);
-    // Titre (9 mots), phrase, 3 sceaux, coffre et ses parties : au moins 20 entrées, attendues
-    // (sans durée d'horloge fixe) jusqu'à ce que tous les départs aient eu lieu.
-    await expect.poll(async () => (await recorded()).filter((r) => !r.ambient).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(20);
+    // Titre (9 mots), phrase, 3 sceaux, coffre et ses parties : au moins 20 entrées (16 sur
+    // téléphone : le coffre s'y résume à « Ajouter »), attendues jusqu'à ce que tous les départs aient eu lieu.
+    await expect.poll(async () => (await recorded()).filter((r) => !r.ambient).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(isMobile ? 16 : 20);
     const all = await recorded();
     for (const e of all.filter((r) => !r.ambient)) expect(e.end, e.name).toBeLessThanOrEqual(900);
     // Seule l'ambiance boucle.
@@ -192,7 +192,8 @@ test.describe("fr-FR", () => {
     await expect(h1.locator(".words .w")).toHaveCount(9);
   });
 
-  test("rien n'attend : à 100 ms, Parcourir ouvre le sélecteur multiple ; un clic sur le verre n'ouvre rien", async ({ page, shh }) => {
+  test("rien n'attend : à 100 ms, Parcourir ouvre le sélecteur multiple ; un clic sur le verre n'ouvre rien", async ({ page, shh, isMobile }) => {
+    test.skip(isMobile, "téléphone : une seule action « Ajouter » (feuille, compose.spec.ts)");
     await page.goto(shh.origin + "/", { waitUntil: "domcontentloaded" });
     const browse = page.getByRole("button", { name: "Parcourir les fichiers" });
     await expect(browse).toBeAttached();
@@ -209,12 +210,20 @@ test.describe("fr-FR", () => {
     expect((await chooser).isMultiple()).toBe(true);
   });
 
-  test("Photo et Vidéo : sélecteur filtré (capture sur téléphone) ; les fichiers choisis ouvrent le composeur", async ({ page, shh }) => {
+  test("Photo et Vidéo : caméra dans la page ; sans caméra, repli sur le sélecteur filtré (capture) ; les fichiers choisis ouvrent le composeur", async ({ page, shh, isMobile }) => {
+    test.skip(isMobile, "téléphone : feuille « Ajouter » (capture.spec.ts)");
+    // Aucune caméra ici : la page le dit et propose le sélecteur (fausse caméra : capture.spec.ts).
+    await page.addInitScript(() => {
+      if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("aucune", "NotFoundError"));
+    });
     await page.goto(shh.origin + "/");
     await page.waitForTimeout(900);
-    for (const [name, accept] of [["Photo", "image/*"], ["Vidéo", "video/*"]] as const) {
-      const chooser = page.waitForEvent("filechooser");
+    for (const [name, accept, fallback] of [["Photo", "image/*", "Choisir une photo"], ["Vidéo", "video/*", "Choisir une vidéo"]] as const) {
       await page.getByRole("group", { name: "Ou créez sur place" }).getByRole("button", { name, exact: true }).click();
+      const cam = page.locator("dialog[data-capture]");
+      await expect(cam.getByRole("alert")).toContainText("Aucune caméra ni aucun micro utilisable");
+      const chooser = page.waitForEvent("filechooser");
+      await cam.getByRole("button", { name: fallback }).click();
       const fc = await chooser;
       expect(fc.isMultiple()).toBe(false);
       expect(await fc.element().getAttribute("accept")).toBe(accept);
@@ -259,8 +268,10 @@ test.describe("fr-FR", () => {
     await cta.evaluate((e) => e.scrollIntoView({ block: "center" }));
     await expect.poll(() => cta.evaluate((e) => Number(getComputedStyle(e.closest(".rv")!).opacity))).toBe(1);
     await cta.click();
-    await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeFocused();
-    await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeInViewport();
+    // Le bouton visible : « Parcourir les fichiers » sur ordinateur, « Ajouter » sur téléphone.
+    const target = page.getByRole("button", { name: isMobile ? /^Ajouter/ : "Parcourir les fichiers" });
+    await expect(target).toBeFocused();
+    await expect(target).toBeInViewport();
     expect(page.url()).toBe(shh.origin + "/");
     if (!isMobile) {
       await page.evaluate(() => scrollTo(0, 0));
@@ -324,7 +335,8 @@ test.describe("fr-FR", () => {
   });
 
   test("ambiance : pause hors écran et onglet caché, reprise ensuite", async ({ page, shh }) => {
-    await page.setViewportSize({ width: 390, height: 560 });
+    // Le volet animé du coffre n'existe qu'à partir de 760 px (téléphone : le coffre se résume à « Ajouter »).
+    await page.setViewportSize({ width: 800, height: 560 });
     await page.goto(shh.origin + "/");
     const state = () =>
       page.evaluate(() => {
@@ -412,7 +424,7 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
     for (const sel of [".aurora", ".grain", ".guil"])
       expect(await page.locator(sel).first().evaluate((e) => getComputedStyle(e).display), sel).toBe("none");
-    for (const name of ["Parcourir les fichiers", "Photo", "Vidéo"]) {
+    for (const name of isMobile ? ["Ajouter Photo, vidéo, vocal, note ou fichiers"] : ["Parcourir les fichiers", "Photo", "Vidéo"]) {
       const b = page.getByRole("button", { name, exact: true });
       expect(await b.evaluate((e) => getComputedStyle(e).borderTopStyle)).toBe("solid");
     }
@@ -449,7 +461,7 @@ test.describe("en-US", () => {
     await expect(
       page.getByRole("img", { name: "Encrypted on your device, unreadable to the server, decrypted at the recipient; the key travels separately, never through the server." }),
     ).toHaveCount(1);
-    await expect(page.getByRole("button", { name: "Browse files" })).toBeVisible();
+    await expect(page.getByRole("button", { name: isMobile ? /^Add/ : "Browse files" })).toBeVisible();
     for (const h of ["How it works", "Why it's safe", "Your questions", "Something to pass on?"])
       await expect(page.getByRole("heading", { level: 2, name: h, exact: true })).toHaveCount(1);
     expect(await noHScroll(page)).toBe(true);

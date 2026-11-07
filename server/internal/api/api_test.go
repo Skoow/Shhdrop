@@ -446,7 +446,7 @@ var wantHeaders = map[string]string{
 		"base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
 	"Referrer-Policy":              "no-referrer",
 	"X-Content-Type-Options":       "nosniff",
-	"Permissions-Policy":           "microphone=(self), camera=(), geolocation=()",
+	"Permissions-Policy":           "microphone=(self), camera=(self), geolocation=()",
 	"Cross-Origin-Opener-Policy":   "same-origin",
 	"Cross-Origin-Resource-Policy": "same-origin",
 	"Strict-Transport-Security":    "max-age=63072000; includeSubDomains; preload",

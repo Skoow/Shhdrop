@@ -6,7 +6,8 @@ import { CONTENT_MAX, MANIFEST_MAX, MAX_ITEMS, NAME_MAX, STRIP_MAX, TEXT_MAX, cl
 import { CATEGORY_ORDER, categoryOf, extOf, type Category } from "./kinds";
 import { HEAD_BYTES, isExecutableSniff, sniff, type Sniffed } from "./sniff";
 
-export type Source = "fichiers" | "photo" | "video" | "depot" | "collage";
+/** `photo-ici`, `video-ici` : pris dans l'interface (caméra maison, media/capture.ts), jamais dans la galerie. */
+export type Source = "fichiers" | "photo" | "video" | "depot" | "collage" | "photo-ici" | "video-ici";
 /** nettoye : métadonnées retirées (Task 9) ; non_nettoye : le fichier peut en contenir ; sans_objet : texte, vocal. */
 export type CleanState = "nettoye" | "non_nettoye" | "sans_objet";
 
@@ -189,8 +190,8 @@ export function createComposer(deps: ComposeDeps = {}) {
 
   function named(f: File, source: Source): { base: string; ext: string } {
     const img = categoryOf("file", f.name, f.type) === "photos";
-    if (source === "photo" && img) return { base: names.photo(++counters.photo), ext: "." + extFor(f, "jpg") };
-    if (source === "video") return { base: names.video(++counters.video), ext: "." + extFor(f, "mp4") };
+    if ((source === "photo" || source === "photo-ici") && img) return { base: names.photo(++counters.photo), ext: "." + extFor(f, "jpg") };
+    if (source === "video" || source === "video-ici") return { base: names.video(++counters.video), ext: "." + extFor(f, "mp4") };
     if (source === "collage" && img) return { base: names.pasted(++counters.pasted), ext: "." + extFor(f, "png") };
     return splitName(cleanName(f.name));
   }
@@ -229,7 +230,8 @@ export function createComposer(deps: ComposeDeps = {}) {
         const mismatch = exec && !isRiskyName(base + ext);
         let data: Blob | Uint8Array<ArrayBuffer> = f;
         let size = f.size;
-        let clean = cleanStateOf(category, base + ext, mime);
+        // Photo prise ici : JPEG tiré d'un <canvas>, sans EXIF ni position par construction.
+        let clean = source === "photo-ici" && category === "photos" ? "nettoye" : cleanStateOf(category, base + ext, mime);
         if (deps.clean && clean === "non_nettoye" && (category !== "photos" || f.size <= STRIP_MAX)) {
           try {
             const r = await deps.clean(f);

@@ -132,33 +132,35 @@ describe("Home (UI §9.1)", () => {
     }
   });
 
-  it("fenêtre de dépôt : Parcourir, Photo et Vidéo ouvrent leur sélecteur ; un clic sur le verre n'ouvre rien", () => {
+  it("fenêtre de dépôt : Parcourir ouvre le sélecteur ; Photo et Vidéo passent par onaction (caméra maison ou repli) ; un clic sur le verre n'ouvre rien", () => {
     const onfiles = vi.fn();
-    show({ onfiles });
+    const onaction = vi.fn();
+    const onadd = vi.fn();
+    show({ onfiles, onaction, onadd });
     const inputs = [...document.querySelectorAll<HTMLInputElement>('input[type="file"]')];
-    expect(inputs).toHaveLength(3);
-    const [files, photo, video] = inputs as [HTMLInputElement, HTMLInputElement, HTMLInputElement];
+    expect(inputs).toHaveLength(1);
+    const files = inputs[0]!;
     expect(files.multiple).toBe(true);
     expect(files.accept).toBe("");
-    expect(photo.accept).toBe("image/*");
-    expect(photo.getAttribute("capture")).toBe("environment");
-    expect(video.accept).toBe("video/*");
-    expect(video.getAttribute("capture")).toBe("environment");
-    const clicks = inputs.map((i) => vi.spyOn(i, "click").mockImplementation(() => undefined));
+    const click = vi.spyOn(files, "click").mockImplementation(() => undefined);
     const button = (name: string) => [...document.querySelectorAll("button")].find((b) => b.textContent!.trim() === name)!;
     button("Parcourir les fichiers").click();
     button("Photo").click();
     button("Vidéo").click();
-    expect(clicks.map((c) => c.mock.calls.length)).toEqual([1, 1, 1]);
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(onaction.mock.calls).toEqual([["photo"], ["video"]]);
+    // Téléphone : un seul bouton « Ajouter » (feuille d'ajout, tenue par le composeur).
+    (document.querySelector(".add-big") as HTMLButtonElement).click();
+    expect(onadd).toHaveBeenCalledOnce();
     // Le verre n'est qu'une cible de dépôt : aucun sélecteur sans contexte (décision du propriétaire).
     (document.querySelector(".empty") as HTMLElement).click();
     (document.querySelector(".drop-title") as HTMLElement).click();
-    expect(clicks.map((c) => c.mock.calls.length)).toEqual([1, 1, 1]);
+    expect(click).toHaveBeenCalledTimes(1);
     // Les fichiers choisis sont remis avec leur source ; le champ est vidé.
     const f = new File(["x"], "a.txt");
-    Object.defineProperty(video, "files", { configurable: true, value: [f] });
-    video.dispatchEvent(new Event("change", { bubbles: true }));
-    expect(onfiles).toHaveBeenCalledWith([f], "video", []);
+    Object.defineProperty(files, "files", { configurable: true, value: [f] });
+    files.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(onfiles).toHaveBeenCalledWith([f], "fichiers", []);
   });
 
   it("actions : groupe nommé ; Vocal masqué sans MediaRecorder ; jamais de bouton Coller (Ctrl/Cmd + V suffit)", () => {
@@ -173,7 +175,7 @@ describe("Home (UI §9.1)", () => {
     const group = document.querySelector('[role="group"]')!;
     expect(document.getElementById(group.getAttribute("aria-labelledby")!)!.textContent).toBe("Ou créez sur place");
     const names = [...group.querySelectorAll("button")].map((b) => b.textContent!.trim());
-    expect(names).toEqual(["Photo", "Vidéo", "Texte"]);
+    expect(names).toEqual(["Photo", "Vidéo", "Note"]);
   });
 
   it("actions : Vocal présent quand MediaRecorder existe ; rappel onaction", () => {
@@ -183,7 +185,7 @@ describe("Home (UI §9.1)", () => {
       show({ onaction });
       const group = document.querySelector('[role="group"]')!;
       const buttons = [...group.querySelectorAll("button")];
-      expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Photo", "Vidéo", "Vocal", "Texte"]);
+      expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Photo", "Vidéo", "Vocal", "Note"]);
       buttons[2]!.click();
       buttons[3]!.click();
       expect(onaction.mock.calls).toEqual([["vocal"], ["texte"]]);

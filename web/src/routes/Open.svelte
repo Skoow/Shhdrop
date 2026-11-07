@@ -165,7 +165,9 @@
   );
   const banner = $derived.by(() => {
     const [pre, post] = t("content.banner", { duration: "\u0000" }).split("\u0000");
-    return { pre: pre ?? "", post: post ?? "" };
+    // Téléphone : la durée en tête, chaque précision sur sa ligne (ordinateur : une ligne avec « · »).
+    const rest = (post ?? "").split(" · ").filter((x) => x.trim() !== "");
+    return { pre: pre ?? "", rest };
   });
 
   let title: HTMLHeadingElement | undefined = $state();
@@ -204,13 +206,13 @@
         {#if r.state === "open"}
           {#if end === null && !gone.closed}
             <p class="banner num">
-              {#if expired}{t("content.expired")}{:else}{banner.pre}<Countdown
+              {#if expired}{t("content.expired")}{:else}<span class="b-main">{banner.pre}<Countdown
                   expiresInS={r.remainingS()}
                   onexpire={() => {
                     expired = true;
                     gone.closeToGone("countdown"); // aucune requête : l'horloge locale suffit
                   }}
-                />{banner.post}{/if}
+                /></span>{#each banner.rest as part, k (k)}<span class="b-sep"> · </span><span class="b-part">{part}</span>{/each}{/if}
             </p>
           {/if}
         {:else}
@@ -419,6 +421,28 @@
   .banner {
     color: var(--text);
     font-size: var(--fs-small);
+  }
+  @media (max-width: 759px) {
+    .cost {
+      font-size: var(--fs-small);
+      line-height: var(--lh-small);
+    }
+    .banner {
+      display: grid;
+      gap: 2px;
+    }
+    .b-main {
+      font-weight: 620;
+    }
+    .b-sep {
+      display: none;
+    }
+    .b-part {
+      color: var(--text-2);
+    }
+    .b-part::first-letter {
+      text-transform: uppercase;
+    }
   }
   .num {
     font-variant-numeric: tabular-nums;

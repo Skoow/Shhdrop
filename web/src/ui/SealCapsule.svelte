@@ -4,6 +4,7 @@
   // (graine fixe, benchmark M2), noms brouillés en proportion (couche aria-hidden, vrais noms
   // en liste masquée, K9), pourcentage. La fermeture du sceau n'est jouée qu'après la
   // résolution de createShare (close(), appelée par l'écran), jamais avant.
+  import { midSplitName } from "./midname";
   import type { Category } from "../flows/kinds";
   import { cipherVeil, scramble } from "./decor";
   import { File, FileArchive, FileText, Film, Image, Lock, LockOpen, Music, Type } from "./Icon";
@@ -26,6 +27,7 @@
     sealedLabel: string;
   };
   let { mode, progress, percent, summary, chip, names, more, sealedLabel, caption }: Props = $props();
+  const split = (name: string, i: number) => midSplitName(scramble(name, kOf(i), 7 + i * 31));
 
   const ICONS: Record<Category, typeof File> = { texte: Type, photos: Image, videos: Film, audio: Music, documents: FileText, archives: FileArchive, autres: File };
   const VEIL = cipherVeil(20261105);
@@ -99,7 +101,7 @@
       {@const Ic = ICONS[n.category]}
       <li style:--k={kOf(i)}>
         <Ic size={18} strokeWidth={1.75} />
-        <span class="nm" translate="no">{scramble(n.name, kOf(i), 7 + i * 31)}</span>
+        <span class="nm" translate="no"><span class="h">{split(n.name, i).head}</span><span class="tl">{split(n.name, i).tail}</span></span>
       </li>
     {/each}
     {#if more}<li class="more">{more}</li>{/if}
@@ -171,8 +173,9 @@
   }
   .head {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--sp-3);
+    gap: var(--sp-2) var(--sp-3);
     min-width: 0;
   }
   .lockbox {
@@ -192,6 +195,8 @@
     flex: 1;
     min-width: 0;
     font-weight: 600;
+    /* Le résumé ne se coupe jamais au milieu (« 8 éléments · / 61 Ko ») : la pastille passe dessous. */
+    white-space: nowrap;
   }
   .chip {
     flex: none;
@@ -232,12 +237,20 @@
     color: var(--text-2);
   }
   .names .nm {
+    display: flex;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
     opacity: calc(1 - var(--k) * 0.45);
     filter: blur(calc(var(--k) * 1.6px));
+  }
+  .names .h {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .names .tl {
+    flex: none;
+    white-space: pre;
   }
   /* Posée sur le volet de texte brouillé, jamais sur des noms lisibles (scan UX, envoi). */
   .veil-cap {

@@ -10,7 +10,8 @@
   import type { PaidTier } from "../limits";
   import { blockKey, createComposer, type AddReport, type Source } from "../flows/compose.svelte";
   import { CLEANER_READY, cleanFile } from "../flows/clean";
-  import { CHAT_READY, VOICE_RECORDER_READY } from "../flows/features";
+  import { addGroups, desktopActions, type AddId } from "../flows/add-actions";
+  import { captureSupport } from "../media/capture";
   import { fromPasteEvent } from "../flows/intake";
   import { createOptions, estimateUpload, sendRights, viewableInBrowser, viewOnlyBlockers, type Rights } from "../flows/options.svelte";
   import { formatBytes, formatDuration } from "../i18n/format";
@@ -19,7 +20,10 @@
   import Button from "../ui/Button.svelte";
   import CapacityGauge from "../ui/CapacityGauge.svelte";
   import CategoryGroup from "../ui/CategoryGroup.svelte";
-  import { ArrowDown, ArrowUp, BrushCleaning, MessagesSquare, Camera, ChevronDown, Lock, Mic, NotebookPen, Pencil, ShieldAlert, SlidersHorizontal, Upload, Video, X } from "../ui/Icon";
+  import { ArrowDown, ArrowUp, BrushCleaning, ChevronDown, Lock, Pencil, Plus, ShieldAlert, SlidersHorizontal, Upload, X } from "../ui/Icon";
+  import AddIcon from "../ui/AddIcon.svelte";
+  import AddSheet from "../ui/AddSheet.svelte";
+  import CaptureScreen, { type Captured } from "../ui/CaptureScreen.svelte";
   import TextField from "../ui/TextField.svelte";
   import PaidSheet from "../ui/PaidSheet.svelte";
   import Sheet from "../ui/Sheet.svelte";
@@ -62,7 +66,6 @@
   const coarseMq = new MediaQuery("pointer: coarse");
   const standaloneMq = new MediaQuery("display-mode: standalone");
   const narrow = $derived(narrowMq.current);
-  const coarse = $derived(coarseMq.current);
   const vaultShown = $derived(vaultAllowed && (coarseMq.current || standaloneMq.current));
   const options = createOptions({ generate: generatePassword, vaultAllowed: () => vaultShown });
   // Formules payantes (D41-16) : feuille d'information seulement, rien n'est en vente.
@@ -131,9 +134,20 @@
     report(r);
   }
 
-  // ---------- Ajouts depuis le composeur ----------
-  const canVoice = typeof MediaRecorder !== "undefined";
+  // ---------- Ajouts : feuille « Ajouter » (téléphone), zone de dépôt et rangée (ordinateur) ----------
+  // Photo, vidéo, vocal pris dans l'interface (CaptureScreen) ; sinon l'appareil photo du système.
+  const support = captureSupport({
+    mediaDevices: typeof navigator === "undefined" ? undefined : navigator.mediaDevices,
+    MediaRecorder: typeof MediaRecorder === "undefined" ? undefined : MediaRecorder,
+  });
+  const touch = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
+  const groups = addGroups({ support, touch });
+  const rowActions = desktopActions(support);
+  let addOpen = $state(false);
+  let capOpen = $state(false);
+  let capMode = $state<"photo" | "video" | "voice">("photo");
   let filesIn: HTMLInputElement | undefined = $state();
+  let galleryIn: HTMLInputElement | undefined = $state();
   let photoIn: HTMLInputElement | undefined = $state();
   let videoIn: HTMLInputElement | undefined = $state();
   function picked(input: HTMLInputElement, source: Source) {
@@ -142,9 +156,26 @@
     void addFiles(list, source);
   }
 
+  /** Une action d'ajout ; `live` faux : repli sur le sélecteur (appel synchrone, même geste). */
+  function addAct(id: AddId, live = groups.flatMap((g) => g.actions).find((a) => a.id === id)?.live ?? false) {
+    if (id === "note") openEditor(null, "");
+    else if (id === "files") filesIn?.click();
+    else if (id === "gallery") galleryIn?.click();
+    else if (id === "voice" || live) {
+      capMode = id === "voice" ? "voice" : id;
+      capOpen = true;
+    } else if (id === "photo") photoIn?.click();
+    else videoIn?.click();
+  }
   function act(a: Action) {
-    if (a === "texte") openEditor(null, "");
-    else voiceOpen = true;
+    addAct(a === "texte" ? "note" : a === "vocal" ? "voice" : a);
+  }
+  function captured(c: Captured) {
+    const name = `capture.${c.ext}`;
+    if (c.mode === "voice") {
+      if (composer.addVoice(c.blob, c.mime) === null) say(t("compose.tooMany", { n: 1, max: MAX_ITEMS }));
+      else announce(t("compose.added", { n: 1 }));
+    } else void addFiles([new File([c.blob], name, { type: c.mime })], c.mode === "photo" ? "photo-ici" : "video-ici");
   }
 
   // ---------- Texte ----------
@@ -186,10 +217,6 @@
     if (it) openEditor(id, it.text ?? "", it.base);
   }
 
-  // ---------- Vocal (Task 12) ----------
-  let voiceOpen = $state(false);
-  // « Conversation » (V2, pas encore construite) : feuille d'attente derrière CHAT_READY.
-  let chatOpen = $state(false);
 
   // ---------- Coller ----------
   const isTextEntry = (n: Element | null) =>
@@ -419,38 +446,24 @@
 <svelte:window ononline={() => (online = true)} onoffline={() => (online = false)} />
 <svelte:document onpaste={onPaste} />
 
-{#snippet create(label: string, Icon: typeof Lock, onclick: () => void)}
-  <button type="button" class="mk" {onclick}>
-    <Icon size={18} strokeWidth={1.8} aria-hidden="true" />
-    <span>{label}</span>
-  </button>
-{/snippet}
-
 {#snippet adder()}
-  <!-- Ajouter : zone de dépôt (un clic ouvre le sélecteur ; on dépose aussi n'importe où sur la
-       page) et « Créer sur place ». Ordinateur : barre fine en bas de la liste ; téléphone : en haut. -->
-  <div class={["adder", { bar: !narrow }]}>
+  <!-- Ordinateur : la zone de dépôt (un clic ouvre le sélecteur ; on dépose aussi n'importe où sur
+       la page) tient lieu de « Fichiers » ; à côté, la même liste d'actions que la feuille du téléphone. -->
+  <div class="adder bar">
     <button type="button" class="dropzone" onclick={() => filesIn?.click()}>
       <span class="dz-ic" aria-hidden="true"><Upload size={18} strokeWidth={1.8} /></span>
       <span class="dz-tx">
-        <span class="dz-t">{coarse ? t("compose.dropzone.touch") : t("compose.dropzone.title")}</span>
-        {#if !coarse}<span class="dz-s">{t("compose.dropzone.sub", { keys: pasteKeys })}</span>{/if}
+        <span class="dz-t">{t("compose.dropzone.title")}</span>
+        <span class="dz-s">{t("compose.dropzone.sub", { keys: pasteKeys })}</span>
       </span>
     </button>
     <div class="make" role="group" aria-label={t("compose.create.label")}>
-      {@render create(t("compose.create.note"), NotebookPen, () => act("texte"))}
-      {@render create(t("compose.create.voice"), Mic, () => act("vocal"))}
-      {#if coarse}
-        {@render create(t("compose.add.photo"), Camera, () => photoIn?.click())}
-        {@render create(t("compose.add.video"), Video, () => videoIn?.click())}
-      {/if}
-      {#if !CHAT_READY}
-        <button type="button" class="mk soon-mk" onclick={() => (chatOpen = true)}>
-          <MessagesSquare size={18} strokeWidth={1.8} aria-hidden="true" />
-          <span>{t("compose.create.chat")}</span>
-          <span class="soon-b">{t("compose.soon.badge")}</span>
+      {#each rowActions as a (a.id)}
+        <button type="button" class="mk" data-add={a.id} onclick={() => addAct(a.id, a.live)}>
+          <AddIcon id={a.id} size={18} />
+          <span>{t(`compose.row.${a.id as "photo" | "video" | "voice" | "note"}`)}</span>
         </button>
-      {/if}
+      {/each}
     </div>
   </div>
 {/snippet}
@@ -459,7 +472,7 @@
   <div class={["app", { narrow }]} {@attach narrow ? null : fitViewport}>
     <div class="list-col">
       <div class="top">
-        <h2 id="compose-title" class="title" tabindex="-1" bind:this={title}>{t("compose.title")}</h2>
+        <h2 id="compose-title" class="title" tabindex="-1" data-large-title bind:this={title}>{t("compose.title")}</h2>
         {#if anyNotCleanedFiles && !narrow}
           <!-- Ordinateur : dans l'en-tête, pour laisser la place à la liste ; la légende en description. -->
           <button type="button" class="cleanbtn small" aria-busy={cleaning} disabled={cleaning} title={t("compose.meta.legend")} aria-describedby="clean-legend" onclick={cleanAll}>
@@ -472,11 +485,6 @@
         <div class="cap"><CapacityGauge bytes={composer.totalBytes} count={composer.count} head onpaid={showPaid} /></div>
       </div>
 
-      <!-- Ajouter : une zone de dépôt (un clic ouvre le sélecteur), puis « Créer sur place ». -->
-      {#if narrow}{@render adder()}{/if}
-      <input bind:this={filesIn} type="file" multiple hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "fichiers")} />
-      <input bind:this={photoIn} type="file" accept="image/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "photo")} />
-      <input bind:this={videoIn} type="file" accept="video/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "video")} />
 
       {#if anyNotCleanedFiles && narrow}
         <button type="button" class="cleanbtn wide" aria-busy={cleaning} disabled={cleaning} aria-describedby="clean-legend-m" onclick={cleanAll}>
@@ -528,14 +536,20 @@
     </div>
 
     {#if narrow}
-      <div class="sendbar m" bind:clientHeight={barH}>
-        <CapacityGauge bytes={composer.totalBytes} count={composer.count} mini />
+      <!-- Téléphone : barre d'action collée (zone du pouce) : réglages en une ligne, puis
+           « Ajouter » (+, ouvre la feuille) à côté de l'action principale. -->
+      <div class="sendbar m dock" bind:clientHeight={barH}>
         <button type="button" class="optbtn" aria-haspopup="dialog" onclick={() => (optionsOpen = true)}>
           <SlidersHorizontal size={18} strokeWidth={1.9} aria-hidden="true" />
           <span class="ob-tx"><span class="ob-t">{t("options.open")}</span><span class="sr-only"> · </span><span class="ob-s num">{shortSummary}</span></span>
           <ChevronDown size={18} strokeWidth={1.9} aria-hidden="true" />
         </button>
-        <Button variant="primary" lock disabled={reasonText !== ""} aria-describedby={reasonText ? "send-reason" : undefined} onpress={send}>{t("options.submit")}</Button>
+        <div class="acts">
+          <button type="button" class="plus" aria-haspopup="dialog" aria-label={t("add.open")} onclick={() => (addOpen = true)}>
+            <Plus size={26} strokeWidth={2.2} aria-hidden="true" />
+          </button>
+          <Button variant="primary" lock disabled={reasonText !== ""} aria-describedby={reasonText ? "send-reason" : undefined} onpress={send}>{t("options.submit")}</Button>
+        </div>
         {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{/if}
       </div>
     {:else}
@@ -554,7 +568,13 @@
   </div>
 {/snippet}
 
-<Home {active} compact={filled} children={filled ? app : undefined} onfiles={(f, s, folders) => void addFiles(f, s, folders)} onaction={act} />
+<!-- Sélecteurs (hors du composeur : l'accueil vide s'en sert aussi). -->
+<input bind:this={filesIn} type="file" multiple hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "fichiers")} />
+<input bind:this={galleryIn} type="file" accept="image/*,video/*" multiple hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "fichiers")} />
+<input bind:this={photoIn} type="file" accept="image/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "photo")} />
+<input bind:this={videoIn} type="file" accept="video/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "video")} />
+
+<Home {active} compact={filled} onadd={() => (addOpen = true)} children={filled ? app : undefined} onfiles={(f, s, folders) => void addFiles(f, s, folders)} onaction={act} />
 
 <Sheet bind:open={editorOpen} title={editorId ? t("text.title.edit") : t("text.title.new")}>
   <div class="editor">
@@ -647,19 +667,14 @@
 
 <PaidSheet bind:open={paidOpen} tier={paidTier} />
 
-<Sheet bind:open={chatOpen} title={t("compose.create.chat")}>
-  <p class="soon">{t("compose.soon.chat")}</p>
-</Sheet>
+<AddSheet bind:open={addOpen} {groups} onpick={addAct} />
 
-<Sheet bind:open={voiceOpen} title={t("compose.voice.title")}>
-  <!-- VOICE_RECORDER_READY : héberger ici <VoiceRecorder onrecorded={(file) => …} /> (autre chantier). -->
-  {#if !VOICE_RECORDER_READY}<p class="soon">{t("compose.soon.voice")}</p>{/if}
-</Sheet>
+<CaptureScreen bind:open={capOpen} mode={capMode} ondone={captured} onfallback={(m) => (m === "photo" ? photoIn : videoIn)?.click()} />
 
 {#if toast}
   <div class="toast-slot" style:--lift="{filled ? barH : 0}px">
     {#key toast.id}
-      <UndoToast message={toast.message} onundo={undo} ondismiss={() => (toast = null)} onclose={() => undefined} />
+      <UndoToast message={toast.message} durationMs={narrow ? 5000 : 6000} onundo={undo} ondismiss={() => (toast = null)} onclose={() => undefined} />
     {/key}
   </div>
 {/if}
@@ -675,7 +690,18 @@
   }
   .app.narrow {
     gap: var(--sp-3);
-    padding-top: var(--sp-3);
+    padding: var(--sp-2) 0 0;
+  }
+  .app.narrow .sendbar {
+    margin-inline: calc(-1 * var(--sp-4));
+    border-radius: 0;
+    /* Opaque : la liste qui défile dessous ne se lit pas à travers les commandes. */
+    background: var(--bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .app.narrow .top {
+    padding-inline: 0;
   }
   .narrow .list-col {
     gap: var(--sp-2);
@@ -812,15 +838,6 @@
     .mk:hover :global(svg) {
       color: var(--accent);
     }
-  }
-  .soon-b {
-    padding: 0 7px;
-    border-radius: var(--r-pill);
-    background: rgb(141 178 255 / 0.14);
-    color: var(--info);
-    font-size: var(--fs-micro);
-    font-weight: 600;
-    line-height: 1.6;
   }
   /* Action secondaire (contour), jamais un aplat ambre qui crie « problème » (scan UX D4). */
   .cleanbtn {
@@ -1038,7 +1055,35 @@
     font-size: var(--fs-small);
   }
   .sendbar.m :global(.btn) {
-    min-height: 52px;
+    min-height: 56px;
+  }
+  /* « Ajouter » (+) à gauche de l'action principale, même hauteur : le pouce trouve les deux. */
+  .acts {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: var(--sp-2);
+  }
+  .plus {
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border: 0;
+    border-radius: 14px;
+    background: var(--surface-3);
+    box-shadow: inset 0 0 0 1px var(--hair-2);
+    color: var(--accent);
+    cursor: pointer;
+    transition: transform var(--dur-press) var(--ease-out);
+  }
+  .plus:active {
+    transform: scale(0.94);
+    background: var(--accent-tint);
+  }
+  .plus:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   /* ---------- Feuilles ---------- */
@@ -1250,7 +1295,7 @@
       .adder.bar .mk {
         padding: 0 12px;
       }
-      .adder.bar .mk > span:not(.soon-b) {
+      .adder.bar .mk > span {
         position: absolute;
         width: 1px;
         height: 1px;
@@ -1355,10 +1400,6 @@
     display: flex;
     justify-content: flex-end;
     gap: var(--sp-2);
-  }
-  .soon {
-    margin: 0;
-    color: var(--text-2);
   }
 
   .floating {

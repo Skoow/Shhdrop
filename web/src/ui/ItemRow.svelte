@@ -2,6 +2,9 @@
   // Ligne du composeur (UI §9.2.4) : vignette ou icône, nom (<bdi>, troncature au milieu qui
   // garde l'extension), taille et durée, badges, actions (renommer ou modifier, retirer),
   // poignée et mode déplacement. Le nom affiché est déjà passé par cleanName.
+  import { swipeToRemove } from "./swipe";
+  import { reducedMotion } from "./motion";
+  import { midSplit } from "./midname";
   import { tick } from "svelte";
   import type { ComposeItem } from "../flows/compose.svelte";
   import { metaNoteKey } from "../flows/compose.svelte";
@@ -43,6 +46,7 @@
   let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, danger = false, el = $bindable() }: Props = $props();
 
   const name = $derived(item.base + item.ext);
+  const mid = $derived(midSplit(item.base));
   const format = $derived(formatOf({ kind: item.kind, ext: item.ext.slice(1).toLowerCase(), sniffed: item.sniffed ?? null }));
   const eta = $derived(transferSeconds(item.size, ASSUMED_UP_BPS));
 
@@ -140,7 +144,7 @@
 
 <!-- Alt + ↑/↓ depuis la poignée ou un bouton de la ligne (l'événement remonte). -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div bind:this={el} class={["row", { editing, moving, compact, danger }]} onkeydown={key}>
+<div bind:this={el} class={["row", { editing, moving, compact, danger }]} onkeydown={key} {@attach compact && !editing ? swipeToRemove(onremove, { reduced: reducedMotion() }) : null}>
   {#if compact}
     <!-- Téléphone : l'ordre se change par le menu « … » (Monter, Descendre). -->
   {:else if movable}
@@ -180,7 +184,7 @@
       </div>
     {:else}
       <bdi class="nm" title={name} translate="no">
-        <span class="b">{item.base}</span>{#if item.kind !== "text"}<span class="e">{item.ext}</span>{/if}
+        <span class="b">{mid.head}</span><span class="e">{mid.tail}{#if item.kind !== "text"}{item.ext}{/if}</span>
       </bdi>
       <span class="meta">
         {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi><span class="sep" aria-hidden="true">·</span>{:else if item.kind === "file"}<span>{t(typeKey(format))}</span><span class="sep" aria-hidden="true">·</span>{/if}
@@ -239,7 +243,15 @@
     background: var(--danger-tint);
     box-shadow: inset 3px 0 0 var(--danger);
   }
+  /* Glisser pour retirer : la ligne, opaque, couvre le fond rouge tant qu'elle n'a pas bougé. */
+  .row.compact:global(.swiping) {
+    background: var(--bg);
+  }
+  .row.compact:global(.swipe-back) {
+    transition: translate 220ms var(--ease-out);
+  }
   .row.compact {
+    touch-action: pan-y;
     grid-template-columns: 44px minmax(0, 1fr) auto;
     min-height: 60px;
     padding: 6px 0 6px 2px;
@@ -278,7 +290,8 @@
   }
   .e {
     flex: none;
-    white-space: nowrap;
+    /* pre : l'espace en tête de la queue (« … 2026.jpg ») reste visible. */
+    white-space: pre;
   }
   .sub {
     min-width: 0;

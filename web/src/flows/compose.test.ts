@@ -441,3 +441,18 @@ describe("éléments en cause (S6)", () => {
     expect([...c.culprits()].sort()).toEqual([t, id("x.exe")].sort());
   });
 });
+
+describe("pris dans l'interface (caméra maison, Q-REC1)", () => {
+  it("photo-ici : nommée « Photo n », sans métadonnées par construction (canvas) → nettoyée", async () => {
+    const c = make();
+    const r = await c.add([new File([new Uint8Array([0xff, 0xd8, 1])], "capture.jpg", { type: "image/jpeg" })], "photo-ici");
+    expect(r.added).toEqual(["Photo 1.jpg"]);
+    expect(c.items[0]).toMatchObject({ category: "photos", clean: "nettoye" });
+  });
+  it("video-ici : nommée « Vidéo n », honnête : le conteneur peut porter nom du navigateur et date → non nettoyée", async () => {
+    const c = make();
+    const r = await c.add([new File([new Uint8Array(4)], "capture.webm", { type: "video/webm" })], "video-ici");
+    expect(r.added).toEqual(["Vidéo 1.webm"]);
+    expect(c.items[0]).toMatchObject({ category: "videos", clean: "non_nettoye" });
+  });
+});

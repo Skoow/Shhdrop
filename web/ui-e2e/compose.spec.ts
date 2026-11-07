@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
+import { openFilePicker, pickInAddSheet } from "./send-helpers";
 
 const FILES = fileURLToPath(new URL("./files/", import.meta.url));
 const f = (name: string) => join(FILES, name);
@@ -18,20 +19,19 @@ const MIXED = [...PHOTOS, f("anniversaire-lou.webm"), f("contrat.pdf"), f("archi
 
 async function open(page: Page, origin: string) {
   await page.goto(origin + "/");
-  await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
+  // Ordinateur : « Parcourir les fichiers » ; téléphone : une seule action, « Ajouter ».
+  await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
 }
 /** Choisit des fichiers par « Parcourir les fichiers » (accueil) ou la zone de dépôt (composeur). */
 async function browse(page: Page, files: string[] | { name: string; mimeType: string; buffer: Buffer }[]) {
-  const home = page.getByRole("button", { name: "Parcourir les fichiers" });
-  const chooser = page.waitForEvent("filechooser");
-  if (await home.isVisible()) await home.click();
-  else await page.locator(".dropzone").click();
-  await (await chooser).setFiles(files as never);
+  await (await openFilePicker(page)).setFiles(files as never);
 }
 async function addNote(page: Page, body: string, title = "") {
-  const inComposer = page.getByRole("group", { name: "Créer sur place" });
-  if (await inComposer.isVisible()) await inComposer.getByRole("button", { name: "Note texte" }).click();
-  else await page.getByRole("group", { name: "Ou créez sur place" }).getByRole("button", { name: "Texte", exact: true }).click();
+  if (!(await pickInAddSheet(page, "Écrire une note"))) {
+    const inComposer = page.getByRole("group", { name: "Créer sur place" });
+    if (await inComposer.isVisible()) await inComposer.getByRole("button", { name: "Note", exact: true }).click();
+    else await page.getByRole("group", { name: "Ou créez sur place" }).getByRole("button", { name: "Note", exact: true }).click();
+  }
   const dlg = page.getByRole("dialog", { name: "Nouveau texte" });
   if (title) await dlg.getByLabel("Titre").fill(title);
   await dlg.getByLabel("Contenu").fill(body);
@@ -132,14 +132,16 @@ test.describe("fr-FR", () => {
     if (isMobile) {
       await expect(page.getByRole("button", { name: /^Actions pour / })).toHaveCount(10);
       await expect(page.getByRole("button", { name: /^Retirer / })).toHaveCount(0);
-      await expect(page.getByRole("button", { name: "Choisir des fichiers" })).toBeVisible();
-      const make = page.getByRole("group", { name: "Créer sur place" }).getByRole("button");
-      await expect(make).toHaveText(["Note texte", "Mémo vocal", "Photo", "Vidéo", "Conversation Bientôt"]);
+      // Téléphone : une seule action d'ajout, « + » à côté de l'envoi ; ni zone de dépôt ni rangée.
+      await expect(page.locator(".dropzone")).toHaveCount(0);
+      await expect(page.getByRole("group", { name: "Créer sur place" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Ajouter", exact: true })).toBeVisible();
       expect(await longParagraphs(page.locator("main"))).toEqual([]);
     } else {
       // Ordinateur : une seule présentation (ni grille ni tableau) ; « Créer sur place » sans Photo ni Vidéo.
       await expect(page.locator(".groups .grid, .groups table, .groups .tile")).toHaveCount(0);
-      await expect(page.getByRole("group", { name: "Créer sur place" }).getByRole("button")).toHaveText(["Note texte", "Mémo vocal", "Conversation Bientôt"]);
+      // Même liste d'actions que la feuille du téléphone ; la zone de dépôt tient lieu de « Fichiers ».
+      await expect(page.getByRole("group", { name: "Créer sur place" }).getByRole("button")).toHaveText(["Photo", "Vidéo", "Vocal", "Note"]);
       await expect(page.getByRole("button", { name: /^Déposez des fichiers n'importe où sur la page/ })).toBeVisible();
       // Exigence du propriétaire : tout tient dans l'écran, sans défilement de page ; le bouton
       // d'envoi est entièrement visible (1440 × 900 puis 1920 × 1080).
@@ -226,7 +228,7 @@ test.describe("fr-FR", () => {
     }
     const pw = box.locator(".val .sr-only");
     const first = await pw.textContent();
-    expect(first).toMatch(/^[a-km-np-zA-HJ-NP-Z2-9!#$%+=?@]{10}$/);
+    expect(first).toMatch(/^[a-km-np-zA-HJ-NP-Z2-9!#$%+=?@&*\-/:;()]{10}$/);
     await regen.click();
     await expect(pw).not.toHaveText(first!);
     if (browserName === "chromium") {
@@ -342,7 +344,7 @@ test.describe("fr-FR", () => {
     await page.getByRole("group", { name: "contrat.pdf retiré" }).getByRole("button", { name: "Annuler" }).click();
     await expect(rows(page)).toHaveCount(3);
     await page.getByRole("button", { name: "Tout retirer" }).click();
-    await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
     await page.getByRole("button", { name: "Annuler" }).click();
     await expect(rows(page)).toHaveCount(3);
   });
@@ -400,7 +402,7 @@ test.describe("fr-FR", () => {
     // Nom long : coupé avec des points de suspension, l'extension reste lisible.
     await browse(page, [{ name: "photo-de-vacances-ete-2026-bretagne-au-bord-de-la-mer-avec-toute-la-famille.jpg", mimeType: "image/jpeg", buffer: readFileSync(f("plage-nuit.jpg")) }]);
     const long = rows(page).filter({ hasText: "photo-de-vacances" });
-    await expect(long.locator(".e")).toHaveText(".jpg");
+    await expect(long.locator(".e")).toHaveText(/\S\.jpg$/); // ellipse au milieu : la fin du nom et l'extension restent
     expect(await long.locator(".b").evaluate((e) => getComputedStyle(e).textOverflow)).toBe("ellipsis");
   });
 
@@ -456,7 +458,7 @@ test.describe("fr-FR", () => {
 
     test.skip(browserName !== "chromium", "fichier creux de 2 Go : Chromium (chemin local)");
     await page.getByRole("button", { name: "Tout retirer" }).click();
-    await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
     const dir = mkdtempSync(join(tmpdir(), "shh-2go-"));
     try {
       // Fichiers creux (aucun octet écrit sur le disque) : 2 Gio exactement, puis 2 Gio + 1 octet.
@@ -469,7 +471,7 @@ test.describe("fr-FR", () => {
       await expect(page.getByRole("alert").filter({ hasText: /^Trop gros/ })).toHaveCount(0);
       await expect(page.locator("#send-reason")).toHaveCount(0);
       await page.getByRole("button", { name: "Tout retirer" }).click();
-      await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
+      await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
       const p = join(dir, "film-2go-plus-1.bin");
       const fd = openSync(p, "w");
       ftruncateSync(fd, 2147483648 + 1);
@@ -575,20 +577,29 @@ test.describe("fr-FR", () => {
     expect(await axe(page)).toEqual([]);
   });
 
-  test("Conversation : entrée « Bientôt », feuille d'explication sans date", async ({ page, shh }) => {
+  test("ajout : feuille « Ajouter » en liste groupée (téléphone), rangée sobre sans doublon (ordinateur) ; plus de « Conversation » ici (onglet Salon)", async ({ page, shh, isMobile }) => {
     await open(page, shh.origin);
     await browse(page, [f("contrat.pdf")]);
-    const b = page.getByRole("group", { name: "Créer sur place" }).getByRole("button", { name: /^Conversation/ });
-    await expect(b.locator(".soon-b")).toHaveText("Bientôt");
-    await b.click();
-    await expect(page.getByRole("dialog", { name: "Conversation" })).toContainText("Bientôt : un salon de discussion chiffré et éphémère, partagé par un lien et un mot de passe.");
-  });
-
-  test("Mémo vocal : entrée « Créer sur place », feuille d'attente (enregistreur à venir)", async ({ page, shh }) => {
-    await open(page, shh.origin);
-    await browse(page, [f("contrat.pdf")]);
-    await page.getByRole("group", { name: "Créer sur place" }).getByRole("button", { name: "Mémo vocal" }).click();
-    await expect(page.getByRole("dialog", { name: "Mémo vocal" })).toContainText("L'enregistreur vocal arrive bientôt.");
+    await expect(page.getByRole("button", { name: /^Conversation/ })).toHaveCount(0);
+    if (isMobile) {
+      await page.getByRole("button", { name: "Ajouter", exact: true }).click();
+      const sheet = page.getByRole("dialog", { name: "Ajouter" });
+      expect(await sheet.getByRole("heading", { level: 3 }).allTextContents()).toEqual(["Prendre ici", "Créer", "Depuis l'appareil"]);
+      const labels = await sheet.locator("[data-add] .lb").allTextContents();
+      expect(labels).toEqual(["Prendre une photo", "Filmer une vidéo", "Enregistrer un vocal", "Écrire une note", "Photos et vidéos", "Fichiers"]);
+      for (const b of await sheet.locator("[data-add]").all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(56);
+      await capture(page, "add-sheet");
+      // « Photos et vidéos » : la galerie (sans capture) ; « Fichiers » : tout type.
+      const chooser = page.waitForEvent("filechooser");
+      await sheet.getByRole("button", { name: /^Photos et vidéos/ }).click();
+      const el = (await chooser).element();
+      expect(await el.getAttribute("accept")).toBe("image/*,video/*");
+      expect(await el.getAttribute("capture")).toBeNull();
+    } else {
+      await expect(page.getByRole("button", { name: "Ajouter", exact: true })).toHaveCount(0);
+      await expect(page.locator(".dropzone")).toBeVisible();
+      await expect(page.getByRole("button", { name: /Parcourir les fichiers/ })).toHaveCount(0);
+    }
   });
 
   test("320 px : nom de 200 caractères et nom arabe, aucun débordement", async ({ page, shh }) => {
@@ -600,7 +611,7 @@ test.describe("fr-FR", () => {
     ]);
     await expect(rows(page)).toHaveCount(2);
     expect(await noHScroll(page)).toBe(true);
-    await expect(rows(page).first().locator(".e")).toHaveText(".pdf");
+    await expect(rows(page).first().locator(".e")).toHaveText(/^x+\.pdf$/);
   });
 });
 
@@ -611,7 +622,10 @@ test.describe("en-US", () => {
     if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(shh.origin + "/");
     const chooser = page.waitForEvent("filechooser");
-    await page.getByRole("button", { name: "Browse files" }).click();
+    if (isMobile) {
+      await page.getByRole("button", { name: /^Add/ }).click();
+      await page.getByRole("dialog", { name: "Add" }).getByRole("button", { name: /^Files/ }).click();
+    } else await page.getByRole("button", { name: "Browse files" }).click();
     await (await chooser).setFiles(MIXED.slice(0, 8));
     await expect(page.getByRole("heading", { level: 2, name: "Your share" })).toBeVisible();
     await expect(page.locator(".top .ht")).toHaveText(/^8\s\/\s200\sitems · /);

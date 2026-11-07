@@ -1,9 +1,9 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { followLink, href, router } from "../app/router.svelte";
+  import { followLink, href, navigate, router } from "../app/router.svelte";
   import { getLang, setLang, t } from "../i18n/i18n.svelte";
   import Aurora from "./Aurora.svelte";
-  import { Languages } from "./Icon";
+  import { ChevronLeft, Languages } from "./Icon";
   import LiveRegion from "./LiveRegion.svelte";
   import Logo from "./Logo.svelte";
   import TabBar from "./TabBar.svelte";
@@ -62,6 +62,36 @@
   }
 
   const here = (name: string) => (router.current.name === name ? "page" : undefined);
+
+  // Téléphone (< 900 px), en-tête d'écran natif : retour en haut à gauche sur les pages
+  // secondaires de l'expéditeur, et le grand titre de l'écran qui se réduit dans la barre une
+  // fois défilé (titre marqué data-large-title, sinon le h1 de l'écran). Sur ordinateur, rien ne change.
+  const BACK: ReadonlySet<string> = new Set(["securite", "confidentialite", "notfound", "manage"]);
+  const back = $derived(BACK.has(router.current.name));
+  let small = $state("");
+  let raf = 0;
+  function measure() {
+    raf = 0;
+    // Le premier titre affiché (un écran caché, comme le composeur pendant l'envoi, ne compte pas).
+    const shown = (sel: string) => [...document.querySelectorAll<HTMLElement>(sel)].find((e) => e.getClientRects().length > 0);
+    const marked = shown("main [data-large-title]");
+    if (router.current.name === "home" && !marked) return void (small = "");
+    const el = marked ?? shown("main h1");
+    const bar = document.querySelector<HTMLElement>("header.top");
+    const hidden = !!el && !!bar && el.getBoundingClientRect().bottom < bar.getBoundingClientRect().bottom;
+    small = hidden ? (el!.textContent ?? "").trim() : "";
+  }
+  const queue = () => {
+    if (!raf) raf = requestAnimationFrame(measure);
+  };
+  $effect(() => {
+    void router.current;
+    queue();
+    return () => cancelAnimationFrame(raf);
+  });
+  function goBack() {
+    navigate("/", { back: true });
+  }
 </script>
 
 <Aurora />
@@ -74,8 +104,14 @@
 
 <div bind:this={sentinel} class="sentinel" aria-hidden="true"></div>
 
-<header class="top" class:scrolled style:--banner-h={banner ? `${bannerH}px` : undefined}>
+<svelte:window onscroll={queue} onresize={queue} />
+
+<header class={["top", { scrolled, tabs, "has-back": back }]} style:--banner-h={banner ? `${bannerH}px` : undefined}>
   <div class="bar wrap">
+    {#if back}
+      <button type="button" class="back" onclick={goBack}><ChevronLeft size={24} strokeWidth={2} aria-hidden="true" /><span class="back-t">{t("shell.back")}</span></button>
+    {/if}
+    <p class={["small", { on: small !== "" }]} aria-hidden="true">{small}</p>
     <a class="logo" href={href("/")} onclick={(e) => followLink(e, "/")} aria-label={t("shell.home")}>
       <!-- Logo « Trame » (scripts/gen-logo.mjs) ; l'introduction ne se joue que sur l'accueil, une fois par chargement. -->
       <Logo />
@@ -89,7 +125,7 @@
       onclick={toggleLang}
     >
       <Languages size={20} strokeWidth={1.75} aria-hidden="true" />
-      <span lang={other}>{t("shell.lang.label")}</span>
+      <span lang={other} class="lang-l">{t("shell.lang.label")}</span>
     </button>
     {#if langLocked}<span id="lang-locked" class="sr">{t("shell.lang.locked")}</span>{/if}
   </div>
@@ -313,7 +349,95 @@
     white-space: nowrap;
   }
 
+  .back,
+  .small {
+    display: none;
+  }
+  /* ---------- Téléphone : en-tête d'écran natif ---------- */
+  @media (max-width: 899px) {
+    .bar {
+      position: relative;
+      flex-wrap: nowrap;
+      min-height: 52px;
+    }
+    /* Retour à la place du logo ; la langue en icône seule (nom accessible inchangé). */
+    .has-back .logo {
+      display: none;
+    }
+    .back {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      min-height: 44px;
+      margin-inline-start: -10px;
+      padding: 0 var(--sp-2) 0 4px;
+      border: 0;
+      border-radius: var(--r-md);
+      background: transparent;
+      color: var(--accent);
+      font: inherit;
+      font-size: var(--fs-body);
+      font-weight: 560;
+      cursor: pointer;
+    }
+    .back:active {
+      opacity: 0.6;
+    }
+    .back:focus-visible {
+      outline: 2px solid var(--accent);
+    }
+    .small {
+      display: block;
+      position: absolute;
+      inset-inline: 104px;
+      margin: 0;
+      overflow: hidden;
+      font-size: var(--fs-body);
+      font-weight: 620;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      opacity: 0;
+      transform: translateY(6px);
+      transition:
+        opacity 180ms var(--ease-out),
+        transform 220ms var(--ease-out);
+      pointer-events: none;
+    }
+    .small.on {
+      opacity: 1;
+      transform: none;
+    }
+    .small.on ~ .logo {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .lang {
+      margin-inline-start: auto;
+      padding-inline: 0;
+      border-color: transparent;
+    }
+    .lang-l {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    /* Écrans racine : la langue est dans l'onglet Réglages. */
+    .top.tabs .lang {
+      display: none;
+    }
+    main {
+      padding-block: var(--sp-3) var(--sp-6);
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
+    .small {
+      transition: none;
+    }
     .lang {
       transition: none;
     }

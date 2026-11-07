@@ -36,7 +36,7 @@
         {:else if tab.soon}
           <button type="button" class="tab soon" aria-disabled="true" aria-describedby="tab-soon-{tab.id}" onclick={() => soon(tab.id)}>
             <Icon size={22} strokeWidth={1.8} aria-hidden="true" /><span class="lb">{t(`tabs.${tab.id}` as Key)}</span>
-            <span class="badge" id="tab-soon-{tab.id}">{t("tabs.soon")}</span>
+            <span class="dot" aria-hidden="true"></span><span class="badge" id="tab-soon-{tab.id}">{t("tabs.soon")}</span>
           </button>
         {:else}
           <button type="button" class="tab" aria-haspopup="dialog" aria-expanded={settings} aria-current={current === "settings" ? "page" : undefined} onclick={() => (settings = true)}>
@@ -149,17 +149,25 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* « Bientôt » : un point discret près de l'icône (le texte reste pour les lecteurs d'écran,
+     relié par aria-describedby) ; il ne chevauche plus l'icône. */
   .badge {
     position: absolute;
-    inset-block-start: 0;
-    inset-inline-start: calc(50% + 6px);
-    padding: 0 5px;
-    border-radius: var(--r-pill);
-    background: var(--surface-3);
-    color: var(--text-2);
-    font-size: 0.625rem;
-    font-weight: 600;
-    line-height: 1.5;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .dot {
+    position: absolute;
+    inset-block-start: 7px;
+    inset-inline-start: calc(50% + 10px);
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--info);
+    box-shadow: 0 0 0 2px var(--bg);
   }
 
   .set {

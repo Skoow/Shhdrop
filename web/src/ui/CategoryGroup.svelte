@@ -11,6 +11,7 @@
   import { ASSUMED_UP_BPS, transferSeconds } from "../flows/estimate";
   import { formatDuration } from "../i18n/format";
   import ItemRow from "./ItemRow.svelte";
+  import { Trash2 } from "./Icon";
   import { reducedMotion } from "./motion";
   import { edgeScroll, shiftFor, targetIndex } from "./reorder";
 
@@ -132,7 +133,8 @@
   </div>
   <ol bind:this={list} class="rows">
     {#each items as item (item.id)}
-      <li class="li" data-row={item.id} animate:flip={{ duration: reducedMotion() ? 0 : flipMs }}>
+      <li class={["li", { swipeable: compact }]} data-row={item.id} animate:flip={{ duration: reducedMotion() ? 0 : flipMs }}>
+        {#if compact}<span class="swipe-bg" aria-hidden="true"><Trash2 size={20} strokeWidth={1.9} />{t("compose.swipe.remove")}</span>{/if}
         <ItemRow
           {item}
           movable={items.length > 1}
@@ -191,6 +193,28 @@
   .li {
     position: relative;
     border-radius: 16px;
+  }
+  /* Glisser pour retirer (téléphone) : le fond rouge apparaît sous la ligne qui part à gauche. */
+  .swipeable {
+    overflow: hidden;
+  }
+  .swipe-bg {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--sp-2);
+    padding-inline-end: var(--sp-5);
+    border-radius: inherit;
+    background: var(--danger);
+    color: var(--on-danger);
+    font-size: var(--fs-small);
+    font-weight: 650;
+    opacity: 0;
+  }
+  .swipeable:has(:global(.swiping)) .swipe-bg {
+    opacity: 1;
   }
   .li:global(.lifted) {
     z-index: 2;

@@ -3,6 +3,7 @@
   // nettoyé (extension toujours visible), type, taille, temps estimé ; pendant un
   // téléchargement : barre, pourcentage, débit, temps restant ; actions selon l'état et les
   // droits. « Voir seulement » : aucune action de téléchargement ni de copie dans le DOM.
+  import { midSplit } from "./midname";
   import type { Row } from "../flows/downloads.svelte";
   import { formatBytes, formatDuration, formatRate } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
@@ -41,6 +42,7 @@
   const dot = $derived(name.lastIndexOf("."));
   const base = $derived(kind === "file" && dot > 0 ? name.slice(0, dot) : name);
   const ext = $derived(kind === "file" && dot > 0 ? name.slice(dot) : "");
+  const mid = $derived(midSplit(base));
   const pct = $derived(row.total > 0 ? Math.min(100, Math.floor((row.done / row.total) * 100)) : row.state === "done" ? 100 : 0);
   const left = $derived(row.rate > 0 ? (row.total - row.done) / row.rate : null);
   const FAIL = { network: "dl.fail.network", budget: "dl.fail.budget", limit: "dl.fail.limit", disk_full: "dl.fail.disk", write: "dl.fail.write", gone: "dl.fail.gone" } as const;
@@ -50,7 +52,7 @@
 <li class="row" data-item={i} data-kind={format.family} data-state={row.state}>
   <FormatIcon {format} />
   <div class="main">
-    <bdi class="name" title={name} translate="no"><span class="b">{base}</span>{#if ext}<span class="e">{ext}</span>{/if}</bdi>
+    <bdi class="name" title={name} translate="no"><span class="b">{mid.head}</span><span class="e">{mid.tail}{ext}</span></bdi>
     <span class="meta num">
       {#if row.state === "downloading"}
         <span class="st">{left === null ? t("dl.progress.start", { pct, rate: formatRate(row.rate, lang) }) : t("dl.progress", { pct, rate: formatRate(row.rate, lang), left: formatDuration(left, lang) })}</span>
@@ -77,7 +79,7 @@
     {#if canView}
       <Button variant="secondary" dense {disabled} bind:el={viewBtn} onpress={() => onview(viewBtn ?? null)} aria-label={t("dl.row.view", { name })}>
         {#snippet icon()}<Eye size={18} />{/snippet}
-        {t("dl.view")}
+        <span class="hide-narrow">{t("dl.view")}</span>
       </Button>
     {/if}
     {#if !viewOnly}
@@ -159,7 +161,8 @@
   }
   .e {
     flex: none;
-    white-space: nowrap;
+    /* pre : l'espace en tête de la queue (« … 2026.jpg ») reste visible. */
+    white-space: pre;
   }
   .meta {
     display: flex;
@@ -232,13 +235,14 @@
     color: var(--warn);
     font-size: var(--fs-micro);
   }
-  /* Téléphone : « Télécharger » en icône seule (nom accessible inchangé), « Voir » garde son texte. */
+  /* Téléphone : « Voir » et « Télécharger » en icône seule (nom accessible inchangé) : le nom a la place. */
   @media (max-width: 560px) {
     .row {
       padding-inline: var(--sp-2) 0;
       gap: 2px var(--sp-2);
     }
-    .actions :global(button.ghost) {
+    .actions :global(button.ghost),
+    .actions :global(button.secondary) {
       min-width: 44px;
       padding-inline: 10px;
       gap: 0;
