@@ -135,9 +135,9 @@ func TestSizing(t *testing.T) {
 	if SegmentSize(80, 1) != 16*65552 {
 		t.Fatal("dernier segment partiel", SegmentSize(80, 1))
 	}
-	// Spec §24, §29.3 : paliers jusqu'à 16 385 morceaux (1 Gio de données + le morceau du
-	// manifeste), 257 segments.
-	want := []int{1, 16, 80, 160, 400, 800, 1600, 4000, 8000, 16385}
+	// Spec §24, §29.3, §41.2 : paliers jusqu'à 32 769 morceaux (2 Gio de données + le morceau
+	// du manifeste), 513 segments.
+	want := []int{1, 16, 80, 160, 400, 800, 1600, 4000, 8000, 16385, 32769}
 	if len(Buckets) != len(want) {
 		t.Fatal("Buckets", Buckets)
 	}
@@ -145,6 +145,10 @@ func TestSizing(t *testing.T) {
 		if Buckets[i] != want[i] {
 			t.Fatal("Buckets", Buckets)
 		}
+	}
+	if SegmentCount(32769) != 513 || SegmentSize(32769, 511) != 64*65552 || SegmentSize(32769, 512) != 65552 ||
+		totalSize(32769) != 2148073536 || ContentBytes(32769) != 2<<30 {
+		t.Fatal("palier de 2 Gio", SegmentCount(32769), totalSize(32769))
 	}
 	if SegmentCount(16385) != 257 || SegmentCount(4000) != 63 || SegmentCount(8000) != 125 {
 		t.Fatal("SegmentCount grands paliers")
@@ -163,14 +167,14 @@ func TestSizing(t *testing.T) {
 		t.Fatal("hasAllBut")
 	}
 	for _, b := range Buckets {
-		total := 0
+		var total int64
 		for n := 0; n < SegmentCount(b); n++ {
 			if segOffset(b, n) != total {
 				t.Fatal("offset", b, n)
 			}
-			total += SegmentSize(b, n)
+			total += int64(SegmentSize(b, n))
 		}
-		if total != 48+b*65552 {
+		if total != totalSize(b) {
 			t.Fatal(b, total)
 		}
 	}
@@ -288,13 +292,13 @@ func TestPutSegmentRules(t *testing.T) {
 	if err := s.PutSegment(id, 0, segBody(80, 0, 1)); !errors.Is(err, ErrNotFound) {
 		t.Fatal("après finalize", err)
 	}
-	// envoi abandonné : délai de 3 h arrondi au quart d'heure (10:02 → 13:15)
+	// envoi abandonné : délai de 6 h arrondi au quart d'heure (10:02 → 16:15)
 	id2, _, _ := s.Create(newKeys().req(1, 1, 1))
-	c.Add(3*time.Hour + 12*time.Minute) // 13:14 : encore accepté
+	c.Add(6*time.Hour + 12*time.Minute) // 16:14 : encore accepté
 	if err := s.PutSegment(id2, 0, segBody(1, 0, 1)); err != nil {
 		t.Fatal("avant délai", err)
 	}
-	c.Add(time.Minute) // 13:15
+	c.Add(time.Minute) // 16:15
 	if err := s.PutSegment(id2, 0, segBody(1, 0, 1)); !errors.Is(err, ErrNotFound) {
 		t.Fatal("après délai", err)
 	}
@@ -475,17 +479,17 @@ func TestPurgeAt(t *testing.T) {
 	var purge int64
 	s.DB.QueryRow("SELECT purge_at FROM shares WHERE id=?", id).Scan(&purge)
 	if want := time.Date(2026, 11, 4, 11, 15, 0, 0, time.UTC).Unix(); purge != want {
-		t.Fatal("purge_at = min(now+3h, expires_at)", time.Unix(purge, 0).UTC())
+		t.Fatal("purge_at = min(now+6h, expires_at)", time.Unix(purge, 0).UTC())
 	}
 	k2, k3 := newKeys(), newKeys()
 	id2 := ready(t, s, k2, 1, 24, 1)
-	s.Unlock(id2, k2.acces, k2.preuve) // 10:52 + 3 h = 13:52, arrondi au quart d'heure supérieur
+	s.Unlock(id2, k2.acces, k2.preuve) // 10:52 + 6 h = 16:52, arrondi au quart d'heure supérieur
 	s.DB.QueryRow("SELECT purge_at FROM shares WHERE id=?", id2).Scan(&purge)
-	if want := time.Date(2026, 11, 4, 14, 0, 0, 0, time.UTC).Unix(); purge != want {
-		t.Fatal("purge_at = ceil15(now+3h)", time.Unix(purge, 0).UTC())
+	if want := time.Date(2026, 11, 4, 17, 0, 0, 0, time.UTC).Unix(); purge != want {
+		t.Fatal("purge_at = ceil15(now+6h)", time.Unix(purge, 0).UTC())
 	}
 	id3 := ready(t, s, k3, 1, 6, 1) // expires_at = ceil15(10:52 + 6 h) = 17:00
-	c.Add(5 * time.Hour)            // 15:52 : now + 3 h dépasse expires_at
+	c.Add(5 * time.Hour)            // 15:52 : now + 6 h dépasse expires_at
 	s.Unlock(id3, k3.acces, k3.preuve)
 	s.DB.QueryRow("SELECT purge_at FROM shares WHERE id=?", id3).Scan(&purge)
 	if want := time.Date(2026, 11, 4, 17, 0, 0, 0, time.UTC).Unix(); purge != want {
@@ -495,22 +499,30 @@ func TestPurgeAt(t *testing.T) {
 
 // Plus grand palier (16 385 morceaux : 1 Gio de données + le morceau du manifeste, 257
 // segments) : le masque des segments couvre les 257 bits ; le dernier segment fait 1 morceau.
+// Plus grand palier gratuit (spec §41.2) : 32 769 morceaux, 513 segments, fichier réservé de
+// 2 148 073 536 octets. Le fichier est réservé (fallocate) mais seuls quatre segments sont
+// écrits ; le masque des autres est posé en base, pour ne pas écrire 2 Gio dans le test.
 func TestLargestBucket(t *testing.T) {
 	if testing.Short() {
-		t.Skip("écrit 1 Gio")
+		t.Skip("réserve 2 Gio sur le disque")
 	}
 	s, _ := newSvc(t)
 	k := newKeys()
-	const b = 16385
+	const b = 32769
 	id, segs, err := s.Create(k.req(b, 1, 1))
-	if err != nil || segs != 257 {
+	if err != nil || segs != 513 {
 		t.Fatal(segs, err)
 	}
+	if _, _, err := s.Create(k.req(32770, 1, 1)); err == nil {
+		t.Fatal("palier 32 770 accepté")
+	}
+	fi, err := os.Stat(filepath.Join(s.Blobs.Dir, id))
+	if err != nil || fi.Size() != 2148073536 {
+		t.Fatal("fichier réservé", fi, err)
+	}
 	body := make([]byte, SegmentSize(b, 1))
-	for n := 1; n < segs-1; n++ {
-		if err := s.PutSegment(id, n, body); err != nil {
-			t.Fatal(n, err)
-		}
+	if err := s.PutSegment(id, 511, body); err != nil {
+		t.Fatal(err)
 	}
 	if err := s.PutSegment(id, segs-1, body); !errors.Is(err, ErrBadSegment) {
 		t.Fatal("dernier segment de mauvaise taille", err)
@@ -519,20 +531,19 @@ func TestLargestBucket(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.PutSegment(id, segs, body); !errors.Is(err, ErrBadSegment) {
-		t.Fatal("segment 257", err)
+		t.Fatal("segment 513", err)
 	}
 	if _, err := s.Finalize(id, fin(id)); !errors.Is(err, ErrIncomplete) {
-		t.Fatal("segment 0 manquant", err)
+		t.Fatal("segments manquants", err)
 	}
 	if err := s.PutSegment(id, 0, make([]byte, SegmentSize(b, 0))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Finalize(id, fin(id)); err != nil {
+	if _, err := s.DB.Exec(`UPDATE shares SET segments_mask=? WHERE id=?`, fullMask(segs), id); err != nil {
 		t.Fatal(err)
 	}
-	fi, err := os.Stat(filepath.Join(s.Blobs.Dir, id))
-	if err != nil || fi.Size() != 48+b*65552 {
-		t.Fatal(fi, err)
+	if _, err := s.Finalize(id, fin(id)); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -546,17 +557,17 @@ func TestUploadDeadlineRounded(t *testing.T) {
 	}
 	var dl int64
 	s.DB.QueryRow("SELECT upload_deadline FROM shares WHERE id=?", id).Scan(&dl)
-	if want := time.Date(2026, 11, 4, 13, 15, 0, 0, time.UTC).Unix(); dl != want {
-		t.Fatal("upload_deadline = ceil15(now+3h)", time.Unix(dl, 0).UTC())
+	if want := time.Date(2026, 11, 4, 16, 15, 0, 0, time.UTC).Unix(); dl != want {
+		t.Fatal("upload_deadline = ceil15(now+6h)", time.Unix(dl, 0).UTC())
 	}
 }
 
-// Un envoi sans aucun segment est balayé dès upload_deadline − 2 h 55 (5 à 20 min après
-// la création, selon l'arrondi) : une réservation vide ne bloque pas l'espace 3 heures.
+// Un envoi sans aucun segment est balayé dès upload_deadline − 5 h 55 (5 à 20 min après
+// la création, selon l'arrondi) : une réservation vide ne bloque pas l'espace 6 heures.
 func TestSweepEmptyUpload(t *testing.T) {
 	s, c := newSvc(t)
 	k := newKeys()
-	empty, _, err := s.Create(k.req(16, 1, 1)) // 10:02, échéance 13:15, balayage vide à 10:20
+	empty, _, err := s.Create(k.req(16, 1, 1)) // 10:02, échéance 16:15, balayage vide à 10:20
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -583,8 +594,8 @@ func TestSweepEmptyUpload(t *testing.T) {
 	if rowCount(t, s, started) != 1 {
 		t.Fatal("envoi commencé effacé")
 	}
-	// Un envoi qui progresse (un segment toutes les 14 min) vit jusqu'à l'échéance de 3 h, pas plus.
-	for c.Now().Before(time.Date(2026, 11, 4, 13, 0, 0, 0, time.UTC)) {
+	// Un envoi qui progresse (un segment toutes les 14 min) vit jusqu'à l'échéance de 6 h, pas plus.
+	for c.Now().Before(time.Date(2026, 11, 4, 16, 0, 0, 0, time.UTC)) {
 		c.Add(14 * time.Minute)
 		if err := s.PutSegment(started, 0, segBody(16, 0, 1)); err != nil {
 			t.Fatal(c.Now(), err)
@@ -593,11 +604,11 @@ func TestSweepEmptyUpload(t *testing.T) {
 			t.Fatal(c.Now(), n, err)
 		}
 	}
-	c.Add(time.Date(2026, 11, 4, 13, 14, 0, 0, time.UTC).Sub(c.Now())) // 13:14
+	c.Add(time.Date(2026, 11, 4, 16, 14, 0, 0, time.UTC).Sub(c.Now())) // 16:14
 	if n, err := s.Sweep(); err != nil || n != 0 {
 		t.Fatal(n, err)
 	}
-	c.Add(time.Minute) // 13:15 = upload_deadline
+	c.Add(time.Minute) // 16:15 = upload_deadline
 	if n, err := s.Sweep(); err != nil || n != 1 {
 		t.Fatal(n, err)
 	}
@@ -839,7 +850,7 @@ func TestSweep(t *testing.T) {
 	abandoned, _, _ := s.Create(newKeys().req(1, 1, 1))
 	expired := ready(t, s, newKeys(), 1, 1, 1) // 11:15
 	long := ready(t, s, newKeys(), 1, 24, 2)   // 10:15 le lendemain
-	drained := ready(t, s, k, 1, 24, 1)        // draining, purge à ceil15(10:02 + 3 h) = 13:15
+	drained := ready(t, s, k, 1, 24, 1)        // draining, purge à ceil15(10:02 + 6 h) = 16:15
 	s.Unlock(drained, k.acces, k.preuve)
 	if n, err := s.Sweep(); err != nil || n != 0 {
 		t.Fatal(n, err)
@@ -854,11 +865,11 @@ func TestSweep(t *testing.T) {
 		t.Fatal(n, err)
 	}
 	gone(t, s, expired)
-	c.Add(2*time.Hour - time.Minute) // 13:14
+	c.Add(5*time.Hour - time.Minute) // 16:14
 	if n, err := s.Sweep(); err != nil || n != 0 {
 		t.Fatal(n, err)
 	}
-	c.Add(time.Minute) // 13:15
+	c.Add(time.Minute) // 16:15
 	if n, err := s.Sweep(); err != nil || n != 1 {
 		t.Fatal(n, err)
 	}
@@ -1052,7 +1063,7 @@ func TestDestroyExpired(t *testing.T) {
 	k, ku := newKeys(), newKeys()
 	id := ready(t, s, k, 1, 1, 1)
 	up, _, _ := s.Create(ku.req(1, 1, 1))
-	c.Add(3*time.Hour + 15*time.Minute) // 13:17 : partage expiré, envoi échu (13:15)
+	c.Add(6*time.Hour + 15*time.Minute) // 16:17 : partage expiré, envoi échu (16:15)
 	for x, k := range map[string]keys{id: k, up: ku} {
 		if err := s.DestroyWithProof(k.acces, rnd(32)); !errors.Is(err, ErrNotFound) {
 			t.Fatal(err)

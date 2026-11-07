@@ -106,22 +106,22 @@ func TestSweepExpired(t *testing.T) {
 
 func TestSweepUnfinishedUpload(t *testing.T) {
 	s, c := newSvc(t)
-	id, _ := create(t, s) // 10:02 : upload_deadline = 13:15
+	id, _ := create(t, s) // 10:02 : upload_deadline = 16:15
 	// Un segment toutes les 10 min : l'envoi n'est ni « vide » ni bloqué, il vit jusqu'à l'échéance.
-	for i := 0; i < 19; i++ { // 10:02 … 13:02
+	for i := 0; i < 37; i++ { // 10:02 … 16:02
 		if err := s.PutSegment(id, 0, bytes.Repeat([]byte{1}, share.SegmentSize(1, 0))); err != nil {
 			t.Fatal(err)
 		}
-		if i < 18 {
+		if i < 36 {
 			c.Add(10 * time.Minute)
 		}
 	}
-	c.Add(12 * time.Minute) // 13:14
+	c.Add(12 * time.Minute) // 16:14
 	s.Sweep()
 	if rows(t, s, id) != 1 {
 		t.Fatal("effacé avant upload_deadline")
 	}
-	c.Add(time.Minute) // 13:15
+	c.Add(time.Minute) // 16:15
 	if n, err := s.Sweep(); err != nil || n != 1 {
 		t.Fatal(n, err)
 	}

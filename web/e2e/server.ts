@@ -2,7 +2,7 @@
 // dossier de données temporaire, port libre (SHH_LISTEN=127.0.0.1:0, lu sur stdout),
 // stdout et stderr capturés en octets bruts (fouillés par le test « le serveur ne voit rien »).
 // SHH_STORAGE_MAX = 4 Gio : le serveur refuse de démarrer si le plafond dépasse l'espace
-// disque libre moins 1 Gio (audit F6), et le défaut de 100 Gio dépasse souvent un poste de test.
+// disque libre moins 1 Gio (audit F6), et le défaut de 200 Gio dépasse souvent un poste de test.
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

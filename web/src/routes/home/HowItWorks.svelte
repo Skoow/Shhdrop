@@ -1,7 +1,8 @@
 <script lang="ts">
   // Accueil v3, « Comment ça marche » (UI §9.1) : trois gestes, chacun avec une petite scène
   // animée en boucle (ambiance : pause hors écran et onglet caché ; image fixe en mouvement réduit).
-  import { t } from "../../i18n/i18n.svelte";
+  import { t, getLang } from "../../i18n/i18n.svelte";
+  import { limitParams } from "../../i18n/limit-params";
   import { ambient, magnet, reveal } from "../../ui/attach";
   import SectionBg from "../../ui/SectionBg.svelte";
   import { Camera, KeyRound, Link2, Lock, Mic, Type } from "../../ui/Icon";
@@ -28,7 +29,7 @@
         <span class="sheet c"><Type size={22} strokeWidth={1.75} /><i></i></span>
       </div>
       <h3>{t("home.how.add.t")}</h3>
-      <p>{t("home.how.add.p")}</p>
+      <p>{t("home.how.add.p", limitParams(getLang()))}</p>
     </li>
     <li class="step rv" {@attach reveal} {@attach magnet}>
       <div class="ill seal" aria-hidden="true" data-ambient {@attach ambient}>

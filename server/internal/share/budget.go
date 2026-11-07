@@ -8,9 +8,9 @@ import "sync"
 // nouveau le segment 0 ; le bourrage n'est jamais lu. Budget = une ouverture complète
 // (fichier + segment 0 + dernier segment) plus un nouvel essai de chaque segment
 // (fichier), soit 2 × fichier chiffré + segment 0 + dernier segment.
-// Audit de sécurité M1 : sans borne, un jeton relit le partage pendant 3 h.
+// Audit de sécurité M1 : sans borne, un jeton relit le partage pendant 6 h.
 func ReadBudget(bucket int) int64 {
-	return 2*int64(totalSize(bucket)) + int64(SegmentSize(bucket, 0)) + int64(SegmentSize(bucket, SegmentCount(bucket)-1))
+	return 2*totalSize(bucket) + int64(SegmentSize(bucket, 0)) + int64(SegmentSize(bucket, SegmentCount(bucket)-1))
 }
 
 type openKey struct {

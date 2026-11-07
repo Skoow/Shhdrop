@@ -2,7 +2,8 @@
   // Voile de dépôt pleine page (UI §9.2.2) : voile --scrim, capsule menthe à 16 px des bords qui
   // se referme (ouverture de 60° → 14°), texte centré. Affiché seulement pendant un glisser de
   // fichiers ; la logique (compteur, Échap, dépôt) est dans l'écran qui l'utilise.
-  import { t } from "../i18n/i18n.svelte";
+  import { t, getLang } from "../i18n/i18n.svelte";
+  import { limitParams } from "../i18n/limit-params";
   import { Paperclip } from "./Icon";
   import { capPath } from "./motion";
 
@@ -21,7 +22,7 @@
   <div class="say">
     <span class="mark"><Paperclip size={28} strokeWidth={1.75} /></span>
     <p class="t">{t("compose.drop")}</p>
-    <p class="s">{t("compose.drop.limit")}</p>
+    <p class="s">{t("compose.drop.limit", limitParams(getLang()))}</p>
   </div>
 </div>
 

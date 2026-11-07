@@ -31,7 +31,7 @@ type Config struct {
 func FromEnv() (Config, error) {
 	c := Config{
 		Listen:          "127.0.0.1:8080",
-		StorageMaxBytes: 107374182400, // 100 Gio (spec §24)
+		StorageMaxBytes: 214748364800, // 200 Gio (spec §24, §41.2)
 		Now:             time.Now,
 	}
 	var err error

@@ -117,17 +117,27 @@ func TestThirtyPer48(t *testing.T) {
 func TestBytesPerDay(t *testing.T) {
 	now := t0
 	l := newLim(&now)
-	// Spec §24 : 3 Gio utiles par jour et par connexion (trois liens de 1 Gio).
-	if BytesPer64 != 3<<30 {
+	// Spec §24, §41.2 : 6 Gio utiles par jour et par connexion (trois liens de 2 Gio).
+	if BytesPer64 != 6<<30 {
 		t.Fatal("BytesPer64", BytesPer64)
 	}
 	for i := 0; i < 3; i++ {
-		if ok, _ := l.AllowCreate(ip("1.2.3.4"), 16384*65536); !ok {
+		if ok, _ := l.AllowCreate(ip("1.2.3.4"), 32768*65536); !ok {
 			t.Fatalf("envoi %d refusé", i+1)
 		}
 	}
-	if ok, ra := l.AllowCreate(ip("1.2.3.4"), 1); ok || ra <= 0 {
-		t.Fatalf("3 Gio + 1 octet : ok=%v retryAfter=%v", ok, ra)
+	if ok, ra := l.AllowCreate(ip("1.2.3.4"), 32768*65536); ok || ra <= 0 {
+		t.Fatalf("4ᵉ partage de 2 Gio : ok=%v retryAfter=%v", ok, ra)
+	}
+	// Sept partages de 1 Gio : le 7ᵉ dépasse les 6 Gio.
+	l2 := newLim(&now)
+	for i := 0; i < 6; i++ {
+		if ok, _ := l2.AllowCreate(ip("5.6.7.8"), 1<<30); !ok {
+			t.Fatalf("partage de 1 Gio %d refusé", i+1)
+		}
+	}
+	if ok, _ := l2.AllowCreate(ip("5.6.7.8"), 1<<30); ok {
+		t.Fatal("7ᵉ partage de 1 Gio accepté")
 	}
 }
 
@@ -135,7 +145,7 @@ func TestRefusalDoesNotCount(t *testing.T) {
 	now := t0
 	l := newLim(&now)
 	if ok, _ := l.AllowCreate(ip("1.2.3.4"), BytesPer64+1); ok {
-		t.Fatal("3 Gio + 1 octet accepté")
+		t.Fatal("6 Gio + 1 octet accepté")
 	}
 	if ok, _ := l.AllowCreate(ip("1.2.3.4"), -1); ok {
 		t.Fatal("taille négative acceptée")
@@ -143,7 +153,7 @@ func TestRefusalDoesNotCount(t *testing.T) {
 	if ok, _ := l.AllowCreate(ip("1.2.3.4"), 1<<62); ok {
 		t.Fatal("taille énorme acceptée")
 	}
-	// Les refus n'ont rien consommé : 10 créations et 3 Gio restent possibles.
+	// Les refus n'ont rien consommé : 10 créations et 6 Gio restent possibles.
 	for i := 0; i < 10; i++ {
 		if ok, _ := l.AllowCreate(ip("1.2.3.4"), BytesPer64/10); !ok {
 			t.Fatalf("création %d refusée", i+1)
@@ -228,14 +238,14 @@ func TestConcurrent(t *testing.T) {
 	}
 }
 
-// Anti-saturation : 6 Gio utiles par jour et par /48, en plus des 3 Gio par /64.
+// Anti-saturation : 12 Gio utiles par jour et par /48, en plus des 6 Gio par /64.
 func TestBytesPer48(t *testing.T) {
 	now := t0
 	l := newLim(&now)
-	if BytesPer48 != 6<<30 {
+	if BytesPer48 != 12<<30 {
 		t.Fatal("BytesPer48", BytesPer48)
 	}
-	const gib = 16384 * 65536
+	const gib = 2 * 16384 * 65536 // 2 Gio
 	for i := 0; i < 6; i++ {
 		a := ip(fmt.Sprintf("2001:db8:1:%x::1", i)) // six /64 du même /48
 		if ok, _ := l.AllowCreate(a, gib); !ok {
@@ -243,7 +253,7 @@ func TestBytesPer48(t *testing.T) {
 		}
 	}
 	if ok, ra := l.AllowCreate(ip("2001:db8:1:ff::1"), 1); ok || ra <= 0 {
-		t.Fatalf("6 Gio + 1 octet par /48 : ok=%v retryAfter=%v", ok, ra)
+		t.Fatalf("12 Gio + 1 octet par /48 : ok=%v retryAfter=%v", ok, ra)
 	}
 	if ok, _ := l.AllowCreate(ip("2001:db8:2::1"), gib); !ok {
 		t.Fatal("autre /48 refusé")
@@ -324,7 +334,7 @@ func (l *Limiter) AllowCreate(ip netip.Addr, bytes int64) (bool, time.Duration) 
 
 // Spec §29.5 : quotas débités à la finalisation (un envoi abandonné ne les consomme pas),
 // création refusée quand ils sont atteints, 2 envois en cours par connexion (6 par /48),
-// octets abandonnés débités à l'effacement (6 Gio par jour, puis 429).
+// octets abandonnés débités à l'effacement (12 Gio par jour, puis 429).
 func TestUploadQuotas(t *testing.T) {
 	const gib = 1 << 30
 	t.Run("10 créations finalisées par jour, puis refus", func(t *testing.T) {
@@ -379,20 +389,43 @@ func TestUploadQuotas(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	t.Run("octets abandonnés : 6 Gio par jour, puis 429", func(t *testing.T) {
+	t.Run("octets abandonnés : 12 Gio par jour, puis 429", func(t *testing.T) {
 		l := New(fixed(time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)))
-		for i := 0; i < 6; i++ {
+		for i := 0; i < 12; i++ {
 			id := fmt.Sprint("g", i)
 			if _, err := l.BeginUpload(ip("1.2.3.4"), id, gib); err != nil {
 				t.Fatal(i, err)
 			}
 			l.AbandonUpload(id)
 		}
-		if _, err := l.BeginUpload(ip("1.2.3.4"), "g6", 1); !errors.Is(err, ErrQuota) {
-			t.Fatal("7ᵉ Gio abandonné accepté", err)
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "g12", 1); !errors.Is(err, ErrQuota) {
+			t.Fatal("13ᵉ Gio abandonné accepté", err)
 		}
 		if _, err := l.BeginUpload(ip("1.2.3.5"), "autre", 1); err != nil {
 			t.Fatal("autre connexion touchée", err)
+		}
+	})
+	t.Run("trois partages de 2 Gio finalisés, le 4ᵉ refusé ; sept de 1 Gio, le 7ᵉ refusé (6 Gio par jour)", func(t *testing.T) {
+		l := New(fixed(time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)))
+		for i := 0; i < 3; i++ {
+			id := fmt.Sprint("b", i)
+			if _, err := l.BeginUpload(ip("1.2.3.4"), id, 2*gib); err != nil {
+				t.Fatal(i, err)
+			}
+			l.FinishUpload(id)
+		}
+		if ra, err := l.BeginUpload(ip("1.2.3.4"), "b3", 2*gib); !errors.Is(err, ErrQuota) || ra <= 0 {
+			t.Fatal("4ᵉ partage de 2 Gio accepté", ra, err)
+		}
+		for i := 0; i < 6; i++ {
+			id := fmt.Sprint("c", i)
+			if _, err := l.BeginUpload(ip("5.6.7.8"), id, gib); err != nil {
+				t.Fatal(i, err)
+			}
+			l.FinishUpload(id)
+		}
+		if _, err := l.BeginUpload(ip("5.6.7.8"), "c6", gib); !errors.Is(err, ErrQuota) {
+			t.Fatal("7ᵉ partage de 1 Gio accepté", err)
 		}
 	})
 	t.Run("id déjà en cours : ErrDuplicate, compté comme une création (sonde), l'envoi existant intact", func(t *testing.T) {

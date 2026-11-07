@@ -46,8 +46,8 @@ func (e *BadPassword) Error() string { return "mot de passe incorrect" }
 
 const (
 	maxAttempts  = 5
-	uploadWindow = 3 * 3600 // secondes (spec §24 : 3 h, comme le jeton d'envoi)
-	purgeWindow  = 3 * 3600 // durée d'un jeton de téléchargement (spec §24 : 3 h)
+	uploadWindow = 6 * 3600 // secondes (spec §24, §41.2 : 6 h, comme le jeton d'envoi)
+	purgeWindow  = 6 * 3600 // durée d'un jeton de téléchargement (spec §24, §41.2 : 6 h)
 	// emptySweep : un envoi sans segment est effacé dès upload_deadline − emptySweep (sweepCond).
 	emptySweep = uploadWindow - 300
 	// stallSweep : un envoi commencé sans nouveau segment depuis 15 min est effacé.
@@ -272,7 +272,7 @@ func (s *Service) Create(r CreateReq) (string, int, error) {
 		return "", 0, err
 	}
 	id := r.ID
-	size := int64(totalSize(r.Bucket))
+	size := totalSize(r.Bucket)
 	segs := SegmentCount(r.Bucket)
 
 	s.createMu.Lock()
@@ -329,7 +329,7 @@ func (s *Service) PutSegment(id string, n int, body []byte) error {
 	if n < 0 || n >= SegmentCount(bucket) || len(body) != SegmentSize(bucket, n) {
 		return ErrBadSegment
 	}
-	if err := s.Blobs.WriteAt(id, int64(segOffset(bucket, n)), body); err != nil {
+	if err := s.Blobs.WriteAt(id, segOffset(bucket, n), body); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return ErrNotFound // détruit pendant l'envoi
 		}
@@ -363,7 +363,7 @@ func (s *Service) PutSegment(id string, n int, body []byte) error {
 // Finalize termine un envoi (spec §29.4, point 4) : tous les segments hors bourrage
 // présents, bourrage rempli d'octets aléatoires (crypto/rand, indiscernables d'un chiffré
 // pour qui lit le disque), puis passage en « ready » avec le sel, Argon2id, V_preuve, E,
-// la durée et les ouvertures. Le bourrage est écrit hors du verrou global (jusqu'à 1 Gio) ;
+// la durée et les ouvertures. Le bourrage est écrit hors du verrou global (jusqu'à 2 Gio) ;
 // le changement d'état revérifie les segments sous uploadMu. Rejoué après succès : 404.
 func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 	if !validID(id) {
@@ -477,8 +477,8 @@ func (s *Service) fillRandom(id string, bucket, from, to int) error {
 	if from >= to {
 		return nil
 	}
-	start := int64(segOffset(bucket, from))
-	end := int64(segOffset(bucket, to))
+	start := segOffset(bucket, from)
+	end := segOffset(bucket, to)
 	buf := make([]byte, fillChunk)
 	for off := start; off < end; {
 		n := min(int64(len(buf)), end-off)
@@ -591,7 +591,7 @@ func (s *Service) OpenSegment(id string, n, openN int) (*blob.Section, error) {
 		return nil, ErrBadSegment
 	}
 	size := int64(SegmentSize(bucket, n))
-	sec, err := s.Blobs.Open(id, int64(segOffset(bucket, n)), size)
+	sec, err := s.Blobs.Open(id, segOffset(bucket, n), size)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, ErrNotFound // détruit entre-temps
 	}
@@ -715,12 +715,12 @@ func (s *Service) DestroyAdmin(kAcces []byte) error {
 // sweepCond : partages à effacer. Ne dépend que du temps et de failed_attempts,
 // qui ne peuvent pas redevenir faux, sauf « uploading » qu'un Finalize ou un
 // PutSegment (masque non vide) peut changer : sweepOne revérifie sous uploadMu.
-// Envoi vide (aucun segment reçu) : effacé dès upload_deadline − 2 h 55 (10 500 s), soit
+// Envoi vide (aucun segment reçu) : effacé dès upload_deadline − 5 h 55 (21 300 s), soit
 // 5 à 20 min après la création selon l'arrondi au quart d'heure : une réservation vide
-// ne bloque pas l'espace pendant trois heures. La date de création n'étant pas stockée,
+// ne bloque pas l'espace pendant six heures. La date de création n'étant pas stockée,
 // on la déduit de l'échéance ; rien de plus n'est enregistré.
 // Envoi bloqué : commencé, mais aucun segment reçu depuis 15 min (progress_at, à la minute,
-// NULL hors envoi) : effacé sans attendre l'échéance de 3 h.
+// NULL hors envoi) : effacé sans attendre l'échéance de 6 h.
 // Paramètres numérotés : ?1 = maintenant, ?2 = maxAttempts.
 var sweepCond = `((state IN ('ready','draining') AND expires_at<=?1) OR
 	(state='uploading' AND upload_deadline<=?1) OR

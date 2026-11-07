@@ -15,7 +15,8 @@
   // et appel final. Un clic sur le verre n'ouvre rien : le sélecteur part de son bouton.
   import { untrack, type Snippet } from "svelte";
   import { dragDepth, dragHasFiles, filesFromDrop } from "../flows/intake";
-  import { t } from "../i18n/i18n.svelte";
+  import { t, getLang } from "../i18n/i18n.svelte";
+  import { limitParams } from "../i18n/limit-params";
   import { magnet, tilt } from "../ui/attach";
   import DropOverlay from "../ui/DropOverlay.svelte";
   import Guilloche from "../ui/Guilloche.svelte";
@@ -205,7 +206,7 @@
                 {@render tile(t("compose.add.text"), Type, () => act("texte"), "caret")}
               </div>
             </div>
-            <p class="proof num">{t("home.proof")}</p>
+            <p class="proof num">{t("home.proof", limitParams(getLang()))}</p>
             <input bind:this={files} type="file" multiple hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "fichiers")} />
             <!-- Téléphone : l'appareil photo ou la caméra du système (capture) ; ordinateur : sélecteur filtré.
                  Aucun accès direct à la caméra : Permissions-Policy camera=() reste (spec §10). -->

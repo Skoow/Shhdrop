@@ -104,7 +104,7 @@ test.describe("fr-FR", () => {
     await expect(rows(page)).toHaveCount(10);
 
     // Capacité en tête, à côté de « Votre envoi ».
-    await expect(page.locator(".top .ht")).toHaveText(/^10\s\/\s10\séléments · [\d,]+\s(?:Ko|Mo) \/ 1\sGo$/);
+    await expect(page.locator(".top .ht")).toHaveText(/^10\s\/\s15\séléments · [\d,]+\s(?:Ko|Mo) \/ 2\sGo$/);
     await expect(page.getByRole("meter", { name: "Nombre d'éléments" })).toHaveAttribute("aria-valuenow", "10");
     expect(await page.locator(".top .gh").evaluate((e) => getComputedStyle(e).fontVariantNumeric)).toContain("tabular-nums");
     expect(await page.locator(".group h3").allTextContents()).toEqual(["Texte", "Photos", "Vidéos", "Documents", "Archives"]);
@@ -447,29 +447,46 @@ test.describe("fr-FR", () => {
     await capture(page, "compose-options-sheet");
   });
 
-  test("limites : 12 fichiers → 10 ajoutés et message ; plus de 1 Go → capacité en danger, envoi bloqué avec la raison", async ({ page, shh, browserName }) => {
+  test("limites : 15 fichiers puis un 16ᵉ → message ; plus de 2 Go → capacité en danger, envoi bloqué avec la raison ; 2 Go exactement accepté", async ({ page, shh, browserName }) => {
     await open(page, shh.origin);
-    await browse(page, Array.from({ length: 12 }, (_, i) => ({ name: `note-${i + 1}.txt`, mimeType: "text/plain", buffer: Buffer.from(`n${i}`) })));
-    await expect(rows(page)).toHaveCount(10);
-    await expect(page.locator(".cnote")).toContainText("2 éléments n'ont pas été ajoutés : 10 au plus.");
-    await expect(page.locator(".cnote")).toContainText("note-11.txt, note-12.txt");
+    const note = (i: number) => ({ name: `note-${i + 1}.txt`, mimeType: "text/plain", buffer: Buffer.from(`n${i}`) });
+    await browse(page, Array.from({ length: 15 }, (_, i) => note(i)));
+    await expect(rows(page)).toHaveCount(15);
+    await expect(page.getByRole("meter", { name: "Nombre d'éléments" })).toHaveAttribute("aria-valuenow", "15");
+    await expect(page.locator(".top .ht")).toHaveText(/^15\s\/\s15\séléments · /);
+    await expect(page.locator(".cnote")).toHaveCount(0);
+    await browse(page, [note(15)]);
+    await expect(rows(page)).toHaveCount(15);
+    await expect(page.locator(".cnote")).toContainText("1 élément n'a pas été ajouté : 15 au plus.");
+    await expect(page.locator(".cnote")).toContainText("note-16.txt");
     await capture(page, "compose-limit-count");
 
-    test.skip(browserName !== "chromium", "fichier creux de 1 Go : Chromium (chemin local)");
+    test.skip(browserName !== "chromium", "fichier creux de 2 Go : Chromium (chemin local)");
     await page.getByRole("button", { name: "Tout retirer" }).click();
     await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
-    const dir = mkdtempSync(join(tmpdir(), "shh-1go-"));
+    const dir = mkdtempSync(join(tmpdir(), "shh-2go-"));
     try {
-      const p = join(dir, "film-1go.bin");
+      // Fichiers creux (aucun octet écrit sur le disque) : 2 Gio exactement, puis 2 Gio + 1 octet.
+      const exact = join(dir, "film-2go.bin");
+      const fe = openSync(exact, "w");
+      ftruncateSync(fe, 2147483648);
+      closeSync(fe);
+      await browse(page, [exact]);
+      await expect(rows(page)).toHaveCount(1);
+      await expect(page.getByRole("alert").filter({ hasText: /^Trop gros/ })).toHaveCount(0);
+      await expect(page.locator("#send-reason")).toHaveCount(0);
+      await page.getByRole("button", { name: "Tout retirer" }).click();
+      await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
+      const p = join(dir, "film-2go-plus-1.bin");
       const fd = openSync(p, "w");
-      ftruncateSync(fd, 1073741824 + 1);
+      ftruncateSync(fd, 2147483648 + 1);
       closeSync(fd);
       await browse(page, [p]);
       await expect(rows(page)).toHaveCount(1);
-      await expect(page.getByRole("alert").filter({ hasText: /^Trop gros\s:\s[\d,]+\s(?:octets?|Ko) de trop \(limite\s:\s1\sGo\)\.$/ }).first()).toBeVisible();
+      await expect(page.getByRole("alert").filter({ hasText: /^Trop gros\s:\s[\d,]+\s(?:octets?|Ko) de trop \(limite\s:\s2\sGo\)\.$/ }).first()).toBeVisible();
       expect(await page.locator(".top .fill").evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(255, 138, 128)");
       await expect(send(page)).toBeDisabled();
-      await expect(page.locator("#send-reason")).toHaveText("Le total dépasse 1 Go. Retirez des éléments.");
+      await expect(page.locator("#send-reason")).toHaveText("Le total dépasse 2 Go. Retirez des éléments.");
       await page.waitForTimeout(6500);
       await capture(page, "compose-limit-size");
     } finally {
@@ -590,7 +607,7 @@ test.describe("en-US", () => {
     await page.getByRole("button", { name: "Browse files" }).click();
     await (await chooser).setFiles(MIXED.slice(0, 8));
     await expect(page.getByRole("heading", { level: 2, name: "Your share" })).toBeVisible();
-    await expect(page.locator(".top .ht")).toHaveText(/^8\s\/\s10\sitems · /);
+    await expect(page.locator(".top .ht")).toHaveText(/^8\s\/\s15\sitems · /);
     if (isMobile) await expect(page.getByRole("button", { name: /^Options · 12h · 1\sopen · download allowed$/ })).toBeVisible();
     else await expect(page.locator(".summary")).toHaveText("Erased in 12h or after 1\u00a0open, whichever comes first.");
     expect(await axe(page)).toEqual([]);

@@ -5,7 +5,7 @@
   // dire après la résolution de createShare puis la fermeture du sceau.
   import { tick } from "svelte";
   import { setScreenTitle } from "../app/title";
-  import type { Sender, Step } from "../flows/send.svelte";
+  import { UPLOAD_WINDOW_MS, type Sender, type Step } from "../flows/send.svelte";
   import type { Category } from "../flows/kinds";
   import { formatBytes, formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
@@ -303,7 +303,7 @@
       <Banner kind="info"><span class="num">{t("seal.paused", { duration: mmss(s.pauseLeftMs) })}</span></Banner>
     {/if}
     {#if s.tooSlow}
-      <Banner kind="warn">{t("seal.tooSlow")}</Banner>
+      <Banner kind="warn">{t("seal.tooSlow", { h: UPLOAD_WINDOW_MS / 3600_000 })}</Banner>
     {/if}
 
     {#if phase === "error"}

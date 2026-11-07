@@ -3,7 +3,8 @@
   // chiffré décoratif (S1) ; quand elle entre dans l'écran, un sceau guilloché vient fermer son
   // ouverture et le contour se referme. Titre, phrase, bouton « Commencer » (anse du cadenas qui se
   // ferme au survol et au focus) et preuves en chiffres, au centre de la capsule.
-  import { t } from "../../i18n/i18n.svelte";
+  import { t, getLang } from "../../i18n/i18n.svelte";
+  import { limitParams } from "../../i18n/limit-params";
   import { ambient, reveal } from "../../ui/attach";
   import { cipherText, rosette } from "../../ui/decor";
   import { capPath } from "../../ui/motion";
@@ -57,7 +58,7 @@
         <span>{t("home.end.cta")}</span>
       </button>
       <ul class="proof num" aria-label={t("home.end.proof.label")}>
-        {#each t("home.end.proof").split(" · ") as item (item)}<li>{item}</li>{/each}
+        {#each t("home.end.proof", limitParams(getLang())).split(" · ") as item (item)}<li>{item}</li>{/each}
       </ul>
     </div>
   </div>

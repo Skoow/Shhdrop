@@ -603,7 +603,7 @@ func TestDownloadTokenCappedAtExpiry(t *testing.T) {
 	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/0", hdr: auth(dl)}), 404, notFound)
 }
 
-// Spec §24 : jeton d'envoi 3 h ; jeton de téléchargement min(3 h, expires_at).
+// Spec §24, §41.2 : jeton d'envoi 6 h ; jeton de téléchargement min(6 h, expires_at).
 func TestTokenLifetimes(t *testing.T) {
 	e := newEnv(t, false, nil)
 	k := newKeys()
@@ -614,16 +614,16 @@ func TestTokenLifetimes(t *testing.T) {
 	var c created
 	json.Unmarshal(w.Body.Bytes(), &c)
 	c.ID = e.idOf(t, c.UploadToken, token.Upload)
-	if _, exp, err := e.sig.CheckExp(c.UploadToken, token.Upload, c.ID); err != nil || !exp.Equal(e.clk.Now().Add(3*time.Hour)) {
+	if _, exp, err := e.sig.CheckExp(c.UploadToken, token.Upload, c.ID); err != nil || !exp.Equal(e.clk.Now().Add(6*time.Hour)) {
 		t.Fatal("jeton d'envoi", exp, err)
 	}
-	e.clk.Add(2*time.Hour + 50*time.Minute) // 12:52 : l'envoi est encore accepté (échéance 13:15)
+	e.clk.Add(5*time.Hour + 50*time.Minute) // 15:52 : l'envoi est encore accepté (échéance 16:15)
 	expect(t, e.do(req{method: "PUT", path: "/api/shares/segments/0", body: rnd(share.SegmentSize(1, 0)),
 		hdr: auth(c.UploadToken)}), 204, "")
 	expect(t, e.do(req{method: "POST", path: "/api/shares/finalize", hdr: auth(c.UploadToken),
 		body: mustJSON(k.finBody(1, 24))}), 200, "")
 	dl, _ := e.unlock(t, c.ID, k)
-	if _, exp, err := e.sig.CheckExp(dl, token.Download, c.ID); err != nil || !exp.Equal(e.clk.Now().Add(3*time.Hour)) {
+	if _, exp, err := e.sig.CheckExp(dl, token.Download, c.ID); err != nil || !exp.Equal(e.clk.Now().Add(6*time.Hour)) {
 		t.Fatal("jeton de téléchargement (24 h)", exp, err)
 	}
 	// Partage d'une heure : jeton plafonné à expires_at.
@@ -632,7 +632,7 @@ func TestTokenLifetimes(t *testing.T) {
 	e.upload(t, short, 1)
 	dl2, _ := e.unlock(t, short.ID, k2)
 	if _, exp, err := e.sig.CheckExp(dl2, token.Download, short.ID); err != nil ||
-		!exp.Equal(time.Date(2026, 11, 4, 14, 0, 0, 0, time.UTC)) {
+		!exp.Equal(time.Date(2026, 11, 4, 17, 0, 0, 0, time.UTC)) {
 		t.Fatal("jeton de téléchargement plafonné", exp, err)
 	}
 }
@@ -728,6 +728,9 @@ func TestCreateRefusals(t *testing.T) {
 	alt, shown = e.captchaFor(t, "")
 	b = k.createBody(1, 1, alt, shown)
 	b["bucket"] = 2
+	expect(t, post(b), 400, badRequest)
+	// Plus grand palier gratuit : 32 770 refusé (le serveur ne connaît que les paliers, spec §41.2).
+	b["bucket"] = 32770
 	expect(t, post(b), 400, badRequest)
 	expect(t, post(k.createBody(1, 1, alt, shown)), 201, "")
 

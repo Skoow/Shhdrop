@@ -98,6 +98,26 @@ func TestServeStorageMaxFitsDisk(t *testing.T) {
 	}
 }
 
+// Spec §41.2 : plafond par défaut de 200 Gio, donc 201 Gio libres exigés au démarrage.
+func TestServeDefaultStorageNeeds201Gio(t *testing.T) {
+	t.Setenv("SHH_DATA_DIR", t.TempDir())
+	t.Setenv("SHH_STORAGE_MAX", "")
+	c, err := config.FromEnv()
+	if err != nil || c.StorageMaxBytes != 200<<30 {
+		t.Fatal(c.StorageMaxBytes, err)
+	}
+	orig := diskFree
+	t.Cleanup(func() { diskFree = orig })
+	diskFree = func(string) (uint64, error) { return 200<<30 + 1<<29, nil } // 200,5 Gio libres
+	if err := checkStorage(c.DataDir, c.StorageMaxBytes, 0); err == nil {
+		t.Fatal("démarrage accepté avec moins de 201 Gio libres")
+	}
+	diskFree = func(string) (uint64, error) { return 201 << 30, nil }
+	if err := checkStorage(c.DataDir, c.StorageMaxBytes, 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Audit F7 : SHH_STATIC_DIR non vérifié ; liste des dossiers et fichiers cachés servis.
 func TestServeStaticDir(t *testing.T) {
 	data := t.TempDir()

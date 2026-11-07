@@ -1327,7 +1327,7 @@ describe("budget de lecture par ouverture (audit M1, spec §24)", () => {
   it("la formule est celle du serveur (budget.go)", async () => {
     const { readFileSync } = await import("node:fs");
     const go = readFileSync(new URL("../../../server/internal/share/budget.go", import.meta.url), "utf8");
-    expect(go).toContain("2*int64(totalSize(bucket)) + int64(SegmentSize(bucket, 0)) + int64(SegmentSize(bucket, SegmentCount(bucket)-1))");
+    expect(go).toContain("2*totalSize(bucket) + int64(SegmentSize(bucket, 0)) + int64(SegmentSize(bucket, SegmentCount(bucket)-1))");
   });
 
   it("ouverture complète (tous les éléments enregistrés) + un nouvel essai de chaque segment : sous le budget", async () => {

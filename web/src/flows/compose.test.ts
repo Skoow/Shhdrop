@@ -67,21 +67,27 @@ describe("createComposer : ajout", () => {
     expect(c.items[0]!.data).toBe(f);
   });
 
-  it("12 fichiers → 10 ajoutés, 2 refusés (noms rendus)", async () => {
+  it("MAX_ITEMS + 2 fichiers → MAX_ITEMS ajoutés, 2 refusés (noms rendus) ; 15 acceptés, le 16ᵉ refusé", async () => {
+    expect(MAX_ITEMS).toBe(15);
     const c = make();
-    const r = await c.add(Array.from({ length: 12 }, (_, i) => file(`f${i}.bin`)), "depot");
+    const r = await c.add(Array.from({ length: MAX_ITEMS + 2 }, (_, i) => file(`f${i}.bin`)), "depot");
     expect(r.added).toHaveLength(MAX_ITEMS);
-    expect(r.refusedCount).toEqual(["f10.bin", "f11.bin"]);
-    expect(c.count).toBe(10);
+    expect(r.refusedCount).toEqual([`f${MAX_ITEMS}.bin`, `f${MAX_ITEMS + 1}.bin`]);
+    expect(c.count).toBe(MAX_ITEMS);
+    const one = make();
+    expect((await one.add(Array.from({ length: MAX_ITEMS }, (_, i) => file(`g${i}`)), "fichiers")).refusedCount).toEqual([]);
+    expect((await one.add([file("seizieme.bin")], "fichiers")).refusedCount).toEqual(["seizieme.bin"]);
+    expect(one.count).toBe(MAX_ITEMS);
   });
 
-  it("deux ajouts simultanés ne dépassent pas 10", async () => {
+  it("deux ajouts simultanés ne dépassent pas MAX_ITEMS", async () => {
     const c = make();
-    const a = c.add(Array.from({ length: 6 }, (_, i) => file(`a${i}`)), "fichiers");
-    const b = c.add(Array.from({ length: 6 }, (_, i) => file(`b${i}`)), "fichiers");
+    const half = Math.ceil(MAX_ITEMS / 2) + 1;
+    const a = c.add(Array.from({ length: half }, (_, i) => file(`a${i}`)), "fichiers");
+    const b = c.add(Array.from({ length: half }, (_, i) => file(`b${i}`)), "fichiers");
     const [ra, rb] = await Promise.all([a, b]);
-    expect(c.count).toBe(10);
-    expect(ra.refusedCount.length + rb.refusedCount.length).toBe(2);
+    expect(c.count).toBe(MAX_ITEMS);
+    expect(ra.refusedCount.length + rb.refusedCount.length).toBe(2 * half - MAX_ITEMS);
   });
 
   it("lecture d'essai rejetée → unreadable", async () => {
@@ -300,11 +306,11 @@ describe("textes", () => {
     expect(c.items[1]!.base).toBe("Note 2");
   });
 
-  it("texte refusé au-delà de 10 éléments", async () => {
+  it("texte refusé au-delà de MAX_ITEMS éléments", async () => {
     const c = make();
-    await c.add(Array.from({ length: 10 }, (_, i) => file(`f${i}`)), "fichiers");
+    await c.add(Array.from({ length: MAX_ITEMS }, (_, i) => file(`f${i}`)), "fichiers");
     expect(c.addText("x")).toBeNull();
-    expect(c.count).toBe(10);
+    expect(c.count).toBe(MAX_ITEMS);
   });
 });
 

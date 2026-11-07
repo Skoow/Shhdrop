@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Jauge de capacité (UI §9.2.5) : taille (proportion de CONTENT_MAX) et nombre (10 crans).
+  // Jauge de capacité (UI §9.2.5) : taille (proportion de CONTENT_MAX) et nombre (un cran par élément, MAX_ITEMS).
   // Les chiffres viennent des constantes, jamais des textes (benchmark M5). Le dépassement de
   // taille est permis dans la liste, pour voir quoi retirer ; l'envoi est alors bloqué.
   import { CONTENT_MAX, MAX_ITEMS } from "../index";
@@ -18,8 +18,8 @@
   const sizeText = $derived(t("compose.gauge.size", { size: formatBytes(bytes, lang), max }));
   const countText = $derived(t("compose.gauge.count", { n: count, max: MAX_ITEMS }));
   const uid = $props.id();
-  // « Trop gros : 1 Go sur 1 Go » ne dirait rien : quand les deux tailles s'arrondissent pareil,
-  // seul l'excédent est donné (« 4 octets de trop, limite : 1 Go »).
+  // « Trop gros : 2 Go sur 2 Go » ne dirait rien : quand les deux tailles s'arrondissent pareil,
+  // seul l'excédent est donné (« 4 octets de trop, limite : 2 Go »).
   const overText = $derived.by(() => {
     const size = formatBytes(bytes, lang);
     const excess = formatBytes(bytes - CONTENT_MAX, lang);
@@ -83,7 +83,7 @@
     <div class="m">
       <span id="{uid}-c" class="sr-only">{t("compose.gauge.countLabel")}</span>
       <span class="v num" aria-hidden="true"><b>{count}</b> / {MAX_ITEMS}</span>
-      <div class="ticks" role="meter" aria-labelledby="{uid}-c" aria-valuemin="0" aria-valuemax={MAX_ITEMS} aria-valuenow={count} aria-valuetext={countText}>
+      <div class="ticks" role="meter" aria-labelledby="{uid}-c" aria-valuemin="0" aria-valuemax={MAX_ITEMS} aria-valuenow={count} aria-valuetext={countText} style:--ticks={MAX_ITEMS}>
         {#each { length: MAX_ITEMS }, i (i)}<span class={["tick", { on: i < count }]}></span>{/each}
       </div>
     </div>
@@ -207,7 +207,7 @@
   }
   .ticks {
     display: grid;
-    grid-template-columns: repeat(10, minmax(0, 1fr));
+    grid-template-columns: repeat(var(--ticks), minmax(0, 1fr));
     gap: 3px;
   }
   .tick {

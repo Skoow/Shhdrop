@@ -17,8 +17,8 @@ export const MARK = "__SHH_DEMO__";
 
 const MAX_JSON = 4096;
 const MAX_ATTEMPTS = 5;
-const UPLOAD_WINDOW_S = 3 * 3600; // jeton d'envoi et échéance d'envoi (spec §24)
-const PURGE_WINDOW_S = 3 * 3600; // jeton de téléchargement (spec §24)
+const UPLOAD_WINDOW_S = 6 * 3600; // jeton d'envoi et échéance d'envoi (spec §24, §41.2)
+const PURGE_WINDOW_S = 6 * 3600; // jeton de téléchargement (spec §24, §41.2)
 const EMPTY_SWEEP_S = UPLOAD_WINDOW_S - 300; // envoi sans segment
 const STALL_SWEEP_S = 900; // envoi sans nouveau segment depuis 15 min
 const CAPTCHA_TTL_S = 120;

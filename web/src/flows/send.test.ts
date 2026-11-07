@@ -209,12 +209,12 @@ describe("createSender : pause (UI §9.4.4)", () => {
     expect(t.s.phase).toBe("upload");
   });
 
-  it("pause refusée à moins de 15 min de la fin de la fenêtre de 3 h", async () => {
+  it("pause refusée à moins de 15 min de la fin de la fenêtre de 6 h", async () => {
     const t = setup();
     void t.s.start(ITEMS, OPTS);
     const o = await toUpload(t);
-    // L'envoi avance (octets et acquittements) jusqu'à 2 h 46 après la création.
-    for (let m = 1; m <= 166; m++) {
+    // L'envoi avance (octets et acquittements) jusqu'à 5 h 46 après la création.
+    for (let m = 1; m <= 346; m++) {
       await vi.advanceTimersByTimeAsync(60_000);
       o.onBytes!(m, 300);
       o.onProgress!(1, 3);
@@ -404,7 +404,7 @@ describe("createSender : verrou d'écran, sortie de page, trop lent", () => {
     expect(t.unload).toHaveBeenLastCalledWith(false);
   });
 
-  it("tooSlow quand le temps restant estimé dépasse la fenêtre restante de 3 h", async () => {
+  it("tooSlow quand le temps restant estimé dépasse la fenêtre restante de 6 h", async () => {
     const t = setup();
     void t.s.start(ITEMS, OPTS);
     const total = 2_000_000_000;
@@ -422,6 +422,6 @@ describe("createSender : verrou d'écran, sortie de page, trop lent", () => {
       p.onBytes!(k * 10_000, 300_000);
     }
     expect(u.s.tooSlow).toBe(false);
-    expect(UPLOAD_WINDOW_MS).toBe(3 * 3600_000);
+    expect(UPLOAD_WINDOW_MS).toBe(6 * 3600_000);
   });
 });

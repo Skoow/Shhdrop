@@ -4,7 +4,7 @@
 import { CONTENT_MAX, MAX_ITEMS, PREVIEW_MAX, TEXT_MAX } from "./crypto/container";
 import { PW_MIN_CHARS } from "./crypto/passphrase";
 
-/** CONTENT_MAX : exactement 1 Gio de données (spec §29.3) ; TEXT_MAX en points de code. */
+/** CONTENT_MAX : exactement 2 Gio de données (spec §29.3) ; TEXT_MAX en points de code. */
 export { CONTENT_MAX, MAX_ITEMS, PREVIEW_MAX, PW_MIN_CHARS, TEXT_MAX };
 /** Durées proposées, en heures, comptées à partir de la fin de l'envoi (spec §4). */
 export const TTL_HOURS = [1, 6, 12, 24] as const;

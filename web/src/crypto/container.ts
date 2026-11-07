@@ -7,11 +7,11 @@ import type { ContentKeys } from "./envelope";
 
 export const CHUNK = 65536, TAG = 16, CHUNK_CT = 65552, HEADER = 48, SEG_CHUNKS = 64;
 /**
- * Paliers en morceaux de 64 Kio (spec §24, §29.3). Chaque palier garde son dernier morceau
- * pour le manifeste : le palier 1 sert aux partages de texte seul, et le plus grand
- * (16 385 morceaux) contient exactement 1 Gio de données plus le morceau du manifeste.
+ * Paliers gratuits en morceaux de 64 Kio (spec §24, §29.3, §41.2). Chaque palier garde son
+ * dernier morceau pour le manifeste : le palier 1 sert aux partages de texte seul, et le plus
+ * grand (32 769 morceaux) contient exactement 2 Gio de données plus le morceau du manifeste.
  */
-export const BUCKETS = [1, 16, 80, 160, 400, 800, 1600, 4000, 8000, 16385] as const;
+export const BUCKETS = [1, 16, 80, 160, 400, 800, 1600, 4000, 8000, 16385, 32769] as const;
 /** Au-delà, pas d'aperçu sur le site : téléchargement en flux seulement (spec §24). */
 export const PREVIEW_MAX = 200 * 1048576;
 /**
@@ -20,9 +20,10 @@ export const PREVIEW_MAX = 200 * 1048576;
  */
 export const MANIFEST_MAX = 65532;
 const TAIL = 4 + MANIFEST_MAX;
-/** Octets de données au plus (fichiers ; les textes vont dans le manifeste) : exactement 1 Gio. */
+/** Octets de données au plus (fichiers ; les textes vont dans le manifeste) : exactement 2 Gio (2 147 483 648). */
 export const CONTENT_MAX = BUCKETS[BUCKETS.length - 1] * CHUNK - TAIL;
-export const MAX_ITEMS = 10;
+/** Éléments par partage au plus (spec §41.2). */
+export const MAX_ITEMS = 15;
 /** Points de code d'un texte au plus. */
 export const TEXT_MAX = 10_000;
 const TEXT_BYTES_MAX = 4 * TEXT_MAX; // un point de code UTF-8 fait au plus 4 octets

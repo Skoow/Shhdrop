@@ -19,8 +19,8 @@ import (
 const (
 	CreatesPer64   = 10
 	CreatesPer48   = 30
-	BytesPer64     = 3 << 30 // 3 Gio utiles par jour (spec §24)
-	BytesPer48     = 6 << 30 // 6 Gio utiles par jour et par /48 (anti-saturation du disque)
+	BytesPer64     = 6 << 30  // 6 Gio utiles par jour : trois partages pleins (spec §24, §41.2)
+	BytesPer48     = 12 << 30 // 12 Gio utiles par jour et par /48 (anti-saturation du disque)
 	RequestsPerMin = 60
 	SegmentsPerMin = 600 // requêtes de segments à jeton valide, compteur à part
 	// SegmentsPer48Min : même compteur par bloc /48 (10 × la connexion), pour qu'un /48
@@ -30,8 +30,8 @@ const (
 	PendingPer64 = 2
 	PendingPer48 = 6
 	// Octets abandonnés (envois effacés sans finalize) par jour (spec §29.5).
-	AbandonedPer64 = 6 << 30
-	AbandonedPer48 = 12 << 30
+	AbandonedPer64 = 12 << 30
+	AbandonedPer48 = 24 << 30
 	// pendingRetry : Retry-After quand la connexion a déjà ses envois en cours.
 	pendingRetry = 60 * time.Second
 	day          = 86400

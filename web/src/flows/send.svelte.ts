@@ -17,11 +17,11 @@ import { createStats } from "./stats";
 
 /** Pause bornée à 10 min (UI §9.4.4). */
 export const PAUSE_MAX_MS = 600_000;
-/** Limite d'un envoi, mesurée depuis la création (spec §7.4). */
-export const UPLOAD_WINDOW_MS = 3 * 3600_000;
+/** Limite d'un envoi, mesurée depuis la création (spec §7.4, §41.2 : 6 h jusqu'à 2 Gio). */
+export const UPLOAD_WINDOW_MS = 6 * 3600_000;
 /** Aucun octet depuis 10 s pendant l'envoi → coupure affichée (sans rapport avec SERVER_STALL_MS). */
 export const STALL_MS = 10_000;
-/** La pause est refusée s'il reste moins de 15 min avant la limite de 3 h. */
+/** La pause est refusée s'il reste moins de 15 min avant la limite de 6 h. */
 export const PAUSE_MIN_LEFT_MS = 15 * 60_000;
 const TICK_MS = 250;
 

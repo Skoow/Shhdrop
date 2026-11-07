@@ -88,7 +88,7 @@ func TestFinalizeFillsRandom(t *testing.T) {
 		t.Fatal("suite de 4 096 zéros dans le bourrage")
 	}
 	for _, n := range []int{0, 1, 2, 6} {
-		if !bytes.Equal(f[segOffset(400, n):segOffset(400, n)+SegmentSize(400, n)], segBody(400, n, byte(n+1))) {
+		if !bytes.Equal(f[segOffset(400, n):segOffset(400, n)+int64(SegmentSize(400, n))], segBody(400, n, byte(n+1))) {
 			t.Fatal("segment envoyé modifié", n)
 		}
 	}
@@ -245,7 +245,7 @@ func TestFinalizeConcurrentFillsOnce(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	pad := int64(segOffset(400, 6) - segOffset(400, 1))
+	pad := segOffset(400, 6) - segOffset(400, 1)
 	if got["ok"] != 1 || got["ok"]+got["busy"]+got["404"] != N {
 		t.Fatal(got)
 	}

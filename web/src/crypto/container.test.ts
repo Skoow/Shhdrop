@@ -3,6 +3,7 @@ import {
   BUCKETS,
   CHUNK,
   CHUNK_CT,
+  MAX_ITEMS,
   CONTENT_MAX,
   HEADER,
   MANIFEST_MAX,
@@ -139,7 +140,7 @@ const freshKeys = (): Promise<ContentKeys> => contentKeys(newSeed());
 
 describe("paliers et segments (v2)", () => {
   it("palier canonique = plus petit palier ≥ fin des données + un morceau (manifeste ≤ 65 532 + 4 octets)", () => {
-    expect(BUCKETS).toEqual([1, 16, 80, 160, 400, 800, 1600, 4000, 8000, 16385]);
+    expect(BUCKETS).toEqual([1, 16, 80, 160, 400, 800, 1600, 4000, 8000, 16385, 32769]);
     expect(MANIFEST_MAX).toBe(65532);
     const room = 4 + MANIFEST_MAX;
     expect(room).toBe(CHUNK);
@@ -149,10 +150,15 @@ describe("paliers et segments (v2)", () => {
     expect(bucketFor(16 * CHUNK - room + 1)).toBe(80);
     for (const b of BUCKETS.slice(1)) {
       expect(bucketFor(b * CHUNK - room)).toBe(b);
-      if (b !== 16385) expect(bucketFor(b * CHUNK - room + 1)).toBe(BUCKETS[BUCKETS.indexOf(b) + 1]);
+      if (b !== BUCKETS.at(-1)) expect(bucketFor(b * CHUNK - room + 1)).toBe(BUCKETS[BUCKETS.indexOf(b) + 1]);
     }
-    expect(CONTENT_MAX).toBe(1073741824); // exactement 1 Gio de données (« 1 Go » affiché)
-    expect(() => bucketFor(CONTENT_MAX + 1)).toThrow("trop_gros");
+    expect(CONTENT_MAX).toBe(2147483648); // exactement 2 Gio de données (« 2 Go » affiché, spec §41.2)
+    expect(bucketFor(CONTENT_MAX)).toBe(32769); // 2 Gio exactement : accepté, plus grand palier
+    expect(bucketFor(CONTENT_MAX - 1)).toBe(32769);
+    expect(bucketFor(8000 * CHUNK)).toBe(16385); // 500 Mio de données et plus : palier intermédiaire
+    expect(bucketFor(1073741824)).toBe(16385); // l'ancien maximum (1 Gio) tient dans 16 385 morceaux
+    expect(bucketFor(1073741825)).toBe(32769); // 1 Gio + 1 octet : le palier suivant
+    expect(() => bucketFor(CONTENT_MAX + 1)).toThrow("trop_gros"); // 2 Gio + 1 octet : refusé
     expect(() => bucketFor(-1)).toThrow();
     expect(() => bucketFor(1.5)).toThrow();
   });
@@ -162,6 +168,9 @@ describe("paliers et segments (v2)", () => {
     expect(segmentCount(400)).toBe(7);
     expect(segmentCount(16385)).toBe(257);
     expect(segmentSize(16385, 256)).toBe(65552); // dernier segment : le morceau du manifeste
+    expect(segmentCount(32769)).toBe(513);
+    expect(segmentSize(32769, 512)).toBe(65552); // le dernier segment du plus grand palier : un seul morceau
+    expect(HEADER + 32769 * CHUNK_CT).toBe(2_148_073_536); // fichier chiffré de 2 Gio (spec §41.2)
     expect(segmentSize(1600, 0)).toBe(48 + 64 * 65552);
     expect(segmentSize(80, 1)).toBe(16 * 65552);
     for (const b of BUCKETS) {
@@ -454,7 +463,7 @@ describe("sealStream : refus", () => {
   });
   it("vide / trop d'éléments", async () => {
     await expect(sealStream([], keys)).rejects.toThrow("vide");
-    await expect(sealStream(Array.from({ length: 11 }, () => f()), keys)).rejects.toThrow("trop_d_elements");
+    await expect(sealStream(Array.from({ length: MAX_ITEMS + 1 }, () => f()), keys)).rejects.toThrow("trop_d_elements");
   });
   it("texte trop long (10 000 caractères acceptés)", async () => {
     const ok = "é".repeat(10_000);
@@ -484,8 +493,14 @@ describe("sealStream : refus", () => {
           throw new Error("ne doit pas être lu");
         },
       }) as unknown as Blob;
+    // Exactement 2 Gio : accepté, au plus grand palier ; le Blob creux n'est pas lu (seul le dernier
+    // segment, qui ne contient que le manifeste, est produit). 2 Gio + 1 octet : refusé.
+    const exact = await sealStream([f("a", huge(CONTENT_MAX))], await freshKeys());
+    expect(exact.bucket).toBe(32769);
+    expect(exact.segmentCount).toBe(513);
+    expect((await exact.segment(512)).length).toBe(65552);
     await expect(sealStream([f("a", huge(CONTENT_MAX + 1))], keys)).rejects.toThrow("trop_gros");
-    await expect(sealStream([f("a", huge(600 * MIB)), f("b", huge(500 * MIB))], keys)).rejects.toThrow("trop_gros");
+    await expect(sealStream([f("a", huge(1200 * MIB)), f("b", huge(900 * MIB))], keys)).rejects.toThrow("trop_gros");
   });
   it("droits invalides refusés à la création", async () => {
     const t: Item[] = [{ kind: "text", name: "", mime: "text/plain", data: utf8("a") }];
@@ -544,7 +559,7 @@ describe("openStream : manifeste invalide (paquet bien chiffré)", () => {
     ["v absent", tail({ items: good.items })],
     ["items absent", tail({ v: 2 })],
     ["items vide", tail({ v: 2, items: [] })],
-    ["11 éléments", tail({ v: 2, items: Array(11).fill(good.items[0]) })],
+    [`${MAX_ITEMS + 1} éléments`, tail({ v: 2, items: Array(MAX_ITEMS + 1).fill(good.items[0]) })],
     ["kind inconnu", tail({ v: 2, items: [{ ...good.items[0], kind: "exe" }] })],
     ["fichier dans la zone du manifeste", tail({ v: 2, items: [{ ...good.items[0], offset: 16 * CHUNK - 100 }] })],
     ["taille négative", tail({ v: 2, items: [{ ...good.items[0], size: -1 }] })],
