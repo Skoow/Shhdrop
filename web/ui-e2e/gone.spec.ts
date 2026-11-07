@@ -1,10 +1,13 @@
-// Disparition du partage pendant un téléchargement (spec §41.8, tâche E1), vrai serveur.
+// Disparition du partage pendant un téléchargement (spec §41.8, tâches E1 et M2), vrai serveur.
 // (a) compte à rebours à zéro pendant un enregistrement : l'interface se ferme aussitôt, le
 //     fichier en cours est nommé et se termine (octets identiques), « Terminé » ;
 // (b) rien en cours : la page de fin ordinaire, sans nom ;
-// (c) destruction faite ici pendant un enregistrement : le serveur efface tout de suite (la
-//     grâce de la Task M2 n'existe pas encore) → « Téléchargement interrompu. », partiel supprimé.
-// Le cas « surveillance » (watch, 410) attend la route serveur de la Task M2 (WATCH_READY).
+// (c) destruction faite ici pendant un enregistrement : l'ouverture active garde sa grâce
+//     (Task M2) → le fichier se termine, octets identiques ;
+// (d) suppression par l'expéditeur (lien de gestion) pendant un enregistrement : fermeture par
+//     la surveillance (410) en moins d'une seconde, le fichier se termine ; le lien ne s'ouvre plus ;
+// (e) grâce perdue : enregistrement en pause plus de 120 s après la suppression, puis repris
+//     → « Téléchargement interrompu. », partiel supprimé.
 import { createHash } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
@@ -42,12 +45,12 @@ async function fakePicker(page: Page) {
 }
 const win = (page: Page, k: string) => page.evaluate((key) => (window as unknown as Record<string, unknown>)[key], k);
 
-async function opened(page: Page, browser: import("@playwright/test").Browser, origin: string) {
+async function opened(page: Page, browser: import("@playwright/test").Browser, origin: string, clock = true) {
   const s = await freshPage(browser);
   const sent = await sendShare(s.page, origin + "/", { text: "secret 4471", files: [{ name: "rapport.bin", mimeType: "application/octet-stream", buffer: BIG }] });
   await s.ctx.close();
   await fakePicker(page);
-  await page.clock.install();
+  if (clock) await page.clock.install();
   await page.goto(sent.link);
   await unlock(page, sent.password);
   return sent;
@@ -104,7 +107,7 @@ test("(b) expiration sans enregistrement en cours : page de fin ordinaire, sans 
   await capture(page, "gone");
 });
 
-test("(c) destruction faite ici pendant un enregistrement : nommé, puis « Téléchargement interrompu. », partiel supprimé", async ({ page, shh, browser }) => {
+test("(c) destruction faite ici pendant un enregistrement : nommé, puis « Terminé » (grâce de l'ouverture active)", async ({ page, shh, browser }) => {
   test.setTimeout(150_000);
   await opened(page, browser, shh.origin);
   let release!: () => void;
@@ -119,6 +122,65 @@ test("(c) destruction faite ici pendant un enregistrement : nommé, puis « Tél
   await page.getByRole("button", { name: "Détruire", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Ce partage a été détruit." })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(/^Le fichier en cours \(rapport\.bin\) est autorisé à se terminer\s; vous ne pouvez plus rien ouvrir d'autre\.$/)).toBeVisible();
+  release();
+  const row = page.locator("[data-transfer]");
+  await expect(row).toHaveAttribute("data-transfer", "done", { timeout: 60_000 });
+  await expect(row).toContainText("Terminé");
+  expect(await win(page, "__closed")).toBe(true);
+  expect(await win(page, "__aborted")).toBeUndefined();
+  expect(await win(page, "__sha")).toBe(sha(BIG));
+});
+
+/** Suppression par l'expéditeur : POST /api/manage/destroy avec S_gestion (lien de gestion). */
+async function senderDeletes(origin: string, manage: string) {
+  const sg = /#m([A-Za-z0-9_-]{43})$/.exec(manage)?.[1];
+  expect(sg).toBeDefined();
+  const r = await fetch(origin + "/api/manage/destroy", { method: "POST", headers: { "X-Shh-Manage": sg! } });
+  expect(r.status).toBe(204);
+}
+
+test("(d) suppression par l'expéditeur pendant un enregistrement : fermeture en moins d'une seconde (surveillance), fichier complet ; lien mort", async ({ page, shh, browser }) => {
+  test.setTimeout(150_000);
+  const sent = await opened(page, browser, shh.origin, false);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route("**/api/shares/segments/*", async (r) => {
+    await gate;
+    await r.continue();
+  });
+  await page.getByRole("button", { name: "Enregistrer rapport.bin" }).click();
+  await expect(page.locator(".save .progress")).toBeVisible();
+  // La surveillance est tenue (aucun signal avant la suppression).
+  await page.waitForRequest((r) => r.url().endsWith("/api/shares/watch"));
+  const t0 = Date.now();
+  await senderDeletes(shh.origin, sent.manage);
+  await expect(page.getByRole("heading", { name: "Ce partage a été supprimé." })).toBeVisible({ timeout: 5_000 });
+  expect(Date.now() - t0).toBeLessThan(1_500); // 410 de watch en moins d'une seconde (+ rendu)
+  await expect(page.locator(".item, pre[dir=auto]")).toHaveCount(0);
+  release();
+  const row = page.locator("[data-transfer]");
+  await expect(row).toHaveAttribute("data-transfer", "done", { timeout: 60_000 });
+  expect(await win(page, "__sha")).toBe(sha(BIG));
+  const other = await freshPage(browser);
+  await other.page.goto(sent.link);
+  await expect(other.page.getByRole("heading", { name: "Ce lien n'existe pas ou n'est plus disponible." })).toBeVisible({ timeout: 20_000 });
+  await other.ctx.close();
+});
+
+test("(e) pause de plus de 120 s après la suppression : grâce perdue → « Téléchargement interrompu. », partiel supprimé", async ({ page, shh, browser }) => {
+  test.setTimeout(240_000);
+  const sent = await opened(page, browser, shh.origin, false);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route("**/api/shares/segments/*", async (r) => {
+    await gate;
+    await r.continue();
+  });
+  await page.getByRole("button", { name: "Enregistrer rapport.bin" }).click();
+  await expect(page.locator(".save .progress")).toBeVisible();
+  await senderDeletes(shh.origin, sent.manage); // ouverture encore active : grâce accordée
+  await expect(page.getByRole("heading", { name: "Ce partage a été supprimé." })).toBeVisible({ timeout: 5_000 });
+  await page.waitForTimeout(125_000); // plus de 120 s sans segment : droit perdu (horloge réelle du serveur)
   release();
   const row = page.locator("[data-transfer]");
   await expect(row).toHaveAttribute("data-transfer", "failed", { timeout: 60_000 });

@@ -100,7 +100,7 @@ test("mauvais mot de passe deux fois → « 3 essais restants », bon → conten
   expect(await page.content()).not.toContain(sent.password);
   // Aucun bandeau, aucune offre, aucune requête hors de l'origine (gardes de la fixture).
   expect(await page.locator("iframe").count()).toBe(0);
-  expect(api.filter((p) => !/^(GET \/api\/shares\/meta|POST \/api\/shares\/unlock|GET \/api\/shares\/segments\/\d+|POST \/api\/shares\/done)$/.test(p))).toEqual([]);
+  expect(api.filter((p) => !/^(GET \/api\/shares\/meta|POST \/api\/shares\/unlock|GET \/api\/shares\/segments\/\d+|POST \/api\/shares\/done|GET \/api\/shares\/watch)$/.test(p))).toEqual([]);
 });
 
 test("cinq mauvais mots de passe → « Le partage a été détruit. », partage absent en Node", async ({ page, shh, browser }) => {

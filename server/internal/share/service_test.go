@@ -240,10 +240,8 @@ func TestFinalizeRounding(t *testing.T) {
 	if want := time.Date(2026, 11, 4, 11, 15, 0, 0, time.UTC).Unix(); exp != want {
 		t.Fatal(time.Unix(exp, 0).UTC())
 	}
-	var dl *int64
-	s.DB.QueryRow("SELECT upload_deadline FROM shares WHERE id=?", id).Scan(&dl)
-	if dl != nil {
-		t.Fatal("upload_deadline doit être effacé (révèle la date de création)")
+	if _, ok := upMem(s, id); ok {
+		t.Fatal("échéance d'envoi gardée après finalize (révèle la date de création)")
 	}
 	if ceil15(900*10) != 900*10 || ceil15(900*10+1) != 900*11 {
 		t.Fatal("ceil15")
@@ -476,22 +474,21 @@ func TestPurgeAt(t *testing.T) {
 	id := ready(t, s, k, 1, 1, 1) // expires_at = 11:15
 	c.Add(50 * time.Minute)       // 10:52
 	s.Unlock(id, k.acces, k.preuve)
-	var purge int64
-	s.DB.QueryRow("SELECT purge_at FROM shares WHERE id=?", id).Scan(&purge)
+	purge, _ := purgeMem(s, id)
 	if want := time.Date(2026, 11, 4, 11, 15, 0, 0, time.UTC).Unix(); purge != want {
 		t.Fatal("purge_at = min(now+6h, expires_at)", time.Unix(purge, 0).UTC())
 	}
 	k2, k3 := newKeys(), newKeys()
 	id2 := ready(t, s, k2, 1, 24, 1)
 	s.Unlock(id2, k2.acces, k2.preuve) // 10:52 + 6 h = 16:52, arrondi au quart d'heure supérieur
-	s.DB.QueryRow("SELECT purge_at FROM shares WHERE id=?", id2).Scan(&purge)
+	purge, _ = purgeMem(s, id2)
 	if want := time.Date(2026, 11, 4, 17, 0, 0, 0, time.UTC).Unix(); purge != want {
 		t.Fatal("purge_at = ceil15(now+6h)", time.Unix(purge, 0).UTC())
 	}
 	id3 := ready(t, s, k3, 1, 6, 1) // expires_at = ceil15(10:52 + 6 h) = 17:00
 	c.Add(5 * time.Hour)            // 15:52 : now + 6 h dépasse expires_at
 	s.Unlock(id3, k3.acces, k3.preuve)
-	s.DB.QueryRow("SELECT purge_at FROM shares WHERE id=?", id3).Scan(&purge)
+	purge, _ = purgeMem(s, id3)
 	if want := time.Date(2026, 11, 4, 17, 0, 0, 0, time.UTC).Unix(); purge != want {
 		t.Fatal("purge_at plafonné à expires_at", time.Unix(purge, 0).UTC())
 	}
@@ -555,8 +552,8 @@ func TestUploadDeadlineRounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var dl int64
-	s.DB.QueryRow("SELECT upload_deadline FROM shares WHERE id=?", id).Scan(&dl)
+	u, _ := upMem(s, id)
+	dl := u.deadline
 	if want := time.Date(2026, 11, 4, 16, 15, 0, 0, time.UTC).Unix(); dl != want {
 		t.Fatal("upload_deadline = ceil15(now+6h)", time.Unix(dl, 0).UTC())
 	}
@@ -626,8 +623,8 @@ func TestReadAfterExpiry(t *testing.T) {
 	if _, err := readSegment(s, id, 0, 1); err != nil {
 		t.Fatal(err)
 	}
-	c.Add(73 * time.Minute) // = expires_at
-	if _, err := readSegment(s, id, 0, 1); !errors.Is(err, ErrNotFound) {
+	c.Add(73 * time.Minute) // = expires_at ; ouverture inactive (dernier segment il y a 73 min)
+	if _, err := readSegment(s, id, 0, 1); !errors.Is(err, ErrGone) {
 		t.Fatal(err)
 	}
 	if _, err := s.Meta(k.acces); !errors.Is(err, ErrNotFound) {
@@ -657,10 +654,10 @@ func TestDestroy(t *testing.T) {
 	if err := s.DestroyManaged(rnd(32)); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	if err := s.DestroyWithProof(k.acces, rnd(32)); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyWithProof(k.acces, rnd(32), false); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	if err := s.DestroyWithProof(rnd(32), k.preuve); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyWithProof(rnd(32), k.preuve, false); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	if rowCount(t, s, id) != 1 {
@@ -674,7 +671,7 @@ func TestDestroy(t *testing.T) {
 		t.Fatal(err)
 	}
 	id2 := ready(t, s, k, 1, 1, 1)
-	if err := s.DestroyWithProof(k.acces, k.preuve); err != nil {
+	if err := s.DestroyWithProof(k.acces, k.preuve, false); err != nil {
 		t.Fatal(err)
 	}
 	gone(t, s, id2)
@@ -906,7 +903,7 @@ func TestDestroyCountsAttempts(t *testing.T) {
 	k := newKeys()
 	id := ready(t, s, k, 1, 1, 1)
 	for i := 1; i <= 4; i++ {
-		if err := s.DestroyWithProof(k.acces, rnd(32)); !errors.Is(err, ErrNotFound) {
+		if err := s.DestroyWithProof(k.acces, rnd(32), false); !errors.Is(err, ErrNotFound) {
 			t.Fatal(err)
 		}
 		if failed(t, s, id) != i {
@@ -914,15 +911,15 @@ func TestDestroyCountsAttempts(t *testing.T) {
 		}
 	}
 	// kAcces faux : ne compte pas.
-	s.DestroyWithProof(rnd(32), rnd(32))
+	s.DestroyWithProof(rnd(32), rnd(32), false)
 	if failed(t, s, id) != 4 {
 		t.Fatal("kAcces faux compté")
 	}
-	if err := s.DestroyWithProof(k.acces, rnd(32)); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyWithProof(k.acces, rnd(32), false); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	gone(t, s, id)
-	if err := s.DestroyWithProof(k.acces, rnd(32)); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyWithProof(k.acces, rnd(32), false); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
 	if _, _, err := s.Unlock(id, k.acces, k.preuve); !errors.Is(err, ErrNotFound) {
@@ -935,9 +932,9 @@ func TestMixedAttemptsShareCounter(t *testing.T) {
 	k := newKeys()
 	id := ready(t, s, k, 1, 1, 1)
 	s.Unlock(id, k.acces, rnd(32))
-	s.DestroyWithProof(k.acces, rnd(32))
+	s.DestroyWithProof(k.acces, rnd(32), false)
 	s.Unlock(id, k.acces, rnd(32))
-	s.DestroyWithProof(k.acces, rnd(32))
+	s.DestroyWithProof(k.acces, rnd(32), false)
 	_, _, err := s.Unlock(id, k.acces, rnd(32))
 	var bp *BadPassword
 	if !errors.As(err, &bp) || bp.AttemptsLeft != 0 {
@@ -1049,7 +1046,7 @@ func TestReadSegmentOpenN(t *testing.T) {
 	if err := s.Done(id, n1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readSegment(s, id, 0, n1); !errors.Is(err, ErrNotFound) {
+	if _, err := readSegment(s, id, 0, n1); !errors.Is(err, ErrGone) {
 		t.Fatal("jeton mort après done", err)
 	}
 	if _, err := readSegment(s, id, 0, n2); err != nil {
@@ -1065,7 +1062,7 @@ func TestDestroyExpired(t *testing.T) {
 	up, _, _ := s.Create(ku.req(1, 1, 1))
 	c.Add(6*time.Hour + 15*time.Minute) // 16:17 : partage expiré, envoi échu (16:15)
 	for x, k := range map[string]keys{id: k, up: ku} {
-		if err := s.DestroyWithProof(k.acces, rnd(32)); !errors.Is(err, ErrNotFound) {
+		if err := s.DestroyWithProof(k.acces, rnd(32), false); !errors.Is(err, ErrNotFound) {
 			t.Fatal(err)
 		}
 		if err := s.DestroyManaged(k.gestion); !errors.Is(err, ErrNotFound) {
@@ -1097,13 +1094,11 @@ func TestValidateAndFrozen(t *testing.T) {
 	}
 }
 
+// progressAt : minute du dernier segment reçu, en mémoire (spec §36 S5) ; invalide hors envoi.
 func progressAt(t *testing.T, s *Service, id string) sql.NullInt64 {
 	t.Helper()
-	var p sql.NullInt64
-	if err := s.DB.QueryRow("SELECT progress_at FROM shares WHERE id=?", id).Scan(&p); err != nil {
-		t.Fatal(err)
-	}
-	return p
+	u, ok := upMem(s, id)
+	return sql.NullInt64{Int64: u.progress, Valid: ok && u.progress != 0}
 }
 
 // Envoi bloqué : aucun nouveau segment depuis 15 min → effacé (avant l'échéance de 3 h).

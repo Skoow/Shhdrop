@@ -286,3 +286,36 @@ func TestConcurrentSingleUse(t *testing.T) {
 		t.Fatalf("%d usages acceptés", ok)
 	}
 }
+
+// Spec §36 S15 (Task M2) : les heures gardées pour la difficulté sont arrondies à la minute
+// (supérieure : une création compte au moins une heure) ; la difficulté double toujours à
+// chaque création de l'heure, même à quelques secondes d'écart.
+func TestCreateTimesRoundedToMinute(t *testing.T) {
+	now := t0.Add(17*time.Second + 300*time.Millisecond)
+	c := newCap(&now)
+	for i := 0; i < 3; i++ {
+		c.RecordCreate(ipA)
+		now = now.Add(7 * time.Second)
+	}
+	c.mu.Lock()
+	for _, ts := range c.creates {
+		for _, x := range ts {
+			if x.Unix()%60 != 0 || x.Nanosecond() != 0 {
+				t.Errorf("heure non arrondie : %v", x)
+			}
+		}
+	}
+	c.mu.Unlock()
+	if ch, _ := c.Challenge(ipA); ch.MaxNumber != 50000<<3 {
+		t.Fatalf("difficulté après 3 créations : %d", ch.MaxNumber)
+	}
+	// 12:00:17 → 12:01 : comptée jusqu'à 13:01 (jamais moins d'une heure).
+	now = t0.Add(time.Hour + 30*time.Second)
+	if ch, _ := c.Challenge(ipA); ch.MaxNumber != 50000<<3 {
+		t.Fatalf("oubliée avant une heure : %d", ch.MaxNumber)
+	}
+	now = t0.Add(time.Hour + time.Minute)
+	if ch, _ := c.Challenge(ipA); ch.MaxNumber != 50000 {
+		t.Fatalf("après l'heure : %d", ch.MaxNumber)
+	}
+}

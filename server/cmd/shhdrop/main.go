@@ -204,6 +204,11 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Envois, « draining » et partages échus effacés (leurs échéances étaient en mémoire, aucun
+	// jeton ne survit : spec §36 S12, §41.8), puis fichiers sans ligne et lignes sans fichier.
+	if _, err := svc.PurgeAtStart(); err != nil {
+		return err
+	}
 	if err := janitor.Reconcile(svc); err != nil {
 		return err
 	}
@@ -245,8 +250,12 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	}
 	jctx, jcancel := context.WithCancel(ctx)
 	jdone := make(chan struct{})
+	wdone := make(chan struct{})
 	go func() { janitor.Run(jctx, svc, db, 60*time.Second); close(jdone) }()
-	defer func() { jcancel(); <-jdone }()
+	// Chaque seconde : partages effacés hors du serveur (shhdrop admin destroy) → flux
+	// coupés et surveillances prévenues (spec §41.8).
+	go func() { janitor.Watch(jctx, svc, time.Second); close(wdone) }()
+	defer func() { jcancel(); <-jdone; <-wdone }()
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {

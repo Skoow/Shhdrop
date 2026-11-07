@@ -128,7 +128,16 @@ export function scanRegions(
   return { hits: [...hits], ...st };
 }
 
-export type Captured = { method: string; url: string; headers: [string, string][]; body: Buffer; response: Buffer };
+export type Captured = {
+  method: string;
+  url: string;
+  headers: [string, string][];
+  body: Buffer;
+  response: Buffer;
+  /** Statut et en-têtes de la réponse (« nom: valeur », une ligne chacun). */
+  status: number;
+  responseHeaders: string;
+};
 
 /** Enveloppe fetch : chaque requête (méthode, URL, en-têtes, corps) et le corps de sa réponse sont copiés dans `log`. */
 export function capturingFetch(log: Captured[], inner: typeof fetch = globalThis.fetch): typeof fetch {
@@ -143,11 +152,13 @@ export function capturingFetch(log: Captured[], inner: typeof fetch = globalThis
     else if (b instanceof Uint8Array) body = Buffer.from(b);
     else if (b instanceof ArrayBuffer) body = Buffer.from(new Uint8Array(b));
     else throw new Error("corps de requête de type non pris en charge par la capture");
-    const entry: Captured = { method: init?.method ?? "GET", url, headers, body, response: Buffer.alloc(0) };
+    const entry: Captured = { method: init?.method ?? "GET", url, headers, body, response: Buffer.alloc(0), status: 0, responseHeaders: "" };
     log.push(entry);
     const r = await inner(input, init);
     // Copie du corps de la réponse (fouillée elle aussi) ; la réponse rendue reste intacte.
     entry.response = Buffer.from(await r.clone().arrayBuffer());
+    entry.status = r.status;
+    r.headers.forEach((v, k) => (entry.responseHeaders += `${k}: ${v}\n`));
     return r;
   };
 }

@@ -187,6 +187,16 @@ func (s *Store) Open(id string, off int64, n int64) (*Section, error) {
 	return &Section{SectionReader: io.NewSectionReader(f, off, n), f: f}, nil
 }
 
+// OpenFile ouvre le fichier entier en lecture (sans mise à jour de la date d'accès), pour
+// le garder ouvert après sa suppression (spec §41.8 : descripteur détaché). À fermer.
+func (s *Store) OpenFile(id string) (*os.File, error) {
+	path, err := s.path(id)
+	if err != nil {
+		return nil, err
+	}
+	return openRead(path)
+}
+
 // Delete supprime le fichier ; sans erreur s'il est déjà absent.
 func (s *Store) Delete(id string) error {
 	p, err := s.path(id)

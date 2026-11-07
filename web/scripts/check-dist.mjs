@@ -8,6 +8,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEMO_BASE, DEMO_META } from "./demo-meta.mjs";
+import { findAnalytics, findErrorListeners } from "./no-analytics.mjs";
 
 const MARK = "__SHH_DEMO__";
 
@@ -45,6 +46,14 @@ export function checkDist(dir, demo) {
   if (!existsSync(join(dir, "index.html"))) return [`${dir} : index.html absent (build manquant ?)`];
   const all = files(dir).map((p) => ({ rel: relative(dir, p), data: readFileSync(p) }));
   const index = readFileSync(join(dir, "index.html"), "utf8");
+
+  // Spec §35.1 (Task M2) : aucune statistique, aucun écouteur global d'erreurs, dans tout build.
+  for (const f of all) {
+    if (/\.(woff2?|png|jpe?g|gif|ico|webp|avif|wasm)$/i.test(f.rel)) continue;
+    const text = f.data.toString("utf8");
+    for (const w of findAnalytics(text)) problems.push(`${f.rel} : statistique « ${w} » (spec §35.1)`);
+    for (const m of findErrorListeners(text)) problems.push(`${f.rel} : écouteur global d'erreurs « ${m} » (spec §35.1)`);
+  }
 
   if (!demo) {
     for (const f of all)

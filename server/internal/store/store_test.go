@@ -174,3 +174,142 @@ func TestRefusesV1Schema(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// columns : noms des colonnes de shares.
+func columns(t *testing.T, db *sql.DB) map[string]bool {
+	t.Helper()
+	rs, err := db.Query(`SELECT name FROM pragma_table_info('shares')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+	m := map[string]bool{}
+	for rs.Next() {
+		var n string
+		if err := rs.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		m[n] = true
+	}
+	return m
+}
+
+// masterNames : tout ce que contient sqlite_master (tables, index, vues, déclencheurs).
+func masterNames(t *testing.T, db *sql.DB) []string {
+	t.Helper()
+	rs, err := db.Query(`SELECT type || ':' || name FROM sqlite_master ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+	var out []string
+	for rs.Next() {
+		var n string
+		if err := rs.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// Spec §36 S5, S11, S12 (Task M2) : progress_at, upload_deadline et purge_at vivent en
+// mémoire ; la base ne garde qu'une date (expires_at). sqlite_master : shares et ses index.
+func TestSchemaMinimal(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cols := columns(t, db)
+	for _, c := range []string{"progress_at", "upload_deadline", "purge_at"} {
+		if cols[c] {
+			t.Errorf("colonne %s encore présente", c)
+		}
+	}
+	if !cols["expires_at"] || !cols["ttl_hours"] {
+		t.Fatal("expires_at et ttl_hours attendus", cols)
+	}
+	want := "index:shares_access_v,index:shares_manage_v,table:shares"
+	if got := strings.Join(masterNames(t, db), ","); got != want {
+		t.Fatalf("sqlite_master = %s, attendu %s", got, want)
+	}
+	// Un partage prêt sans ttl_hours est accepté (ttl_hours à NULL après finalize, S11).
+	if _, err := db.Exec(`INSERT INTO shares(id,state,bucket,max_opens,opens_left,segments_mask,salt,kdf_ops,kdf_mem,access_v,proof_v,manage_v,envelope,expires_at)
+		VALUES('r','ready',16,1,1,x'00',x'00',3,3,x'01',x'01',x'02',zeroblob(60),900)`); err != nil {
+		t.Fatal("ready sans ttl_hours refusé :", err)
+	}
+}
+
+// Base de l'ancien schéma v2 (avec les trois colonnes) : migrée en place par copie dans
+// une nouvelle table WITHOUT ROWID, puis VACUUM ; ttl_hours mis à NULL hors envoi ; aucun
+// octet des colonnes retirées ne reste dans le fichier.
+func TestMigratesDatesOutOfDB(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shares.db")
+	old := `CREATE TABLE shares(
+  id TEXT PRIMARY KEY, state TEXT NOT NULL CHECK(state IN ('uploading','ready','draining')),
+  bucket INTEGER NOT NULL, ttl_hours INTEGER, max_opens INTEGER,
+  opens_left INTEGER NOT NULL, opens_issued INTEGER NOT NULL DEFAULT 0, done_mask INTEGER NOT NULL DEFAULT 0,
+  failed_attempts INTEGER NOT NULL DEFAULT 0, segments_mask BLOB NOT NULL,
+  salt BLOB, kdf_ops INTEGER, kdf_mem INTEGER,
+  access_v BLOB NOT NULL, proof_v BLOB, manage_v BLOB NOT NULL, envelope BLOB,
+  upload_deadline INTEGER, expires_at INTEGER, purge_at INTEGER, progress_at INTEGER) WITHOUT ROWID;
+CREATE UNIQUE INDEX shares_access_v ON shares(access_v);
+CREATE UNIQUE INDEX shares_manage_v ON shares(manage_v)`
+	raw, err := sql.Open("sqlite", "file:"+path+"?_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(old); err != nil {
+		t.Fatal(err)
+	}
+	marker := []byte("REPERE-DATE-RETIREE")
+	if _, err := raw.Exec(`INSERT INTO shares(id,state,bucket,ttl_hours,max_opens,opens_left,segments_mask,salt,kdf_ops,kdf_mem,access_v,proof_v,manage_v,envelope,expires_at,purge_at,progress_at,upload_deadline)
+		VALUES('r','ready',16,24,3,3,x'00',x'00',3,3,x'01',x'01',x'02',zeroblob(60),900,?,?,?)`, marker, marker, marker); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`INSERT INTO shares(id,state,bucket,opens_left,segments_mask,access_v,manage_v,upload_deadline)
+		VALUES('u','uploading',16,0,x'00',x'03',x'04',1800)`); err != nil {
+		t.Fatal(err)
+	}
+	raw.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	raw.Close()
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cols := columns(t, db)
+	if cols["progress_at"] || cols["upload_deadline"] || cols["purge_at"] {
+		t.Fatal("colonnes non retirées", cols)
+	}
+	var ttl sql.NullInt64
+	var maxOpens, exp int64
+	if err := db.QueryRow(`SELECT ttl_hours, max_opens, expires_at FROM shares WHERE id='r'`).Scan(&ttl, &maxOpens, &exp); err != nil {
+		t.Fatal(err)
+	}
+	if ttl.Valid || maxOpens != 3 || exp != 900 {
+		t.Fatal("ligne migrée", ttl, maxOpens, exp)
+	}
+	var n int
+	db.QueryRow(`SELECT count(*) FROM shares`).Scan(&n)
+	if n != 2 {
+		t.Fatal("lignes copiées", n)
+	}
+	if got := strings.Join(masterNames(t, db), ","); got != "index:shares_access_v,index:shares_manage_v,table:shares" {
+		t.Fatal("sqlite_master", got)
+	}
+	var rowid int
+	if err := db.QueryRow("SELECT rowid FROM shares").Scan(&rowid); err == nil {
+		t.Fatal("table migrée avec rowid")
+	}
+	if err := Checkpoint(db); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	w, _ := os.ReadFile(path + "-wal")
+	if bytes.Contains(append(b, w...), marker) {
+		t.Fatal("octets des colonnes retirées encore sur disque")
+	}
+}

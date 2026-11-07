@@ -14,18 +14,27 @@ import (
 // requête ne désigne un partage, et une création ne peut heurter qu'un vérificateur dont
 // l'auteur connaît le secret (aucun oracle d'existence, revue K1, I2).
 // WITHOUT ROWID : pas de compteur d'insertion qui trahirait l'ordre de création (spec §9.1).
-// Schéma v2 (spec §29.8) : ttl_hours, max_opens, salt, kdf_*, proof_v et envelope (E,
-// 60 octets) restent NULL jusqu'à finalize ; un partage « ready » les a tous (CHECK).
-const schema = `CREATE TABLE IF NOT EXISTS shares(
+// Schéma v2 (spec §29.8) : max_opens, salt, kdf_*, proof_v et envelope (E, 60 octets)
+// restent NULL jusqu'à finalize ; un partage « ready » les a tous (CHECK).
+// Minimisation (spec §36 S5, S11, S12, Task M2) : aucune échéance d'envoi, de blocage ni de
+// purge en base (elles vivent en mémoire, share.Service) ; ttl_hours reste NULL après
+// finalize (il donnerait l'heure de création à 15 min près) ; seule date : expires_at.
+const tableDef = `(
   id TEXT PRIMARY KEY, state TEXT NOT NULL CHECK(state IN ('uploading','ready','draining')),
   bucket INTEGER NOT NULL, ttl_hours INTEGER, max_opens INTEGER,
   opens_left INTEGER NOT NULL, opens_issued INTEGER NOT NULL DEFAULT 0, done_mask INTEGER NOT NULL DEFAULT 0,
   failed_attempts INTEGER NOT NULL DEFAULT 0, segments_mask BLOB NOT NULL,
   salt BLOB, kdf_ops INTEGER, kdf_mem INTEGER,
   access_v BLOB NOT NULL, proof_v BLOB, manage_v BLOB NOT NULL, envelope BLOB,
-  upload_deadline INTEGER, expires_at INTEGER, purge_at INTEGER, progress_at INTEGER,
-  CHECK(state='uploading' OR (ttl_hours IS NOT NULL AND max_opens IS NOT NULL AND salt IS NOT NULL AND
+  expires_at INTEGER,
+  CHECK(state='uploading' OR (max_opens IS NOT NULL AND salt IS NOT NULL AND
     kdf_ops IS NOT NULL AND kdf_mem IS NOT NULL AND proof_v IS NOT NULL AND envelope IS NOT NULL AND length(envelope)=60))) WITHOUT ROWID`
+
+const schema = `CREATE TABLE IF NOT EXISTS shares` + tableDef
+
+// keptColumns : colonnes recopiées par la migration (toutes celles du schéma actuel).
+const keptColumns = `id,state,bucket,ttl_hours,max_opens,opens_left,opens_issued,done_mask,failed_attempts,
+  segments_mask,salt,kdf_ops,kdf_mem,access_v,proof_v,manage_v,envelope,expires_at`
 
 // indexes : créés après le contrôle du format (une base v1 n'a pas les mêmes colonnes).
 const indexes = `CREATE UNIQUE INDEX IF NOT EXISTS shares_access_v ON shares(access_v);
@@ -81,11 +90,55 @@ func Open(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("base au format v1 (sans colonne envelope) : à effacer avant de démarrer le serveur v2")
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migration du schéma : %w", err)
+	}
 	if _, err := db.Exec(indexes); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("création des index : %w", err)
 	}
 	return db, nil
+}
+
+// migrate retire les colonnes de dates de l'ancien schéma v2 (Task M2) : copie dans une
+// nouvelle table WITHOUT ROWID sans elles (ttl_hours mis à NULL hors envoi), remplacement
+// de l'ancienne, puis VACUUM et vidage du WAL. secure_delete (DSN) efface les pages
+// libérées : aucun octet des colonnes retirées ne reste dans le fichier. Sans ces colonnes,
+// rien à faire.
+func migrate(db *sql.DB) error {
+	var old int
+	q := `SELECT count(*) FROM pragma_table_info('shares') WHERE name IN ('upload_deadline','purge_at','progress_at')`
+	if err := db.QueryRow(q).Scan(&old); err != nil {
+		return err
+	}
+	if old == 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		`DROP TABLE IF EXISTS shares_m2`,
+		`CREATE TABLE shares_m2` + tableDef,
+		`INSERT INTO shares_m2(` + keptColumns + `) SELECT ` + keptColumns + ` FROM shares`,
+		`UPDATE shares_m2 SET ttl_hours=NULL WHERE state<>'uploading'`,
+		`DROP TABLE shares`, // ses index avec elle
+		`ALTER TABLE shares_m2 RENAME TO shares`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`VACUUM`); err != nil {
+		return err
+	}
+	return Checkpoint(db)
 }
 
 // Checkpoint replie le WAL dans la base et le tronque.

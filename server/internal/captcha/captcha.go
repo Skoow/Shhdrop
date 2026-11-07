@@ -148,7 +148,13 @@ func (c *Captcha) RecordCreate(ip netip.Addr) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sweepLocked(now)
-	c.creates[b] = append(c.creates[b], now)
+	// Heure arrondie à la minute supérieure (spec §36 S15) : rien de plus précis n'est gardé,
+	// et une création compte toujours au moins une heure.
+	at := now.Truncate(time.Minute)
+	if at.Before(now) {
+		at = at.Add(time.Minute)
+	}
+	c.creates[b] = append(c.creates[b], at)
 }
 
 // Verify accepte une solution une seule fois. shownAt est l'heure d'affichage de la page

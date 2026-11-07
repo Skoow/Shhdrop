@@ -19,6 +19,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/captcha"
@@ -28,10 +29,12 @@ import (
 )
 
 const (
-	maxJSON       = 4 << 10
-	captchaTTL    = 2 * time.Minute // durée du jeton shown_at (= celle du défi ALTCHA)
-	uploadTTL     = 6 * time.Hour   // = share.uploadWindow (spec §24, §41.2)
-	downloadTTL   = 6 * time.Hour   // plafonné à expires_at (spec §24, §41.2)
+	maxJSON    = 4 << 10
+	captchaTTL = 2 * time.Minute // durée du jeton shown_at (= celle du défi ALTCHA)
+	uploadTTL  = 6 * time.Hour   // = share.uploadWindow (spec §24, §41.2)
+	// downloadTTL : durée du jeton de téléchargement, qui n'est plus plafonnée à expires_at :
+	// elle borne la grâce d'une ouverture active après l'échéance (spec §41.8).
+	downloadTTL   = 6 * time.Hour
 	maxSegmentLen = share.Header + share.SegChunks*share.ChunkCT
 )
 
@@ -49,6 +52,12 @@ const (
 	// budgetRetry : Retry-After d'une ouverture qui a lu tout son budget (share.ReadBudget).
 	// Le budget ne se recharge pas : seul un nouveau déverrouillage rouvre la lecture.
 	budgetRetry = 60 * time.Second
+	// Surveillances tenues (GET /api/shares/watch, spec §41.8) : 25 s au plus, 2 par
+	// connexion, 256 au total (pas de borne propre au /48 : la spécification n'en fixe pas).
+	watchHold                       = 25 * time.Second
+	watchTotal, watchPer64, watch48 = 256, 2, 256
+	// reportsAlert : signalements dans l'heure à partir desquels /healthz lève l'alerte (§15.2).
+	reportsAlert = 5
 )
 
 // transfers : places et échéances des segments (réglables par les tests).
@@ -78,6 +87,46 @@ type server struct {
 	behindProxy bool
 	proxies     []netip.Prefix
 	xfer        transfers
+	dlTTL       time.Duration // durée des jetons de téléchargement
+	watchSlots  *limits.Slots // surveillances tenues
+	// wait : attente d'une surveillance (minuterie ; remplacée par les tests) ; stop la libère.
+	wait    func(time.Duration) (c <-chan time.Time, stop func() bool)
+	reports reportCounter
+}
+
+// reportCounter : signalements de l'heure en cours, un seul entier sans identifiant, remis à
+// zéro chaque heure (spec §9.5, §36 S21) ; exposé seulement en booléen sur /healthz local.
+type reportCounter struct {
+	mu   sync.Mutex
+	hour int64
+	n    int
+}
+
+func (c *reportCounter) add(now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if h := now.Unix() / 3600; h != c.hour {
+		c.hour, c.n = h, 0
+	}
+	c.n++
+}
+
+func (c *reportCounter) alert(now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return now.Unix()/3600 == c.hour && c.n >= reportsAlert
+}
+
+func timerWait(d time.Duration) (<-chan time.Time, func() bool) {
+	t := time.NewTimer(d)
+	return t.C, t.Stop
+}
+
+func newServer(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
+	behindProxy bool, proxies []netip.Prefix) *server {
+	return &server{svc: svc, sig: sig, lim: lim, cap: capt, behindProxy: behindProxy, proxies: proxies,
+		xfer: defaultTransfers(), dlTTL: downloadTTL, watchSlots: limits.NewSlots(watchTotal, watchPer64, watch48),
+		wait: timerWait}
 }
 
 type ctxIP struct{}
@@ -88,8 +137,7 @@ type ctxIP struct{}
 // valide, reçoit 500 au lieu de partager les limites du proxy (échec fermé).
 func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
 	static http.Handler, behindProxy bool, proxies []netip.Prefix) http.Handler {
-	return newHandler(&server{svc: svc, sig: sig, lim: lim, cap: capt, behindProxy: behindProxy, proxies: proxies,
-		xfer: defaultTransfers()}, static)
+	return newHandler(newServer(svc, sig, lim, capt, behindProxy, proxies), static)
 }
 
 func newHandler(s *server, static http.Handler) http.Handler {
@@ -105,12 +153,13 @@ func newHandler(s *server, static http.Handler) http.Handler {
 	api.HandleFunc("GET /api/shares/segments/{n}", s.getSegment)
 	api.HandleFunc("POST /api/shares/done", s.done)
 	api.HandleFunc("POST /api/shares/destroy", s.destroy)
+	api.HandleFunc("GET /api/shares/watch", s.watch)
 	api.HandleFunc("GET /api/manage/status", s.manageStatus)
 	api.HandleFunc("POST /api/manage/destroy", s.manageDestroy)
 	api.HandleFunc("/api/", notFoundAPI)
 
 	root := http.NewServeMux()
-	root.HandleFunc("GET /healthz", healthz)
+	root.HandleFunc("GET /healthz", s.healthz)
 	root.Handle("/api/", s.guard(api))
 	root.Handle("/api", s.guard(http.HandlerFunc(notFoundAPI))) // sans cela : 307 vers /api/
 	// /API/x, /Api… : jamais le repli SPA (200 + index.html), la même 404 que /api/… (limites comprises).
@@ -136,10 +185,10 @@ func isAPIPath(p string) bool {
 // guard : adresse du client (de confiance) puis limite de débit, pour tout /api/*.
 func (s *server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip, trusted := clientIP(r, s.proxies)
+		ip, trusted, proxied := clientIP(r, s.proxies)
 		// Derrière le proxy, seul Caddy (pair de confiance, avec X-Shh-Client-IP) doit parler
 		// au serveur : tout autre pair ou en-tête absent révèle une erreur de configuration.
-		if s.behindProxy && (!trusted || !isProxy(parse(r.RemoteAddr), s.proxies)) {
+		if s.behindProxy && (!trusted || !proxied) {
 			writeErr(w, http.StatusInternalServerError, "internal")
 			return
 		}
@@ -160,21 +209,26 @@ func (s *server) guard(next http.Handler) http.Handler {
 }
 
 // validSegmentToken : requête de segment (PUT avec jeton d'envoi, GET avec jeton de
-// téléchargement) dont le jeton est signé et non expiré. Ces requêtes ont leur propre
-// limite (SegmentsPerMin) ; l'état du partage est revérifié ensuite.
+// téléchargement) ou surveillance (GET /api/shares/watch, hors des 60 requêtes par minute,
+// spec §41.8) dont le jeton est signé et non expiré. Ces requêtes ont leur propre limite
+// (SegmentsPerMin) ; l'état du partage est revérifié ensuite.
 func (s *server) validSegmentToken(r *http.Request) bool {
-	n, ok := strings.CutPrefix(r.URL.Path, "/api/shares/segments/")
-	if !ok || n == "" || strings.Contains(n, "/") {
-		return false
-	}
 	var kind byte
-	switch r.Method {
-	case http.MethodPut:
-		kind = token.Upload
-	case http.MethodGet:
+	if r.URL.Path == "/api/shares/watch" && r.Method == http.MethodGet {
 		kind = token.Download
-	default:
-		return false
+	} else {
+		n, ok := strings.CutPrefix(r.URL.Path, "/api/shares/segments/")
+		if !ok || n == "" || strings.Contains(n, "/") {
+			return false
+		}
+		switch r.Method {
+		case http.MethodPut:
+			kind = token.Upload
+		case http.MethodGet:
+			kind = token.Download
+		default:
+			return false
+		}
 	}
 	tok, err := bearer(r)
 	if err != nil {
@@ -186,13 +240,17 @@ func (s *server) validSegmentToken(r *http.Request) bool {
 
 // healthz : santé, pour les appels locaux directs seulement (spec §8). Une requête
 // relayée par Caddy (porteuse de X-Shh-Client-IP) ou distante reçoit 404. Non limité.
-func healthz(w http.ResponseWriter, r *http.Request) {
+// reports_alert : au moins 5 signalements dans l'heure en cours (spec §15.2, §36 S21) ;
+// aucun autre champ, aucun nombre ni identifiant.
+func (s *server) healthz(w http.ResponseWriter, r *http.Request) {
 	if !parse(r.RemoteAddr).IsLoopback() || len(r.Header.Values("X-Shh-Client-IP")) != 0 {
 		writeErr(w, http.StatusNotFound, "not_found")
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	io.WriteString(w, "ok")
+	writeJSON(w, http.StatusOK, struct {
+		OK    bool `json:"ok"`
+		Alert bool `json:"reports_alert"`
+	}{true, s.reports.alert(s.svc.Now())})
 }
 
 // sentWriter retient si l'en-tête de réponse est déjà parti.
@@ -279,6 +337,9 @@ func fail(w http.ResponseWriter, err error) {
 			Error string `json:"error"`
 			Left  int    `json:"attempts_left"`
 		}{"bad_password", bp.AttemptsLeft})
+	case errors.Is(err, share.ErrGone):
+		// Seulement derrière un jeton signé valide (segment, done, watch) : spec §41.8.
+		writeErr(w, http.StatusGone, "gone")
 	case errors.As(err, &bp), errors.Is(err, share.ErrNotFound), errors.Is(err, token.ErrInvalid):
 		// 5ᵉ essai faux : le partage est détruit, réponse « introuvable » uniforme.
 		writeErr(w, http.StatusNotFound, "not_found")

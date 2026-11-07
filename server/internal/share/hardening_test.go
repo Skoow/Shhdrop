@@ -102,7 +102,7 @@ func TestValidateRefusesEmptyHashVerifier(t *testing.T) {
 	if _, err := s.Meta(nil); !errors.Is(err, ErrNotFound) {
 		t.Fatal("meta lu avec un secret vide", err)
 	}
-	if err := s.DestroyWithProof(nil, nil); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyWithProof(nil, nil, false); !errors.Is(err, ErrNotFound) {
 		t.Fatal("détruit avec des secrets vides", err)
 	}
 }
@@ -158,10 +158,10 @@ func TestDestroyWhileDraining(t *testing.T) {
 	if state != "draining" {
 		t.Fatal(state)
 	}
-	if err := s.DestroyWithProof(k.acces, rnd(32)); !errors.Is(err, ErrNotFound) {
+	if err := s.DestroyWithProof(k.acces, rnd(32), false); !errors.Is(err, ErrNotFound) {
 		t.Fatal("mauvais K_preuve accepté", err)
 	}
-	if err := s.DestroyWithProof(k.acces, k.preuve); err != nil {
+	if err := s.DestroyWithProof(k.acces, k.preuve, false); err != nil {
 		t.Fatal(err)
 	}
 	gone(t, s, id)

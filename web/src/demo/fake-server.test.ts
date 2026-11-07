@@ -47,8 +47,10 @@ function setup(opts: FakeServerOpts = {}) {
 }
 
 const text = (s: string) => ({ kind: "text" as const, name: "", mime: "text/plain", data: utf8(s) });
+/** 5 Mio : plusieurs segments (palier 160). */
+const bigFile = () => ({ kind: "file" as const, name: "a.bin", mime: "application/octet-stream", data: new Uint8Array(5 * 1048576).map((_, i) => i & 255) });
 
-async function share(net: { fetch: typeof fetch }, maxOpens = 2, items = [text("bonjour")]) {
+async function share(net: { fetch: typeof fetch }, maxOpens = 2, items: Parameters<typeof createShare>[1] = [text("bonjour")]) {
   return createShare(ORIGIN, items, { ttlHours: 1, maxOpens, password: PW, solveCaptcha, ...net });
 }
 
@@ -119,7 +121,7 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     expect(fake.shares()).toBe(0);
     await o.done();
     expect(statuses).toContain("POST /api/shares/destroy 204");
-    expect(statuses.at(-1)).toBe("POST /api/shares/done 404");
+    expect(statuses.at(-1)).toBe("POST /api/shares/done 410"); // jeton valide, partage disparu (spec §41.8)
   });
 
   it("dernière ouverture lue (done) : le partage « draining » est effacé", async ({ expect }) => {
@@ -161,6 +163,72 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     await expect(shareStatus(r.manage, ORIGIN, net)).rejects.toBeInstanceOf(NotFoundError);
     await expect(destroyShare(r.manage, ORIGIN, net)).rejects.toBeInstanceOf(NotFoundError);
     expect(fake.shares()).toBe(0);
+  });
+
+  it("spec §41.8 : suppression pendant une lecture → l'ouverture active finit, l'autre reçoit 410 ; watch → 410", async ({ expect }) => {
+    let offset = 0;
+    const { fake, net } = setup({ watchHoldMs: 50, rateBytesPerS: 1e9, now: () => Date.now() + offset });
+    const big = bigFile();
+    const r = await share(net, 2, [big]);
+    const b = await openShare(r.link, PW, ORIGIN, undefined, net);
+    offset = 130_000; // b : plus aucun segment depuis 130 s, inactive
+    const a = await openShare(r.link, PW, ORIGIN, undefined, net); // vient de lire : active
+    expect(await a.watch()).toBe("alive"); // 204 après la tenue (50 ms ici)
+    const pending = a.watch(); // tenue en cours
+    await destroyShare(r.manage, ORIGIN, net);
+    expect(await pending).toBe("gone");
+    expect(fake.shares()).toBe(0);
+    expect(Buffer.from(await a.item(0)).equals(Buffer.from(big.data))).toBe(true); // grâce : segments servis
+    expect(await b.watch()).toBe("gone");
+    await expect(b.item(0)).rejects.toThrow(); // pas commencée : 410
+    await a.done();
+  });
+
+  it("destruction faite ici : la surveillance en cours rend « stop », pas « gone » (l'écran de fin vient de destroy)", async ({ expect }) => {
+    const { net } = setup({ watchHoldMs: 10_000 });
+    const r = await share(net, 2);
+    const o = await openShare(r.link, PW, ORIGIN, undefined, net);
+    const pending = o.watch();
+    await o.destroy();
+    expect(await pending).toBe("stop");
+    expect(await o.watch()).toBe("stop");
+  });
+
+  it("spec §36 S14, §41.8 : motif fermé ; signalement → plus aucune lecture (410)", async ({ expect }) => {
+    const { net, statuses } = setup({ rateBytesPerS: 1e9 });
+    const r = await share(net, 2, [bigFile()]);
+    const a = await openShare(r.link, PW, ORIGIN, undefined, net);
+    await a.destroy("report");
+    await expect(a.item(0)).rejects.toThrow();
+    expect(statuses, statuses.join("\n")).toContain("GET /api/shares/segments/0 410");
+    const fake2 = createFakeServer();
+    for (const reason of ["ReperRaison", "", "REPORT", null]) {
+      const res = await fake2.handle(
+        new Request(`${ORIGIN}/api/shares/destroy`, {
+          method: "POST",
+          headers: { "X-Shh-Access": b64u(new Uint8Array(32)) },
+          body: JSON.stringify({ proof: b64u(new Uint8Array(32)), reason }),
+        }),
+      );
+      expect([res.status, await res.text()]).toEqual([400, '{"error":"bad_request"}']);
+    }
+  });
+
+  it("spec §41.8 : échéance pendant une lecture → active continue, pause de 120 s → 410", async ({ expect }) => {
+    let offset = 0;
+    const { net, statuses } = setup({ now: () => Date.now() + offset, rateBytesPerS: 1e9 });
+    const big = bigFile();
+    const r = await share(net, 3, [big]);
+    const a = await openShare(r.link, PW, ORIGIN, undefined, net);
+    const b = await openShare(r.link, PW, ORIGIN, undefined, net);
+    offset = ((await fetchMeta(r.link, ORIGIN, net)).expiresInS - 30) * 1000; // 30 s avant l'échéance
+    expect(Buffer.from(await a.item(0)).equals(Buffer.from(big.data))).toBe(true);
+    offset += 100_000; // échu, segment servi il y a 100 s : active
+    expect(Buffer.from(await a.item(0)).equals(Buffer.from(big.data))).toBe(true);
+    await expect(b.item(0)).rejects.toThrow(); // inactive à l'échéance : 410
+    offset += 130_000; // 130 s sans segment : droit perdu
+    await expect(a.item(0)).rejects.toThrow();
+    expect(statuses.filter((x) => x.endsWith(" 410")).length).toBeGreaterThanOrEqual(2);
   });
 
   it("annulation pendant l'envoi : détruit par S_gestion en « uploading »", async ({ expect }) => {
@@ -318,6 +386,9 @@ describe("faux serveur de démo : requêtes brutes", () => {
       expect((await fin({ ...FIN, fill_from: 3, fill_to: 6, ...bad })).status, JSON.stringify(bad)).toBe(400);
     }
     expect((await fin({ ...FIN, fill_from: 4, fill_to: 6 })).status).toBe(409); // segment 3 manquant hors bourrage
+    // Ni fill_from ni fill_to (spec §36 S4) : tous les segments exigés.
+    const { fill_from: _f, fill_to: _t, ...noFill } = FIN;
+    expect((await fin({ ...noFill, fill_from: undefined, fill_to: undefined })).status).toBe(409);
     expect((await fin({ ...FIN, fill_from: 3, fill_to: 6 })).status).toBe(200);
     // Rejeu de finalize : plus en envoi → 404.
     expect((await fin({ ...FIN, fill_from: 3, fill_to: 6 })).status).toBe(404);

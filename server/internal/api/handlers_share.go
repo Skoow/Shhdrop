@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -213,11 +214,15 @@ func (s *server) finalize(w http.ResponseWriter, r *http.Request) {
 	req.Salt, errs[0] = secret(b.Salt, 16)
 	req.ProofV, errs[1] = secret(b.ProofV, 32)
 	req.Envelope, errs[2] = secret(b.Envelope, share.EnvelopeLen)
-	if errs != [3]error{} || b.FillFrom == nil || b.FillTo == nil {
+	// fill_from et fill_to ensemble, ou aucun des deux (spec §36 S4, Q-MIN1 : le navigateur a
+	// envoyé lui-même tout le bourrage ; tous les segments sont alors exigés).
+	if errs != [3]error{} || (b.FillFrom == nil) != (b.FillTo == nil) {
 		fail(w, errBadRequest)
 		return
 	}
-	req.FillFrom, req.FillTo = *b.FillFrom, *b.FillTo
+	if b.FillFrom != nil {
+		req.FillFrom, req.FillTo = *b.FillFrom, *b.FillTo
+	}
 	left, err := s.svc.Finalize(id, req)
 	if err != nil {
 		fail(w, err)
@@ -284,8 +289,9 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	now := s.svc.Now()
-	exp := min(now.Add(downloadTTL).Unix(), now.Add(m.ExpiresIn).Unix())
+	// Jeton de dlTTL (6 h), non plafonné à expires_at : il borne la grâce d'une ouverture
+	// active après l'échéance ; le partage reste revérifié à chaque requête (spec §41.8).
+	exp := s.svc.Now().Add(s.dlTTL).Unix()
 	writeJSON(w, http.StatusOK, struct {
 		Token    string `json:"download_token"`
 		Segments int    `json:"segments"`
@@ -310,15 +316,25 @@ func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
-	sec, err := s.svc.OpenSegment(id, n, openN)
+	sec, err := s.svc.OpenSegmentCtx(r.Context(), id, n, openN)
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	defer sec.Close()
+	// Révocation (signalement, administrateur, exclusion ; spec §41.8) : la connexion est
+	// coupée tout de suite, même si l'écriture attend un client lent (échéance dans le passé).
+	// La lecture du segment s'arrête aussi à la tranche suivante (share.ctxReader).
+	rc := http.NewResponseController(w)
+	stop := context.AfterFunc(sec.Context(), func() {
+		if errors.Is(context.Cause(sec.Context()), share.ErrRevoked) {
+			rc.SetWriteDeadline(time.Unix(1, 0))
+		}
+	})
+	defer stop()
 	// Échéance propre à la requête (remplace le WriteTimeout de 300 s) : un client trop
 	// lent est coupé et rend sa place. Absente des tests en mémoire (ErrNotSupported).
-	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(s.xfer.deadline(sec.Size()))); err != nil &&
+	if err := rc.SetWriteDeadline(time.Now().Add(s.xfer.deadline(sec.Size()))); err != nil &&
 		!errors.Is(err, http.ErrNotSupported) {
 		fail(w, err)
 		return
@@ -349,16 +365,20 @@ func (s *server) done(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/shares/destroy : destruction ou signalement par le destinataire (K_accès en
 // en-tête, K_preuve dans le corps). L'expéditeur passe par /api/manage/destroy.
+// reason : absent (destruction : les ouvertures actives finissent) ou exactement "report"
+// (signalement : flux coupés, compté dans l'heure) ; toute autre valeur → 400, jamais de
+// texte libre (spec §36 S14, §41.8).
 func (s *server) destroy(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		Proof  string `json:"proof"`
-		Reason string `json:"reason"` // motif de signalement : non conservé
+		Proof  string          `json:"proof"`
+		Reason json.RawMessage `json:"reason"` // valeur brute : null, "" ou "REPORT" refusés
 	}
 	if err := readJSON(w, r, &b); err != nil {
 		fail(w, err)
 		return
 	}
-	if len(b.Reason) > 64 {
+	report := b.Reason != nil
+	if report && string(b.Reason) != `"report"` {
 		fail(w, errBadRequest)
 		return
 	}
@@ -372,9 +392,12 @@ func (s *server) destroy(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	if err := s.svc.DestroyWithProof(ka, kp); err != nil {
+	if err := s.svc.DestroyWithProof(ka, kp, report); err != nil {
 		fail(w, err)
 		return
+	}
+	if report {
+		s.reports.add(s.svc.Now())
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -16,7 +16,6 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"time"
 
@@ -134,6 +133,16 @@ type Service struct {
 	createMu sync.Mutex   // rend atomiques « place libre ? » et la réservation
 	uploadMu sync.RWMutex // Finalize attend la fin des écritures de segments en cours
 	budget   readBudget   // octets lus par ouverture, en mémoire seulement
+	// mem : échéances d'envoi, minute du dernier segment reçu et purge des « draining », en
+	// mémoire seulement (spec §36 S5, S12) : un redémarrage efface de toute façon ces partages
+	// (PurgeAtStart), aucun jeton n'y survivant.
+	mem struct {
+		mu    sync.Mutex
+		up    map[string]upload
+		purge map[string]int64
+	}
+	streams Streams   // flux de segments annulables (spec §41.8)
+	gone    goneState // ouvertures actives, descripteurs détachés, surveillances (spec §41.8)
 	// finalizing : envois dont un Finalize est en cours ; un seul à la fois par id, pour
 	// qu'aucun appel concurrent ne réécrive le bourrage (revue K1, I1).
 	finalizing struct {
@@ -143,6 +152,84 @@ type Service struct {
 }
 
 func (s *Service) now() int64 { return s.Now().Unix() }
+
+// upload : échéance d'un envoi (ceil15(création + 6 h)) et minute du dernier segment reçu
+// (0 : aucun), en mémoire seulement.
+type upload struct{ deadline, progress int64 }
+
+// uploadOpen : l'envoi id est connu de ce processus et son échéance n'est pas passée.
+func (s *Service) uploadOpen(id string, now int64) bool {
+	s.mem.mu.Lock()
+	defer s.mem.mu.Unlock()
+	u, ok := s.mem.up[id]
+	return ok && u.deadline > now
+}
+
+func (s *Service) setUpload(id string, u upload) {
+	s.mem.mu.Lock()
+	defer s.mem.mu.Unlock()
+	if s.mem.up == nil {
+		s.mem.up = map[string]upload{}
+	}
+	s.mem.up[id] = u
+}
+
+func (s *Service) touchUpload(id string, now int64) {
+	s.mem.mu.Lock()
+	defer s.mem.mu.Unlock()
+	if u, ok := s.mem.up[id]; ok {
+		u.progress = minute(now)
+		s.mem.up[id] = u
+	}
+}
+
+func (s *Service) setPurge(id string, at int64) {
+	s.mem.mu.Lock()
+	defer s.mem.mu.Unlock()
+	if s.mem.purge == nil {
+		s.mem.purge = map[string]int64{}
+	}
+	s.mem.purge[id] = at
+}
+
+func (s *Service) forget(id string) {
+	s.mem.mu.Lock()
+	defer s.mem.mu.Unlock()
+	delete(s.mem.up, id)
+	delete(s.mem.purge, id)
+}
+
+// uploadDue : l'envoi est échu (6 h), vide depuis 5 à 20 min, bloqué depuis 15 min, ou
+// inconnu de la mémoire (créé avant un redémarrage).
+func (s *Service) uploadDue(id string, now int64) bool {
+	s.mem.mu.Lock()
+	defer s.mem.mu.Unlock()
+	u, ok := s.mem.up[id]
+	return !ok || u.deadline <= now ||
+		(u.progress == 0 && u.deadline-emptySweep <= now) ||
+		(u.progress != 0 && u.progress+stallSweep <= now)
+}
+
+// dueAt : un partage prêt ou « draining » doit disparaître (échéance, 5 essais faux, purge
+// d'un « draining ») ; event : heure de l'événement, point de départ de la grâce (§41.8).
+func (s *Service) dueAt(id, state string, exp sql.NullInt64, failed int, now int64) (bool, int64) {
+	switch {
+	case state == "uploading":
+		return s.uploadDue(id, now), now
+	case exp.Valid && exp.Int64 <= now:
+		return true, exp.Int64
+	case failed >= maxAttempts:
+		return true, now
+	case state == "draining":
+		s.mem.mu.Lock()
+		p, ok := s.mem.purge[id]
+		s.mem.mu.Unlock()
+		if !ok || p <= now {
+			return true, now
+		}
+	}
+	return false, 0
+}
 
 // match compare sha256(x) au vérificateur stocké, en temps constant. Un secret fait
 // toujours 32 octets : toute autre longueur (nil compris) est refusée (audit F4).
@@ -289,7 +376,8 @@ func (s *Service) Create(r CreateReq) (string, int, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	if used+size > s.StorageMax {
+	// Les descripteurs détachés (§41.8) tiennent encore leur place jusqu'à leur fermeture.
+	if used+s.detachedBytes()+size > s.StorageMax {
 		return "", 0, ErrFull
 	}
 	if err := reserveBlob(s.Blobs, id, size); err != nil {
@@ -301,11 +389,14 @@ func (s *Service) Create(r CreateReq) (string, int, error) {
 		}
 		return "", 0, err
 	}
-	// proof_v, salt, kdf_*, ttl_hours, max_opens et envelope restent NULL jusqu'à Finalize.
-	_, err = s.DB.Exec(`INSERT INTO shares(id,state,bucket,opens_left,segments_mask,access_v,manage_v,upload_deadline)
-		VALUES(?,'uploading',?,0,?,?,?,?)`,
-		id, r.Bucket, make([]byte, (segs+7)/8), r.AccessV, r.ManageV, ceil15(s.now()+uploadWindow))
+	// proof_v, salt, kdf_*, max_opens et envelope restent NULL jusqu'à Finalize ; aucune date
+	// en base (l'échéance de l'envoi vit en mémoire, spec §36 S12).
+	s.setUpload(id, upload{deadline: ceil15(s.now() + uploadWindow)})
+	_, err = s.DB.Exec(`INSERT INTO shares(id,state,bucket,opens_left,segments_mask,access_v,manage_v)
+		VALUES(?,'uploading',?,0,?,?,?)`,
+		id, r.Bucket, make([]byte, (segs+7)/8), r.AccessV, r.ManageV)
 	if err != nil {
+		s.forget(id)
 		return "", 0, errors.Join(err, s.Blobs.Delete(id))
 	}
 	return id, segs, nil
@@ -320,9 +411,11 @@ func (s *Service) PutSegment(id string, n int, body []byte) error {
 	}
 	s.uploadMu.RLock()
 	defer s.uploadMu.RUnlock()
+	if !s.uploadOpen(id, s.now()) {
+		return ErrNotFound
+	}
 	var bucket int
-	err := s.DB.QueryRow(`SELECT bucket FROM shares WHERE id=? AND state='uploading' AND upload_deadline>?`,
-		id, s.now()).Scan(&bucket)
+	err := s.DB.QueryRow(`SELECT bucket FROM shares WHERE id=? AND state='uploading'`, id).Scan(&bucket)
 	if err != nil {
 		return notFound(err)
 	}
@@ -343,18 +436,19 @@ func (s *Service) PutSegment(id string, n int, body []byte) error {
 			return notFound(err)
 		}
 		if mask[n/8]&(1<<(n%8)) != 0 {
-			// Segment remplacé (reprise) : c'est aussi un progrès.
-			_, err := s.DB.Exec(`UPDATE shares SET progress_at=? WHERE id=? AND state='uploading'`, minute(s.now()), id)
-			return err
+			// Segment remplacé (reprise) : c'est aussi un progrès (minute, en mémoire).
+			s.touchUpload(id, s.now())
+			return nil
 		}
 		next := append([]byte(nil), mask...)
 		next[n/8] |= 1 << (n % 8)
-		res, err := s.DB.Exec(`UPDATE shares SET segments_mask=?, progress_at=? WHERE id=? AND state='uploading' AND segments_mask=?`,
-			next, minute(s.now()), id, mask)
+		res, err := s.DB.Exec(`UPDATE shares SET segments_mask=? WHERE id=? AND state='uploading' AND segments_mask=?`,
+			next, id, mask)
 		if err != nil {
 			return err
 		}
 		if k, _ := res.RowsAffected(); k == 1 {
+			s.touchUpload(id, s.now())
 			return nil
 		}
 	}
@@ -376,10 +470,12 @@ func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 		return 0, ErrBusy // aucune lecture ni écriture : réponse immédiate
 	}
 	defer s.releaseFinalize(id)
+	if !s.uploadOpen(id, s.now()) {
+		return 0, ErrNotFound
+	}
 	var bucket int
 	var mask []byte
-	err := s.DB.QueryRow(`SELECT bucket, segments_mask FROM shares WHERE id=? AND state='uploading' AND upload_deadline>?`,
-		id, s.now()).Scan(&bucket, &mask)
+	err := s.DB.QueryRow(`SELECT bucket, segments_mask FROM shares WHERE id=? AND state='uploading'`, id).Scan(&bucket, &mask)
 	if err != nil {
 		return 0, notFound(err)
 	}
@@ -400,8 +496,10 @@ func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 	s.uploadMu.Lock() // plus aucune écriture de segment en vol
 	defer s.uploadMu.Unlock()
 	now := s.now()
-	err = s.DB.QueryRow(`SELECT segments_mask FROM shares WHERE id=? AND state='uploading' AND upload_deadline>?`,
-		id, now).Scan(&mask)
+	if !s.uploadOpen(id, now) {
+		return 0, ErrNotFound
+	}
+	err = s.DB.QueryRow(`SELECT segments_mask FROM shares WHERE id=? AND state='uploading'`, id).Scan(&mask)
 	if err != nil {
 		return 0, notFound(err)
 	}
@@ -411,16 +509,18 @@ func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 	exp := ceil15(now + int64(r.TTLHours)*3600)
 	// segments_mask passe à « tous reçus » : la base ne garde pas la frontière du bourrage,
 	// qui donnerait la taille du contenu à 4 Mio près (revue K1, I3).
-	// upload_deadline et progress_at effacés : ils trahiraient la date de l'envoi (spec §9.1).
+	// Échéance d'envoi et dernier segment oubliés (mémoire) ; ttl_hours reste NULL : avec
+	// expires_at, il donnerait l'heure de création à 15 min près (spec §36 S11).
 	var got int64
-	err = s.DB.QueryRow(`UPDATE shares SET state='ready', expires_at=?, upload_deadline=NULL, progress_at=NULL,
-		ttl_hours=?, max_opens=?, opens_left=?, salt=?, kdf_ops=?, kdf_mem=?, proof_v=?, envelope=?, segments_mask=?
-		WHERE id=? AND state='uploading' AND upload_deadline>? AND segments_mask=? RETURNING expires_at`,
-		exp, r.TTLHours, r.MaxOpens, r.MaxOpens, r.Salt, r.KdfOps, r.KdfMem, r.ProofV, r.Envelope, fullMask(segs),
-		id, now, mask).Scan(&got)
+	err = s.DB.QueryRow(`UPDATE shares SET state='ready', expires_at=?, ttl_hours=NULL,
+		max_opens=?, opens_left=?, salt=?, kdf_ops=?, kdf_mem=?, proof_v=?, envelope=?, segments_mask=?
+		WHERE id=? AND state='uploading' AND segments_mask=? RETURNING expires_at`,
+		exp, r.MaxOpens, r.MaxOpens, r.Salt, r.KdfOps, r.KdfMem, r.ProofV, r.Envelope, fullMask(segs),
+		id, mask).Scan(&got)
 	if err != nil {
 		return 0, notFound(err)
 	}
+	s.forget(id)
 	return secs(got - now), nil
 }
 
@@ -534,13 +634,19 @@ func (s *Service) Unlock(id string, kAcces, kPreuve []byte) (int, []byte, error)
 	}
 	if match(kPreuve, proofV) {
 		var openN int
+		var state string
+		var exp int64
 		err := s.DB.QueryRow(`UPDATE shares SET opens_left=opens_left-1, opens_issued=opens_issued+1,
-			state=CASE WHEN opens_left-1=0 THEN 'draining' ELSE state END,
-			purge_at=CASE WHEN opens_left-1=0 THEN min(?, expires_at) ELSE purge_at END
+			state=CASE WHEN opens_left-1=0 THEN 'draining' ELSE state END
 			WHERE id=? AND state='ready' AND opens_left>0 AND expires_at>? AND failed_attempts<?
-			RETURNING opens_issued`, ceil15(now+purgeWindow), id, now, maxAttempts).Scan(&openN)
+			RETURNING opens_issued, state, expires_at`, id, now, maxAttempts).Scan(&openN, &state, &exp)
 		if err != nil {
 			return 0, nil, notFound(err)
+		}
+		if state == "draining" {
+			// Purge (dernière ouverture émise + 6 h, durée de son jeton) en mémoire seulement :
+			// en base, elle daterait la dernière ouverture à 15 min près (spec §36 S12).
+			s.setPurge(id, min(ceil15(now+purgeWindow), exp))
 		}
 		return openN, envelope, nil
 	}
@@ -562,53 +668,38 @@ func (s *Service) countFailure(id string) (int, error) {
 	}
 	if failed >= maxAttempts {
 		// En cas d'échec, Sweep réessaie (failed_attempts>=5) ; le partage est déjà inaccessible.
-		if _, err := s.destroy(id); err != nil {
+		// 5 mots de passe faux : comme une suppression (spec §41.8 cas 2), les ouvertures
+		// actives finissent.
+		if _, err := s.retire(id, true, s.now()); err != nil {
 			return 0, err
 		}
 	}
 	return maxAttempts - failed, nil
 }
 
-// OpenSegment ouvre un segment en lecture en flux pour l'ouverture openN (venue d'un jeton
-// signé) : elle doit avoir été émise et ne pas être terminée (done), sinon ErrNotFound.
-// Seul un partage « ready » ou « draining » est lisible : Finalize attend la fin de toute
-// écriture (uploadMu) avant de quitter « uploading », et PutSegment n'écrit plus ensuite,
-// donc aucun segment en cours d'écriture n'est jamais servi. Chaque ouverture a un budget
-// de lecture (ReadBudget) ; au-delà, ErrBudget. L'appelant ferme la section.
-func (s *Service) OpenSegment(id string, n, openN int) (*blob.Section, error) {
-	if !validID(id) || openN < 1 || openN > 10 {
-		return nil, ErrNotFound
-	}
-	now := s.now()
-	var bucket int
-	err := s.DB.QueryRow(`SELECT bucket FROM shares WHERE id=? AND expires_at>? AND failed_attempts<? AND
-		(state='ready' OR (state='draining' AND purge_at>?)) AND ?<=opens_issued AND (done_mask & ?)=0`,
-		id, now, maxAttempts, now, openN, int64(1)<<(openN-1)).Scan(&bucket)
-	if err != nil {
-		return nil, notFound(err)
-	}
-	if n < 0 || n >= SegmentCount(bucket) {
-		return nil, ErrBadSegment
-	}
-	size := int64(SegmentSize(bucket, n))
-	sec, err := s.Blobs.Open(id, segOffset(bucket, n), size)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, ErrNotFound // détruit entre-temps
-	}
-	if err != nil {
-		return nil, err
-	}
-	// Compté après l'ouverture réussie : une erreur du serveur ne consomme pas le budget.
-	if !s.budget.charge(openKey{id, openN}, size, ReadBudget(bucket), now) {
-		sec.Close()
-		return nil, ErrBudget
-	}
-	return sec, nil
-}
-
+// Done marque l'ouverture openN terminée. Partage disparu : ErrGone, sauf pour une
+// ouverture qui finissait sur le descripteur détaché (qu'elle rend).
 func (s *Service) Done(id string, openN int) error {
-	if !validID(id) || openN < 1 || openN > 10 {
+	if !validID(id) || openN < 1 || openN > maxOpenN {
 		return ErrNotFound
+	}
+	if handled, err := s.doneDetached(id, openN); handled {
+		return err
+	}
+	// Partage échu non encore balayé : retiré d'abord (grâce des ouvertures actives).
+	var st string
+	var failed int
+	var exp sql.NullInt64
+	if s.DB.QueryRow(`SELECT state, failed_attempts, expires_at FROM shares WHERE id=?`, id).Scan(&st, &failed, &exp) == nil {
+		if due, event := s.dueAt(id, st, exp, failed, s.now()); due && st != "uploading" {
+			if _, err := s.retire(id, true, event); err != nil {
+				return err
+			}
+			if handled, err := s.doneDetached(id, openN); handled {
+				return err
+			}
+			return ErrGone
+		}
 	}
 	var state string
 	var mask int64
@@ -616,36 +707,76 @@ func (s *Service) Done(id string, openN int) error {
 	err := s.DB.QueryRow(`UPDATE shares SET done_mask = done_mask | ?
 		WHERE id=? AND ? <= opens_issued RETURNING state, done_mask, opens_issued`,
 		int64(1)<<(openN-1), id, openN).Scan(&state, &mask, &issued)
-	if err != nil {
-		return notFound(err)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Ouverture jamais émise (impossible avec un jeton signé) : introuvable ; sinon le
+		// partage a disparu.
+		var one int
+		if s.DB.QueryRow(`SELECT 1 FROM shares WHERE id=?`, id).Scan(&one) == nil {
+			return ErrNotFound
+		}
+		return ErrGone
 	}
-	// En « draining », opens_issued est figé et done_mask ne fait que croître : sûr.
+	if err != nil {
+		return err
+	}
+	// En « draining », opens_issued est figé et done_mask ne fait que croître : sûr. Toutes
+	// les ouvertures sont terminées : aucune n'a besoin de grâce.
 	if state == "draining" && bits.OnesCount64(uint64(mask)) == issued {
-		_, err := s.destroy(id)
+		_, err := s.retire(id, true, s.now())
 		return err
 	}
 	return nil
 }
 
-// alive : condition de vie commune à la destruction et au statut. Un partage expiré (ou un
-// envoi échu) est introuvable, et aucun essai n'y est compté ; Sweep l'effacera.
-const alive = `((state='uploading' AND upload_deadline>?1) OR (state<>'uploading' AND expires_at>?1))`
+// doneDetached : done d'une ouverture d'un partage disparu ; handled si le partage est détaché.
+func (s *Service) doneDetached(id string, openN int) (handled bool, err error) {
+	s.gone.mu.Lock()
+	defer s.gone.mu.Unlock()
+	s.gone.init()
+	d := s.gone.dead[id]
+	if d == nil {
+		return false, nil
+	}
+	had := d.opens[openN]
+	delete(d.opens, openN)
+	s.reapLocked(id, d, s.now())
+	if had {
+		return true, nil
+	}
+	return true, ErrGone
+}
+
+// alive : condition de vie commune à la destruction et au statut, complétée pour un envoi
+// par son échéance en mémoire (aliveUpload). Un partage expiré (ou un envoi échu) est
+// introuvable, et aucun essai n'y est compté ; Sweep l'effacera.
+const alive = `(state='uploading' OR expires_at>?1)`
+
+// aliveUpload : un envoi n'est vivant que si ce processus en connaît l'échéance, non passée.
+func (s *Service) aliveUpload(id, state string, now int64) bool {
+	return state != "uploading" || s.uploadOpen(id, now)
+}
 
 // DestroyWithProof : destruction par le destinataire (K_accès et K_preuve). Partage
 // trouvé par V_accès ; K_preuve faux = un essai de mot de passe (compteur commun avec Unlock).
-func (s *Service) DestroyWithProof(kAcces, kPreuve []byte) error {
+// report (signalement) : aucune grâce, les flux en cours sont coupés (spec §41.8) ; sinon
+// les ouvertures actives finissent (cas 2).
+func (s *Service) DestroyWithProof(kAcces, kPreuve []byte, report bool) error {
 	v := Verifier(kAcces)
 	if v == nil {
 		return ErrNotFound
 	}
-	var id string
+	now := s.now()
+	var id, state string
 	var proofV []byte
-	err := s.DB.QueryRow(`SELECT id, proof_v FROM shares WHERE access_v=?2 AND `+alive, s.now(), v).Scan(&id, &proofV)
+	err := s.DB.QueryRow(`SELECT id, proof_v, state FROM shares WHERE access_v=?2 AND `+alive, now, v).Scan(&id, &proofV, &state)
 	if err != nil {
 		return notFound(err)
 	}
+	if !s.aliveUpload(id, state, now) {
+		return ErrNotFound
+	}
 	if match(kPreuve, proofV) { // proof_v NULL (envoi en cours) : jamais juste
-		return s.destroyOrNotFound(id)
+		return s.retireOrNotFound(id, !report)
 	}
 	if _, err := s.countFailure(id); err != nil && !errors.Is(err, ErrNotFound) {
 		return err
@@ -659,7 +790,7 @@ func (s *Service) DestroyManaged(sGestion []byte) error {
 	if err != nil {
 		return err
 	}
-	return s.destroyOrNotFound(id)
+	return s.retireOrNotFound(id, true)
 }
 
 // managed : id du partage vivant dont V_gestion = SHA-256(sGestion).
@@ -668,9 +799,16 @@ func (s *Service) managed(sGestion []byte) (string, error) {
 	if v == nil {
 		return "", ErrNotFound
 	}
-	var id string
-	err := s.DB.QueryRow(`SELECT id FROM shares WHERE manage_v=?2 AND `+alive, s.now(), v).Scan(&id)
-	return id, notFound(err)
+	now := s.now()
+	var id, state string
+	err := s.DB.QueryRow(`SELECT id, state FROM shares WHERE manage_v=?2 AND `+alive, now, v).Scan(&id, &state)
+	if err != nil {
+		return "", notFound(err)
+	}
+	if !s.aliveUpload(id, state, now) {
+		return "", ErrNotFound
+	}
+	return id, nil
 }
 
 // Status : compteurs, échéance et état, partage trouvé par V_gestion (spec §32).
@@ -683,10 +821,14 @@ func (s *Service) Status(sGestion []byte) (Status, error) {
 	var st Status
 	var left int
 	var exp, maxOpens sql.NullInt64
-	err := s.DB.QueryRow(`SELECT max_opens, opens_left, expires_at, state FROM shares WHERE manage_v=?2 AND `+alive,
-		now, v).Scan(&maxOpens, &left, &exp, &st.State)
+	var id string
+	err := s.DB.QueryRow(`SELECT id, max_opens, opens_left, expires_at, state FROM shares WHERE manage_v=?2 AND `+alive,
+		now, v).Scan(&id, &maxOpens, &left, &exp, &st.State)
 	if err != nil {
 		return Status{}, notFound(err)
+	}
+	if !s.aliveUpload(id, st.State, now) {
+		return Status{}, ErrNotFound
 	}
 	if maxOpens.Valid { // NULL pendant l'envoi : 0 / 0
 		st.MaxOpens = int(maxOpens.Int64)
@@ -699,7 +841,8 @@ func (s *Service) Status(sGestion []byte) (Status, error) {
 }
 
 // DestroyAdmin : destruction par l'administrateur, à partir de K_accès (dérivée du lien
-// signalé par la commande d'administration), quel que soit l'état du partage.
+// signalé par la commande d'administration), quel que soit l'état du partage. Aucune grâce :
+// un contenu signalé n'est plus servi (spec §41.8, Q-GONE3).
 func (s *Service) DestroyAdmin(kAcces []byte) error {
 	v := Verifier(kAcces)
 	if v == nil {
@@ -709,30 +852,19 @@ func (s *Service) DestroyAdmin(kAcces []byte) error {
 	if err := s.DB.QueryRow(`SELECT id FROM shares WHERE access_v=?`, v).Scan(&id); err != nil {
 		return notFound(err)
 	}
-	return s.destroyOrNotFound(id)
+	return s.retireOrNotFound(id, false)
 }
 
-// sweepCond : partages à effacer. Ne dépend que du temps et de failed_attempts,
-// qui ne peuvent pas redevenir faux, sauf « uploading » qu'un Finalize ou un
-// PutSegment (masque non vide) peut changer : sweepOne revérifie sous uploadMu.
-// Envoi vide (aucun segment reçu) : effacé dès upload_deadline − 5 h 55 (21 300 s), soit
-// 5 à 20 min après la création selon l'arrondi au quart d'heure : une réservation vide
-// ne bloque pas l'espace pendant six heures. La date de création n'étant pas stockée,
-// on la déduit de l'échéance ; rien de plus n'est enregistré.
-// Envoi bloqué : commencé, mais aucun segment reçu depuis 15 min (progress_at, à la minute,
-// NULL hors envoi) : effacé sans attendre l'échéance de 6 h.
-// Paramètres numérotés : ?1 = maintenant, ?2 = maxAttempts.
-var sweepCond = `((state IN ('ready','draining') AND expires_at<=?1) OR
-	(state='uploading' AND upload_deadline<=?1) OR
-	(state='uploading' AND upload_deadline-` + strconv.Itoa(emptySweep) + `<=?1 AND segments_mask=zeroblob(length(segments_mask))) OR
-	(state='uploading' AND progress_at IS NOT NULL AND progress_at+` + strconv.Itoa(stallSweep) + `<=?1) OR
-	(state='draining' AND purge_at<=?1) OR failed_attempts>=?2)`
-
-// Sweep efface les partages expirés, les envois abandonnés, les « draining » échus
-// et les destructions au 5ᵉ essai restées inachevées. Continue malgré les erreurs.
+// Sweep efface les partages expirés (grâce des ouvertures actives, §41.8), les « draining »
+// échus, les destructions au 5ᵉ essai restées inachevées et les envois abandonnés : échus
+// (6 h), vides (5 à 20 min après la création, selon l'arrondi de l'échéance au quart
+// d'heure : une réservation vide ne bloque pas l'espace six heures) ou bloqués (aucun
+// segment depuis 15 min). Les échéances des envois et des purges sont en mémoire. Ferme
+// aussi les descripteurs détachés qui ne servent plus. Continue malgré les erreurs.
 func (s *Service) Sweep() (int, error) {
 	now := s.now()
-	rows, err := s.DB.Query(`SELECT id FROM shares WHERE `+sweepCond, now, maxAttempts)
+	s.sweepGone(now)
+	rows, err := s.DB.Query(`SELECT id FROM shares WHERE state<>'ready' OR expires_at<=? OR failed_attempts>=?`, now, maxAttempts)
 	if err != nil {
 		return 0, err
 	}
@@ -762,20 +894,62 @@ func (s *Service) Sweep() (int, error) {
 	return removed, errors.Join(errs...)
 }
 
-// sweepOne revérifie la condition sous uploadMu : aucun Finalize ne peut
+// sweepOne revérifie l'échéance sous uploadMu : aucun Finalize ni PutSegment ne peut
 // s'intercaler entre la vérification et l'effacement (fichier, puis ligne).
 func (s *Service) sweepOne(id string, now int64) (bool, error) {
 	s.uploadMu.Lock()
 	defer s.uploadMu.Unlock()
-	var one int
-	err := s.DB.QueryRow(`SELECT 1 FROM shares WHERE id=?3 AND `+sweepCond, now, maxAttempts, id).Scan(&one)
+	var state string
+	var failed int
+	var exp sql.NullInt64
+	err := s.DB.QueryRow(`SELECT state, failed_attempts, expires_at FROM shares WHERE id=?`, id).Scan(&state, &failed, &exp)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return s.destroy(id)
+	due, event := s.dueAt(id, state, exp, failed, now)
+	if !due {
+		return false, nil
+	}
+	return s.retire(id, true, event)
+}
+
+// PurgeAtStart, à appeler au démarrage du serveur (jamais par une commande
+// d'administration, qui partage la base d'un serveur en marche) : efface tout envoi en cours
+// et tout partage « draining » (leurs échéances étaient en mémoire, et aucun jeton ne survit
+// à un redémarrage : ni envoi ni lecture n'y sont plus possibles), expiré ou détruit au 5ᵉ
+// essai (spec §36 S12, §41.8). Rend le nombre de partages effacés.
+func (s *Service) PurgeAtStart() (int, error) {
+	rows, err := s.DB.Query(`SELECT id FROM shares WHERE state<>'ready' OR expires_at<=? OR failed_attempts>=?`, s.now(), maxAttempts)
+	if err != nil {
+		return 0, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	n := 0
+	var errs []error
+	for _, id := range ids {
+		ok, err := s.destroy(id)
+		if err != nil {
+			errs = append(errs, err)
+		} else if ok {
+			n++
+		}
+	}
+	return n, errors.Join(errs...)
 }
 
 // destroy efface le fichier d'abord, puis la ligne ; renvoie si une ligne existait. Un
@@ -793,14 +967,15 @@ func (s *Service) destroy(id string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	s.forget(id)
 	if state == "uploading" && s.OnAbandon != nil {
 		s.OnAbandon(id, bucket)
 	}
 	return true, nil
 }
 
-func (s *Service) destroyOrNotFound(id string) error {
-	ok, err := s.destroy(id)
+func (s *Service) retireOrNotFound(id string, grace bool) error {
+	ok, err := s.retire(id, grace, s.now())
 	if err == nil && !ok {
 		return ErrNotFound
 	}

@@ -138,7 +138,7 @@ describe("le serveur ne voit rien", () => {
     const o2 = await openShare(r2.link, GENERATED, srv.origin, undefined, { fetch });
     expect(o2.manifest.items[0]!.text).toBe(`texte ${MARKER} texte`);
     await o2.destroy("report");
-    await o2.done(); // 404 attendu et toléré : le partage est déjà effacé
+    await o2.done(); // 410 « gone » attendu et toléré : le partage est déjà effacé
     o2.wipe();
     expect(seeds).toHaveLength(2);
     const seed1 = seeds[0]!, seed2 = seeds[1]!;
@@ -313,5 +313,118 @@ describe("le serveur ne voit rien", () => {
     expect(worst).toBeLessThan(4096);
     expect(findIn(fillCopy!, [...secrets, ...keysOnDisk])).toEqual([]);
     expect(fillCopy!.length).toBe(3 * 64 * 65552);
+  });
+});
+
+// Spec §36 (Task M2) : repères de requête (adresse, User-Agent, Referer, Accept-Language,
+// identifiant dans une route inconnue, motif de destruction) ; aucun sur disque (base, WAL,
+// fichiers), dans stdout, stderr ni dans une réponse ; base minimale après finalize, pendant
+// la lecture et après la suppression (aucune date sauf expires_at, multiple de 900 ; ni
+// progress_at, upload_deadline, purge_at ni ttl_hours ; aucun texte de motif).
+describe("le serveur ne voit rien : repères de requête, base minimale (spec §36)", () => {
+  const IP = "203.0.113.77";
+  const R = {
+    ua: "ReperUA/1.0",
+    ref: "https://repere-referer.example/ReperRef",
+    lang: "xx-ReperLang",
+    id: "ReperIdAAAAAAAAAAAAAAA", // 22 caractères : forme d'un identifiant valide
+    idLong: "ReperIdAAAAAAAAAAAAAAAAAAAAAA",
+    reason: "ReperRaison",
+  };
+  const markers = [
+    needle("IP (texte)", IP),
+    { label: "IP (4 octets)", forms: [Buffer.from([203, 0, 113, 77])] },
+    needle("User-Agent", R.ua),
+    needle("Referer", "ReperRef"),
+    needle("Accept-Language", "ReperLang"),
+    needle("identifiant", "ReperIdAAAAAAAA"),
+    needle("motif", R.reason),
+  ];
+  let srv: TestServer;
+  const log: Captured[] = [];
+  const captured = capturingFetch(log);
+  const marked: typeof fetch = (input, init) => {
+    const h = new Headers(init?.headers);
+    h.set("X-Shh-Client-IP", IP);
+    h.set("User-Agent", R.ua);
+    h.set("Referer", R.ref);
+    h.set("Accept-Language", R.lang);
+    return captured(input, { ...init, headers: h });
+  };
+  type Row = Record<string, unknown>;
+  const snapshots: Record<string, { cols: string[]; rows: Row[]; master: string[] }> = {};
+  async function dbSnapshot(label: string) {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(join(srv.dataDir, "shares.db"), { readOnly: true });
+    try {
+      const cols = (db.prepare("SELECT name FROM pragma_table_info('shares')").all() as { name: string }[]).map((c) => c.name);
+      const rows = db.prepare("SELECT * FROM shares").all() as Row[];
+      const master = (db.prepare("SELECT type || ':' || name AS n FROM sqlite_master ORDER BY 1").all() as { n: string }[]).map((x) => x.n);
+      snapshots[label] = { cols, rows, master };
+    } finally {
+      db.close();
+    }
+  }
+
+  beforeAll(async () => {
+    srv = await startServer();
+    const r = await createShare(srv.origin, [{ kind: "text", name: "", mime: "text/plain", data: utf8("texte") }], {
+      ttlHours: 6,
+      maxOpens: 2,
+      password: GENERATED,
+      solveCaptcha: solveAltcha,
+      fetch: marked,
+    });
+    await dbSnapshot("après finalize");
+    const o = await openShare(r.link, GENERATED, srv.origin, undefined, { fetch: marked });
+    await dbSnapshot("pendant la lecture");
+    // Identifiant repère dans des routes inconnues ; motif repère refusé (400, partage intact).
+    for (const path of [`/api/${R.id}`, `/api/shares/${R.idLong}`, `/API/${R.id}`, `/api/shares/segments/${R.id}`]) await marked(srv.origin + path);
+    const p = parseLink(r.link);
+    if (p.kind !== "s") throw new Error("lien de partage attendu");
+    const kA = (await deriveAccess(p.kLien)).kAcces;
+    const bad = await marked(srv.origin + "/api/shares/destroy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Shh-Access": b64u(kA) },
+      body: JSON.stringify({ proof: b64u(new Uint8Array(32)), reason: R.reason }),
+    });
+    expect(bad.status).toBe(400);
+    await o.done();
+    await destroyShare(r.manage, srv.origin, { fetch: marked });
+    await dbSnapshot("après suppression");
+    await srv.stop();
+  });
+  afterAll(async () => {
+    await srv?.dispose();
+  });
+
+  it("base : seule date expires_at (multiple de 900), ni ttl_hours, ni colonnes retirées, rien d'autre que shares", () => {
+    for (const [label, s] of Object.entries(snapshots)) {
+      expect(s.cols, label).not.toContain("progress_at");
+      expect(s.cols, label).not.toContain("upload_deadline");
+      expect(s.cols, label).not.toContain("purge_at");
+      expect(s.master, label).toEqual(["index:shares_access_v", "index:shares_manage_v", "table:shares"]);
+      for (const row of s.rows) {
+        expect(row.ttl_hours, label).toBeNull();
+        expect(Number(row.expires_at) % 900, label).toBe(0);
+      }
+    }
+    expect(snapshots["après finalize"]!.rows).toHaveLength(1);
+    expect(snapshots["après suppression"]!.rows).toHaveLength(0);
+  });
+
+  it("aucun repère sur disque (base, WAL, fichiers), dans stdout, stderr ni dans une réponse", () => {
+    expect(scanDir(srv.dataDir, markers)).toEqual([]);
+    expect(findIn(srv.stdout(), markers)).toEqual([]);
+    expect(findIn(srv.stderr(), markers)).toEqual([]);
+    expect(srv.stdout().toString("utf8")).toMatch(/^SHH_LISTENING 127\.0\.0\.1:\d+\n$/);
+    const hits: string[] = [];
+    for (const r of log) for (const l of findIn(Buffer.concat([r.response, Buffer.from(r.responseHeaders)]), markers)) hits.push(`${r.method} ${r.url} : ${l}`);
+    expect(hits).toEqual([]);
+    // Témoin : les repères sont bien partis dans les requêtes.
+    expect(log.length).toBeGreaterThan(10);
+    for (const r of log) expect(r.headers.find(([k]) => k === "user-agent")?.[1], r.url).toBe(R.ua);
+    expect(log.some((r) => r.url.includes(R.id))).toBe(true);
+    expect(log.some((r) => r.body.includes(R.reason))).toBe(true);
   });
 });

@@ -113,8 +113,8 @@ test("destruction par l'expéditeur pendant la lecture → l'interface se ferme 
   await s.ctx.close();
   await page.goto(sent.link);
   await unlock(page, sent.password);
+  // Spec §41.8 : la surveillance (410) ferme l'interface sans geste de la personne.
   await destroyShare(sent.manage, shh.origin);
-  await page.getByRole("button", { name: "Écouter long.ogg" }).click();
   await expect(page.getByRole("heading", { name: "Ce partage a été supprimé." })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("button", { name: "Regarder anniversaire-lou.webm" })).toHaveCount(0);
 

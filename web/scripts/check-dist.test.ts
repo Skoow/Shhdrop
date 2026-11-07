@@ -77,6 +77,17 @@ describe("check-dist.mjs, production", () => {
     expect(run([site({ "index.html": PROD_INDEX, "assets/index-a.js": "const u=import.meta.url;x.reimport(1)" })])).toEqual({ code: 0, err: "" });
   });
 
+  it("échoue sur une statistique ou un écouteur global d'erreurs (spec §35.1), démo comprise ; « scrollbar » passe", () => {
+    const trap = { "assets/index-a.js": 'const s="x GTAG( y";navigator.sendBeacon(u);window.onerror = f', "assets/a.css": "::-webkit-scrollbar{}" };
+    expect(checkDist(site({ "index.html": PROD_INDEX, ...trap }), false)).toEqual([
+      "assets/index-a.js : statistique « gtag( » (spec §35.1)",
+      "assets/index-a.js : statistique « sendbeacon » (spec §35.1)",
+      "assets/index-a.js : écouteur global d'erreurs « window.onerror = » (spec §35.1)",
+    ]);
+    const demo = { "index.html": DEMO_INDEX, "404.html": DEMO_INDEX, "assets/install-a.js": 'const MARK="__SHH_DEMO__";gtag(1)' };
+    expect(checkDist(site(demo), true)).toEqual(["assets/install-a.js : statistique « gtag( » (spec §35.1)"]);
+  });
+
   it("échoue si le build manque", () => {
     expect(run([join(tmpdir(), "absent-check-dist")]).code).toBe(1);
   });

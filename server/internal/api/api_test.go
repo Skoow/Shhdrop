@@ -43,6 +43,7 @@ func (c *clock) Add(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.Unloc
 
 type env struct {
 	h   http.Handler
+	srv *server
 	svc *share.Service
 	sig *token.Signer
 	clk *clock
@@ -97,9 +98,10 @@ func newEnvFull(t *testing.T, behindProxy bool, proxies []netip.Prefix, static h
 		static = htmlStatic()
 	}
 	sig := token.New(rnd(32), c.Now)
-	h := newHandler(&server{svc: svc, sig: sig, lim: lim, cap: captcha.New(rnd(32), c.Now),
-		behindProxy: behindProxy, proxies: proxies, xfer: x}, static)
-	return &env{h: h, svc: svc, sig: sig, clk: c, dir: dir}
+	srv := newServer(svc, sig, lim, captcha.New(rnd(32), c.Now), behindProxy, proxies)
+	srv.xfer = x
+	h := newHandler(srv, static)
+	return &env{h: h, srv: srv, svc: svc, sig: sig, clk: c, dir: dir}
 }
 
 type req struct {
@@ -149,6 +151,7 @@ const (
 	budgetBody = `{"error":"budget","retry_after_s":60}`
 	notFound   = `{"error":"not_found"}`
 	badRequest = `{"error":"bad_request"}`
+	healthOK   = `{"ok":true,"reports_alert":false}`
 )
 
 // solve trouve le nombre par force brute, comme le widget ALTCHA.
@@ -255,6 +258,12 @@ func auth(tok string) map[string]string { return map[string]string{"Authorizatio
 // upload envoie des segments aléatoires, finalise et rend leur contenu.
 func (e *env) upload(t *testing.T, c created, bucket int) [][]byte {
 	t.Helper()
+	return e.uploadTTL(t, c, bucket, 1)
+}
+
+// uploadTTL : upload avec une durée de vie de ttl heures.
+func (e *env) uploadTTL(t *testing.T, c created, bucket, ttl int) [][]byte {
+	t.Helper()
 	var segs [][]byte
 	for n := 0; n < c.Segments; n++ {
 		b := rnd(share.SegmentSize(bucket, n))
@@ -263,9 +272,9 @@ func (e *env) upload(t *testing.T, c created, bucket int) [][]byte {
 			hdr: auth(c.UploadToken)}), 204, "")
 	}
 	w := e.do(req{method: "POST", path: "/api/shares/finalize", hdr: auth(c.UploadToken),
-		body: mustJSON(c.k.finBody(c.opens, 1))})
+		body: mustJSON(c.k.finBody(c.opens, ttl))})
 	expect(t, w, 200, "")
-	if s := jsonOf(t, w)["expires_in_s"].(float64); s < 3600 || s > 3600+900 {
+	if s := jsonOf(t, w)["expires_in_s"].(float64); s < float64(ttl)*3600 || s > float64(ttl)*3600+900 {
 		t.Fatalf("expires_in_s = %v", s)
 	}
 	return segs
@@ -337,7 +346,7 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("meta après ouverture : %v", m)
 	}
 	// Ouverture terminée : son jeton ne lit plus rien.
-	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/0", hdr: auth(dl)}), 404, notFound)
+	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/0", hdr: auth(dl)}), 410, goneBody) // ouverture terminée : plus de droit (spec §41.8)
 
 	w = e.do(req{method: "GET", path: "/api/manage/status",
 		hdr: map[string]string{"X-Shh-Manage": enc.EncodeToString(k.gestion)}})
@@ -350,10 +359,11 @@ func TestFullFlow(t *testing.T) {
 
 	// Destruction par le destinataire (K_accès + K_preuve).
 	w = e.do(req{method: "POST", path: "/api/shares/destroy", hdr: access(k),
-		body: mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve), "reason": "malware"})})
+		body: mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve)})})
 	expect(t, w, 204, "")
 	expect(t, e.do(req{method: "GET", path: "/api/shares/meta", hdr: access(k)}), 404, notFound)
-	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/0", hdr: auth(dl)}), 404, notFound)
+	// Ouverture déjà terminée (done) : aucune grâce, 410 avec son jeton.
+	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/0", hdr: auth(dl)}), 410, goneBody)
 	if _, err := os.Stat(filepath.Join(e.dir, "blobs", c.ID)); !os.IsNotExist(err) {
 		t.Fatal("fichier encore présent")
 	}
@@ -592,7 +602,8 @@ func TestForgedOpenN(t *testing.T) {
 	}
 }
 
-func TestDownloadTokenCappedAtExpiry(t *testing.T) {
+// Après l'échéance, un jeton jamais utilisé (ouverture non active) ne lit plus rien : 410.
+func TestDownloadAfterExpiryNotActive(t *testing.T) {
 	e := newEnv(t, false, nil)
 	k := newKeys()
 	c := e.create(t, "", k, 1, 1)
@@ -600,10 +611,11 @@ func TestDownloadTokenCappedAtExpiry(t *testing.T) {
 	e.clk.Add(50 * time.Minute)
 	dl, _ := e.unlock(t, c.ID, k)
 	e.clk.Add(30 * time.Minute) // au-delà de expires_at, avant 1 h de jeton
-	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/0", hdr: auth(dl)}), 404, notFound)
+	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/0", hdr: auth(dl)}), 410, goneBody)
 }
 
-// Spec §24, §41.2 : jeton d'envoi 6 h ; jeton de téléchargement min(6 h, expires_at).
+// Spec §24, §41.2, §41.8 : jeton d'envoi 6 h ; jeton de téléchargement 6 h, plus plafonné
+// à expires_at (il borne la grâce d'une ouverture active).
 func TestTokenLifetimes(t *testing.T) {
 	e := newEnv(t, false, nil)
 	k := newKeys()
@@ -626,14 +638,13 @@ func TestTokenLifetimes(t *testing.T) {
 	if _, exp, err := e.sig.CheckExp(dl, token.Download, c.ID); err != nil || !exp.Equal(e.clk.Now().Add(6*time.Hour)) {
 		t.Fatal("jeton de téléchargement (24 h)", exp, err)
 	}
-	// Partage d'une heure : jeton plafonné à expires_at.
+	// Partage d'une heure : jeton de 6 h aussi (la grâce de §41.8 en dépend).
 	k2 := newKeys()
 	short := e.create(t, "", k2, 1, 1)
 	e.upload(t, short, 1)
 	dl2, _ := e.unlock(t, short.ID, k2)
-	if _, exp, err := e.sig.CheckExp(dl2, token.Download, short.ID); err != nil ||
-		!exp.Equal(time.Date(2026, 11, 4, 17, 0, 0, 0, time.UTC)) {
-		t.Fatal("jeton de téléchargement plafonné", exp, err)
+	if _, exp, err := e.sig.CheckExp(dl2, token.Download, short.ID); err != nil || !exp.Equal(e.clk.Now().Add(6*time.Hour)) {
+		t.Fatal("jeton de téléchargement", exp, err)
 	}
 }
 
@@ -893,6 +904,12 @@ func TestCreateConflictAndFinalizeV2(t *testing.T) {
 	m := good()
 	m["fill_from"] = 4
 	expect(t, fin(m), 409, `{"error":"incomplete"}`) // segment 3 attendu
+	// Spec §36 S4, Q-MIN1 (mode « au clic ») : sans fill_from ni fill_to, aucun bourrage n'est
+	// rempli par le serveur : tous les segments doivent avoir été envoyés.
+	m = good()
+	delete(m, "fill_from")
+	delete(m, "fill_to")
+	expect(t, fin(m), 409, `{"error":"incomplete"}`)
 	g := good()
 	expect(t, fin(g), 200, "")
 	expect(t, fin(g), 404, notFound) // rejeu
@@ -1141,10 +1158,21 @@ func TestUniformNotFoundAllRoutes(t *testing.T) {
 		"done": func(id string, _ keys, tok string) req {
 			return req{method: "POST", path: "/api/shares/done", hdr: auth(tok)}
 		},
+		"watch": func(id string, _ keys, tok string) req { return watchReq(tok) },
 	}
+	// Spec §41.8 : un jeton signé par le serveur, valide, d'un partage disparu → 410 « gone »
+	// (seul le serveur a pu le signer : aucun oracle d'existence). Tout le reste : 404.
+	tokenRoute := map[string]bool{"segment": true, "done": true, "watch": true}
+	signedGone := map[string]bool{"inexistant": true, "détruit": true, "expiré": true}
 	for rname, route := range routes {
 		for _, c := range cases {
 			w := e.do(route(c.id, c.k, c.tok))
+			if tokenRoute[rname] && signedGone[c.name] {
+				if w.Code != 410 || w.Body.String() != goneBody {
+					t.Fatalf("%s / %s : %d %q", rname, c.name, w.Code, w.Body.String())
+				}
+				continue
+			}
 			if w.Code != 404 || w.Body.String() != notFound {
 				t.Fatalf("%s / %s : %d %q", rname, c.name, w.Code, w.Body.String())
 			}
@@ -1155,13 +1183,22 @@ func TestUniformNotFoundAllRoutes(t *testing.T) {
 	ref := e.do(routes["meta"](unknown, newKeys(), "")).Body.String()
 	for rname, route := range routes {
 		for _, c := range cases {
+			if tokenRoute[rname] && signedGone[c.name] {
+				continue
+			}
 			if got := e.do(route(c.id, c.k, c.tok)).Body.String(); got != ref {
 				t.Fatalf("%s / %s : %q ≠ %q", rname, c.name, got, ref)
 			}
 		}
 	}
-	// Aucun essai compté sur le partage expiré ; le partage vivant intact.
-	for _, id := range []string{expired.ID, live.ID} {
+	// Aucun essai compté sur le partage vivant ; le partage expiré a été retiré à la première
+	// lecture portant son jeton (aucune ouverture active : aucune grâce).
+	var n int
+	e.svc.DB.QueryRow(`SELECT count(*) FROM shares WHERE id=?`, expired.ID).Scan(&n)
+	if n != 0 {
+		t.Fatal("partage expiré encore en base")
+	}
+	for _, id := range []string{live.ID} {
 		var f int
 		if err := e.svc.DB.QueryRow(`SELECT failed_attempts FROM shares WHERE id=?`, id).Scan(&f); err != nil || f != 0 {
 			t.Fatalf("failed_attempts = %d %v", f, err)
@@ -1177,10 +1214,10 @@ func TestHealthz(t *testing.T) {
 		e := newEnv(t, proxy, nil)
 		for i := 0; i < limits.RequestsPerMin+5; i++ { // non limité
 			w := e.do(req{method: "GET", path: "/healthz", remote: "127.0.0.1:9"})
-			expect(t, w, 200, "ok")
+			expect(t, w, 200, healthOK)
 			checkHeaders(t, "healthz", w)
 		}
-		expect(t, e.do(req{method: "GET", path: "/healthz", remote: "[::1]:9"}), 200, "ok")
+		expect(t, e.do(req{method: "GET", path: "/healthz", remote: "[::1]:9"}), 200, healthOK)
 		expect(t, e.do(req{method: "GET", path: "/healthz", remote: "198.51.100.1:9"}), 404, notFound)
 		// Relayé par Caddy (en-tête posé) : refusé même si le pair est local.
 		expect(t, e.do(req{method: "GET", path: "/healthz", remote: "127.0.0.1:9",

@@ -34,6 +34,30 @@ func Run(ctx context.Context, svc *share.Service, db *sql.DB, every time.Duratio
 	}
 }
 
+// Watch appelle PollRemoved à chaque période (une seconde en production), jusqu'à
+// l'annulation de ctx : un partage effacé par « shhdrop admin destroy » (autre processus)
+// voit ses flux coupés et ses surveillances prévenues (spec §41.8). Aucune requête quand
+// rien n'est surveillé ni en cours de lecture.
+func Watch(ctx context.Context, svc *share.Service, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	failed := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		// Au plus une ligne fixe par série d'erreurs (jamais d'identifiant).
+		if err := svc.PollRemoved(); err != nil && !failed {
+			fmt.Fprintln(os.Stderr, "janitor: erreur de surveillance")
+			failed = true
+		} else if err == nil {
+			failed = false
+		}
+	}
+}
+
 // Reconcile, à appeler avant d'écouter : efface les fichiers sans ligne et les
 // lignes sans fichier. Les fichiers qui ne sont pas des identifiants valides sont ignorés.
 func Reconcile(svc *share.Service) error {

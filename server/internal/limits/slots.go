@@ -61,3 +61,10 @@ func (s *Slots) release(k64, k48 string) {
 		delete(s.c48, k48)
 	}
 }
+
+// Len : transferts en cours au total (tests).
+func (s *Slots) Len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.n
+}

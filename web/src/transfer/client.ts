@@ -597,6 +597,7 @@ export async function openShare(
     const kPreuve = keys.kPreuve;
     const kEnv = keys.kEnv;
     let wiped = false;
+    let destroying = false; // destroy() en cours ou réussi ici
 
     let finished = false;
     const done = async () => {
@@ -605,8 +606,9 @@ export async function openShare(
       try {
         await api.done(c, u.downloadToken);
       } catch (e) {
-        // 404 : partage déjà effacé (expiré ou détruit) ; le contenu est déjà lu.
-        if (!(e instanceof api.HttpError && e.status === 404)) throw readerError(e);
+        // 404 ou 410 « gone » (spec §41.8) : partage déjà effacé (expiré ou détruit) ; le
+        // contenu est déjà lu.
+        if (!(e instanceof api.HttpError && (e.status === 404 || e.status === 410))) throw readerError(e);
       }
     };
     try {
@@ -658,11 +660,22 @@ export async function openShare(
         item: (i) => wrap(() => rd.item(i)),
         saveItem: (i, sink) => wrap(() => rd.streamItem(i, sink)),
         done,
-        watch: (signal) => api.watch(c, u.downloadToken, signal),
+        // Une destruction faite ici prévient aussi la surveillance (410) : ce « gone » est le
+        // nôtre, l'écran de fin vient de destroy() ; la surveillance s'arrête simplement.
+        watch: async (signal) => {
+          const r = await api.watch(c, u.downloadToken, signal);
+          return r === "gone" && destroying ? "stop" : r;
+        },
         destroy: (reason) =>
           guarded(async () => {
             if (wiped) throw new Error("cles_effacees");
-            await api.destroy(c, { kAcces, kPreuve }, reason);
+            destroying = true;
+            try {
+              await api.destroy(c, { kAcces, kPreuve }, reason);
+            } catch (e) {
+              destroying = false;
+              throw e;
+            }
           }, (e) => (e instanceof Error && e.message === "cles_effacees" ? e : readerError(e))),
         wipe: () => {
           wiped = true;

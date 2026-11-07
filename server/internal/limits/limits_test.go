@@ -472,3 +472,52 @@ func fixed(t time.Time) func() time.Time { return func() time.Time { return t } 
 type stepClock struct{ t time.Time }
 
 func (c *stepClock) Now() time.Time { return c.t }
+
+// Spec §9.5, §35.1 (Task M2) : chaque compteur est vide après sa durée de vie (horloge
+// injectée) : ceux de la minute à la minute suivante, ceux du jour à minuit UTC ; une place
+// de transfert est rendue à la fin du transfert.
+func TestCountersEmptyAfterRotation(t *testing.T) {
+	now := time.Date(2026, 11, 4, 23, 58, 10, 0, time.UTC)
+	l := newLim(&now)
+	lens := func() (minute, day int) {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		l.rotateLocked(now)
+		minute = len(l.req) + len(l.seg) + len(l.seg48)
+		day = len(l.count64) + len(l.count48) + len(l.bytes64) + len(l.bytes48) + len(l.uploads) +
+			len(l.pend64) + len(l.pend48) + len(l.aband64) + len(l.aband48)
+		return
+	}
+	for i, a := range []string{"2001:db8:1:1::1", "2001:db8:2:1::1", "198.51.100.9"} {
+		l.AllowRequest(ip(a))
+		l.AllowSegment(ip(a))
+		if _, err := l.BeginUpload(ip(a), fmt.Sprintf("id-%d", i), 1<<20); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.AbandonUpload("id-0")
+	l.FinishUpload("id-1")
+	if m, d := lens(); m == 0 || d == 0 {
+		t.Fatal("compteurs non remplis", m, d)
+	}
+	now = now.Add(time.Minute) // 23:59:10
+	if m, d := lens(); m != 0 || d == 0 {
+		t.Fatal("minute", m, d)
+	}
+	now = time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC) // minuit UTC
+	if m, d := lens(); m != 0 || d != 0 {
+		t.Fatal("minuit UTC", m, d)
+	}
+	s := NewSlots(3, 2, 3)
+	rel, err := s.Acquire("a", "b")
+	if err != nil || s.Len() != 1 {
+		t.Fatal(err, s.Len())
+	}
+	rel()
+	s.mu.Lock()
+	n := len(s.c64) + len(s.c48)
+	s.mu.Unlock()
+	if s.Len() != 0 || n != 0 {
+		t.Fatal("place non rendue", s.Len(), n)
+	}
+}

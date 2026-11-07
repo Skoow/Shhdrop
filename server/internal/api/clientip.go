@@ -14,7 +14,7 @@ import (
 // ou est invalide, on rend l'adresse du proxy : toutes ces requêtes partagent alors les
 // mêmes limites (échec du côté sûr). Rend une adresse invalide si RemoteAddr est illisible.
 func ClientIP(r *http.Request, proxies []netip.Prefix) netip.Addr {
-	a, _ := clientIP(r, proxies)
+	a, _, _ := clientIP(r, proxies)
 	return a
 }
 
@@ -32,18 +32,20 @@ func isProxy(peer netip.Addr, proxies []netip.Prefix) bool {
 }
 
 // clientIP rend aussi trusted = faux pour une requête d'un proxy sans X-Shh-Client-IP
-// valide (à refuser derrière le proxy : SHH_BEHIND_PROXY=1).
-func clientIP(r *http.Request, proxies []netip.Prefix) (addr netip.Addr, trusted bool) {
+// valide, et proxied = le pair est un proxy de confiance (derrière le proxy,
+// SHH_BEHIND_PROXY=1, toute requête doit avoir trusted et proxied). Seul endroit, avec
+// /healthz, qui lit l'adresse du pair (spec §36 S2, minimize_test.go).
+func clientIP(r *http.Request, proxies []netip.Prefix) (addr netip.Addr, trusted, proxied bool) {
 	peer := parse(r.RemoteAddr)
 	if !isProxy(peer, proxies) {
-		return peer, true
+		return peer, true, false
 	}
 	if h := r.Header.Values("X-Shh-Client-IP"); len(h) == 1 {
 		if a, err := netip.ParseAddr(strings.TrimSpace(h[0])); err == nil {
-			return a.Unmap().WithZone(""), true
+			return a.Unmap().WithZone(""), true, true
 		}
 	}
-	return peer, false
+	return peer, false, true
 }
 
 func parse(remote string) netip.Addr {

@@ -6,7 +6,11 @@
 // trouvé par V_accès ou V_gestion (calculés ici depuis K_accès et S_gestion reçus en
 // en-tête ; 400 si l'un existe déjà), désigné ensuite par le jeton signé ; id interne tiré
 // ici ; sel, Argon2id, V_preuve et enveloppe à la finalisation, bourrage [fill_from, fill_to)
-// rempli d'aléa, enveloppe rendue par unlock. Il ne reçoit et ne garde que ce que reçoit le
+// rempli d'aléa, enveloppe rendue par unlock. Disparition pendant un téléchargement (spec
+// §41.8) : 410 « gone » pour un jeton valide d'un partage disparu ; ouvertures actives (un
+// segment dans les 120 s) servies jusqu'à 2 h après l'échéance ou la suppression ;
+// signalement : aucune grâce, lectures en cours coupées ; GET /api/shares/watch tenue 25 s.
+// Il ne reçoit et ne garde que ce que reçoit le
 // vrai serveur (empreintes, sel, enveloppe, segments chiffrés), dans une Map de la page :
 // rien n'est écrit ailleurs.
 // Non simulés : limites par connexion, quotas, place disque, gel. Aucune preuve anti-robot
@@ -23,6 +27,9 @@ const EMPTY_SWEEP_S = UPLOAD_WINDOW_S - 300; // envoi sans segment
 const STALL_SWEEP_S = 900; // envoi sans nouveau segment depuis 15 min
 const CAPTCHA_TTL_S = 120;
 const MIN_FILL_S = 3; // création refusée moins de 3 s après l'émission du défi
+const ACTIVE_S = 120; // ouverture active : un segment dans les 120 s (spec §41.8)
+const GRACE_S = 2 * 3600; // grâce après l'échéance ou la suppression
+const WATCH_HOLD_MS = 25_000;
 
 type State = "uploading" | "ready" | "draining";
 
@@ -54,6 +61,8 @@ type Token = { kind: "upload" | "download"; id: string; openN: number; exp: numb
 export type FakeServerOpts = {
   /** Horloge en millisecondes (tests). Par défaut Date.now. */
   now?: () => number;
+  /** Durée d'une surveillance tenue (tests). 25 s par défaut. */
+  watchHoldMs?: number;
   /** Débit simulé des segments (envoi et lecture), en octets par seconde. 20 Mo/s par défaut. */
   rateBytesPerS?: number;
   /** Coupure simulée : à `atFraction` des octets du premier envoi, tout /api échoue pendant `ms`. */
@@ -75,6 +84,7 @@ class HttpFail {
   ) {}
 }
 const notFound = () => new HttpFail(404, "not_found");
+const goneFail = () => new HttpFail(410, "gone");
 const badRequest = () => new HttpFail(400, "bad_request");
 
 const json = (status: number, v: unknown) =>
@@ -170,6 +180,31 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
   const shares = new Map<string, Share>();
   const tokens = new Map<string, Token>();
   const shownAt = new Map<string, number>(); // jeton → émission (s), usage unique
+  // Spec §41.8 : (id, n° d'ouverture) → dernier segment et lectures en cours ; partages
+  // disparus encore lus par leurs ouvertures actives ; surveillances ; lectures coupées.
+  const active = new Map<string, { last: number; inflight: number }>();
+  const dead = new Map<string, { share: Share; graceEnd: number; opens: Set<number> }>();
+  const watchers = new Map<string, Set<() => void>>();
+  const revoked = new Set<string>();
+  const ak = (id: string, n: number) => `${id}:${n}`;
+  const isActive = (id: string, n: number, t: number) => {
+    const a = active.get(ak(id, n));
+    return a !== undefined && (a.inflight > 0 || t - a.last < ACTIVE_S);
+  };
+
+  /** Retire un partage ; grâce : ses ouvertures actives non terminées peuvent finir. */
+  function retire(id: string, grace: boolean, event: number): void {
+    const s = shares.get(id);
+    if (s === undefined) return;
+    shares.delete(id);
+    const t = now();
+    const opens = new Set<number>();
+    if (grace) for (let n = 1; n <= s.opensIssued; n++) if ((s.doneMask & (1 << (n - 1))) === 0 && isActive(id, n, t)) opens.add(n);
+    if (opens.size > 0) dead.set(id, { share: s, graceEnd: event + GRACE_S, opens });
+    else if (!grace) revoked.add(id);
+    for (const wake of watchers.get(id) ?? []) wake();
+    watchers.delete(id);
+  }
 
   // Coupure : déclenchée une seule fois, au premier envoi qui franchit la fraction.
   let outageUntil = 0;
@@ -180,16 +215,21 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
   function sweep(): void {
     const t = now();
     for (const [id, s] of shares) {
-      const gone =
-        (s.state !== "uploading" && s.expiresAt <= t) ||
+      const upGone =
         (s.state === "uploading" && s.uploadDeadline <= t) ||
         (s.state === "uploading" && s.uploadDeadline - EMPTY_SWEEP_S <= t && s.segments.every((x) => x === undefined)) ||
-        (s.state === "uploading" && s.progressAt !== null && s.progressAt + STALL_SWEEP_S <= t) ||
-        (s.state === "draining" && s.purgeAt <= t) ||
-        s.failed >= MAX_ATTEMPTS;
-      if (gone) shares.delete(id);
+        (s.state === "uploading" && s.progressAt !== null && s.progressAt + STALL_SWEEP_S <= t);
+      if (upGone) shares.delete(id);
+      else if (s.state !== "uploading" && s.expiresAt <= t) retire(id, true, s.expiresAt);
+      else if ((s.state === "draining" && s.purgeAt <= t) || s.failed >= MAX_ATTEMPTS) retire(id, true, t);
     }
-    for (const [k, tok] of tokens) if (tok.exp <= t || !shares.has(tok.id)) tokens.delete(k);
+    for (const [id, d] of dead) {
+      for (const n of d.opens) if (t >= d.graceEnd || !isActive(id, n, t)) d.opens.delete(n);
+      if (d.opens.size === 0) dead.delete(id);
+    }
+    for (const [k, a] of active) if (a.inflight === 0 && t - a.last >= ACTIVE_S) active.delete(k);
+    // Jetons gardés jusqu'à leur échéance : un jeton valide d'un partage disparu → 410.
+    for (const [k, tok] of tokens) if (tok.exp <= t) tokens.delete(k);
     for (const [k, at] of shownAt) if (at + CAPTCHA_TTL_S <= t) shownAt.delete(k);
   }
 
@@ -237,7 +277,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
 
   async function countFailure(id: string, s: Share): Promise<number> {
     s.failed++;
-    if (s.failed >= MAX_ATTEMPTS) shares.delete(id);
+    if (s.failed >= MAX_ATTEMPTS) retire(id, true, now());
     return MAX_ATTEMPTS - s.failed;
   }
 
@@ -326,7 +366,9 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     const { id } = checkToken(req, "upload");
     const b = await readJSON(req, FINALIZE_KEYS);
     const ttl = int(b.ttl_hours), maxOpens = int(b.max_opens), ops = int(b.kdf_ops), mem = int(b.kdf_mem);
-    if (typeof b.fill_from !== "number" || typeof b.fill_to !== "number") throw badRequest();
+    // fill_from et fill_to ensemble, ou aucun des deux (spec §36 S4 : tout le bourrage envoyé).
+    const noFill = b.fill_from === undefined && b.fill_to === undefined;
+    if (!noFill && (typeof b.fill_from !== "number" || typeof b.fill_to !== "number")) throw badRequest();
     const from = int(b.fill_from), to = int(b.fill_to);
     const salt = decodeB64(b.salt, 16), proofV = decodeB64(b.proof_v, 32), envelope = decodeB64(b.envelope, 60);
     emptyHash ??= await sha256(new Uint8Array(0));
@@ -391,7 +433,8 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
         s.state = "draining";
         s.purgeAt = Math.min(ceil15(now() + PURGE_WINDOW_S), s.expiresAt);
       }
-      const exp = Math.min(now() + PURGE_WINDOW_S, s.expiresAt);
+      // Jeton de 6 h, non plafonné à l'échéance : il borne la grâce (spec §41.8).
+      const exp = now() + PURGE_WINDOW_S;
       return json(200, {
         download_token: issue("download", id, s.opensIssued, exp),
         segments: segmentCount(s.bucket),
@@ -403,19 +446,44 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     throw notFound(); // 5ᵉ essai faux : détruit
   }
 
+  /** Segments lisibles par l'ouverture tok, ou 410 (partage disparu, ouverture finie). */
+  function readableBy(tok: Token): Share {
+    const t = now();
+    const d = dead.get(tok.id);
+    if (d !== undefined) {
+      if (!d.opens.has(tok.openN) || t >= d.graceEnd || !isActive(tok.id, tok.openN, t)) {
+        d.opens.delete(tok.openN);
+        throw goneFail();
+      }
+      return d.share;
+    }
+    const s = shares.get(tok.id);
+    if (s === undefined) throw goneFail();
+    if (tok.openN > s.opensIssued) throw notFound();
+    if ((s.doneMask & (1 << (tok.openN - 1))) !== 0) throw goneFail();
+    return s;
+  }
+
   async function getSegment(req: Request, nStr: string): Promise<Response> {
     const tok = checkToken(req, "download");
     const id = tok.id;
     const n = segNum(nStr);
-    const s = live(id);
-    const t = now();
-    const open = s.state === "ready" || (s.state === "draining" && s.purgeAt > t);
-    if (!open || s.expiresAt <= t || s.failed >= MAX_ATTEMPTS || tok.openN > s.opensIssued || (s.doneMask & (1 << (tok.openN - 1))) !== 0)
-      throw notFound();
+    const s = readableBy(tok);
     if (n >= s.segments.length) throw badRequest();
     const data = s.segments[n]!;
-    await transfer(data.length);
-    if (!shares.has(id)) throw notFound(); // détruit pendant la lecture
+    const key = ak(id, tok.openN);
+    const a = active.get(key) ?? { last: now(), inflight: 0 };
+    active.set(key, a);
+    a.inflight++;
+    a.last = now();
+    try {
+      await transfer(data.length);
+    } finally {
+      a.inflight--;
+      a.last = now();
+    }
+    // Signalement pendant la lecture : connexion coupée (aucune grâce).
+    if (revoked.has(id)) throw new TypeError("Failed to fetch");
     return new Response(data.slice() as Uint8Array<ArrayBuffer>, {
       status: 200,
       headers: { "Content-Type": "application/octet-stream", "X-Shh-Demo": MARK },
@@ -425,12 +493,45 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
   function done(req: Request): Response {
     const tok = checkToken(req, "download");
     const id = tok.id;
-    const s = live(id);
+    const d = dead.get(id);
+    if (d !== undefined) {
+      if (!d.opens.delete(tok.openN)) throw goneFail();
+      return empty(204);
+    }
+    const s = shares.get(id);
+    if (s === undefined) throw goneFail();
     if (tok.openN > s.opensIssued) throw notFound();
     s.doneMask |= 1 << (tok.openN - 1);
     let bits = 0;
     for (let m = s.doneMask; m !== 0; m >>>= 1) bits += m & 1;
-    if (s.state === "draining" && bits === s.opensIssued) shares.delete(id);
+    if (s.state === "draining" && bits === s.opensIssued) retire(id, true, now());
+    return empty(204);
+  }
+
+  /** GET /api/shares/watch : tenue 25 s (raccourcie à l'échéance) ; 410 dès la disparition. */
+  async function watch(req: Request): Promise<Response> {
+    const tok = checkToken(req, "download");
+    if (dead.has(tok.id)) throw goneFail();
+    const s = readableBy(tok);
+    const left = s.expiresAt * 1000 - nowMs();
+    if (left <= 0) throw goneFail();
+    const gone = await new Promise<boolean>((resolve) => {
+      const set = watchers.get(tok.id) ?? new Set<() => void>();
+      watchers.set(tok.id, set);
+      const wake = () => finish(true);
+      const timer = setTimeout(() => finish(nowMs() >= s.expiresAt * 1000), Math.min(opts.watchHoldMs ?? WATCH_HOLD_MS, left));
+      const abort = () => finish(false);
+      function finish(g: boolean) {
+        clearTimeout(timer);
+        set.delete(wake);
+        req.signal.removeEventListener("abort", abort);
+        resolve(g);
+      }
+      set.add(wake);
+      req.signal.addEventListener("abort", abort);
+    });
+    if (req.signal.aborted) throw new DOMException("Aborted", "AbortError");
+    if (gone) throw goneFail();
     return empty(204);
   }
 
@@ -443,15 +544,16 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
   /** Destinataire : K_accès en en-tête, K_preuve dans le corps (POST /api/shares/destroy). */
   async function destroy(req: Request): Promise<Response> {
     const b = await readJSON(req, ["proof", "reason"]);
-    const reason = str(b.reason);
-    if (reason === null || reason.length > 64) throw badRequest();
+    // Motif fermé (spec §36 S14) : absent, ou exactement "report".
+    const report = "reason" in b;
+    if (report && b.reason !== "report") throw badRequest();
     const ka = headerSecret(req, "X-Shh-Access");
     const kp = decodeB64(b.proof, 32);
     const e = await find(ka, "accessV");
     if (e === undefined || !isAlive(e[1])) throw notFound();
     const [id, s] = e;
     if (s.proofV !== null && (await matches(kp, s.proofV))) {
-      shares.delete(id);
+      retire(id, !report, now());
       return empty(204);
     }
     await countFailure(id, s); // K_accès juste, K_preuve faux : un essai
@@ -468,7 +570,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
 
   async function manageDestroy(req: Request): Promise<Response> {
     const [id] = await managed(req);
-    shares.delete(id);
+    retire(id, true, now());
     return empty(204);
   }
 
@@ -507,6 +609,8 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
         return done(req);
       case "POST /api/shares/destroy":
         return destroy(req);
+      case "GET /api/shares/watch":
+        return watch(req);
     }
     throw notFound();
   }
