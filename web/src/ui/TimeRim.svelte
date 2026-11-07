@@ -2,6 +2,7 @@
   // Contour de temps (benchmark S3) : le contour de la capsule se raccourcit avec le temps
   // restant, mis à jour à la minute (aucune boucle d'animation) ; les ouvertures restantes sont
   // de petites encoches. Décoratif : le texte complet est porté par le parent (Countdown, état).
+  import { untrack } from "svelte";
   import { capPath } from "./motion";
   import { notches, rimOffset } from "./rim";
 
@@ -24,7 +25,8 @@
 
   // Échéance fixée au montage (remainingS est relatif à ce moment).
   let deadline = 0;
-  let left = $state(0);
+  // Valeur de départ posée tout de suite : aucune transition de « vide » à « plein » au montage.
+  let left = $state(untrack(() => remainingS));
   $effect(() => {
     const r = remainingS;
     const t0 = now();
