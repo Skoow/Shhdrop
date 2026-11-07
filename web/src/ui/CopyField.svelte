@@ -6,12 +6,14 @@
   import Button from "./Button.svelte";
   import { Check, Copy } from "./Icon";
 
-  type Props = { label: string; value: string };
-  let { label, value }: Props = $props();
+  /** `whole` : valeur montrée en entier, sur plusieurs lignes au besoin (mot de passe : ce qu'on lit = ce qu'on copie). */
+  type Props = { label: string; value: string; whole?: boolean };
+  let { label, value, whole = false }: Props = $props();
 
   // Troncature au milieu par CSS seulement (la largeur décide) : une tête qui s'ellipse et une
   // queue fixe. Le texte visible n'est pas sélectionnable : on ne peut pas copier une valeur
-  // tronquée ; la copie vient toujours de `value`.
+  // tronquée ; la copie vient toujours de `value`. Espaces gardées telles quelles (scan UX B5 :
+  // l'espace à la jonction tête-queue disparaissait).
   const TAIL = 8;
   const head = $derived(value.length > TAIL ? value.slice(0, -TAIL) : "");
   const tail = $derived(value.length > TAIL ? value.slice(-TAIL) : value);
@@ -60,7 +62,11 @@
         aria-describedby="{uid}-hint"
       />
     {:else}
-      <span class="val vis" translate="no" aria-hidden="true"><span class="head">{head}</span><span class="tail">{tail}</span></span>
+      {#if whole}
+        <span class="val vis whole" translate="no" aria-hidden="true">{value}</span>
+      {:else}
+        <span class="val vis" translate="no" aria-hidden="true"><span class="head">{head}</span><span class="tail">{tail}</span></span>
+      {/if}
       <span class="sr-only">{value}</span>
     {/if}
     <!-- Nom accessible = texte visible + suffixe masqué (WCAG 2.5.3 : le nom commence par le libellé visible). -->
@@ -111,6 +117,15 @@
   .vis {
     user-select: none;
     -webkit-user-select: none;
+  }
+  .head,
+  .tail {
+    white-space: pre;
+  }
+  .whole {
+    padding-block: var(--sp-2);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
   .head {
     flex: 0 1 auto;

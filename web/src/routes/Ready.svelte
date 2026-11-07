@@ -1,8 +1,9 @@
 <script lang="ts">
-  // « Lien prêt » (UI §9.5) : affiché seulement après la résolution de createShare. Deux cartes
-  // pour deux secrets (M18, S2) : le lien (Copier, Partager, QR) et le mot de passe (Copier,
-  // dictée), séparées par le rappel ; lien de gestion ; Vider le presse-papier ; Terminé ;
-  // Supprimer ce partage. Les valeurs ne viennent que des props (Copier lit l'état, jamais le
+  // « Lien prêt » (UI §9.5) : affiché seulement après la résolution de createShare. L'avertissement
+  // « plus jamais affichés » en tête ; deux cartes pour deux secrets (M18, S2) : le lien (Copier,
+  // Partager, QR) et le mot de passe (Copier, dictée), séparées par le rappel ; lien de gestion
+  // replié ; Supprimer ce partage (secondaire) ; Vider le presse-papier ; Terminé (principal,
+  // collé en bas sur téléphone). Les valeurs ne viennent que des props (Copier lit l'état, jamais le
   // DOM) ; rien n'est écrit dans la console, le titre, l'URL ou un stockage.
   import { tick } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
@@ -16,9 +17,10 @@
   import Button from "../ui/Button.svelte";
   import { clearClipboard } from "../ui/clipboard";
   import CopyField from "../ui/CopyField.svelte";
-  import { AudioLines, ClipboardX, Eye, Lock, QrCode, Share2, Trash2 } from "../ui/Icon";
+  import { AudioLines, ChevronDown, ClipboardX, Eye, Lock, QrCode as QrIcon, Share2, Trash2 } from "../ui/Icon";
   import InlineConfirm from "../ui/InlineConfirm.svelte";
   import Logo from "../ui/Logo.svelte";
+  import QrCode from "../ui/QrCode.svelte";
   import { reducedMotion } from "../ui/motion";
   import Sheet from "../ui/Sheet.svelte";
   import "../ui/seal.css";
@@ -178,6 +180,8 @@
         </div>
       </header>
 
+      <p class="never" data-fan><ClipboardX size={18} strokeWidth={1.75} aria-hidden="true" />{t("ready.never")}</p>
+
       <div class="card" role="group" aria-label={t("ready.link.title")} data-fan>
         <CopyField label={t("ready.link.label")} value={result.link} />
         <div class="row">
@@ -188,7 +192,7 @@
             </Button>
           {/if}
           <Button variant="secondary" dense aria-expanded={narrow.current ? undefined : qrShown} onpress={toggleQr}>
-            {#snippet icon()}<QrCode size={20} strokeWidth={1.75} />{/snippet}
+            {#snippet icon()}<QrIcon size={20} strokeWidth={1.75} />{/snippet}
             {qrShown ? t("ready.qr.hide") : t("ready.qr")}
           </Button>
           {#if demo}
@@ -200,7 +204,7 @@
         </div>
         {#if qrShown && !narrow.current}
           <figure class="qr">
-            {#await import("../ui/QrCode.svelte") then m}<m.default text={result.link} label={t("ready.qr.alt")} />{/await}
+            <QrCode text={result.link} label={t("ready.qr.alt")} />
             <figcaption>{t("ready.qr.caption")}</figcaption>
           </figure>
         {/if}
@@ -209,7 +213,7 @@
       <p class="two" data-fan>{t("ready.two")}</p>
 
       <div class="card" role="group" aria-label={t("ready.pw.title")} data-fan>
-        <CopyField label={t("ready.pw.title")} value={result.password} />
+        <CopyField label={t("ready.pw.title")} value={result.password} whole />
         <p class="hint">{t("ready.pw.reminder")}</p>
         <div class="row">
           <Button variant="ghost" dense onpress={() => {
@@ -222,21 +226,16 @@
         </div>
       </div>
 
-      <section class="card manage" aria-labelledby="g-manage">
-        <h3 id="g-manage" class="ct">{t("ready.manage.title")}</h3>
-        <CopyField label={t("ready.manage.label")} value={result.manage} />
-        <p class="hint">{t("ready.manage.hint")}</p>
-      </section>
-
-      <div class="clip">
-        <p class="never"><ClipboardX size={18} strokeWidth={1.75} aria-hidden="true" />{t("ready.never")}</p>
-        <Button variant="ghost" dense onpress={clearClip}>{t("ready.clear")}</Button>
-        <p class="hint">{t("ready.clear.note")}</p>
-      </div>
-
-      <div class="done">
-        <InlineConfirm label={t("ready.done")} message={t("ready.done.confirm")} confirmLabel={t("ready.done.yes")} onconfirm={done} />
-      </div>
+      <details class="card manage">
+        <summary class="ct">
+          <span>{t("ready.manage.title")}</span>
+          <ChevronDown class="chev" size={20} strokeWidth={1.75} aria-hidden="true" />
+        </summary>
+        <div class="manage-body">
+          <CopyField label={t("ready.manage.label")} value={result.manage} />
+          <p class="hint">{t("ready.manage.hint")}</p>
+        </div>
+      </details>
 
       <div class="danger-zone">
         <InlineConfirm
@@ -251,12 +250,27 @@
         </InlineConfirm>
         {#if deleteError}<p class="del-err" role="alert">{deleteError}</p>{/if}
       </div>
+
+      <div class="clip">
+        <Button variant="ghost" dense onpress={clearClip}>{t("ready.clear")}</Button>
+        <p class="hint">{t("ready.clear.note")}</p>
+      </div>
+
+      <div class="done">
+        <InlineConfirm
+          label={t("ready.done")}
+          message={t("ready.done.confirm")}
+          confirmLabel={t("ready.done.yes")}
+          triggerVariant="primary"
+          onconfirm={done}
+        />
+      </div>
     </div>
   </section>
 
   <Sheet bind:open={qrSheet} title={t("ready.qr")}>
     <figure class="qr">
-      {#await import("../ui/QrCode.svelte") then m}<m.default text={result.link} label={t("ready.qr.alt")} />{/await}
+      <QrCode text={result.link} label={t("ready.qr.alt")} />
       <figcaption>{t("ready.qr.caption")}</figcaption>
     </figure>
   </Sheet>
@@ -399,27 +413,67 @@
     display: grid;
     justify-items: start;
     gap: var(--sp-2);
-    padding-top: var(--sp-4);
-    border-top: 1px solid var(--line);
   }
   .never {
+    max-width: none;
     margin: 0;
     display: flex;
     align-items: center;
     gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4);
+    border-left: 2px solid var(--warn);
+    border-radius: 0 var(--r-md) var(--r-md) 0;
+    background: var(--warn-tint);
+    color: var(--text);
+    font-weight: 560;
+  }
+  .never :global(svg) {
+    flex: none;
+    color: var(--warn);
+  }
+  .manage {
+    gap: 0;
+  }
+  .manage summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    min-height: 44px;
+    cursor: pointer;
+    list-style: none;
+  }
+  .manage summary::-webkit-details-marker {
+    display: none;
+  }
+  .manage :global(.chev) {
+    flex: none;
     color: var(--text-2);
+    transition: transform var(--dur-fast) var(--ease-out);
+  }
+  .manage[open] :global(.chev) {
+    transform: rotate(180deg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .manage :global(.chev) {
+      transition: none;
+    }
+  }
+  .manage-body {
+    display: grid;
+    gap: var(--sp-3);
+    padding-top: var(--sp-3);
   }
   .done {
     display: grid;
     justify-items: start;
+    padding-top: var(--sp-4);
+    border-top: 1px solid var(--line);
   }
   .danger-zone {
     display: grid;
     justify-items: start;
     gap: var(--sp-2);
-    margin-top: var(--sp-6);
-    padding-top: var(--sp-4);
-    border-top: 1px solid var(--line);
   }
   .danger-zone :global(button.ghost) {
     color: var(--danger);
@@ -436,10 +490,12 @@
       width: 72px;
       height: 46px;
     }
-    .danger-zone {
+    /* Terminé, l'action principale, sous le pouce ; la suppression reste dans le fil. */
+    .done {
       position: sticky;
       bottom: 0;
       z-index: 2;
+      justify-items: stretch;
       margin-inline: calc(-1 * var(--sp-4));
       padding: var(--sp-2) var(--sp-4) calc(var(--sp-2) + env(safe-area-inset-bottom));
       background: var(--bg);

@@ -35,12 +35,25 @@ test.describe("fr-FR", () => {
     await toReady(page, context, shh.origin);
     await expect(readyHeading(page)).toBeFocused();
 
-    // Ordre du DOM : carte lien → rappel → carte mot de passe ; deux groupes nommés.
+    // Ordre du DOM : avertissement → carte lien → rappel → carte mot de passe → gestion repliée →
+    // Supprimer → Vider → Terminé (scan UX, « Lien prêt » : hiérarchie).
     const order = await page.evaluate(() => {
-      const els = [...document.querySelectorAll(".ready [role=group][aria-label], .ready p.two")];
-      return els.map((e) => e.getAttribute("aria-label") ?? "rappel");
+      const els = [...document.querySelectorAll(".ready p.never, .ready [role=group][aria-label], .ready p.two, .ready details.manage, .ready .danger-zone, .ready .clip, .ready .done")];
+      return els.map((e) => e.getAttribute("aria-label") ?? e.className.split(" ").find((c) => c && !c.startsWith("svelte-") && c !== "card"));
     });
-    expect(order.slice(0, 3)).toEqual(["Lien", "rappel", "Mot de passe"]);
+    expect(order).toEqual(["never", "Lien", "two", "Mot de passe", "manage", "danger-zone", "clip", "done"]);
+    await expect(page.locator(".ready p.never")).toHaveText("Ce lien et ce mot de passe ne seront plus jamais affichés.");
+    // Terminé : action principale ; Supprimer : secondaire.
+    await expect(page.getByRole("button", { name: "Terminé" })).toHaveClass(/\bprimary\b/);
+    await expect(page.getByRole("button", { name: "Supprimer ce partage" })).not.toHaveClass(/\bprimary\b/);
+    // Lien de gestion replié par défaut, ouvert d'un clic sur son titre.
+    const manage = page.locator("details.manage");
+    await expect(manage).not.toHaveAttribute("open");
+    await expect(manage.getByRole("button", { name: /^Copier/ })).toBeHidden();
+    await manage.getByText("Gérer ce partage").click();
+    await expect(manage).toHaveAttribute("open");
+    await expect(manage.getByRole("button", { name: /^Copier/ })).toBeVisible();
+    await expect(manage.locator(".sr-only").first()).toHaveText(/#m[A-Za-z0-9_-]{43}$/);
     await expect(page.locator(".ready").getByText("Un mot de passe en plus du lien. Envoyez-les par deux moyens différents.")).toBeVisible();
 
     const link = await valueOf(page, linkCard(page));
@@ -109,6 +122,33 @@ test.describe("fr-FR", () => {
     await page.getByRole("button", { name: "Nouvel envoi" }).click();
     await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
     expect(await armed(page)).toBe(false);
+  });
+
+  test("mot de passe saisi avec espaces : affiché exactement comme il est copié (scan UX B5)", async ({ page, shh, context, isMobile }) => {
+    test.setTimeout(120_000);
+    const own = "soleil de mars en hiver";
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: shh.origin });
+    await page.goto(shh.origin + "/");
+    await addText(page, "espaces");
+    let opts = page.locator(".side");
+    if (isMobile) {
+      await page.getByRole("button", { name: /^Options · / }).click();
+      opts = page.getByRole("dialog", { name: "Options" });
+    }
+    await opts.getByRole("button", { name: "Écrire mon propre mot de passe" }).click();
+    await opts.getByLabel("Votre mot de passe").fill(own);
+    if (isMobile) await page.keyboard.press("Escape");
+    await sendButton(page).click();
+    await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
+    expect(await pwCard(page).locator(".val.vis").innerText()).toBe(own);
+    await pwCard(page).getByRole("button", { name: /^Copier/ }).click();
+    expect(await clip(page)).toBe(own);
+    // Mot de passe généré de 10 caractères : même règle (ce qu'on lit = ce qu'on copie).
+    const p2 = await context.newPage();
+    await toReady(p2, context, shh.origin);
+    const gen = await valueOf(p2, pwCard(p2));
+    expect(gen).toHaveLength(10);
+    expect(await pwCard(p2).locator(".val.vis").innerText()).toBe(gen);
   });
 
   test("pastille « vers 9 h 45 » (arrondi au quart d'heure) et durée de vie choisie (3 ouvertures, 6 h)", async ({ page, shh, context, isMobile }) => {
@@ -200,14 +240,23 @@ test.describe("fr-FR", () => {
 test.describe("390 × 844", () => {
   test.use({ locale: "fr-FR", viewport: { width: 390, height: 844 }, isMobile: false });
 
-  test("Supprimer ce partage reste à portée (collé en bas) ; QR en feuille ; capture", async ({ page, shh, context }) => {
+  test("Terminé collé en bas, sous le pouce ; Supprimer dans le fil, jamais collé ; QR en feuille ; capture", async ({ page, shh, context }) => {
     test.setTimeout(120_000);
     await toReady(page, context, shh.origin);
     await page.waitForTimeout(700);
     await capture(page, "ready-390");
-    await expect(page.getByRole("button", { name: "Supprimer ce partage" })).toBeInViewport();
+    const done = page.getByRole("button", { name: "Terminé" });
+    const del = page.getByRole("button", { name: "Supprimer ce partage" });
+    await expect(done).toBeInViewport();
+    await expect(del).not.toBeInViewport();
     await page.evaluate(() => window.scrollTo(0, 300));
-    await expect(page.getByRole("button", { name: "Supprimer ce partage" })).toBeInViewport();
+    await expect(done).toBeInViewport();
+    expect(await del.evaluate((e) => getComputedStyle(e.closest(".danger-zone")!).position)).toBe("static");
+    // Tout en bas : Supprimer n'est pas sous la barre de Terminé (ni recouvert, ni collé à elle).
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const [d, b] = [await del.boundingBox(), await page.locator(".done").boundingBox()];
+    expect(d!.y + d!.height).toBeLessThan(b!.y - 40);
+    await capture(page, "ready-390-bottom");
     await linkCard(page).getByRole("button", { name: "QR code" }).click();
     const sheet = page.getByRole("dialog", { name: "QR code" });
     await expect(sheet.getByRole("img", { name: "QR code du lien de partage" })).toBeVisible();

@@ -354,7 +354,7 @@ export const fr = {
   "ready.pw.reminder":
     "Envoyez-le par un autre moyen que le lien. Les deux dans la même messagerie, c'est comme ne pas en mettre.",
   "ready.delete.confirm": "Supprimer ce partage pour tout le monde\u202f? Le lien ne mènera plus à rien.",
-  "ready.never": "Ces informations ne seront plus jamais affichées.",
+  "ready.never": "Ce lien et ce mot de passe ne seront plus jamais affichés.",
   "ready.active": "Actif · s'efface vers {time}",
   "ready.selfdestruct": "S'efface tout seul : après {opens}, ou au bout de {ttl}.",
   "ready.opens.one": "{n} ouverture",

@@ -352,7 +352,7 @@ export const en = {
   "ready.created": "Share created.",
   "ready.pw.reminder": "Send it another way than the link. Both in the same chat is like having no password.",
   "ready.delete.confirm": "Delete this share for everyone? The link will lead nowhere.",
-  "ready.never": "This information will never be shown again.",
+  "ready.never": "This link and this password will never be shown again.",
   "ready.active": "Active · erases itself around {time}",
   "ready.selfdestruct": "Erases itself: after {opens}, or after {ttl}.",
   "ready.opens.one": "{n} open",

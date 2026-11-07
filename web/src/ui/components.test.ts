@@ -166,6 +166,11 @@ describe("CopyField", () => {
     expect(input.value).toBe("x".repeat(80));
     expect(input.readOnly).toBe(true);
   });
+  it("whole : la valeur entière dans un seul nœud, espaces comprises (scan UX B5)", () => {
+    show(CopyField, { label: "Mot de passe", value: "soleil de mars en hiver", whole: true });
+    expect(document.querySelector(".val.whole")!.textContent).toBe("soleil de mars en hiver");
+    expect(document.querySelector(".head")).toBeNull();
+  });
   it("valeur courte : affichée telle quelle", () => {
     show(CopyField, { label: "Mot de passe", value: "abc def" });
     expect(document.querySelector(".val")!.textContent).toBe("abc def");
