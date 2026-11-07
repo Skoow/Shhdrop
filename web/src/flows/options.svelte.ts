@@ -3,7 +3,7 @@
 import { MAX_OPENS, OPENS_DEFAULT, PREVIEW_MAX, TTL_DEFAULT, TTL_HOURS, type PwCheck, type TtlHours } from "../index";
 
 export type Rights = "voir" | "enregistrer" | "coffre";
-export type OptionsBlock = "mdp_trop_court" | "mdp_trop_courant" | "mdp_verif";
+export type OptionsBlock = "mdp_trop_court" | "mdp_trop_courant" | "mdp_repetition" | "mdp_suite" | "mdp_clavier" | "mdp_verif";
 
 export type OptionsDeps = {
   /** Mot de passe généré (spec §31). */
@@ -95,7 +95,7 @@ export function createOptions(deps: OptionsDeps) {
       const c = check();
       if (c === null) return "mdp_verif";
       if (c.ok) return null;
-      return c.reason === "trop_court" ? "mdp_trop_court" : "mdp_trop_courant";
+      return `mdp_${c.reason}`;
     },
   };
 }

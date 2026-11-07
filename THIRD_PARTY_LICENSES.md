@@ -9,13 +9,20 @@ Le code de Shhdrop est publié sous licence GNU AGPL-3.0 (voir `LICENSE`). Les c
 - Licence : Creative Commons Attribution 3.0 (CC-BY 3.0), https://creativecommons.org/licenses/by/3.0/
 - Utilisation : `web/src/crypto/wordlist-eff.ts` (généré), mots seuls, sans les numéros de dés.
 
-## SecLists, `10k-most-common.txt`
+## SecLists, `10k-most-common.txt` et `100k-most-used-passwords-NCSC.txt`
 
-- Source : https://github.com/danielmiessler/SecLists (Passwords/Common-Credentials/10k-most-common.txt)
-- Licence : MIT, Copyright (c) Daniel Miessler et contributeurs
-- Utilisation : `web/src/crypto/blocklist.ts` (généré), liste noire de mots de passe courants.
+- Source : https://github.com/danielmiessler/SecLists (Passwords/Common-Credentials/10k-most-common.txt et 100k-most-used-passwords-NCSC.txt, 20 000 premières lignes de cette dernière)
+- Licence : MIT, Copyright (c) Daniel Miessler et contributeurs. La liste NCSC vient du National Cyber Security Centre (Royaume-Uni, 2019), tirée de Pwned Passwords (Troy Hunt) ; SecLists la redistribue sous sa licence MIT.
+- Utilisation : `web/src/crypto/blocklist.ts` (généré), mots de passe courants et « cœurs » de dictionnaire (règle de `web/src/crypto/weakpw.ts`).
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
+
+## Richelieu, `french_passwords_top20000.txt`
+
+- Source : https://github.com/tarraschk/richelieu (20 000 mots de passe français les plus courants, tirés de fuites publiques filtrées sur des adresses en .fr)
+- Auteurs : Maxime Alay-Eddine et Paul Barbaste
+- Licence : Creative Commons Attribution 4.0 International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
+- Utilisation : `web/src/crypto/blocklist.ts` (généré), transformée (minuscules, accents retirés, entrées de 10 caractères ou plus et cœurs de dictionnaire seulement).
 
 ## Dépendances npm de l'interface (Plan 2)
 

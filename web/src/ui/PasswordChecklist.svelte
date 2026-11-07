@@ -1,7 +1,7 @@
 <script lang="ts">
-  // Règles d'un mot de passe saisi (spec §31 : 12 caractères au moins, absent de la liste noire),
-  // en direct, et indication de solidité fondée sur la longueur seulement : aucune promesse
-  // chiffrée, aucun calcul « d'entropie » affiché (UI §20.8).
+  // Règles d'un mot de passe saisi (spec §31 : 10 caractères au moins, ni répétition, ni suite,
+  // ni rangée de clavier, ni mot de passe courant), en direct, et indication de solidité fondée
+  // sur la longueur seulement : aucune promesse chiffrée, aucun calcul « d'entropie » (UI §20.8).
   import type { PwCheck } from "../index";
   import { t } from "../i18n/i18n.svelte";
   import { Check, X } from "./Icon";
@@ -11,8 +11,9 @@
 
   const len = $derived([...value.normalize("NFC")].length);
   const longEnough = $derived(len >= min);
-  const notCommon = $derived(longEnough && result !== null && (result.ok || result.reason !== "trop_courant"));
-  const strength = $derived(!longEnough ? "weak" : len >= 20 ? "good" : "ok");
+  const weak = $derived(longEnough && result !== null && !result.ok && result.reason !== "trop_court" ? result.reason : null);
+  const notCommon = $derived(longEnough && result !== null && result.ok);
+  const strength = $derived(!longEnough || weak !== null ? "weak" : len >= 20 ? "good" : "ok");
 </script>
 
 <div class="pc" {id}>
@@ -20,7 +21,7 @@
     <span class={["seg", strength, { on: len > 0 }]}></span>
     <span class={["seg", strength, { on: longEnough }]}></span>
     <span class={["seg", strength, { on: strength === "good" }]}></span>
-    <span class={["lbl", strength]}>{len === 0 ? t("options.pw.length", { n: 0 }) : t(`options.pw.strength.${strength}`)}</span>
+    <span class={["lbl", strength]}>{len === 0 ? t("options.pw.length", { n: 0 }) : weak !== null ? t("options.pw.strength.guessable") : t(`options.pw.strength.${strength}`)}</span>
   </div>
   <ul class="rules">
     <li class={{ ok: longEnough }}>
@@ -29,7 +30,7 @@
     </li>
     <li class={{ ok: notCommon }}>
       {#if notCommon}<Check size={16} strokeWidth={2.2} aria-hidden="true" />{:else}<X size={16} strokeWidth={2.2} aria-hidden="true" />{/if}
-      <span>{t("options.pw.rule.common")}</span>
+      <span>{t(weak === null ? "options.pw.rule.common" : `options.pw.rule.${weak}`)}</span>
     </li>
   </ul>
   <p class="tip">{t("options.pw.tip")}</p>

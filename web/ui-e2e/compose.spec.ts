@@ -239,7 +239,17 @@ test.describe("fr-FR", () => {
     const reason = isMobile ? opts.locator("#opt-reason") : page.locator("#send-reason");
     await expect(reason).toHaveText("Le mot de passe doit faire au moins 10 caractères.");
     await field.fill("unbelievable");
-    await expect(reason).toHaveText("Ce mot de passe est trop courant. Choisissez-en un autre.");
+    await expect(reason).toHaveText("Ce mot de passe est trop courant, même avec des chiffres ou des symboles autour. Choisissez-en un autre.");
+    // Règles de forme (audit M1) : une raison claire pour chacune.
+    await field.fill("azertyuiop");
+    await expect(reason).toHaveText("Ce mot de passe suit les touches du clavier (comme «\u00a0azerty\u00a0»). Choisissez-en un autre.");
+    await expect(opts.getByText("Suit les touches du clavier")).toBeVisible();
+    await field.fill("aaaaaaaaaa");
+    await expect(reason).toHaveText(/^Ce mot de passe répète trop les mêmes caractères/);
+    await field.fill("1234567890");
+    await expect(reason).toHaveText(/^Ce mot de passe suit l'ordre de l'alphabet ou des chiffres/);
+    await field.fill("motdepasse12");
+    await expect(reason).toHaveText(/^Ce mot de passe est trop courant/);
     await field.fill("cheval-agr");
     await expect(reason).toHaveCount(0);
     await field.fill("court");

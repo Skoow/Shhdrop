@@ -101,8 +101,16 @@ describe("createOptions (UI §9.3)", () => {
     expect(sendRights(o)).toEqual({ rights: "voir" });
   });
 
+  it("chaque raison de refus du mot de passe a sa raison de blocage (audit M1)", () => {
+    for (const reason of ["repetition", "suite", "clavier", "trop_courant"] as const) {
+      const o = make({ check: () => ({ ok: false, reason }) });
+      o.setCustom("peu importe");
+      expect(o.blockReason()).toBe(`mdp_${reason}`);
+    }
+  });
+
   it("chaque raison de blocage a son texte FR et EN", () => {
-    for (const k of ["options.block.mdp_trop_court", "options.block.mdp_trop_courant", "options.block.mdp_verif"]) {
+    for (const k of ["options.block.mdp_trop_court", "options.block.mdp_trop_courant", "options.block.mdp_repetition", "options.block.mdp_suite", "options.block.mdp_clavier", "options.block.mdp_verif"]) {
       expect(fr[k as keyof typeof fr], k).toBeTruthy();
       expect(en[k as keyof typeof en], k).toBeTruthy();
     }

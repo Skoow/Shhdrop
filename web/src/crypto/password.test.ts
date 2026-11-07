@@ -91,7 +91,8 @@ describe("checkPassword et mot de passe généré", () => {
     expect(checkPassword(g)).toEqual({ ok: true });
     // Saisie (jamais produite par generatePassword) : 10 caractères exigés, comme le tirage.
     expect(checkPassword("aB3!aB3!a")).toEqual({ ok: false, reason: "trop_court" });
-    expect(checkPassword("aB3!aB3!aB")).toEqual({ ok: true });
+    expect(checkPassword("aB3!cD5?eF")).toEqual({ ok: true });
+    expect(checkPassword("aB3!aB3!aB")).toEqual({ ok: false, reason: "repetition" });
     // Une copie construite caractère par caractère reste une chaîne saisie aux yeux du type,
     // mais égale à un mot de passe généré récent : acceptée (même force que le tirage).
     expect(checkPassword([...g].join(""))).toEqual({ ok: true });
@@ -101,7 +102,7 @@ describe("checkPassword et mot de passe généré", () => {
     for (let i = 0; i < 16; i++) generatePassword();
     expect(checkPassword(first)).toEqual({ ok: true });
   });
-  it("un mot de passe saisi reste soumis à la règle des 10 caractères et à la liste noire", () => {
+  it("un mot de passe saisi reste soumis à la règle des 10 caractères et aux règles de weakpw.ts", () => {
     expect(checkPassword("cheval-agrafe")).toEqual({ ok: true });
     expect(checkPassword("unbelievable")).toEqual({ ok: false, reason: "trop_courant" });
   });
