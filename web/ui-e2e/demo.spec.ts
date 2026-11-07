@@ -103,8 +103,13 @@ test.describe("fr-FR", () => {
       expect(res?.status()).toBe(200);
       await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
       expect(page.url()).toBe(demo.url);
-      // Route d'ouverture ou de gestion (match → open / manage), ni accueil ni « Cette page n'existe pas ».
-      await expect(page.getByRole("heading", { level: 1, name: "Shhdrop" })).toBeVisible();
+      // Route d'ouverture ou de gestion : le faux serveur de cet onglet ne connaît pas ce partage.
+      if (what === "partage") {
+        await expect(page.getByRole("heading", { level: 1, name: "Ce lien n'existe pas ou n'est plus disponible." })).toBeVisible();
+        await expect(page.getByText("(normal en démo : le partage n'existait que dans l'onglet d'origine)")).toBeVisible();
+      } else {
+        await expect(page.getByRole("heading", { level: 1, name: "Supprimé" })).toBeVisible();
+      }
       await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toHaveCount(0);
       await expect(page.getByText("Cette page n'existe pas.")).toHaveCount(0);
       await expect(page.getByRole("note")).toHaveText(BANNER_FR);
@@ -279,10 +284,44 @@ test.describe("fr-FR : envoi (Tasks 17–18)", () => {
     expect(manage).toMatch(/\/Shhdrop\/#m[A-Za-z0-9_-]{43}$/);
     expect(await storage(page)).toBe(0);
     await capture(page, "demo-ready");
-    // L'écran d'ouverture (Task 20) n'existe pas encore : la route d'ouverture est atteinte, le « # » retiré.
+    const password = (await page.getByRole("group", { name: "Mot de passe" }).locator(".sr-only").first().textContent()) ?? "";
+    // Même onglet (le faux serveur vit dans la page) : ouverture complète, puis destruction.
     await page.getByRole("button", { name: "Ouvrir comme destinataire (démo)" }).click();
     await expect(readyHeading(page)).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => location.pathname + location.hash)).toBe("/Shhdrop/");
+    await expect(page.getByRole("heading", { name: "Un partage chiffré vous attend" })).toBeVisible();
+    await page.getByLabel("Mot de passe", { exact: true }).fill("pas-le-bon");
+    await page.getByRole("button", { name: "Déverrouiller" }).click();
+    await expect(page.locator("#open-err").getByText("Mot de passe incorrect · 4\u202fessais restants")).toBeVisible({ timeout: 20_000 });
+    await page.getByLabel("Mot de passe", { exact: true }).fill(password);
+    await page.getByRole("button", { name: "Déverrouiller" }).click();
+    await expect(page.getByRole("heading", { name: "Contenu du partage" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator("pre").filter({ hasText: "Le code de la porte est 4471." })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Enregistrer releve.bin" })).toBeVisible();
+    await capture(page, "demo-content");
+    await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
+    await page.getByRole("button", { name: "Détruire", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Détruit" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator("[data-receipt]")).toBeVisible();
+    expect(await storage(page)).toBe(0);
+    // Le lien collé à nouveau dans le même onglet : le partage n'existe plus.
+    await page.evaluate((l) => (location.hash = new URL(l).hash), link);
+    await expect(page.getByRole("heading", { name: "Ce lien n'existe pas ou n'est plus disponible." })).toBeVisible();
+  });
+
+  test("« Supprimer ce partage » depuis « Lien prêt », puis le lien de gestion : supprimé (scan du 7 novembre, F2)", async ({ page, demo }) => {
+    test.setTimeout(90_000);
+    await page.goto(demo.url);
+    await addText(page, "À supprimer.");
+    await sendButton(page).click();
+    await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
+    const link = (await page.getByRole("group", { name: "Lien" }).locator(".sr-only").first().textContent()) ?? "";
+    await page.getByRole("button", { name: "Supprimer ce partage" }).click();
+    await page.getByRole("button", { name: "Supprimer", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Partage supprimé" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText("Connexion impossible\u202f: le partage n'a pas été supprimé.")).toHaveCount(0);
+    await page.evaluate((l) => (location.hash = new URL(l).hash), link);
+    await expect(page.getByRole("heading", { name: "Ce lien n'existe pas ou n'est plus disponible." })).toBeVisible();
   });
 
   test("?coupure : bandeau de coupure, puis reprise et Lien prêt", async ({ page, demo }) => {

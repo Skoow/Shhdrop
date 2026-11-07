@@ -43,6 +43,14 @@ export function inAppBrowser(ua: string, standalone: boolean): string | null {
   return null;
 }
 
+/** Application installée (PWA) : jamais signalée comme navigateur intégré. */
+export function isStandalone(w: Window): boolean {
+  return (
+    w.matchMedia?.("(display-mode: standalone)").matches === true ||
+    (w.navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
+}
+
 const LOW_MEMORY_BYTES = 200 * 1024 * 1024;
 
 /** Vrai si un fichier de `size` octets risque d'épuiser la mémoire : > 200 Mio et (deviceMemory < 4, ou iPhone/iPad). */

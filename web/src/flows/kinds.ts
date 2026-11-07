@@ -42,3 +42,22 @@ export function categoryOf(kind: "file" | "text", name: string, mime: string, sn
   if (DOC_EXT.has(e) || m === "application/pdf" || m.startsWith("text/")) return "documents";
   return "autres";
 }
+
+/**
+ * Catégorie d'un élément reçu (UI §9.8), purement visuelle : la visionneuse permise
+ * (previewKind), sinon la même table que categoryOf (extension du nom nettoyé, type MIME du
+ * manifeste). Ce type n'est lu que pour choisir le groupe : jamais affiché, jamais donné à un Blob.
+ */
+export function categoryOfReceived(
+  kind: "file" | "text",
+  preview: "image" | "audio" | "video" | "text" | "pdf" | "none",
+  safeName: string,
+  manifestMime: string,
+): Category {
+  if (kind === "text" || preview === "text") return "texte";
+  if (preview === "image") return "photos";
+  if (preview === "video") return "videos";
+  if (preview === "audio") return "audio";
+  if (preview === "pdf") return "documents";
+  return categoryOf("file", safeName, manifestMime);
+}

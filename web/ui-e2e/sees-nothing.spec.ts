@@ -1,4 +1,4 @@
-// « Le serveur ne voit rien » (spec §14), étendu au chemin d'envoi du NAVIGATEUR (Task 27) —
+// « Le serveur ne voit rien » (spec §14), étendu aux chemins d'envoi et d'ouverture du NAVIGATEUR —
 // CE TEST BLOQUE TOUTE MISE EN LIGNE. Un texte, un nom de fichier et un contenu repères sont
 // envoyés par l'interface (vrai serveur, vraie preuve de travail, XHR des segments). On fouille
 // ensuite, en octets bruts et en base64url / base64 : chaque requête du navigateur (URL,
@@ -18,7 +18,7 @@ const windows = (label: string, s: string) => Array.from({ length: s.length - 7 
 test.describe("fr-FR", () => {
   test.use({ locale: "fr-FR" });
 
-  test("envoi par l'interface : aucune donnée claire, aucun nom, ni mot de passe ni K_lien côté serveur", async ({ page, shh }) => {
+  test("envoi puis ouverture par l'interface : aucune donnée claire, aucun nom, ni mot de passe ni K_lien côté serveur", async ({ page, shh }) => {
     test.setTimeout(120_000);
     const sent: { label: string; data: Buffer }[] = [];
     page.on("request", (r) => {
@@ -64,6 +64,31 @@ test.describe("fr-FR", () => {
     const manage = (await page.locator(".manage .sr-only").first().textContent()) ?? "";
     const sGestion = new Uint8Array(Buffer.from(manage.slice(manage.indexOf("#m") + 2), "base64url"));
     expect(findIn(Buffer.concat(sent.map((s) => s.data)), [needle("témoin S_gestion", sGestion as Uint8Array<ArrayBuffer>)])).toEqual(["témoin S_gestion"]);
+    // Chemin d'ouverture (Tasks 20, 21, 23) : le destinataire ouvre le lien dans cet onglet,
+    // tape le mot de passe (une fois faux, puis juste), lit le texte et enregistre le fichier
+    // (faux sélecteur de fichier). Les mêmes captures couvrent ses requêtes et leurs réponses.
+    await page.addInitScript(() => {
+      const w = window as unknown as Record<string, unknown>;
+      w.showSaveFilePicker = async () => ({
+        createWritable: async () => ({ write: async () => undefined, close: async () => void (w.__closed = true), abort: async () => undefined }),
+      });
+    });
+    await page.goto("about:blank"); // nouveau document : le script ci-dessus s'applique
+    await page.goto(link);
+    await page.getByLabel("Mot de passe", { exact: true }).fill(password + "x");
+    await page.getByRole("button", { name: "Déverrouiller" }).click();
+    await expect(page.locator("#open-err").getByText(/^Mot de passe incorrect/)).toBeVisible({ timeout: 20_000 });
+    await page.getByLabel("Mot de passe", { exact: true }).fill(password);
+    await page.getByRole("button", { name: "Déverrouiller" }).click();
+    await expect(page.locator("pre").filter({ hasText: TEXT })).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: `Enregistrer ${NAME}` }).click();
+    await expect.poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__closed)).toBe(true);
+    await page.getByRole("button", { name: "Terminer et effacer" }).click();
+    await expect(page.getByRole("heading", { name: "Effacé de cet appareil." })).toBeVisible();
+    for (const route of ["GET /api/shares/meta", "POST /api/shares/unlock", "GET /api/shares/segments/0", "POST /api/shares/done"])
+      expect(sent.some((s) => s.label === route), route).toBe(true);
+    needles.push(needle("mot de passe faux", password + "x"));
+
     const puts = sent.filter((s) => s.label.startsWith("PUT /api/shares/segments/"));
     expect(puts.length).toBeGreaterThan(0);
     expect(puts.reduce((n, s) => n + s.data.length, 0)).toBeGreaterThan(CONTENT.length);

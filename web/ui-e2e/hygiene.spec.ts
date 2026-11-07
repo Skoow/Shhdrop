@@ -9,7 +9,7 @@ const KEY2 = Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => i * 5)).toStr
 const INSTAGRAM =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 307.0.0.34.111 (iPhone15,3; iOS 17_1; fr_FR; fr; scale=3.00; 1290x2796; 532277534)";
 
-/** Requêtes vers /api/ (aucune ne doit partir dans ces tests : il n'y a encore aucun écran qui en fasse). */
+/** Requêtes vers /api/. */
 function apiRequests(page: Page): string[] {
   const urls: string[] = [];
   page.on("request", (r) => {
@@ -121,10 +121,14 @@ for (const [kind, frag] of [
     await page.reload();
     expect(page.url()).toBe(`${shh.origin}/`);
     expect(await page.content()).not.toContain(KEY);
-    expect(api).toEqual([]);
+    // Ouverture : une seule lecture de l'état (meta, avec K_accès dérivé, jamais la clé) ;
+    // gestion : une lecture de l'état (manage/status). Aucune autre requête d'API.
+    expect(api.map((u) => new URL(u).pathname)).toEqual([kind === "partage" ? "/api/shares/meta" : "/api/manage/status"]);
     // La partie après « # » n'est jamais envoyée au serveur (adresse, en-têtes, corps).
+    // Gestion : S_gestion (la valeur du fragment) part, par conception, dans l'en-tête
+    // X-Shh-Manage de manage/status (spec §29.8) ; nulle part ailleurs (adresse, corps, autre en-tête).
     expect(all.length).toBeGreaterThan(0);
-    for (const r of all) expect(r).not.toContain(KEY);
+    for (const r of all) expect(kind === "gestion" ? r.replace(`"x-shh-manage":"${KEY}"`, "") : r).not.toContain(KEY);
   });
 }
 
@@ -243,7 +247,8 @@ test("/?fbclid=x#<clé> : requête et # retirés, adresse = chemin nu", async ({
   const api = apiRequests(page);
   await page.goto(`${shh.origin}/?fbclid=x#${KEY}`);
   await expect.poll(() => page.url()).toBe(`${shh.origin}/`);
-  expect(api).toEqual([]);
+  // Seule requête d'API : la lecture de l'état du partage (sans la clé ni la requête de suivi).
+  await expect.poll(() => api.map((u) => new URL(u).pathname + new URL(u).search)).toEqual(["/api/shares/meta"]);
 });
 
 test.describe("navigateur intégré (Facebook) avec ?fbclid=", () => {

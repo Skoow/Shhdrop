@@ -15,6 +15,8 @@
     triggerVariant?: "primary" | "secondary" | "ghost" | "danger";
     icon?: Snippet;
     disabled?: boolean;
+    /** Nom accessible du bouton d'origine, s'il doit en dire plus que `label` (il commence par `label`, WCAG 2.5.3). */
+    triggerName?: string;
   };
   let {
     label,
@@ -26,6 +28,7 @@
     triggerVariant = "secondary",
     icon,
     disabled = false,
+    triggerName,
   }: Props = $props();
 
   let asking = $state(false);
@@ -65,7 +68,7 @@
     </div>
   </div>
 {:else}
-  <Button variant={triggerVariant} bind:el={trigger} {icon} {disabled} onpress={ask}>{label}</Button>
+  <Button variant={triggerVariant} bind:el={trigger} {icon} {disabled} onpress={ask} aria-label={triggerName}>{label}</Button>
 {/if}
 
 <style>

@@ -1,0 +1,555 @@
+<script lang="ts">
+  // Ouverture d'un partage (UI §9.7, §9.11, S4 ; benchmark M6, M9, S3). Le lien est pris une
+  // fois (take) et remis à createReceiver, qui le garde dans sa fermeture et nettoie la barre
+  // d'adresse. Le mot de passe ne vit que dans le champ, jusqu'au déverrouillage. La capsule
+  // est un seul élément du verrouillage à la fin : data-state « locked », « open », « destroyed ».
+  import { untrack } from "svelte";
+  import { inAppBrowser, isStandalone } from "../app/env";
+  import type { LinkState } from "../app/link";
+  import { scrubAddressBar } from "../app/link";
+  import { followLink, href } from "../app/router.svelte";
+  import { createReceiver } from "../flows/receive.svelte";
+  import { formatDuration } from "../i18n/format";
+  import { getLang, t } from "../i18n/i18n.svelte";
+  import { PW_TRIES } from "../index";
+  import { announce } from "../ui/announce";
+  import Button from "../ui/Button.svelte";
+  import { copyText } from "../ui/clipboard";
+  import Countdown from "../ui/Countdown.svelte";
+  import { ChevronDown, Copy, Eye, EyeOff, Lock, LockOpen, ShieldCheck, TriangleAlert } from "../ui/Icon";
+  import TimeRim from "../ui/TimeRim.svelte";
+  import Content from "./Content.svelte";
+  import Ended from "./Ended.svelte";
+  import Invalid from "./Invalid.svelte";
+
+  type Props = {
+    /** Lit le lien de l'adresse, une fois, au montage (le secret n'est jamais une prop réactive). */
+    take: () => LinkState | null;
+  };
+  let { take }: Props = $props();
+  const lang = $derived(getLang());
+
+  const r = createReceiver(untrack(() => take()) ?? { kind: "incomplete" }, {
+    inAppBrowser: () => inAppBrowser(navigator.userAgent, isStandalone(window)),
+    // Chemin non nu (« //x », « \ ») : repli sur l'accueil plutôt que garder le « # ».
+    scrub: () => {
+      if (!scrubAddressBar(history, location.pathname)) scrubAddressBar(history, href("/"));
+    },
+  });
+
+  // ---------- Champ (UI §12.3) ----------
+  let pw = $state("");
+  let shown = $state(false);
+  let input: HTMLInputElement | undefined = $state();
+  const busy = $derived(r.state === "unlocking");
+
+  // LimitError : bouton désactivé jusqu'à l'échéance.
+  let limited = $state(false);
+  $effect(() => {
+    if (r.error !== "limit" || r.state !== "locked" || !r.retryAfterS) return;
+    limited = true;
+    const id = setTimeout(() => (limited = false), r.retryAfterS * 1000);
+    return () => clearTimeout(id);
+  });
+
+  async function unlock() {
+    if (pw === "" || busy || limited) {
+      if (pw === "") await r.unlock(""); // message « Entrez le mot de passe. », aucun essai
+      return;
+    }
+    const value = pw;
+    await r.unlock(value);
+    if (r.state === "open") {
+      pw = ""; // plus aucune référence au mot de passe
+      return;
+    }
+    if (r.error === "bad_password" && input) {
+      input.focus();
+      input.select();
+    }
+  }
+  function onkey(e: KeyboardEvent) {
+    if (e.key === "Enter" && !e.isComposing) {
+      e.preventDefault();
+      void unlock();
+    }
+  }
+
+  const errorText = $derived.by(() => {
+    switch (r.error) {
+      case "bad_password":
+        return t("open.badPw", { n: r.attemptsLeft ?? 0 });
+      case "password_required":
+        return t("open.pwRequired");
+      case "limit":
+        return t(r.state === "error" ? "open.meta.limit" : "open.limit", { duration: formatDuration(r.retryAfterS ?? 60, lang) });
+      case "network":
+        return r.state === "error" ? t("err.network") : t("open.network");
+      default:
+        return "";
+    }
+  });
+  // Les erreurs sont en role="alert" (annoncées une fois, sans doublon dans la région polie).
+
+  // ---------- Navigateur intégré (S4) ----------
+  async function copyLink() {
+    // Le « # » est encore dans la barre (rien n'a été retiré) : le lien d'origine, sans la requête.
+    const r2 = await copyText(location.origin + location.pathname + location.hash);
+    announce(r2 === "copied" ? t("copy.done", { label: t("open.inapp.copy") }) : t("copy.manual"));
+  }
+
+  // ---------- Fin de lecture ----------
+  let expired = $state(false);
+  let end = $state<"finished" | "destroyed" | "gone" | null>(null);
+  const capState = $derived(
+    r.state === "destroyed_by_password" || end === "destroyed" || end === "gone" ? "destroyed" : r.state === "open" ? "open" : "locked",
+  );
+  const banner = $derived.by(() => {
+    const [pre, post] = t("content.banner", { duration: "\u0000" }).split("\u0000");
+    return { pre: pre ?? "", post: post ?? "" };
+  });
+
+  let title: HTMLHeadingElement | undefined = $state();
+  $effect(() => {
+    if (!title) return;
+    untrack(() => title?.focus({ preventScroll: true }));
+  });
+</script>
+
+{#if r.state === "invalid" || r.state === "incomplete"}
+  <Invalid kind={r.state} />
+{:else}
+  <section class="open" aria-labelledby={r.state === "open" ? undefined : "open-title"}>
+    <div class={["capsule", capState === "open" && "bar", r.state === "open" && end !== null && "spent"]} data-capsule data-state={capState} aria-busy={r.state === "meta" ? "true" : undefined}>
+      {#if (r.state === "locked" || r.state === "unlocking") && r.expiresInS > 0}
+        <TimeRim remainingS={r.remainingS()} totalS={r.expiresInS} radius={31} />
+      {:else if r.state === "open" && end === null && !expired}
+        <TimeRim remainingS={r.remainingS()} totalS={r.expiresInS} radius={23} />
+      {/if}
+      <span class="lockbox" aria-hidden="true">
+        {#if capState === "locked"}<Lock size={26} strokeWidth={1.75} />{:else}<LockOpen size={capState === "open" ? 20 : 26} strokeWidth={1.75} />{/if}
+      </span>
+      <div class="cap-tx">
+        {#if r.state === "open"}
+          {#if end === null}
+            <p class="banner num">
+              {#if expired}{t("content.expired")}{:else}{banner.pre}<Countdown expiresInS={r.remainingS()} onexpire={() => (expired = true)} />{banner.post}{/if}
+            </p>
+          {/if}
+        {:else}
+          <h1 id="open-title" class="title" tabindex="-1" bind:this={title}>
+            {r.state === "destroyed_by_password" ? t("open.destroyedByPw") : t("open.title")}
+          </h1>
+          {#if r.state === "locked" || r.state === "unlocking"}
+            <p class="avail num">{t("open.available")} <Countdown expiresInS={r.remainingS()} onexpire={() => r.expire()} /></p>
+          {:else if r.state === "meta"}
+            <p class="avail">{t("open.loading")}</p>
+          {/if}
+        {/if}
+      </div>
+    </div>
+
+    {#if r.state === "inapp"}
+      <div class="inapp" role="alert">
+        <p class="warn-tx"><TriangleAlert size={20} aria-hidden="true" /> <span>{t("open.inapp", { app: r.app ?? "" })}</span></p>
+        <div class="row">
+          <Button variant="primary" onpress={copyLink}>
+            {#snippet icon()}<Copy size={18} />{/snippet}
+            {t("open.inapp.copy")}
+          </Button>
+          <Button variant="ghost" onpress={() => r.continueHere()}>{t("open.inapp.continue")}</Button>
+        </div>
+      </div>
+    {:else if r.state === "error"}
+      <p class="err" role="alert">{errorText}</p>
+      <div><Button variant="secondary" onpress={() => r.retry()}>{t("common.retry")}</Button></div>
+    {:else if r.state === "locked" || r.state === "unlocking"}
+      <p class="intro">{t("open.intro")}</p>
+      <div class="unlock">
+        <label class="fl" for="shh-unlock">{t("open.password")}</label>
+        <div class={["box", r.error === "bad_password" && "bad"]}>
+          <input
+            bind:this={input}
+            bind:value={pw}
+            id="shh-unlock"
+            name="shh-unlock"
+            type={shown ? "text" : "password"}
+            class="in"
+            autocomplete="one-time-code"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            translate="no"
+            enterkeyhint="go"
+            readonly={busy}
+            aria-invalid={r.error === "bad_password" ? "true" : undefined}
+            aria-describedby="open-tries{errorText ? ' open-err' : ''}"
+            onkeydown={onkey}
+          />
+          <button type="button" class="ib" aria-label={shown ? t("open.pw.hide") : t("open.pw.show")} aria-pressed={shown} onclick={() => (shown = !shown)}>
+            {#if shown}<EyeOff size={19} strokeWidth={1.9} aria-hidden="true" />{:else}<Eye size={19} strokeWidth={1.9} aria-hidden="true" />{/if}
+          </button>
+        </div>
+        {#if errorText}
+          <div id="open-err" class="err" role="alert">
+            <p>{errorText}</p>
+            {#if r.error === "bad_password" && r.attemptsLeft === 1}<p>{t("open.lastTry")}</p>{/if}
+          </div>
+        {/if}
+        <p id="open-tries" class="small">{t("open.tries", { n: PW_TRIES })}</p>
+        <p id="open-cost" class="cost">{t("open.oneOpen")}</p>
+        <Button variant="primary" busy={busy} disabled={pw === "" || limited} onpress={unlock} aria-describedby="open-cost">
+          {#snippet icon()}<LockOpen size={18} />{/snippet}
+          {busy ? t("open.unlocking") : t("open.unlock")}
+        </Button>
+        <p class="trust"><ShieldCheck size={18} aria-hidden="true" /> <span>{t("open.trust")}</span></p>
+      </div>
+      <details class="private">
+        <summary><span>{t("open.private")}</span><ChevronDown size={18} aria-hidden="true" /></summary>
+        <ul>
+          <li>{t("open.private.safari")}</li>
+          <li>{t("open.private.chrome")}</li>
+          <li>{t("open.private.firefox")}</li>
+        </ul>
+        <p>{t("open.private.limit")}</p>
+      </details>
+    {:else if r.state === "destroyed_by_password"}
+      <p class="intro">{t("open.destroyedByPw.body")}</p>
+      <p><a class="send" href={href("/")} onclick={(e) => followLink(e, "/")}>{t("invalid.send")}</a></p>
+    {:else if end !== null}
+      <Ended kind={end} />
+    {:else if r.state === "open" && r.opened}
+      <Content
+        opened={r.opened}
+        {expired}
+        onend={(k) => {
+          end = k;
+          r.forget(); // clés déjà effacées ; le contenu déchiffré n'est plus référencé
+        }}
+      />
+    {/if}
+  </section>
+{/if}
+
+<style>
+  .open {
+    width: min(100%, 760px);
+    margin-inline: auto;
+    padding: var(--sp-6) var(--sp-4) var(--sp-8);
+    display: grid;
+    gap: var(--sp-5);
+    min-width: 0;
+  }
+
+  /* ---------- Capsule (M6) ---------- */
+  .capsule {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
+    min-width: 0;
+    padding: var(--sp-5);
+    border-radius: var(--r-2xl);
+    background: var(--vessel);
+    box-shadow: var(--edge-hi), var(--e-vessel);
+  }
+  .capsule[data-state="destroyed"] {
+    background: transparent;
+    box-shadow: none;
+    outline: 2px dashed var(--line-strong);
+    outline-offset: -2px;
+  }
+  .capsule.bar {
+    position: sticky;
+    inset-block-start: calc(64px + var(--sp-2));
+    z-index: 5;
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--r-xl);
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    backdrop-filter: blur(20px) saturate(1.2);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .capsule.bar {
+      background: var(--surface-1);
+    }
+  }
+  @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+    .capsule.bar {
+      background: var(--surface-1);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+  }
+  /* Fin de lecture : la capsule se replie (pointillés si détruite) au-dessus du message. */
+  .capsule.spent {
+    align-self: start;
+    justify-self: start;
+    padding: var(--sp-2);
+    border-radius: var(--r-pill);
+  }
+  .capsule.spent .lockbox {
+    width: 64px;
+    height: 40px;
+  }
+  .lockbox {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 64px;
+    height: 64px;
+    border-radius: var(--r-lg);
+    background: var(--accent-tint);
+    color: var(--accent);
+  }
+  .bar .lockbox {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--r-md);
+  }
+  [data-state="destroyed"] .lockbox {
+    background: transparent;
+    color: var(--text-3);
+  }
+  .cap-tx {
+    display: grid;
+    gap: var(--sp-1);
+    min-width: 0;
+  }
+  .title {
+    margin: 0;
+    font-size: var(--fs-screen);
+    font-stretch: var(--wd-screen);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .title:focus {
+    outline: none;
+  }
+  .avail,
+  .banner {
+    margin: 0;
+    color: var(--text-2);
+  }
+  .banner {
+    color: var(--text);
+    font-size: var(--fs-small);
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- Déverrouillage ---------- */
+  .intro {
+    margin: 0;
+    color: var(--text-2);
+    max-width: 60ch;
+  }
+  .unlock {
+    display: grid;
+    gap: var(--sp-3);
+    max-width: 520px;
+  }
+  .unlock > :global(button) {
+    justify-self: start;
+  }
+  .fl {
+    color: var(--text-2);
+    font-size: var(--fs-small);
+    font-weight: 600;
+  }
+  .box {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-height: 60px;
+    padding: 4px 6px 4px var(--sp-4);
+    border-radius: 14px;
+    background: var(--surface-1);
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+  }
+  .box.bad {
+    box-shadow: inset 0 0 0 1px var(--danger);
+  }
+  .box:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .in {
+    flex: 1;
+    min-width: 0;
+    height: 50px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: max(1.0625rem, 16px);
+    outline: none;
+  }
+  .ib {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .ib:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  @media (hover: hover) {
+    .ib:hover {
+      color: var(--text);
+      background: var(--surface-3);
+    }
+  }
+  .err {
+    margin: 0;
+    color: var(--danger);
+    display: grid;
+    gap: var(--sp-1);
+  }
+  .err p {
+    margin: 0;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .err {
+      animation: err-in var(--dur-fast) var(--ease-out);
+    }
+  }
+  @keyframes err-in {
+    from {
+      opacity: 0;
+    }
+  }
+  .small {
+    margin: 0;
+    color: var(--text-3);
+    font-size: var(--fs-small);
+  }
+  .cost {
+    margin: 0;
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--r-md);
+    background: var(--warn-tint);
+    color: var(--warn);
+    font-weight: 520;
+  }
+  .trust {
+    margin: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-2);
+    color: var(--text-2);
+    font-size: var(--fs-small);
+  }
+  .trust :global(svg) {
+    flex: none;
+    color: var(--accent);
+    margin-top: 1px;
+  }
+
+  /* ---------- Navigation privée (demande du propriétaire) ---------- */
+  .private {
+    max-width: 60ch;
+    color: var(--text-2);
+    font-size: var(--fs-small);
+    border-top: 1px solid var(--line);
+    padding-top: var(--sp-4);
+  }
+  .private summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    list-style: none;
+    cursor: pointer;
+    color: var(--text);
+    font-weight: 560;
+  }
+  .private summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--r-sm);
+  }
+  .private summary::-webkit-details-marker {
+    display: none;
+  }
+  .private summary :global(svg) {
+    flex: none;
+    color: var(--text-2);
+    transition: transform var(--dur-fast) var(--ease-out);
+  }
+  .private[open] summary :global(svg) {
+    transform: rotate(180deg);
+  }
+  .private ul {
+    margin: var(--sp-2) 0;
+    padding-left: var(--sp-5);
+    display: grid;
+    gap: var(--sp-1);
+  }
+  .private p {
+    margin: 0;
+  }
+
+  /* ---------- Navigateur intégré ---------- */
+  .inapp {
+    display: grid;
+    gap: var(--sp-4);
+    padding: var(--sp-4);
+    border-radius: var(--r-lg);
+    background: var(--warn-tint);
+  }
+  .warn-tx {
+    margin: 0;
+    display: flex;
+    gap: var(--sp-2);
+    color: var(--warn);
+  }
+  .warn-tx :global(svg) {
+    flex: none;
+  }
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+  .send {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    color: var(--accent);
+    text-underline-offset: 0.2em;
+  }
+  @media (max-width: 480px) {
+    .capsule {
+      padding: var(--sp-4);
+      gap: var(--sp-3);
+    }
+    .lockbox {
+      width: 52px;
+      height: 52px;
+    }
+    .title {
+      font-size: var(--fs-h1);
+    }
+  }
+  @media (forced-colors: active) {
+    .capsule {
+      border: 1px solid CanvasText;
+    }
+    .capsule[data-state="destroyed"] {
+      outline-color: CanvasText;
+    }
+  }
+</style>
