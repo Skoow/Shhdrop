@@ -369,6 +369,22 @@ export async function done(c: Ctx, token: string): Promise<void> {
   await send(c, { method: "POST", path: "/api/shares/done", headers: bearer(token), retry: true, keepalive: true }, none);
 }
 
+/**
+ * GET /api/shares/watch (spec §41.8, route de la Task M2, étape 7b) : requête tenue 25 s au
+ * plus par le serveur. 204 → "alive" ; 410 {"error":"gone"} → "gone" ; toute autre réponse
+ * (404 d'un serveur sans la route, 429, 5xx) → "stop" : la surveillance s'arrête, sans
+ * nouvel essai ici. Annulable (signal).
+ */
+export async function watch(c: Ctx, token: string, signal?: AbortSignal): Promise<"alive" | "gone" | "stop"> {
+  try {
+    await send(c, { method: "GET", path: "/api/shares/watch", headers: bearer(token), signal }, none);
+    return "alive";
+  } catch (e) {
+    if (signal?.aborted) throw e;
+    return e instanceof HttpError && e.status === 410 && e.code === "gone" ? "gone" : "stop";
+  }
+}
+
 export type DestroyAuth = { kAcces: KAcces; kPreuve: KPreuve } | { sGestion: SGestion };
 
 /**

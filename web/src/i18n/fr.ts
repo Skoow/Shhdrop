@@ -452,8 +452,6 @@ export const fr = {
 
   "content.title": "Contenu du partage",
   "content.expired": "Expiré · ce qui est affiché disparaît quand vous quittez la page",
-  "content.gone":
-    "Ce partage n'est plus disponible (expiré ou détruit). Ce qui est déjà affiché reste visible jusqu'à ce que vous quittiez la page.",
   "content.viewOnly": "L'expéditeur n'a pas autorisé le téléchargement. Une capture d'écran reste possible.",
   "content.show": "Afficher",
   "content.listen": "Écouter",
@@ -550,4 +548,15 @@ export const fr = {
   "paid.soon.body": "Ce n'est pas encore en vente\u202f: rien ne vous est demandé aujourd'hui.",
   "paid.upsell": "Avec Plus\u202f: jusqu'à {size} et {days}.",
   "paid.upsell.more": "En savoir plus",
+
+  "gone.title.expired": "Ce partage a expiré.",
+  "gone.title.removed": "Ce partage a été supprimé.",
+  "gone.title.destroyed": "Ce partage a été détruit.",
+  "gone.body": "Son contenu a été effacé de cette page. Ce que vous avez déjà enregistré sur cet appareil n'est pas concerné.",
+  "gone.finishing.one": "Le fichier en cours ({name}) est autorisé à se terminer\u202f; vous ne pouvez plus rien ouvrir d'autre.",
+  "gone.finishing.other": "Les {n}\u202ffichiers en cours sont autorisés à se terminer\u202f; vous ne pouvez plus rien ouvrir d'autre.",
+  "gone.keepOpen": "Gardez cette page ouverte jusqu'à la fin.",
+  "gone.item.state": "Fichier en cours autorisé à se terminer",
+  "gone.item.done": "Terminé",
+  "gone.item.failed": "Téléchargement interrompu.",
 } as const;

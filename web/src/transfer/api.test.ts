@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BadResponse, HttpError, captcha, create, ctx, destroy, done, finalize, getSegment, meta, putSegment, retryAfterHeader, status, unlock, type FinalizeBody } from "./api";
+import { BadResponse, HttpError, captcha, create, ctx, destroy, done, finalize, getSegment, meta, putSegment, retryAfterHeader, status, unlock, watch, type FinalizeBody } from "./api";
 import type { KAcces, KPreuve } from "../crypto/types";
 import type { SGestion } from "../crypto/types";
 
@@ -227,5 +227,19 @@ describe("Retry-After (tâche UP : compte à rebours de la page « trop de deman
     const e = await finalize(ctx("http://x", { fetch: f as unknown as typeof fetch }), "t", FIN).catch((x: unknown) => x);
     expect(e).toBeInstanceOf(HttpError);
     expect((e as HttpError).retryAfterS).toBe(42);
+  });
+});
+
+describe("watch (spec §41.8) : 204 alive, 410 gone, le reste stop", () => {
+  const at = (status: number, body = "") => vi.fn(async () => new Response(status === 204 ? null : body, { status }));
+  it("chaque réponse, jeton en en-tête, jamais dans l'adresse", async () => {
+    const f = at(204);
+    expect(await watch(ctx("http://x", { fetch: f as unknown as typeof fetch }), "jeton", undefined)).toBe("alive");
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://x/api/shares/watch");
+    expect(JSON.stringify(init.headers)).toContain("jeton");
+    expect(await watch(ctx("http://x", { fetch: at(410, '{"error":"gone"}') as unknown as typeof fetch }), "t")).toBe("gone");
+    for (const [st, b] of [[404, '{"error":"not_found"}'], [410, '{"error":"autre"}'], [429, "{}"], [500, "{}"]] as const)
+      expect(await watch(ctx("http://x", { fetch: at(st, b) as unknown as typeof fetch, retryDelayMs: 1 }), "t"), String(st)).toBe("stop");
   });
 });

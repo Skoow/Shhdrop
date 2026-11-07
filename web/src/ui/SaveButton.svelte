@@ -4,6 +4,7 @@
   // qu'après close() réussi (ou le lien de repli déclenché), jamais après une annulation.
   import { formatBytes, formatRate } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
+  import type { Gone } from "../flows/gone.svelte";
   import { collectToBlob, PREVIEW_MAX, type Opened } from "../index";
   import { clickDownload, saveItemTo, type SaveDeps, type SaveResult } from "../viewers/save";
   import { announce } from "./announce";
@@ -17,8 +18,15 @@
     disabled?: boolean;
     /** +1 au début d'un enregistrement, −1 à la fin (garde de sortie de page). */
     onbusy?: (delta: 1 | -1) => void;
+    /**
+     * Spec §41.8 (E1) : l'enregistrement est suivi par la fermeture « partage disparu » ; s'il
+     * est en cours quand l'interface se ferme, il continue et l'écran de fin le montre.
+     */
+    gone?: Gone;
+    /** Le serveur ne sert plus ce partage (refus pendant l'enregistrement). */
+    ongone?: () => void;
   };
-  let { opened, i, disabled = false, onbusy }: Props = $props();
+  let { opened, i, disabled = false, onbusy, gone, ongone }: Props = $props();
   const lang = $derived(getLang());
 
   type Picker = SaveDeps["showSaveFilePicker"];
@@ -39,7 +47,8 @@
   let ac: AbortController | null = null;
 
   async function save() {
-    if (saving || disabled) return;
+    if (saving || disabled || gone?.closed) return;
+    const tracker = gone?.begin(name, total) ?? null;
     saving = true;
     result = null;
     done = 0;
@@ -56,6 +65,7 @@
         (d, _t, r) => {
           done = d;
           rate = r;
+          tracker?.progress(d);
         },
         ac.signal,
       );
@@ -63,7 +73,9 @@
       saving = false;
       ac = null;
       onbusy?.(-1);
+      tracker?.end(result === "saved");
     }
+    if (result === "gone") ongone?.();
     if (result === "saved") announce(t("save.done"));
     if (result === "cancelled") result = null; // retour silencieux
   }
@@ -71,7 +83,7 @@
     ac?.abort();
   }
   const message = $derived(
-    result === "failed" ? t(usedPicker ? "save.interrupted" : "save.failed") : result === "disk_full" ? t("save.diskFull") : "",
+    result === "failed" || result === "gone" ? t(usedPicker ? "save.interrupted" : "save.failed") : result === "disk_full" ? t("save.diskFull") : "",
   );
 </script>
 

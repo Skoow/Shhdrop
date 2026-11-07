@@ -5,6 +5,7 @@
   // Enregistrer ; erreurs de lecture → message et Réessayer.
   import { untrack } from "svelte";
   import { lowMemory } from "../app/env";
+  import type { Gone } from "../flows/gone.svelte";
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { NotFoundError, type Opened } from "../index";
@@ -31,8 +32,10 @@
     onbusy: (delta: 1 | -1) => void;
     /** Le serveur ne connaît plus le partage (NotFoundError pendant une lecture). */
     ongone: () => void;
+    /** Suivi des enregistrements pour la fermeture « partage disparu » (spec §41.8). */
+    gone?: Gone;
   };
-  let { opened, i, queue, disabled, expired, viewOnly, onbusy, ongone }: Props = $props();
+  let { opened, i, queue, disabled, expired, viewOnly, onbusy, ongone, gone }: Props = $props();
   const lang = $derived(getLang());
 
   const entry = $derived(opened.manifest.items[i]!);
@@ -124,7 +127,7 @@
             {phase === "error" ? t("common.retry") : action}
           </Button>
         {/if}
-        {#if !viewOnly}<SaveButton {opened} {i} {disabled} {onbusy} />{/if}
+        {#if !viewOnly}<SaveButton {opened} {i} {disabled} {onbusy} {gone} {ongone} />{/if}
       {/if}
     </div>
   </div>

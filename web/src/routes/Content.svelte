@@ -6,6 +6,9 @@
   // l'adresse ni un stockage. Le bandeau collé (temps restant) est la capsule d'Open.svelte.
   import { guardUnload } from "../app/lifecycle";
   import { destroyFromContent, finish, type DestroyOutcome } from "../flows/endoflife";
+  import { WATCH_READY } from "../flows/features";
+  import type { Gone } from "../flows/gone.svelte";
+  import { browserWatchDeps, startWatch } from "../flows/watch";
   import { CATEGORY_ORDER, categoryOfReceived, type Category } from "../flows/kinds";
   import { t, type Key } from "../i18n/i18n.svelte";
   import type { Opened } from "../index";
@@ -25,8 +28,10 @@
     expired: boolean;
     /** Fin de lecture : la capsule passe à l'état voulu. */
     onend: (kind: "finished" | "destroyed" | "gone") => void;
+    /** Fermeture « partage disparu » (spec §41.8) : suit les enregistrements en cours. */
+    gone: Gone;
   };
-  let { opened, expired, onend }: Props = $props();
+  let { opened, expired, onend, gone: closer }: Props = $props();
 
   const viewOnly = $derived(opened.manifest.rights === "voir");
   const CAT_KEY: Record<Category, Key> = {
@@ -53,19 +58,26 @@
   // UI §9.8 : avertir avant de quitter seulement pendant un aperçu ou un enregistrement.
   $effect(() => guardUnload(() => busy > 0));
 
-  let gone = $state(false);
   let ended = $state<ContentEnd | null>(null);
-  const disabled = $derived(expired || gone || ended !== null);
+  const disabled = $derived(expired || closer.closed || ended !== null);
   let wiped = false;
 
   // UI §12.2 : sortie de page → done (keepalive), wipe, révocation. Démontage (nouveau lien
   // collé dans la barre, autre route) : même effacement.
   function leave() {
-    if (wiped) return;
+    // Fermeture « partage disparu » : la fin de lecture attend les enregistrements en cours.
+    if (wiped || closer.closedNow()) return;
     wiped = true;
     void finish(opened);
   }
   $effect(() => () => leave());
+
+  // Spec §41.8 : surveillance de la disparition (route serveur de la Task M2 ; drapeau).
+  $effect(() => {
+    if (!WATCH_READY) return;
+    const w = startWatch((s) => opened.watch(s), () => closer.closeToGone("watch410"), browserWatchDeps());
+    return () => w.stop();
+  });
 
   let heading: HTMLHeadingElement | undefined = $state();
   $effect(() => {
@@ -118,6 +130,13 @@
     }
     wiped = true;
     reportOpen = false;
+    // Un enregistrement en cours : l'interface se ferme sur l'écran « partage disparu », qui le
+    // montre jusqu'à sa fin (spec §41.8 ; un signalement coupe tout côté serveur, l'écran dira
+    // « Téléchargement interrompu. »). Sinon, la fin ordinaire.
+    if (closer.running > 0) {
+      closer.closeToGone(out === "gone" ? "http410" : "destroyed-here");
+      return null;
+    }
     await dissolving;
     arrive(out);
     return null;
@@ -132,16 +151,13 @@
     {#if viewOnly}
       <p class="notice"><Eye size={18} aria-hidden="true" /> <span>{t("content.viewOnly")}</span></p>
     {/if}
-    {#if gone}
-      <p class="alert" role="alert">{t("content.gone")}</p>
-    {/if}
 
     {#each groups as g (g.c)}
       <section class="group" aria-labelledby="g-{g.c}">
         <h2 id="g-{g.c}" class="gh">{t(CAT_KEY[g.c])}<span class="sr-only">,</span> <span class="count num">{g.items.length}</span></h2>
         <ul class="items">
           {#each g.items as i (i)}
-            <ReceivedItem {opened} {i} {queue} {disabled} {expired} {viewOnly} {onbusy} ongone={() => (gone = true)} />
+            <ReceivedItem {opened} {i} {queue} {disabled} {expired} {viewOnly} {onbusy} gone={closer} ongone={() => closer.closeToGone("http410")} />
           {/each}
         </ul>
       </section>
@@ -149,7 +165,7 @@
 
     <footer class="eol" data-eol>
       <Button variant="secondary" onpress={finishNow}>{t("content.finish")}</Button>
-      {#if !gone}
+      {#if !closer.closed}
         <div class="danger-zone">
           <p class="hint">{t("content.destroy.hint")}</p>
           <div class="row">
@@ -201,14 +217,6 @@
     background: var(--surface-1);
     border: 1px solid var(--hair-2);
     color: var(--text-2);
-    max-width: 65ch;
-  }
-  .alert {
-    margin: 0;
-    padding: var(--sp-3) var(--sp-4);
-    border-radius: var(--r-lg);
-    background: var(--warn-tint);
-    color: var(--warn);
     max-width: 65ch;
   }
   .group {

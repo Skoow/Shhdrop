@@ -447,7 +447,6 @@ export const en = {
 
   "content.title": "Share contents",
   "content.expired": "Expired · what is shown disappears when you leave the page",
-  "content.gone": "This share is no longer available (expired or destroyed). What is already shown stays visible until you leave the page.",
   "content.viewOnly": "The sender did not allow downloads. A screenshot is still possible.",
   "content.show": "Show",
   "content.listen": "Listen",
@@ -544,4 +543,15 @@ export const en = {
   "paid.soon.body": "It's not on sale yet: nothing is asked of you today.",
   "paid.upsell": "With Plus: up to {size} and {days}.",
   "paid.upsell.more": "Learn more",
+
+  "gone.title.expired": "This share has expired.",
+  "gone.title.removed": "This share has been deleted.",
+  "gone.title.destroyed": "This share has been destroyed.",
+  "gone.body": "Its content was erased from this page. Anything you already saved on this device is not affected.",
+  "gone.finishing.one": "The file in progress ({name}) is allowed to finish; you can't open anything else.",
+  "gone.finishing.other": "The {n}\u00a0files in progress are allowed to finish; you can't open anything else.",
+  "gone.keepOpen": "Keep this page open until it's done.",
+  "gone.item.state": "File in progress allowed to finish",
+  "gone.item.done": "Done",
+  "gone.item.failed": "Download interrupted.",
 } as const satisfies Record<keyof typeof fr, string>;

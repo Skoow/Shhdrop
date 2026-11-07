@@ -3,9 +3,11 @@
 // d'annulation), sinon assemblage en Blob application/octet-stream puis <a download>. Le nom
 // proposé est toujours safeName(i) ; le type MIME du manifeste n'est jamais utilisé ici.
 // « saved » n'est rendu qu'après close() réussi, ou après le déclenchement du lien (repli).
-import type { Opened } from "../index";
+// « gone » : le serveur ne sert plus ce partage pendant l'enregistrement (spec §41.8) ; le
+// fichier partiel est supprimé comme pour tout échec.
+import { NotFoundError, type Opened } from "../index";
 
-export type SaveResult = "saved" | "cancelled" | "failed" | "disk_full";
+export type SaveResult = "saved" | "cancelled" | "failed" | "disk_full" | "gone";
 
 type Writable = { write(chunk: Uint8Array<ArrayBuffer>): Promise<void>; close(): Promise<void>; abort(reason?: unknown): Promise<void> };
 type Handle = { createWritable(): Promise<Writable> };
@@ -69,6 +71,7 @@ export async function saveItemTo(
     } catch (e) {
       await w.abort().catch(() => undefined); // le fichier partiel est supprimé
       if (signal?.aborted) return "cancelled";
+      if (e instanceof NotFoundError) return "gone";
       return named(e, "QuotaExceededError") ? "disk_full" : "failed";
     }
   }
@@ -89,6 +92,7 @@ export async function saveItemTo(
     blob = await deps.collectToBlob(counted, i);
   } catch (e) {
     if (signal?.aborted) return "cancelled";
+    if (e instanceof NotFoundError) return "gone";
     return named(e, "QuotaExceededError") ? "disk_full" : "failed";
   }
   if (signal?.aborted) return "cancelled";

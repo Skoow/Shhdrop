@@ -18,6 +18,10 @@
   import Countdown from "../ui/Countdown.svelte";
   import { ChevronDown, Copy, Eye, EyeOff, Lock, LockOpen, ShieldCheck, TriangleAlert } from "../ui/Icon";
   import TimeRim from "../ui/TimeRim.svelte";
+  import { finish } from "../flows/endoflife";
+  import { createGone } from "../flows/gone.svelte";
+  import GoneScreen from "../ui/GoneScreen.svelte";
+  import { revokeAll } from "../viewers/blobs";
   import Content from "./Content.svelte";
   import Ended from "./Ended.svelte";
   import ErrorPage from "./ErrorPage.svelte";
@@ -117,11 +121,23 @@
     announce(r2 === "copied" ? t("copy.done", { label: t("open.inapp.copy") }) : t("copy.manual"));
   }
 
+  // ---------- Disparition pendant la lecture (spec §41.8, E1) ----------
+  // La fin de lecture (done, wipe) attend les enregistrements en cours ; rien ne part sur le
+  // réseau pour dire « fermé ».
+  const gone = createGone({
+    finish: async () => {
+      const o = r.opened;
+      if (o) await finish(o);
+      r.forget();
+    },
+    revokeAll,
+  });
+
   // ---------- Fin de lecture ----------
   let expired = $state(false);
   let end = $state<"finished" | "destroyed" | "gone" | null>(null);
   const capState = $derived(
-    r.state === "destroyed_by_password" || end === "destroyed" || end === "gone" ? "destroyed" : r.state === "open" ? "open" : "locked",
+    r.state === "destroyed_by_password" || end === "destroyed" || end === "gone" || gone.closed ? "destroyed" : r.state === "open" ? "open" : "locked",
   );
   const banner = $derived.by(() => {
     const [pre, post] = t("content.banner", { duration: "\u0000" }).split("\u0000");
@@ -149,7 +165,7 @@
     <div class={["capsule", capState === "open" && "bar", r.state === "open" && end !== null && "spent"]} data-capsule data-state={capState} aria-busy={r.state === "meta" ? "true" : undefined}>
       {#if (r.state === "locked" || r.state === "unlocking") && r.expiresInS > 0}
         <TimeRim remainingS={r.remainingS()} totalS={r.expiresInS} radius={31} />
-      {:else if r.state === "open" && end === null && !expired}
+      {:else if r.state === "open" && end === null && !expired && !gone.closed}
         <TimeRim remainingS={r.remainingS()} totalS={r.expiresInS} radius={23} />
       {/if}
       <span class="lockbox" aria-hidden="true">
@@ -157,9 +173,15 @@
       </span>
       <div class="cap-tx">
         {#if r.state === "open"}
-          {#if end === null}
+          {#if end === null && !gone.closed}
             <p class="banner num">
-              {#if expired}{t("content.expired")}{:else}{banner.pre}<Countdown expiresInS={r.remainingS()} onexpire={() => (expired = true)} />{banner.post}{/if}
+              {#if expired}{t("content.expired")}{:else}{banner.pre}<Countdown
+                  expiresInS={r.remainingS()}
+                  onexpire={() => {
+                    expired = true;
+                    gone.closeToGone("countdown"); // aucune requête : l'horloge locale suffit
+                  }}
+                />{banner.post}{/if}
             </p>
           {/if}
         {:else}
@@ -239,12 +261,15 @@
     {:else if r.state === "destroyed_by_password"}
       <p class="intro">{t("open.destroyedByPw.body")}</p>
       <p><a class="send" href={href("/")} onclick={(e) => followLink(e, "/")}>{t("invalid.send")}</a></p>
+    {:else if gone.cause !== null}
+      <GoneScreen cause={gone.cause} finishing={gone.finishing} />
     {:else if end !== null}
       <Ended kind={end} />
     {:else if r.state === "open" && r.opened}
       <Content
         opened={r.opened}
         {expired}
+        {gone}
         onend={(k) => {
           end = k;
           r.forget(); // clés déjà effacées ; le contenu déchiffré n'est plus référencé

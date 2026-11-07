@@ -526,6 +526,11 @@ export type Opened = {
   saveItem(i: number, sink: (chunk: Uint8Array<ArrayBuffer>) => Promise<void> | void): Promise<void>;
   done(): Promise<void>;
   /**
+   * Surveillance de la disparition (spec §41.8) : un appel = une requête tenue au plus 25 s.
+   * "alive" (rien), "gone" (partage disparu : fermer l'interface), "stop" (ne plus surveiller).
+   */
+  watch(signal?: AbortSignal): Promise<"alive" | "gone" | "stop">;
+  /**
    * Détruit le partage (« report » : signalement, motif non conservé par le serveur) avec
    * K_accès et K_preuve gardés depuis l'ouverture, sans repasser par meta : marche aussi
    * après la dernière ouverture (état « draining »). Erreurs : voir readerError ;
@@ -653,6 +658,7 @@ export async function openShare(
         item: (i) => wrap(() => rd.item(i)),
         saveItem: (i, sink) => wrap(() => rd.streamItem(i, sink)),
         done,
+        watch: (signal) => api.watch(c, u.downloadToken, signal),
         destroy: (reason) =>
           guarded(async () => {
             if (wiped) throw new Error("cles_effacees");

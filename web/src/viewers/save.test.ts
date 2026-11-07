@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Opened } from "../index";
+import { NotFoundError, type Opened } from "../index";
 import { REVOKE_AFTER_MS, saveItemTo, type SaveDeps } from "./save";
 
 const NAME = "facture.pdf";
@@ -53,6 +53,15 @@ describe("saveItemTo, sélecteur de fichier", () => {
     expect(w.written).toEqual([1, 2, 3]);
     expect([w.closed, w.aborted]).toEqual([1, 0]);
     expect(seen).toEqual([2, 3]);
+  });
+  it("partage disparu au milieu (spec §41.8) : abort(), jamais close(), « gone » ; le repli aussi", async () => {
+    const { w, impl } = writable();
+    const r = await saveItemTo(fakeOpened([[1], [2]], new NotFoundError()), 0, deps({ showSaveFilePicker: async () => ({ createWritable: async () => impl }) }), () => undefined);
+    expect(r).toBe("gone");
+    expect([w.closed, w.aborted]).toEqual([0, 1]);
+    const click = vi.fn();
+    expect(await saveItemTo(fakeOpened([[1]]), 0, deps({ collectToBlob: async () => Promise.reject(new NotFoundError()), click }), () => undefined)).toBe("gone");
+    expect(click).not.toHaveBeenCalled();
   });
   it("erreur de saveItem → abort(), jamais close(), failed", async () => {
     const { w, impl } = writable();

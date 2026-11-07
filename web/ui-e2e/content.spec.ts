@@ -86,22 +86,27 @@ test("groupes et ordre de l'envoi ; texte, image, audio, vidéo ; pièges jamais
   await capture(page, "content-image");
 });
 
-test("expiration pendant la lecture → « Expiré », boutons désactivés ; capture", async ({ page, shh, browser }) => {
+test("expiration pendant la lecture, rien en cours → l'interface se ferme aussitôt (spec §41.8) ; capture", async ({ page, shh, browser }) => {
   test.setTimeout(150_000);
   const sent = await share(browser, shh.origin);
   await page.clock.install();
   await page.goto(sent.link);
   await unlock(page, sent.password);
+  const api: string[] = [];
+  page.on("request", (r) => void (new URL(r.url()).pathname.startsWith("/api/") && api.push(r.url())));
   await page.clock.fastForward("12:30:00");
-  await expect(page.getByText("Expiré · ce qui est affiché disparaît quand vous quittez la page")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Regarder anniversaire-lou.webm" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Enregistrer trap.svg" })).toBeDisabled();
-  await expect(page.locator("pre[dir=auto]")).toHaveText(TEXT); // ce qui est affiché reste
+  await expect(page.getByRole("heading", { name: "Ce partage a expiré." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Contenu du partage" })).toHaveCount(0);
+  await expect(page.locator(".item, pre[dir=auto], video, audio, img[src^=blob]")).toHaveCount(0);
+  expect(await page.evaluate(() => document.body.innerText)).not.toMatch(/anniversaire-lou|trap\.svg|4471/);
+  await expect(page).toHaveTitle("Partage indisponible · Shhdrop");
+  expect(api.filter((u) => !u.endsWith("/api/shares/done"))).toEqual([]); // aucune requête pour fermer
   await settle(page);
+  expect(await axe(page)).toEqual([]);
   await capture(page, "content-expired");
 });
 
-test("destruction par l'expéditeur pendant la lecture → message « plus disponible » ; Retour → plus rien", async ({ page, shh, browser }) => {
+test("destruction par l'expéditeur pendant la lecture → l'interface se ferme (« supprimé ») ; Retour → plus rien", async ({ page, shh, browser }) => {
   test.setTimeout(150_000);
   const s = await freshPage(browser);
   const sent = await sendShare(s.page, shh.origin + "/", { text: TEXT, files: [file("anniversaire-lou.webm"), LONG] });
@@ -110,8 +115,8 @@ test("destruction par l'expéditeur pendant la lecture → message « plus dispo
   await unlock(page, sent.password);
   await destroyShare(sent.manage, shh.origin);
   await page.getByRole("button", { name: "Écouter long.ogg" }).click();
-  await expect(page.getByText(/^Ce partage n'est plus disponible \(expiré ou détruit\)/)).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole("button", { name: "Regarder anniversaire-lou.webm" })).toBeDisabled();
+  await expect(page.getByRole("heading", { name: "Ce partage a été supprimé." })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Regarder anniversaire-lou.webm" })).toHaveCount(0);
 
   // Un fichier déposé sur la page ne la fait pas naviguer.
   const prevented = await page.evaluate(() => {
