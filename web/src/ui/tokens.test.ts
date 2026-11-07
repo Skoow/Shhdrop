@@ -381,6 +381,8 @@ describe("Icon.ts (UI §6)", () => {
     "file-archive", "upload", "notebook-pen", "file-terminal", "brush-cleaning",
     // Composeur v3.1 : « Conversation ».
     "messages-square",
+    // Pages d'erreur (tâche UP).
+    "compass", "server-crash", "hourglass", "wrench", "monitor-x",
   ];
   const pascal = (s: string) =>
     s.split("-").map((p) => p[0]!.toUpperCase() + p.slice(1)).join("");

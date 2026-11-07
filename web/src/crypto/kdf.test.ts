@@ -106,13 +106,9 @@ describe("mot de passe à la création et à l'ouverture (audit F9, spec §31)",
   it("passwordKey refuse le mot de passe vide", async () => {
     await expect(passwordKey("", salt, KDF_MIN)).rejects.toThrow("mot_de_passe_vide");
   });
-  it("passwordKeyForCreate impose checkPassword et KDF_CREATE ; accepte un mot de passe généré", async () => {
-    await expect(passwordKeyForCreate("", salt)).rejects.toThrow("mot_de_passe_trop_court");
-    await expect(passwordKeyForCreate("court-crt", salt)).rejects.toThrow("mot_de_passe_trop_court");
-    await expect(passwordKeyForCreate("aB3!aB3!", salt)).rejects.toThrow("mot_de_passe_trop_court");
-    await expect(passwordKeyForCreate("unbelievable", salt)).rejects.toThrow("mot_de_passe_trop_courant");
-    const pw = "cheval-agrafe-pile-correct";
-    expect(hex(await passwordKeyForCreate(pw, salt))).toBe(hex(await passwordKey(pw, salt, KDF_MIN)));
+  it("passwordKeyForCreate n'accepte qu'un mot de passe généré (D41-15) et impose KDF_CREATE", async () => {
+    for (const pw of ["", "court-crt", "aB3!aB3!", "unbelievable", "cheval-agrafe-pile-correct", "Tigre-Velours-92-Brume"])
+      await expect(passwordKeyForCreate(pw, salt), pw).rejects.toThrow("mot_de_passe_non_genere");
     const g = generatePassword();
     expect(hex(await passwordKeyForCreate(g, salt))).toBe(hex(await passwordKey(g, salt, KDF_CREATE)));
     expect(KDF_CREATE).toEqual(KDF_MIN);

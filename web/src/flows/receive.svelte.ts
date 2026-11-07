@@ -6,7 +6,7 @@
 // d'application (S4), où le « # » reste jusqu'à « Continuer ici quand même ». Le mot de passe
 // n'est jamais gardé : il ne vit que le temps de l'appel à unlock().
 import type { LinkState } from "../app/link";
-import { BadPasswordError, LimitError, NotFoundError, fetchMeta, openShare, type Opened } from "../index";
+import { BadPasswordError, LimitError, NotFoundError, ServerError, fetchMeta, openShare, type Opened } from "../index";
 
 export type ReceiveState =
   | "meta" // fetchMeta en cours (squelette)
@@ -17,10 +17,10 @@ export type ReceiveState =
   | "invalid"
   | "destroyed_by_password"
   | "incomplete"
-  | "error"; // fetchMeta impossible (réseau, limite) : Réessayer
+  | "error"; // fetchMeta impossible (réseau, limite, serveur, maintenance) : page d'erreur, Réessayer
 
-/** Message affiché à l'état « locked » ou « error ». */
-export type ReceiveError = "bad_password" | "password_required" | "limit" | "network" | null;
+/** Message affiché à l'état « locked », ou page d'erreur de l'état « error » (tâche UP). */
+export type ReceiveError = "bad_password" | "password_required" | "limit" | "network" | "server" | "maintenance" | null;
 
 export type ReceiverDeps = {
   fetchMeta: (link: string, expectedOrigin: string) => Promise<{ expiresInS: number; opensLeft: number }>;
@@ -33,6 +33,8 @@ export type ReceiverDeps = {
   scrub: () => void;
   /** Origine attendue des liens : location.origin. */
   origin: string;
+  /** Faux si le navigateur se sait hors ligne (navigator.onLine) : page « hors ligne » sans requête. */
+  online: () => boolean;
 };
 
 export type Receiver = {
@@ -69,6 +71,7 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
     inAppBrowser: () => null,
     scrub: () => undefined,
     origin: typeof location === "undefined" ? "" : location.origin,
+    online: () => typeof navigator === "undefined" || navigator.onLine !== false,
     ...deps,
   };
 
@@ -97,6 +100,11 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
 
   async function loadMeta(): Promise<void> {
     if (secret === null || inflight) return;
+    if (!d.online()) {
+      s.error = "network";
+      s.state = "error";
+      return;
+    }
     inflight = true;
     s.state = "meta";
     s.error = null;
@@ -113,6 +121,9 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
       else if (e instanceof LimitError) {
         s.retryAfterS = e.retryAfterS;
         s.error = "limit";
+        s.state = "error";
+      } else if (e instanceof ServerError) {
+        s.error = e.maintenance ? "maintenance" : "server";
         s.state = "error";
       } else {
         s.error = "network";

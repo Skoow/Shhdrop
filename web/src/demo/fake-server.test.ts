@@ -21,7 +21,7 @@ import { createFakeServer, type FakeServerOpts } from "./fake-server";
 
 
 const ORIGIN = "https://demo.test";
-const PW = "cheval-agrafe-pile-correct";
+const PW = "Kq7!mP2#xZ"; // forme d'un mot de passe généré (D41-15)
 const solveCaptcha = async (): Promise<CaptchaProof> => ({ kind: "pow", payload: "demo" });
 
 type Seen = { method: string; url: string; headers: [string, string][]; body: Buffer };

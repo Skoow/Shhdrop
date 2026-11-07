@@ -59,6 +59,7 @@ import {
   LimitError,
   NotFoundError,
   ReadBudgetError,
+  ServerError,
   collectToBlob,
   createShare,
   destroyShare,
@@ -76,7 +77,7 @@ const ORIGIN = "https://srv.test";
 const KLIEN = () => new Uint8Array(32).fill(1) as KLien;
 const LINK = shareLink(ORIGIN, new Uint8Array(32).fill(1) as KLien);
 const MANAGE = manageLink(ORIGIN, new Uint8Array(32).fill(2) as SGestion);
-const PW = "cheval-agrafe-pile-correct";
+const PW = "Kq7!mP2#xZ"; // forme d'un mot de passe généré (D41-15)
 
 type Reply = Response | "net";
 type Route = (method: string, path: string) => Reply | undefined;
@@ -157,7 +158,6 @@ describe("openShare : correspondance des erreurs", () => {
   });
   const notFound: [string, Route][] = [
     ["404 sur meta", (_, p) => (p.endsWith("/meta") ? j(404, { error: "not_found" }) : undefined)],
-    ["500 sur unlock", (_, p) => (p.endsWith("/unlock") ? j(500, { error: "internal" }) : undefined)],
     ["400 sur unlock", (_, p) => (p.endsWith("/unlock") ? j(400, { error: "bad_request" }) : undefined)],
     ["403 sans attempts_left", (_, p) => (p.endsWith("/unlock") ? j(403, { error: "bad_password" }) : undefined)],
     ["KDF trop faible", (_, p) => (p.endsWith("/meta") ? j(200, { ...META, kdf: { ops: 1, mem: 8192 } }) : undefined)],
@@ -176,6 +176,17 @@ describe("openShare : correspondance des erreurs", () => {
   it.each(notFound)("%s → NotFoundError", async (_, route) => {
     const s = server(route);
     expect(await reject(openShare(LINK, PW, ORIGIN, undefined, s.net))).toBeInstanceOf(NotFoundError);
+  });
+  it("5xx persistant → ServerError (texte fixe) ; 503 « frozen » → maintenance (tâche UP)", async () => {
+    const e500 = await reject(openShare(LINK, PW, ORIGIN, undefined, server((_, p) => (p.endsWith("/unlock") ? j(500, { error: "internal" }) : undefined)).net));
+    expect(e500).toBeInstanceOf(ServerError);
+    expect((e500 as ServerError).maintenance).toBe(false);
+    const meta503 = await reject(fetchMeta(LINK, ORIGIN, server((_, p) => (p.endsWith("/meta") ? j(503, { error: "frozen" }) : undefined)).net));
+    expect(meta503).toBeInstanceOf(ServerError);
+    expect((meta503 as ServerError).maintenance).toBe(true);
+    // Code choisi par le serveur : jamais affiché ; un autre 503 reste une erreur du serveur.
+    const busy = await reject(fetchMeta(LINK, ORIGIN, server((_, p) => (p.endsWith("/meta") ? j(503, { error: "busy" }) : undefined)).net));
+    expect((busy as ServerError).maintenance).toBe(false);
   });
   it("paquet corrompu : done() appelé d'office ; KDF refusée : aucun unlock", async () => {
     const s = server(() => undefined);
@@ -212,7 +223,7 @@ describe("fetchMeta, shareStatus, destroyShare : correspondance des erreurs", ()
   });
   it("shareStatus", async () => {
     expect(await reject(shareStatus(MANAGE, ORIGIN, server(() => j(404, { error: "not_found" })).net))).toBeInstanceOf(NotFoundError);
-    expect(await reject(shareStatus(MANAGE, ORIGIN, server(() => j(500, { error: "internal" })).net))).toBeInstanceOf(NotFoundError);
+    expect(await reject(shareStatus(MANAGE, ORIGIN, server(() => j(500, { error: "internal" })).net))).toBeInstanceOf(ServerError);
     expect(await reject(shareStatus(MANAGE, ORIGIN, server(() => j(200, { opens_used: "x" })).net))).toBeInstanceOf(NotFoundError);
     expect(await reject(shareStatus(MANAGE, ORIGIN, server(() => "net").net))).toEqual(new Error("reseau"));
   });
@@ -1187,7 +1198,7 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
     await drive(createShare(ORIGIN, SMALL, { ...base(s), password: generatePassword() }));
     expect(s.finals).toHaveLength(1);
     const t = sender({ segments: 1 });
-    await expect(drive(createShare(ORIGIN, SMALL, { ...base(t), password: "aB3!aB3!" }))).rejects.toThrow("mot_de_passe_trop_court");
+    await expect(drive(createShare(ORIGIN, SMALL, { ...base(t), password: "aB3!aB3!" }))).rejects.toThrow("mot_de_passe_non_genere");
     expect(t.calls).toEqual([]);
   });
 

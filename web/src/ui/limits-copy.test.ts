@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Limites gratuites à l'écran (spec §41.2) : « 15 éléments · 2 Go » vient des constantes ;
+// Limites gratuites à l'écran (spec §41.2, D41-17) : « 200 éléments · 2 Go » vient des constantes ;
 // aucune occurrence des anciennes valeurs dans les textes ni dans les écrans.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -27,29 +27,29 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("limites gratuites : 15 éléments, 2 Go", () => {
+describe("limites : 200 éléments (toutes formules), 2 Go gratuits", () => {
   it("constantes", () => {
-    expect(MAX_ITEMS).toBe(15);
+    expect(MAX_ITEMS).toBe(200);
     expect(CONTENT_MAX).toBe(2 * 1024 * MIB);
   });
 
   it("accueil : ligne de preuves, en français et en anglais", () => {
     show(Home);
-    expect(document.querySelector(".proof")!.textContent).toContain("15 éléments · 2 Go · 24 h au plus");
+    expect(document.querySelector(".proof")!.textContent).toContain("200 éléments · 2 Go · 24 h au plus");
     setLang("en");
     flushSync();
-    expect(document.querySelector(".proof")!.textContent).toContain("15 items · 2 GB · 24 h at most");
+    expect(document.querySelector(".proof")!.textContent).toContain("200 items · 2 GB · 24 h at most");
   });
 
-  it("jauge : « 340 Mo / 2 Go » et « 3 / 15 », 15 crans", () => {
+  it("jauge : « 340 Mo / 2 Go » et « 3 / 200 », barre du nombre (plus de crans)", () => {
     show(CapacityGauge, { bytes: 340 * MIB, count: 3 });
     const t = document.body.textContent!;
     expect(t).toContain("340 Mo");
     expect(t).toContain("/ 2 Go");
-    expect(t).toContain("3 / 15");
-    expect(document.querySelectorAll(".tick")).toHaveLength(15);
-    expect(document.querySelectorAll(".tick.on")).toHaveLength(3);
-    expect(document.querySelector(".ticks")!.getAttribute("aria-valuemax")).toBe("15");
+    expect(t).toContain("3 / 200");
+    expect(document.querySelectorAll(".tick")).toHaveLength(0);
+    expect(document.querySelector(".bar.count")!.getAttribute("aria-valuemax")).toBe("200");
+    expect(document.querySelector(".bar.count")!.getAttribute("aria-valuenow")).toBe("3");
   });
 
   it("jauge : exactement 2 Go ne bloque pas, 2 Go + 1 octet est « trop gros » avec la même constante", () => {
@@ -75,7 +75,7 @@ describe("limites gratuites : 15 éléments, 2 Go", () => {
     }
     for (const f of ["i18n/fr.ts", "i18n/en.ts"]) {
       expect(src(f), f).not.toMatch(/\b(dix éléments|ten items|gigaoctet|gigabyte)\b/);
-      expect(src(f), f).not.toMatch(/\b(15|2)\\u(202f|00a0)(éléments|items|Go|GB)/);
+      expect(src(f), f).not.toMatch(/\b(15|200|2)\\u(202f|00a0)(éléments|items|Go|GB)/);
     }
   });
 });

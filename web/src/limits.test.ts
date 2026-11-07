@@ -28,7 +28,7 @@ describe("limites : mêmes valeurs côté serveur (Go)", () => {
     expect(CONTENT_MAX).toBe(goBuckets.at(-1)! * CHUNK - 4 - MANIFEST_MAX);
   });
   it("éléments par partage (le serveur ne les voit pas : chiffrés dans le manifeste)", () => {
-    expect(MAX_ITEMS).toBe(15);
+    expect(MAX_ITEMS).toBe(200);
   });
   it("taille : 2 Gio de données ; le plus grand palier est celui de la spec (32 769 morceaux)", () => {
     expect(CONTENT_MAX).toBe(2 ** 31);

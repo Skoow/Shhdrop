@@ -22,8 +22,16 @@ export const MANIFEST_MAX = 65532;
 const TAIL = 4 + MANIFEST_MAX;
 /** Octets de données au plus (fichiers ; les textes vont dans le manifeste) : exactement 2 Gio (2 147 483 648). */
 export const CONTENT_MAX = BUCKETS[BUCKETS.length - 1] * CHUNK - TAIL;
-/** Éléments par partage au plus (spec §41.2). */
-export const MAX_ITEMS = 15;
+/**
+ * Éléments par partage au plus, pour toutes les formules (décision du 7 novembre, D41-17 :
+ * le nombre d'éléments n'est plus un critère de formule, une archive .zip le contourne).
+ * Borne technique d'un manifeste d'un morceau (MANIFEST_MAX = 65 532 octets) : une entrée de
+ * fichier au nom ASCII de 120 caractères et au type de 40 caractères fait environ 220 octets,
+ * soit environ 290 entrées ; 200 laisse de la marge. Des noms en écriture non latine (jusqu'à
+ * 4 octets par caractère) ou de longs textes peuvent remplir le manifeste avant : le composeur
+ * le mesure et bloque l'envoi avec sa raison (« manifeste »), jamais un échec au scellement.
+ */
+export const MAX_ITEMS = 200;
 /** Points de code d'un texte au plus. */
 export const TEXT_MAX = 10_000;
 const TEXT_BYTES_MAX = 4 * TEXT_MAX; // un point de code UTF-8 fait au plus 4 octets

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BadPasswordError, LimitError, NotFoundError, type Opened } from "../index";
+import { BadPasswordError, LimitError, NotFoundError, ServerError, type Opened } from "../index";
 import { createReceiver, type ReceiverDeps } from "./receive.svelte";
 
 const LINK = "https://x.test/#" + "A".repeat(43);
@@ -13,7 +13,7 @@ function setup(over: Partial<ReceiverDeps> = {}, link: string | null = LINK) {
   const opened = { manifest: { v: 2, rights: "enregistrer", items: [] } } as unknown as Opened;
   const openShare = vi.fn(async (): Promise<Opened> => opened);
   const scrub = vi.fn();
-  const deps = { fetchMeta, openShare, scrub, now: () => t, inAppBrowser: () => null, origin: "https://x.test", ...over };
+  const deps = { fetchMeta, openShare, scrub, now: () => t, inAppBrowser: () => null, origin: "https://x.test", online: () => true, ...over };
   const r = createReceiver(link === null ? { kind: "incomplete" } : { kind: "s", link }, deps);
   return { r, fetchMeta: deps.fetchMeta, openShare: deps.openShare, scrub: deps.scrub, clock, opened };
 }
@@ -65,6 +65,27 @@ describe("createReceiver (UI §9.7)", () => {
     const l = setup({ fetchMeta: vi.fn(async () => Promise.reject(new LimitError(120))) });
     await flush();
     expect([l.r.state, l.r.error, l.r.retryAfterS]).toEqual(["error", "limit", 120]);
+  });
+
+  it("5xx à fetchMeta → error/server ; 503 « frozen » → error/maintenance (tâche UP)", async () => {
+    const a = setup({ fetchMeta: vi.fn(async () => Promise.reject(new ServerError(false))) });
+    await flush();
+    expect([a.r.state, a.r.error]).toEqual(["error", "server"]);
+    const b = setup({ fetchMeta: vi.fn(async () => Promise.reject(new ServerError(true))) });
+    await flush();
+    expect([b.r.state, b.r.error]).toEqual(["error", "maintenance"]);
+  });
+
+  it("navigateur hors ligne : error/network sans aucune requête ; de retour en ligne, Réessayer relit", async () => {
+    let on = false;
+    const { r, fetchMeta } = setup({ online: () => on });
+    await flush();
+    expect([r.state, r.error]).toEqual(["error", "network"]);
+    expect(fetchMeta).not.toHaveBeenCalled();
+    on = true;
+    await r.retry();
+    expect(r.state).toBe("locked");
+    expect(fetchMeta).toHaveBeenCalledTimes(1);
   });
 
   it("lien incomplet → incomplete, sans requête", async () => {

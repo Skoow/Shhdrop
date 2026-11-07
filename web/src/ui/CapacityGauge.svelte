@@ -1,15 +1,17 @@
 <script lang="ts">
-  // Jauge de capacité (UI §9.2.5) : taille (proportion de CONTENT_MAX) et nombre (un cran par élément, MAX_ITEMS).
+  // Jauge de capacité (UI §9.2.5) : taille (proportion de CONTENT_MAX) et nombre (proportion de MAX_ITEMS).
   // Les chiffres viennent des constantes, jamais des textes (benchmark M5). Le dépassement de
   // taille est permis dans la liste, pour voir quoi retirer ; l'envoi est alors bloqué.
   import { CONTENT_MAX, MAX_ITEMS } from "../index";
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { announce } from "./announce";
+  import Upsell from "./Upsell.svelte";
 
   /** `mini` : une ligne, pour la barre d'envoi du téléphone ; `head` : en-tête de la liste. */
-  type Props = { bytes: number; count: number; mini?: boolean; head?: boolean };
-  let { bytes, count, mini = false, head = false }: Props = $props();
+  /** `onpaid` : sous le dépassement, la ligne « Avec Plus… » (D41-16). */
+  type Props = { bytes: number; count: number; mini?: boolean; head?: boolean; onpaid?: (tier: "plus") => void };
+  let { bytes, count, mini = false, head = false, onpaid }: Props = $props();
 
   const lang = $derived(getLang());
   const max = $derived(formatBytes(CONTENT_MAX, lang));
@@ -52,7 +54,7 @@
     </div>
     {#if level === "near"}<span class="near">{t("compose.gauge.near")}</span>{/if}
   </div>
-  {#if level === "over"}<p class="over-msg" role="alert">{overText}</p>{/if}
+  {#if level === "over"}<p class="over-msg" role="alert">{overText}</p>{#if onpaid}<Upsell {onpaid} />{/if}{/if}
 {:else if mini}
   <!-- Rappel visuel de la barre du téléphone : les mesures accessibles sont dans l'en-tête. -->
   <div class={["mini", level]} aria-hidden="true">
@@ -83,8 +85,9 @@
     <div class="m">
       <span id="{uid}-c" class="sr-only">{t("compose.gauge.countLabel")}</span>
       <span class="v num" aria-hidden="true"><b>{count}</b> / {MAX_ITEMS}</span>
-      <div class="ticks" role="meter" aria-labelledby="{uid}-c" aria-valuemin="0" aria-valuemax={MAX_ITEMS} aria-valuenow={count} aria-valuetext={countText} style:--ticks={MAX_ITEMS}>
-        {#each { length: MAX_ITEMS }, i (i)}<span class={["tick", { on: i < count }]}></span>{/each}
+      <!-- Barre et non plus un cran par élément : MAX_ITEMS vaut 200 (D41-17). -->
+      <div class="bar count" role="meter" aria-labelledby="{uid}-c" aria-valuemin="0" aria-valuemax={MAX_ITEMS} aria-valuenow={count} aria-valuetext={countText}>
+        <span class="fill" style:--r={Math.min(1, count / MAX_ITEMS)}></span>
       </div>
     </div>
   </div>
@@ -205,20 +208,6 @@
     color: var(--warn);
     font-size: var(--fs-micro);
   }
-  .ticks {
-    display: grid;
-    grid-template-columns: repeat(var(--ticks), minmax(0, 1fr));
-    gap: 3px;
-  }
-  .tick {
-    height: 4px;
-    border-radius: 2px;
-    background: rgb(233 236 242 / 0.12);
-    transition: background-color var(--dur-base) var(--ease-out);
-  }
-  .tick.on {
-    background: var(--accent);
-  }
   .over-msg {
     margin: var(--sp-2) 0 0;
     color: var(--danger);
@@ -232,18 +221,15 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .fill,
-    .tick {
+    .fill {
       transition: none;
     }
   }
   @media (forced-colors: active) {
-    .bar,
-    .tick {
+    .bar {
       background: GrayText;
     }
-    .fill,
-    .tick.on {
+    .fill {
       background: Highlight;
       forced-color-adjust: none;
     }

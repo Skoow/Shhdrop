@@ -1,32 +1,23 @@
 <script lang="ts">
-  // Mot de passe de l'envoi (UI §9.3, spec §31) : un seul champ, ses boutons dedans, en fin de
-  // champ (« Générer un autre », « Copier », et Afficher/Masquer pour un mot de passe écrit).
-  // Par défaut, 10 caractères générés sur l'appareil ; « Écrire mon propre mot de passe » sous
-  // le champ ; « Générer un autre » rend un mot de passe généré. Attributs de UI §12.3, hors
-  // de tout <form>. La copie lit l'état, jamais le DOM animé (K9).
-  import { tick } from "svelte";
-  import type { PwCheck } from "../index";
+  // Mot de passe de l'envoi (UI §9.3, spec §31) : toujours généré sur l'appareil, 10 caractères
+  // (D41-15 : plus de mot de passe écrit à la main). Un seul champ, ses deux boutons dedans,
+  // en fin de champ : « Générer un autre » et « Copier ». La copie lit l'état, jamais le DOM
+  // animé (K9).
   import type { Options } from "../flows/options.svelte";
   import { t } from "../i18n/i18n.svelte";
   import { announce } from "./announce";
   import { copyText } from "./clipboard";
-  import { Check, Copy, Eye, EyeOff, RefreshCw } from "./Icon";
-  import PasswordChecklist from "./PasswordChecklist.svelte";
+  import { Check, Copy, RefreshCw } from "./Icon";
 
-  type Props = { options: Options; min: number; result: PwCheck | null; describedby?: string };
-  let { options, min, result, describedby }: Props = $props();
+  type Props = { options: Options };
+  let { options }: Props = $props();
 
   let generation = $state(0);
   let copied = $state(false);
-  let masked = $state(false);
-  let input: HTMLInputElement | undefined = $state();
-  let ownBtn: HTMLButtonElement | undefined = $state();
   let timer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => () => clearTimeout(timer));
-  const custom = $derived(options.mode === "custom");
 
   function regenerate() {
-    options.useGenerated();
     options.regenerate();
     generation++;
     copied = false;
@@ -41,47 +32,19 @@
       timer = setTimeout(() => (copied = false), 2000);
     } else announce(t("copy.manual"));
   }
-  async function own() {
-    options.setCustom(options.custom);
-    await tick();
-    input?.focus();
-  }
 </script>
 
 <div class="pf">
-  {#if custom}<label class="fl" for="shh-own">{t("options.pw.field")}</label>{:else}<span class="sr-only">{t("options.pw.generated")}</span>{/if}
-  <div class={["box", { custom }]}>
-    {#if custom}
-      <input
-        bind:this={input}
-        id="shh-own"
-        name="shh-own"
-        type="text"
-        class={["in", "mono", { masked }]}
-        value={options.custom}
-        oninput={(e) => options.setCustom(e.currentTarget.value)}
-        autocomplete="off"
-        autocapitalize="off"
-        autocorrect="off"
-        spellcheck="false"
-        translate="no"
-        enterkeyhint="done"
-        aria-invalid={result !== null && !result.ok && options.custom !== "" ? "true" : undefined}
-        aria-describedby={["pw-rules", describedby].filter(Boolean).join(" ")}
-      />
-      <button type="button" class="ib" title={masked ? t("options.pw.show") : t("options.pw.hide")} aria-label={masked ? t("options.pw.show") : t("options.pw.hide")} aria-pressed={masked} onclick={() => (masked = !masked)}>
-        {#if masked}<Eye size={19} strokeWidth={1.9} aria-hidden="true" />{:else}<EyeOff size={19} strokeWidth={1.9} aria-hidden="true" />{/if}
-      </button>
-    {:else}
-      <p class="val">
-        <span class="sr-only" translate="no">{options.generated}</span>
-        {#key generation}
-          <span class="pw mono" aria-hidden="true" translate="no">
-            {#each [...options.generated] as ch, i (i)}<span class="ch" style:--i={i}>{ch}</span>{/each}
-          </span>
-        {/key}
-      </p>
-    {/if}
+  <span class="sr-only">{t("options.pw.generated")}</span>
+  <div class="box">
+    <p class="val">
+      <span class="sr-only" translate="no">{options.password}</span>
+      {#key generation}
+        <span class="pw mono" aria-hidden="true" translate="no">
+          {#each [...options.password] as ch, i (i)}<span class="ch" style:--i={i}>{ch}</span>{/each}
+        </span>
+      {/key}
+    </p>
     <button type="button" class="ib" title={t("options.pw.regenerate")} aria-label={t("options.pw.regenerate")} onclick={regenerate}>
       <RefreshCw size={19} strokeWidth={1.9} aria-hidden="true" />
     </button>
@@ -89,29 +52,14 @@
       {#if copied}<Check size={19} strokeWidth={2.2} aria-hidden="true" />{:else}<Copy size={19} strokeWidth={1.9} aria-hidden="true" />{/if}
     </button>
   </div>
-  {#if custom}
-    <PasswordChecklist id="pw-rules" value={options.custom} {result} {min} />
-    <button type="button" class="link" onclick={regenerate}>{t("options.pw.useGenerated")}</button>
-  {:else}
-    <div class="under">
-      <span class="note">{t("options.pw.random")}</span>
-      <button bind:this={ownBtn} type="button" class="link" onclick={own}>{t("options.pw.own")}</button>
-    </div>
-  {/if}
+  <span class="note">{t("options.pw.random")}</span>
 </div>
 
 <style>
-  /* min-width: 0 partout : le champ saisi (largeur propre d'un <input>) ne doit pas élargir la
-     colonne des options (scan UX B4). */
   .pf {
     min-width: 0;
     display: grid;
     gap: 6px;
-  }
-  .fl {
-    color: var(--text-2);
-    font-size: var(--fs-small);
-    font-weight: 600;
   }
   .box {
     min-width: 0;
@@ -123,10 +71,6 @@
     border-radius: 14px;
     background: rgb(5 7 10 / 0.5);
     box-shadow: inset 0 0 0 1px var(--hair-2);
-  }
-  .box.custom {
-    background: var(--surface-1);
-    box-shadow: inset 0 0 0 1px var(--line-strong);
   }
   .box:focus-within {
     outline: 2px solid var(--accent);
@@ -162,22 +106,6 @@
       opacity: 0;
       transform: translateY(0.35em);
     }
-  }
-  .in {
-    flex: 1;
-    width: 0;
-    min-width: 0;
-    height: 50px;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--text);
-    font-size: max(1.0625rem, 16px);
-    outline: none;
-  }
-  /* Masquer sans type="password" : aucun gestionnaire ne propose d'enregistrer (UI §12.3). */
-  .in.masked {
-    -webkit-text-security: disc;
   }
   /* Boutons dans le champ : 44 px de cible. */
   .ib {
@@ -217,30 +145,9 @@
       transition: transform 420ms var(--ease-out);
     }
   }
-  .under {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    column-gap: var(--sp-3);
-  }
   .note {
     color: var(--text-3);
     font-size: var(--fs-small);
-  }
-  .link {
-    min-height: 44px;
-    padding: 0 2px;
-    border: 0;
-    background: none;
-    color: var(--accent);
-    font: inherit;
-    font-size: var(--fs-small);
-    font-weight: 560;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-    text-decoration-color: rgb(95 227 181 / 0.45);
-    cursor: pointer;
   }
   @media (prefers-reduced-motion: reduce) {
     .ib {

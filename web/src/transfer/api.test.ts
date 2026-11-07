@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BadResponse, HttpError, captcha, create, ctx, destroy, done, finalize, getSegment, meta, putSegment, status, unlock, type FinalizeBody } from "./api";
+import { BadResponse, HttpError, captcha, create, ctx, destroy, done, finalize, getSegment, meta, putSegment, retryAfterHeader, status, unlock, type FinalizeBody } from "./api";
 import type { KAcces, KPreuve } from "../crypto/types";
 import type { SGestion } from "../crypto/types";
 
@@ -212,5 +212,20 @@ describe("API v2 (spec §29.8)", () => {
     for (const bad of [undefined, 5, env.slice(1), env + "A", env.slice(0, 79) + "=", env.slice(0, 79) + "\n", env.slice(0, 78) + "+/"]) {
       await expect(unlock(ctx("http://x", { fetch: reply(bad) as unknown as typeof fetch }), k, p), String(bad)).rejects.toBeInstanceOf(BadResponse);
     }
+  });
+});
+
+describe("Retry-After (tâche UP : compte à rebours de la page « trop de demandes »)", () => {
+  it("délai en secondes seulement ; date HTTP, vide ou farfelu ignorés", () => {
+    const h = (v?: string) => new Headers(v === undefined ? {} : { "Retry-After": v });
+    expect(retryAfterHeader(h("42"))).toBe(42);
+    expect(retryAfterHeader(h(" 7 "))).toBe(7);
+    for (const v of [undefined, "", "-1", "1.5", "Wed, 21 Oct 2026 07:28:00 GMT", "9999999999"]) expect(retryAfterHeader(h(v)), String(v)).toBeUndefined();
+  });
+  it("429 sans retry_after_s dans le corps (mandataire) : l'en-tête est lu", async () => {
+    const f = vi.fn(async () => new Response("<html>trop</html>", { status: 429, headers: { "Retry-After": "42" } }));
+    const e = await finalize(ctx("http://x", { fetch: f as unknown as typeof fetch }), "t", FIN).catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(HttpError);
+    expect((e as HttpError).retryAfterS).toBe(42);
   });
 });

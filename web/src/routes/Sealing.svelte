@@ -17,6 +17,7 @@
   import PhaseList from "../ui/PhaseList.svelte";
   import SealCapsule from "../ui/SealCapsule.svelte";
   import UploadStats from "../ui/UploadStats.svelte";
+  import ErrorPage from "./ErrorPage.svelte";
 
   type Props = {
     sender: Sender;
@@ -247,6 +248,10 @@
   }
 </script>
 
+{#if phase === "error" && s.error === "gele"}
+  <!-- 503 « frozen » : drapeau de maintenance du serveur (tâche UP) ; l'envoi est gardé, « Revenir à mon envoi ». -->
+  <ErrorPage kind="maintenance" level={2} onback={() => onexit("edit")} />
+{:else}
 <section class="sealing" aria-labelledby="seal-title">
   <div class="cap-col">
     <SealCapsule
@@ -363,6 +368,7 @@
     <p class="foot"><CircleHelp size={18} strokeWidth={1.75} aria-hidden="true" /><span>{t("seal.padding")} {t("seal.keepOpen")}</span></p>
   </div>
 </section>
+{/if}
 
 <style>
   .sealing {

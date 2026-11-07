@@ -124,31 +124,15 @@ test.describe("fr-FR", () => {
     expect(await armed(page)).toBe(false);
   });
 
-  test("mot de passe saisi avec espaces : affiché exactement comme il est copié (scan UX B5)", async ({ page, shh, context, isMobile }) => {
+  test("mot de passe généré de 10 caractères : affiché exactement comme il est copié (scan UX B5 ; D41-15 : plus de saisie)", async ({ page, shh, context }) => {
     test.setTimeout(120_000);
-    const own = "soleil de mars en hiver";
     await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: shh.origin });
-    await page.goto(shh.origin + "/");
-    await addText(page, "espaces");
-    let opts = page.locator(".side");
-    if (isMobile) {
-      await page.getByRole("button", { name: /^Options · / }).click();
-      opts = page.getByRole("dialog", { name: "Options" });
-    }
-    await opts.getByRole("button", { name: "Écrire mon propre mot de passe" }).click();
-    await opts.getByLabel("Votre mot de passe").fill(own);
-    if (isMobile) await page.keyboard.press("Escape");
-    await sendButton(page).click();
-    await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
-    expect(await pwCard(page).locator(".val.vis").innerText()).toBe(own);
-    await pwCard(page).getByRole("button", { name: /^Copier/ }).click();
-    expect(await clip(page)).toBe(own);
-    // Mot de passe généré de 10 caractères : même règle (ce qu'on lit = ce qu'on copie).
-    const p2 = await context.newPage();
-    await toReady(p2, context, shh.origin);
-    const gen = await valueOf(p2, pwCard(p2));
+    await toReady(page, context, shh.origin);
+    const gen = await valueOf(page, pwCard(page));
     expect(gen).toHaveLength(10);
-    expect(await pwCard(p2).locator(".val.vis").innerText()).toBe(gen);
+    expect(await pwCard(page).locator(".val.vis").innerText()).toBe(gen);
+    await pwCard(page).getByRole("button", { name: /^Copier/ }).click();
+    expect(await clip(page)).toBe(gen);
   });
 
   test("pastille « vers 9 h 45 » (arrondi au quart d'heure) et durée de vie choisie (3 ouvertures, 6 h)", async ({ page, shh, context, isMobile }) => {

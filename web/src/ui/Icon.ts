@@ -67,3 +67,9 @@ export { default as FileTerminal } from "@lucide/svelte/icons/file-terminal";
 export { default as BrushCleaning } from "@lucide/svelte/icons/brush-cleaning";
 // Composeur v3.1 : « Conversation » (bientôt).
 export { default as MessagesSquare } from "@lucide/svelte/icons/messages-square";
+// Pages d'erreur (tâche UP) : introuvable, serveur, trop de demandes, maintenance, navigateur.
+export { default as Compass } from "@lucide/svelte/icons/compass";
+export { default as ServerCrash } from "@lucide/svelte/icons/server-crash";
+export { default as Hourglass } from "@lucide/svelte/icons/hourglass";
+export { default as Wrench } from "@lucide/svelte/icons/wrench";
+export { default as MonitorX } from "@lucide/svelte/icons/monitor-x";

@@ -38,7 +38,7 @@ import { startServer, type TestServer } from "./server";
 
 const MARKER = "MOT-REPERE-7f3a";
 const NAME = "nom-repere-91c2.pdf";
-const PASSWORD = "mdp-repere-44b8-zzzz"; // mot de passe saisi (pas généré)
+const PASSWORD = "Rp4#Wz8?Tm"; // repère de la forme générée (D41-15 : plus de mot de passe saisi)
 const MIB = 1048576;
 const GENERATED = generatePassword();
 const hk = (ikm: Uint8Array, info: string) => new Uint8Array(hkdfSync("sha256", ikm, new Uint8Array(0), info, 32));

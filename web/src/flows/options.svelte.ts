@@ -1,15 +1,13 @@
 // Options de l'envoi (UI §9.3, spec §31, §34) : durée, ouvertures, mot de passe, droits du
 // destinataire. En mémoire seulement : le mot de passe n'est jamais rangé ni journalisé.
-import { MAX_OPENS, OPENS_DEFAULT, PREVIEW_MAX, TTL_DEFAULT, TTL_HOURS, type PwCheck, type TtlHours } from "../index";
+// Le mot de passe est toujours généré (D41-15) : aucune saisie, donc aucun contrôle ici.
+import { MAX_OPENS, OPENS_DEFAULT, PREVIEW_MAX, TTL_DEFAULT, TTL_HOURS, type TtlHours } from "../index";
 
 export type Rights = "voir" | "enregistrer" | "coffre";
-export type OptionsBlock = "mdp_trop_court" | "mdp_trop_courant" | "mdp_repetition" | "mdp_suite" | "mdp_clavier" | "mdp_verif";
 
 export type OptionsDeps = {
   /** Mot de passe généré (spec §31). */
   generate: () => string;
-  /** Contrôle d'un mot de passe saisi (12 caractères, liste noire) ; null tant que le contrôle n'est pas chargé. */
-  check: (pw: string) => PwCheck | null;
   /** Le droit « coffre » est-il proposé ici (spec §27 : pas en démo) ? */
   vaultAllowed?: () => boolean;
 };
@@ -17,9 +15,7 @@ export type OptionsDeps = {
 export function createOptions(deps: OptionsDeps) {
   let ttl = $state<TtlHours>(TTL_DEFAULT);
   let opens = $state(OPENS_DEFAULT);
-  let mode = $state<"generated" | "custom">("generated");
   let generated = $state(deps.generate());
-  let custom = $state("");
   // Droits (spec §34, simplifiés par le propriétaire le 5 novembre) : un interrupteur
   // « Autoriser le téléchargement » (activé par défaut) et, seulement s'il est activé et là où
   // le coffre existe, la sous-option « Garder une copie chiffrée dans l'app du destinataire ».
@@ -27,10 +23,6 @@ export function createOptions(deps: OptionsDeps) {
   let vault = $state(false);
   const vaultOk = () => deps.vaultAllowed?.() === true;
   const rights = $derived<Rights>(!download ? "voir" : vault && vaultOk() ? "coffre" : "enregistrer");
-
-  function check(): PwCheck | null {
-    return mode === "generated" ? { ok: true } : deps.check(custom);
-  }
 
   return {
     get ttlHours(): TtlHours {
@@ -45,18 +37,9 @@ export function createOptions(deps: OptionsDeps) {
     set maxOpens(v: number) {
       opens = Math.min(MAX_OPENS, Math.max(1, Number.isFinite(v) ? Math.trunc(v) : 1));
     },
-    get mode() {
-      return mode;
-    },
-    /** Mot de passe qui sera utilisé. */
+    /** Mot de passe qui sera utilisé : toujours le dernier généré. */
     get password() {
-      return mode === "generated" ? generated : custom;
-    },
-    get generated() {
       return generated;
-    },
-    get custom() {
-      return custom;
     },
     /** Droit écrit dans le manifeste : voir, enregistrer ou coffre. */
     get rights(): Rights {
@@ -82,20 +65,6 @@ export function createOptions(deps: OptionsDeps) {
     },
     regenerate() {
       generated = deps.generate();
-    },
-    setCustom(pw: string) {
-      mode = "custom";
-      custom = pw;
-    },
-    useGenerated() {
-      mode = "generated";
-    },
-    check,
-    blockReason(): OptionsBlock | null {
-      const c = check();
-      if (c === null) return "mdp_verif";
-      if (c.ok) return null;
-      return `mdp_${c.reason}`;
     },
   };
 }

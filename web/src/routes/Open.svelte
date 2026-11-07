@@ -20,6 +20,7 @@
   import TimeRim from "../ui/TimeRim.svelte";
   import Content from "./Content.svelte";
   import Ended from "./Ended.svelte";
+  import ErrorPage from "./ErrorPage.svelte";
   import Invalid from "./Invalid.svelte";
 
   type Props = {
@@ -100,7 +101,9 @@
       case "limit":
         return t(r.state === "error" ? "open.meta.limit" : "open.limit", { duration: formatDuration(r.retryAfterS ?? 60, lang) });
       case "network":
-        return r.state === "error" ? t("err.network") : t("open.network");
+      case "server":
+      case "maintenance":
+        return t("open.network");
       default:
         return "";
     }
@@ -134,6 +137,13 @@
 
 {#if r.state === "invalid" || r.state === "incomplete"}
   <Invalid kind={r.state} />
+{:else if r.state === "error"}
+  <!-- fetchMeta impossible : page d'erreur (tâche UP) ; le lien reste en mémoire pour Réessayer. -->
+  <ErrorPage
+    kind={r.error === "limit" ? "limit" : r.error === "server" ? "server" : r.error === "maintenance" ? "maintenance" : "offline"}
+    retryAfterS={r.retryAfterS ?? 60}
+    onretry={() => void r.retry()}
+  />
 {:else}
   <section class="open" aria-labelledby={r.state === "open" ? undefined : "open-title"}>
     <div class={["capsule", capState === "open" && "bar", r.state === "open" && end !== null && "spent"]} data-capsule data-state={capState} aria-busy={r.state === "meta" ? "true" : undefined}>
@@ -176,9 +186,6 @@
           <Button variant="ghost" onpress={() => r.continueHere()}>{t("open.inapp.continue")}</Button>
         </div>
       </div>
-    {:else if r.state === "error"}
-      <p class="err" role="alert">{errorText}</p>
-      <div><Button variant="secondary" onpress={() => r.retry()}>{t("common.retry")}</Button></div>
     {:else if r.state === "locked" || r.state === "unlocking"}
       <p class="intro">{t("open.intro")}</p>
       <div class="unlock">

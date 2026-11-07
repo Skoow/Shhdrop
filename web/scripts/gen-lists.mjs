@@ -1,11 +1,11 @@
-// Génère src/crypto/wordlist-eff.ts et src/crypto/blocklist.ts.
+// Génère src/crypto/wordlist-eff.ts et src/vault/blocklist.ts (listes du code du coffre, spec §27.2).
 // Usage : node scripts/gen-lists.mjs (Node 22.18 ou plus : importe weakpw.ts en retirant les types)
 // Les sources sont vérifiées par nombre de lignes ET empreinte SHA-256 (épinglée ici).
 // Le résultat est commité : le build reste reproductible et hors ligne (spec §24, §28).
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { cores, encodeCores, normalizeForList, weakReason } from "../src/crypto/weakpw.ts";
+import { cores, encodeCores, normalizeForList, weakReason } from "../src/vault/weakpw.ts";
 
 const SOURCES = {
   eff: {
@@ -35,7 +35,7 @@ const SOURCES = {
     lines: 20000,
   },
 };
-const PW_MIN_CHARS = 10; // = passphrase.ts (vérifié par passphrase.test.ts)
+const PW_MIN_CHARS = 10; // = PASSCODE_MIN_CHARS de vault/passcode.ts (vérifié par passcode.test.ts)
 
 async function fetchPinned(src) {
   const res = await fetch(src.url);
@@ -78,7 +78,7 @@ const block = [
 ].sort();
 
 const out = (name, header, body) =>
-  writeFileSync(fileURLToPath(new URL(`../src/crypto/${name}`, import.meta.url)), header + body);
+  writeFileSync(fileURLToPath(new URL(`../src/${name === "blocklist.ts" ? "vault" : "crypto"}/${name}`, import.meta.url)), header + body);
 const hdr = (src) =>
   `// FICHIER GÉNÉRÉ par scripts/gen-lists.mjs — ne pas modifier à la main.\n// Source : ${src.url}\n// SHA-256 de la source : ${src.sha256}\n`;
 

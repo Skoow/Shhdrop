@@ -30,7 +30,7 @@ describe("MAX_ITEMS à 7", () => {
     c = mount(CapacityGauge as never, { target: document.body, props: { bytes: 1, count: 2 } }) as Record<string, unknown>;
     flushSync();
     expect(document.body.textContent).toContain("2 / 7");
-    expect(document.querySelectorAll(".tick")).toHaveLength(7);
+    expect(document.querySelector(".bar.count")!.getAttribute("aria-valuemax")).toBe("7");
     void unmount(c);
     document.body.innerHTML = "";
     c = mount(DropOverlay as never, { target: document.body, props: { open: true } }) as Record<string, unknown>;

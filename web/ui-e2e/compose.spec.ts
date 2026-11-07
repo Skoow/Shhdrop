@@ -104,7 +104,7 @@ test.describe("fr-FR", () => {
     await expect(rows(page)).toHaveCount(10);
 
     // Capacité en tête, à côté de « Votre envoi ».
-    await expect(page.locator(".top .ht")).toHaveText(/^10\s\/\s15\séléments · [\d,]+\s(?:Ko|Mo) \/ 2\sGo$/);
+    await expect(page.locator(".top .ht")).toHaveText(/^10\s\/\s200\séléments · [\d,]+\s(?:Ko|Mo) \/ 2\sGo$/);
     await expect(page.getByRole("meter", { name: "Nombre d'éléments" })).toHaveAttribute("aria-valuenow", "10");
     expect(await page.locator(".top .gh").evaluate((e) => getComputedStyle(e).fontVariantNumeric)).toContain("tabular-nums");
     expect(await page.locator(".group h3").allTextContents()).toEqual(["Texte", "Photos", "Vidéos", "Documents", "Archives"]);
@@ -205,7 +205,7 @@ test.describe("fr-FR", () => {
     expect(await axe(page)).toEqual([]);
   });
 
-  test("mot de passe : 10 caractères, boutons dans le champ ; écrire le sien puis « Utiliser un mot de passe généré » ; raison reliée", async ({ page, shh, isMobile, browserName }) => {
+  test("mot de passe : toujours généré, 10 caractères, « Générer un autre » et « Copier » dans le champ ; aucune saisie (D41-15)", async ({ page, shh, isMobile, browserName }) => {
     await open(page, shh.origin);
     await browse(page, [f("contrat.pdf")]);
     const opts = await options(page, isMobile);
@@ -230,39 +230,16 @@ test.describe("fr-FR", () => {
       expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await pw.textContent());
     }
 
-    // Écrire le sien : 10 caractères au moins, raison reliée ; puis revenir au généré par le lien.
-    await opts.getByRole("button", { name: "Écrire mon propre mot de passe" }).click();
-    const field = opts.getByLabel("Votre mot de passe");
-    await expect(field).toBeFocused();
-    await expect(field).toHaveValue("");
-    for (const [k, v] of [["type", "text"], ["autocomplete", "off"], ["autocapitalize", "off"], ["autocorrect", "off"], ["spellcheck", "false"], ["name", "shh-own"]])
-      await expect(field).toHaveAttribute(k, v);
+    // D41-15 : aucune saisie possible, nulle part (ordinateur et feuille du téléphone).
+    await expect(opts.getByRole("button", { name: "Écrire mon propre mot de passe" })).toHaveCount(0);
+    await expect(opts.locator("input[type=text], input[type=password], input:not([type])")).toHaveCount(0);
     expect(await page.locator("form").count()).toBe(0);
-    await field.fill("court");
-    const reason = isMobile ? opts.locator("#opt-reason") : page.locator("#send-reason");
-    await expect(reason).toHaveText("Le mot de passe doit faire au moins 10 caractères.");
-    await field.fill("unbelievable");
-    await expect(reason).toHaveText("Ce mot de passe est trop courant, même avec des chiffres ou des symboles autour. Choisissez-en un autre.");
-    // Règles de forme (audit M1) : une raison claire pour chacune.
-    await field.fill("azertyuiop");
-    await expect(reason).toHaveText("Ce mot de passe suit les touches du clavier (comme «\u00a0azerty\u00a0»). Choisissez-en un autre.");
-    await expect(opts.getByText("Suit les touches du clavier", { exact: true })).toBeVisible();
-    await field.fill("aaaaaaaaaa");
-    await expect(reason).toHaveText(/^Ce mot de passe répète trop les mêmes caractères/);
-    await field.fill("1234567890");
-    await expect(reason).toHaveText(/^Ce mot de passe suit l'ordre de l'alphabet ou des chiffres/);
-    await field.fill("motdepasse12");
-    await expect(reason).toHaveText(/^Ce mot de passe est trop courant/);
-    await field.fill("cheval-agr");
-    await expect(reason).toHaveCount(0);
-    await field.fill("court");
-    await settle(page);
     // Le champ et son contour de focus (2 + 2 px) tiennent dans la colonne (scan UX B4).
+    await settle(page);
     const inside = await page.evaluate(() => {
       const box = document.querySelector(".pf .box")!.getBoundingClientRect();
       const col = (document.querySelector(".side-scroll") ?? document.querySelector("dialog[open]"))!;
       const c = col.getBoundingClientRect();
-      // Zone visible du conteneur qui défile : bord gauche intérieur + clientWidth (sans barre).
       const left = c.left + col.clientLeft;
       return { boxL: box.left, boxR: box.right, colL: left, colR: left + col.clientWidth, scrollW: col.scrollWidth, clientW: col.clientWidth };
     });
@@ -270,16 +247,42 @@ test.describe("fr-FR", () => {
     expect(inside.boxR + 4).toBeLessThanOrEqual(inside.colR + 0.5);
     expect(inside.scrollW).toBeLessThanOrEqual(inside.clientW);
     expect(await axe(page)).toEqual([]);
-    await capture(page, "compose-password-custom");
-    await opts.getByRole("button", { name: "Utiliser un mot de passe généré" }).click();
-    await expect(opts.getByLabel("Votre mot de passe")).toHaveCount(0);
-    await expect(box.locator(".val .sr-only")).toHaveText(/^.{10}$/);
-    // Et « Générer un autre » dans le champ fait de même.
-    await opts.getByRole("button", { name: "Écrire mon propre mot de passe" }).click();
-    await box.getByRole("button", { name: "Générer un autre" }).click();
-    await expect(opts.getByLabel("Votre mot de passe")).toHaveCount(0);
     if (isMobile) await page.keyboard.press("Escape");
     await expect(send(page)).toBeEnabled();
+  });
+
+  test("limites gratuites en clair ; choix payants verrouillés (badge Plus) → feuille honnête « Bientôt disponible » (D41-16)", async ({ page, shh, isMobile }) => {
+    await open(page, shh.origin);
+    await browse(page, [f("contrat.pdf")]);
+    await expect(page.locator("[data-free]")).toHaveText("Gratuit\u202f: 2\u202fGo · 24\u202fh max");
+    const opts = await options(page, isMobile);
+    const locked = opts.locator("[data-locked] button, button[data-locked]");
+    await expect(locked).toHaveCount(5);
+    await expect(opts.locator(".badge")).toHaveText(["Plus", "Plus", "Plus"]);
+    for (const b of await locked.all()) {
+      const r = (await b.boundingBox())!;
+      expect(r.height).toBeGreaterThanOrEqual(43.5);
+    }
+    await expect(opts.getByRole("radio", { name: "12 h" })).toBeChecked();
+    await opts.getByRole("button", { name: "7\u202fjours", exact: true }).click();
+    await expect(opts.getByRole("button", { name: "7\u202fjours", exact: true })).toHaveAccessibleDescription("Avec Plus, bientôt disponible.");
+    const sheet = page.getByRole("dialog", { name: "Shhdrop Plus" });
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText("Bientôt disponible.");
+    await expect(sheet).toContainText(/7\s€ pour 30\sjours/);
+    await expect(sheet.locator("form, input, a[href]")).toHaveCount(0);
+    await settle(page);
+    expect(await axe(page)).toEqual([]);
+    await capture(page, "compose-paid-sheet");
+    await sheet.getByRole("button", { name: "Compris" }).click();
+    await expect(sheet).toBeHidden();
+    await expect(opts.getByRole("radio", { name: "12 h" })).toBeChecked(); // rien n'a changé
+    if (!isMobile) await capture(page, "compose-locked-options");
+    else {
+      await settle(page);
+      await capture(page, "compose-locked-options");
+      await page.keyboard.press("Escape");
+    }
   });
 
   test("options : 12 h et 1 ouverture par défaut, flèches, phrase à jour ; téléchargement (interrupteur), coffre sur téléphone seulement", async ({ page, shh, isMobile }) => {
@@ -447,18 +450,21 @@ test.describe("fr-FR", () => {
     await capture(page, "compose-options-sheet");
   });
 
-  test("limites : 15 fichiers puis un 16ᵉ → message ; plus de 2 Go → capacité en danger, envoi bloqué avec la raison ; 2 Go exactement accepté", async ({ page, shh, browserName }) => {
+  test("limites : 200 fichiers minuscules puis un 201ᵉ → message, sans « Plus » (D41-17) ; plus de 2 Go → capacité en danger, ligne « Avec Plus », envoi bloqué ; 2 Go exactement accepté", async ({ page, shh, browserName }) => {
+    test.setTimeout(120_000);
     await open(page, shh.origin);
-    const note = (i: number) => ({ name: `note-${i + 1}.txt`, mimeType: "text/plain", buffer: Buffer.from(`n${i}`) });
-    await browse(page, Array.from({ length: 15 }, (_, i) => note(i)));
-    await expect(rows(page)).toHaveCount(15);
-    await expect(page.getByRole("meter", { name: "Nombre d'éléments" })).toHaveAttribute("aria-valuenow", "15");
-    await expect(page.locator(".top .ht")).toHaveText(/^15\s\/\s15\séléments · /);
+    const note = (i: number) => ({ name: `n${i + 1}.txt`, mimeType: "text/plain", buffer: Buffer.from(`n${i}`) });
+    await browse(page, Array.from({ length: 200 }, (_, i) => note(i)));
+    await expect(rows(page)).toHaveCount(200);
+    await expect(page.getByRole("meter", { name: "Nombre d'éléments" })).toHaveAttribute("aria-valuenow", "200");
+    await expect(page.locator(".top .ht")).toHaveText(/^200\s\/\s200\séléments · /);
     await expect(page.locator(".cnote")).toHaveCount(0);
-    await browse(page, [note(15)]);
-    await expect(rows(page)).toHaveCount(15);
-    await expect(page.locator(".cnote")).toContainText("1 élément n'a pas été ajouté : 15 au plus.");
-    await expect(page.locator(".cnote")).toContainText("note-16.txt");
+    await expect(send(page)).toBeEnabled();
+    await browse(page, [note(200)]);
+    await expect(rows(page)).toHaveCount(200);
+    await expect(page.locator(".cnote")).toContainText("1 élément n'a pas été ajouté : 200 au plus.");
+    await expect(page.locator(".cnote")).toContainText("n201.txt");
+    await expect(page.locator(".cnote [data-upsell]")).toHaveCount(0); // le nombre n'est pas vendu
     await capture(page, "compose-limit-count");
 
     test.skip(browserName !== "chromium", "fichier creux de 2 Go : Chromium (chemin local)");
@@ -487,8 +493,15 @@ test.describe("fr-FR", () => {
       expect(await page.locator(".top .fill").evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(255, 138, 128)");
       await expect(send(page)).toBeDisabled();
       await expect(page.locator("#send-reason")).toHaveText("Le total dépasse 2 Go. Retirez des éléments.");
+      // D41-16 : sous l'erreur, une ligne discrète (ni alerte, ni fenêtre) et « En savoir plus ».
+      const up = page.locator(".top [data-upsell]");
+      await expect(up).toHaveText(/^Avec Plus\s:\sjusqu'à 10\sGo et 7\sjours\.\s*En savoir plus$/);
+      await expect(page.getByRole("dialog")).toHaveCount(0);
       await page.waitForTimeout(6500);
       await capture(page, "compose-limit-size");
+      await up.getByRole("button", { name: "En savoir plus" }).click();
+      await expect(page.getByRole("dialog", { name: "Shhdrop Plus" })).toBeVisible();
+      await page.keyboard.press("Escape");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -607,7 +620,7 @@ test.describe("en-US", () => {
     await page.getByRole("button", { name: "Browse files" }).click();
     await (await chooser).setFiles(MIXED.slice(0, 8));
     await expect(page.getByRole("heading", { level: 2, name: "Your share" })).toBeVisible();
-    await expect(page.locator(".top .ht")).toHaveText(/^8\s\/\s15\sitems · /);
+    await expect(page.locator(".top .ht")).toHaveText(/^8\s\/\s200\sitems · /);
     if (isMobile) await expect(page.getByRole("button", { name: /^Options · 12h · 1\sopen · download allowed$/ })).toBeVisible();
     else await expect(page.locator(".summary")).toHaveText("Erased in 12h or after 1\u00a0open, whichever comes first.");
     expect(await axe(page)).toEqual([]);

@@ -2,10 +2,9 @@
 // en.ts) n'écrivent jamais ces nombres en dur, ils les reçoivent d'ici. Les mêmes valeurs
 // sont imposées par le serveur ; limits.test.ts les compare au code Go.
 import { CONTENT_MAX, MAX_ITEMS, PREVIEW_MAX, TEXT_MAX } from "./crypto/container";
-import { PW_MIN_CHARS } from "./crypto/passphrase";
 
 /** CONTENT_MAX : exactement 2 Gio de données (spec §29.3) ; TEXT_MAX en points de code. */
-export { CONTENT_MAX, MAX_ITEMS, PREVIEW_MAX, PW_MIN_CHARS, TEXT_MAX };
+export { CONTENT_MAX, MAX_ITEMS, PREVIEW_MAX, TEXT_MAX };
 /** Durées proposées, en heures, comptées à partir de la fin de l'envoi (spec §4). */
 export const TTL_HOURS = [1, 6, 12, 24] as const;
 export type TtlHours = (typeof TTL_HOURS)[number];
@@ -21,3 +20,15 @@ export const PW_TRIES = 5;
 export const STRIP_MAX = 50 * 1048576;
 /** Longueur maximale d'un nom, en points de code (UI §9.2.4, même borne que cleanName). */
 export const NAME_MAX = 120;
+
+/**
+ * Formules payantes (spec §38.8.1, prix proposés de §38.8.2, TTC, en euros) : montrées dans le
+ * composeur comme des choix verrouillés, avec « Bientôt disponible » (D41-16) ; rien n'est en
+ * vente tant que les Tasks P1 à P3 ne sont pas faites. Le nombre d'éléments n'en fait pas
+ * partie : MAX_ITEMS vaut pour toutes (D41-17). Aucune n'apporte de sécurité de plus (§38.9.0).
+ */
+export type PaidTier = "plus" | "pro";
+export const PAID: Readonly<Record<PaidTier, { bytes: number; opens: number; ttlDays: readonly number[]; month: number; year: number }>> = {
+  plus: { bytes: 10 * 1024 ** 3, opens: 50, ttlDays: [2, 3, 7], month: 7, year: 70 },
+  pro: { bytes: 50 * 1024 ** 3, opens: 100, ttlDays: [2, 3, 7], month: 20, year: 220 },
+};

@@ -83,19 +83,32 @@ export class LimitError extends Error {
   }
 }
 
+/**
+ * Le serveur a répondu 5xx après tous les essais (tâche UP) : page « erreur du serveur », ou
+ * « maintenance » pour 503 {"error":"frozen"} (drapeau d'exploitation, `shhdrop admin freeze`).
+ * Texte fixe : un serveur ne peut pas faire afficher un message choisi par lui.
+ */
+export class ServerError extends Error {
+  constructor(readonly maintenance: boolean) {
+    super(maintenance ? "maintenance" : "serveur");
+    this.name = "ServerError";
+  }
+}
+
 const isNetwork = (e: unknown) => e instanceof Error && e.message === "reseau";
 
 // Erreurs côté destinataire et gestion (openShare, destroyShare, shareStatus, fetchMeta) :
 // coupure persistante → Error("reseau") ; 429 « budget » → ReadBudgetError (définitif,
 // sans nouvel essai) ; autre 429 → LimitError ; mauvais mot de passe →
-// BadPasswordError ; tout le reste (404, paquet corrompu, paramètres KDF refusés, réponse
-// invalide, autre code) → NotFoundError : rien d'exploitable n'est montré, et un serveur
-// malveillant ne peut pas faire afficher un message choisi par lui.
+// BadPasswordError ; 5xx → ServerError (texte fixe) ; tout le reste (404, paquet corrompu,
+// paramètres KDF refusés, réponse invalide, autre code) → NotFoundError : rien d'exploitable
+// n'est montré, et un serveur malveillant ne peut pas faire afficher un message choisi par lui.
 function readerError(e: unknown): Error {
-  if (e instanceof BadPasswordError || e instanceof LimitError || e instanceof NotFoundError || e instanceof ReadBudgetError) return e;
+  if (e instanceof BadPasswordError || e instanceof LimitError || e instanceof NotFoundError || e instanceof ReadBudgetError || e instanceof ServerError) return e;
   if (isNetwork(e)) return e as Error;
   if (api.isBudget(e)) return new ReadBudgetError();
   if (e instanceof api.HttpError) {
+    if (e.status >= 500 && e.status <= 599) return new ServerError(e.status === 503 && e.code === "frozen");
     if (e.status === 429) return new LimitError(e.retryAfterS ?? 60);
     if (e.status === 403 && e.code === "bad_password" && e.attemptsLeft !== undefined) return new BadPasswordError(e.attemptsLeft);
   }

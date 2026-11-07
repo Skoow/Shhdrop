@@ -77,6 +77,13 @@ function httpErrorOf(status: number, v: unknown): HttpError {
   return new HttpError(status, typeof j.error === "string" ? j.error : `http_${status}`, int(j.attempts_left), int(j.retry_after_s));
 }
 
+/** En-tête Retry-After en secondes (forme « délai » seulement ; une date HTTP est ignorée). */
+export function retryAfterHeader(h: Headers): number | undefined {
+  const v = h.get("Retry-After")?.trim() ?? "";
+  if (!/^\d{1,9}$/.test(v)) return undefined;
+  return Number(v);
+}
+
 async function httpError(r: Response): Promise<HttpError> {
   let v: unknown;
   try {
@@ -84,7 +91,10 @@ async function httpError(r: Response): Promise<HttpError> {
   } catch {
     // corps absent ou non JSON
   }
-  return httpErrorOf(r.status, v);
+  const e = httpErrorOf(r.status, v);
+  // 429 ou 503 sans retry_after_s dans le corps (mandataire devant le serveur) : l'en-tête.
+  const h = e.retryAfterS === undefined ? retryAfterHeader(r.headers) : undefined;
+  return h === undefined ? e : new HttpError(e.status, e.code, e.attemptsLeft, h);
 }
 
 /**

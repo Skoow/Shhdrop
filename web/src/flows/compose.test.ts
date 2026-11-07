@@ -67,8 +67,8 @@ describe("createComposer : ajout", () => {
     expect(c.items[0]!.data).toBe(f);
   });
 
-  it("MAX_ITEMS + 2 fichiers → MAX_ITEMS ajoutés, 2 refusés (noms rendus) ; 15 acceptés, le 16ᵉ refusé", async () => {
-    expect(MAX_ITEMS).toBe(15);
+  it("MAX_ITEMS + 2 fichiers → MAX_ITEMS ajoutés, 2 refusés (noms rendus) ; 200 acceptés, le 201ᵉ refusé (fichiers minuscules)", async () => {
+    expect(MAX_ITEMS).toBe(200);
     const c = make();
     const r = await c.add(Array.from({ length: MAX_ITEMS + 2 }, (_, i) => file(`f${i}.bin`)), "depot");
     expect(r.added).toHaveLength(MAX_ITEMS);
@@ -332,8 +332,22 @@ describe("blocages et textes de raison", () => {
     expect(c.blockReason()).toBe("hors_ligne");
   });
 
+  it("200 éléments aux noms courts : envoi permis ; manifeste plein (noms longs non latins, longs textes) : bloqué avant le scellement (D41-17)", async () => {
+    const short = make();
+    await short.add(Array.from({ length: MAX_ITEMS }, (_, i) => file(`photo-${i}.jpg`, 1, "image/jpeg")), "fichiers");
+    expect(short.count).toBe(200);
+    expect(short.blockReason()).toBeNull();
+    // 120 caractères de 4 octets par nom : environ 500 octets par entrée, le manifeste déborde.
+    const wide = make();
+    await wide.add(Array.from({ length: MAX_ITEMS }, (_, i) => file(`${"😀".repeat(110)}${String(i).padStart(3, "0")}.bin`)), "fichiers");
+    expect(wide.blockReason()).toBe("manifeste");
+    const texts = make();
+    for (let i = 0; i < 7; i++) texts.addText("é".repeat(10_000)); // 7 × 20 000 octets > 65 532
+    expect(texts.blockReason()).toBe("manifeste");
+  });
+
   it("chaque raison a son texte en français et en anglais", () => {
-    expect(BLOCK_REASONS).toEqual(["vide", "trop_gros", "texte_trop_long", "nettoyage", "hors_ligne"]);
+    expect(BLOCK_REASONS).toEqual(["vide", "trop_gros", "texte_trop_long", "manifeste", "nettoyage", "hors_ligne"]);
     for (const r of BLOCK_REASONS) {
       const k = blockKey(r);
       expect(fr[k as keyof typeof fr], r).toBeTruthy();

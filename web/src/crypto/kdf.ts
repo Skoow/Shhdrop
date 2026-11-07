@@ -1,6 +1,6 @@
 import sodium from "libsodium-wrappers-sumo";
 import { utf8 } from "./encoding";
-import { checkPassword } from "./passphrase";
+import { isGeneratedPassword } from "./password";
 import type { KAcces, KLien, KMdp, SGestion } from "./types";
 
 export const KDF_MIN = { ops: 3, mem: 67108864 } as const;
@@ -66,15 +66,12 @@ export async function deriveAccess(kLien: KLien): Promise<AccessKeys> {
 }
 
 /**
- * K_mdp pour CRÉER un partage (spec §29.2, §31) : un mot de passe généré par
- * generatePassword (10 caractères) ou saisi passant checkPassword (10 caractères au moins et
- * règles de weakpw.ts) ; sinon Error(`mot_de_passe_${raison}`) (trop_court, repetition, suite,
- * clavier, trop_courant).
+ * K_mdp pour CRÉER un partage (spec §29.2, §31, D41-15) : seulement un mot de passe de la forme
+ * de generatePassword (10 caractères, quatre familles) ; sinon Error("mot_de_passe_non_genere").
  * Paramètres Argon2id fixés à KDF_CREATE (64 Mio, 3 passes). Audit F9.
  */
 export async function passwordKeyForCreate(password: string, salt: Uint8Array<ArrayBuffer>): Promise<KMdp> {
-  const pw = checkPassword(password);
-  if (!pw.ok) throw new Error(`mot_de_passe_${pw.reason}`);
+  if (!isGeneratedPassword(password)) throw new Error("mot_de_passe_non_genere");
   return passwordKey(password, salt, KDF_CREATE);
 }
 

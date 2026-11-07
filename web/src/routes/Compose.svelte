@@ -5,7 +5,8 @@
   // Tout reste en mémoire (aucun stockage) ; l'envoi lui-même est la Task 17 (`onsend`).
   import { flushSync, tick } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
-  import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, PW_MIN_CHARS, TEXT_MAX, checkPassword, generatePassword, type Item, type KeepTtl } from "../index";
+  import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, TTL_MAX_HOURS, generatePassword, type Item, type KeepTtl } from "../index";
+  import type { PaidTier } from "../limits";
   import { blockKey, createComposer, type AddReport, type Source } from "../flows/compose.svelte";
   import { CLEANER_READY, cleanFile } from "../flows/clean";
   import { CHAT_READY, VOICE_RECORDER_READY } from "../flows/features";
@@ -19,6 +20,7 @@
   import CategoryGroup from "../ui/CategoryGroup.svelte";
   import { ArrowDown, ArrowUp, BrushCleaning, MessagesSquare, Camera, ChevronDown, Lock, Mic, NotebookPen, Pencil, ShieldAlert, SlidersHorizontal, Upload, Video, X } from "../ui/Icon";
   import TextField from "../ui/TextField.svelte";
+  import PaidSheet from "../ui/PaidSheet.svelte";
   import Popover from "../ui/Popover.svelte";
   import Sheet from "../ui/Sheet.svelte";
   import TextArea from "../ui/TextArea.svelte";
@@ -62,7 +64,14 @@
   const narrow = $derived(narrowMq.current);
   const coarse = $derived(coarseMq.current);
   const vaultShown = $derived(vaultAllowed && (coarseMq.current || standaloneMq.current));
-  const options = createOptions({ generate: generatePassword, check: checkPassword, vaultAllowed: () => vaultShown });
+  const options = createOptions({ generate: generatePassword, vaultAllowed: () => vaultShown });
+  // Formules payantes (D41-16) : feuille d'information seulement, rien n'est en vente.
+  let paidOpen = $state(false);
+  let paidTier = $state<PaidTier>("plus");
+  function showPaid(tier: PaidTier) {
+    paidTier = tier;
+    paidOpen = true;
+  }
 
   const filled = $derived(composer.count > 0);
   const lang = $derived(getLang());
@@ -325,16 +334,9 @@
   }
 
   // ---------- Envoi ----------
-  const pwResult = $derived(options.mode === "custom" ? options.check() : null);
   const composerBlock = $derived(composer.blockReason());
-  const optionsBlock = $derived(options.blockReason());
-  const reasonText = $derived(
-    composerBlock
-      ? t(blockKey(composerBlock), { max: composerBlock === "trop_gros" ? formatBytes(CONTENT_MAX, lang) : num(TEXT_MAX) })
-      : optionsBlock
-        ? t(`options.block.${optionsBlock}`, { min: PW_MIN_CHARS })
-        : "",
-  );
+  const reasonText = $derived(composerBlock ? t(blockKey(composerBlock), { max: composerBlock === "trop_gros" ? formatBytes(CONTENT_MAX, lang) : num(TEXT_MAX) }) : "");
+  const freeText = $derived(t("compose.free", { size: formatBytes(CONTENT_MAX, lang), ttl: formatDuration(TTL_MAX_HOURS * 3600, lang) }));
   const estimate = $derived(estimateUpload(composer.totalBytes));
   const culprits = $derived(composer.culprits());
   const unviewable = $derived(viewOnlyBlockers(composer.items));
@@ -481,7 +483,8 @@
           <span id="clean-legend" class="sr-only">{t("compose.meta.legend")}</span>
         {/if}
         <button type="button" class="clear" onclick={clearAll}><X size={16} strokeWidth={2} aria-hidden="true" />{t("compose.clear")}</button>
-        <div class="cap"><CapacityGauge bytes={composer.totalBytes} count={composer.count} head /></div>
+        <p class="free num" data-free>{freeText}</p>
+        <div class="cap"><CapacityGauge bytes={composer.totalBytes} count={composer.count} head onpaid={showPaid} /></div>
       </div>
 
       <!-- Ajouter : une zone de dépôt (un clic ouvre le sélecteur), puis « Créer sur place ». -->
@@ -556,10 +559,10 @@
       <!-- Ordinateur : colonne collée, défilement propre, pied collé : le bouton reste visible. -->
       <div class="side">
         <div class="side-scroll">
-          <Options {options} {pwResult} {unviewable} {vaultShown} {estimate} part="controls" pwErrorId={optionsBlock ? "send-reason" : undefined} />
+          <Options {options} {unviewable} {vaultShown} {estimate} part="controls" onpaid={showPaid} />
         </div>
         <div class="sendbar foot">
-          <Options {options} {pwResult} {unviewable} {vaultShown} {estimate} part="summary" />
+          <Options {options} {unviewable} {vaultShown} {estimate} part="summary" />
           <Button variant="primary" lock disabled={reasonText !== ""} aria-describedby={reasonText ? "send-reason" : undefined} onpress={send}>{t("options.submit")}</Button>
           {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{/if}
         </div>
@@ -609,8 +612,7 @@
 
 <Sheet bind:open={optionsOpen} title={t("options.title")}>
   <div class="opt-sheet">
-    <Options {options} {pwResult} {unviewable} {vaultShown} {estimate} compact pwErrorId={optionsBlock ? "opt-reason" : undefined} />
-    {#if optionsBlock}<p id="opt-reason" class="reason">{reasonText}</p>{/if}
+    <Options {options} {unviewable} {vaultShown} {estimate} compact onpaid={showPaid} />
     <Button variant="primary" onpress={() => void (optionsOpen = false)}>{t("compose.move.done")}</Button>
   </div>
 </Sheet>
@@ -662,6 +664,8 @@
 {:else}
   <Popover bind:open={() => menuId !== null, (v) => { if (!v) menuId = null; }} anchor={menuAnchor} title={menuName}>{@render menuBody()}</Popover>
 {/if}
+
+<PaidSheet bind:open={paidOpen} tier={paidTier} />
 
 <Sheet bind:open={chatOpen} title={t("compose.create.chat")}>
   <p class="soon">{t("compose.soon.chat")}</p>
@@ -716,6 +720,13 @@
   .cap {
     grid-column: 1 / -1;
     min-width: 0;
+  }
+  /* Limites gratuites, dites en clair sous le titre (D41-16). */
+  .free {
+    grid-column: 1 / -1;
+    margin: -6px 0 0;
+    color: var(--text-3);
+    font-size: var(--fs-small);
   }
 
   /* Zone de dépôt : un clic ouvre le sélecteur ; on peut aussi déposer n'importe où sur la page. */

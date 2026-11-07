@@ -4,12 +4,9 @@ import { fr } from "../i18n/fr";
 import { createOptions, estimateUpload, sendRights, viewableInBrowser, viewOnlyBlockers, type OptionsDeps } from "./options.svelte";
 import { CONTENT_MAX, MAX_OPENS, PW_TRIES, generatePassword, PASSWORD_ALPHABET } from "../index";
 
-const check: OptionsDeps["check"] = (pw) =>
-  [...pw].length < 12 ? { ok: false, reason: "trop_court" } : pw === "motdepasse12" ? { ok: false, reason: "trop_courant" } : { ok: true };
-
 function make(over: Partial<OptionsDeps> = {}) {
   let n = 0;
-  return createOptions({ generate: () => `Gen${++n}abcd`.slice(0, 8), check, ...over });
+  return createOptions({ generate: () => `Gen${++n}abcd`.slice(0, 8), ...over });
 }
 
 describe("createOptions (UI §9.3)", () => {
@@ -17,11 +14,14 @@ describe("createOptions (UI §9.3)", () => {
     const o = make();
     expect(o.ttlHours).toBe(12);
     expect(o.maxOpens).toBe(1);
-    expect(o.mode).toBe("generated");
     expect(o.password).toBe("Gen1abcd");
     expect(o.rights).toBe("enregistrer");
-    expect(o.check()).toEqual({ ok: true });
-    expect(o.blockReason()).toBeNull();
+  });
+
+  it("mot de passe toujours généré (D41-15) : aucune saisie possible", () => {
+    const o = make();
+    for (const k of ["setCustom", "useGenerated", "custom", "mode", "check", "blockReason"]) expect(k in o, k).toBe(false);
+    expect(Object.getOwnPropertyDescriptor(o, "password")?.set).toBeUndefined();
   });
 
   it("regenerate : un nouveau à chaque appel, sans limite", () => {
@@ -30,29 +30,6 @@ describe("createOptions (UI §9.3)", () => {
       o.regenerate();
       expect(o.password).toBe(`Gen${i}abcd`.slice(0, 8));
     }
-  });
-
-  it("mot de passe personnel : trop court, trop courant, accepté ; retour au généré", () => {
-    const o = make();
-    o.setCustom("court");
-    expect(o.mode).toBe("custom");
-    expect(o.check()).toEqual({ ok: false, reason: "trop_court" });
-    expect(o.blockReason()).toBe("mdp_trop_court");
-    o.setCustom("motdepasse12");
-    expect(o.blockReason()).toBe("mdp_trop_courant");
-    o.setCustom("une phrase à moi");
-    expect(o.blockReason()).toBeNull();
-    expect(o.password).toBe("une phrase à moi");
-    o.useGenerated();
-    expect(o.mode).toBe("generated");
-    expect(o.password).toBe("Gen1abcd"); // le généré est gardé pendant la saisie
-  });
-
-  it("vérificateur pas encore chargé → bloque avec sa raison, jamais accepté par défaut", () => {
-    const o = make({ check: () => null });
-    o.setCustom("une phrase assez longue");
-    expect(o.check()).toBeNull();
-    expect(o.blockReason()).toBe("mdp_verif");
   });
 
   it("ouvertures bornées 1 à 10, durée parmi 1, 6, 12, 24", () => {
@@ -101,19 +78,9 @@ describe("createOptions (UI §9.3)", () => {
     expect(sendRights(o)).toEqual({ rights: "voir" });
   });
 
-  it("chaque raison de refus du mot de passe a sa raison de blocage (audit M1)", () => {
-    for (const reason of ["repetition", "suite", "clavier", "trop_courant"] as const) {
-      const o = make({ check: () => ({ ok: false, reason }) });
-      o.setCustom("peu importe");
-      expect(o.blockReason()).toBe(`mdp_${reason}`);
-    }
-  });
-
-  it("chaque raison de blocage a son texte FR et EN", () => {
-    for (const k of ["options.block.mdp_trop_court", "options.block.mdp_trop_courant", "options.block.mdp_repetition", "options.block.mdp_suite", "options.block.mdp_clavier", "options.block.mdp_verif"]) {
-      expect(fr[k as keyof typeof fr], k).toBeTruthy();
-      expect(en[k as keyof typeof en], k).toBeTruthy();
-    }
+  it("plus aucun texte de saisie ni de règle de mot de passe (D41-15)", () => {
+    for (const d of [fr, en])
+      for (const k of Object.keys(d)) expect(/^options\.(block\.mdp_|pw\.(own|useGenerated|field|show|hide|rule\.|strength\.|length|tip))/.test(k), k).toBe(false);
   });
 
   it("phrase des options : pluriel et valeurs lues dans les constantes, chiffres jamais écrits en dur", async () => {

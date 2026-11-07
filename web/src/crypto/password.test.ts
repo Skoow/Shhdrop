@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { checkPassword, generatePassphrase } from "./passphrase";
-import { PASSWORD_ALPHABET, PASSWORD_FAMILIES, PASSWORD_LEN, generatePassword } from "./password";
+import { PASSWORD_ALPHABET, PASSWORD_FAMILIES, PASSWORD_LEN, generatePassword, isGeneratedPassword } from "./password";
 
 const FAMILIES = ["abcdefghijkmnpqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789", "!#$%+=?@"];
 
@@ -85,28 +84,16 @@ describe("generatePassword", () => {
   });
 });
 
-describe("checkPassword et mot de passe généré", () => {
-  it("accepte un mot de passe généré de 10 caractères ; une chaîne saisie : 10 caractères au moins", () => {
-    const g = generatePassword();
-    expect(checkPassword(g)).toEqual({ ok: true });
-    // Saisie (jamais produite par generatePassword) : 10 caractères exigés, comme le tirage.
-    expect(checkPassword("aB3!aB3!a")).toEqual({ ok: false, reason: "trop_court" });
-    expect(checkPassword("aB3!cD5?eF")).toEqual({ ok: true });
-    expect(checkPassword("aB3!aB3!aB")).toEqual({ ok: false, reason: "repetition" });
-    // Une copie construite caractère par caractère reste une chaîne saisie aux yeux du type,
-    // mais égale à un mot de passe généré récent : acceptée (même force que le tirage).
-    expect(checkPassword([...g].join(""))).toEqual({ ok: true });
-  });
-  it("un mot de passe généré ancien (hors des 16 derniers) passe encore la règle commune des 10 caractères", () => {
+describe("isGeneratedPassword : seule la forme générée est acceptée (D41-15)", () => {
+  it("accepte tout mot de passe généré, même ancien ou recopié caractère par caractère", () => {
     const first = generatePassword();
-    for (let i = 0; i < 16; i++) generatePassword();
-    expect(checkPassword(first)).toEqual({ ok: true });
+    for (let i = 0; i < 40; i++) expect(isGeneratedPassword(generatePassword())).toBe(true);
+    expect(isGeneratedPassword(first)).toBe(true);
+    expect(isGeneratedPassword([...first].join(""))).toBe(true);
+    expect(isGeneratedPassword("aB3!cD5?eF")).toBe(true);
   });
-  it("un mot de passe saisi reste soumis à la règle des 10 caractères et aux règles de weakpw.ts", () => {
-    expect(checkPassword("cheval-agrafe")).toEqual({ ok: true });
-    expect(checkPassword("unbelievable")).toEqual({ ok: false, reason: "trop_courant" });
-  });
-  it("generatePassphrase reste exportée (« Utiliser mon propre mot de passe »)", () => {
-    expect(checkPassword(generatePassphrase())).toEqual({ ok: true });
+  it("refuse toute autre chaîne : longueur, alphabet (ambigus l, o, I, O, 0, 1), familles", () => {
+    for (const pw of ["", "aB3!cD5?e", "aB3!cD5?eFg", "cheval-agrafe-pile", "aB3!cD5?el", "aB3!cD5?eO", "aB3!cD5?e0", "aB3!cD5?e1", "abcdefghij", "aB3cD5eF7g", "aB3!cD5?e ", "aB3!cD5?é2"])
+      expect(isGeneratedPassword(pw), pw).toBe(false);
   });
 });
