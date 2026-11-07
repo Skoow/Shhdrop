@@ -93,7 +93,11 @@ export function previewKindOf(e: ManifestEntry): PreviewKind {
   return Object.hasOwn(PREVIEW, mime) ? PREVIEW[mime]! : "none";
 }
 
-const RISKY = new Set(["exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "js", "jar", "apk", "app", "dmg", "pkg", "sh", "html", "htm", "hta", "lnk", "iso", "msix", "appx", "reg", "wsf", "cpl", "pif", "url", "command", "desktop", "svg", "svgz", "xhtml", "xht", "mht", "mhtml"]);
+const RISKY = new Set(["exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "js", "jar", "apk", "app", "dmg", "pkg", "sh", "html", "htm", "hta", "lnk", "iso", "msix", "appx", "reg", "wsf", "cpl", "pif", "url", "command", "desktop", "svg", "svgz", "xhtml", "xht", "mht", "mhtml",
+  // Audit F4 (7 novembre) : images disque (contournent la marque « provenant d'Internet »),
+  // OneNote, aide compilée, macros Office, requêtes web Excel, raccourcis et scripts Windows.
+  "img", "vhd", "vhdx", "one", "chm", "xlsm", "docm", "pptm", "xlam", "ppam", "iqy", "slk", "scf", "jse", "vbe", "psm1",
+  "appref-ms", "application", "gadget", "msc", "settingcontent-ms"]);
 
 /** Extension exécutable ou interprétée : avertir avant l'enregistrement (spec §12). À appeler sur un nom passé par safeName. */
 export function isRiskyName(name: string): boolean {

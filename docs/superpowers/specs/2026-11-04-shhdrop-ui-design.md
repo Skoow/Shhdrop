@@ -373,7 +373,7 @@ Chaque composant interactif a ses états : repos, survol (`@media (hover: hover)
 | `InlineConfirm` | Confirmation de destruction, d'annulation, de sortie | Remplace le bouton par « Confirmer / Annuler » sur place, focus sur « Annuler » ; pas de modale |
 | `Sheet` | QR code sur téléphone, vérification de repli, signalement | `<dialog>` natif + `showModal()`, Échap ferme, focus rendu au déclencheur |
 | `VerifFrame` | Cadre reCAPTCHA isolé | §15 |
-| `QrCode` | QR du lien | SVG produit par code (chemins), chargé à la demande |
+| `QrCode` | QR du lien | SVG produit par code (chemins), importé statiquement (spec §28.3), affiché à la demande |
 | `Viewer*` | Image, Audio, Vidéo, Texte, Pdf | §9.8 |
 | `SaveButton` | Enregistrement en flux | Progression en octets, Annuler, états §9.9 |
 | `Dissolve` | Enveloppe la zone qui se dissout | §7.4 |
@@ -668,7 +668,7 @@ Affiché seulement quand la promesse de `createShare` est résolue (spec §5.1).
 | `pdf` | « Lire » → visionneuse isolée (§13) | Enregistrer seulement |
 | `none` | Enregistrer seulement | Enregistrer seulement |
 
-- Lecture pour l'aperçu : `saveItem(i, sink)` avec un `sink` qui accumule les tranches et compte les octets (progression « 12 Mo / 48 Mo », pourcentage, Annuler) ; à la fin, `new Blob(tranches, { type: TYPE_SUR[kind] })` (table fixe : `image` → type d'origine seulement s'il est dans la liste blanche JPEG, PNG, WebP, GIF, AVIF, SVG, HEIC ; `audio` → `audio/mp4` ou `audio/webm` ; `video` → `video/mp4`, `video/quicktime` ou `video/webm` ; sinon refus), puis mise à zéro des tranches. Un seul aperçu en téléchargement à la fois (les autres boutons attendent) : borne mémoire et bande passante.
+- Lecture pour l'aperçu : `saveItem(i, sink)` avec un `sink` qui accumule les tranches et compte les octets (progression « 12 Mo / 48 Mo », pourcentage, Annuler) ; à la fin, `new Blob(tranches, { type: TYPE_SUR[kind] })` (table fixe : `image` → type d'origine seulement s'il est dans la liste blanche JPEG, PNG, WebP, GIF, AVIF, HEIC (jamais SVG : `none`, enregistrement seul avec l'avertissement « à risque », décision du 7 novembre) ; `audio` → `audio/mp4` ou `audio/webm` ; `video` → `video/mp4`, `video/quicktime` ou `video/webm` ; sinon refus), puis mise à zéro des tranches. Un seul aperçu en téléchargement à la fois (les autres boutons attendent) : borne mémoire et bande passante.
 - **Échec de décodage** (`error` sur `<img>`, `<audio>`, `<video>`, par exemple une vidéo HEVC d'iPhone sur Android) : la visionneuse est retirée, « Ce fichier ne peut pas être lu sur cet appareil. Enregistrez-le pour l'ouvrir avec une autre application. » + Enregistrer (spec §12 : un échec de décodage vaut `none`).
 - Images : l'URL blob est **révoquée dès `load`** (§12.4).
 - Erreurs de lecture : `Error("reseau")` → « Téléchargement interrompu. » + Réessayer (le jeton vaut 3 h) ; `NotFoundError` → « Ce partage n'est plus disponible (expiré ou détruit). Ce qui est déjà affiché reste visible jusqu'à ce que vous quittiez la page. » et tous les boutons de lecture et d'enregistrement sont désactivés.
@@ -827,7 +827,8 @@ Clés principales (extrait normatif ; le plan fixe la liste complète) :
 - Visionneuse : `previewKind(i)` seulement ; nom : `safeName(i)` seulement.
 - Texte : interpolation Svelte, jamais `{@html}`, jamais de liens rendus cliquables.
 - **`{@html}` interdit dans tout le code** (règle de lint et test de recherche).
-- SVG : `<img>` seulement, URL révoquée au `load`.
+- SVG : **jamais affiché** (`previewKind` rend `none`), même dans `<img>` : enregistrement seul, marqué « à risque » (`isRiskyName`) ; aligné sur spec §12 le 7 novembre.
+- Images : URL révoquée au `load`.
 - Téléchargement : Blob `application/octet-stream`, nom `safeName(i)`.
 - Aucun `URL.createObjectURL` sur un type hors de `TYPE_SUR` (§9.8) côté destinataire ; côté expéditeur, seulement pour les vignettes d'images nettoyées (sa propre donnée).
 

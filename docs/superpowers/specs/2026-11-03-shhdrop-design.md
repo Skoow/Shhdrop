@@ -410,7 +410,7 @@ Ne sont **pas** des statistiques : les colonnes d'un partage vivant (`opens_left
 | Type | Affichage |
 |---|---|
 | Image (JPEG, PNG, WebP, GIF, AVIF) | `<img>` depuis une URL blob, plein écran, zoom natif |
-| SVG | `<img>` uniquement (aucun script ne s'exécute) |
+| SVG | **jamais affiché** : téléchargement seul, avec l'avertissement « à risque » (ouvert localement dans un navigateur, son script s'exécute ; décision du 7 novembre) |
 | Audio | `<audio controls>` natif |
 | Vidéo (MP4, MOV, WebM) | `<video controls>` natif, **après** téléchargement complet |
 | Texte | Affiché comme **texte brut** (jamais interprété comme HTML) |
@@ -418,12 +418,12 @@ Ne sont **pas** des statistiques : les colonnes d'un partage vivant (`opens_left
 | HEIC | Affiché là où le navigateur le sait (Safari) ; sinon téléchargement |
 | Autres | Téléchargement seulement |
 
-- Le type affiché suit une **liste blanche** : un fichier déclaré « image » qui n'en est pas une n'est pas affiché. Dans le code, `Opened.previewKind(i)` rend `image` (JPEG, PNG, WebP, GIF, AVIF, HEIC, SVG — dans `<img>` seulement), `audio` (MPEG, MP4, AAC, Ogg, WebM, WAV), `video` (MP4, WebM, QuickTime), `pdf`, `text` (éléments texte) ou `none` (tout le reste, HTML compris, et tout élément de plus de 200 Mio). L'écran traite un échec de décodage comme `none`.
+- Le type affiché suit une **liste blanche** : un fichier déclaré « image » qui n'en est pas une n'est pas affiché. Dans le code, `Opened.previewKind(i)` rend `image` (JPEG, PNG, WebP, GIF, AVIF, HEIC ; jamais SVG), `audio` (MPEG, MP4, AAC, Ogg, WebM, WAV), `video` (MP4, WebM, QuickTime), `pdf`, `text` (éléments texte) ou `none` (tout le reste, HTML compris, et tout élément de plus de 200 Mio). L'écran traite un échec de décodage comme `none`.
 - Le nom et le type MIME du manifeste sont **bruts** (écrits par l'expéditeur) : jamais affichés ni utilisés tels quels. On utilise `Opened.safeName(i)` et `Opened.isRiskyFile(i)`.
 - **Téléchargement** :
   - type `application/octet-stream`, toujours (`collectToBlob` ne prend plus de type) ;
   - **nom de fichier nettoyé** (`safeName`) : NFC ; caractères d'inversion de sens d'écriture retirés (U+202A–U+202E, U+2066–U+2069, U+200E, U+200F, U+061C ; anti-« facture‮fdp.exe ») ; contrôles C0/C1, `/` et `\` retirés ; tous les caractères ignorables par défaut retirés (`Default_Ignorable_Code_Point` : largeur nulle, U+00AD, U+034F, remplissages hangul, sélecteurs de variante, étiquettes…) ; U+200D (ZWJ) gardé seulement entre deux emoji et U+FE0F seulement après un emoji ; espaces regroupés ; points initiaux retirés (fichier caché), points et espaces finaux aussi (Windows les retire) ; 120 points de code au plus, coupés entre deux graphèmes (`Intl.Segmenter`), extension gardée (« fichier » devant l'extension si la coupe ne laisse rien avant elle, jamais un nom qui commence par un point) ; « fichier » si rien ne reste ;
-  - **avertissement** pour les fichiers exécutables ou dangereux (`isRiskyFile` : .exe, .msi, .bat, .cmd, .com, .scr, .ps1, .vbs, .js, .jar, .apk, .app, .dmg, .pkg, .sh, .html, .htm, .hta, .lnk, .iso, .msix, .appx, .reg, .wsf, .cpl, .pif, .url, .command, .desktop).
+  - **avertissement** pour les fichiers exécutables ou dangereux (`isRiskyFile` : .exe, .msi, .bat, .cmd, .com, .scr, .ps1, .vbs, .js, .jar, .apk, .app, .dmg, .pkg, .sh, .html, .htm, .hta, .lnk, .iso, .msix, .appx, .reg, .wsf, .cpl, .pif, .url, .command, .desktop, .svg, .svgz, .xhtml, .xht, .mht, .mhtml ; ajoutés le 7 novembre, audit F4 : .img, .vhd, .vhdx, .one, .chm, .xlsm, .docm, .pptm, .xlam, .ppam, .iqy, .slk, .scf, .jse, .vbe, .psm1, .appref-ms, .application, .gadget, .msc, .settingcontent-ms ; plus le contenu reconnu : MZ, ELF, Mach-O, ISO).
 - **Destruction et signalement après lecture** : `Opened.destroy("report")` réutilise K_accès et K_preuve gardés depuis l'ouverture, sans relire `meta` : possible même après la dernière ouverture (état `draining`). `wipe()` les met à zéro. La fin du téléchargement (`done`) part en `keepalive` pour survivre à la fermeture de la page.
 - **Mémoire** : déchiffrement élément par élément, chiffré libéré au fur et à mesure ; avertissement sur les appareils qui manquent de mémoire.
 

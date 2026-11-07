@@ -130,6 +130,12 @@ describe("isRiskyName", () => {
     }
     // Ouverts localement dans un navigateur, leur script s'exécute (scan du 7 novembre, F4 en partie).
     for (const e of ["svg", "svgz", "xhtml", "xht", "mht", "mhtml"]) expect(isRiskyName(`f.${e}`), e).toBe(true);
+    // Images disque, OneNote, aide compilée, macros Office, raccourcis et scripts Windows (audit F4).
+    for (const e of ["img", "vhd", "vhdx", "one", "chm", "mht", "mhtml", "svg", "xlsm", "docm", "pptm", "xlam", "ppam", "iqy", "slk", "lnk", "scf", "hta", "jse", "vbe", "ps1", "psm1", "appref-ms", "application", "gadget", "msc", "settingcontent-ms"]) {
+      expect(isRiskyName(`facture.${e}`), e).toBe(true);
+      expect(isRiskyName(`facture.${e.toUpperCase()}`), e).toBe(true);
+    }
+    for (const n of ["photo.jpeg", "tableur.xlsx", "texte.docx", "diapo.pptx", "x.ms", "x.imgs"]) expect(isRiskyName(n), n).toBe(false);
     expect(isRiskyName(".exe")).toBe(true); // nom qui commence par le point : aussi
     expect(isRiskyName(".bashrc")).toBe(false);
     for (const n of ["photo.jpg", "doc.pdf", "exe", "notes.txt", "fichier"]) expect(isRiskyName(n), n).toBe(false);
