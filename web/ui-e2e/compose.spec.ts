@@ -158,8 +158,9 @@ test.describe("fr-FR", () => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.waitForTimeout(500);
     }
+    // Task 17 : l'appui ouvre l'écran d'envoi (détail dans send.spec.ts).
     await send(page).click();
-    await expect(page.locator(".cnote").filter({ hasText: "Envoi : prochaine étape." })).toBeVisible();
+    await expect(page.locator("#seal-title")).toBeVisible();
   });
 
   test("dépôt de 3 fichiers sur l'accueil fraîchement chargé → composeur ; dossier refusé avec consigne", async ({ page, shh }) => {

@@ -1,0 +1,235 @@
+// « Lien prêt » (UI §9.5) sur le vrai serveur : deux cartes pour deux secrets (M18), copie qui
+// lit l'état, partage natif sans mot de passe, QR du lien seul, dictée locale, garde de sortie,
+// Terminé, Supprimer. Captures fr-FR à 1440 × 900 et 390 × 844.
+import type { BrowserContext, Page } from "@playwright/test";
+import { NotFoundError, fetchMeta } from "../src/index";
+import { qrPath } from "../src/qr/qr";
+import { axe, capture, expect, test } from "./fixtures";
+import { addText, armed, readyHeading, sendButton } from "./send-helpers";
+
+const LINK_RE = /^http:\/\/127\.0\.0\.1:\d+\/#[A-Za-z0-9_-]{43}$/;
+
+async function toReady(page: Page, context: BrowserContext, origin: string, text = "Le code de la porte est 4471.") {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin });
+  await page.goto(origin + "/");
+  await addText(page, text);
+  await sendButton(page).click();
+  await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
+}
+const clip = (page: Page) => page.evaluate(() => navigator.clipboard.readText());
+const linkCard = (page: Page) => page.getByRole("group", { name: "Lien" });
+const pwCard = (page: Page) => page.getByRole("group", { name: "Mot de passe" });
+/** Valeur complète d'un CopyField (texte pour lecteur d'écran). */
+const valueOf = (page: Page, card: ReturnType<typeof linkCard>) => card.locator(".sr-only").first().textContent().then((s) => s ?? "");
+
+test.describe("fr-FR", () => {
+  test.use({ locale: "fr-FR", timezoneId: "Europe/Paris" });
+
+  test("deux cartes, copie depuis l'état, partage natif sans mot de passe, QR du lien seul, Vider, Terminé", async ({ page, shh, context, isMobile }) => {
+    test.setTimeout(120_000);
+    await page.addInitScript(() => {
+      const shared: unknown[] = [];
+      (window as unknown as { __shared: unknown[] }).__shared = shared;
+      Object.defineProperty(navigator, "share", { value: async (d: unknown) => void shared.push(d), configurable: true });
+    });
+    await toReady(page, context, shh.origin);
+    await expect(readyHeading(page)).toBeFocused();
+
+    // Ordre du DOM : carte lien → rappel → carte mot de passe ; deux groupes nommés.
+    const order = await page.evaluate(() => {
+      const els = [...document.querySelectorAll(".ready [role=group][aria-label], .ready p.two")];
+      return els.map((e) => e.getAttribute("aria-label") ?? "rappel");
+    });
+    expect(order.slice(0, 3)).toEqual(["Lien", "rappel", "Mot de passe"]);
+    await expect(page.locator(".ready").getByText("Un mot de passe en plus du lien. Envoyez-les par deux moyens différents.")).toBeVisible();
+
+    const link = await valueOf(page, linkCard(page));
+    const password = await valueOf(page, pwCard(page));
+    expect(link).toMatch(LINK_RE);
+    expect(password.length).toBeGreaterThanOrEqual(8);
+    expect(await linkCard(page).innerText()).not.toContain(password);
+
+    // Copier lit l'état, jamais le DOM.
+    await page.evaluate(() => document.querySelectorAll(".cf .val").forEach((e) => (e.textContent = "x")));
+    await linkCard(page).getByRole("button", { name: /^Copier/ }).click();
+    expect(await clip(page)).toBe(link);
+    await pwCard(page).getByRole("button", { name: /^Copier/ }).click();
+    expect(await clip(page)).toBe(password);
+
+    // Partager : { url } seulement.
+    await linkCard(page).getByRole("button", { name: "Partager" }).click();
+    expect(await page.evaluate(() => (window as unknown as { __shared: unknown[] }).__shared)).toEqual([{ url: link }]);
+
+    // QR : le lien, rien d'autre (même chemin que qrPath(link)).
+    await linkCard(page).getByRole("button", { name: "QR code" }).click();
+    const qr = page.getByRole("img", { name: "QR code du lien de partage" });
+    await expect(qr).toBeVisible();
+    expect(await qr.locator("path").getAttribute("d")).toBe(qrPath(link).d);
+    expect(await qr.locator("path").getAttribute("d")).not.toBe(qrPath(password).d);
+    await expect(page.getByText("Le QR contient la clé : ne le montrez qu'au destinataire.")).toBeVisible();
+    await expect(page.locator("input[type=email]")).toHaveCount(0);
+    expect(await axe(page)).toEqual([]);
+    await capture(page, "ready-qr");
+    if (isMobile) await page.keyboard.press("Escape"); // téléphone : QR en feuille
+
+    // Vider le presse-papier.
+    await page.getByRole("button", { name: "Vider le presse-papier" }).click();
+    await expect.poll(() => clip(page)).toBe("");
+
+    // Garde de sortie jusqu'à Terminé ; puis composeur vide, plus aucun secret à l'écran.
+    expect(await armed(page)).toBe(true);
+    await page.getByRole("button", { name: "Terminé" }).click();
+    await expect(page.getByText("Vous ne pourrez plus les afficher. Terminer ?")).toBeVisible();
+    await page.getByRole("button", { name: "Terminer" }).click();
+    await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
+    await expect(page.locator("[data-row]")).toHaveCount(0);
+    const body = await page.evaluate(() => document.body.innerText);
+    expect(body).not.toContain(link);
+    expect(body).not.toContain(password);
+    expect(await armed(page)).toBe(false);
+    expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
+  });
+
+  test("Supprimer ce partage : confirmation, « Partage supprimé », plus rien sur le serveur", async ({ page, shh, context }) => {
+    test.setTimeout(120_000);
+    await toReady(page, context, shh.origin);
+    const link = await valueOf(page, linkCard(page));
+    await capture(page, "ready");
+    await page.getByRole("button", { name: "Supprimer ce partage" }).click();
+    await expect(page.getByText("Supprimer ce partage pour tout le monde ? Le lien ne mènera plus à rien.")).toBeVisible();
+    await page.getByRole("button", { name: "Supprimer", exact: true }).click();
+    const title = page.getByRole("heading", { name: "Partage supprimé" });
+    await expect(title).toBeVisible();
+    await expect(title).toBeFocused();
+    await expect(page.getByText("Il a été effacé du serveur : le lien ne mène plus à rien.", { exact: false })).toBeVisible();
+    await expect.poll(async () => fetchMeta(link, shh.origin).then(() => "vivant", (e) => (e instanceof NotFoundError ? "supprimé" : String(e)))).toBe("supprimé");
+    expect(await page.evaluate(() => document.body.innerText)).not.toContain(link);
+    await page.waitForTimeout(2600); // gomme du logo
+    await capture(page, "ready-deleted");
+    await page.getByRole("button", { name: "Nouvel envoi" }).click();
+    await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
+    expect(await armed(page)).toBe(false);
+  });
+
+  test("pastille « vers 9 h 45 » (arrondi au quart d'heure) et durée de vie choisie (3 ouvertures, 6 h)", async ({ page, shh, context, isMobile }) => {
+    test.setTimeout(120_000);
+    // Date.now() figé et durée exacte : le serveur arrondit l'échéance au quart d'heure SUPÉRIEUR
+    // de son heure réelle ; la réponse de finalize est fixée ici à 12 h (ou 6 h) pile.
+    const exact = async (p: Page) =>
+      p.route("**/api/shares/finalize", async (route) => {
+        const r = await route.fetch();
+        const ttl = JSON.parse(route.request().postData() ?? "{}").ttl_hours as number;
+        await route.fulfill({ response: r, json: { expires_in_s: ttl * 3600 } });
+      });
+    await exact(page);
+    await page.clock.setFixedTime(new Date("2026-11-05T21:41:00+01:00"));
+    await toReady(page, context, shh.origin);
+    await expect(page.getByText(/^Actif · s'efface vers 9\sh\s45$/)).toBeVisible();
+    await expect(page.getByText(/^S'efface tout seul\s: après 1\souverture, ou au bout de 12\sh\.$/)).toBeVisible();
+    await expect(page.getByText(/disparaît de partout/)).toHaveCount(0);
+
+    const p2 = await context.newPage();
+    await exact(p2);
+    await p2.clock.setFixedTime(new Date("2026-11-05T21:36:00+01:00"));
+    await p2.goto(shh.origin + "/");
+    await addText(p2, "options");
+    if (isMobile) await p2.getByRole("button", { name: /^Options · / }).click(); // téléphone : options en feuille
+    await p2.getByRole("radiogroup", { name: "Durée" }).getByRole("radio", { name: /^6\sh$/ }).evaluate((e: HTMLInputElement) => e.click());
+    await p2.getByRole("radiogroup", { name: "Ouvertures" }).getByRole("radio", { name: "3", exact: true }).evaluate((e: HTMLInputElement) => e.click());
+    if (isMobile) await p2.keyboard.press("Escape");
+    await sendButton(p2).click();
+    await expect(readyHeading(p2)).toBeVisible({ timeout: 60_000 });
+    await expect(p2.getByText(/^S'efface tout seul\s: après 3\souvertures, ou au bout de 6\sh\.$/)).toBeVisible();
+    await expect(p2.getByText(/^Actif · s'efface vers 3\sh\s30$/)).toBeVisible();
+  });
+
+  test("dictée : un caractère à la fois avec son mot d'aide ; Échap ferme ; rien dans la console ni le stockage", async ({ page, shh, context }) => {
+    test.setTimeout(120_000);
+    const logs: string[] = [];
+    page.on("console", (m) => logs.push(m.text()));
+    await toReady(page, context, shh.origin);
+    const password = await valueOf(page, pwCard(page));
+    await pwCard(page).getByRole("button", { name: "Lire à voix haute" }).click();
+    const dlg = page.getByRole("dialog", { name: "Mot de passe, caractère par caractère" });
+    await expect(dlg).toBeVisible();
+    await expect(dlg.getByText(`1 sur ${password.length}`)).toBeVisible();
+    await expect(dlg.locator(".lab")).toHaveText(/(minuscule|majuscule|chiffre|point|dièse|dollar|pour cent|plus|égal|arobase)/);
+    await dlg.getByRole("button", { name: "Suivant" }).click();
+    await expect(dlg.getByText(`2 sur ${password.length}`)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dlg).toBeHidden();
+    expect(logs.join("\n")).not.toContain(password);
+    expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
+    expect(await page.title()).not.toContain(password);
+  });
+
+  test("mouvement réduit : aucune animation ; sinon, montée en éventail ≤ 640 ms et boutons cliquables", async ({ page, shh, context, isMobile }) => {
+    test.setTimeout(120_000);
+    // Toutes les animations WAAPI lancées dans « Lien prêt » : durée + délai ≤ 640 ms.
+    await page.addInitScript(() => {
+      const runs: number[] = [];
+      (window as unknown as { __runs: number[] }).__runs = runs;
+      const orig = Element.prototype.animate;
+      Element.prototype.animate = function (k, o) {
+        if (this.closest(".ready") && typeof o === "object") runs.push(Number(o.duration ?? 0) + Number(o.delay ?? 0));
+        return orig.call(this, k, o);
+      };
+    });
+    await toReady(page, context, shh.origin);
+    const runs = await page.evaluate(() => (window as unknown as { __runs: number[] }).__runs);
+    expect(runs.length).toBeGreaterThanOrEqual(3);
+    for (const d of runs) expect(d).toBeLessThanOrEqual(640);
+    // Boutons cliquables pendant l'animation : la copie répond tout de suite.
+    await page.getByRole("group", { name: "Lien" }).getByRole("button", { name: /^Copier/ }).click();
+
+    // Téléphone + mouvement réduit : le bouton « Ajouter » de la feuille texte du composeur v3 ne
+    // devient jamais « stable » pour Playwright (signalé ; hors du périmètre de cette tâche).
+    if (isMobile) return;
+    const p2 = await context.newPage();
+    await p2.emulateMedia({ reducedMotion: "reduce" });
+    await p2.goto(shh.origin + "/");
+    await addText(p2, "réduit");
+    await sendButton(p2).click();
+    await expect(readyHeading(p2)).toBeVisible({ timeout: 60_000 });
+    expect(
+      await p2.evaluate(() => document.getAnimations().filter((a) => (a.effect as KeyframeEffect | null)?.target?.closest?.(".ready")).length),
+    ).toBe(0);
+  });
+});
+
+test.describe("390 × 844", () => {
+  test.use({ locale: "fr-FR", viewport: { width: 390, height: 844 }, isMobile: false });
+
+  test("Supprimer ce partage reste à portée (collé en bas) ; QR en feuille ; capture", async ({ page, shh, context }) => {
+    test.setTimeout(120_000);
+    await toReady(page, context, shh.origin);
+    await page.waitForTimeout(700);
+    await capture(page, "ready-390");
+    await expect(page.getByRole("button", { name: "Supprimer ce partage" })).toBeInViewport();
+    await page.evaluate(() => window.scrollTo(0, 300));
+    await expect(page.getByRole("button", { name: "Supprimer ce partage" })).toBeInViewport();
+    await linkCard(page).getByRole("button", { name: "QR code" }).click();
+    const sheet = page.getByRole("dialog", { name: "QR code" });
+    await expect(sheet.getByRole("img", { name: "QR code du lien de partage" })).toBeVisible();
+    await page.waitForTimeout(500);
+    await capture(page, "ready-qr-390");
+  });
+});
+
+test.describe("en-US", () => {
+  test.use({ locale: "en-US" });
+
+  test("Link ready in English ; capture", async ({ page, shh }) => {
+    test.setTimeout(120_000);
+    await page.goto(shh.origin + "/");
+    await page.getByRole("group", { name: "Or create one here" }).getByRole("button", { name: "Text", exact: true }).click();
+    const dlg = page.getByRole("dialog");
+    await dlg.locator("textarea").fill("The door code is 4471.");
+    await dlg.getByRole("button", { name: "Add", exact: true }).click();
+    await page.getByRole("button", { name: "Encrypt and send" }).click();
+    await expect(page.getByRole("heading", { name: "Link ready" })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText("A password on top of the link. Send them two different ways.").last()).toBeVisible();
+    await page.waitForTimeout(700);
+    await capture(page, "ready-en");
+  });
+});

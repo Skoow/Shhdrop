@@ -45,13 +45,14 @@ describe("installDemo", async () => {
     expect(d.securityGaps).toContain("GitHub receives your IP address");
   });
 
-  it("openAsRecipient : pushState vers /s/{id}#… et popstate ; refuse un autre lien", () => {
+  it("openAsRecipient : pushState vers /#<43> (spec §32) et popstate ; refuse un autre lien", () => {
     const d = getDemo()!;
     const pops: string[] = [];
     window.addEventListener("popstate", () => pops.push(location.pathname + location.hash));
-    d.openAsRecipient(`${location.origin}/s/abc_-1#cle`);
-    expect(pops).toEqual(["/s/abc_-1#cle"]);
-    for (const bad of ["https://ailleurs.test/s/abc#k", `${location.origin}/m/abc#k`, `${location.origin}/s/abc?x=1#k`, `${location.origin}/s/a/b#k`])
+    const key = "A".repeat(43);
+    d.openAsRecipient(`${location.origin}/#${key}`);
+    expect(pops).toEqual([`/#${key}`]);
+    for (const bad of [`https://ailleurs.test/#${key}`, `${location.origin}/#m${key}`, `${location.origin}/?x=1#${key}`, `${location.origin}/s/abc#${key}`, `${location.origin}/#court`])
       expect(() => d.openAsRecipient(bad), bad).toThrow("lien_invalide");
     expect(pops).toHaveLength(1);
   });

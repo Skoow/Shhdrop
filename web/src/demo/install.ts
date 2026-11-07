@@ -4,7 +4,7 @@
 // remplit les crochets lus par les écrans (app/demo-hooks.ts). Aucun stockage navigateur.
 import { setDemo } from "../app/demo-hooks";
 import { getLang } from "../i18n/i18n.svelte";
-import type { CaptchaProof } from "../index";
+import { SHARE_FRAGMENT, type CaptchaProof } from "../index";
 import DemoBanner from "./DemoBanner.svelte";
 import { createFakeServer } from "./fake-server";
 import { fakeXHRClass } from "./fake-xhr";
@@ -84,12 +84,12 @@ export function installDemo(w: Window): void {
   setDemo({
     solveCaptcha: async (): Promise<CaptchaProof> => ({ kind: "pow", payload: "demo" }),
     openAsRecipient(link: string) {
-      // Lien de partage de cet onglet (avec ou sans la base) : navigation interne, sans
-      // rechargement ; App.svelte lit puis retire le « # » comme pour un lien ouvert.
+      // Lien de partage de cet onglet (spec §32 : `${origin}${base}#<43>`) : navigation interne,
+      // sans rechargement ; App.svelte lit puis retire le « # » comme pour un lien ouvert.
       const u = new URL(link);
-      const path = u.pathname.startsWith(base + "/") ? u.pathname.slice(base.length) : u.pathname;
-      if (u.origin !== w.location.origin || !/^\/s\/[A-Za-z0-9_-]+$/.test(path) || u.search !== "") throw new Error("lien_invalide");
-      w.history.pushState(null, "", base + path + u.hash);
+      const ok = u.origin === w.location.origin && (u.pathname === base + "/" || u.pathname === base || (base === "" && u.pathname === "/")) && u.search === "" && SHARE_FRAGMENT.test(u.hash);
+      if (!ok) throw new Error("lien_invalide");
+      w.history.pushState(null, "", base + "/" + u.hash);
       w.dispatchEvent(new PopStateEvent("popstate"));
     },
     get invalidLinkNote() {

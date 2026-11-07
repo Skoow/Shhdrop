@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { cipherText, rng, scramble } from "./decor";
+import { cipherText, cipherVeil, rng, scramble } from "./decor";
 
 describe("decor (UI §20.2 S1)", () => {
   it("rng : déterministe, dans [0, 1)", () => {
@@ -29,6 +29,13 @@ describe("decor (UI §20.2 S1)", () => {
     `);
     expect(t.split("\n").map((l) => l.length)).toEqual([40, 40, 40, 40, 40, 40]);
     expect(t).toMatch(/^[A-Za-z0-9+/\n]+$/);
+  });
+
+  it("cipherVeil : (seed: number) => string, deux fois la même chaîne (M2)", () => {
+    expect(cipherVeil.length).toBe(1);
+    expect(cipherVeil(42)).toBe(cipherVeil(42));
+    expect(cipherVeil(42)).not.toBe(cipherVeil(43));
+    expect(cipherVeil(42).split("\n")).toHaveLength(18);
   });
 
   it("scramble : k = 0 inchangé, k = 1 même longueur, espaces gardées", () => {

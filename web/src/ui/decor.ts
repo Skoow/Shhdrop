@@ -35,6 +35,14 @@ export function scramble(text: string, k: number, seed: number): string {
   return chars.join("");
 }
 
+/**
+ * Volet de texte chiffré décoratif de la capsule (benchmark M2) : 18 lignes de 34 caractères
+ * tirées de la graine seule. Jamais un tampon réel : la signature ne prend qu'un nombre.
+ */
+export function cipherVeil(seed: number): string {
+  return cipherText(seed, 34, 18);
+}
+
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
 /**

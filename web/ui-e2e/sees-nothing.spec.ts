@@ -1,0 +1,76 @@
+// « Le serveur ne voit rien » (spec §14), étendu au chemin d'envoi du NAVIGATEUR (Task 27) —
+// CE TEST BLOQUE TOUTE MISE EN LIGNE. Un texte, un nom de fichier et un contenu repères sont
+// envoyés par l'interface (vrai serveur, vraie preuve de travail, XHR des segments). On fouille
+// ensuite, en octets bruts et en base64url / base64 : chaque requête du navigateur (URL,
+// en-têtes, corps), les réponses, stdout/stderr du serveur et le dossier de données. Ni le
+// contenu, ni les noms, ni le mot de passe, ni K_lien, ni l'id dérivé du lien ne doivent y être.
+import { shareId } from "../src/crypto/envelope";
+import type { KLien } from "../src/crypto/types";
+import { findIn, needle, scanDir, type Needle } from "../e2e/scan";
+import { expect, test } from "./fixtures";
+import { addText, readyHeading, sendButton } from "./send-helpers";
+
+const TEXT = "MOT-REPERE-NAVIGATEUR-5d1e : le code de la porte est 4471";
+const NAME = "nom-repere-navigateur-a83f.pdf";
+const CONTENT = "CONTENU-REPERE-NAVIGATEUR-0c6b ".repeat(4000);
+const windows = (label: string, s: string) => Array.from({ length: s.length - 7 }, (_, i) => needle(`${label}[${i}]`, s.slice(i, i + 8)));
+
+test.describe("fr-FR", () => {
+  test.use({ locale: "fr-FR" });
+
+  test("envoi par l'interface : aucune donnée claire, aucun nom, ni mot de passe ni K_lien côté serveur", async ({ page, shh }) => {
+    test.setTimeout(120_000);
+    const sent: { label: string; data: Buffer }[] = [];
+    page.on("request", (r) => {
+      const head = Object.entries(r.headers())
+        .map(([k, v]) => `${k}: ${v}`)
+        .join("\n");
+      sent.push({ label: `${r.method()} ${new URL(r.url()).pathname}`, data: Buffer.concat([Buffer.from(r.url() + "\n" + head + "\n"), r.postDataBuffer() ?? Buffer.alloc(0)]) });
+    });
+    const answers: { label: string; data: Buffer }[] = [];
+    page.on("response", async (r) => {
+      if (!new URL(r.url()).pathname.startsWith("/api/")) return;
+      answers.push({ label: `réponse ${new URL(r.url()).pathname}`, data: await r.body().catch(() => Buffer.alloc(0)) });
+    });
+
+    await page.goto(shh.origin + "/");
+    await addText(page, TEXT);
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator(".dropzone").click();
+    await (await chooser).setFiles({ name: NAME, mimeType: "application/octet-stream", buffer: Buffer.from(CONTENT) });
+    await expect(page.locator("[data-row]")).toHaveCount(2);
+    await sendButton(page).click();
+    await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
+
+    const link = (await page.getByRole("group", { name: "Lien" }).locator(".sr-only").first().textContent()) ?? "";
+    const password = (await page.getByRole("group", { name: "Mot de passe" }).locator(".sr-only").first().textContent()) ?? "";
+    expect(link).toMatch(/#[A-Za-z0-9_-]{43}$/);
+    expect(password.length).toBeGreaterThanOrEqual(8);
+    const kLien = new Uint8Array(Buffer.from(link.slice(link.indexOf("#") + 1), "base64url"));
+    expect(kLien.length).toBe(32);
+    const id = await shareId(new Uint8Array(kLien) as KLien);
+
+    const needles: Needle[] = [
+      ...windows("texte", TEXT),
+      ...windows("nom", NAME.replace(/\.pdf$/, "")),
+      needle("contenu", "CONTENU-REPERE-NAVIGATEUR-0c6b"),
+      needle("mot de passe", password),
+      needle("K_lien", kLien as Uint8Array<ArrayBuffer>),
+      needle("K_lien (texte)", link.slice(link.indexOf("#") + 1)),
+      needle("id dérivé du lien", id),
+    ];
+
+    // Témoin : la capture voit bien les en-têtes et les corps (S_gestion part, par conception, en en-tête).
+    const manage = (await page.locator(".manage .sr-only").first().textContent()) ?? "";
+    const sGestion = new Uint8Array(Buffer.from(manage.slice(manage.indexOf("#m") + 2), "base64url"));
+    expect(findIn(Buffer.concat(sent.map((s) => s.data)), [needle("témoin S_gestion", sGestion as Uint8Array<ArrayBuffer>)])).toEqual(["témoin S_gestion"]);
+    const puts = sent.filter((s) => s.label.startsWith("PUT /api/shares/segments/"));
+    expect(puts.length).toBeGreaterThan(0);
+    expect(puts.reduce((n, s) => n + s.data.length, 0)).toBeGreaterThan(CONTENT.length);
+    const hits: string[] = [];
+    for (const s of [...sent, ...answers]) for (const l of findIn(s.data, needles)) hits.push(`${s.label} : ${l}`);
+    for (const l of findIn(Buffer.concat([shh.server.stdout(), shh.server.stderr()]), needles)) hits.push(`journal : ${l}`);
+    hits.push(...scanDir(shh.server.dataDir, needles));
+    expect(hits).toEqual([]);
+  });
+});

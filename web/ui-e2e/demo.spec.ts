@@ -4,6 +4,7 @@
 // Les tâches suivantes ajoutent leur parcours à ce fichier.
 import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
+import { addFile, addText, readyHeading, sendButton } from "./send-helpers";
 
 const BANNER_FR = "Démo : rien n'est envoyé, le lien ne marche que dans cet onglet.";
 const BANNER_EN = "Demo: nothing is sent, the link only works in this tab.";
@@ -257,6 +258,41 @@ test.describe("fr-FR", () => {
     expect(await storage(page)).toBe(0);
     expect(await axe(page)).toEqual([]);
     await capture(page, "demo-compose");
+  });
+});
+
+test.describe("fr-FR : envoi (Tasks 17–18)", () => {
+  test.use({ locale: "fr-FR" });
+
+  test("Chiffrer et envoyer : progression, Lien prêt avec un lien /Shhdrop/#<43>, ouvrir comme destinataire", async ({ page, demo }) => {
+    test.setTimeout(90_000);
+    await page.goto(demo.url);
+    await addText(page, "Le code de la porte est 4471.");
+    await addFile(page, "releve.bin", 2 * 1048576);
+    await sendButton(page).click();
+    await expect(page.getByRole("heading", { name: "Préparation des clés" }).or(page.getByRole("heading", { name: "Vérification anti-robot" }))).toBeVisible();
+    await expect(page).toHaveTitle(/^Démo · /);
+    await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
+    const link = (await page.getByRole("group", { name: "Lien" }).locator(".sr-only").first().textContent()) ?? "";
+    expect(link).toMatch(new RegExp(`^${demo.origin.replace(/\./g, "\\.")}/Shhdrop/#[A-Za-z0-9_-]{43}$`));
+    const manage = (await page.locator(".manage .sr-only").first().textContent()) ?? "";
+    expect(manage).toMatch(/\/Shhdrop\/#m[A-Za-z0-9_-]{43}$/);
+    expect(await storage(page)).toBe(0);
+    await capture(page, "demo-ready");
+    // L'écran d'ouverture (Task 20) n'existe pas encore : la route d'ouverture est atteinte, le « # » retiré.
+    await page.getByRole("button", { name: "Ouvrir comme destinataire (démo)" }).click();
+    await expect(readyHeading(page)).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => location.pathname + location.hash)).toBe("/Shhdrop/");
+  });
+
+  test("?coupure : bandeau de coupure, puis reprise et Lien prêt", async ({ page, demo }) => {
+    test.setTimeout(120_000);
+    await page.goto(demo.url + "?coupure");
+    await addFile(page, "releve.bin", 3 * 1048576);
+    await sendButton(page).click();
+    await expect(page.getByRole("status").filter({ hasText: /Connexion perdue|Hors ligne/ })).toBeVisible({ timeout: 30_000 });
+    await capture(page, "demo-seal-offline");
+    await expect(readyHeading(page)).toBeVisible({ timeout: 90_000 });
   });
 });
 
