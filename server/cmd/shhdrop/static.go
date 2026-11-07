@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,7 +21,11 @@ import (
 //   - repli de l'application monopage : un chemin inconnu dont le dernier segment n'a pas
 //     d'extension sert index.html ; un fichier absent (x.js) → 404. Les liens sont à la
 //     racine (« /#clé », spec §32) : plus de repli particulier sous /s/ ni /m/ ; un chemin
-//     abîmé sans extension charge l'application, qui retire le « # » (UI §12.1).
+//     abîmé sans extension charge l'application, qui retire le « # » (UI §12.1) ;
+//   - statut réel (audit de performance, point 5) : seules les routes de l'application
+//     (appRoutes, mêmes que web/src/app/router.svelte.ts) répondent 200 ; tout autre chemin
+//     sans extension reçoit index.html avec le statut 404 (l'application y affiche « Cette
+//     page n'existe pas. »), jamais un « soft 404 » en 200.
 //
 // Les en-têtes de sécurité sont posés par api.New autour de ce gestionnaire.
 func staticHandler(dir string) (http.Handler, error) {
@@ -45,7 +50,11 @@ func staticHandler(dir string) (http.Handler, error) {
 			return
 		}
 		f, fi, err := openRegular(fsys, name)
+		status := http.StatusOK
 		if errors.Is(err, fs.ErrNotExist) && !strings.Contains(path.Base(name), ".") && !isDir(fsys, name) {
+			if !appRoutes[r.URL.Path] {
+				status = http.StatusNotFound
+			}
 			name = "index.html"
 			f, fi, err = openRegular(fsys, name)
 		}
@@ -59,9 +68,27 @@ func staticHandler(dir string) (http.Handler, error) {
 			http.NotFound(w, r)
 			return
 		}
+		if status == http.StatusNotFound {
+			// ServeContent répondrait 200 : en-têtes posés à la main, corps entier (pas de plage).
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Content-Length", strconv.FormatInt(fi.Size(), 10))
+			w.WriteHeader(http.StatusNotFound)
+			if r.Method != http.MethodHead {
+				io.Copy(w, rs)
+			}
+			return
+		}
 		// Date nulle : pas de Last-Modified (Cache-Control: no-store partout).
 		http.ServeContent(w, r, fi.Name(), time.Time{}, rs)
 	}), nil
+}
+
+// appRoutes : chemins de l'application qui répondent 200 (voir match() dans
+// web/src/app/router.svelte.ts ; un test compare les deux listes).
+var appRoutes = map[string]bool{
+	"/":                true,
+	"/securite":        true,
+	"/confidentialite": true,
 }
 
 // staticName : chemin de l'URL → nom dans le dossier ; refuse les segments cachés.

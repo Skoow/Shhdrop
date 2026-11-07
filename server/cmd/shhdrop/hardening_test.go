@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -166,10 +168,17 @@ func TestServeStaticDir(t *testing.T) {
 	}
 	// Repli de l'application monopage : /, et tout chemin sans extension, servent index.html,
 	// mêmes en-têtes, sans X-Robots-Tag (spec §32 : les liens sont à la racine, « /#clé »).
-	for _, p := range []string{"/", "/index.html", "/securite", "/s/AAAAAAAAAAAAAAAAAAAAAA", "/m/x/y"} {
+	// Statut réel (audit de performance, point 5) : 200 pour les routes de l'application,
+	// 404 pour tout autre chemin (le corps reste l'application, qui affiche « introuvable »).
+	for _, c := range []struct {
+		p    string
+		want int
+	}{{"/", 200}, {"/index.html", 200}, {"/securite", 200}, {"/confidentialite", 200}, {"/securite/", 404},
+		{"/s/AAAAAAAAAAAAAAAAAAAAAA", 404}, {"/m/x/y", 404}, {"/nope", 404}, {"/Securite", 404}} {
+		p := c.p
 		for _, m := range []string{"GET", "HEAD"} {
 			code, body, h := get(m, p)
-			if code != 200 || (m == "GET" && !strings.Contains(body, "<title>Shhdrop</title>")) ||
+			if code != c.want || (m == "GET" && !strings.Contains(body, "<title>Shhdrop</title>")) ||
 				h.Get("Content-Security-Policy") == "" || h.Get("Cache-Control") != "no-store" || h.Get("X-Content-Type-Options") != "nosniff" ||
 				!strings.HasPrefix(h.Get("Content-Type"), "text/html") || len(h.Values("X-Robots-Tag")) != 0 {
 				t.Fatalf("%s %s : %d %q %v", m, p, code, body, h)
@@ -257,5 +266,20 @@ func TestAvailBytes(t *testing.T) {
 	}
 	if got := availBytes(1000, 4096, 0); got != 1000*4096 {
 		t.Fatal(got)
+	}
+}
+
+// Les routes qui répondent 200 sont exactement celles du routeur du client (match()).
+func TestAppRoutesMatchClientRouter(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "web", "src", "app", "router.svelte.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{"/": true}
+	for _, m := range regexp.MustCompile(`if \(p === "(/[a-z-]+)"\) return \{ name: "[a-z]+" \}`).FindAllStringSubmatch(string(src), -1) {
+		got[m[1]] = true
+	}
+	if len(got) < 3 || !maps.Equal(got, appRoutes) {
+		t.Fatalf("routes du client %v, du serveur %v", got, appRoutes)
 	}
 }
