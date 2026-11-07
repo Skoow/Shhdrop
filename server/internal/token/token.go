@@ -98,6 +98,15 @@ func (s *Signer) Subject(tok string, kind byte) (string, int, error) {
 	return id, n, nil
 }
 
+// SubjectExp est Subject, et rend aussi l'expiration signée.
+func (s *Signer) SubjectExp(tok string, kind byte) (string, int, time.Time, error) {
+	id, n, exp, err := s.parse(tok, kind)
+	if err != nil {
+		return "", 0, time.Time{}, err
+	}
+	return id, n, time.Unix(exp, 0), nil
+}
+
 func (s *Signer) parse(tok string, kind byte) (string, int, int64, error) {
 	fail := func() (string, int, int64, error) { return "", 0, 0, ErrInvalid }
 	if len(tok) > maxTokenLen {

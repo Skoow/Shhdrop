@@ -46,6 +46,7 @@ func (a *activity) activeAt(now int64) bool {
 // detached : fichier d'un partage disparu, gardé ouvert pour ses ouvertures actives.
 type detached struct {
 	f        *os.File
+	accessV  []byte // V_accès, pour qu'une destruction par l'administrateur le coupe (kill.go)
 	bucket   int
 	graceEnd int64
 	opens    map[int]bool // ouvertures qui gardent le droit de finir
@@ -65,6 +66,7 @@ type goneState struct {
 	active map[openKey]*activity
 	dead   map[string]*detached
 	watch  map[string]*watcher
+	grants map[openKey]*grantEntry // octrois d'ouverture (grant.go)
 }
 
 func (g *goneState) init() {
@@ -72,6 +74,7 @@ func (g *goneState) init() {
 		g.active = map[openKey]*activity{}
 		g.dead = map[string]*detached{}
 		g.watch = map[string]*watcher{}
+		g.grants = map[openKey]*grantEntry{}
 	}
 }
 
@@ -167,7 +170,7 @@ func (s *Service) openOnce(parent context.Context, id string, n, openN int) (seg
 		return nil, false, 0, err
 	}
 	// Compté après l'ouverture réussie : une erreur du serveur ne consomme pas le budget.
-	if !s.budget.charge(k, size, ReadBudget(bucket), now) {
+	if !s.budget.charge(k, size, s.budgetLocked(k, bucket), now) {
 		sec.Close()
 		return nil, false, 0, ErrBudget
 	}
@@ -185,12 +188,18 @@ func (s *Service) serveDetachedLocked(parent context.Context, id string, d *deta
 		return nil, ErrBadSegment
 	}
 	size := int64(SegmentSize(d.bucket, n))
-	if !s.budget.charge(k, size, ReadBudget(d.bucket), now) {
+	if !s.budget.charge(k, size, s.budgetLocked(k, d.bucket), now) {
 		return nil, ErrBudget
 	}
 	d.refs++
 	sec := io.NewSectionReader(d.f, segOffset(d.bucket, n), size)
 	return s.startLocked(parent, k, sec, size, nil, func() { d.refs-- }), nil
+}
+
+// budgetLocked : budget de lecture de l'ouverture k, (2 + r) × le fichier chiffré + segment 0
+// + dernier segment, où r est le nombre de rechargements acceptés (spec §41.4). Sous gone.mu.
+func (s *Service) budgetLocked(k openKey, bucket int) int64 {
+	return ReadBudget(bucket) + s.grantReopensLocked(k)*totalSize(bucket)
 }
 
 // startLocked inscrit le flux (Streams) et l'activité de l'ouverture ; la fermeture met à jour
@@ -266,7 +275,8 @@ func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 	s.gone.init()
 	var bucket, issued int
 	var doneMask int64
-	err := s.DB.QueryRow(`SELECT bucket, opens_issued, done_mask FROM shares WHERE id=?`, id).Scan(&bucket, &issued, &doneMask)
+	var accessV []byte
+	err := s.DB.QueryRow(`SELECT bucket, opens_issued, done_mask, access_v FROM shares WHERE id=?`, id).Scan(&bucket, &issued, &doneMask, &accessV)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -287,7 +297,7 @@ func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 			return false, err
 		}
 		if f != nil {
-			s.gone.dead[id] = &detached{f: f, bucket: bucket, graceEnd: event + graceWindow, opens: allowed}
+			s.gone.dead[id] = &detached{f: f, accessV: accessV, bucket: bucket, graceEnd: event + graceWindow, opens: allowed}
 		}
 	}
 	if !grace {
@@ -395,10 +405,18 @@ func (s *Service) WatchCount() int {
 
 // PollRemoved repère les partages surveillés ou en cours de lecture dont la ligne a disparu
 // hors de ce processus (« shhdrop admin destroy ») : leurs flux sont coupés et leurs
-// surveillances prévenues, sans grâce. À appeler chaque seconde (janitor.Watch).
+// surveillances prévenues, sans grâce. Coupe aussi les partages détachés que la commande a
+// demandé de couper (kill.go). À appeler chaque seconde (janitor.Watch).
 func (s *Service) PollRemoved() error {
 	s.gone.mu.Lock()
 	s.gone.init()
+	if len(s.gone.dead) > 0 {
+		err := s.pollKillsLocked()
+		if err != nil {
+			s.gone.mu.Unlock()
+			return err
+		}
+	}
 	set := map[string]bool{}
 	for id := range s.gone.watch {
 		set[id] = true

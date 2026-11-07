@@ -388,7 +388,7 @@ export const fr = {
   "open.destroyedByPw": "Mot de passe incorrect. Le partage a été détruit.",
 
   "content.banner":
-    "Disponible encore {duration} · disparaît quand vous quittez la page · recharger consomme une ouverture",
+    "Disponible encore {duration} · disparaît quand vous quittez la page · recharger ne compte pas une ouverture de plus pendant 30\u00a0min",
   "content.finish": "Terminer et effacer",
   "content.undecodable":
     "Ce fichier ne peut pas être lu sur cet appareil. Enregistrez-le pour l'ouvrir avec une autre application.",
@@ -425,8 +425,18 @@ export const fr = {
   "open.title": "Un partage chiffré vous attend",
   "open.loading": "Lecture du partage…",
   "open.available": "Disponible encore",
-  "open.oneOpen.one": "L'ouvrir compte une ouverture, même si vous rechargez la page. Il peut encore être ouvert {n}\u00a0fois.",
-  "open.oneOpen.other": "L'ouvrir compte une ouverture, même si vous rechargez la page. Il peut encore être ouvert {n}\u00a0fois.",
+  "open.oneOpen.one":
+    "Ce partage peut être ouvert encore {n}\u00a0fois. Ouvrir ce partage compte une ouverture. Recharger la page ou l'ouvrir dans un autre onglet de ce navigateur n'en compte pas d'autre pendant 30\u00a0minutes.",
+  "open.oneOpen.other":
+    "Ce partage peut être ouvert encore {n}\u00a0fois. Ouvrir ce partage compte une ouverture. Recharger la page ou l'ouvrir dans un autre onglet de ce navigateur n'en compte pas d'autre pendant 30\u00a0minutes.",
+  // Rechargement et autres onglets (spec §41.4, UI §9.7.1)
+  "open.reopen.title": "Rouvrir ce partage",
+  "open.reopen.body":
+    "Vous avez déjà déverrouillé ce partage. Entrez le mot de passe pour le rouvrir\u202f: cela ne compte pas une ouverture de plus.",
+  "open.reopen": "Rouvrir",
+  "open.otherTab": "Ce partage est déjà ouvert dans un autre onglet\u202f: l'ouvrir ici ne compte pas une ouverture de plus.",
+  "open.grantInvalid": "L'ouverture précédente a expiré. Déverrouiller en utilisera une nouvelle.",
+  "open.reopenLimit": "Trop de rechargements\u202f: une nouvelle ouverture sera comptée.",
   "open.password": "Mot de passe",
   "open.pw.show": "Afficher le mot de passe",
   "open.pw.hide": "Masquer le mot de passe",

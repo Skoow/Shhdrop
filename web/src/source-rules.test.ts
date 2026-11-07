@@ -74,8 +74,12 @@ describe("règles de sources", () => {
     expect(offenders(/\bfetch\s*\(|XMLHttpRequest/, inUiDir)).toEqual([]));
   it("aucun stockage navigateur", () =>
     expect(
-      offenders(/localStorage|sessionStorage|indexedDB|document\.cookie/),
+      offenders(/localStorage|indexedDB|document\.cookie/),
     ).toEqual([]));
+  // Spec §41.4 : exception écrite, l'octroi d'ouverture de l'onglet (session/open-grant.ts),
+  // et plus tard le salon (chat/session.ts, §39.13.3). Nulle part ailleurs.
+  it("sessionStorage seulement dans session/open-grant.ts (et chat/session.ts)", () =>
+    expect(offenders(/sessionStorage/, (r) => r !== "session/open-grant.ts" && r !== "chat/session.ts")).toEqual([]));
   it("pas de console.log", () => expect(offenders(/console\.log/)).toEqual([]));
 
   // UI §20.2 S6 et §20.4 (poussière) : styles par CSSOM et WAAPI seulement, aucune lecture de

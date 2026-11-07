@@ -75,6 +75,26 @@ export class ReadBudgetError extends Error {
   }
 }
 
+/**
+ * Octroi d'ouverture refusé (409 grant_invalid : expiré, redémarrage du serveur, ouverture
+ * terminée, spec §41.4) : ni ouverture ni essai consommé ; déverrouiller sans octroi en
+ * consommera une nouvelle (à dire avant).
+ */
+export class GrantInvalidError extends Error {
+  constructor() {
+    super("octroi_invalide");
+    this.name = "GrantInvalidError";
+  }
+}
+
+/** Plus de 10 rechargements pour cette ouverture (429 reopen_limit) : une nouvelle sera comptée. */
+export class ReopenLimitError extends Error {
+  constructor() {
+    super("trop_de_rechargements");
+    this.name = "ReopenLimitError";
+  }
+}
+
 /** Trop de requêtes (429) : réessayer dans retryAfterS secondes. */
 export class LimitError extends Error {
   constructor(readonly retryAfterS: number) {
@@ -104,10 +124,21 @@ const isNetwork = (e: unknown) => e instanceof Error && e.message === "reseau";
 // paramètres KDF refusés, réponse invalide, autre code) → NotFoundError : rien d'exploitable
 // n'est montré, et un serveur malveillant ne peut pas faire afficher un message choisi par lui.
 function readerError(e: unknown): Error {
-  if (e instanceof BadPasswordError || e instanceof LimitError || e instanceof NotFoundError || e instanceof ReadBudgetError || e instanceof ServerError) return e;
+  if (
+    e instanceof BadPasswordError ||
+    e instanceof LimitError ||
+    e instanceof NotFoundError ||
+    e instanceof ReadBudgetError ||
+    e instanceof ServerError ||
+    e instanceof GrantInvalidError ||
+    e instanceof ReopenLimitError
+  )
+    return e;
   if (isNetwork(e)) return e as Error;
   if (api.isBudget(e)) return new ReadBudgetError();
   if (e instanceof api.HttpError) {
+    if (e.status === 409 && e.code === "grant_invalid") return new GrantInvalidError();
+    if (e.status === 429 && e.code === "reopen_limit") return new ReopenLimitError();
     if (e.status >= 500 && e.status <= 599) return new ServerError(e.status === 503 && e.code === "frozen");
     if (e.status === 429) return new LimitError(e.retryAfterS ?? 60);
     if (e.status === 403 && e.code === "bad_password" && e.attemptsLeft !== undefined) return new BadPasswordError(e.attemptsLeft);
@@ -467,17 +498,39 @@ export async function createShare(
  * Durée de vie restante et ouvertures restantes (ruling 5 : déjà connues de qui a K_accès,
  * pour annoncer « encore N fois » avant le geste irréversible).
  */
-export async function fetchMeta(link: string, expectedOrigin: string, net?: api.Net): Promise<{ expiresInS: number; opensLeft: number }> {
+export async function fetchMeta(
+  link: string,
+  expectedOrigin: string,
+  net?: api.Net,
+  grant?: string,
+): Promise<{ expiresInS: number; opensLeft: number }> {
   const p = parseShare(link, expectedOrigin);
   return guarded(async () => {
     const { kAcces } = await deriveAccess(p.kLien);
     try {
-      const m = await api.meta(api.ctx(p.origin, net), kAcces);
+      const m = await api.meta(api.ctx(p.origin, net), kAcces, grant);
       return { expiresInS: m.expiresInS, opensLeft: m.opensLeft };
     } finally {
       kAcces.fill(0);
     }
   }, readerError);
+}
+
+/**
+ * Étiquette d'un partage entre onglets (spec §41.4) : SHA-256(K_accès) tronqué à 16 octets,
+ * en base64url (22 caractères). Ne révèle ni K_lien ni K_accès ; sert seulement à demander à
+ * un autre onglet s'il détient un octroi pour ce partage.
+ */
+export async function grantTag(link: string, expectedOrigin: string): Promise<string> {
+  const p = parseShare(link, expectedOrigin);
+  const { kAcces } = await deriveAccess(p.kLien);
+  p.kLien.fill(0);
+  try {
+    const h = new Uint8Array(await crypto.subtle.digest("SHA-256", kAcces as Uint8Array<ArrayBuffer>));
+    return b64u(h.subarray(0, 16));
+  } finally {
+    kAcces.fill(0);
+  }
 }
 
 /**
@@ -526,6 +579,13 @@ export type Opened = {
   saveItem(i: number, sink: (chunk: Uint8Array<ArrayBuffer>) => Promise<void> | void): Promise<void>;
   done(): Promise<void>;
   /**
+   * Octroi d'ouverture rendu par unlock (spec §41.4) : à garder (session/open-grant.ts) pour
+   * qu'un rechargement rouvre la même ouverture. Ni clé ni mot de passe.
+   */
+  readonly grant: string;
+  /** Octroi renouvelé pour 30 min (POST /api/shares/regrant) ; erreurs : voir readerError. */
+  regrant(): Promise<string>;
+  /**
    * Surveillance de la disparition (spec §41.8) : un appel = une requête tenue au plus 25 s.
    * "alive" (rien), "gone" (partage disparu : fermer l'interface), "stop" (ne plus surveiller).
    */
@@ -561,13 +621,22 @@ function itemError(e: unknown): unknown {
  * l'effacement ; le jeton ne lit plus rien ensuite). En cas d'échec avant de rendre
  * la main, done() est appelé d'office.
  */
+export type OpenOpts = {
+  onProgress?: (d: number, t: number) => void;
+  /** Octroi d'ouverture (rechargement, autre onglet) : rouvre la même ouverture sans en consommer. */
+  grant?: string;
+};
+
 export async function openShare(
   link: string,
   password: string,
   expectedOrigin: string,
-  onProgress?: (d: number, t: number) => void,
+  progressOrOpts?: ((d: number, t: number) => void) | OpenOpts,
   net?: api.Net,
 ): Promise<Opened> {
+  const o: OpenOpts = typeof progressOrOpts === "function" ? { onProgress: progressOrOpts } : (progressOrOpts ?? {});
+  const onProgress = o.onProgress;
+  const grant = o.grant;
   const p = parseShare(link, expectedOrigin);
   // Avant toute requête et toute dérivation (coûteuse) : un champ vide n'est pas un mot de passe.
   if (password === "") throw new Error("mot_de_passe_requis");
@@ -585,9 +654,9 @@ export async function openShare(
       keys?.kPreuve.fill(0);
     };
     try {
-      m = await api.meta(c, kAcces);
+      m = await api.meta(c, kAcces, grant);
       keys = await keysFromMeta(p.kLien, m, password);
-      u = await api.unlock(c, kAcces, keys.kPreuve);
+      u = await api.unlock(c, kAcces, keys.kPreuve, grant);
     } catch (e) {
       zero();
       throw e;
@@ -660,6 +729,8 @@ export async function openShare(
         item: (i) => wrap(() => rd.item(i)),
         saveItem: (i, sink) => wrap(() => rd.streamItem(i, sink)),
         done,
+        grant: u.grant,
+        regrant: () => guarded(() => api.regrant(c, u.downloadToken), readerError),
         // Une destruction ou une fin (done) faite ici prévient aussi la surveillance (410) :
         // ce « gone » est le nôtre, l'écran de fin vient de destroy() ou de done() ; la
         // surveillance s'arrête simplement.

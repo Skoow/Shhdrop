@@ -7,7 +7,7 @@
   import { inAppBrowser, isStandalone } from "../app/env";
   import type { LinkState } from "../app/link";
   import { scrubAddressBar } from "../app/link";
-  import { followLink, href } from "../app/router.svelte";
+  import { followLink, href, markReopen } from "../app/router.svelte";
   import { createReceiver } from "../flows/receive.svelte";
   import { formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
@@ -48,7 +48,11 @@
   // perdrait le lien sans bruit. Confirmation du navigateur tant que le lien est tenu ici
   // (verrouillé, déverrouillage, erreur de lecture) ; jamais dans un navigateur intégré, qui
   // garde le « # ».
-  const holdsLink = $derived(r.state === "locked" || r.state === "unlocking" || r.state === "error");
+  // Rechargement (reopen) : le lien et l'octroi sont dans l'onglet (spec §41.4) ; rien ne se perd.
+  // Lecture de meta (et attente des autres onglets, 400 ms) comprise : le « # » est déjà retiré.
+  const holdsLink = $derived(
+    (r.state === "meta" || r.state === "locked" || r.state === "unlocking" || r.state === "error") && !r.reopening,
+  );
   $effect(() => {
     if (!holdsLink) return;
     const warn = (e: BeforeUnloadEvent) => {
@@ -57,6 +61,21 @@
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
+  });
+
+  // Ouverture déverrouillée : cette entrée d'historique revient ici au rechargement (spec §41.4).
+  $effect(() => {
+    if (r.state === "open") untrack(() => markReopen(history));
+  });
+
+  // ---------- Activité (spec §41.4) : 30 min sans clic, touche, défilement ni retour à la page → octroi effacé ----------
+  $effect(() => {
+    const touch = () => r.touch();
+    const opts = { passive: true, capture: true };
+    for (const ev of ["pointerdown", "keydown", "scroll", "visibilitychange"]) window.addEventListener(ev, touch, opts);
+    return () => {
+      for (const ev of ["pointerdown", "keydown", "scroll", "visibilitychange"]) window.removeEventListener(ev, touch, opts);
+    };
   });
 
   // ---------- Champ (UI §12.3) ----------
@@ -103,6 +122,10 @@
         return t("open.badPw", { n: r.attemptsLeft ?? 0 });
       case "password_required":
         return t("open.pwRequired");
+      case "grant_invalid":
+        return t("open.grantInvalid");
+      case "reopen_limit":
+        return t("open.reopenLimit");
       case "limit":
         return t(r.state === "error" ? "open.meta.limit" : "open.limit", { duration: formatDuration(r.retryAfterS ?? 60, lang) });
       case "network":
@@ -164,7 +187,7 @@
 {:else}
   <section class="open" aria-labelledby={r.state === "open" ? undefined : "open-title"}>
     <div class={["capsule", capState === "open" && "bar", r.state === "open" && end !== null && "spent"]} data-capsule data-state={capState} aria-busy={r.state === "meta" ? "true" : undefined}>
-      {#if (r.state === "locked" || r.state === "unlocking") && r.expiresInS > 0}
+      {#if (r.state === "locked" || r.state === "reopen" || r.state === "unlocking") && r.expiresInS > 0}
         <TimeRim remainingS={r.remainingS()} totalS={r.expiresInS} radius={31} />
       {:else if r.state === "open" && end === null && !expired && !gone.closed}
         <TimeRim remainingS={r.remainingS()} totalS={r.expiresInS} radius={23} />
@@ -192,9 +215,9 @@
           {/if}
         {:else}
           <h1 id="open-title" class="title" tabindex="-1" bind:this={title}>
-            {r.state === "destroyed_by_password" ? t("open.destroyedByPw") : t("open.title")}
+            {r.state === "destroyed_by_password" ? t("open.destroyedByPw") : r.reopening ? t("open.reopen.title") : t("open.title")}
           </h1>
-          {#if r.state === "locked" || r.state === "unlocking"}
+          {#if r.state === "locked" || r.state === "reopen" || r.state === "unlocking"}
             <p class="avail num">{t("open.available")} <Countdown expiresInS={r.remainingS()} onexpire={() => r.expire()} /></p>
           {:else if r.state === "meta"}
             <p class="avail">{t("open.loading")}</p>
@@ -214,7 +237,7 @@
           <Button variant="ghost" onpress={() => r.continueHere()}>{t("open.inapp.continue")}</Button>
         </div>
       </div>
-    {:else if r.state === "locked" || r.state === "unlocking"}
+    {:else if r.state === "locked" || r.state === "reopen" || r.state === "unlocking"}
       <p class="intro">{t("open.intro")}</p>
       <div class="unlock">
         <label class="fl" for="shh-unlock">{t("open.password")}</label>
@@ -248,10 +271,16 @@
           </div>
         {/if}
         <p id="open-tries" class="small">{t("open.tries", { n: PW_TRIES })}</p>
-        <p id="open-cost" class="cost">{t("open.oneOpen", { n: r.opensLeft })}</p>
-        <Button variant="primary" busy={busy} disabled={pw === "" || limited} onpress={unlock} aria-describedby="open-cost">
+        {#if r.reopening}
+          <p id="open-cost" class="cost">{t("open.reopen.body")}</p>
+        {:else if r.otherTab}
+          <p id="open-cost" class="cost">{t("open.otherTab")}</p>
+        {:else if r.opensLeft > 0}
+          <p id="open-cost" class="cost">{t("open.oneOpen", { n: r.opensLeft })}</p>
+        {/if}
+        <Button variant="primary" busy={busy} disabled={pw === "" || limited} onpress={unlock} aria-describedby={r.reopening || r.otherTab || r.opensLeft > 0 ? "open-cost" : undefined}>
           {#snippet icon()}<LockOpen size={18} />{/snippet}
-          {busy ? t("open.unlocking") : t("open.unlock")}
+          {busy ? t("open.unlocking") : r.reopening ? t("open.reopen") : t("open.unlock")}
         </Button>
         <p class="trust"><ShieldCheck size={18} aria-hidden="true" /> <span>{t("open.trust")}</span></p>
       </div>

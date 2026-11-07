@@ -243,7 +243,12 @@ func (s *server) meta(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	m, err := s.svc.Meta(ka)
+	g, err := grantHeader(r)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	m, err := s.svc.MetaGrant(ka, g)
 	if err != nil {
 		fail(w, err)
 		return
@@ -276,19 +281,26 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	// Meta d'abord : il trouve le partage par V_accès, et expires_at (figé une fois prêt)
-	// plafonne le jeton. Une clé d'accès fausse échoue ici sans compter d'essai.
-	m, err := s.svc.Meta(ka)
+	// Octroi d'ouverture (facultatif, spec §41.4) : rouvre la même ouverture sans en consommer.
+	g, err := grantHeader(r)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	// Meta d'abord : il trouve le partage par V_accès (un « draining » seulement avec un octroi
+	// valable). Une clé d'accès fausse échoue ici sans compter d'essai.
+	m, err := s.svc.MetaGrant(ka, g)
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	id := m.ID
-	openN, envelope, err := s.svc.Unlock(id, ka, kp)
+	o, err := s.svc.UnlockGrant(id, ka, kp, g)
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	openN, envelope := o.N, o.Envelope
 	// Jeton de dlTTL (6 h), non plafonné à expires_at : il borne la grâce d'une ouverture
 	// active après l'échéance ; le partage reste revérifié à chaque requête (spec §41.8).
 	exp := s.svc.Now().Add(s.dlTTL).Unix()
@@ -296,7 +308,8 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 		Token    string `json:"download_token"`
 		Segments int    `json:"segments"`
 		Envelope string `json:"envelope"`
-	}{s.sig.Issue(token.Download, id, openN, time.Unix(exp, 0)), m.Segments, b64.EncodeToString(envelope)})
+		Grant    string `json:"grant"`
+	}{s.sig.Issue(token.Download, id, openN, time.Unix(exp, 0)), m.Segments, b64.EncodeToString(envelope), o.Grant})
 }
 
 func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {

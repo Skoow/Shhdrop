@@ -3,6 +3,19 @@
 // clé est lue une fois par readLink (app/link.ts), puis retirée de l'adresse.
 import { MANAGE_FRAGMENT, SHARE_FRAGMENT } from "../index";
 
+/**
+ * Marque de l'entrée d'historique d'une ouverture déverrouillée (aucun secret) : un
+ * rechargement de cette entrée, sans « # », revient à l'écran d'ouverture : état « reopen »
+ * si l'onglet garde l'octroi (spec §41.4), sinon « Lien incomplet » (Terminer, destruction,
+ * 30 min d'inactivité…). Une autre entrée (accueil) reste l'accueil.
+ */
+export const REOPEN_MARK = "shhOg";
+export function markReopen(h: History): void {
+  h.replaceState({ [REOPEN_MARK]: true }, "", location.pathname);
+}
+const reopenHere = () =>
+  typeof history !== "undefined" && (history.state as Record<string, unknown> | null)?.[REOPEN_MARK] === true;
+
 export type Route = {
   name: "home" | "open" | "manage" | "securite" | "confidentialite" | "notfound";
 };
@@ -14,7 +27,7 @@ export type Route = {
  */
 const TRUNCATED_FRAGMENT = /^#[A-Za-z0-9_-]{20,44}$/;
 
-export function match(pathname: string, hash = "", base: string = import.meta.env.BASE_URL): Route {
+export function match(pathname: string, hash = "", base: string = import.meta.env.BASE_URL, reopen = false): Route {
   const prefix = base.endsWith("/") ? base.slice(0, -1) : base; // "" ou "/Shhdrop"
   let p = pathname;
   if (prefix !== "") {
@@ -26,6 +39,7 @@ export function match(pathname: string, hash = "", base: string = import.meta.en
     if (SHARE_FRAGMENT.test(hash)) return { name: "open" };
     if (MANAGE_FRAGMENT.test(hash)) return { name: "manage" };
     if (TRUNCATED_FRAGMENT.test(hash)) return { name: "open" };
+    if (hash === "" && reopen) return { name: "open" };
     return { name: "home" };
   }
   if (p === "/securite") return { name: "securite" };
@@ -35,13 +49,13 @@ export function match(pathname: string, hash = "", base: string = import.meta.en
 }
 
 export const router = $state<{ current: Route }>({
-  current: typeof location === "undefined" ? { name: "home" } : match(location.pathname, location.hash),
+  current: typeof location === "undefined" ? { name: "home" } : match(location.pathname, location.hash, undefined, reopenHere()),
 });
 
 // Ne réaffecte que si la route change : un popstate sans effet (lien vers la page courante,
 // « # » retiré) ne relance ni les effets ni le focus.
 function sync(): void {
-  const next = match(location.pathname, location.hash);
+  const next = match(location.pathname, location.hash, undefined, reopenHere());
   if (next.name !== router.current.name) router.current = next;
 }
 

@@ -8,7 +8,7 @@
   import { lowMemory } from "../app/env";
   import { guardUnload } from "../app/lifecycle";
   import { createDownloads, readSkipping, summarize, type Target } from "../flows/downloads.svelte";
-  import { destroyFromContent, finish, type DestroyOutcome } from "../flows/endoflife";
+  import { destroyFromContent, finish, release, type DestroyOutcome } from "../flows/endoflife";
   import { ASSUMED_DOWN_BPS, transferSeconds } from "../flows/estimate";
   import { WATCH_READY } from "../flows/features";
   import type { Gone } from "../flows/gone.svelte";
@@ -229,8 +229,9 @@
   const disabled = $derived(expired || closer.closed || ended !== null);
   let wiped = false;
 
-  // UI §12.2 : sortie de page → done (keepalive), wipe, révocation. Démontage (nouveau lien
-  // collé dans la barre, autre route) : même effacement. Partage disparu : la lecture en cours
+  // UI §12.2, spec §41.4 : sortie de page → wipe, révocation, mais plus de done : l'ouverture
+  // reste valable le temps de son octroi, pour qu'un rechargement la rouvre sans en consommer.
+  // Démontage (nouveau lien collé dans la barre, autre route) : même effacement. Partage disparu : la lecture en cours
   // continue (spec §41.8), le reste s'arrête ; la fin de lecture l'attend (gone.svelte.ts).
   function leave() {
     if (closer.closedNow()) {
@@ -241,7 +242,7 @@
     wiped = true;
     dl.dispose();
     previews.clear();
-    void finish(o);
+    release(o);
   }
   $effect(() => () => leave());
 

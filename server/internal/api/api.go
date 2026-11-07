@@ -152,6 +152,7 @@ func newHandler(s *server, static http.Handler) http.Handler {
 	api.HandleFunc("POST /api/shares/unlock", s.unlock)
 	api.HandleFunc("GET /api/shares/segments/{n}", s.getSegment)
 	api.HandleFunc("POST /api/shares/done", s.done)
+	api.HandleFunc("POST /api/shares/regrant", s.regrant)
 	api.HandleFunc("POST /api/shares/destroy", s.destroy)
 	api.HandleFunc("GET /api/shares/watch", s.watch)
 	api.HandleFunc("GET /api/manage/status", s.manageStatus)
@@ -352,6 +353,10 @@ func fail(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusConflict, "incomplete")
 	case errors.Is(err, share.ErrFull):
 		writeErr(w, http.StatusInsufficientStorage, "full")
+	case errors.Is(err, share.ErrGrantInvalid):
+		writeErr(w, http.StatusConflict, "grant_invalid")
+	case errors.Is(err, share.ErrReopenLimit):
+		writeErr(w, http.StatusTooManyRequests, "reopen_limit")
 	case errors.Is(err, share.ErrBudget):
 		writeRetry(w, http.StatusTooManyRequests, "budget", budgetRetry)
 	case errors.Is(err, share.ErrFrozen):

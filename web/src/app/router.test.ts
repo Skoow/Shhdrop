@@ -11,6 +11,12 @@ describe("match", () => {
     expect(match("/confidentialite")).toEqual({ name: "confidentialite" });
   });
 
+  it("spec §41.4 : rechargement d'une ouverture déverrouillée (marque + octroi gardé) → ouverture ; sinon accueil", () => {
+    expect(match("/", "", "/", true)).toEqual({ name: "open" });
+    expect(match("/", "", "/", false)).toEqual({ name: "home" });
+    expect(match("/securite", "", "/", true)).toEqual({ name: "securite" });
+  });
+
   it("spec §32 : « / » + fragment de partage ou de gestion → ouverture ou gestion ; la clé n'est pas gardée", () => {
     expect(match("/", `#${KEY}`)).toEqual({ name: "open" });
     expect(match("/", `#m${KEY}`)).toEqual({ name: "manage" });

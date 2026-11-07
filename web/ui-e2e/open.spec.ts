@@ -42,7 +42,8 @@ test("mauvais mot de passe deux fois → « 3 essais restants », bon → conten
 
   // M9 : le geste irréversible annoncé avant, relié au bouton ; textes de confiance.
   // Ruling 5 : ouvertures restantes lues par fetchMeta (partage à 3 ouvertures).
-  const cost = "L'ouvrir compte une ouverture, même si vous rechargez la page. Il peut encore être ouvert 3\u00a0fois.";
+  const cost =
+    "Ce partage peut être ouvert encore 3\u00a0fois. Ouvrir ce partage compte une ouverture. Recharger la page ou l'ouvrir dans un autre onglet de ce navigateur n'en compte pas d'autre pendant 30\u00a0minutes.";
   await expect(page.getByText(cost)).toBeVisible();
   await expect(unlockButton(page)).toHaveAccessibleDescription(cost);
   await expect(page.getByText("Le serveur ne reçoit que des données chiffrées, jamais la clé.")).toBeVisible();

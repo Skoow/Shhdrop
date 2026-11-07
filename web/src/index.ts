@@ -4,6 +4,9 @@
 export {
   BadPasswordError,
   CAPTCHA_MIN_MS,
+  GrantInvalidError,
+  ReopenLimitError,
+  grantTag,
   LimitError,
   NotFoundError,
   ReadBudgetError,
@@ -19,6 +22,7 @@ export {
   type CreateOpts,
   type Net,
   type Opened,
+  type OpenOpts,
   type PreviewKind,
 } from "./transfer/client";
 export { prepareCaptcha, type PreparedCaptcha } from "./transfer/prepare";

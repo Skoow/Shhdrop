@@ -7,7 +7,9 @@ import { b64u, utf8 } from "../crypto/encoding";
 import { segmentSize } from "../crypto/container";
 import {
   BadPasswordError,
+  GrantInvalidError,
   NotFoundError,
+  ReopenLimitError,
   collectToBlob,
   createShare,
   destroyShare,
@@ -124,6 +126,41 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     expect(statuses.at(-1)).toBe("POST /api/shares/done 410"); // jeton valide, partage disparu (spec §41.8)
   });
 
+  it("spec §41.4 : l'octroi rouvre la même ouverture (même en draining), 10 fois au plus ; faux → GrantInvalidError", async ({ expect }) => {
+    let offset = 0;
+    const { fake, net } = setup({ now: () => Date.now() + offset });
+    const r = await share(net, 1);
+    const o = await openShare(r.link, PW, ORIGIN, undefined, net);
+    expect(o.grant).toMatch(/^[A-Za-z0-9_-]{54}$/);
+    let g = o.grant;
+    expect((await fetchMeta(r.link, ORIGIN, net, g)).opensLeft).toBe(0); // draining, rouvrable
+    for (let i = 0; i < 10; i++) {
+      const again = await openShare(r.link, PW, ORIGIN, { grant: g }, net);
+      g = again.grant;
+    }
+    expect(await shareStatus(r.manage, ORIGIN, net)).toMatchObject({ opensUsed: 1, state: "draining" });
+    await expect(openShare(r.link, PW, ORIGIN, { grant: g }, net)).rejects.toBeInstanceOf(ReopenLimitError);
+    const bad = await openShare(r.link, "faux", ORIGIN, { grant: "A".repeat(54) }, net).catch((x: unknown) => x);
+    expect(bad).toBeInstanceOf(NotFoundError); // draining sans octroi valable : introuvable
+    // Octroi expiré sans renouvellement (30 min) : l'ouverture finit, le draining est effacé.
+    offset += 31 * 60_000;
+    expect(fake.shares()).toBe(0);
+  });
+
+  it("spec §41.4 : partage prêt, octroi falsifié → GrantInvalidError sans essai ; done → l'octroi ne rouvre plus", async ({ expect }) => {
+    const { net } = setup();
+    const r = await share(net, 3);
+    const o = await openShare(r.link, PW, ORIGIN, undefined, net);
+    await expect(openShare(r.link, "faux", ORIGIN, { grant: "A".repeat(54) }, net)).rejects.toBeInstanceOf(GrantInvalidError);
+    const again = await openShare(r.link, PW, ORIGIN, { grant: o.grant }, net);
+    expect(await shareStatus(r.manage, ORIGIN, net)).toMatchObject({ opensUsed: 1 });
+    expect(await again.regrant()).toMatch(/^[A-Za-z0-9_-]{54}$/);
+    await again.done();
+    await expect(openShare(r.link, PW, ORIGIN, { grant: again.grant }, net)).rejects.toBeInstanceOf(GrantInvalidError);
+    const bad = await openShare(r.link, "faux", ORIGIN, undefined, net).catch((x: unknown) => x);
+    expect((bad as BadPasswordError).attemptsLeft).toBe(4); // l'octroi falsifié n'a compté aucun essai
+  });
+
   it("dernière ouverture lue (done) : le partage « draining » est effacé", async ({ expect }) => {
     const { fake, net } = setup();
     const r = await share(net, 1);
@@ -231,7 +268,14 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     const r = await share(net, 3, [big]);
     const a = await openShare(r.link, PW, ORIGIN, undefined, net);
     const b = await openShare(r.link, PW, ORIGIN, undefined, net);
-    offset = ((await fetchMeta(r.link, ORIGIN, net)).expiresInS - 30) * 1000; // 30 s avant l'échéance
+    // 30 s avant l'échéance, octrois renouvelés au moins toutes les 25 min (comme la page,
+    // spec §41.4) : sinon l'ouverture finirait 30 min après le déverrouillage.
+    const target = ((await fetchMeta(r.link, ORIGIN, net)).expiresInS - 30) * 1000;
+    while (offset < target) {
+      offset = Math.min(target, offset + 25 * 60_000);
+      await a.regrant();
+      await b.regrant();
+    }
     expect(Buffer.from(await a.item(0)).equals(Buffer.from(big.data))).toBe(true);
     offset += 100_000; // échu, segment servi il y a 100 s : active
     expect(Buffer.from(await a.item(0)).equals(Buffer.from(big.data))).toBe(true);

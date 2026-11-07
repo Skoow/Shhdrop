@@ -301,10 +301,20 @@ export async function finalize(c: Ctx, token: string, b: FinalizeBody, signal?: 
 
 export type Meta = { expiresInS: number; salt: string; kdf: { ops: number; mem: number }; bucket: number; segments: number; opensLeft: number };
 
-export async function meta(c: Ctx, kAcces: KAcces): Promise<Meta> {
+/** Octroi d'ouverture (spec §41.4) : 40 octets, soit 54 caractères base64url exactement. */
+export const GRANT_CHARS = 54;
+const GRANT_RE = /^[A-Za-z0-9_-]{54}$/;
+
+const grantHeader = (grant?: string): Record<string, string> => (grant ? { "X-Shh-Grant": grant } : {});
+
+/**
+ * meta ; avec un octroi (rechargement), un partage dont toutes les ouvertures sont prises
+ * (« draining ») reste lisible pour l'ouverture en cours : opens_left vaut alors 0.
+ */
+export async function meta(c: Ctx, kAcces: KAcces, grant?: string): Promise<Meta> {
   const o = await send(
     c,
-    { method: "GET", path: "/api/shares/meta", headers: { "X-Shh-Access": b64u(kAcces) }, retry: true },
+    { method: "GET", path: "/api/shares/meta", headers: { "X-Shh-Access": b64u(kAcces), ...grantHeader(grant) }, retry: true },
     readJSON,
   );
   const k = obj(o.kdf);
@@ -314,14 +324,20 @@ export async function meta(c: Ctx, kAcces: KAcces): Promise<Meta> {
     kdf: { ops: num(k, "ops"), mem: num(k, "mem") },
     bucket: num(o, "bucket"),
     segments: num(o, "segments"),
-    opensLeft: opensLeft(num(o, "opens_left")),
+    opensLeft: opensLeft(num(o, "opens_left"), grant !== undefined && grant !== ""),
   };
 }
 
-/** Un partage lisible a au moins une ouverture restante (ruling 5). */
-function opensLeft(n: number): number {
-  if (n < 1) throw new BadResponse();
+/** Un partage lisible a au moins une ouverture restante (ruling 5), sauf rouvert par octroi. */
+function opensLeft(n: number, reopen: boolean): number {
+  if (n < (reopen ? 0 : 1)) throw new BadResponse();
   return n;
+}
+
+function grantOf(o: Record<string, unknown>): string {
+  const g = str(o, "grant");
+  if (!GRANT_RE.test(g)) throw new BadResponse();
+  return g;
 }
 
 /** Enveloppe E rendue par unlock : 60 octets, soit 80 caractères base64url exactement. */
@@ -337,23 +353,30 @@ function envelopeOf(o: Record<string, unknown>): Uint8Array<ArrayBuffer> {
   }
 }
 
-// Jamais rejoué : un déverrouillage réussi consomme une ouverture, un échec compte un essai.
+// Jamais rejoué : un déverrouillage réussi consomme une ouverture (sauf avec un octroi
+// valable : même ouverture, spec §41.4), un échec compte un essai.
 export async function unlock(
   c: Ctx,
   kAcces: KAcces,
   kPreuve: KPreuve,
-): Promise<{ downloadToken: string; segments: number; envelope: Uint8Array<ArrayBuffer> }> {
+  grant?: string,
+): Promise<{ downloadToken: string; segments: number; envelope: Uint8Array<ArrayBuffer>; grant: string }> {
   const o = await send(
     c,
     {
       method: "POST",
       path: "/api/shares/unlock",
       ...json({ proof: b64u(kPreuve) }),
-      headers: { "Content-Type": "application/json", "X-Shh-Access": b64u(kAcces) },
+      headers: { "Content-Type": "application/json", "X-Shh-Access": b64u(kAcces), ...grantHeader(grant) },
     },
     readJSON,
   );
-  return { downloadToken: str(o, "download_token"), segments: num(o, "segments"), envelope: envelopeOf(o) };
+  return { downloadToken: str(o, "download_token"), segments: num(o, "segments"), envelope: envelopeOf(o), grant: grantOf(o) };
+}
+
+/** Octroi renouvelé pour 30 min (jamais au-delà du jeton) ; rejouable. */
+export async function regrant(c: Ctx, token: string): Promise<string> {
+  return grantOf(await send(c, { method: "POST", path: "/api/shares/regrant", headers: bearer(token), retry: true }, readJSON));
 }
 
 export async function getSegment(c: Ctx, token: string, n: number, size: number): Promise<Uint8Array<ArrayBuffer>> {

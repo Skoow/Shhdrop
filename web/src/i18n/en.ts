@@ -384,7 +384,7 @@ export const en = {
   "open.destroyedByPw": "Wrong password. The share has been destroyed.",
 
   "content.banner":
-    "Available for {duration} · disappears when you leave the page · reloading uses an open",
+    "Available for {duration} · disappears when you leave the page · reloading does not count another open for 30\u00a0min",
   "content.finish": "Finish and erase",
   "content.undecodable":
     "This file can't be played on this device. Save it to open it with another app.",
@@ -421,8 +421,17 @@ export const en = {
   "open.title": "An encrypted share is waiting for you",
   "open.loading": "Reading the share…",
   "open.available": "Available for",
-  "open.oneOpen.one": "Opening it counts as one open, even if you reload the page. It can be opened {n}\u00a0more time.",
-  "open.oneOpen.other": "Opening it counts as one open, even if you reload the page. It can be opened {n}\u00a0more times.",
+  "open.oneOpen.one":
+    "This share can be opened {n}\u00a0more time. Opening it counts as one open. Reloading the page or opening it in another tab of this browser does not count another one for 30\u00a0minutes.",
+  "open.oneOpen.other":
+    "This share can be opened {n}\u00a0more times. Opening it counts as one open. Reloading the page or opening it in another tab of this browser does not count another one for 30\u00a0minutes.",
+  // Reload and other tabs (spec §41.4, UI §9.7.1)
+  "open.reopen.title": "Reopen this share",
+  "open.reopen.body": "You already unlocked this share. Enter the password to reopen it: this does not count another open.",
+  "open.reopen": "Reopen",
+  "open.otherTab": "This share is already open in another tab: opening it here does not count another open.",
+  "open.grantInvalid": "The previous open has expired. Unlocking will use a new one.",
+  "open.reopenLimit": "Too many reloads: a new open will be counted.",
   "open.password": "Password",
   "open.pw.show": "Show password",
   "open.pw.hide": "Hide password",

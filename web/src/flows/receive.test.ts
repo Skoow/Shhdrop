@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { BadPasswordError, LimitError, NotFoundError, ServerError, type Opened } from "../index";
+import { BadPasswordError, GrantInvalidError, LimitError, NotFoundError, ReopenLimitError, ServerError, type Opened } from "../index";
+import type { OpenGrantEntry } from "../session/open-grant";
 import { createReceiver, type ReceiverDeps } from "./receive.svelte";
 
 const LINK = "https://x.test/#" + "A".repeat(43);
@@ -10,12 +11,57 @@ function setup(over: Partial<ReceiverDeps> = {}, link: string | null = LINK) {
   let t = 1_000_000;
   const clock = { advance: (ms: number) => (t += ms) };
   const fetchMeta = vi.fn(async () => ({ expiresInS: 3600, opensLeft: 3 }));
-  const opened = { manifest: { v: 2, rights: "enregistrer", items: [] } } as unknown as Opened;
+  const opened = { manifest: { v: 2, rights: "enregistrer", items: [] }, grant: GRANT, regrant: vi.fn(async () => GRANT2) } as unknown as Opened;
   const openShare = vi.fn(async (): Promise<Opened> => opened);
   const scrub = vi.fn();
-  const deps = { fetchMeta, openShare, scrub, now: () => t, inAppBrowser: () => null, origin: "https://x.test", online: () => true, ...over };
+  const timers: { ms: number; f: () => void; on: boolean }[] = [];
+  const every = (ms: number, f: () => void) => {
+    const x = { ms, f, on: true };
+    timers.push(x);
+    return () => void (x.on = false);
+  };
+  /** Avance l'horloge et déclenche les minuteries échues (une fois par période franchie). */
+  const tick = (ms: number) => {
+    for (let k = 0; k < ms; k += 60_000) {
+      t += 60_000;
+      for (const x of [...timers]) if (x.on && (t - 1_000_000) % x.ms === 0) x.f();
+    }
+  };
+  const store = memStore();
+  const deps: Partial<ReceiverDeps> = {
+    fetchMeta,
+    openShare,
+    scrub,
+    now: () => t,
+    inAppBrowser: () => null,
+    origin: "https://x.test",
+    online: () => true,
+    grants: store,
+    tag: async () => TAG,
+    askTabs: async () => null,
+    answerTabs: () => () => undefined,
+    visible: () => true,
+    every,
+    ...over,
+  };
   const r = createReceiver(link === null ? { kind: "incomplete" } : { kind: "s", link }, deps);
-  return { r, fetchMeta: deps.fetchMeta, openShare: deps.openShare, scrub: deps.scrub, clock, opened };
+  return { r, fetchMeta: deps.fetchMeta!, openShare: deps.openShare!, scrub: deps.scrub!, clock, opened, store, tick, timers };
+}
+
+const GRANT = "G".repeat(54);
+const GRANT2 = "H".repeat(54);
+const TAG = "T".repeat(22);
+
+function memStore(init: OpenGrantEntry | null = null) {
+  let v: OpenGrantEntry | null = init;
+  return {
+    load: vi.fn(() => v),
+    save: vi.fn((e: OpenGrantEntry) => void (v = { ...e })),
+    clear: vi.fn(() => void (v = null)),
+    get value() {
+      return v;
+    },
+  };
 }
 
 /** Toute valeur atteignable depuis l'objet exposé (getters lus), en texte. */
@@ -220,3 +266,152 @@ describe("createReceiver (UI §9.7)", () => {
     expect(r.opened).toBeUndefined();
   });
 });
+
+describe("rechargement et autres onglets (spec §41.4, UI §9.7.1)", () => {
+  const KEY = "A".repeat(43);
+  const entry = (over: Partial<OpenGrantEntry> = {}): OpenGrantEntry => ({ v: 1, link: KEY, grant: GRANT, last: 1_000_000, ...over });
+
+  it("saveOpenGrant seulement après un openShare réussi ; ni mot de passe ni clé dans l'entrée", async () => {
+    const store = memStore();
+    let fail = true;
+    const { r } = setup({
+      grants: store,
+      openShare: vi.fn(async () => (fail ? Promise.reject(new BadPasswordError(4)) : ({ grant: GRANT, regrant: vi.fn() } as unknown as Opened))),
+    });
+    await flush();
+    await r.unlock(PW);
+    expect(store.save).not.toHaveBeenCalled();
+    fail = false;
+    await r.unlock(PW);
+    expect(store.save).toHaveBeenCalledTimes(1);
+    const v = store.value!;
+    expect(Object.keys(v).sort()).toEqual(["grant", "last", "link", "v"]);
+    expect(v.link).toBe(KEY);
+    expect(v.grant).toBe(GRANT);
+    expect(JSON.stringify(v)).not.toContain(PW);
+  });
+
+  it("rechargement (sans « # ») avec entrée → reopen, mot de passe ressaisi, unlock avec l'octroi", async () => {
+    const store = memStore(entry());
+    const { r, fetchMeta, openShare } = setup({ grants: store }, null);
+    await flush();
+    expect(r.state).toBe("reopen");
+    expect(fetchMeta).toHaveBeenCalledWith(LINK, "https://x.test", GRANT);
+    await r.unlock(PW);
+    expect(openShare).toHaveBeenCalledWith(LINK, PW, "https://x.test", GRANT);
+    expect(r.state).toBe("open");
+  });
+
+  it("mauvais mot de passe en reopen : reste en reopen, essais affichés", async () => {
+    const { r } = setup({ grants: memStore(entry()), openShare: vi.fn(async () => Promise.reject(new BadPasswordError(4))) }, null);
+    await flush();
+    await r.unlock("faux");
+    expect([r.state, r.error, r.attemptsLeft]).toEqual(["reopen", "bad_password", 4]);
+  });
+
+  it("un « # » différent du lien gardé efface l'entrée (autre partage)", async () => {
+    const store = memStore(entry({ link: "B".repeat(43) }));
+    const { r, fetchMeta } = setup({ grants: store });
+    await flush();
+    expect(store.clear).toHaveBeenCalled();
+    expect(r.state).toBe("locked");
+    expect(fetchMeta).toHaveBeenCalledWith(LINK, "https://x.test");
+  });
+
+  it("grant_invalid et reopen_limit : entrée effacée, retour à locked avec la phrase, puis déverrouillage sans octroi", async () => {
+    for (const [err, code] of [[new GrantInvalidError(), "grant_invalid"], [new ReopenLimitError(), "reopen_limit"]] as const) {
+      const store = memStore(entry());
+      let first = true;
+      const openShare = vi.fn(async () => {
+        if (first) {
+          first = false;
+          throw err;
+        }
+        return { grant: GRANT2, regrant: vi.fn() } as unknown as Opened;
+      });
+      const { r } = setup({ grants: store, openShare }, null);
+      await flush();
+      await r.unlock(PW);
+      expect([r.state, r.error]).toEqual(["locked", code]);
+      expect(store.value).toBeNull();
+      await r.unlock(PW);
+      expect(openShare).toHaveBeenLastCalledWith(LINK, PW, "https://x.test");
+      expect(store.value?.grant).toBe(GRANT2);
+    }
+  });
+
+  it("NotFoundError, échéance et forget (Terminer, destruction, disparition) effacent l'entrée", async () => {
+    const a = memStore(entry());
+    const ra = setup({ grants: a, fetchMeta: vi.fn(async () => Promise.reject(new NotFoundError())) }, null).r;
+    await flush();
+    expect([ra.state, a.value]).toEqual(["invalid", null]);
+    const b = memStore(entry());
+    const rb = setup({ grants: b }, null).r;
+    await flush();
+    rb.expire();
+    expect(b.value).toBeNull();
+    const c = memStore();
+    const rc = setup({ grants: c }).r;
+    await flush();
+    await rc.unlock(PW);
+    expect(c.value).not.toBeNull();
+    rc.forget();
+    expect(c.value).toBeNull();
+  });
+
+  it("30 min sans activité : entrée effacée ; l'activité la garde ; renouvellement toutes les 10 min page visible", async () => {
+    const store = memStore();
+    let visible = true;
+    const { r, tick, opened } = setup({ grants: store, visible: () => visible });
+    await flush();
+    await r.unlock(PW);
+    tick(10 * 60_000);
+    await flush();
+    expect(opened.regrant).toHaveBeenCalledTimes(1);
+    expect(store.value?.grant).toBe(GRANT2);
+    visible = false;
+    tick(10 * 60_000);
+    expect(opened.regrant).toHaveBeenCalledTimes(1); // page cachée : rien
+    visible = true;
+    r.touch();
+    tick(29 * 60_000);
+    expect(store.value).not.toBeNull();
+    tick(60_000);
+    expect(store.value).toBeNull();
+  });
+
+  it("entrée de plus de 30 min au chargement : effacée, écran normal", async () => {
+    const store = memStore(entry({ last: 1_000_000 - 30 * 60_000 }));
+    const { r } = setup({ grants: store }, null);
+    await flush();
+    expect(r.state).toBe("incomplete");
+    expect(store.value).toBeNull();
+  });
+
+  it("autre onglet : octroi reçu → même ouverture, phrase « déjà ouvert » ; sans réponse → écran normal", async () => {
+    const ask = vi.fn(async () => GRANT2);
+    const { r, openShare, fetchMeta } = setup({ askTabs: ask });
+    await flush();
+    expect(ask).toHaveBeenCalledWith(TAG);
+    expect([r.state, r.otherTab]).toEqual(["locked", true]);
+    expect(fetchMeta).toHaveBeenCalledWith(LINK, "https://x.test", GRANT2);
+    await r.unlock(PW);
+    expect(openShare).toHaveBeenCalledWith(LINK, PW, "https://x.test", GRANT2);
+    const r2 = setup({ askTabs: vi.fn(async () => null) }).r;
+    await flush();
+    expect([r2.state, r2.otherTab]).toEqual(["locked", false]);
+  });
+
+  it("répond aux autres onglets avec l'octroi en mémoire, pour sa seule étiquette ; plus après forget", async () => {
+    let answer: ((tag: string) => string | null) | null = null;
+    const { r } = setup({ answerTabs: (g) => ((answer = g), () => void (answer = null)) });
+    await flush();
+    expect(answer).toBeNull();
+    await r.unlock(PW);
+    expect(answer!(TAG)).toBe(GRANT);
+    expect(answer!("U".repeat(22))).toBeNull();
+    r.forget();
+    expect(answer).toBeNull();
+  });
+});
+

@@ -100,6 +100,9 @@ type Config struct {
 	// OnAbandon (facultatif) : appelé quand un envoi est effacé sans avoir été finalisé
 	// (quotas d'octets abandonnés, spec §29.5). Ne doit pas bloquer.
 	OnAbandon func(id string, bucket int)
+	// KillWait (commande d'administration seulement) : attente de la coupure, par le serveur
+	// en marche, d'un partage déjà détaché (DestroyAdmin, kill.go) ; 0 : aucune demande.
+	KillWait time.Duration
 }
 
 // NewService valide la configuration : une valeur zéro ne doit jamais désactiver le gel
@@ -117,8 +120,10 @@ func NewService(c Config) (*Service, error) {
 	case c.FrozenFile == "" || !filepath.IsAbs(c.FrozenFile):
 		return nil, errors.New("share : FrozenFile doit être un chemin absolu")
 	}
-	return &Service{DB: c.DB, Blobs: c.Blobs, Now: c.Now, StorageMax: c.StorageMax, FrozenFile: c.FrozenFile,
-		OnAbandon: c.OnAbandon}, nil
+	s := &Service{DB: c.DB, Blobs: c.Blobs, Now: c.Now, StorageMax: c.StorageMax, FrozenFile: c.FrozenFile,
+		OnAbandon: c.OnAbandon, KillWait: c.KillWait}
+	rand.Read(s.grantKey[:]) // clé des octrois d'ouverture, propre à ce processus (spec §41.4)
+	return s, nil
 }
 
 // Service : à construire avec NewService.
@@ -129,6 +134,7 @@ type Service struct {
 	StorageMax int64
 	FrozenFile string
 	OnAbandon  func(id string, bucket int)
+	KillWait   time.Duration
 
 	createMu sync.Mutex   // rend atomiques « place libre ? » et la réservation
 	uploadMu sync.RWMutex // Finalize attend la fin des écritures de segments en cours
@@ -142,7 +148,9 @@ type Service struct {
 		purge map[string]int64
 	}
 	streams Streams   // flux de segments annulables (spec §41.8)
-	gone    goneState // ouvertures actives, descripteurs détachés, surveillances (spec §41.8)
+	gone    goneState // ouvertures actives, descripteurs détachés, surveillances, octrois (spec §41.4, §41.8)
+	// grantKey : clé HMAC des octrois d'ouverture, tirée au démarrage, jamais écrite.
+	grantKey [32]byte
 	// finalizing : envois dont un Finalize est en cours ; un seul à la fois par id, pour
 	// qu'aucun appel concurrent ne réécrive le bourrage (revue K1, I1).
 	finalizing struct {
@@ -615,22 +623,32 @@ func (s *Service) Meta(kAcces []byte) (Meta, error) {
 	return m, nil
 }
 
-// Unlock (id rendu par Meta) vérifie K_accès puis K_preuve ; juste : consomme une ouverture et rend son
-// numéro avec l'enveloppe E (spec §29.8), seulement en « ready » (proof_v et envelope ne
-// sont posés que par Finalize).
+// Unlock : UnlockGrant sans octroi, qui ne rend que le numéro et l'enveloppe.
 func (s *Service) Unlock(id string, kAcces, kPreuve []byte) (int, []byte, error) {
+	o, err := s.UnlockGrant(id, kAcces, kPreuve, "")
+	return o.N, o.Envelope, err
+}
+
+// UnlockGrant (id rendu par Meta) vérifie K_accès puis K_preuve. Sans octroi : consomme une
+// ouverture (seulement en « ready » : proof_v et envelope ne sont posés que par Finalize) et
+// rend son numéro, l'enveloppe E (spec §29.8) et l'octroi d'ouverture (spec §41.4). Avec un
+// octroi : rouvre la même ouverture sans en consommer (reopen).
+func (s *Service) UnlockGrant(id string, kAcces, kPreuve []byte, grant string) (Opened, error) {
 	if !validID(id) {
-		return 0, nil, ErrNotFound
+		return Opened{}, ErrNotFound
+	}
+	if grant != "" {
+		return s.reopen(id, kAcces, kPreuve, grant)
 	}
 	now := s.now()
 	var accessV, proofV, envelope []byte
 	err := s.DB.QueryRow(`SELECT access_v, proof_v, envelope FROM shares WHERE id=? AND state='ready' AND expires_at>?
 		AND proof_v IS NOT NULL AND envelope IS NOT NULL`, id, now).Scan(&accessV, &proofV, &envelope)
 	if err != nil {
-		return 0, nil, notFound(err)
+		return Opened{}, notFound(err)
 	}
 	if !match(kAcces, accessV) {
-		return 0, nil, ErrNotFound // ne compte pas comme essai
+		return Opened{}, ErrNotFound // ne compte pas comme essai
 	}
 	if match(kPreuve, proofV) {
 		var openN int
@@ -641,20 +659,23 @@ func (s *Service) Unlock(id string, kAcces, kPreuve []byte) (int, []byte, error)
 			WHERE id=? AND state='ready' AND opens_left>0 AND expires_at>? AND failed_attempts<?
 			RETURNING opens_issued, state, expires_at`, id, now, maxAttempts).Scan(&openN, &state, &exp)
 		if err != nil {
-			return 0, nil, notFound(err)
+			return Opened{}, notFound(err)
 		}
 		if state == "draining" {
 			// Purge (dernière ouverture émise + 6 h, durée de son jeton) en mémoire seulement :
 			// en base, elle daterait la dernière ouverture à 15 min près (spec §36 S12).
 			s.setPurge(id, min(ceil15(now+purgeWindow), exp))
 		}
-		return openN, envelope, nil
+		s.gone.mu.Lock()
+		g := s.grantLocked(openKey{id, openN}, exp, now)
+		s.gone.mu.Unlock()
+		return Opened{N: openN, Envelope: envelope, Grant: g}, nil
 	}
 	left, err := s.countFailure(id)
 	if err != nil {
-		return 0, nil, err
+		return Opened{}, err
 	}
-	return 0, nil, &BadPassword{AttemptsLeft: left}
+	return Opened{}, &BadPassword{AttemptsLeft: left}
 }
 
 // countFailure compte un mauvais K_preuve (Unlock et Destroy partagent le compteur)
@@ -683,6 +704,10 @@ func (s *Service) Done(id string, openN int) error {
 	if !validID(id) || openN < 1 || openN > maxOpenN {
 		return ErrNotFound
 	}
+	s.gone.mu.Lock()
+	s.gone.init()
+	delete(s.gone.grants, openKey{id, openN}) // l'ouverture finit : son octroi ne rouvre plus rien
+	s.gone.mu.Unlock()
 	if handled, err := s.doneDetached(id, openN); handled {
 		return err
 	}
@@ -842,7 +867,9 @@ func (s *Service) Status(sGestion []byte) (Status, error) {
 
 // DestroyAdmin : destruction par l'administrateur, à partir de K_accès (dérivée du lien
 // signalé par la commande d'administration), quel que soit l'état du partage. Aucune grâce :
-// un contenu signalé n'est plus servi (spec §41.8, Q-GONE3).
+// un contenu signalé n'est plus servi (spec §41.8, Q-GONE3). Un partage déjà retiré dont des
+// ouvertures finissent sur un descripteur détaché est coupé aussi : ici s'il l'est dans ce
+// processus, sinon par le serveur en marche (requestKill, PollRemoved).
 func (s *Service) DestroyAdmin(kAcces []byte) error {
 	v := Verifier(kAcces)
 	if v == nil {
@@ -850,7 +877,13 @@ func (s *Service) DestroyAdmin(kAcces []byte) error {
 	}
 	var id string
 	if err := s.DB.QueryRow(`SELECT id FROM shares WHERE access_v=?`, v).Scan(&id); err != nil {
-		return notFound(err)
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if s.cutDetached(v) {
+			return nil
+		}
+		return s.requestKill(v)
 	}
 	return s.retireOrNotFound(id, false)
 }
@@ -863,6 +896,7 @@ func (s *Service) DestroyAdmin(kAcces []byte) error {
 // aussi les descripteurs détachés qui ne servent plus. Continue malgré les erreurs.
 func (s *Service) Sweep() (int, error) {
 	now := s.now()
+	gerr := s.sweepGrants(now)
 	s.sweepGone(now)
 	rows, err := s.DB.Query(`SELECT id FROM shares WHERE state<>'ready' OR expires_at<=? OR failed_attempts>=?`, now, maxAttempts)
 	if err != nil {
@@ -882,7 +916,7 @@ func (s *Service) Sweep() (int, error) {
 		return 0, err
 	}
 	removed := 0
-	var errs []error
+	errs := []error{gerr}
 	for _, id := range ids {
 		ok, err := s.sweepOne(id, now)
 		if err != nil {

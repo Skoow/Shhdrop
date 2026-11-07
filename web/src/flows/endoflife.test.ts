@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LimitError, NotFoundError, type Opened } from "../index";
 import { liveUrls, trackUrl } from "../viewers/blobs";
-import { destroyFromContent, finish } from "./endoflife";
+import { destroyFromContent, finish, release } from "./endoflife";
 
 function fake(destroy: () => Promise<void> = async () => undefined, done: () => Promise<void> = async () => undefined) {
   const log: string[] = [];
@@ -34,6 +34,18 @@ describe("finish", () => {
     const b = fake(undefined, async () => Promise.reject(new Error("reseau")));
     await expect(finish(b.o)).resolves.toBeUndefined();
     expect(b.log).toEqual(["done", "wipe"]);
+  });
+});
+
+describe("release (pagehide, démontage ; spec §41.4)", () => {
+  it("wipe() et révocation, jamais done() : l'ouverture reste rouvrable par son octroi", () => {
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:x/b");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    trackUrl(new Blob(["b"]));
+    const a = fake();
+    release(a.o);
+    expect(a.log).toEqual(["wipe"]);
+    expect(liveUrls()).toBe(0);
   });
 });
 

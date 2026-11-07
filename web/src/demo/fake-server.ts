@@ -30,6 +30,8 @@ const MIN_FILL_S = 3; // création refusée moins de 3 s après l'émission du d
 const ACTIVE_S = 120; // ouverture active : un segment dans les 120 s (spec §41.8)
 const GRACE_S = 2 * 3600; // grâce après l'échéance ou la suppression
 const WATCH_HOLD_MS = 25_000;
+const GRANT_TTL_S = 30 * 60; // octroi d'ouverture (spec §41.4)
+const MAX_REOPENS = 10;
 
 type State = "uploading" | "ready" | "draining";
 
@@ -187,6 +189,34 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
   const watchers = new Map<string, Set<() => void>>();
   const revoked = new Set<string>();
   const ak = (id: string, n: number) => `${id}:${n}`;
+  // Octrois d'ouverture (spec §41.4) : chaîne opaque → ouverture ; (id, n) → échéance et
+  // rechargements, comme le serveur (en mémoire ; rien n'est gardé ailleurs).
+  const grantStr = new Map<string, { id: string; openN: number; exp: number }>();
+  const grantOf = new Map<string, { exp: number; reopens: number }>();
+  function grant(id: string, openN: number, cap: number): string {
+    const t = now();
+    const exp = Math.min(t + GRANT_TTL_S, cap);
+    const e = grantOf.get(ak(id, openN)) ?? { exp: 0, reopens: 0 };
+    e.exp = Math.max(e.exp, exp);
+    grantOf.set(ak(id, openN), e);
+    const g = randomId(40);
+    grantStr.set(g, { id, openN, exp });
+    return g;
+  }
+  function grantHeader(req: Request): string | null {
+    const v = req.headers.get("X-Shh-Grant");
+    if (v === null) return null;
+    if (v.includes(",")) throw badRequest();
+    decodeB64(v, 40);
+    return v;
+  }
+  /** Octroi valable de l'ouverture encore vivante (non terminée, non balayée) du partage id. */
+  function liveGrant(g: string, id: string, s: Share): number | null {
+    const x = grantStr.get(g);
+    if (x === undefined || x.id !== id || x.exp <= now()) return null;
+    if (!grantOf.has(ak(id, x.openN)) || x.openN > s.opensIssued || (s.doneMask & (1 << (x.openN - 1))) !== 0) return null;
+    return x.openN;
+  }
   const isActive = (id: string, n: number, t: number) => {
     const a = active.get(ak(id, n));
     return a !== undefined && (a.inflight > 0 || t - a.last < ACTIVE_S);
@@ -223,6 +253,13 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
       else if (s.state !== "uploading" && s.expiresAt <= t) retire(id, true, s.expiresAt);
       else if ((s.state === "draining" && s.purgeAt <= t) || s.failed >= MAX_ATTEMPTS) retire(id, true, t);
     }
+    for (const [k, e] of grantOf) {
+      const i = k.lastIndexOf(":");
+      const id = k.slice(0, i);
+      const n = Number(k.slice(i + 1));
+      if (e.exp <= t && !isActive(id, n, t)) endOpen(id, n);
+    }
+    for (const [g, x] of grantStr) if (x.exp <= t || !grantOf.has(ak(x.id, x.openN))) grantStr.delete(g);
     for (const [id, d] of dead) {
       for (const n of d.opens) if (t >= d.graceEnd || !isActive(id, n, t)) d.opens.delete(n);
       if (d.opens.size === 0) dead.delete(id);
@@ -408,8 +445,19 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     return e;
   }
 
+  /** Comme readable, et aussi un « draining » pour qui porte un octroi vivant (spec §41.4). */
+  async function reopenable(kAcces: Uint8Array, g: string | null): Promise<[string, Share]> {
+    const e = await find(kAcces, "accessV");
+    if (e === undefined) throw notFound();
+    const s = e[1];
+    if (s.expiresAt <= now() || s.failed >= MAX_ATTEMPTS) throw notFound();
+    if (s.state === "ready") return e;
+    if (s.state === "draining" && g !== null && liveGrant(g, e[0], s) !== null) return e;
+    throw notFound();
+  }
+
   async function meta(req: Request): Promise<Response> {
-    const [, s] = await readable(headerSecret(req, "X-Shh-Access"));
+    const [, s] = await reopenable(headerSecret(req, "X-Shh-Access"), grantHeader(req));
     return json(200, {
       expires_in_s: s.expiresAt - now(),
       salt: b64(s.salt!),
@@ -422,28 +470,54 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
 
   async function unlock(req: Request): Promise<Response> {
     const ka = headerSecret(req, "X-Shh-Access");
+    const g = grantHeader(req);
     const b = await readJSON(req, ["proof"]);
     const kp = decodeB64(b.proof, 32);
-    const [id, s] = await readable(ka); // clé d'accès fausse : 404, aucun essai compté
+    const [id, s] = await reopenable(ka, g); // clé d'accès fausse : 404, aucun essai compté
+    // Octroi invalide (falsifié, autre partage, expiré, ouverture terminée) : 409, ni ouverture
+    // ni essai consommé.
+    const reopenN = g === null ? null : liveGrant(g, id, s);
+    if (g !== null && reopenN === null) throw new HttpFail(409, "grant_invalid");
     if (s.proofV !== null && (await matches(kp, s.proofV))) {
-      if (s.opensLeft <= 0) throw notFound();
-      s.opensLeft--;
-      s.opensIssued++;
-      if (s.opensLeft === 0) {
-        s.state = "draining";
-        s.purgeAt = Math.min(ceil15(now() + PURGE_WINDOW_S), s.expiresAt);
-      }
       // Jeton de 6 h, non plafonné à l'échéance : il borne la grâce (spec §41.8).
       const exp = now() + PURGE_WINDOW_S;
+      let openN: number;
+      if (reopenN !== null) {
+        const e = grantOf.get(ak(id, reopenN));
+        if (e === undefined) throw new HttpFail(409, "grant_invalid");
+        if (e.reopens >= MAX_REOPENS) throw new HttpFail(429, "reopen_limit");
+        e.reopens++;
+        openN = reopenN;
+        if (s.state === "draining") s.purgeAt = Math.max(s.purgeAt, Math.min(ceil15(now() + PURGE_WINDOW_S), s.expiresAt));
+      } else {
+        if (s.state !== "ready" || s.opensLeft <= 0) throw notFound();
+        s.opensLeft--;
+        s.opensIssued++;
+        openN = s.opensIssued;
+        if (s.opensLeft === 0) {
+          s.state = "draining";
+          s.purgeAt = Math.min(ceil15(now() + PURGE_WINDOW_S), s.expiresAt);
+        }
+      }
       return json(200, {
-        download_token: issue("download", id, s.opensIssued, exp),
+        download_token: issue("download", id, openN, exp),
         segments: segmentCount(s.bucket),
         envelope: b64(s.envelope!),
+        grant: grant(id, openN, s.expiresAt),
       });
     }
     const left = await countFailure(id, s);
     if (left > 0) throw new HttpFail(403, "bad_password", { attempts_left: left });
     throw notFound(); // 5ᵉ essai faux : détruit
+  }
+
+  /** POST /api/shares/regrant : octroi renouvelé, jamais au-delà du jeton ni de l'échéance. */
+  function regrant(req: Request): Response {
+    const tok = checkToken(req, "download");
+    const s = shares.get(tok.id);
+    const cap = s === undefined ? 0 : Math.min(tok.exp, s.expiresAt);
+    if (s === undefined || dead.has(tok.id) || !grantOf.has(ak(tok.id, tok.openN)) || cap <= now()) throw goneFail();
+    return json(200, { grant: grant(tok.id, tok.openN, cap) });
   }
 
   /** Segments lisibles par l'ouverture tok, ou 410 (partage disparu, ouverture finie). */
@@ -490,21 +564,26 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     });
   }
 
-  function done(req: Request): Response {
-    const tok = checkToken(req, "download");
-    const id = tok.id;
+  /** Fin de l'ouverture n (done, ou octroi expiré sans renouvellement) ; rend faux si déjà disparue. */
+  function endOpen(id: string, n: number): "ok" | "gone" | "unknown" {
+    grantOf.delete(ak(id, n));
     const d = dead.get(id);
-    if (d !== undefined) {
-      if (!d.opens.delete(tok.openN)) throw goneFail();
-      return empty(204);
-    }
+    if (d !== undefined) return d.opens.delete(n) ? "ok" : "gone";
     const s = shares.get(id);
-    if (s === undefined) throw goneFail();
-    if (tok.openN > s.opensIssued) throw notFound();
-    s.doneMask |= 1 << (tok.openN - 1);
+    if (s === undefined) return "gone";
+    if (n > s.opensIssued) return "unknown";
+    s.doneMask |= 1 << (n - 1);
     let bits = 0;
     for (let m = s.doneMask; m !== 0; m >>>= 1) bits += m & 1;
     if (s.state === "draining" && bits === s.opensIssued) retire(id, true, now());
+    return "ok";
+  }
+
+  function done(req: Request): Response {
+    const tok = checkToken(req, "download");
+    const r = endOpen(tok.id, tok.openN);
+    if (r === "gone") throw goneFail();
+    if (r === "unknown") throw notFound();
     return empty(204);
   }
 
@@ -607,6 +686,8 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
         return unlock(req);
       case "POST /api/shares/done":
         return done(req);
+      case "POST /api/shares/regrant":
+        return regrant(req);
       case "POST /api/shares/destroy":
         return destroy(req);
       case "GET /api/shares/watch":

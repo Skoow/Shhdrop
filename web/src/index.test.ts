@@ -8,6 +8,9 @@ describe("interface publique", () => {
       [
         "BadPasswordError",
         "CAPTCHA_MIN_MS",
+        "GrantInvalidError",
+        "ReopenLimitError",
+        "grantTag",
         "CHUNK",
         "SEG_CHUNKS",
         "bucketFor",

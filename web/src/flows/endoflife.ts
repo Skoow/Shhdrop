@@ -1,12 +1,20 @@
 // Fin de vie chez le destinataire (UI §9.8 pied, §9.10, §12.2).
 // - Terminer et effacer : done() (fin de lecture, keepalive) → wipe() → révocation des URL.
+// - Sortie de page (pagehide, démontage) : wipe() et révocation seulement, SANS done() (spec
+//   §41.4) : l'ouverture reste valable le temps de l'octroi, pour qu'un rechargement la rouvre.
 // - Détruire, Signaler : opened.destroy() (ou destroy("report"), motif non conservé), puis
 //   wipe() ; la dissolution (onDestroyed) ne commence qu'après la réponse du serveur.
 import { LimitError, NotFoundError, type Opened } from "../index";
 import { revokeAll } from "../viewers/blobs";
 
+/** Sortie de page : effacement local, aucune requête (l'octroi rouvre l'ouverture au rechargement). */
+export function release(opened: Opened): void {
+  opened.wipe();
+  revokeAll();
+}
+
 /**
- * Terminer et effacer (et pagehide). Ne lève jamais : un done() en échec (réseau) n'empêche
+ * Terminer et effacer. Ne lève jamais : un done() en échec (réseau) n'empêche
  * pas l'effacement local ; le serveur efface de toute façon à l'échéance.
  */
 export async function finish(opened: Opened): Promise<void> {

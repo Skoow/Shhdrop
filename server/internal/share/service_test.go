@@ -857,6 +857,9 @@ func TestSweep(t *testing.T) {
 		t.Fatal(n, err)
 	}
 	gone(t, s, abandoned)
+	// Octroi de l'unique ouverture expiré sans renouvellement (10:32) : ouverture terminée, le
+	// « draining » part sans attendre sa purge (spec §41.4, fin d'ouverture).
+	gone(t, s, drained)
 	c.Add(13 * time.Minute) // 11:15
 	if n, err := s.Sweep(); err != nil || n != 1 {
 		t.Fatal(n, err)
@@ -867,10 +870,9 @@ func TestSweep(t *testing.T) {
 		t.Fatal(n, err)
 	}
 	c.Add(time.Minute) // 16:15
-	if n, err := s.Sweep(); err != nil || n != 1 {
+	if n, err := s.Sweep(); err != nil || n != 0 {
 		t.Fatal(n, err)
 	}
-	gone(t, s, drained)
 	if rowCount(t, s, long) != 1 {
 		t.Fatal("partage vivant effacé")
 	}

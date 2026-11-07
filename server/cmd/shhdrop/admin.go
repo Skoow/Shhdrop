@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/skoow/shhdrop/server/internal/blob"
 	"github.com/skoow/shhdrop/server/internal/config"
@@ -190,7 +191,9 @@ func openService(cfg config.Config, dir string) (*share.Service, func(), error) 
 		return nil, nil, err
 	}
 	svc, err := share.NewService(share.Config{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")},
-		Now: cfg.Now, StorageMax: cfg.StorageMaxBytes, FrozenFile: filepath.Join(dir, "frozen")})
+		Now: cfg.Now, StorageMax: cfg.StorageMaxBytes, FrozenFile: filepath.Join(dir, "frozen"),
+		// Partage déjà retiré mais encore lu (grâce) : le serveur en marche le coupe (kill.go).
+		KillWait: 3 * time.Second})
 	if err != nil {
 		db.Close()
 		return nil, nil, err
