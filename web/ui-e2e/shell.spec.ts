@@ -16,7 +16,7 @@ test("l'accueil se charge sous la CSP, sans violation ni requête tierce", async
 for (const p of ["/s/x", "/m/x"]) {
   test(`${p} : 404 de l'interface, sans X-Robots-Tag`, async ({ page, shh }) => {
     const res = await page.goto(shh.origin + p);
-    expect(res?.status()).toBe(200);
+    expect(res?.status()).toBe(404); // vrai statut (audit de performance, point 5)
     expect(res?.headers()["x-robots-tag"]).toBeUndefined();
     await expect(page.getByRole("heading", { name: /^(Cette page n'existe pas\.|This page does not exist\.)$/ })).toBeVisible();
   });
