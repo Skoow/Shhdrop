@@ -114,7 +114,10 @@ test.describe("fr-FR", () => {
     // Archive : catégorie, note honnête.
     await expect(page.getByText("Archive : son contenu n'est ni vérifié ni nettoyé.")).toBeVisible();
     await expect(page.getByText("Nettoyé", { exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Nettoyer tous les fichiers" })).toBeVisible();
+    // Nettoyage pas encore réel (CLEANER_READY faux) : aucun bouton qui ne fait rien ; les
+    // pastilles « Non nettoyé », honnêtes, restent (scan UX B3).
+    await expect(page.getByRole("button", { name: "Nettoyer tous les fichiers" })).toHaveCount(0);
+    await expect(page.locator(".badge.warn").filter({ hasText: "Non nettoyé" }).first()).toBeVisible();
     await expect(page.locator("[data-row]").filter({ hasText: "plage-nuit.jpg" }).locator("img")).toHaveAttribute("src", /^blob:/);
     await expect(page.locator("[data-row]").filter({ hasText: "anniversaire-lou.webm" })).toContainText("1:12");
     expect(await noHScroll(page)).toBe(true);
@@ -183,7 +186,7 @@ test.describe("fr-FR", () => {
     await expect(rows(page)).toHaveCount(3);
   });
 
-  test("types : exécutable signalé, tableur (zip) = document, archive par son contenu ; Nettoyer tous les fichiers dit ce qui ne l'est pas", async ({ page, shh, isMobile }) => {
+  test("types : exécutable signalé, tableur (zip) = document, archive par son contenu", async ({ page, shh, isMobile }) => {
     await open(page, shh.origin);
     const buf = (n: string) => ({ name: n, mimeType: "", buffer: readFileSync(f(n)) });
     await browse(page, [buf("installer.exe"), buf("budget-2026.xlsx"), { name: "sauvegarde", mimeType: "", buffer: readFileSync(f("archive.zip")) }, { name: "vacances.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0x4d, 0x5a, 0x90, 0]) }]);
@@ -197,8 +200,7 @@ test.describe("fr-FR", () => {
     await expect(rows(page).filter({ hasText: "vacances.jpg" }).getByText("Attention : c'est un programme, malgré son extension.")).toBeVisible();
     await expect(rows(page).filter({ hasText: "sauvegarde" }).getByText("Archive : son contenu n'est ni vérifié ni nettoyé.")).toBeVisible();
     if (!isMobile) await expect(page.getByRole("table", { name: "Autres" }).getByRole("cell", { name: "EXE", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Nettoyer tous les fichiers" }).click();
-    await expect(page.locator(".cnote").filter({ hasText: "Non nettoyés" })).toContainText("budget-2026.xlsx");
+    await expect(page.getByRole("button", { name: "Nettoyer tous les fichiers" })).toHaveCount(0);
     expect(await axe(page)).toEqual([]);
   });
 

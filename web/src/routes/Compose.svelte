@@ -233,7 +233,9 @@
   });
 
   // ---------- Nettoyer tous les fichiers ----------
-  const anyNotCleanedFiles = $derived(composer.items.some((i) => i.kind === "file" && i.clean === "non_nettoye"));
+  // Le bouton n'apparaît que si le nettoyage est réel (Tasks 9a à 9c) : jamais un bouton qui ne
+  // fait rien (scan UX B3). Les pastilles « Non nettoyé », honnêtes, restent.
+  const anyNotCleanedFiles = $derived(CLEANER_READY && composer.items.some((i) => i.kind === "file" && i.clean === "non_nettoye"));
   let cleaning = $state(false);
   async function cleanAll() {
     cleaning = true;
@@ -809,16 +811,17 @@
     font-weight: 600;
     line-height: 1.6;
   }
+  /* Action secondaire (contour), jamais un aplat ambre qui crie « problème » (scan UX D4). */
   .cleanbtn {
     display: inline-flex;
     align-items: center;
     gap: 8px;
     min-height: 44px;
     padding: 0 14px;
-    border: 0;
+    border: 1px solid var(--line-strong);
     border-radius: 10px;
-    background: var(--warn);
-    color: #1d1503;
+    background: transparent;
+    color: var(--text);
     font: inherit;
     font-size: var(--fs-small);
     font-weight: 620;
