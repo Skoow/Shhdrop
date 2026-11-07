@@ -124,10 +124,12 @@ export function estimateUpload(contentBytes: number): { bytes: number; fastS: nu
   return { bytes, fastS: bytes / FAST, slowS: bytes / SLOW };
 }
 
+// SVG : jamais affiché (scan de sécurité du 7 novembre). PDF : pas de visionneuse tant que la
+// Task 22 (cadre isolé) n'est pas livrée ; le remettre ici avec elle.
 const VIEWABLE = new Set([
-  "image/jpeg", "image/png", "image/webp", "image/gif", "image/avif", "image/heic", "image/svg+xml",
+  "image/jpeg", "image/png", "image/webp", "image/gif", "image/avif", "image/heic",
   "audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg", "audio/webm", "audio/wav",
-  "video/mp4", "video/webm", "video/quicktime", "application/pdf",
+  "video/mp4", "video/webm", "video/quicktime",
 ]);
 type Viewable = { kind: "file" | "text"; base: string; ext: string; mime: string; size: number };
 

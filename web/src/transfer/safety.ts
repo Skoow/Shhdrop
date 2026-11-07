@@ -66,7 +66,6 @@ const PREVIEW: Record<string, PreviewKind> = {
   "image/gif": "image",
   "image/avif": "image",
   "image/heic": "image",
-  "image/svg+xml": "image", // dans <img> uniquement : aucun script ne s'y exécute
   "audio/mpeg": "audio",
   "audio/mp4": "audio",
   "audio/aac": "audio",
@@ -85,6 +84,8 @@ const PREVIEW: Record<string, PreviewKind> = {
  * ≤ 200 Mio ; sinon « none » (téléchargement seulement). Le contenu peut mentir sur son
  * type : l'écran doit encore traiter un échec de décodage comme « none ».
  */
+// SVG retiré de la liste (scan de sécurité du 7 novembre) : même dans <img>, où son script ne
+// s'exécute pas, rien qui puisse en porter un n'est affiché ; HTML, XML et archives web non plus.
 export function previewKindOf(e: ManifestEntry): PreviewKind {
   if (e.kind === "text") return "text";
   if (e.size > PREVIEW_MAX) return "none";
@@ -92,7 +93,7 @@ export function previewKindOf(e: ManifestEntry): PreviewKind {
   return Object.hasOwn(PREVIEW, mime) ? PREVIEW[mime]! : "none";
 }
 
-const RISKY = new Set(["exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "js", "jar", "apk", "app", "dmg", "pkg", "sh", "html", "htm", "hta", "lnk", "iso", "msix", "appx", "reg", "wsf", "cpl", "pif", "url", "command", "desktop"]);
+const RISKY = new Set(["exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "js", "jar", "apk", "app", "dmg", "pkg", "sh", "html", "htm", "hta", "lnk", "iso", "msix", "appx", "reg", "wsf", "cpl", "pif", "url", "command", "desktop", "svg", "svgz", "xhtml", "xht", "mht", "mhtml"]);
 
 /** Extension exécutable ou interprétée : avertir avant l'enregistrement (spec §12). À appeler sur un nom passé par safeName. */
 export function isRiskyName(name: string): boolean {

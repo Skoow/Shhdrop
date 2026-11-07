@@ -98,8 +98,13 @@ describe("safeName", () => {
 
 describe("previewKindOf", () => {
   it("liste blanche des types MIME", () => {
-    for (const m of ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif", "image/heic", "image/svg+xml"]) {
+    for (const m of ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif", "image/heic"]) {
       expect(previewKindOf(file("x", m)), m).toBe("image");
+    }
+    // Scan de sécurité du 7 novembre : rien qui puisse porter un script n'est jamais affiché
+    // (SVG, HTML, XML et variantes) : téléchargement seulement.
+    for (const m of ["image/svg+xml", "IMAGE/SVG+XML", "image/svg+xml; charset=utf-8", "text/xml", "application/xml", "image/svg", "text/xsl", "application/xslt+xml", "message/rfc822", "multipart/related", "application/x-mimearchive"]) {
+      expect(previewKindOf(file("x", m)), m).toBe("none");
     }
     for (const m of ["audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg", "audio/webm", "audio/wav"]) expect(previewKindOf(file("x", m)), m).toBe("audio");
     for (const m of ["video/mp4", "video/webm", "video/quicktime"]) expect(previewKindOf(file("x", m)), m).toBe("video");
@@ -123,9 +128,11 @@ describe("isRiskyName", () => {
       expect(isRiskyName(`f.${e}`), e).toBe(true);
       expect(isRiskyName(`f.${e.toUpperCase()}`), e).toBe(true);
     }
+    // Ouverts localement dans un navigateur, leur script s'exécute (scan du 7 novembre, F4 en partie).
+    for (const e of ["svg", "svgz", "xhtml", "xht", "mht", "mhtml"]) expect(isRiskyName(`f.${e}`), e).toBe(true);
     expect(isRiskyName(".exe")).toBe(true); // nom qui commence par le point : aussi
     expect(isRiskyName(".bashrc")).toBe(false);
-    for (const n of ["photo.jpg", "image.svg", "doc.pdf", "exe", "notes.txt", "fichier"]) expect(isRiskyName(n), n).toBe(false);
+    for (const n of ["photo.jpg", "doc.pdf", "exe", "notes.txt", "fichier"]) expect(isRiskyName(n), n).toBe(false);
     expect(isRiskyName(safeName("../../facture‮fdp.exe\u0000"))).toBe(true);
     expect(isRiskyName(safeName("x.exe. "))).toBe(true);
   });

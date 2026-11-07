@@ -130,9 +130,30 @@ async function guarded<T>(f: () => Promise<T>, map: (e: unknown) => unknown): Pr
  */
 function parseFor(link: string, expectedOrigin: string): ParsedLink {
   const origin = checkOrigin(expectedOrigin);
-  const p = parseLink(link);
+  const p = parseAtBase(link);
   if (p.origin !== origin) throw new Error("lien_invalide");
   return p;
+}
+
+/**
+ * Base de l'application (« / », « /Shhdrop/ » en démo), lue à l'appel. createShare rend des
+ * liens qui la portent (option `base`) : les fonctions de lecture les acceptent donc, en plus
+ * de la racine (forme rendue par app/link.ts:readLink). Aucun autre chemin : l'ancien format
+ * « /s/<id>#… » reste refusé (scan de sécurité du 7 novembre, F2).
+ */
+function appBase(): string {
+  const b = import.meta.env?.BASE_URL;
+  return typeof b === "string" && b !== "" ? b : "/";
+}
+
+function parseAtBase(link: string): ParsedLink {
+  try {
+    return parseLink(link);
+  } catch (e) {
+    const base = appBase();
+    if (base === "/") throw e;
+    return parseLink(link, base);
+  }
 }
 
 type ShareLink = Extract<ParsedLink, { kind: "s" }>;

@@ -161,9 +161,11 @@ describe("sans téléchargement (spec §34)", () => {
       { kind: "file", base: "c", ext: ".docx", mime: "", size: 3 },
       { kind: "file", base: "d", ext: ".mp4", mime: "video/mp4", size: 300 * 1048576 },
       { kind: "file", base: "e", ext: ".pdf", mime: "application/pdf", size: 3 },
+      { kind: "file", base: "f", ext: ".svg", mime: "image/svg+xml", size: 3 },
     ] as const;
-    expect(viewOnlyBlockers(items)).toEqual(["b.zip", "c.docx", "d.mp4"]);
+    // PDF : pas encore de visionneuse (Task 22) ; SVG : jamais affiché (scan du 7 novembre).
+    expect(viewOnlyBlockers(items)).toEqual(["b.zip", "c.docx", "d.mp4", "e.pdf", "f.svg"]);
     expect(viewableInBrowser(items[0])).toBe(true);
-    expect(viewableInBrowser(items[5])).toBe(true);
+    expect(viewableInBrowser(items[1])).toBe(true);
   });
 });

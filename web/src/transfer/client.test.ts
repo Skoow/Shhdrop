@@ -1378,3 +1378,30 @@ describe("budget de lecture par ouverture (audit M1, spec §24)", () => {
     expect(busy).toBe(3);
   }, 30_000);
 });
+
+describe("base de l'application (scan de sécurité du 7 novembre, F2)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("démo (/Shhdrop/) : les liens rendus par createShare, avec la base, sont acceptés ; la racine aussi", async () => {
+    vi.stubEnv("BASE_URL", "/Shhdrop/");
+    const atBase = MANAGE.replace("/#m", "/Shhdrop/#m");
+    expect(atBase).not.toBe(MANAGE);
+    const s = server(() => j(404, { error: "not_found" }));
+    expect(await reject(destroyShare(atBase, ORIGIN, s.net))).toBeInstanceOf(NotFoundError);
+    expect(await reject(shareStatus(atBase, ORIGIN, s.net))).toBeInstanceOf(NotFoundError);
+    expect(await fetchMeta(LINK.replace("/#", "/Shhdrop/#"), ORIGIN, server(() => undefined).net)).toEqual({ expiresInS: 3000 });
+    expect(await fetchMeta(LINK, ORIGIN, server(() => undefined).net)).toEqual({ expiresInS: 3000 });
+    // Autre chemin, ancien format : toujours refusés, sans requête.
+    const none = server(() => undefined);
+    for (const bad of [MANAGE.replace("/#m", "/autre/#m"), `${ORIGIN}/s/${b64u(new Uint8Array(16).fill(5))}#${b64u(KLIEN())}`]) {
+      await expect(destroyShare(bad, ORIGIN, none.net), bad).rejects.toThrow("lien_invalide");
+    }
+    expect(none.calls).toEqual([]);
+  });
+
+  it("production (/) : un lien sous /Shhdrop/ est refusé", async () => {
+    const s = server(() => undefined);
+    await expect(destroyShare(MANAGE.replace("/#m", "/Shhdrop/#m"), ORIGIN, s.net)).rejects.toThrow("lien_invalide");
+    expect(s.calls).toEqual([]);
+  });
+});
