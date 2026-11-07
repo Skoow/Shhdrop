@@ -194,6 +194,16 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     expect(await o.watch()).toBe("stop");
   });
 
+  it("fin faite ici (done, dernière ouverture) : la surveillance en cours rend « stop », pas « gone »", async ({ expect }) => {
+    const { fake, net } = setup({ watchHoldMs: 10_000 });
+    const r = await share(net, 1);
+    const o = await openShare(r.link, PW, ORIGIN, undefined, net);
+    const pending = o.watch();
+    await o.done();
+    expect(fake.shares()).toBe(0);
+    expect(await pending).toBe("stop");
+  });
+
   it("spec §36 S14, §41.8 : motif fermé ; signalement → plus aucune lecture (410)", async ({ expect }) => {
     const { net, statuses } = setup({ rateBytesPerS: 1e9 });
     const r = await share(net, 2, [bigFile()]);

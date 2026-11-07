@@ -51,7 +51,7 @@ test.describe("fr-FR", () => {
     await expect(certs).toHaveCount(3);
     await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeVisible();
     // Limites gratuites (spec §41.2), lues des constantes.
-    await expect(page.locator("p.proof")).toHaveText("15\u202féléments · 2\u202fGo · 24\u202fh au plus · 5\u202fessais, puis destruction");
+    await expect(page.locator("p.proof")).toHaveText("200\u202féléments · 2\u202fGo · 24\u202fh au plus · 5\u202fessais, puis destruction");
     for (const h of ["Comment ça marche", "Pourquoi c'est sûr", "Vos questions", "Quelque chose à transmettre ?"])
       await expect(page.getByRole("heading", { level: 2, name: h, exact: true })).toHaveCount(1);
     await expect(page.getByRole("img", { name: SCHEMA_FR })).toHaveCount(1);

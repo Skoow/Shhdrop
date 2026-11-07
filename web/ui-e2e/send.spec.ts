@@ -318,6 +318,9 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("heading", { name: "Finalisation" })).toBeVisible({ timeout: 30_000 });
     await expect(readyHeading(page)).toBeVisible({ timeout: 30_000 });
     await capture(page, "seal-sealed");
+    // Fondu d'écran bref et transitions finies autorisés en mouvement réduit : on les laisse finir ;
+    // aucune animation (sceau compris) ne doit encore tourner ensuite.
+    await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))));
     expect(await page.evaluate(() => document.getAnimations().filter((a) => a.playState === "running").length)).toBe(0);
   });
 });

@@ -660,11 +660,12 @@ export async function openShare(
         item: (i) => wrap(() => rd.item(i)),
         saveItem: (i, sink) => wrap(() => rd.streamItem(i, sink)),
         done,
-        // Une destruction faite ici prévient aussi la surveillance (410) : ce « gone » est le
-        // nôtre, l'écran de fin vient de destroy() ; la surveillance s'arrête simplement.
+        // Une destruction ou une fin (done) faite ici prévient aussi la surveillance (410) :
+        // ce « gone » est le nôtre, l'écran de fin vient de destroy() ou de done() ; la
+        // surveillance s'arrête simplement.
         watch: async (signal) => {
           const r = await api.watch(c, u.downloadToken, signal);
-          return r === "gone" && destroying ? "stop" : r;
+          return r === "gone" && (destroying || finished) ? "stop" : r;
         },
         destroy: (reason) =>
           guarded(async () => {
