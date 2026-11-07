@@ -1,7 +1,7 @@
 # Shhdrop — spécification V1 (version 2, finale à valider)
 
 Date : 4 novembre 2026 · Domaine visé : **shhdrop.app**
-Historique : v1 du 3 novembre, puis revue critique indépendante et passage complet de recherche d'oublis (voir section 0). v2.4 (4 novembre) : durcissement après l'audit « sharp edges » (section 25). v2.5 (5 novembre) : repli Google reCAPTCHA isolé (section 26). v2.6 (5 novembre) : décisions du propriétaire, coffre chiffré sur téléphone (27), code vérifiable (28), chiffrement anticipé (29), revue post-quantique (30), mot de passe de 8 caractères (31), lien court (32), historique local sans compte (33), droits du destinataire (34, simplifiés en 34.1), puis aucune statistique, nettoyage des métadonnées de tous les fichiers et enregistrement dans l'interface (35), minimisation de ce que voit le serveur (36). v2.7 (5 novembre) : compte facultatif par passkey, sans e-mail (37) et offre payante facultative « patte blanche » (38). v2.8 (7 novembre) : compte facultatif complété pour la création, la connexion et la récupération (37.11), salon de discussion éphémère (39), formules Plus et Pro avec modèle de coûts (38.8), envoi direct pair à pair (40). v2.9 (7 novembre) : exclusion d'un participant du salon avec rotation de l'invitation (39.13), explication des époques (39.2.4), trafic du salon toujours par notre serveur en WebSocket (39.3.1) et plus de pair à pair par défaut (40, 41.3), gratuit à 15 éléments et 2 Gio (4, 41.2) avec Plus et Pro refaits (38.8), rechargement sans ouverture supplémentaire (41.4), gestion de l'expéditeur sans empreinte (33.1), page de contenu et archive .zip (41.6) ; journal des décisions en 41. **v2.10 (7 novembre)** : départ du compte à rebours à la première ouverture, avec plafond de 7 jours (38.9.1, 41.9) ; expiration, suppression et exclusion pendant un téléchargement (41.8, 39.13.6) ; Pro à 7 jours et éléments illimités par manifeste découpé (38.8, 38.9.2, 41.10) ; onze fonctions payantes détaillées (38.9) ; extensions à risque ajoutées (12) ; licences de la liste noire (31) ; décisions D41-9 à D41-14 et signalements F-1 à F-13 (41). Les sections 29 à 41 remplacent les passages signalés « → § » ci-dessous.
+Historique : v1 du 3 novembre, puis revue critique indépendante et passage complet de recherche d'oublis (voir section 0). v2.4 (4 novembre) : durcissement après l'audit « sharp edges » (section 25). v2.5 (5 novembre) : repli Google reCAPTCHA isolé (section 26). v2.6 (5 novembre) : décisions du propriétaire, coffre chiffré sur téléphone (27), code vérifiable (28), chiffrement anticipé (29), revue post-quantique (30), mot de passe de 8 caractères (31), lien court (32), historique local sans compte (33), droits du destinataire (34, simplifiés en 34.1), puis aucune statistique, nettoyage des métadonnées de tous les fichiers et enregistrement dans l'interface (35), minimisation de ce que voit le serveur (36). v2.7 (5 novembre) : compte facultatif par passkey, sans e-mail (37) et offre payante facultative « patte blanche » (38). v2.8 (7 novembre) : compte facultatif complété pour la création, la connexion et la récupération (37.11), salon de discussion éphémère (39), formules Plus et Pro avec modèle de coûts (38.8), envoi direct pair à pair (40). v2.9 (7 novembre) : exclusion d'un participant du salon avec rotation de l'invitation (39.13), explication des époques (39.2.4), trafic du salon toujours par notre serveur en WebSocket (39.3.1) et plus de pair à pair par défaut (40, 41.3), gratuit à 15 éléments et 2 Gio (4, 41.2) avec Plus et Pro refaits (38.8), rechargement sans ouverture supplémentaire (41.4), gestion de l'expéditeur sans empreinte (33.1), page de contenu et archive .zip (41.6) ; journal des décisions en 41. **v2.11 (7 novembre)** : mot de passe toujours généré, offre visible et verrouillée, 200 éléments pour toutes les formules, écran « partage disparu » (41.13, D41-15 à D41-18). **v2.10 (7 novembre)** : départ du compte à rebours à la première ouverture, avec plafond de 7 jours (38.9.1, 41.9) ; expiration, suppression et exclusion pendant un téléchargement (41.8, 39.13.6) ; Pro à 7 jours et éléments illimités par manifeste découpé (38.8, 38.9.2, 41.10) ; onze fonctions payantes détaillées (38.9) ; extensions à risque ajoutées (12) ; licences de la liste noire (31) ; décisions D41-9 à D41-14 et signalements F-1 à F-13 (41). Les sections 29 à 41 remplacent les passages signalés « → § » ci-dessous.
 
 ---
 
@@ -73,7 +73,7 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 
 ### Dans la V1
 
-- Partage jusqu'à 15 éléments (v2.9 ; 10 avant) : texte, fichiers, photo prise sur place, vocal enregistré sur place.
+- Partage jusqu'à 200 éléments pour toutes les formules (v2.11, D41-17 ; 15 en v2.9, 10 avant) : texte, fichiers, photo prise sur place, vocal enregistré sur place.
 - Chiffrement de bout en bout dans le navigateur, mot de passe obligatoire (généré par défaut).
 - Lien de partage + lien de gestion privé pour l'expéditeur.
 - Destinataire : compte à rebours, déverrouillage, lecture sur le site (image, audio, vidéo, texte, PDF), téléchargement, destruction, signalement.
@@ -1010,6 +1010,8 @@ Le test « le serveur ne voit rien » ajoute un repère de mot de passe saisi **
 
 ## 31. Décision du propriétaire (v2.6) — mot de passe par défaut de 8 caractères, porté à 10
 
+> **v2.11 (7 novembre, D41-15, §41.13)** : le mot de passe d'un partage est **toujours généré** (10 caractères, « Générer un autre », « Copier ») ; plus aucune saisie. Les passages ci-dessous sur le mot de passe saisi, `checkPassword` et la liste noire ne valent plus que pour le **code du coffre** (§27.2) : `web/src/vault/passcode.ts` (`checkPasscode`), `weakpw.ts`, `blocklist.ts`, importés par le seul code du coffre, hors du paquet livré tant que le coffre n'existe pas. La création n'accepte que la forme générée (`isGeneratedPassword` : 10 caractères de l'alphabet, quatre familles).
+
 - **Mise à jour (5 novembre, décision du propriétaire, Q-MDP1 réglée)** : le mot de passe généré fait **10 caractères** (même alphabet, mêmes quatre familles) : 594 641 958 752 747 520 possibilités, soit **2^59,0** (environ 4,7 millions d'années-GPU en moyenne avec l'hypothèse ci-dessous). Un mot de passe saisi doit faire **10 caractères au moins** (au lieu de 12) et rester absent de la liste noire : le même seuil pour tous. `isGeneratedPassword` reste un raccourci, plus une exception de longueur. Les passages ci-dessous qui disent 8 et 12 caractères sont remplacés par cette ligne ; le code du coffre (§27.2) suit la même règle de 10 caractères.
 - **Mise à jour (7 novembre, audit M1 ; à valider par le propriétaire, car la règle validée change)** : « absent de la liste noire » devient la règle complète de `web/src/crypto/weakpw.ts`, appliquée à tout mot de passe saisi de 10 caractères au moins (et au code du coffre, §27.2) : refus (1) de moins de 5 caractères distincts, ou de plus de la moitié des caractères pris dans des répétitions (`aaa`, `abab`, casse comprise), des suites (`abcd`, `6789`, `2468`, 4 au moins) ou des rangées et colonnes de clavier AZERTY, QWERTY, QWERTZ (`azer`, `1qaz`, 4 au moins) ; (2) d'un mot de passe entier présent dans la liste ; (3) d'un mot de passe dont le « cœur » (séparateurs, chiffres et symboles des bords retirés, accents retirés, `0→o`, `1→i` ou `l`, `@→a`…) est un mot de passe courant (`motdepasse12`, `Soleil2024!`, `p@ssw0rd`). Listes générées par `scripts/gen-lists.mjs`, sources épinglées par SHA-256 : SecLists 10k (MIT), les 20 000 premières lignes de la liste NCSC 100k (redistribuée par SecLists), Richelieu (20 000 mots de passe français, CC BY 4.0). **v2.10 (D41-14)** : les trois listes sont livrées **compressées**, pour environ **14,8 Ko en gzip** au total ; licences : voir la mise à jour suivante. Une raison claire par règle à l'écran. Le mot de passe généré n'est pas concerné (raccourci `isGeneratedPassword`).
 - **Mise à jour (7 novembre, v2.10, D41-14) — listes et licences** : (1) **SecLists 10k** (`10k-most-common.txt`) : licence **MIT** (dépôt SecLists) ; (2) **NCSC, 20 000 premières lignes** de la liste « 100k most used passwords » du National Cyber Security Centre (Royaume-Uni), redistribuée par SecLists sous la licence MIT du dépôt ; la licence **d'origine** de la liste NCSC est **probablement l'Open Government Licence v3.0 (OGL v3) : à confirmer** auprès de la source avant la mise en ligne (si elle n'était pas libre, la liste serait retirée et remplacée par SecLists seule) ; (3) **Richelieu**, 20 000 mots de passe français : **CC BY 4.0** — attribution obligatoire (auteur, source, licence, mention des modifications : liste tronquée et compressée). Les trois textes de licence et l'attribution vont dans `THIRD_PARTY_LICENSES.md` et sur une page « Licences » du site (sans ressource tierce). Les trois listes sont des données publiques de mots de passe divulgués : aucune n'est un secret ; elles sont incluses au code (aucun `import()` dynamique, §28.3), ce qui compte dans le budget de poids de la page.
@@ -1458,6 +1460,8 @@ Modèle choisi par le propriétaire : le service gratuit reste **complet, privé
 
 ### 38.1 Règle d'honnêteté
 
+> **v2.11 (D41-16, §41.13)** : en plus de `/offre`, l'expéditeur voit dans le composeur les choix payants **verrouillés** (badge « Plus ») et, au dépassement de la taille gratuite, une ligne neutre « Avec Plus : jusqu'à 10 Go et 7 jours. ». Le reste de cette section tient : aucun motif trompeur, rien pour le destinataire.
+
 - L'offre payante n'apporte **aucune sécurité de plus** : même chiffrement, mêmes règles, même code, mêmes garanties que le gratuit. Seulement de la capacité ou du confort.
 - **Aucun motif trompeur** : pas de compte à rebours promotionnel, pas de case précochée, pas de « plus que 2 places », pas de renouvellement automatique, pas de prix barré fictif, pas de relance par e-mail (il n'y en a pas), pas de fonction gratuite retirée pour vendre.
 - **Le destinataire ne voit jamais l'offre** : aucune mention sur les pages d'ouverture, de contenu ni de coffre. L'expéditeur la voit seulement sur la page `/offre`, et d'une ligne neutre quand il atteint une limite (« Au-delà de 1 Go : offre Plus, facultative »).
@@ -1465,7 +1469,7 @@ Modèle choisi par le propriétaire : le service gratuit reste **complet, privé
 
 ### 38.2 Gratuit pour toujours, et ce qui peut être payant
 
-**Gratuit pour toujours** (tout ce qu'il faut pour partager en privé) : chiffrement de bout en bout, mot de passe, tous les types de contenu, nettoyage des métadonnées (§35.2), jusqu'à 15 éléments et 2 Gio par lien (v2.9 ; 10 et 1 Gio avant), durées 1 h à 24 h, 1 à 10 ouvertures, lien de gestion et destruction, droits du destinataire (§34), historique local (§33), coffre du téléphone (§27), signalement, code vérifiable (§28), compte facultatif et synchronisation (§37, Q-A2).
+**Gratuit pour toujours** (tout ce qu'il faut pour partager en privé) : chiffrement de bout en bout, mot de passe, tous les types de contenu, nettoyage des métadonnées (§35.2), jusqu'à 200 éléments (v2.11, D41-17 ; 15 en v2.9) et 2 Gio par lien (v2.9 ; 1 Gio avant), durées 1 h à 24 h, 1 à 10 ouvertures, lien de gestion et destruction, droits du destinataire (§34), historique local (§33), coffre du téléphone (§27), signalement, code vérifiable (§28), compte facultatif et synchronisation (§37, Q-A2).
 
 > **v2.9** : la colonne « Plus (suggéré) » ci-dessous est celle de la v2.7, **remplacée par §38.8** (Plus 10 Gio, Pro 50 Gio, nouveaux prix). La colonne « Gratuit » est mise à jour.
 
@@ -1548,7 +1552,7 @@ Remplace la colonne « Plus (suggéré) » de §38.2 et Q-P3 ; §38.1 (honnêtet
 | Fonction | Gratuit | **Plus** | **Pro** |
 |---|---|---|---|
 | Taille par lien | **2 Go** | **10 Go** (paliers 5 et 10 Gio, + morceau du manifeste, §29.3) | **50 Go** (paliers 20 et 50 Gio, + morceau du manifeste) |
-| Éléments par lien | **15** | **50** | **illimité (50 Go au total)** : manifeste découpé (§38.9.2), borne technique de 50 000 |
+| Éléments par lien | **200** | **200** | **200** (v2.11, D41-17 : même borne technique pour tous ; « illimité » et le manifeste découpé abandonnés) |
 | Durée de vie | 1, 6, 12, 24 h | 2, 3 et 7 jours | 2, 3 et 7 jours (**7 jours au plus, comme Plus** ; v2.10 : l'ancien 30 j / 14 j est supprimé) |
 | Compte à rebours à la première ouverture (plafond 7 j après la création, §38.9.1) | non | oui | oui |
 | Échéance personnalisée (date et heure) | non | oui | oui |
@@ -1652,7 +1656,7 @@ Fonctions **conservées** (pas de formule « Équipe »). Chacune a ci-dessous :
 | Fonction | Gratuit | Plus | Pro |
 |---|---|---|---|
 | Départ du compte à rebours à la première ouverture (§38.9.1) | non | oui | oui |
-| Éléments illimités, manifeste découpé (§38.9.2) | 15 | 50 | **illimité (50 Go au total)** |
+| ~~Éléments illimités, manifeste découpé (§38.9.2)~~ (abandonné, D41-17) | 200 | 200 | 200 |
 | Demander des fichiers (§38.9.3) | base : 1 demande, 5 dépôts, limites gratuites | 3 demandes, 25 dépôts | 10 demandes, 100 dépôts |
 | Prolonger (§38.9.4) | non | oui | oui |
 | Ajouter des fichiers (§38.9.5) | non | oui (3 ajouts) | oui (7 ajouts) |
@@ -1681,6 +1685,8 @@ Fonctions **conservées** (pas de formule « Équipe »). Chacune a ci-dessous :
 - **Tests** (Task P4) : voir plan.
 
 #### 38.9.2 Éléments illimités pour le Pro : manifeste découpé (index + segments de manifeste)
+
+> **Abandonné (v2.11, D41-17)** : le nombre d'éléments n'est plus un critère de formule (200 pour tous, §41.13). Le texte ci-dessous est gardé pour mémoire ; la Task P5 est abandonnée.
 
 Pro : « **illimité (50 Go au total)** » (UI et textes) ; Plus 50 éléments ; gratuit 15. Le manifeste actuel (64 Kio, un morceau, §29.3) contient environ 200 éléments : il faut un manifeste en plusieurs morceaux, **sans nouvelle cryptographie** (même paquet « SHH2 », mêmes morceaux AES-256-GCM/STREAM sous `K_contenu`).
 
@@ -2259,6 +2265,10 @@ Huit décisions du propriétaire en v2.9 (et un complément du coordinateur sur 
 | D41-11 | 7 nov. 2026 | **Formules payantes corrigées** : durée maximale du Pro **7 jours** (comme Plus) ; **Pro : éléments illimités dans 50 Gio au total** → manifeste découpé (index + segments de manifeste, même paquet SHH2, aucune cryptographie maison) ; l'interface dit « illimité (50 Go au total) » | §38.8, §38.9.2, §41.10, UI §9.14.1, Tasks P2 (corrigée), P5 |
 | D41-12 | 7 nov. 2026 | **Fonctions payantes conservées (pas d'« Équipe »)**, spécifiées en détail : demander des fichiers, prolonger, ajouter des fichiers, ouverture programmée, plusieurs destinataires à liens révocables un par un, notification d'ouverture, page de réception personnalisée (Pro), CLI/API (Pro), limite de téléchargement par fichier, filigrane « confidentiel » en lecture seule (dissuasion seulement), débit prioritaire. **Aucune fonction ne donne plus de sécurité ; aucune statistique sur les destinataires** | §38.9, §36 S48–S59, UI §9.14, Tasks F0 à F11 (après la V1) |
 | D41-13 | 7 nov. 2026 | **Extensions à risque** ajoutées : `.wsh`, `.msp`, `.xll`, `.ps1xml`, `.inf` (le code suivra) | §12 (`isRiskyFile`) |
+| D41-15 | 7 nov. 2026 | **Mot de passe toujours généré** (10 caractères) : plus de saisie d'un mot de passe personnel, nulle part ; la liste noire et ses règles ne servent plus qu'au code du coffre (§27.2) et quittent le paquet livré | §31, §41.13, UI §9.3 |
+| D41-16 | 7 nov. 2026 | **Offre visible, verrouillée, jamais vendue avant P1** : limites gratuites dites en clair dans le composeur ; choix payants affichés verrouillés (badge « Plus »), feuille d'information avec le prix prévu et « Bientôt disponible » ; une ligne discrète « Avec Plus… » au dépassement de la taille. Remplace §38.1 (« seulement sur `/offre` ») et UI §9.3.1 (« absente, pas grisée ») pour le composeur | §38.1, §41.13, UI §9.3.1 |
+| D41-17 | 7 nov. 2026 | **Le nombre d'éléments n'est plus un critère de formule** (une archive .zip le contourne) : 200 éléments pour toutes les formules, borne technique d'un manifeste d'un morceau ; « illimité » et le manifeste découpé (Task P5) **abandonnés** ; les formules diffèrent par la taille, la durée et les fonctions | §4, §38.8.1, §38.9.0, §38.9.2, §41.13, Task P5 |
+| D41-18 | 7 nov. 2026 | **Écran « partage disparu » pendant un téléchargement** : il dit la cause connue de l'appareil (« a expiré », « a été supprimé », « a été détruit ») et **nomme le fichier en cours** (nom nettoyé), sa progression, puis « Terminé » ou « Téléchargement interrompu. » ; sans téléchargement en cours, la page de fin ordinaire. Remplace, pour ce point, la ligne « sans nom ni taille » de §41.8 | §41.8, §41.13, UI §9.8.9 |
 | D41-14 | 7 nov. 2026 | **Liste noire de mots de passe (§31)** : SecLists 10k, NCSC top-20k et Richelieu 20k (CC BY 4.0), compressées, environ 14,8 Ko en gzip ; licences notées, **licence d'origine de la liste NCSC (probablement OGL v3) à confirmer** | §31 |
 
 ### 41.1 Contradictions et corrections relevées (vigilance)
@@ -2277,6 +2287,8 @@ Huit décisions du propriétaire en v2.9 (et un complément du coordinateur sur 
 | Faible | D41-6 | Le serveur peut relier en direct plusieurs partages d'une connexion si l'accueil les relit tous | Affichage local d'abord, relecture espacée et à la demande (§33.1) |
 
 ### 41.2 Gratuit : 15 éléments, 2 Gio (D41-4)
+
+> **v2.11 (D41-17)** : 200 éléments pour toutes les formules ; les 2 Gio du gratuit restent. « 15 éléments » ci-dessous est remplacé par 200.
 
 « 2 Go » à l'écran désigne 2 Gio (2 147 483 648 octets), comme « 1 Go » désignait 1 Gio jusqu'ici. Les autres limites gratuites ne changent pas : durée 1, 6, 12, 24 h ; ouvertures 1 à 10 ; 5 essais ; création de 10 partages par jour par connexion et 30 par /48 ; salon (24 h, 10 personnes, 1 Go au total, 500 Mo par fichier). **Cohérence vérifiée** : la différence entre 2 Go par partage et 500 Mo par fichier de salon est voulue (budget d'un salon vivant en mémoire et sur disque, §39.1).
 
@@ -2403,6 +2415,21 @@ Spécifié en §38.9.1 (Plus et Pro seulement ; plafond de 7 jours ; colonnes `s
 - **Fonctions payantes** : onze fonctions conservées, sans « Équipe » ; spécification détaillée en §38.9 ; tâches P4, P5, F0 à F11 « après la V1 ». Règles : aucune sécurité de plus, aucune statistique sur les destinataires (§38.9.0).
 - **Extensions à risque** : `.wsh`, `.msp`, `.xll`, `.ps1xml`, `.inf` ajoutées à `isRiskyFile` (§12, liste mise à jour ; le code suivra).
 - **Liste noire de mots de passe** (§31) : SecLists 10k, NCSC top-20k, Richelieu 20k, compressées, environ 14,8 Ko en gzip ; licences notées en §31 (licence d'origine de la liste NCSC : à confirmer).
+
+### 41.13 Décisions v2.11 (7 novembre 2026) : mot de passe généré, offre visible, 200 éléments, écran « partage disparu » (D41-15 à D41-18)
+
+- **Mot de passe (D41-15)** : toujours généré ; `createShare` refuse toute autre forme (`mot_de_passe_non_genere`). Le paquet livré perd la liste noire et ses règles (mesuré : voir le rapport de la tâche UP). Le coffre (§27.2), s'il garde un code choisi, importe `web/src/vault/passcode.ts`.
+- **Offre visible (D41-16)** : « Gratuit : 2 Go · 24 h max » sous « Votre envoi » ; dans les options, 2, 3 et 7 jours, « Démarrer à la première ouverture » et « Jusqu'à 50 » ouvertures, verrouillés, badge « Plus » ; un appui ouvre une feuille : ce que Plus ajoute, **prix prévu** de §38.8.2, « Bientôt disponible. », « Compris ». Aucun achat, formulaire, urgence ni case précochée. Au-delà de 2 Go, sous l'erreur : « Avec Plus : jusqu'à 10 Go et 7 jours. » et « En savoir plus ». Le destinataire ne voit rien de tout cela.
+- **200 éléments (D41-17)** : `MAX_ITEMS = 200` pour toutes les formules. Borne d'un manifeste d'un morceau (65 532 octets) : une entrée de fichier au nom ASCII de 120 caractères fait environ 220 octets (≈ 290 entrées) ; des noms non latins (4 octets par caractère) ou de longs textes remplissent le manifeste avant : le composeur mesure le manifeste (majoré) et bloque l'envoi avec une raison claire (« manifeste ») au lieu d'échouer au scellement. Au 201ᵉ élément : « … 200 au plus. Retirez-en, ou regroupez des fichiers dans une archive .zip. », sans ligne « Plus ».
+- **Écran « partage disparu » (D41-18)** : voir UI §9.8.9 ; la cause dite est celle que connaît l'appareil : compte à rebours → « a expiré », 410 ou refus d'une lecture avant l'échéance → « a été supprimé », destruction faite ici → « a été détruit ».
+
+| Id | Gravité | Endroit | Problème | Correction (intégrée ou proposée) |
+|---|---|---|---|---|
+| G-1 | Moyenne | D41-16 contre §38.1, UI §9.3.1 | La règle validée disait « l'offre seulement sur `/offre` » et « option indisponible absente, pas grisée avec une publicité » | Remplacée pour le composeur par D41-16 (décision du propriétaire) ; signalée ici, non corrigée en silence |
+| G-2 | Moyenne | D41-16, légal (§38.5) | Un prix affiché pour un service pas encore vendu, avant l'avis du juriste et du comptable | Libellé « Prix prévu », TTC, « Bientôt disponible », rien à payer ; à faire valider avant P1 |
+| G-3 | Faible | D41-18 contre §41.8 (Q-GONE1) | Le nom du fichier en cours s'affiche après la fermeture (§41.8 disait « sans nom ni taille ») ; « a été supprimé » dit une cause que le serveur ne distingue pas (410 identique pour expiration et suppression) | Nom nettoyé, sur l'écran du destinataire seulement, rien sur le réseau ; « supprimé » seulement si l'échéance locale n'est pas atteinte |
+| G-4 | Moyenne | Task E1 contre Task M2 | Le serveur ne sert pas encore les segments d'une ouverture active après l'échéance ou la suppression (grâce), ni le 410 `gone`, ni `GET /api/shares/watch` | Client livré ; surveillance derrière `WATCH_READY = false` ; aujourd'hui un téléchargement en cours s'interrompt (« Téléchargement interrompu. ») si le serveur efface ; à brancher avec M2 étapes 3c et 7b |
+| G-5 | Faible | D41-17, existant | Avant D41-17, 15 textes longs pouvaient déjà déborder du manifeste et échouer au scellement | Corrigé par le blocage « manifeste » du composeur |
 
 ### 41.12 Signalements v2.10 (vigilance)
 

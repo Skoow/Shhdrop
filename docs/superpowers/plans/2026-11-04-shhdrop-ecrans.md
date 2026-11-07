@@ -1871,7 +1871,9 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 - [ ] **Step 3 : Lancer** → ÉCHEC. **Step 4 : Implémenter** spec §38.9.1 (migration de la base : trois colonnes, `secure_delete`). **Step 5 : Lancer** `make test && make test-ui` → SUCCÈS.
 - [ ] **Step 6 : Mettre à jour** spec §36 S48, S49 (état « Fait ») avec le commit. **Step 7 : Commit** « feat(premium): compte à rebours à la première ouverture, plafond de 7 jours » et push.
 
-### Task P5 : Pro illimité — manifeste découpé, index et segments de manifeste (spec §38.9.2, §41.10 ; UI §9.14.1) — **après la V1, Pro**
+### Task P5 : Pro illimité — manifeste découpé, index et segments de manifeste (spec §38.9.2, §41.10 ; UI §9.14.1) — **ABANDONNÉE (7 novembre, spec D41-17)**
+
+> **Abandonnée** : le propriétaire a décidé que le nombre d'éléments n'est plus un critère de formule (une archive .zip contourne toute limite de nombre). Toutes les formules ont la même borne technique de 200 éléments (`MAX_ITEMS`, un manifeste d'un morceau) ; le manifeste découpé, la version 3 de l'en-tête et la liste virtualisée ne sont pas construits. Le texte ci-dessous est gardé pour mémoire.
 
 **Files:**
 - Create: `web/src/crypto/manifest-v3.ts`, `manifest-v3.test.ts`, `manifest-v3.vectors.json`, `web/src/ui/VirtualList.svelte`, `web/ui-e2e/many-items.spec.ts`
