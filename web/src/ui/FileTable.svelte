@@ -19,10 +19,12 @@
     onremove: (id: string) => void;
     onmenu: (id: string) => void;
     onmove: (id: string, delta: -1 | 1) => void;
+    /** Faux : en-tête lu par les lecteurs d'écran seulement (un seul en-tête visible par liste). */
+    header?: boolean;
     cannotOpen?: (item: ComposeItem) => boolean;
     danger?: (item: ComposeItem) => boolean;
   };
-  let { caption, items, helpId, onrename, onremove, onmenu, onmove, cannotOpen, danger }: Props = $props();
+  let { caption, items, helpId, onrename, onremove, onmenu, onmove, header = true, cannotOpen, danger }: Props = $props();
 
   function key(e: KeyboardEvent, id: string) {
     if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
@@ -33,7 +35,7 @@
 
 <table class="ft">
   <caption class="sr-only">{caption}</caption>
-  <thead>
+  <thead class={{ quiet: !header }}>
     <tr>
       <th scope="col" class="c-name">{t("compose.col.name")}</th>
       <th scope="col" class="c-type">{t("compose.col.type")}</th>
@@ -91,6 +93,17 @@
     text-align: start;
     text-transform: uppercase;
     border-bottom: 1px solid var(--hair-2);
+  }
+  /* En-tête répété : gardé pour les lecteurs d'écran, masqué à l'œil (scan UX, tableau). */
+  thead.quiet th {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
   td {
     padding: 4px var(--sp-3);

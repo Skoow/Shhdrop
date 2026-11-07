@@ -61,3 +61,16 @@ export function thumb(item: ComposeItem, onfail: () => void) {
     return revoke;
   };
 }
+
+/**
+ * Nom raccourci au milieu (« photo-de-vac…tagne.jpg ») : le début et la fin, extension comprise,
+ * restent lisibles ; `max` points de code au plus. Affichage seulement : le nom complet reste
+ * dans le nom accessible et l'infobulle.
+ */
+export function middleEllipsis(name: string, max: number): string {
+  const cps = [...name];
+  if (cps.length <= max) return name;
+  const head = Math.ceil((max - 1) / 2) + 1;
+  const tail = max - 1 - head;
+  return cps.slice(0, head).join("") + "…" + cps.slice(cps.length - tail).join("");
+}

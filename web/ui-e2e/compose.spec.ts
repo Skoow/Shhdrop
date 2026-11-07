@@ -349,6 +349,19 @@ test.describe("fr-FR", () => {
     await expect(more).toBeFocused();
     await more.click();
     const menu = page.getByRole("dialog", { name: "plage-nuit.jpg" });
+    // Ordinateur : menu ancré sous le bouton (popover), pas une fenêtre modale (scan UX).
+    await expect(menu).toHaveAttribute("popover", "auto");
+    await expect(page.locator("dialog[open]")).toHaveCount(0);
+    await expect(menu.getByRole("button", { name: "Renommer" })).toBeFocused();
+    const [mb, ab] = [(await menu.boundingBox())!, (await more.boundingBox())!];
+    expect(Math.abs(mb.y - (ab.y + ab.height)) <= 12 || Math.abs(mb.y + mb.height - ab.y) <= 12).toBe(true);
+    expect(Math.min(Math.abs(mb.x + mb.width - (ab.x + ab.width)), Math.abs(mb.x - ab.x))).toBeLessThanOrEqual(2);
+    await settle(page);
+    await capture(page, "compose-item-popover");
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await expect(more).toBeFocused();
+    await more.click();
     await menu.getByRole("button", { name: "Monter" }).click();
     expect(await names(page)).toEqual(["plage-nuit.jpg", "toits-belleville.jpg"]);
     await menu.getByRole("button", { name: "Renommer" }).click();
@@ -390,6 +403,14 @@ test.describe("fr-FR", () => {
     await browse(page, [f("toits-belleville.jpg")]);
     // Grille : le doublon est dit dans la description de la vignette (et sa pastille).
     await expect(page.getByText("En double ?")).toHaveCount(2);
+
+    // Un seul en-tête de tableau visible, même avec plusieurs catégories en tableau (scan UX).
+    await browse(page, [{ name: "sauvegarde-complete-du-telephone-2026.zip", mimeType: "application/zip", buffer: readFileSync(f("archive.zip")) }]);
+    await expect(page.locator("table.ft")).toHaveCount(2);
+    expect(await page.locator("table.ft th.c-name").evaluateAll((ths) => ths.map((th) => th.getBoundingClientRect().height > 1))).toEqual([true, false]);
+    // Légende de vignette : raccourcie au milieu, extension lisible.
+    await browse(page, [{ name: "photo-de-vacances-ete-2026-bretagne.jpg", mimeType: "image/jpeg", buffer: readFileSync(f("plage-nuit.jpg")) }]);
+    await expect(page.locator(".tile .nm").filter({ hasText: "…" })).toHaveText(/^photo-de-.+….+\.jpg$/);
   });
 
   test("téléphone : menu « … » (Renommer, Monter, Descendre, Retirer) ; feuille Options : focus piégé, Échap rend le focus", async ({ page, shh, isMobile }) => {

@@ -19,6 +19,7 @@
   import CategoryGroup from "../ui/CategoryGroup.svelte";
   import { ArrowDown, ArrowUp, BrushCleaning, MessagesSquare, Camera, ChevronDown, Lock, Mic, NotebookPen, Pencil, ShieldAlert, SlidersHorizontal, Upload, Video, X } from "../ui/Icon";
   import TextField from "../ui/TextField.svelte";
+  import Popover from "../ui/Popover.svelte";
   import Sheet from "../ui/Sheet.svelte";
   import TextArea from "../ui/TextArea.svelte";
   import UndoToast from "../ui/UndoToast.svelte";
@@ -357,9 +358,20 @@
   $effect(() => {
     if (menuId !== null && !menuItem) menuId = null;
   });
+  // Un seul en-tête de tableau visible : celui du premier groupe en tableau (ordinateur).
+  const TABLE_CATS = new Set(["documents", "archives", "autres"]);
+  const firstTable = $derived(composer.groups().find((g) => TABLE_CATS.has(g.category))?.category);
+
+  // Ordinateur : menu ancré sur le bouton « … » de l'élément (ou sa ligne) ; téléphone : feuille.
+  let menuAnchor = $state.raw<HTMLElement | null>(null);
+  function anchorFor(id: string): HTMLElement | null {
+    const row = document.querySelector<HTMLElement>(`[data-row="${CSS.escape(id)}"]`);
+    return row?.querySelector<HTMLElement>("[data-menu]") ?? row;
+  }
   function openMenu(id: string) {
     menuRenaming = false;
     menuError = null;
+    menuAnchor = anchorFor(id);
     menuId = id;
   }
   /** Renommer directement (tableau des documents) : la feuille s'ouvre sur le champ. */
@@ -369,6 +381,7 @@
     menuDraft = it.base;
     menuError = null;
     menuRenaming = true;
+    menuAnchor = anchorFor(id);
     menuId = id;
   }
   function menuEdit() {
@@ -502,6 +515,7 @@
       <div class="groups">
         {#each composer.groups() as g (g.category)}
           <CategoryGroup
+            tableHeader={g.category === firstTable}
             category={g.category}
             items={g.items}
             bytes={g.bytes}
@@ -601,7 +615,7 @@
   </div>
 </Sheet>
 
-<Sheet bind:open={() => menuId !== null, (v) => { if (!v) menuId = null; }} title={menuName}>
+{#snippet menuBody()}
   {#if menuItem}
     {#if menuRenaming}
       <div class="mrename">
@@ -641,7 +655,13 @@
       </div>
     {/if}
   {/if}
-</Sheet>
+{/snippet}
+
+{#if narrow}
+  <Sheet bind:open={() => menuId !== null, (v) => { if (!v) menuId = null; }} title={menuName}>{@render menuBody()}</Sheet>
+{:else}
+  <Popover bind:open={() => menuId !== null, (v) => { if (!v) menuId = null; }} anchor={menuAnchor} title={menuName}>{@render menuBody()}</Popover>
+{/if}
 
 <Sheet bind:open={chatOpen} title={t("compose.create.chat")}>
   <p class="soon">{t("compose.soon.chat")}</p>

@@ -30,10 +30,12 @@
     /** Renommer depuis le tableau (feuille de renommage). */
     onrenamesheet?: (id: string) => void;
     cannotOpen?: (item: ComposeItem) => boolean;
+    /** Tableau : en-tête visible (le premier tableau de la liste seulement). */
+    tableHeader?: boolean;
     /** Élément en cause d'un blocage ou d'un risque : marqué en rouge (S6). */
     danger?: (item: ComposeItem) => boolean;
   };
-  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, onrenamesheet, cannotOpen, danger }: Props = $props();
+  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, onrenamesheet, cannotOpen, tableHeader = true, danger }: Props = $props();
   // Ordinateur : grille de vignettes (photos, vidéos), tableau (documents, archives, autres),
   // lignes pour les notes et l'audio. Téléphone : lignes compactes partout.
   const view = $derived(compact ? "rows" : category === "photos" || category === "videos" ? "grid" : category === "texte" || category === "audio" ? "rows" : "table");
@@ -133,7 +135,7 @@
   {#if view === "grid"}
     <MediaGrid {items} {helpId} onmenu={(id) => onmenu?.(id)} {onmove} {cannotOpen} {danger} />
   {:else if view === "table"}
-    <FileTable caption={t(KEY[category])} {items} {helpId} onrename={(id) => onrenamesheet?.(id)} {onremove} onmenu={(id) => onmenu?.(id)} {onmove} {cannotOpen} {danger} />
+    <FileTable caption={t(KEY[category])} {items} {helpId} onrename={(id) => onrenamesheet?.(id)} {onremove} onmenu={(id) => onmenu?.(id)} {onmove} header={tableHeader} {cannotOpen} {danger} />
   {:else}
   <ol bind:this={list} class="rows">
     {#each items as item (item.id)}

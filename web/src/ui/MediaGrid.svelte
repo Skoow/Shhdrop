@@ -10,7 +10,9 @@
   import { getLang, t } from "../i18n/i18n.svelte";
   import { formatClock, mediaDuration } from "../media/duration";
   import { Ellipsis } from "./Icon";
-  import { canThumb, iconFor, thumb } from "./itemView";
+  import { canThumb, iconFor, middleEllipsis, thumb } from "./itemView";
+  /** Légende : 64 px, deux lignes de 10 caractères environ. */
+  const CAPTION_MAX = 20;
   import { reducedMotion } from "./motion";
 
   type Props = {
@@ -91,7 +93,8 @@
       {#if durations[item.id] !== undefined}<span class="dur num" aria-hidden="true">{formatClock(durations[item.id]!)}</span>{/if}
       </span>
       <span class="sr-only" id="{uid}-{item.id}">{info.join(". ")}</span>
-      <bdi class="nm" translate="no" aria-hidden="true"><span class="b">{item.base}</span><span class="e">{item.ext}</span></bdi>
+      <!-- Deux lignes au plus, raccourci au milieu : le début et l'extension restent lisibles. -->
+      <bdi class="nm" translate="no" aria-hidden="true">{middleEllipsis(name, CAPTION_MAX)}</bdi>
     </li>
   {/each}
 </ol>
@@ -194,20 +197,14 @@
     }
   }
   .nm {
-    display: flex;
+    display: block;
     min-width: 0;
+    max-height: calc(2 * 1.3em);
+    overflow: hidden;
     color: var(--text-2);
     font-size: 0.6875rem;
     line-height: 1.3;
-  }
-  .b {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .e {
-    flex: none;
+    overflow-wrap: anywhere;
   }
   @media (prefers-reduced-motion: reduce) {
     .pic,
