@@ -1,7 +1,7 @@
 # Shhdrop — spécification V1 (version 2, finale à valider)
 
 Date : 4 novembre 2026 · Domaine visé : **shhdrop.app**
-Historique : v1 du 3 novembre, puis revue critique indépendante et passage complet de recherche d'oublis (voir section 0). v2.4 (4 novembre) : durcissement après l'audit « sharp edges » (section 25). v2.5 (5 novembre) : repli Google reCAPTCHA isolé (section 26). v2.6 (5 novembre) : décisions du propriétaire, coffre chiffré sur téléphone (27), code vérifiable (28), chiffrement anticipé (29), revue post-quantique (30), mot de passe de 8 caractères (31), lien court (32), historique local sans compte (33), droits du destinataire (34, simplifiés en 34.1), puis aucune statistique, nettoyage des métadonnées de tous les fichiers et enregistrement dans l'interface (35), minimisation de ce que voit le serveur (36). v2.7 (5 novembre) : compte facultatif par passkey, sans e-mail (37) et offre payante facultative « patte blanche » (38). v2.8 (7 novembre) : compte facultatif complété pour la création, la connexion et la récupération (37.11), salon de discussion éphémère (39), formules Plus et Pro avec modèle de coûts (38.8), envoi direct pair à pair (40). v2.9 (7 novembre) : exclusion d'un participant du salon avec rotation de l'invitation (39.13), explication des époques (39.2.4), trafic du salon toujours par notre serveur en WebSocket (39.3.1) et plus de pair à pair par défaut (40, 41.3), gratuit à 15 éléments et 2 Gio (4, 41.2) avec Plus et Pro refaits (38.8), rechargement sans ouverture supplémentaire (41.4), gestion de l'expéditeur sans empreinte (33.1), page de contenu et archive .zip (41.6) ; journal des décisions en 41. Les sections 29 à 41 remplacent les passages signalés « → § » ci-dessous.
+Historique : v1 du 3 novembre, puis revue critique indépendante et passage complet de recherche d'oublis (voir section 0). v2.4 (4 novembre) : durcissement après l'audit « sharp edges » (section 25). v2.5 (5 novembre) : repli Google reCAPTCHA isolé (section 26). v2.6 (5 novembre) : décisions du propriétaire, coffre chiffré sur téléphone (27), code vérifiable (28), chiffrement anticipé (29), revue post-quantique (30), mot de passe de 8 caractères (31), lien court (32), historique local sans compte (33), droits du destinataire (34, simplifiés en 34.1), puis aucune statistique, nettoyage des métadonnées de tous les fichiers et enregistrement dans l'interface (35), minimisation de ce que voit le serveur (36). v2.7 (5 novembre) : compte facultatif par passkey, sans e-mail (37) et offre payante facultative « patte blanche » (38). v2.8 (7 novembre) : compte facultatif complété pour la création, la connexion et la récupération (37.11), salon de discussion éphémère (39), formules Plus et Pro avec modèle de coûts (38.8), envoi direct pair à pair (40). v2.9 (7 novembre) : exclusion d'un participant du salon avec rotation de l'invitation (39.13), explication des époques (39.2.4), trafic du salon toujours par notre serveur en WebSocket (39.3.1) et plus de pair à pair par défaut (40, 41.3), gratuit à 15 éléments et 2 Gio (4, 41.2) avec Plus et Pro refaits (38.8), rechargement sans ouverture supplémentaire (41.4), gestion de l'expéditeur sans empreinte (33.1), page de contenu et archive .zip (41.6) ; journal des décisions en 41. **v2.10 (7 novembre)** : départ du compte à rebours à la première ouverture, avec plafond de 7 jours (38.9.1, 41.9) ; expiration, suppression et exclusion pendant un téléchargement (41.8, 39.13.6) ; Pro à 7 jours et éléments illimités par manifeste découpé (38.8, 38.9.2, 41.10) ; onze fonctions payantes détaillées (38.9) ; extensions à risque ajoutées (12) ; licences de la liste noire (31) ; décisions D41-9 à D41-14 et signalements F-1 à F-13 (41). Les sections 29 à 41 remplacent les passages signalés « → § » ci-dessous.
 
 ---
 
@@ -101,7 +101,7 @@ Ouvert à tous, sans inscription. Usage personnel au départ, ouverture publique
 |---|---|
 | Éléments par partage | **15** maximum (v2.9, §41.2 ; 10 avant) |
 | Taille par partage | **2 Gio** de contenu utile (v2.9, §41.2 ; 1 Gio avant) ; plus grand palier gratuit de 32 769 morceaux de 64 Kio (2 Gio de données + le morceau du manifeste), fichier chiffré de 48 + 32 769 × 65 552 = 2 148 073 536 octets (avant : 16 385 morceaux, 1 074 069 568 octets, §29.3) |
-| Durée de vie | au choix 1 h, 6 h, 12 h, 24 h ; comptée **à partir de la fin de l'envoi** ; expiration arrondie au **quart d'heure supérieur** |
+| Durée de vie | au choix 1 h, 6 h, 12 h, 24 h ; comptée **à partir de la fin de l'envoi** ; expiration arrondie au **quart d'heure supérieur**. Plus et Pro (§38.9.1) : le compte à rebours peut démarrer à la **première ouverture**, avec un plafond absolu de 7 jours après la création. À l'échéance, aucune nouvelle ouverture ; un téléchargement commencé peut se terminer pendant 2 h au plus (§41.8) |
 | Ouvertures | au choix 1 à 10 ; **une ouverture = un déverrouillage réussi** ; recharger la page, ou ouvrir le partage dans plusieurs onglets du même navigateur après un déverrouillage réussi, ne compte **pas** une ouverture de plus pendant les 30 min de l'octroi d'ouverture (§41.4) ; un autre navigateur ou appareil, ou un octroi expiré, en consomme une |
 | Fin de vie | le premier atteint : durée, ouvertures épuisées, destruction (expéditeur, destinataire, administrateur), signalement, 5 mots de passe faux |
 | Mot de passe | → §31 (10 caractères générés par défaut, 10 au moins si saisi). Avant v2.6 : obligatoire ; généré par défaut : **4 mots** tirés d'une liste de 7 776 mots (≈ 52 bits) ; personnalisé : 12 caractères minimum et absent d'une liste noire des mots de passe courants (contrôle côté navigateur : le serveur ne peut pas le vérifier) |
@@ -257,7 +257,7 @@ Chaque module a une responsabilité unique et des tests propres. `web/src/crypto
 2. `POST unlock` (avec `K_accès` et `K_preuve`), traité en une seule requête SQL conditionnelle :
    - **Faux** : `failed_attempts = failed_attempts + 1 WHERE failed_attempts < 5` ; réponse avec les essais restants ; au 5ᵉ, destruction.
    - **Juste** : `opens_left = opens_left - 1, opens_issued = opens_issued + 1 WHERE state='ready' AND opens_left > 0 AND expires_at > now AND failed_attempts < 5`, et passage en `draining` avec `purge_at` = min(maintenant + 6 h arrondi au quart d'heure supérieur, `expires_at`) quand `opens_left` atteint 0. Le n° d'ouverture rendu (`opens_issued`) entre dans un **jeton de téléchargement signé**, propre à cette ouverture, valable 6 h et plafonné à `expires_at`. **v2.9 (§41.4)** : la réponse porte aussi un **octroi d'ouverture** signé (30 min), qui permet de rouvrir cette même ouverture sans en consommer une autre ; `unlock` avec un octroi valable ne décrémente rien.
-3. `GET /segments/{n}` (avec le jeton) : refusé dès l'expiration du partage ou sa destruction (coupure nette), et pour une ouverture déjà terminée.
+3. `GET /segments/{n}` (avec le jeton) : refusé dès l'expiration du partage ou sa destruction, et pour une ouverture déjà terminée. **v2.10 (§41.8)** : « coupure nette » est remplacée par la règle de l'ouverture active : une ouverture qui a reçu un segment dans les 120 s précédentes termine son téléchargement jusqu'à 2 h après l'événement (et jamais au-delà de son jeton) ; aucune ouverture nouvelle ; coupure immédiate pour un signalement, l'administrateur ou l'exclusion d'un salon. Signal `gone` : 410 sur toute requête à jeton valide, et `GET /api/shares/watch`.
 4. `POST done` (avec le jeton) : pose le bit de cette ouverture dans `done_mask` (idempotent : un `done` rejoué ne change rien) ; le jeton de cette ouverture ne lit plus aucun segment.
 5. Quand `opens_left = 0` (état `draining`), plus aucun déverrouillage n'est possible. Le partage est effacé dès que toutes les ouvertures émises sont terminées (nombre de bits de `done_mask` = `opens_issued`), au plus tard à `purge_at`.
 
@@ -325,7 +325,8 @@ Table `shares`, une ligne par partage vivant :
 - Toutes les dates stockées sont **arrondies au quart d'heure supérieur**, sauf `progress_at`. → §36 S5, S11, S12 (Task M2) : `progress_at`, `upload_deadline` et `purge_at` passent en mémoire, `ttl_hours` à `NULL` après `finalize` ; la base ne garde plus qu'une date, `expires_at`.
 - `progress_at` : minute du dernier segment reçu, pour effacer un envoi bloqué (§7.4). Il n'existe **que pendant l'envoi** : `NULL` à la création (la minute de création n'est donc jamais écrite), mis à jour à chaque segment, remis à `NULL` à la finalisation comme `upload_deadline`. Pendant l'envoi, il donne à la minute près l'heure du dernier segment reçu.
 
-- **Jamais stockés** : adresse IP, date de création, nom, type ou taille exacte de fichier, navigateur, pays, jetons.
+- **v2.10 (§38.9, partages Plus et Pro seulement)** : `tier` (0, 1, 2), `starts_on_first_open`, `hard_expires_at` (§38.9.1), `opens_at` (§38.9.6), `brand` (§38.9.9), `extensions` (compteur, §38.9.4) ; tables séparées `parts`, `links`, `requests`, `request_notes` (§38.9.3, §38.9.5, §38.9.7). Pour un partage `starts_on_first_open` non démarré, `ttl_hours` reste non nul jusqu'au premier déverrouillage (S49). Date créée à 15 min près : voir S48.
+- **Jamais stockés** : adresse IP, date de création (sauf, pour un partage payant, le plafond `hard_expires_at` qui la donne à 15 min près, S48), nom, type ou taille exacte de fichier, navigateur, pays, jetons.
 - La ligne est supprimée quand le partage meurt. `secure_delete=ON`, `temp_store=MEMORY` et vidage du WAL chaque minute : rien ne reste dans le fichier de base (vérifié par le test « le serveur ne voit rien » après destruction et arrêt).
 
 ### 9.2 Fichiers
@@ -371,6 +372,10 @@ Interdits, côté serveur comme côté navigateur : mesure d'audience, télémé
 | Trames de la minute, flux ouverts (§39.3.6) | jeton de membre (SHA-256) ; HMAC de connexion | 1 min ; durée du flux | 60 par siège, 120 par connexion, 600 par /48 ; 4, 16 et 2 000 flux |
 | (plus tard, §41.3) Identifiants TURN de l'heure, octets relayés du jour (§40.4) | HMAC(secret du jour, /64 ou IPv4, /48) | 1 h ; minuit UTC | 30 identifiants par heure ; 5 Go relayés par jour (gratuit) |
 | État d'un salon vivant (§39.3.2) : file de 200 trames, sièges, budget des trames | id interne du salon | vie du salon | relais et règles du salon ; pas une statistique |
+| Ouvertures actives et flux de segments annulables (§41.8) | (id interne, n° d'ouverture) → heure du dernier segment ; clé de révocation → fonctions d'annulation | 120 s sans segment ; fin de grâce de 2 h au plus ; fin du flux | continuer un téléchargement commencé après l'expiration ou une suppression ; couper les flux d'une exclusion, d'un signalement ou d'un lien révoqué |
+| Requêtes `watch` tenues (§41.8) | HMAC de connexion ; total | 25 s | signal « gone » en moins d'une seconde ; 2 par connexion, 256 au total |
+| Abonnements de notification (§38.9.8, si Q-F3 acceptée) | id interne du partage | vie du partage ou redémarrage | notification d'ouverture ; jamais écrits sur disque |
+| Places de transfert réservées au Pro (§38.9.13) | total | durée du transfert | 192 places communes, 64 réservées |
 
 Ne sont **pas** des statistiques : les colonnes d'un partage vivant (`opens_left`, `opens_issued`, `done_mask`, `failed_attempts`), nécessaires à ses règles et effacées avec lui. Hors de notre contrôle, à dire sur la page Confidentialité : les tableaux de bord de trafic de l'hébergeur, les statistiques de trafic de GitHub Pages pour la démo, la sonde externe de §15.2 (elle ne reçoit que la page d'accueil publique).
 
@@ -425,7 +430,7 @@ Ne sont **pas** des statistiques : les colonnes d'un partage vivant (`opens_left
 - **Téléchargement** :
   - type `application/octet-stream`, toujours (`collectToBlob` ne prend plus de type) ;
   - **nom de fichier nettoyé** (`safeName`) : NFC ; caractères d'inversion de sens d'écriture retirés (U+202A–U+202E, U+2066–U+2069, U+200E, U+200F, U+061C ; anti-« facture‮fdp.exe ») ; contrôles C0/C1, `/` et `\` retirés ; tous les caractères ignorables par défaut retirés (`Default_Ignorable_Code_Point` : largeur nulle, U+00AD, U+034F, remplissages hangul, sélecteurs de variante, étiquettes…) ; U+200D (ZWJ) gardé seulement entre deux emoji et U+FE0F seulement après un emoji ; espaces regroupés ; points initiaux retirés (fichier caché), points et espaces finaux aussi (Windows les retire) ; 120 points de code au plus, coupés entre deux graphèmes (`Intl.Segmenter`), extension gardée (« fichier » devant l'extension si la coupe ne laisse rien avant elle, jamais un nom qui commence par un point) ; « fichier » si rien ne reste ;
-  - **avertissement** pour les fichiers exécutables ou dangereux (`isRiskyFile` : .exe, .msi, .bat, .cmd, .com, .scr, .ps1, .vbs, .js, .jar, .apk, .app, .dmg, .pkg, .sh, .html, .htm, .hta, .lnk, .iso, .msix, .appx, .reg, .wsf, .cpl, .pif, .url, .command, .desktop, .svg, .svgz, .xhtml, .xht, .mht, .mhtml ; ajoutés le 7 novembre, audit F4 : .img, .vhd, .vhdx, .one, .chm, .xlsm, .docm, .pptm, .xlam, .ppam, .iqy, .slk, .scf, .jse, .vbe, .psm1, .appref-ms, .application, .gadget, .msc, .settingcontent-ms ; plus le contenu reconnu : MZ, ELF, Mach-O, ISO).
+  - **avertissement** pour les fichiers exécutables ou dangereux (`isRiskyFile` : .exe, .msi, .bat, .cmd, .com, .scr, .ps1, .vbs, .js, .jar, .apk, .app, .dmg, .pkg, .sh, .html, .htm, .hta, .lnk, .iso, .msix, .appx, .reg, .wsf, .cpl, .pif, .url, .command, .desktop, .svg, .svgz, .xhtml, .xht, .mht, .mhtml ; ajoutés le 7 novembre, audit F4 : .img, .vhd, .vhdx, .one, .chm, .xlsm, .docm, .pptm, .xlam, .ppam, .iqy, .slk, .scf, .jse, .vbe, .psm1, .appref-ms, .application, .gadget, .msc, .settingcontent-ms ; **ajoutés le 7 novembre (v2.10, D41-13)** : .wsh, .msp, .xll, .ps1xml, .inf (le code suivra) ; plus le contenu reconnu : MZ, ELF, Mach-O, ISO).
 - **Destruction et signalement après lecture** : `Opened.destroy("report")` réutilise K_accès et K_preuve gardés depuis l'ouverture, sans relire `meta` : possible même après la dernière ouverture (état `draining`). `wipe()` les met à zéro. La fin du téléchargement (`done`) part en `keepalive` pour survivre à la fermeture de la page.
 - **Mémoire** : déchiffrement élément par élément, chiffré libéré au fur et à mesure ; avertissement sur les appareils qui manquent de mémoire.
 
@@ -1006,7 +1011,8 @@ Le test « le serveur ne voit rien » ajoute un repère de mot de passe saisi **
 ## 31. Décision du propriétaire (v2.6) — mot de passe par défaut de 8 caractères, porté à 10
 
 - **Mise à jour (5 novembre, décision du propriétaire, Q-MDP1 réglée)** : le mot de passe généré fait **10 caractères** (même alphabet, mêmes quatre familles) : 594 641 958 752 747 520 possibilités, soit **2^59,0** (environ 4,7 millions d'années-GPU en moyenne avec l'hypothèse ci-dessous). Un mot de passe saisi doit faire **10 caractères au moins** (au lieu de 12) et rester absent de la liste noire : le même seuil pour tous. `isGeneratedPassword` reste un raccourci, plus une exception de longueur. Les passages ci-dessous qui disent 8 et 12 caractères sont remplacés par cette ligne ; le code du coffre (§27.2) suit la même règle de 10 caractères.
-- **Mise à jour (7 novembre, audit M1 ; à valider par le propriétaire, car la règle validée change)** : « absent de la liste noire » devient la règle complète de `web/src/crypto/weakpw.ts`, appliquée à tout mot de passe saisi de 10 caractères au moins (et au code du coffre, §27.2) : refus (1) de moins de 5 caractères distincts, ou de plus de la moitié des caractères pris dans des répétitions (`aaa`, `abab`, casse comprise), des suites (`abcd`, `6789`, `2468`, 4 au moins) ou des rangées et colonnes de clavier AZERTY, QWERTY, QWERTZ (`azer`, `1qaz`, 4 au moins) ; (2) d'un mot de passe entier présent dans la liste ; (3) d'un mot de passe dont le « cœur » (séparateurs, chiffres et symboles des bords retirés, accents retirés, `0→o`, `1→i` ou `l`, `@→a`…) est un mot de passe courant (`motdepasse12`, `Soleil2024!`, `p@ssw0rd`). Listes générées par `scripts/gen-lists.mjs`, sources épinglées par SHA-256 : SecLists 10k (MIT), les 20 000 premières lignes de la liste NCSC 100k (redistribuée par SecLists), Richelieu (20 000 mots de passe français, CC BY 4.0). Une raison claire par règle à l'écran. Le mot de passe généré n'est pas concerné (raccourci `isGeneratedPassword`).
+- **Mise à jour (7 novembre, audit M1 ; à valider par le propriétaire, car la règle validée change)** : « absent de la liste noire » devient la règle complète de `web/src/crypto/weakpw.ts`, appliquée à tout mot de passe saisi de 10 caractères au moins (et au code du coffre, §27.2) : refus (1) de moins de 5 caractères distincts, ou de plus de la moitié des caractères pris dans des répétitions (`aaa`, `abab`, casse comprise), des suites (`abcd`, `6789`, `2468`, 4 au moins) ou des rangées et colonnes de clavier AZERTY, QWERTY, QWERTZ (`azer`, `1qaz`, 4 au moins) ; (2) d'un mot de passe entier présent dans la liste ; (3) d'un mot de passe dont le « cœur » (séparateurs, chiffres et symboles des bords retirés, accents retirés, `0→o`, `1→i` ou `l`, `@→a`…) est un mot de passe courant (`motdepasse12`, `Soleil2024!`, `p@ssw0rd`). Listes générées par `scripts/gen-lists.mjs`, sources épinglées par SHA-256 : SecLists 10k (MIT), les 20 000 premières lignes de la liste NCSC 100k (redistribuée par SecLists), Richelieu (20 000 mots de passe français, CC BY 4.0). **v2.10 (D41-14)** : les trois listes sont livrées **compressées**, pour environ **14,8 Ko en gzip** au total ; licences : voir la mise à jour suivante. Une raison claire par règle à l'écran. Le mot de passe généré n'est pas concerné (raccourci `isGeneratedPassword`).
+- **Mise à jour (7 novembre, v2.10, D41-14) — listes et licences** : (1) **SecLists 10k** (`10k-most-common.txt`) : licence **MIT** (dépôt SecLists) ; (2) **NCSC, 20 000 premières lignes** de la liste « 100k most used passwords » du National Cyber Security Centre (Royaume-Uni), redistribuée par SecLists sous la licence MIT du dépôt ; la licence **d'origine** de la liste NCSC est **probablement l'Open Government Licence v3.0 (OGL v3) : à confirmer** auprès de la source avant la mise en ligne (si elle n'était pas libre, la liste serait retirée et remplacée par SecLists seule) ; (3) **Richelieu**, 20 000 mots de passe français : **CC BY 4.0** — attribution obligatoire (auteur, source, licence, mention des modifications : liste tronquée et compressée). Les trois textes de licence et l'attribution vont dans `THIRD_PARTY_LICENSES.md` et sur une page « Licences » du site (sans ressource tierce). Les trois listes sont des données publiques de mots de passe divulgués : aucune n'est un secret ; elles sont incluses au code (aucun `import()` dynamique, §28.3), ce qui compte dans le budget de poids de la page.
 - Remplace la phrase de 4 mots de §4 comme défaut. `generatePassword()` tire 8 caractères dans un alphabet de 64 sans caractères ambigus : minuscules sans `l` ni `o` (24), majuscules sans `I` ni `O` (24), chiffres `2` à `9` (8), symboles `! # $ % + = ? @` (8). Tirage uniforme par `crypto.getRandomValues` (64 = 2⁶ : aucun biais), recommencé jusqu'à ce que les quatre familles soient présentes. Bouton **« Générer un autre »**, sans limite ; la personne peut saisir le sien.
 - **Nombre exact** : 107 294 591 287 296 mots de passe possibles (4 familles présentes), soit **2^46,6** ; ce n'est pas 50 bits (2⁴⁸ sans la contrainte des familles).
 - Le mot de passe généré a un type marqué (`GeneratedPassword`) accepté à 8 caractères ; un mot de passe saisi reste soumis à `checkPassword` (12 caractères, liste noire), un humain choisissant moins bien qu'un tirage.
@@ -1230,8 +1236,22 @@ But : que le serveur, et quiconque le lit (hébergeur, pirate, réquisition), ap
 | S28 | **Pass payant ↔ identité** (§38) | chez le vendeur officiel seulement (empreinte `Q`) | aucune référence de commande ni moyen de paiement chez nous ; pass rangé dans `B` : le serveur ignore quel compte le détient | **À faire** P1 |
 | S29 | **Pass ↔ partages Plus** | aucun : jetons aveugles (RFC 9474, 9578) ; en direct, adresse et heure | émission par lots à heure aléatoire, longtemps avant usage ; variante sans jetons : liaison en direct (§38.4) | **À faire** P1 |
 | S30 | **Partage Plus** | palier, durée ou ouvertures au-delà du gratuit | inévitable (règles appliquées par le serveur) ; ne dit pas qui a payé | Assumé |
+| S48 | **Mode « première ouverture » et plafond de 7 jours** (§38.9.1) | `starts_on_first_open` et `hard_expires_at` en base pour un partage Plus ou Pro : le plafond **donne la date de création à 15 min près** (régression par rapport à S11, pour les partages payants seulement) | nécessaire à la règle ; correction possible : retrancher 0 à 3 h au hasard (Q-F1, défaut non) | Assumé (F-1) |
+| S49 | **Heure du premier déverrouillage** | vue en direct ; `ttl_hours` remis à `NULL` au premier déverrouillage : la base ne garde que `expires_at` | rien de plus à retirer | Fait en conception (P4) |
+| S50 | **Manifeste découpé** (§38.9.2) | l'en-tête en clair porte la version 3 : plus d'environ 200 éléments ; nombre de segments de fin | inévitable (l'en-tête est authentifié) | Assumé |
+| S51 | **Parties d'un partage, fichiers à limite** (§38.9.5, §38.9.11) | nombre et paliers des parties, moment de chaque ajout (direct), que telle partie est limitée et son compteur de lectures | une partie par fichier à limite seulement quand l'expéditeur la demande | Assumé |
+| S52 | **Liens par destinataire** (§38.9.7) | nombre de liens, compteur d'ouvertures de chacun, appartenance au même partage, révocations (direct) | noms des liens uniquement chez l'expéditeur | Assumé |
+| S53 | **Ouverture programmée** (§38.9.6) | `opens_at`, au quart d'heure | nécessaire | Assumé |
+| S54 | **Notification d'ouverture** (§38.9.8) | abonnements en mémoire seulement ; le service de notification du navigateur (Google, Apple, Mozilla, Microsoft) apprend qu'une adresse d'abonnement reçoit un message à cet instant ; contenu chiffré d'un octet | rien sur disque ; hôtes fermés | **Conditionnel** (Q-F3, F-8) |
+| S55 | **Prolongation** (§38.9.4) | heure de la requête et nouvelle échéance (direct) ; aucune trace gardée sauf `expires_at` et le compteur de prolongations | — | Assumé |
+| S56 | **Demandes de fichiers** (§38.9.3) | ligne `requests` (clé publique, limites, échéance), notes scellées de taille fixe, nombre de dépôts ; aucun lien de base entre une demande et les partages déposés ; adresse du déposant en direct | notes scellées à clé publique ; libellé dans le fragment du lien | Assumé |
+| S57 | **Marque de la page de réception** (§38.9.9) | qu'une marque existe et sa taille fixe ; contenu scellé par `K_marque` | — | Assumé |
+| S58 | **CLI / API** (§38.9.10) | mêmes requêtes qu'un navigateur ; `User-Agent` retiré comme les autres (S2) | — | Fait en conception |
+| S59 | **Débit prioritaire** (§38.9.13) | le niveau du partage, déjà connu (S30) | — | Assumé |
+| S60 | **Présence pendant la lecture** (§41.8) | `GET /api/shares/watch` tenue 25 s : le serveur sait, à la seconde près, que la page de l'ouverture est restée ouverte et visible | uniquement page visible et active ; pas de journal ; alternative : sonder toutes les 30 s (Q-GONE2) | Assumé (F-5) |
+| S61 | **Ouvertures actives, fichiers détachés** (§41.8) | en mémoire : dernière heure de segment de chaque ouverture active ; sur disque : un fichier supprimé mais ouvert, jusqu'à 2 h après une suppression, uniquement pour une ouverture déjà commencée | aucune ouverture nouvelle ; coupure immédiate pour signalement, administrateur et exclusion | Assumé (F-4) |
 
-→ §39.3.8 : lignes S31 à S43 pour le salon ; §40.7 : S44 à S47 pour l'envoi direct. Dont S34 : « en train d'écrire » toujours actif (décision du propriétaire) — le serveur voit qui écrit et depuis combien de temps, à 2,5 s près (§39.3.7).
+→ §39.3.8 : lignes S31 à S43 pour le salon ; §40.7 : S44 à S47 pour l'envoi direct ; **S48 à S61 ci-dessus (v2.10)** : fonctions payantes (§38.9) et disparition pendant un téléchargement (§41.8). Dont S34 : « en train d'écrire » toujours actif (décision du propriétaire) — le serveur voit qui écrit et depuis combien de temps, à 2,5 s près (§39.3.7).
 
 **Le test « le serveur ne voit rien » (§14) s'étend** (Task M2, bloquant comme avant) : en plus des repères de contenu, de nom, de mot de passe et de clés, il envoie une **IP repère** (texte et 4 octets), un **User-Agent, un Referer et un Accept-Language repères**, un identifiant repère dans une route inconnue et un `reason` repère ; il exige : aucun de ces repères sur disque (base, WAL, fichiers), dans stdout, stderr ni dans une réponse ; base sans `progress_at`, `upload_deadline`, `purge_at` non nuls après `finalize` et sans `ttl_hours` ; toutes les dates de la base multiples de 900 s ; en mode « au clic », aucune requête `finalize` ne porte `fill_from`. **Compte (Tasks A1 à A3)** : le même test crée un compte, synchronise un coffre de compte qui contient des `S_gestion`, libellés et réglages repères, puis exige : aucun repère dans `accounts.db`, son WAL, stdout, stderr ni une réponse ; aucune valeur commune entre `accounts.db` et `shares.db` (`V_gestion`, `V_accès`, identifiants) ; aucune date de `accounts.db` qui ne soit un premier du mois à minuit UTC ; aucune requête vers `/api/shares/*` ou `/api/manage/*` qui porte `X-Shh-Session` ; après suppression du compte et arrêt, aucun octet de `B` dans le fichier de base. La fouille de la mémoire reste limitée aux repères de contenu et de clés : l'adresse et les en-têtes passent forcément par la mémoire du processus qui reçoit la requête ; derrière Caddy (Plan 3), les en-têtes retirés ne doivent plus y apparaître.
 
@@ -1452,10 +1472,10 @@ Modèle choisi par le propriétaire : le service gratuit reste **complet, privé
 | Fonction | Gratuit | Plus (suggéré, v2.7) | Recommandation |
 |---|---|---|---|
 | Taille par lien | 2 Gio (v2.9) | **5 Gio** (v2.7 ; v2.9 : 10 Gio, §38.8) | Oui. 10 Gio : oui en v2.9, avec la réserve séparée (§38.6) |
-| Durée de vie | 1, 6, 12, 24 h | **2 j, 3 j, 7 j** ; 30 j réservés au Pro (§38.8) | Oui ; toujours arrondie au quart d'heure |
+| Durée de vie | 1, 6, 12, 24 h | **2 j, 3 j, 7 j** (le Pro aussi : 7 jours au plus, v2.10, §38.8) | Oui ; toujours arrondie au quart d'heure |
 | Ouvertures | 1 à 10 | **jusqu'à 50**, avec taille × ouvertures ≤ 100 Gio (5 Gio → 20 ouvertures) | Oui, avec le plafond de sortie |
 | Échéance personnalisée | non | date et heure choisies dans la plage permise | Oui (confort, sans coût) |
-| « Demander des fichiers » (lien de dépôt) | **version de base gratuite** (dans les limites gratuites) | limites Plus | Oui ; **fonction encore à spécifier** (registre du 5 nov., idée 1), section dédiée à écrire avant P2 |
+| « Demander des fichiers » (lien de dépôt) | **version de base gratuite** (dans les limites gratuites) | limites Plus | Oui ; **spécifiée en §38.9.3 (v2.10)** |
 | Historique synchronisé | gratuit (Q-A2) | — | Ne pas le vendre |
 | Coffre plus grand | 2 Gio, 20 entrées (§27.3) | — | **Non** : stockage du téléphone de l'utilisateur, qui ne nous coûte rien ; le vendre serait malhonnête |
 | Partages Plus | — | **20 par pass de 30 jours** | Oui (borne le disque, §38.6) |
@@ -1509,15 +1529,17 @@ Modèle choisi par le propriétaire : le service gratuit reste **complet, privé
 |---|---|---|
 | Q-P1 | Moyen de paiement | Carte via un vendeur officiel, pass prépayés ; BTCPay ensuite ; ni espèces ni Monero au lancement |
 | Q-P2 | Exception à la règle crypto pour Privacy Pass (circl, blindrsa-ts) | Oui, après revue de chaîne d'approvisionnement et de l'implémentation ; sinon variante minimale de §38.4 |
-| Q-P3 | Limites Plus | Remplacée par §38.8.1 (v2.9) : Plus 10 Gio, 50 éléments, 7 j, 50 ouvertures sous 100 Go, 30 liens par pass ; Pro 50 Gio, 200 éléments, 30 j (14 j au-delà de 20 Gio), 100 ouvertures sous 250 Go, 100 liens par pass |
+| Q-P3 | Limites Plus | Remplacée par §38.8.1 (v2.9) : Plus 10 Gio, 50 éléments, 7 j, 50 ouvertures sous 100 Go, 30 liens par pass ; Pro 50 Gio, éléments illimités (v2.10, §38.9.2), 7 j (comme Plus, v2.10), 100 ouvertures sous 250 Go, 100 liens par pass |
 | Q-P4 | Abonnement ou prépayé | Prépayé seulement, aucun renouvellement automatique |
 | Q-P5 | Statut juridique de l'exploitant | À décider avec le juriste et le comptable avant P1 (micro-entreprise avec domiciliation ou société) |
-| Q-P6 | « Demander des fichiers » | Base gratuite, limites Plus payantes ; section de spec à écrire |
+| Q-P6 | « Demander des fichiers » | Base gratuite, limites Plus payantes ; spécifiée en §38.9.3 (v2.10) |
 | Q-P7 | Coffre plus grand payant | Non |
 
 ### 38.8 Décision du propriétaire (v2.8, 7 novembre ; refaite en v2.9, 7 novembre) — deux formules, « Plus » et « Pro », limites et prix avec marge
 
 Remplace la colonne « Plus (suggéré) » de §38.2 et Q-P3 ; §38.1 (honnêteté), §38.3 et §38.4 (paiement, pass, jetons aveugles), §38.5 (légal) et §38.6 (réserve séparée, chiffres mis à jour) restent valables. **Aucune formule n'apporte de sécurité de plus** : seulement de la capacité et du confort. Le gratuit reste complet et privé. Les « abonnements » demandés sont des **pass prépayés** de 30 ou 365 jours, sans renouvellement automatique (Q-P4) : prix « par mois » et « par an ».
+
+**v2.10 (décision du propriétaire, 7 novembre 2026, D41-11)** : la durée maximale du Pro est de **7 jours** (comme Plus) ; le Pro n'a plus de limite d'éléments (dans 50 Gio au total) ; toutes les mentions de « 30 jours » pour une durée de partage sont corrigées (les pass de 30 jours, eux, restent). Détails : §41.10, §38.9.
 
 **v2.9 (décision du propriétaire, 7 novembre 2026)** : le gratuit passe à 15 éléments et 2 Gio (§4, §41.2) ; les limites payantes sont relevées pour rester nettement au-dessus ; les prix sont revus pour viser **au moins 60 % de marge brute** à l'usage réaliste. Les chiffres de la v2.8 (Plus 5 Go, 5 € ; Pro 20 Go, 12 €) sont abandonnés : à 12 €, le Pro ne couvrait plus son coût direct avec les nouvelles tailles.
 
@@ -1526,14 +1548,16 @@ Remplace la colonne « Plus (suggéré) » de §38.2 et Q-P3 ; §38.1 (honnêtet
 | Fonction | Gratuit | **Plus** | **Pro** |
 |---|---|---|---|
 | Taille par lien | **2 Go** | **10 Go** (paliers 5 et 10 Gio, + morceau du manifeste, §29.3) | **50 Go** (paliers 20 et 50 Gio, + morceau du manifeste) |
-| Éléments par lien | **15** | **50** | **200** |
-| Durée de vie | 1, 6, 12, 24 h | 2, 3 et 7 jours | 2, 3, 7, 14 et 30 jours ; **30 jours jusqu'à 20 Gio, 14 jours au-delà** (borne le disque) |
+| Éléments par lien | **15** | **50** | **illimité (50 Go au total)** : manifeste découpé (§38.9.2), borne technique de 50 000 |
+| Durée de vie | 1, 6, 12, 24 h | 2, 3 et 7 jours | 2, 3 et 7 jours (**7 jours au plus, comme Plus** ; v2.10 : l'ancien 30 j / 14 j est supprimé) |
+| Compte à rebours à la première ouverture (plafond 7 j après la création, §38.9.1) | non | oui | oui |
 | Échéance personnalisée (date et heure) | non | oui | oui |
 | Ouvertures | 1 à 10 | jusqu'à 50, taille × ouvertures ≤ 100 Go | jusqu'à 100, taille × ouvertures ≤ 250 Go |
 | Liens payants par pass de 30 jours | — | 30 | 100 |
 | Liens gratuits par jour | 10 (inchangé, §4) | 10 + les liens du pass | 10 + les liens du pass |
 | Salon de discussion (§39) | 24 h, 10 personnes, 1 Go | 3 jours, 20 personnes, 5 Go | 7 jours, 50 personnes, 20 Go |
-| « Demander des fichiers » (fonction encore à spécifier, §38.2) | base gratuite | limites Plus | limites Pro |
+| Fonctions payantes détaillées (v2.10) | — | §38.9 : demander des fichiers, prolonger, ajouter des fichiers, ouverture programmée, plusieurs destinataires, notification, limite par fichier, filigrane | Plus, **plus** page personnalisée, CLI/API, débit prioritaire (tableau de §38.9.0) |
+| « Demander des fichiers » (§38.9.3) | base gratuite | limites Plus | limites Pro |
 | Envoi direct (§40) | plus tard, optionnel (§41.3) | idem | idem |
 | Bande passante prioritaire | non | non | oui : réserve séparée de places de transfert simultané (§24) ; « prioritaire », jamais « débit garanti » |
 | Historique synchronisé (§37) | **gratuit** | gratuit | gratuit |
@@ -1569,7 +1593,7 @@ Le Pro annuel offre un mois et non deux : avec deux mois offerts (200 €), sa m
 
 | | Plus | Pro |
 |---|---|---|
-| Stockage moyen tenu | 12 Go-mois | 80 Go-mois |
+| Stockage moyen tenu (v2.10 : le Pro garde au plus 7 jours, l'estimation est donc prudente) | 12 Go-mois | 80 Go-mois |
 | Trafic sortant | 0,4 To par mois | 1,5 To par mois |
 | Coût direct (stockage à 8 €/To-mois, sortie à 3 €/To) | 0,10 + 1,20 = **1,30 €** | 0,64 + 4,50 = **5,14 €** |
 
@@ -1612,6 +1636,173 @@ Ces chiffres n'incluent ni le temps du propriétaire, ni un audit externe (§3),
 | Q-P9 | Historique synchronisé payant | Non (gratuit pour tous) |
 | Q-P10 | Paliers de 5, 10, 20 et 50 Gio | Oui, avec la réserve Plus séparée (§38.6) de 300 Gio |
 | Q-P11 | Pire cas de sortie par pass (§38.8.1) | Hébergeur à sortie forfaitaire exigé avant P2 ; sinon baisser les plafonds « taille × ouvertures » |
+
+### 38.9 Fonctions payantes (décision du propriétaire, 7 novembre 2026, v2.10) — spécification détaillée
+
+Fonctions **conservées** (pas de formule « Équipe »). Chacune a ci-dessous : sécurité, ce que voit le serveur (lignes S48 à S59 de §36), interface (UI §9.14) et tests (plan : Tasks P4, P5 et F0 à F11, **toutes après la V1**, bloquées comme P1 à P3 par Q-P1, Q-P2, Q-P5 et l'avis de §38.5). Décisions : §41.0 (D41-9 à D41-14).
+
+#### 38.9.0 Règles communes (valent pour toutes les fonctions)
+
+1. **Aucune sécurité de plus, aucune de moins.** Argon2id (mêmes paramètres minimaux), AES-256-GCM/STREAM, 5 essais puis destruction, mot de passe de 10 caractères et liste noire (§31), CSP, nettoyage des métadonnées (§35.2), enveloppe `E` : **strictement identiques** pour le gratuit, Plus et Pro. Aucune fonction ci-dessous ne relâche ni ne renforce l'un d'eux. Test de **parité** (Task F0) : les constantes de sécurité sont lues d'un seul endroit sans paramètre de formule, et un test échoue si une branche `tier` en change une.
+2. **Aucune statistique sur les destinataires.** L'expéditeur ne voit que ce que §4 compte déjà : ouvertures utilisées (et, avec §38.9.7, **par lien**, c'est le même compteur), état, échéance. **Jamais** : qui, d'où (adresse, pays, appareil, navigateur), à quelle heure précise (seulement l'intervalle observé en local, §33), combien de temps de lecture, quel élément a été regardé (S9), combien de fois un élément a été vu. Seule exception, **explicite et choisie par l'expéditeur** : la limite par fichier (§38.9.11) compte des lectures complètes d'un fichier à limite, rien d'autre. Test de balayage (Task F0) : les réponses de `meta`, `unlock`, `manage/status` et des nouvelles routes ne contiennent que des champs d'une **liste blanche** ; tout champ nouveau fait échouer le test avec « ajouter une ligne justifiée à §38.9.0 ».
+3. **Droit d'usage** : le jeton aveugle de création (§38.4) fixe le **niveau** du partage (`tier` : 0 gratuit, 1 Plus, 2 Pro). Les actions suivantes (prolonger, ajouter, révoquer un lien…) se font avec `S_gestion` et lisent le `tier` **du partage** : aucun pass ni jeton n'y intervient, donc rien ne relie ces actions au payeur. Le `tier` ne change jamais. Une fonction demandée à un niveau insuffisant → 400 `bad_request` identique à une valeur invalide.
+4. **Le destinataire ne voit jamais l'offre** (§38.1) : les écrans d'ouverture n'affichent que l'effet (« Ce lien disparaît 24 h après sa première ouverture »), jamais « Plus » ni « Pro ».
+5. **Répartition proposée** (à valider, Q-F4 ; le propriétaire a fixé : minuteur à la première ouverture = Plus et Pro ; page personnalisée et CLI/API = Pro ; débit prioritaire = Pro, §38.8.1) :
+
+| Fonction | Gratuit | Plus | Pro |
+|---|---|---|---|
+| Départ du compte à rebours à la première ouverture (§38.9.1) | non | oui | oui |
+| Éléments illimités, manifeste découpé (§38.9.2) | 15 | 50 | **illimité (50 Go au total)** |
+| Demander des fichiers (§38.9.3) | base : 1 demande, 5 dépôts, limites gratuites | 3 demandes, 25 dépôts | 10 demandes, 100 dépôts |
+| Prolonger (§38.9.4) | non | oui | oui |
+| Ajouter des fichiers (§38.9.5) | non | oui (3 ajouts) | oui (7 ajouts) |
+| Ouverture programmée (§38.9.6) | non | oui | oui |
+| Plusieurs destinataires, liens révocables (§38.9.7) | 1 lien | 5 liens | 25 liens |
+| Notification d'ouverture (§38.9.8) | non | oui | oui |
+| Page de réception personnalisée (§38.9.9) | non | non | oui |
+| CLI / API (§38.9.10) | non | non | oui |
+| Limite de téléchargement par fichier (§38.9.11) | non | oui | oui |
+| Filigrane « confidentiel » (§38.9.12) | non | oui | oui |
+| Débit prioritaire (§38.9.13) | non | non | oui |
+
+6. **Stockage** : les données de ces fonctions sont dans `shares.db` (colonnes ou tables **séparées** : `parts`, `links`, `requests`, `request_notes`) ; aucune colonne ne porte de jeton, de pass, de compte ni d'identifiant de destinataire.
+
+#### 38.9.1 Départ du compte à rebours : à la création ou à la première ouverture (Plus et Pro)
+
+**Choix de l'expéditeur** (UI §9.3.1) : « Le compte à rebours démarre… » **à la création** (par défaut ; **seule option gratuite** : comptée à partir de la fin de l'envoi, §4) ou **à la première ouverture**. Avec la seconde : **plafond absolu** — le partage est purgé **7 jours après sa création**, même s'il n'a jamais été ouvert (c'est aussi la durée maximale de Plus et de Pro, §38.8.1).
+
+- **Serveur — colonnes** : `starts_on_first_open` (0/1, posé à `finalize`, jamais modifié ensuite) et `hard_expires_at` (plafond). Pour tout partage Plus ou Pro, `hard_expires_at` = création + 7 j, arrondi au quart d'heure **inférieur** (seule date arrondie vers le bas : elle ne doit jamais dépasser 7 jours ; la création est connue en mémoire jusqu'à `finalize` : `upload_deadline` − fenêtre d'envoi de 6 h ou 24 h, §41.2). Gratuit : `NULL` (le plafond est `expires_at`).
+- **Avant le premier déverrouillage** : `expires_at` = `hard_expires_at` et `ttl_hours` est **conservé** (non nul : la durée choisie). Le nettoyeur purge à `expires_at` comme pour tout partage : un partage jamais ouvert disparaît donc à 7 jours.
+- **Premier `unlock` réussi** (le seul qui passe `opens_issued` de 0 à 1 ; un `unlock` avec octroi d'ouverture, §41.4, n'en est pas un), dans la **même requête SQL conditionnelle** que §7.5 : `expires_at = MIN(ceil15(maintenant + ttl_hours h), hard_expires_at), ttl_hours = NULL WHERE starts_on_first_open = 1 AND ttl_hours IS NOT NULL`. Deux déverrouillages simultanés : un seul gagne la condition `ttl_hours IS NOT NULL` ; l'autre lit l'échéance déjà fixée. Le jeton de téléchargement et l'octroi sont plafonnés au **nouvel** `expires_at` (même transaction). **Invariant, testé** : `expires_at` ≤ `hard_expires_at` à tout instant.
+- **Ne démarrent rien** : `meta`, la pré-lecture (§29.6), un mot de passe faux, une page de gestion. Démarre le compte à rebours : **n'importe quelle personne qui détient le lien et le mot de passe** (dit à l'expéditeur : « Le compte à rebours démarre quand quelqu'un déverrouille le lien, pas forcément la personne que vous visez »).
+- **`meta`** rend en plus `starts_on_open` (booléen), `duration_s` (durée choisie, tant que non démarré) et `seconds_left` (jusqu'à `expires_at`, donc jusqu'au plafond tant que non démarré). **`manage/status`** rend `started` (booléen) et `expires_at`.
+- **Durées** autorisées avec ce mode : 1 h, 6 h, 12 h, 24 h, 2, 3 et 7 jours ; la durée est **bornée par le plafond** (ouvert au 6ᵉ jour avec 3 j choisis : disparition au 7ᵉ jour). L'écran le dit avant l'envoi et à l'ouverture (« au plus tard le … »).
+- **Ce que voit le serveur** : S48 (le mode et le plafond, donc la **date de création à 15 min près** pour un partage payant, régression par rapport à S11 : voir le signalement F-1, §41.12) ; S49 (l'heure du premier déverrouillage n'est **pas** gardée : `ttl_hours` est remis à `NULL`, `expires_at` seul reste).
+- **Tests** (Task P4) : voir plan.
+
+#### 38.9.2 Éléments illimités pour le Pro : manifeste découpé (index + segments de manifeste)
+
+Pro : « **illimité (50 Go au total)** » (UI et textes) ; Plus 50 éléments ; gratuit 15. Le manifeste actuel (64 Kio, un morceau, §29.3) contient environ 200 éléments : il faut un manifeste en plusieurs morceaux, **sans nouvelle cryptographie** (même paquet « SHH2 », mêmes morceaux AES-256-GCM/STREAM sous `K_contenu`).
+
+- **Limite d'éléments : côté navigateur seulement.** Le serveur ne voit pas le nombre d'éléments (S6) ; il ne borne que le palier (taille). Les limites 15/50 sont des limites du composeur (un client modifié peut les dépasser *dans la taille payée*, sans conséquence de sécurité ni de coût). **Borne technique** du Pro : `ITEMS_PRO_TECH_MAX` = **50 000** éléments (mémoire de la liste ; voir F-2, §41.12 : « illimité » est donc un peu fort, d'où « illimité (50 Go au total) » et la borne dite sur la page des limites).
+- **Format** : l'en-tête est « SHH2 » avec l'octet de version **3** (authentifié comme tout l'en-tête, qui est une donnée authentifiée de chaque morceau et de `E`) **si et seulement si** le manifeste JSON dépasse `MANIFEST_MAX` ; sinon version 2 inchangée. Clair du paquet v3 : **données** ‖ zéros ‖ **pages de manifeste** P₁…Pₖ ‖ **morceau d'index** (le dernier du paquet, avec le drapeau « dernier morceau »).
+  - **Page de manifeste** : exactement un morceau de 64 Kio : longueur du JSON (4 octets) ‖ JSON `{ "v": 3, "items": [...] }` (une tranche d'éléments, au plus 65 528 octets) ‖ zéros. **Règle de découpage déterministe** : éléments dans l'ordre d'ajout, une page est remplie jusqu'à ce que le suivant ne tienne plus ; un élément ne coupe jamais deux pages.
+  - **Morceau d'index** : « MIDX » ‖ `k` (4 octets) ‖ nombre total d'éléments (4) ‖ pour chaque page : premier élément (4) et nombre d'éléments (4) ‖ zéros ‖ longueur de l'index (4) en toute fin (même place que la longueur du manifeste v2). 8 octets par page : jusqu'à 8 000 pages.
+  - Les `rights` et `keep_ttl_h` sont dans la **page 1** (comme dans le manifeste v2).
+- **Sécurité** : une page ou l'index modifié, retiré, dupliqué ou déplacé est détecté (numéro du morceau dans le nonce, drapeau « dernier » sur l'index seul) ; le client vérifie que les plages de l'index sont **contiguës, croissantes, sans trou**, que chaque page porte **exactement** le nombre d'éléments annoncé et que le total est celui de l'index. Version 2 réécrite en 3 par le serveur, ou l'inverse : échec (l'en-tête est authentifié). Aucune empreinte de plus : le GCM suffit.
+- **Palier canonique v3** : le plus petit palier dont la capacité ≥ fin des données + (`k` + 1) morceaux, `k` étant déterminé par la règle de découpage ; vérifié à l'ouverture comme le palier v2 (§7.3).
+- **Lecture (S9 amendé)** : après le segment de fin (qui porte l'index et les dernières pages), le client lit les segments de pages restants en **ordre croissant**, puis les données depuis le segment 0 (un seul retour en arrière, fixe, indépendant de ce que la personne ouvrira). La pré-lecture (§29.6) suit le même calendrier. Toutes les pages sont gardées en mémoire (50 000 éléments ≈ 20 Mo) ; la liste de l'interface est **virtualisée** (UI §9.14.1).
+- **Envoi** : le manifeste n'est chiffré **qu'au clic** (§29.4 point 4), donc renommer ou réordonner ne rechiffre rien d'envoyé et « chaque numéro de morceau n'est chiffré qu'une fois par `R` » tient. Les pages et l'index sont dans les segments de fin ; `fill_to` du bourrage s'arrête avant la première page.
+- **Ce que voit le serveur** : S6 reste vrai en pratique ; **S50** : l'en-tête en clair du fichier porte la version 3, donc le serveur (ou un voleur de disque) sait que ce partage a **plus de 200 éléments environ**, et le nombre de segments de fin.
+- **Tests** (Task P5) : voir plan.
+
+#### 38.9.3 Demander des fichiers (lien de dépôt)
+
+**But** : une personne (le demandeur) envoie un lien ; n'importe qui qui le reçoit peut lui déposer des fichiers, chiffrés de bout en bout, sans compte. **Principe** : le déposant crée un partage Shhdrop **ordinaire** et en scelle le lien au demandeur avec une clé publique ; le serveur ne garde qu'une boîte de notes scellées.
+
+- **Clés** (libsodium, `crypto_box_seal`, rien de maison) : le navigateur du demandeur tire une paire X25519 (`pk`, `sk`), `K_dépôt` (32 octets) et `S_demande` (32 octets). **Lien de demande** (public, à envoyer) : `https://…/d#…` avec, dans le fragment, `pk`, `K_dépôt` et un libellé (au plus 120 caractères, **du texte**, jamais interprété). **Lien de gestion de la demande** (secret) : `S_demande` et `sk`, gardés dans l'historique local chiffré (§33) ; le perdre = perdre les dépôts non encore relevés (dit).
+- **Dépôt** : le déposant ouvre le lien, compose comme pour un envoi (même composeur, nettoyage des métadonnées compris, mot de passe **généré et jamais montré**), et son navigateur : (1) `POST /api/shares` avec l'en-tête `X-Shh-Request` = `K_dépôt_acc` = HKDF(`K_dépôt`, « shhdrop/v2/depot ») ; le serveur vérifie que la demande est ouverte, qu'il reste un dépôt (`deposits_left` décrémenté **à la création**), applique les **limites du niveau de la demande** (taille du palier, durée ≤ fin de la demande) en plus des quotas par connexion (§4) ; (2) envoie le partage normalement ; (3) `POST /api/requests/note` : une **note scellée** de taille fixe (512 octets) = `crypto_box_seal`(« SHDP1 » ‖ `K_lien` ‖ mot de passe ‖ `S_gestion` ‖ libellé du déposant facultatif, `pk`).
+- **Relevé** : le demandeur (`GET /api/requests/notes`, `S_demande`) reçoit les notes, les ouvre avec `sk` et voit une liste « Dépôts reçus » ; chaque dépôt s'ouvre comme un partage normal (mot de passe déjà connu : pas de saisie), avec les droits et protections habituels (avertissement des fichiers à risque, page de contenu §41.6). Il peut **détruire** un dépôt (`S_gestion` de la note) ou **fermer** la demande (`POST /api/requests/close`).
+- **Abus** (le lien de demande est un point d'entrée public) : nombre de dépôts et taille bornés par la demande ; durée de la demande ≤ 24 h (gratuit) ou 7 j (Plus, Pro) ; difficulté anti-robot habituelle (§22 D4) ; quotas par connexion ; un déposant ne voit jamais ce que les autres ont déposé ; le libellé est du texte brut. **Hameçonnage** : la page de dépôt dit toujours « Cette personne vous demande des fichiers. Shhdrop ne vérifie pas son identité. » (bandeau non masquable, comme §38.9.9). **Contenus illicites** : un dépôt est un partage ordinaire ; « Signaler » côté demandeur détruit le dépôt (§7.6) ; le déposant reste responsable de ce qu'il envoie.
+- **Limite honnête** : le déposant ne peut pas relire son dépôt (le mot de passe est généré puis scellé pour le seul demandeur) ; il garde ses fichiers d'origine. Un demandeur malveillant n'apprend rien du déposant (aucune adresse, aucun compte) ; le serveur voit l'adresse du déposant en direct, comme pour tout envoi.
+- **Ce que voit le serveur** : S56 (une ligne `requests` : `pk`, limites, échéance ; des notes scellées opaques ; le compte des dépôts ; **aucun lien de base entre une demande et les partages déposés**).
+- **Tests** (Task F1) : voir plan.
+
+#### 38.9.4 Prolonger un partage (Plus, Pro)
+
+- `POST /api/manage/extend` (`S_gestion`) `{ add_hours }` avec `add_hours` ∈ {1, 6, 12, 24, 48, 72, 168} : nouvelle échéance = `MIN(ceil15(expires_at + add_hours), hard_expires_at)`. **Jamais au-delà du plafond de 7 jours depuis la création** (§38.9.1) : « prolonger » ne fabrique pas un partage plus long que ce que la formule permet. Partage non `ready`, expiré, détruit, gratuit, non démarré (mode « première ouverture », où l'échéance est déjà le plafond) : 404/400 uniformes. Les ouvertures restantes **ne changent pas**.
+- **Sécurité** : aucune clé n'est touchée ; le lien et le mot de passe restent ceux d'avant. Les jetons déjà émis sont plafonnés à l'ancienne échéance : un téléchargement en cours qui dépasserait **demande un renouvellement** (octroi/regrant, §41.4), qui obtient le nouveau plafond. Une action de gestion ne peut pas être rejouée par un tiers (en-tête secret, pas de jeton). Limites : 5 prolongations par partage (anti-boucle de requêtes).
+- **Ce que voit le serveur** : S55 (le moment et la nouvelle échéance, en direct ; rien n'est gardé de plus qu'`expires_at`).
+- **Interface** : bouton « Prolonger » sur la carte du tableau de bord et la vue de gestion (UI §9.14.4) ; la date limite absolue est affichée.
+- **Tests** (Task F2).
+
+#### 38.9.5 Ajouter des fichiers à un partage existant (Plus, Pro)
+
+**Problème de cryptographie** : le paquet est un fichier de taille fixe dont le manifeste est au bout, chaque morceau n'est chiffré qu'une fois par `R` ; on ne peut donc ni agrandir le paquet, ni réécrire son manifeste. **Solution** : un ajout est une **partie** supplémentaire (un second paquet « SHH2 ») rattachée au même partage.
+
+- **Parties** : table `parts(share, n, bucket, state, size_class)`, `n` ≥ 1 (la partie 0 est le paquet d'origine) ; au plus 3 ajouts (Plus) ou 7 (Pro). Chaque partie est envoyée, finalisée et lue **comme un partage** (mêmes segments, mêmes jetons d'envoi), avec ses propres `K_contenu_n` = HKDF(`R`, « shhdrop/v2/partie/contenu » ‖ `n`) et `C_engagement_n` = HMAC(`R`, « shhdrop/v2/partie/engagement » ‖ `n`) : **clés distinctes, donc aucun nonce réutilisé**. La partie n a son propre manifeste (dans son dernier morceau, v2 ou v3), authentifié par `K_contenu_n`. Le palier canonique est vérifié par partie.
+- **Qui peut ajouter** : l'expéditeur doit prouver qu'il connaît le **lien et le mot de passe** (il ne les a pas gardés, §33) : il les ressaisit (écran « Ajouter des fichiers »), son navigateur calcule `K_preuve` et appelle `POST /api/manage/envelope` (`S_gestion` **et** `K_preuve`) : le serveur vérifie `K_preuve` (**le même compteur de 5 essais** que `unlock`, sinon `S_gestion` + lien permettraient de deviner le mot de passe hors ligne sans limite) et rend `E` ; le navigateur déchiffre `R`, puis envoie la partie. Aucune clé n'est gardée dans l'historique (variante « garder `R` » rejetée, Q-F2).
+- **Destinataire** : `meta` rend le nombre de parties ; `unlock` rend `E` et la liste des parties (palier de chacune) ; le client lit la partie 0 puis les autres, dont il fusionne les listes (une section « Ajouté le … » n'existe pas : le serveur ne garde pas l'heure). Un destinataire qui a déjà ouvert voit « Des éléments ont été ajoutés » au prochain `regrant`/rechargement. L'ajout **ne remet pas** les ouvertures à zéro.
+- **Limites** : la taille totale (parties comprises) ≤ la taille du niveau ; l'échéance du partage s'applique à toutes les parties ; budgets de lecture (§24) **par partie** ; quotas du jour débités à `finalize` de la partie.
+- **Ce que voit le serveur** : S51 (nombre et paliers des parties, moment de chaque ajout en direct).
+- **Tests** (Task F3).
+
+#### 38.9.6 Ouverture programmée (Plus, Pro)
+
+- L'expéditeur choisit « S'ouvre à partir de : date et heure » (dans les 7 jours). Colonne `opens_at` (arrondie au quart d'heure **supérieur**). **Contrainte** : `opens_at` + 1 h ≤ plafond (`hard_expires_at`, ou `expires_at` en mode « à la création ») : l'écran la vérifie et affiche la fenêtre réellement utilisable ; avec le mode « première ouverture », le compte à rebours ne démarre pas avant `opens_at`.
+- **Application par le serveur seulement** (honnête) : avant `opens_at`, `unlock` répond 403 `not_yet` (n'utilise ni essai ni ouverture) et ne rend pas `E`. **Aucun verrou cryptographique** : sans tiers de confiance (pas de service d'horloge ni de « time-lock » externe, CLAUDE.md), un serveur malveillant pourrait rendre `E` plus tôt ; il n'a pourtant ni le lien ni le mot de passe, donc rien n'est lisible sans le destinataire. Dit sur la page Sécurité.
+- `meta` rend `opens_at_s` (secondes avant l'ouverture) ; la pré-lecture reste permise. Écran du destinataire : « Ce partage s'ouvrira le … (dans 3 h 20). » avec compte à rebours local, puis le champ de mot de passe.
+- Ce que voit le serveur : S53.
+- **Tests** (Task F4).
+
+#### 38.9.7 Plusieurs destinataires, liens révocables un par un (Plus : 5 liens, Pro : 25)
+
+- **Principe** : un seul contenu (`R`, paquet), **un lien par destinataire**. Chaque lien a son propre `K_lien_i` (donc son `K_accès_i`), son `sel_i`, son `K_preuve_i`, son enveloppe `E_i` (qui enveloppe le **même** `R`), ses ouvertures (1 à 10) et son compteur d'essais (5 faux mots de passe détruisent **ce lien seulement**, Q-F7). Le mot de passe peut être le même pour tous (défaut) ou différent. Table `links(share, access_v, proof_v, salt, kdf, envelope, opens_left, opens_issued, done_mask, failed_attempts)`.
+- **Création** : l'expéditeur nomme chaque lien (« Alice », « Banque »…) ; les noms restent **dans son historique local chiffré** (§33), jamais envoyés. La somme des ouvertures de tous les liens respecte le plafond du niveau (« taille × ouvertures », §38.8.1).
+- **Ajouter un lien plus tard** : ressaisie du lien et du mot de passe comme en §38.9.5 (`POST /api/manage/envelope`), puis création de `E_i`.
+- **Révoquer un lien** : `POST /api/manage/revoke` (`S_gestion`, étiquette du lien) : la ligne `links` est supprimée ; ses jetons et octrois sont révoqués **tout de suite** et ses flux de segments **coupés** (§41.8 : une révocation comme une exclusion de salon). Le lien révoqué répond comme un lien inexistant. Les autres liens et le contenu ne bougent pas. **Détruire** le partage détruit tous les liens.
+- **Limite honnête, écrite** : un destinataire révoqué **connaît `R`** s'il a déjà ouvert, et garde tout ce qu'il a déjà téléchargé ; sans ses jetons il ne peut plus rien demander au serveur. Rechiffrer pour tous les autres est impossible sans refaire l'envoi. Si le serveur était compromis plus tard, un destinataire révoqué qui garde `R` et un chiffré volé pourraient lire ; c'est la même exposition que n'importe quel destinataire ayant ouvert.
+- **Pas d'analyse des destinataires** : le tableau de bord montre par lien « ouvert n / m » et « révoqué » (compteurs de §4), rien d'autre (§38.9.0).
+- **Ce que voit le serveur** : S52 (le nombre de liens, les compteurs de chacun, que ces liens appartiennent au même partage, les révocations en direct).
+- **Tests** (Task F5).
+
+#### 38.9.8 Notification d'ouverture (Plus, Pro) — jamais qui, jamais où
+
+- **Contenu** : « Un de vos partages a été ouvert » (et « Dernière ouverture utilisée »). Rien d'autre : ni lien nommé, ni nom, ni adresse, ni pays, ni appareil, ni heure plus précise que celle de la notification elle-même.
+- **Canaux** : (1) **Sans compte** : sur le tableau de bord, la relecture locale (§33.1) affiche « ouvert » ; rien de nouveau. (2) **Notification système (Web Push, RFC 8030/8291/8292)**, choisie par l'expéditeur : le navigateur s'abonne (`PushManager`, clé publique VAPID du serveur dans le manifeste de version signé, §28.2), et l'abonnement (adresse, `p256dh`, `auth`) est enregistré **en mémoire seulement**, par partage (comme `purge_at`, S12) ; un redémarrage du serveur l'oublie (dit). Le serveur envoie une charge **chiffrée de bout en bout** (RFC 8291) qui ne contient qu'un octet de type. (3) **Avec le compte facultatif** (§37) : les abonnements des appareils de la personne sont rangés dans le coffre de compte `B` (le serveur ne sait pas à qui) ; à la création d'un partage, le navigateur les envoie au serveur pour ce partage seulement. Le serveur ne relie jamais le compte au partage (§37.4).
+- **Dépendances et exceptions (à valider, Q-F3)** : Web Push exige un **service worker** (UI §14.1 dit « sans service worker » ; §28.6 le prévoit conditionnel) et un **contact sortant du serveur** vers le service de notification du navigateur (Google, Apple, Mozilla, Microsoft). Ce n'est pas une ressource tierce chargée par le site, mais un tiers de plus qui apprend « cette adresse d'abonnement reçoit une notification à cet instant » (jamais le contenu). La liste d'hôtes autorisés est fermée (`fcm.googleapis.com`, `updates.push.services.mozilla.com`, `*.push.apple.com`, `*.notify.windows.com`) contre la falsification de requête côté serveur (SSRF). Cryptographie du côté Go : bibliothèque standard + une dépendance auditée (RFC 8291) ou implémentation avec vecteurs officiels : **exception écrite** à « WebCrypto et libsodium uniquement », comme Q-P2. **Tant que Q-F3 n'est pas tranchée, seuls les canaux (1) et (3) sans push sont livrés.**
+- **Limites** : au plus une notification par partage et par minute (regroupement) ; au plus 5 abonnements par partage ; adresse d'abonnement invalide ou refusée (410) : retirée.
+- Ce que voit le serveur : S54.
+- **Tests** (Task F6).
+
+#### 38.9.9 Page de réception personnalisée : logo et couleurs (Pro)
+
+- **Marque** : un logo (PNG, WebP ou JPEG ; **jamais SVG**) **ré-encodé dans le navigateur de l'expéditeur** (canvas, sans métadonnées, §35.2) à 128 × 128 au plus et 24 Kio au plus, et deux couleurs (accent et fond de carte). Rangée dans le **profil de marque** de l'expéditeur : historique local chiffré et coffre de compte ; **aucun profil sur le serveur**.
+- **Transport** : la marque est **scellée** par une clé dérivée du lien, `K_marque` = HKDF(`K_lien`, « shhdrop/v2/marque »), AES-256-GCM, taille fixe 24 Kio + étiquette (rembourrée), rangée dans la colonne `brand` du partage et rendue par `meta` ; le destinataire la déchiffre **avant** le mot de passe (il a le lien). Le serveur n'en voit rien (octets opaques de taille fixe).
+- **Garde-fous contre l'usurpation** (la personnalisation ne doit pas servir à imiter une banque) : (1) la marque ne change **ni les textes, ni la mise en page, ni les champs, ni les boutons** ; seulement le logo (au-dessus de la carte) et l'accent ; (2) un **bandeau fixe, non masquable**, reste : « Page Shhdrop. Le logo est choisi par l'expéditeur ; Shhdrop ne vérifie pas son identité. » ; (3) contraste de l'accent ≥ 4,5:1 sur le fond (sinon l'accent par défaut) ; (4) logo en `<img>` depuis une URL blob (`img-src blob:` existe déjà), révoquée au `load` ; (5) l'adresse du site, le cadenas et la CSP ne changent pas ; (6) échec de déchiffrement ou de décodage → page standard, sans erreur visible.
+- **Ce que voit le serveur** : S57 (qu'une marque existe, sa taille fixe).
+- **Tests** (Task F7).
+
+#### 38.9.10 CLI et API (Pro)
+
+- **API** : l'API de §8/§29.8 **est** l'API publique ; elle est documentée (`docs/api.md`), versionnée, sans clé d'API (une clé serait un identifiant qui relie les appels). Le droit Pro s'exerce par **jetons aveugles** (§38.4) : le CLI détient le pass `P` (fichier `0600` ou entrée standard), demande les jetons par lots, les dépense un par partage. Avec un jeton Pro valide, la preuve de travail est à difficulté **fixe minimale** (pas de doublement horaire) et il n'y a pas de repli reCAPTCHA ; ni quotas, ni limites de niveau ne changent.
+- **CLI** `shhdrop` (envoi : `shhdrop send fichiers… [--hours N --opens N --password-file F]` ; réception : `shhdrop open LIEN --out DIR` ; gestion : `status`, `destroy`, `extend`) : **même code que le navigateur** (modules `web/src/crypto`, `transfer`, `cleaning` réutilisés sous Node ≥ 22 : WebCrypto et libsodium seulement ; aucune deuxième implémentation de la cryptographie à tenir). Distribué en binaire reproductible et signé (§28) et par le dépôt.
+- **Règles de sécurité du CLI** : le **mot de passe ne passe jamais par un argument de ligne de commande** (visible dans la liste des processus) : entrée standard, `--password-file` ou saisie interactive sans écho ; mot de passe généré affiché une fois sur la sortie d'erreur, jamais journalisé ; le lien est écrit sur la sortie standard seulement ; aucun fichier de configuration ne garde `K_lien` ou un mot de passe ; l'historique `S_gestion` reste dans un fichier chiffré `0600` (même format que §33) ; nettoyage des métadonnées appliqué comme dans le navigateur (formats non pris en charge : même comportement qu'au navigateur) ; aucune télémétrie.
+- **Ce que voit le serveur** : S58 (rien de plus qu'un navigateur : mêmes requêtes ; l'en-tête `User-Agent` du CLI est retiré comme les autres, S2).
+- **Tests** (Task F8) : interopérabilité dans les deux sens avec le navigateur.
+
+#### 38.9.11 Limite de téléchargement par fichier (Plus, Pro)
+
+- **Problème** : le serveur ne connaît pas les frontières des éléments (S9) ; il ne peut donc pas compter « les lectures d'un fichier » dans un paquet unique. **Solution** : un fichier à limite est placé dans sa **propre partie** (§38.9.5), choisie à la composition (« Limiter à 1, 2, 3 ou 5 téléchargements ») ; le serveur compte alors des **lectures complètes de la partie**, par lien (§38.9.7) : `part_reads_left`. Une « lecture » = la partie lue de bout en bout (budget `limite × palier + 2 segments 0`, aucun rechargement hors octroi, §41.4). L'aperçu et l'enregistrement d'une même ouverture partagent **une** lecture (le contenu déjà chargé est réutilisé, §41.6).
+- **Sécurité et honnêteté** : c'est une **limite de confort et de dissuasion**, pas une protection : le destinataire peut copier ce qu'il a enregistré ; un client modifié peut contourner le compte *local* mais pas le compteur serveur. Le serveur apprend la taille de la partie à limite et qu'elle est limitée (S51).
+- Une fois la limite atteinte : « Ce fichier a atteint sa limite de téléchargements. » ; le reste du partage reste accessible.
+- **Tests** (Task F9).
+
+#### 38.9.12 Filigrane « confidentiel » en lecture seule (Plus, Pro) — une dissuasion, rien de plus
+
+- **Ce que c'est** : avec « Autoriser le téléchargement » désactivé (droit `"voir"`, §34.1), la visionneuse superpose un motif répété et incliné, semi-transparent : « Confidentiel » et, au choix de l'expéditeur, le **nom du lien** (« Pour Alice », §38.9.7). Le texte du filigrane est dans le **manifeste chiffré** (page 1) : le serveur ne le voit pas. Dessiné sur un `<canvas>` pour les images et les pages de PDF (il apparaît donc dans une capture d'écran) ; superposition pour la vidéo et le texte.
+- **Honnêteté, écrite sur l'écran de l'expéditeur et du destinataire** : « Le filigrane dissuade et aide à retrouver l'origine d'une fuite. Il n'empêche ni la capture d'écran, ni la photo de l'écran, et il ne protège pas contre un navigateur modifié. » Il n'est **jamais** appliqué aux fichiers enregistrés (Shhdrop ne modifie pas les fichiers) : il n'existe donc que dans le mode « voir seulement ».
+- **Aucun pistage** : le nom du lien vient de l'expéditeur, pas du destinataire ; aucune donnée sur le destinataire n'est ajoutée.
+- **Tests** (Task F10).
+
+#### 38.9.13 Débit prioritaire (Pro)
+
+- Les transferts simultanés de segments (§24 : 256 au total) sont répartis en **192 communs et 64 réservés** : un segment d'un partage Pro (le niveau est lu de la ligne du partage en base, jamais d'un en-tête du client) peut prendre une place commune **ou** réservée ; un segment gratuit ou Plus ne prend que les communes. Sans place : 503 `busy` avec `Retry-After`, comme aujourd'hui. Les limites **par connexion et par /48** (16 et 64 téléchargements, 8 et 32 envois) **ne changent pas** : un abus ne passe pas par le Pro.
+- Honnêteté : « prioritaire », jamais « débit garanti » (§38.8.1) ; l'avantage profite aussi aux destinataires du partage Pro. Aucun effet sur la sécurité. Ce que voit le serveur : S59 (le niveau du partage, déjà connu, S30).
+- **Tests** (Task F11).
+
+#### 38.9.14 Questions ouvertes ajoutées (défaut recommandé)
+
+| # | Question | Défaut recommandé |
+|---|---|---|
+| Q-F1 | Plafond de 7 jours : brouiller la date de création du plafond (retirer 0 à 3 h au hasard) pour que la base ne donne pas la création à 15 min près | Non (le propriétaire a demandé « 7 jours après la création ») ; à revoir si S48 gêne |
+| Q-F2 | Garder `R` dans l'historique local pour « ajouter des fichiers » sans ressaisir le lien et le mot de passe | Non (un voleur de l'appareil et de la base lirait le contenu) |
+| Q-F3 | Notifications Web Push : service worker, contact sortant vers Google, Apple, Mozilla, Microsoft, bibliothèque de chiffrement RFC 8291 côté Go | À trancher par le propriétaire ; sans réponse, **pas de push** |
+| Q-F4 | Répartition des fonctions entre Plus et Pro (§38.9.0) et limites de « Demander des fichiers » | La table de §38.9.0 |
+| Q-F5 | Nombre de prolongations par partage | 5 |
+| Q-F6 | Les destinataires d'un lien révoqué sont-ils prévenus | Non (le lien répond comme un lien inexistant) |
+| Q-F7 | 5 faux mots de passe sur un lien d'un partage à plusieurs liens : détruire ce lien seulement ou tout le partage | Ce lien seulement (une personne qui n'a qu'un lien ne peut pas détruire les autres) |
+
 
 ---
 
@@ -1962,6 +2153,12 @@ Avec le lien et le mot de passe seuls, une personne exclue est **indiscernable d
 - **Cryptographie (TS)** : après `0x09`, aucun expéditeur restant ne scelle de `CK_0` à la `RK` de l'exclu ; l'exclu, avec l'ancienne `K_maître_s`, l'ancienne `K_trame`, ses chaînes et toutes ses clés, **ne déchiffre aucune trame de rang > R** ; la trame `rotation` n'est pas ouvrable par l'exclu ; rotation en attente jetée si `exclure` échoue ; messages en vol renvoyés après rotation ; fuzz du décodeur de la trame `rotation`.
 - **e2e (Playwright, trois contextes plus un quatrième)** : le créateur exclut Bob → Bob voit « Vous avez été exclu » et ne reçoit plus rien ; **Bob tente de revenir avec l'ancien lien et l'ancien mot de passe → refusé (« Ce lien n'existe pas ou n'est plus disponible »)** ; **Alice et le créateur continuent de discuter** sans resaisir quoi que ce soit (messages, « écrit… », une pièce jointe) ; Alice recharge sa page → elle rentre par son jeton de membre, sans lien ni mot de passe ; la ligne « Bob a été exclu du salon » est chez tous ; **le créateur envoie la nouvelle invitation à Carole (quatrième contexte) → elle entre** ; Bob avec la nouvelle invitation entrerait sous un autre pseudonyme (test de la limite : documentée, non « corrigée ») ; « Nouveau lien d'invitation » sans exclusion : l'ancien lien est refusé, personne n'est sorti ; « le serveur ne voit rien » : ni pseudonyme, ni `K_lien'`, ni `P'`, ni `K_maître_s'` dans une requête, ni sur disque.
 
+- **Téléchargement en cours au moment de l'exclusion (v2.10)** : serveur — un flux de pièce en cours (gros fichier, débit limité par le test) est **coupé** à l'exclusion (connexion fermée avant la fin, octets reçus < taille), les requêtes suivantes → 403 `excluded`, registre `Streams` vide ensuite, aucun flux d'un autre membre touché ; client — fichier partiel supprimé (`abort()` appelé), `wipeRoom` exécuté une fois ; e2e — Bob télécharge une pièce de 200 Mio, le créateur l'exclut : le téléchargement s'arrête net chez Bob, Alice finit le sien, **Bob (même contexte, même adresse) rejoint un autre salon avec sa nouvelle invitation sans refus**, aucun compteur ne le distingue (aucun bannissement).
+
+#### 39.13.6 Téléchargements de pièces en cours : annulation immédiate (D41-10, v2.10)
+
+Quand le serveur révoque le jeton de membre, il **annule en même temps tous les flux de segments de pièces en cours** servis à ce jeton (registre `Streams`, §41.8) : la connexion est fermée au milieu du segment, **sans période de grâce** (contrairement à l'expiration et à la suppression d'un partage, §41.8 cas 1 et 2). Le navigateur de la personne exclue supprime le fichier partiel (`writable.abort()`) et exécute `wipeRoom`. **L'exclusion vaut pour ce salon seulement** : aucun bannissement du service, aucune liste, aucune adresse ni empreinte gardées ; la personne peut rejoindre un autre salon, ou, avec la nouvelle invitation, le même salon sous un autre pseudonyme (limite de §39.13.4).
+
 ---
 
 ## 40. Décision du propriétaire (v2.8, 7 novembre) — envoi direct (pair à pair) — **plus tard, optionnel (après la V1)**
@@ -2041,9 +2238,9 @@ Exemple : 1 Gio ouvert 3 fois. Stocké : environ 1 Go entrant, 3 Go sortants, 1 
 
 ---
 
-## 41. Décisions du propriétaire (v2.9, 7 novembre 2026)
+## 41. Décisions du propriétaire (v2.9 et v2.10, 7 novembre 2026)
 
-Huit décisions du propriétaire (et un complément du coordinateur sur l'exclusion). Chaque ligne du journal renvoie à la section qui la spécifie.
+Huit décisions du propriétaire en v2.9 (et un complément du coordinateur sur l'exclusion), puis six en v2.10 (D41-9 à D41-14). Chaque ligne du journal renvoie à la section qui la spécifie.
 
 ### 41.0 Journal des décisions
 
@@ -2052,11 +2249,17 @@ Huit décisions du propriétaire (et un complément du coordinateur sur l'exclus
 | D41-1 | 7 nov. 2026 | **Exclure un participant d'un salon est permis** (inverse Q-SAL5). Le serveur révoque le jeton de membre ; chaque expéditeur restant ouvre une époque tout de suite ; une ligne système est affichée ; l'exclu garde ce qu'il a vu. **Complément du coordinateur** : l'exclusion fait tourner l'invitation (nouveau lien et mot de passe), pour que l'exclu ne puisse pas revenir ; les membres restants rechargent par leur jeton de membre | §39.13, §39.5, §41.4 |
 | D41-2 | 7 nov. 2026 | **Le changement de clés ne limite pas la conversation** : époques toutes les 100 messages ou chaque heure ; phrase pour la page d'explication du salon | §39.2.4, §39.4 |
 | D41-3 | 7 nov. 2026 | **Le trafic du salon passe toujours par notre serveur, en WebSocket** ; jamais de pair à pair ; objectifs de latence, ping/pong, contre-pression ; pièces jointes stockées chez nous ; **aucun pair à pair par défaut nulle part** ; §40 devient « plus tard, optionnel », Tasks D-1 et D-2 « après la V1 » ; comportement de Q-SAL10 supprimé | §39.3.1, §40, §41.3 |
-| D41-4 | 7 nov. 2026 | **Gratuit plus généreux** : 15 éléments et 2 Gio par partage ; quotas, paliers, stockage et textes mis à jour ; **Plus et Pro refaits** (Plus 10 Go / 50 éléments / 7 jours, 7 €/mois, 70 €/an ; Pro 50 Go / 200 éléments / 30 jours, 20 €/mois, 220 €/an), marge brute d'au moins 60 % à l'usage réaliste | §4, §38.8, §41.2 |
+| D41-4 | 7 nov. 2026 | **Gratuit plus généreux** : 15 éléments et 2 Gio par partage ; quotas, paliers, stockage et textes mis à jour ; **Plus et Pro refaits** (Plus 10 Go / 50 éléments / 7 jours, 7 €/mois, 70 €/an ; Pro 50 Go / 200 éléments / 30 jours, 20 €/mois, 220 €/an ; **Pro corrigé en v2.10 par D41-11 : 7 jours, éléments illimités**), marge brute d'au moins 60 % à l'usage réaliste | §4, §38.8, §41.2 |
 | D41-5 | 7 nov. 2026 | **Recharger la page, ou ouvrir le partage dans plusieurs onglets du même navigateur, ne compte qu'une ouverture** : octroi d'ouverture signé de 30 min, clé du lien et octroi gardés dans le `sessionStorage` de l'onglet (exception écrite à « aucun stockage navigateur »), échange entre onglets par `BroadcastChannel` | §41.4 |
 | D41-6 | 7 nov. 2026 | **Gestion de l'expéditeur sans empreinte** : historique local chiffré, « Vos partages actifs » à l'accueil, tableau de bord de cartes, synchronisation par le compte facultatif | §33.1 |
 | D41-7 | 7 nov. 2026 | **Page de contenu du destinataire « 2027 »** : galerie, visionneuse plein écran, lecteurs vidéo et audio (forme d'onde), texte ; Télécharger, Tout télécharger, archive .zip (écrivain ZIP maison, sans stockage ni dépendance) ; rien de tout cela en « voir seulement » | §41.6, UI §9.8 |
 | D41-8 | 7 nov. 2026 | **L'écran « partage détruit »** n'a plus de cadenas ouvert ni de boîte en pointillés : illustration géométrique d'un document qui se défait en points de la Trame, et le mouvement `erase()` du logo | UI §9.10, §20 |
+| D41-9 | 7 nov. 2026 | **Départ du compte à rebours (Plus et Pro)** : au choix de l'expéditeur, à la création (seule option gratuite) ou à la première ouverture ; avec « première ouverture », **plafond absolu** : le partage est purgé 7 jours après sa création même s'il n'a jamais été ouvert. Serveur : drapeau `starts_on_first_open` ; `expires_at` fixé au premier déverrouillage réussi, jamais au-delà de création + 7 j. Ce que voit le serveur : S48, S49. Option d'interface dans le composeur payant | §38.9.1, §41.9, §36, UI §9.3.1, §9.7.2, Task P4 |
+| D41-10 | 7 nov. 2026 | **Expiration ou suppression pendant un téléchargement** : à l'expiration, plus aucune ouverture nouvelle, mais une ouverture commencée termine, avec une grâce de 2 h au plus bornée par l'échéance du téléchargement ; à la suppression par l'expéditeur (ou destruction), comme à l'expiration, le fichier en cours se termine en arrière-plan alors que l'interface du destinataire se ferme tout de suite (plus d'accès au lien, de visionneuse, de liste, de nouveau téléchargement, rien de visible) ; serveur : flux déjà accordés terminés, aucune nouvelle requête hors ouverture active, flux annulables liés à la révocation, signal « gone » ; **salon** : l'exclusion annule les téléchargements en cours tout de suite, hors de ce salon seulement, sans bannissement du service. **Contradictions de la demande signalées : F-3** | §41.8, §39.13.6, §7.5, §9.5, §36 S60–S61, UI §9.8.9, Tasks M2 (3c, 7b), E1, C-6 |
+| D41-11 | 7 nov. 2026 | **Formules payantes corrigées** : durée maximale du Pro **7 jours** (comme Plus) ; **Pro : éléments illimités dans 50 Gio au total** → manifeste découpé (index + segments de manifeste, même paquet SHH2, aucune cryptographie maison) ; l'interface dit « illimité (50 Go au total) » | §38.8, §38.9.2, §41.10, UI §9.14.1, Tasks P2 (corrigée), P5 |
+| D41-12 | 7 nov. 2026 | **Fonctions payantes conservées (pas d'« Équipe »)**, spécifiées en détail : demander des fichiers, prolonger, ajouter des fichiers, ouverture programmée, plusieurs destinataires à liens révocables un par un, notification d'ouverture, page de réception personnalisée (Pro), CLI/API (Pro), limite de téléchargement par fichier, filigrane « confidentiel » en lecture seule (dissuasion seulement), débit prioritaire. **Aucune fonction ne donne plus de sécurité ; aucune statistique sur les destinataires** | §38.9, §36 S48–S59, UI §9.14, Tasks F0 à F11 (après la V1) |
+| D41-13 | 7 nov. 2026 | **Extensions à risque** ajoutées : `.wsh`, `.msp`, `.xll`, `.ps1xml`, `.inf` (le code suivra) | §12 (`isRiskyFile`) |
+| D41-14 | 7 nov. 2026 | **Liste noire de mots de passe (§31)** : SecLists 10k, NCSC top-20k et Richelieu 20k (CC BY 4.0), compressées, environ 14,8 Ko en gzip ; licences notées, **licence d'origine de la liste NCSC (probablement OGL v3) à confirmer** | §31 |
 
 ### 41.1 Contradictions et corrections relevées (vigilance)
 
@@ -2153,3 +2356,68 @@ Voir §33.1 (refus argumenté de l'empreinte, historique local chiffré, « Vos 
 | Q-OG2 | Raccourcir les 30 min d'octroi pour que les partages à ouvertures épuisées partent plus vite | Non (30 min demandées) ; à revoir avec les retours |
 | Q-ZIP1 | Compression DEFLATE (fflate) dans l'archive | Non (déjà compressé) |
 | Q-L1 | Durées des jetons à 6 h et 24 h | Oui (§41.2) |
+| Q-GONE1 | Une ligne « Un téléchargement se termine en arrière-plan » (sans nom ni taille) sur l'écran fermé du destinataire | Oui : sans elle, la personne quitte la page et coupe le téléchargement |
+| Q-GONE2 | Signal « gone » par requête tenue de 25 s (`watch`) ou par sondage toutes les 30 s | Requête tenue (fermeture en moins d'une seconde) |
+| Q-GONE3 | Signalement et destruction par l'administrateur : coupure immédiate sans grâce | Oui (contenu signalé) |
+| Q-F1 à Q-F6 | Fonctions payantes (§38.9.14) | Voir §38.9.14 |
+
+### 41.8 Disparition pendant un téléchargement : expiration, suppression, exclusion (D41-10)
+
+**Vocabulaire.** *Ouverture active* : une ouverture `n` dont le jeton de téléchargement a été émis **avant** l'événement et qui a reçu un segment dans les **120 s** précédentes (état en mémoire : (id interne, n) → heure du dernier segment ; ajouté à §9.5). *Fin de grâce* = le plus petit de : événement + **2 h**, et l'expiration du jeton de téléchargement (6 h, ou 24 h au-delà de 2 Gio, §41.2) : la grâce est **bornée par l'échéance du téléchargement**. *Coupure* : le serveur ferme la connexion en cours de segment.
+
+**Cas 1 — Expiration (`expires_at`).**
+- **Plus aucune nouvelle ouverture** : `unlock`, octroi, `regrant`, pré-lecture et émission de jeton sont refusés (404 uniforme, 410 `gone` pour un porteur de jeton signé valide, voir « signal »). `meta` répond 404 comme aujourd'hui.
+- **Une ouverture active termine ce qu'elle fait** : ses requêtes de segments suivantes sont servies jusqu'à la fin de grâce (budget de lecture de §24 inchangé). Un segment en cours d'envoi n'est jamais coupé à l'échéance. Après 120 s sans segment, le droit est perdu : **pas de reprise après une pause**. Le partage (fichier, ligne) est effacé dès qu'aucune ouverture n'est active, au plus tard à la fin de grâce ; un redémarrage du serveur efface tout partage expiré (§36 S12).
+- **Navigateur** : à zéro du compte à rebours local (sans requête) ou sur signal `gone`, l'interface se **ferme tout de suite** : liste, galerie, visionneuse, lecteurs, aperçus retirés du DOM ; URL blob révoquées ; tranches et textes mis à zéro ; `sessionStorage["shh.og"]` effacé ; aucun accès au lien, aucun nouveau téléchargement, aucune relecture, plus d'appel `meta`/`regrant`/`watch`/pré-lecture. Reste **seulement** le tuyau d'écriture des téléchargements déjà en cours (flux vers le fichier, ou assemblage en mémoire pour le repli Blob) avec la clé de contenu non extractible, gardée jusqu'à la fin de **ce** téléchargement puis mise à zéro. L'écran affiche « Ce partage n'est plus disponible. » et, tant qu'un téléchargement se termine, une seule ligne **sans nom ni taille** : « Un téléchargement se termine en arrière-plan. Gardez cette page ouverte. » (Q-GONE1). Si le serveur refuse ou coupe (fin de grâce), le fichier partiel est supprimé (`writable.abort()`) et la ligne devient « Téléchargement interrompu. ».
+
+**Cas 2 — Suppression par l'expéditeur (`manage/destroy`), destruction par le destinataire, 5 mots de passe faux.**
+- **Immédiat** : la ligne est retirée ; plus aucune ouverture nouvelle, plus de `meta`, `unlock`, `regrant`, pré-lecture ni jeton (mêmes réponses que cas 1). Les liens révoqués un par un (§38.9.7) suivent la même règle pour **leurs** ouvertures.
+- **Ouverture active** : le serveur garde le **descripteur du fichier ouvert** alors que le fichier n'a plus de nom (détaché du dossier : introuvable, non servi à une autre ouverture) et sert les segments suivants **de cette ouverture** jusqu'à la fin de grâce, puis ferme le descripteur (l'espace est alors libéré). La place réservée est décomptée à la fermeture.
+- **Navigateur** : identique au cas 1 (fermeture immédiate), avec le même texte ; les téléchargements en cours se terminent en arrière-plan. Le destinataire ne voit jamais **qui** ni **pourquoi** (« n'est plus disponible » pour la suppression comme pour l'expiration).
+- **Exceptions sans continuation (coupure immédiate de tous les flux)** : « Signaler » (`reason: "report"`), `shhdrop admin destroy` — un contenu signalé ne doit plus être servi une seconde (Q-GONE3, le propriétaire n'a pas traité ces deux cas) — et l'exclusion d'un salon (cas 3).
+
+**Cas 3 — Salon : exclusion d'un participant.**
+- **Annulation immédiate** : à `exclure` (même transaction que la révocation du jeton, §39.13.2), le serveur **annule** tous les flux de segments de pièces servis à ce jeton de membre (annulation du contexte de chaque flux, connexion fermée en cours de segment). Aucune grâce : l'exclu ne finit rien (§39.13.1b). Ses requêtes suivantes → 403 `excluded` ; son navigateur fait `wipeRoom` (clés, blob, brouillons, fichier partiel supprimé).
+- **Exclu de ce salon seulement, jamais banni du service** : aucune liste de bannissement, aucune adresse ni empreinte (§36) ; le jeton de membre révoqué ne vaut que dans ce salon ; les compteurs par connexion (entrées de l'heure, salons du jour) ne tiennent pas compte de l'exclusion. **Une nouvelle invitation à un autre salon fonctionne** (test). Une nouvelle invitation au même salon fonctionne aussi, sous un autre pseudonyme (limite déjà écrite, §39.13.4).
+
+**Serveur (Task M2, amendée) — flux annulables liés à la révocation des jetons.**
+- Registre `Streams` (mémoire seulement, §9.5) : chaque service de segment s'enregistre avec une clé de révocation — (id interne, n) pour un partage, empreinte du jeton de membre pour un salon, (id, étiquette du lien) pour un lien révoqué — et un `context.CancelFunc`. `Revoke(clé, avecGrâce bool)` : sans grâce → annule tous les flux de la clé ; avec grâce → marque la clé « en grâce jusqu'à T » et laisse les flux et les requêtes suivantes de **ses ouvertures actives** passer, sans en accepter d'autres.
+- Copie du fichier vers la réponse par `io.CopyN` sur un `io.Reader` qui contrôle le contexte ; contrôle de l'**échéance de grâce à chaque segment**, jamais au milieu d'un segment. Test avec `-race`.
+- **Signal « gone »** : (1) réponse **410** `{"error":"gone"}` à toute requête qui porte un **jeton signé valide** (segment, `done`, `regrant`, `watch`) quand le partage a disparu ou que l'ouverture n'a plus de droit ; toutes les autres requêtes gardent les erreurs uniformes de §8 (un 410 exige un jeton que seul le serveur a pu signer : **aucun oracle d'existence**). (2) `GET /api/shares/watch` (jeton de téléchargement) : requête tenue **25 s au plus**, 204 si rien, 410 dès la disparition (moins d'une seconde) ; la page la rappelle en boucle tant qu'elle est visible et active ; 2 par connexion, 256 au total, hors des 60 requêtes par minute. Variante WebSocket écartée (Q-GONE2, plus lourd). Coût dit : S60 (le serveur sait, à 25 s près, qu'une page est restée ouverte).
+- **Client** : `gone` → `closeToGone()` : arrête tout appel sauf la **suite des téléchargements déjà en cours** (qui demandent eux-mêmes leurs segments suivants) ; ne lance plus rien ; ferme l'interface comme décrit.
+
+**Tests** : serveur (Task M2, étapes 3c et 7b) et client (Task E1), voir plan. Cas minimum : expiration pendant le segment 3 d'un téléchargement de 40 segments → fini ; 120 s de pause puis reprise après expiration → refusé ; ouverture non démarrée à l'échéance → refusée ; `destroy` pendant le téléchargement → fini, une autre ouverture → 404, descripteur fermé à la fin de grâce (aucun fichier détaché ouvert à la fin du test) ; `report` et `admin destroy` → flux coupés ; exclusion → flux de pièces coupés, jeton refusé, autre salon accepté.
+
+### 41.9 Départ du compte à rebours à la première ouverture (D41-9)
+
+Spécifié en §38.9.1 (Plus et Pro seulement ; plafond de 7 jours ; colonnes `starts_on_first_open` et `hard_expires_at` ; ce que voit le serveur : §36 S48 à S49). Interface : UI §9.3.1 et §9.7.2. Plan : Task P4.
+
+### 41.10 Formules payantes corrigées (D41-11)
+
+- **Durée maximale du Pro : 7 jours, comme Plus** (au lieu de 30 jours, et de 14 jours au-delà de 20 Gio). Corrigé : §38.2, §38.7 (Q-P3), §38.8.1, §38.8.3, Task P2, plan Task P2. Le Pro se distingue désormais par la taille (50 Gio), l'absence de limite d'éléments, les ouvertures, la page personnalisée, le CLI/API et le débit prioritaire.
+- **Éléments : Pro illimité dans 50 Gio au total** (Plus 50, gratuit 15) → manifeste découpé en index + segments de manifeste (§38.9.2), Task P5. Interface : « illimité (50 Go au total) ».
+- Le modèle de coûts de §38.8.3 reste valable : une durée de 7 jours au lieu de 30 baisse le stockage moyen du Pro (l'estimation de 80 Go-mois est donc prudente) ; prix inchangés (Q-P8).
+
+### 41.11 Fonctions payantes (D41-12) et extensions à risque (D41-13), liste noire (D41-14)
+
+- **Fonctions payantes** : onze fonctions conservées, sans « Équipe » ; spécification détaillée en §38.9 ; tâches P4, P5, F0 à F11 « après la V1 ». Règles : aucune sécurité de plus, aucune statistique sur les destinataires (§38.9.0).
+- **Extensions à risque** : `.wsh`, `.msp`, `.xll`, `.ps1xml`, `.inf` ajoutées à `isRiskyFile` (§12, liste mise à jour ; le code suivra).
+- **Liste noire de mots de passe** (§31) : SecLists 10k, NCSC top-20k, Richelieu 20k, compressées, environ 14,8 Ko en gzip ; licences notées en §31 (licence d'origine de la liste NCSC : à confirmer).
+
+### 41.12 Signalements v2.10 (vigilance)
+
+| Id | Gravité | Endroit | Problème | Correction (intégrée ou proposée) |
+|---|---|---|---|---|
+| F-1 | Moyenne | §38.9.1, `hard_expires_at` | Pour un partage payant, la base contient la date de création + 7 j à 15 min près : la date de création, que S11 s'efforçait de ne pas garder, est de nouveau déductible au repos | Intégré (assumé, S48) ; correction proposée : retrancher 0 à 3 h au hasard (Q-F1, défaut non) |
+| F-2 | Faible | §38.9.2 | « Illimité » est faux au sens strict : la liste tient en mémoire | Borne technique de 50 000 éléments, dite ; texte « illimité (50 Go au total) » comme demandé |
+| F-3 | Élevée | D41-10, serveur | La demande dit à la fois « les flux déjà accordés peuvent finir, aucune nouvelle requête de segment n'est servie » et « le fichier en cours finit en arrière-plan » ; un fichier de plusieurs segments exige de nouvelles requêtes. De même « le client cesse de demander » contredit « finit en arrière-plan » | Lecture retenue : **les requêtes d'une ouverture active sont servies jusqu'à la fin de grâce** ; aucune autre. Lecture stricte (seul le flux HTTP en cours finit) : un gros fichier serait tronqué, rejetée. **À confirmer** |
+| F-4 | Moyenne | §41.8 cas 2 | Après suppression, le chiffré reste lisible jusqu'à 2 h par le descripteur ouvert (jamais pour une ouverture nouvelle ; chiffré seulement) : ce n'est plus un effacement immédiat | Intégré (assumé, S61), dit sur la page Sécurité ; coupure immédiate pour signalement et administrateur (Q-GONE3) |
+| F-5 | Moyenne | §41.8 `watch` | Une requête tenue 25 s dit au serveur qu'une page est restée ouverte, à la seconde près | Intégré (S60), seulement tant que la page est visible ; alternative : sonder toutes les 30 s (Q-GONE2) |
+| F-6 | Moyenne | §38.9.5, §38.9.7 | `S_gestion` + lien permettraient de deviner le mot de passe hors ligne contre `E` sans les 5 essais | La route d'enveloppe exige `K_preuve` et partage le compteur d'essais de `unlock` |
+| F-7 | Faible | §4, §38.8.1 | Le serveur ne voit pas le nombre d'éléments (S6) : « 15, 50 » ne sont pas appliqués par lui | Dit en §38.9.2 ; sans conséquence de sécurité ni de coût (la taille est bornée par le palier) |
+| F-8 | Moyenne | §38.9.8 | Web Push impose un service worker (contraire à UI §14.1 par défaut), un contact sortant du serveur et un tiers qui apprend l'instant de la notification, avec une exception à la règle de cryptographie | Seuls les canaux sans push sont livrés tant que Q-F3 n'est pas tranchée |
+| F-9 | Moyenne | §38.9.9 | Une page personnalisée peut servir à imiter un service connu (hameçonnage) | Bandeau fixe non masquable, logo seul, aucun texte ni champ modifiable, raster ré-encodé (§38.9.9) |
+| F-10 | Faible | §38.9.6 | L'ouverture programmée est appliquée par le serveur, pas par un verrou cryptographique | Dit sur la page Sécurité ; aucun tiers d'horloge (CLAUDE.md) |
+| F-11 | Faible | §38.9.12 | Le filigrane peut faire croire à une protection | Texte d'honnêteté obligatoire, uniquement en « voir seulement » |
+| F-12 | Moyenne | §38.8.1, Pro | Sans durée de 30 jours, la différence de prix Plus 7 € / Pro 20 € repose sur 50 Gio, l'absence de limite d'éléments, la page personnalisée, le CLI/API et le débit prioritaire | À valider (Q-P8) ; aucun changement de prix sans décision |
+| F-13 | Faible | §31 | La licence CC BY 4.0 (Richelieu) exige l'attribution ; la licence d'origine de la liste NCSC n'est pas confirmée | Attribution dans `THIRD_PARTY_LICENSES.md` et sur la page Licences ; confirmation à obtenir (§31) |
