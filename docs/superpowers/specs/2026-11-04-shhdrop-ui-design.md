@@ -687,7 +687,7 @@ Refonte « application » de la gestion. **Pas d'empreinte d'appareil** (refusé
    - `Countdown` « Disponible encore 5 h 31 ». **À zéro** (avant déverrouillage) : passage local à « Lien invalide », sans requête (§18, A22).
    - Champ mot de passe (attributs §12.3), Afficher/Masquer, **Déverrouiller** (`primary`, `lock-open`), Entrée par `keydown`.
    - Note : « Déverrouiller utilise une ouverture. Si le téléchargement échoue ensuite, cette ouverture est perdue. »
-   - Ouvertures restantes (ruling 5, 7 novembre) : `fetchMeta` rend aussi `opensLeft` (déjà connu de qui a `K_accès`) ; la mention de coût se lit « L'ouvrir compte une ouverture, même si vous rechargez la page. Il peut encore être ouvert {n} fois. »
+   - Ouvertures restantes (ruling 5, 7 novembre) : `fetchMeta` rend aussi `opensLeft` (déjà connu de qui a `K_accès`) ; la mention de coût se lit « L'ouvrir compte une ouverture. Il peut encore être ouvert {n} fois. » ; recharger ou ouvrir un autre onglet n'en compte pas d'autre pendant 30 minutes (§9.7.1, qui prévaut)
    - Garde de sortie (ruling 3) : tant que l'écran tient le lien (verrouillé, déverrouillage, erreur de lecture), `beforeunload` demande confirmation : le `#` n'est jamais conservé, recharger perdrait le lien sans bruit. Jamais dans un navigateur intégré (le `#` y reste).
    - Navigation privée : « Pour laisser moins de traces, ouvrez ce lien en navigation privée » (ruling 1 : jamais « aucune trace »).
 4. Pendant `openShare` : bouton en chargement, « Déchiffrement de la clé… » (Argon2id, environ 1 s, plus sur un vieux téléphone). Double appui sans effet (bouton désactivé synchrone).
