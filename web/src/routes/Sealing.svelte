@@ -259,8 +259,8 @@
       names={shownNames}
       {more}
       sealedLabel={t("seal.phase.sealed")}
+      caption={t("seal.veil")}
     />
-    <p class="veil-cap">{t("seal.veil")}</p>
   </div>
 
   <div class="info">
@@ -375,20 +375,18 @@
   @media (min-width: 960px) {
     .sealing {
       grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-      align-items: start;
+      align-items: center;
+      /* Centré dans la hauteur utile (sans en-tête ni pied) : plus de demi-page vide (scan UX). */
+      align-content: center;
+      min-height: calc(100dvh - 11rem);
       gap: var(--sp-8);
-      padding-top: var(--sp-8);
+      padding-block: var(--sp-6);
     }
   }
   .cap-col {
     display: grid;
     gap: var(--sp-3);
     min-width: 0;
-  }
-  .veil-cap {
-    margin: 0;
-    font-size: var(--fs-small);
-    color: var(--text-2);
   }
   .info {
     display: grid;

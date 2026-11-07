@@ -67,7 +67,16 @@ test.describe("fr-FR", () => {
     await sendButton(page).click();
     await page.evaluate(() => {
       const seen = new Set<string>();
+      const w = window as unknown as { __capBad: number; __capSeen: number };
+      w.__capBad = 0;
+      w.__capSeen = 0;
       const look = () => {
+        // La légende « ce que le serveur reçoit » ne se pose jamais sur un nom lisible (scan UX).
+        if (document.querySelector("[data-capsule] .veil-cap")) {
+          w.__capSeen++;
+          const shown = [...document.querySelectorAll("[data-capsule] .names .nm")].map((e) => e.textContent ?? "").join("|");
+          if (/plage-nuit|archive-photos|Le code/.test(shown)) w.__capBad++;
+        }
         const h = document.querySelector("#seal-title")?.textContent ?? "";
         if (h && !seen.has(h)) {
           seen.add(h);
@@ -88,6 +97,7 @@ test.describe("fr-FR", () => {
     await expect(page.locator(".stats")).toHaveCSS("font-variant-numeric", "tabular-nums");
     await page.waitForTimeout(300);
     await capture(page, "seal-progress");
+    await expect(page.locator(".sealing")).not.toContainText("palier");
 
     // Finalisation retardée : « Envoyé » est là, « Scellé » non ; aucun lien nulle part.
     await expect.poll(() => finalizing, { timeout: 30_000 }).toBe(true);
@@ -110,6 +120,12 @@ test.describe("fr-FR", () => {
     expect(idx.at(-1)).toBe(4);
     expect(idx).toContain(2);
     expect(idx).toContain(3);
+    const cap = await page.evaluate(() => {
+      const w = window as unknown as { __capBad: number; __capSeen: number };
+      return { bad: w.__capBad, seen: w.__capSeen };
+    });
+    expect(cap.bad).toBe(0);
+    expect(cap.seen).toBeGreaterThan(0);
   });
 
   test("Pause : plus aucun PUT pendant 5 s, Reprendre, succès ; M12 : Pause et Annuler à chaque phase", async ({ page, shh }) => {

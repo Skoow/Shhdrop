@@ -11,6 +11,7 @@ import Countdown from "./Countdown.svelte";
 import CopyField from "./CopyField.svelte";
 import IconButton from "./IconButton.svelte";
 import InlineConfirm from "./InlineConfirm.svelte";
+import SealCapsule from "./SealCapsule.svelte";
 import Segmented from "./Segmented.svelte";
 import Sheet from "./Sheet.svelte";
 import Stepper from "./Stepper.svelte";
@@ -174,6 +175,20 @@ describe("CopyField", () => {
   it("valeur courte : affichée telle quelle", () => {
     show(CopyField, { label: "Mot de passe", value: "abc def" });
     expect(document.querySelector(".val")!.textContent).toBe("abc def");
+  });
+});
+
+describe("SealCapsule : légende « ce que le serveur reçoit » (scan UX, envoi)", () => {
+  const base = { percent: 0, summary: "2 éléments", chip: "Envoi", names: [{ name: "vacances.jpg", category: "photos" }, { name: "contrat.pdf", category: "documents" }], more: "", sealedLabel: "Scellé", caption: "En image, ce que le serveur reçoit : des données illisibles." };
+  it("jamais tant qu'un nom est lisible", () => {
+    show(SealCapsule, { ...base, mode: "progress", progress: 0 });
+    expect(document.body.textContent).not.toContain("ce que le serveur reçoit");
+  });
+  it("affichée quand tous les noms sont brouillés", () => {
+    show(SealCapsule, { ...base, mode: "final", progress: 1 });
+    const cap = document.querySelector(".veil-cap")!;
+    expect(cap.textContent).toBe(base.caption);
+    expect(document.querySelector(".names")!.textContent).not.toContain("vacances.jpg");
   });
 });
 

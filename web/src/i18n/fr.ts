@@ -282,7 +282,7 @@ export const fr = {
   "seal.keys": "Préparation des clés",
   "seal.captcha": "Vérification anti-robot · calcul sur votre appareil",
   "seal.upload": "Chiffrement et envoi",
-  "seal.padding": "La taille envoyée est arrondie au palier supérieur pour masquer la taille réelle.",
+  "seal.padding": "Des données neutres sont ajoutées pour ne pas révéler la taille exacte de vos fichiers.",
   "seal.offline": "Connexion perdue. Nouvel essai dans {duration}…",
   "seal.paused": "En pause · reprise automatique dans {duration}",
   "seal.cancel.confirm": "Annuler l'envoi\u202f? Ce qui a été envoyé sera effacé du serveur.",

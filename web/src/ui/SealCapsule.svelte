@@ -20,10 +20,12 @@
     summary: string;
     chip: string;
     names: { name: string; category: Category }[];
+    /** « En image, ce que le serveur reçoit » : montrée seulement quand aucun nom n'est lisible. */
+    caption?: string;
     more: string;
     sealedLabel: string;
   };
-  let { mode, progress, percent, summary, chip, names, more, sealedLabel }: Props = $props();
+  let { mode, progress, percent, summary, chip, names, more, sealedLabel, caption }: Props = $props();
 
   const ICONS: Record<Category, typeof File> = { texte: Type, photos: Image, videos: Film, audio: Music, documents: FileText, archives: FileArchive, autres: File };
   const VEIL = cipherVeil(20261105);
@@ -43,6 +45,7 @@
   });
   const p = $derived(mode === "sealed" || mode === "final" ? 1 : Math.min(1, Math.max(0, drawn)));
   const kOf = (i: number) => Math.min(1, Math.max(0, p * 1.35 - i * 0.08));
+  const allScrambled = $derived(names.every((_, i) => kOf(i) >= 1));
 
   let root: HTMLDivElement | undefined = $state();
   let running: Animation[] = [];
@@ -105,6 +108,8 @@
     {#each names as n, i (i)}<li translate="no">{n.name}</li>{/each}
     {#if more}<li>{more}</li>{/if}
   </ul>
+
+  {#if caption && allScrambled}<p class="veil-cap">{caption}</p>{/if}
 
   <div class="figure num" aria-hidden="true">
     {#if mode === "sealed"}
@@ -234,11 +239,24 @@
     opacity: calc(1 - var(--k) * 0.45);
     filter: blur(calc(var(--k) * 1.6px));
   }
+  /* Posée sur le volet de texte brouillé, jamais sur des noms lisibles (scan UX, envoi). */
+  .veil-cap {
+    grid-row: 3;
+    grid-column: 1;
+    align-self: end;
+    justify-self: start;
+    max-width: 55%;
+    margin: 0;
+    font-size: var(--fs-small);
+    color: var(--text-2);
+  }
   .names .more {
     padding-left: calc(18px + var(--sp-3));
     font-size: var(--fs-small);
   }
   .figure {
+    grid-row: 3;
+    grid-column: 1;
     justify-self: end;
     font-size: var(--fs-figure);
     line-height: var(--lh-figure);
