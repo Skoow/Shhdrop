@@ -103,8 +103,8 @@ describe("mot de passe généré (spec §31)", () => {
       const p = generatePassword();
       expect(p).toHaveLength(10);
       expect([...p].every((c) => PASSWORD_ALPHABET.includes(c))).toBe(true);
-      expect(/[a-z]/.test(p) && /[A-Z]/.test(p) && /[2-9]/.test(p) && /[!#$%+=?@]/.test(p)).toBe(true);
-      expect(/[0O1lIo]/.test(p)).toBe(false);
+      expect(/[a-z]/.test(p) && /[A-Z]/.test(p) && /[2-9]/.test(p) && /[!#$%+=?@&*\-/:;()]/.test(p)).toBe(true);
+      expect(/[0O1lIo|]/.test(p)).toBe(false);
     }
   });
 

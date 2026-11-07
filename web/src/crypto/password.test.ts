@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { PASSWORD_ALPHABET, PASSWORD_FAMILIES, PASSWORD_LEN, generatePassword, isGeneratedPassword } from "./password";
 
-const FAMILIES = ["abcdefghijkmnpqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789", "!#$%+=?@"];
+const FAMILIES = ["abcdefghijkmnpqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789", "!#$%+=?@&*-/:;()"];
 
 // Nombre de compositions (n_min, n_maj, n_chiffres, n_symboles), chacune ≥ 1, et poids
 // multinomial : sert à calculer l'espérance exacte d'apparition de chaque symbole sous la
@@ -28,17 +28,19 @@ function exact(): { total: bigint; expectedPerSymbol: number[] } {
 }
 
 describe("PASSWORD_ALPHABET (spec §31)", () => {
-  it("64 symboles distincts, quatre familles, aucun caractère ambigu", () => {
-    expect(PASSWORD_ALPHABET).toBe("abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!#$%+=?@");
-    expect(new Set(PASSWORD_ALPHABET).size).toBe(64);
+  it("72 symboles distincts, quatre familles, aucun caractère ambigu ; l'ancien alphabet (64) est inclus", () => {
+    expect(PASSWORD_ALPHABET).toBe("abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!#$%+=?@&*-/:;()");
+    expect(new Set(PASSWORD_ALPHABET).size).toBe(72);
+    for (const c of "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!#$%+=?@") expect(PASSWORD_ALPHABET).toContain(c);
     expect(PASSWORD_FAMILIES).toEqual(FAMILIES);
     expect(FAMILIES.join("")).toBe(PASSWORD_ALPHABET);
-    for (const c of "0O1lIo") expect(PASSWORD_ALPHABET).not.toContain(c);
+    for (const c of "0O1lIo|`'\" ") expect(PASSWORD_ALPHABET).not.toContain(c);
   });
-  it("nombre exact de mots de passe : 594 641 958 752 747 520 (2^59,0)", () => {
+  it("nombre exact de mots de passe : 2 245 913 002 660 331 520 (2^60,96) : au moins 60 bits d'entropie", () => {
     const { total } = exact();
-    expect(total).toBe(594_641_958_752_747_520n);
-    expect(Math.log2(Number(total))).toBeCloseTo(59.0, 1);
+    expect(total).toBe(2_245_913_002_660_331_520n);
+    expect(Math.log2(Number(total))).toBeCloseTo(60.96, 2);
+    expect(Math.log2(Number(total))).toBeGreaterThanOrEqual(60);
   });
 });
 
@@ -68,9 +70,11 @@ describe("generatePassword", () => {
     });
   });
 
-  it("tirage par crypto.getRandomValues, octet & 63 (64 = 2⁶ : aucun biais) ; recommence sans les 4 familles", () => {
-    // Premier tirage : 10 × « a » (une seule famille) → refusé ; second : a A 2 ! a A 2 ! a A.
-    const draws = [new Array(10).fill(0), [0, 24, 48, 56, 64 + 0, 128 + 24, 192 + 48, 255 - 7, 0, 24]];
+  it("tirage par crypto.getRandomValues et rejet (octet ≥ 216 jeté, puis octet % 72 : aucun biais) ; recommence sans les 4 familles", () => {
+    // Premier tirage : 20 × « a » (une seule famille) → refusé ; second : 216 et 255 jetés,
+    // puis a A 2 ! (72 → a, 168 → A, 120 → 2, 128 → !) a A.
+    const pad = (a: number[]) => [...a, ...new Array(20 - a.length).fill(0)];
+    const draws = [new Array(20).fill(0), pad([216, 0, 24, 255, 48, 56, 72, 168, 120, 128, 0, 24])];
     const spy = vi.spyOn(crypto, "getRandomValues").mockImplementation(<T extends ArrayBufferView | null>(a: T): T => {
       (a as unknown as Uint8Array).set(draws.shift()!);
       return a;
@@ -93,7 +97,7 @@ describe("isGeneratedPassword : seule la forme générée est acceptée (D41-15)
     expect(isGeneratedPassword("aB3!cD5?eF")).toBe(true);
   });
   it("refuse toute autre chaîne : longueur, alphabet (ambigus l, o, I, O, 0, 1), familles", () => {
-    for (const pw of ["", "aB3!cD5?e", "aB3!cD5?eFg", "cheval-agrafe-pile", "aB3!cD5?el", "aB3!cD5?eO", "aB3!cD5?e0", "aB3!cD5?e1", "abcdefghij", "aB3cD5eF7g", "aB3!cD5?e ", "aB3!cD5?é2"])
+    for (const pw of ["", "aB3!cD5?e", "aB3!cD5?eFg", "cheval-agrafe-pile", "aB3!cD5?el", "aB3!cD5?eO", "aB3!cD5?e0", "aB3!cD5?e1", "aB3!cD5?e|", "abcdefghij", "aB3cD5eF7g", "aB3!cD5?e ", "aB3!cD5?é2"])
       expect(isGeneratedPassword(pw), pw).toBe(false);
   });
 });

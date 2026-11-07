@@ -368,7 +368,7 @@ open(kEnv: CryptoKey, e: Uint8Array, id: Uint8Array, header: Uint8Array): Promis
 shareId(kLien: KLien): Promise<Uint8Array>;                          // HKDF(kLien, "shhdrop/v2/id"), 16 octets
 // password.ts (spec §31)
 type GeneratedPassword = string & { readonly __gen: unique symbol };
-PASSWORD_ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!#$%+=?@";   // 64 symboles
+PASSWORD_ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!#$%+=?@&*-/:;()";   // 72 symboles (7 novembre : ≥ 60 bits)
 generatePassword(): GeneratedPassword;                                // 8 caractères, 4 familles présentes
 // manifeste v2 (container.ts)
 type Rights = "voir" | "enregistrer" | "coffre";

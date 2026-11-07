@@ -12,6 +12,13 @@ const SYMBOLS: Record<Lang, Record<string, string>> = {
     "=": "égal",
     "?": "point d'interrogation",
     "@": "arobase",
+    "&": "esperluette",
+    "*": "astérisque",
+    "/": "barre oblique",
+    ":": "deux-points",
+    ";": "point-virgule",
+    "(": "parenthèse ouvrante",
+    ")": "parenthèse fermante",
     "-": "tiret",
     _: "tiret bas",
     ".": "point",
@@ -27,6 +34,13 @@ const SYMBOLS: Record<Lang, Record<string, string>> = {
     "=": "equals",
     "?": "question mark",
     "@": "at sign",
+    "&": "ampersand",
+    "*": "asterisk",
+    "/": "slash",
+    ":": "colon",
+    ";": "semicolon",
+    "(": "opening parenthesis",
+    ")": "closing parenthesis",
     "-": "hyphen",
     _: "underscore",
     ".": "period",
@@ -39,16 +53,34 @@ const WORDS: Record<Lang, { lower: string; upper: string; digit: string; other: 
   en: { lower: "lowercase", upper: "uppercase", digit: "digit", other: "character" },
 };
 
-/** Mot d'aide d'un caractère (« B majuscule », « 7 chiffre », « ! point d'exclamation »). */
+// Alphabet radio (OTAN, le même en français et en anglais) : « K comme Kilo ».
+const RADIO: Record<string, string> = {
+  A: "Alfa", B: "Bravo", C: "Charlie", D: "Delta", E: "Echo", F: "Foxtrot", G: "Golf", H: "Hotel", I: "India",
+  J: "Juliett", K: "Kilo", L: "Lima", M: "Mike", N: "November", O: "Oscar", P: "Papa", Q: "Quebec", R: "Romeo",
+  S: "Sierra", T: "Tango", U: "Uniform", V: "Victor", W: "Whiskey", X: "X-ray", Y: "Yankee", Z: "Zulu",
+};
+const AS: Record<Lang, string> = { fr: "comme", en: "as in" };
+
+/** Épeler un caractère (« B comme Bravo, majuscule », « 7, chiffre », « ! point d'exclamation »). */
 export function dictateLabel(ch: string, lang: Lang): string {
   const w = WORDS[lang];
   const sym = SYMBOLS[lang][ch];
   if (sym) return ch === " " ? sym : `${ch} ${sym}`;
-  if (/^[0-9]$/.test(ch)) return `${ch} ${w.digit}`;
+  if (/^[0-9]$/.test(ch)) return `${ch}, ${w.digit}`;
   const up = ch.toUpperCase();
   const low = ch.toLowerCase();
+  const radio = RADIO[up];
+  if (radio) return `${ch} ${AS[lang]} ${radio}, ${ch === up ? w.upper : w.lower}`;
   if (up !== low) return ch === up ? `${up} ${w.upper}` : `${low} ${w.lower}`;
   return `${ch} ${w.other}`;
+}
+
+/** Groupes de 4 pour lire le mot de passe (affichage seulement ; la copie reste d'un seul tenant). */
+export function groups(password: string, size = 4): string[] {
+  const chars = Array.from(password);
+  const out: string[] = [];
+  for (let i = 0; i < chars.length; i += size) out.push(chars.slice(i, i + size).join(""));
+  return out;
 }
 
 export function dictate(password: string, lang: Lang): { ch: string; label: string }[] {

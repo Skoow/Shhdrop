@@ -15,14 +15,25 @@ describe("mode dictée (S5)", () => {
   it("paires ambiguës : étiquettes distinctes", () => {
     for (const [a, b] of [["O", "0"], ["l", "I"], ["I", "1"], ["l", "1"], ["B", "8"], ["S", "5"], ["Z", "2"], ["G", "6"], ["s", "S"], ["c", "C"]])
       expect(dictateLabel(a!, "fr")).not.toBe(dictateLabel(b!, "fr"));
-    expect(dictateLabel("B", "fr")).toBe("B majuscule");
-    expect(dictateLabel("7", "fr")).toBe("7 chiffre");
+    // Épeler : alphabet radio (OTAN), casse dite à part.
+    expect(dictateLabel("B", "fr")).toBe("B comme Bravo, majuscule");
+    expect(dictateLabel("k", "fr")).toBe("k comme Kilo, minuscule");
+    expect(dictateLabel("7", "fr")).toBe("7, chiffre");
     expect(dictateLabel("!", "fr")).toBe("! point d'exclamation");
-    expect(dictate("aB7!", "en").map((x) => x.label)).toEqual(["a lowercase", "B uppercase", "7 digit", "! exclamation mark"]);
+    expect(dictate("aB7!", "en").map((x) => x.label)).toEqual(["a as in Alfa, lowercase", "B as in Bravo, uppercase", "7, digit", "! exclamation mark"]);
   });
 
   it("module local : aucune synthèse vocale ni requête réseau", () => {
     const src = readFileSync(new URL("./dictate.ts", import.meta.url), "utf8");
     expect(src).not.toMatch(/speechSynthesis|SpeechSynthesis|fetch\s*\(|XMLHttpRequest|sendBeacon|WebSocket/);
+  });
+});
+
+describe("groupes de lecture", () => {
+  it("par 4, séparateur visuel seulement ; recoller les groupes rend le mot de passe", async () => {
+    const { groups } = await import("./dictate");
+    expect(groups("K7m4Xq2p9r")).toEqual(["K7m4", "Xq2p", "9r"]);
+    expect(groups("K7m4Xq2p9r").join("")).toBe("K7m4Xq2p9r");
+    expect(groups("")).toEqual([]);
   });
 });
