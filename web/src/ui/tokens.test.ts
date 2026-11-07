@@ -383,6 +383,8 @@ describe("Icon.ts (UI §6)", () => {
     "messages-square",
     // Pages d'erreur (tâche UP).
     "compass", "server-crash", "hourglass", "wrench", "monitor-x",
+    // Téléphone façon app : onglet « Envoyer ».
+    "send",
   ];
   const pascal = (s: string) =>
     s.split("-").map((p) => p[0]!.toUpperCase() + p.slice(1)).join("");

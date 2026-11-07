@@ -30,6 +30,7 @@
   import Faq from "./home/Faq.svelte";
   import HowItWorks from "./home/HowItWorks.svelte";
   import Limits from "./home/Limits.svelte";
+  import Compare from "./home/Compare.svelte";
   import WhySafe from "./home/WhySafe.svelte";
 
   type Props = {
@@ -227,6 +228,7 @@
   {#if !compact}
     <HowItWorks />
     <WhySafe />
+    <Compare />
     <Limits />
     <Faq />
     <Closing onstart={start} />

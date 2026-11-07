@@ -6,6 +6,7 @@
   import { Languages } from "./Icon";
   import LiveRegion from "./LiveRegion.svelte";
   import Logo from "./Logo.svelte";
+  import TabBar from "./TabBar.svelte";
 
   type Props = {
     children: Snippet;
@@ -13,8 +14,16 @@
     banner?: Snippet;
     /** Vrai pendant un envoi : la bascule de langue est inerte (UI §10). */
     langLocked?: boolean;
+    /** Barre d'onglets du téléphone (app/tabbar.ts) ; rendue sous 900 px seulement (CSS). */
+    tabs?: boolean;
   };
-  let { children, banner, langLocked = false }: Props = $props();
+  let { children, banner, langLocked = false, tabs = false }: Props = $props();
+
+  // Téléphone : la page réserve la hauteur de la barre d'onglets (base.css, html.has-tabbar).
+  $effect(() => {
+    document.documentElement.classList.toggle("has-tabbar", tabs);
+    return () => document.documentElement.classList.remove("has-tabbar");
+  });
 
   let main: HTMLElement | undefined = $state();
   let sentinel: HTMLElement | undefined = $state();
@@ -99,6 +108,8 @@
   </div>
 </footer>
 
+{#if tabs}<TabBar />{/if}
+
 <LiveRegion />
 
 <style>
@@ -140,6 +151,9 @@
     position: sticky;
     inset-block-start: 0;
     z-index: 11;
+    /* App installée (barre d'état translucide sur iOS) : rien sous l'encoche. */
+    padding-top: env(safe-area-inset-top, 0px);
+    background: var(--bg);
   }
   @media (max-height: 500px) and (orientation: landscape) {
     .banner-slot {
@@ -158,9 +172,13 @@
     position: sticky;
     inset-block-start: var(--banner-h, 0px);
     z-index: 10;
+    padding-top: env(safe-area-inset-top, 0px);
     transition:
       background-color var(--dur-base) var(--ease-out),
       box-shadow var(--dur-base) var(--ease-out);
+  }
+  .banner-slot ~ .top {
+    padding-top: 0;
   }
   /* Verre mobile (§5.4) : le contenu défile dessous, le flou est donc justifié (K6). */
   .top.scrolled {
@@ -251,6 +269,12 @@
     border-block-start: 1px solid var(--hair);
     margin-block-start: var(--sp-8);
     padding-block: var(--sp-5) calc(var(--sp-5) + env(safe-area-inset-bottom));
+  }
+  /* Téléphone avec onglets : Sécurité et Confidentialité sont dans « Réglages ». */
+  @media (max-width: 899px) {
+    :global(html.has-tabbar) .foot {
+      display: none;
+    }
   }
   .foot-in {
     display: flex;

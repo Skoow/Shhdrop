@@ -63,7 +63,8 @@
   });
 
   function setView(v: View) {
-    void runTransition(() => flushSync(() => (view = v)));
+    // Retour au composeur (annuler, modifier, nouvel envoi) : glissement inverse sur téléphone.
+    void runTransition(() => flushSync(() => (view = v)), { back: v === "compose" });
     onbusy?.(v !== "compose");
   }
 

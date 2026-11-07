@@ -5,6 +5,7 @@
   // Tout reste en mémoire (aucun stockage) ; l'envoi lui-même est la Task 17 (`onsend`).
   import { flushSync, tick } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
+  import { chrome } from "../app/chrome.svelte";
   import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, TTL_MAX_HOURS, generatePassword, type Item, type KeepTtl } from "../index";
   import type { PaidTier } from "../limits";
   import { blockKey, createComposer, type AddReport, type Source } from "../flows/compose.svelte";
@@ -238,7 +239,11 @@
   // Ordinateur, composeur ouvert : pied de page resserré (règle globale plus bas).
   $effect(() => {
     document.documentElement.classList.toggle("composing", filled && !narrow);
-    return () => document.documentElement.classList.remove("composing");
+    chrome.composing = filled; // téléphone : la barre d'onglets cède la place à la barre d'envoi
+    return () => {
+      document.documentElement.classList.remove("composing");
+      chrome.composing = false;
+    };
   });
 
   // ---------- Nettoyer tous les fichiers ----------

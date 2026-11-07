@@ -278,10 +278,12 @@
         {:else if r.opensLeft > 0}
           <p id="open-cost" class="cost">{t("open.oneOpen", { n: r.opensLeft })}</p>
         {/if}
-        <Button variant="primary" busy={busy} disabled={pw === "" || limited} onpress={unlock} aria-describedby={r.reopening || r.otherTab || r.opensLeft > 0 ? "open-cost" : undefined}>
+<div class="cta dock">
+          <Button variant="primary" busy={busy} disabled={pw === "" || limited} onpress={unlock} aria-describedby={r.reopening || r.otherTab || r.opensLeft > 0 ? "open-cost" : undefined}>
           {#snippet icon()}<LockOpen size={18} />{/snippet}
           {busy ? t("open.unlocking") : r.reopening ? t("open.reopen") : t("open.unlock")}
         </Button>
+        </div>
         <p class="trust"><ShieldCheck size={18} aria-hidden="true" /> <span>{t("open.trust")}</span></p>
       </div>
       <details class="private">
@@ -433,8 +435,29 @@
     gap: var(--sp-3);
     max-width: 520px;
   }
-  .unlock > :global(button) {
+  .cta {
     justify-self: start;
+  }
+  /* Téléphone, façon app : « Déverrouiller » pleine largeur, collé en bas (zone du pouce) ;
+     dans le flux quand le clavier est ouvert (base.css, .dock), juste sous le champ. */
+  @media (max-width: 899px) {
+    .cta {
+      justify-self: stretch;
+      z-index: 4;
+      margin-inline: calc(-1 * var(--sp-4));
+      padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom, 0px));
+      background: linear-gradient(to top, var(--bg) 72%, transparent);
+    }
+    .cta :global(.btn) {
+      width: 100%;
+      min-height: 56px;
+      border-radius: 14px;
+      font-size: 1.0625rem;
+    }
+    :global(html.kbd-open) .cta {
+      padding-block: var(--sp-2);
+      background: none;
+    }
   }
   .fl {
     color: var(--text-2);

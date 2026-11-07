@@ -61,6 +61,7 @@ describe("Home (UI §9.1)", () => {
       "Glissez vos fichiers iciQue voulez-vous envoyer\u202f?",
       "Comment ça marche",
       "Pourquoi c'est sûr",
+      "Pourquoi Shhdrop",
       "Ce que Shhdrop ne peut pas faire",
       "Vos questions",
       "Quelque chose à transmettre\u202f?",

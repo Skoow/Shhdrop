@@ -14,6 +14,8 @@
   import SendFlow from "./routes/SendFlow.svelte";
   import Unsupported from "./routes/Unsupported.svelte";
   import AppShell from "./ui/AppShell.svelte";
+  import { chrome } from "./app/chrome.svelte";
+  import { tabBarVisible } from "./app/tabbar";
 
   // UI §9 : vérifié une fois, avant toute route. Sans ces capacités, aucune route ne démarre
   // (ni lecture du lien, ni requête).
@@ -24,6 +26,9 @@
 
   // Task 17 : vrai pendant un envoi et sur « Lien prêt » (langue figée, dépôt de fichier ignoré).
   let sending = $state(false);
+
+  // Téléphone : barre d'onglets sur les écrans racine de l'expéditeur seulement (app/tabbar.ts).
+  const tabs = $derived(tabBarVisible({ supported, route: router.current.name, sending, composing: chrome.composing }));
 
   // UI §12.2 : une page restaurée du cache « page précédente » est rechargée.
   reloadIfRestored(window);
@@ -97,7 +102,7 @@
   {#if demo}<demo.Banner />{/if}
 {/snippet}
 
-<AppShell banner={demo ? demoBanner : undefined} langLocked={sending}>
+<AppShell banner={demo ? demoBanner : undefined} langLocked={sending} {tabs}>
   {#if !supported}
     <Unsupported />
   {:else if router.current.name === "notfound"}

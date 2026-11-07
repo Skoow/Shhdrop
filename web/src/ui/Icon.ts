@@ -73,3 +73,4 @@ export { default as ServerCrash } from "@lucide/svelte/icons/server-crash";
 export { default as Hourglass } from "@lucide/svelte/icons/hourglass";
 export { default as Wrench } from "@lucide/svelte/icons/wrench";
 export { default as MonitorX } from "@lucide/svelte/icons/monitor-x";
+export { default as Send } from "@lucide/svelte/icons/send";

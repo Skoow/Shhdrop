@@ -100,7 +100,7 @@
     animation: fade var(--dur-slow) var(--ease-out);
   }
   /* Téléphone : feuille ancrée en bas, qui monte depuis le bord (UI §20.4, courbe sans rebond). */
-  @media (max-width: 40rem) {
+  @media (max-width: 899px) {
     .sheet {
       margin: auto 0 0;
       width: 100%;

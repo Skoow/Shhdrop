@@ -12,6 +12,8 @@ export async function addText(page: Page, text: string) {
   await dlg.getByLabel("Contenu").fill(text);
   await dlg.getByRole("button", { name: "Ajouter" }).click();
   await expect(dlg).toBeHidden();
+  // Le composeur remplace l'accueil après la transition de vue : attendre la ligne ajoutée.
+  await expect(page.locator("[data-row]").first()).toBeVisible();
 }
 
 export async function addFile(page: Page, name: string, bytes: number, mimeType = "application/octet-stream") {

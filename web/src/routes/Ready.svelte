@@ -22,6 +22,7 @@
   import Logo from "../ui/Logo.svelte";
   import QrCode from "../ui/QrCode.svelte";
   import { reducedMotion } from "../ui/motion";
+  import { canShareLink, haptic, shareLink } from "../ui/native";
   import Sheet from "../ui/Sheet.svelte";
   import "../ui/seal.css";
 
@@ -69,6 +70,7 @@
   $effect(() => {
     if (!heading) return;
     heading.focus({ preventScroll: true });
+    haptic();
     announce(t("ready.created"));
   });
   $effect(() => {
@@ -85,14 +87,9 @@
   });
 
   // ---------- Partager, QR ----------
-  const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
+  const canShare = canShareLink();
   async function share() {
-    if (!result) return;
-    try {
-      await navigator.share({ url: result.link }); // jamais le mot de passe
-    } catch {
-      /* annulé par l'utilisateur */
-    }
+    if (result) await shareLink(result.link); // le lien seul, jamais le mot de passe
   }
   let qrShown = $state(false);
   let qrSheet = $state(false);

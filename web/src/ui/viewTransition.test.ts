@@ -67,6 +67,15 @@ describe("runTransition (UI §20.2 K2)", () => {
     expect(document.documentElement.classList.contains("vt-reduced")).toBe(false);
   });
 
+  it("back: true → classe vt-back (glissement vers la droite sur téléphone), retirée après", async () => {
+    const api = fakeApi();
+    const p = runTransition(() => undefined, { reduced: false, back: true });
+    expect(document.documentElement.classList.contains("vt-back")).toBe(true);
+    api.finish();
+    await p;
+    expect(document.documentElement.classList.contains("vt-back")).toBe(false);
+  });
+
   it("reduced par défaut : suit prefers-reduced-motion", async () => {
     vi.stubGlobal("matchMedia", (q: string) => ({ matches: q.includes("reduced-motion"), media: q }));
     const api = fakeApi();

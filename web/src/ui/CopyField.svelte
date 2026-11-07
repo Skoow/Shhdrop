@@ -3,6 +3,7 @@
   import { t } from "../i18n/i18n.svelte";
   import { announce } from "./announce";
   import { copyText } from "./clipboard";
+  import { haptic } from "./native";
   import Button from "./Button.svelte";
   import { Check, Copy } from "./Icon";
 
@@ -32,6 +33,7 @@
     if (r === "copied") {
       manual = false;
       copied = true;
+      haptic();
       announce(t("copy.done", { label }));
       timer = setTimeout(() => (copied = false), 2000);
     } else {

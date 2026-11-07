@@ -122,6 +122,45 @@ p {
     transform: translateY(10px);
   }
 }
+/* Téléphone (< 900 px), façon app : l'écran suivant glisse depuis la droite, le précédent
+   part vers la gauche ; en arrière (html.vt-back), l'inverse. Mouvement réduit : le fondu
+   ci-dessous l'emporte (même spécificité, déclaré après). */
+@media (max-width: 899px) {
+  ::view-transition-old(root) {
+    animation: vt-slide-out 260ms var(--ease-in-out) both;
+  }
+  ::view-transition-new(root) {
+    animation: vt-slide-in 360ms var(--ease-view) both;
+  }
+  html.vt-back::view-transition-old(root) {
+    animation-name: vt-slide-out-back;
+  }
+  html.vt-back::view-transition-new(root) {
+    animation-name: vt-slide-in-back;
+  }
+}
+@keyframes vt-slide-out {
+  to {
+    opacity: 0.4;
+    transform: translateX(-30%);
+  }
+}
+@keyframes vt-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes vt-slide-out-back {
+  to {
+    opacity: 0.4;
+    transform: translateX(30%);
+  }
+}
+@keyframes vt-slide-in-back {
+  from {
+    transform: translateX(-100%);
+  }
+}
 /* Mouvement réduit : les groupes nommés (titre, capsule) ne se déplacent ni ne changent de
    taille ; seul le fondu des captures ancienne et nouvelle reste (UI §20.7). */
 html.vt-reduced::view-transition-group(*) {
@@ -136,6 +175,37 @@ html.vt-reduced::view-transition-new(root) {
 @keyframes vt-fade {
   from {
     opacity: 0;
+  }
+}
+
+/* Téléphone (< 900 px), façon app (jusqu'à la vraie version mobile) : ni rebond ni « tirer pour
+   rafraîchir », aucun défilement horizontal, pas de délai ni de surlignage gris au toucher
+   (chaque élément touchable a son propre état :active), champs à 16 px au moins (iOS ne zoome
+   pas), place réservée à la barre d'onglets. */
+#app {
+  overflow-x: clip;
+}
+@media (max-width: 899px) {
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+  a,
+  button,
+  summary,
+  label,
+  input,
+  select,
+  textarea {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  a:active,
+  summary:active {
+    opacity: 0.72;
+  }
+  html.has-tabbar body {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   }
 }
 

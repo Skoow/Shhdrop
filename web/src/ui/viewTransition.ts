@@ -20,7 +20,11 @@ type DocWithVT = Document & { startViewTransition?: (cb: () => void) => ViewTran
  */
 export const STALL_MS = 420;
 
-export async function runTransition(update: () => void, opts: { reduced?: boolean } = {}): Promise<void> {
+/**
+ * `back` : retour en arrière (annuler, nouvel envoi) ; sur téléphone, l'écran glisse vers la
+ * droite au lieu de la gauche (base.css, html.vt-back).
+ */
+export async function runTransition(update: () => void, opts: { reduced?: boolean; back?: boolean } = {}): Promise<void> {
   const doc = document as DocWithVT;
   if (typeof doc.startViewTransition !== "function") {
     update();
@@ -30,6 +34,7 @@ export async function runTransition(update: () => void, opts: { reduced?: boolea
   // Mouvement réduit : fondu de 120 ms seulement (base.css, html.vt-reduced).
   const reduced = opts.reduced ?? reducedMotion();
   if (reduced) root.classList.add("vt-reduced");
+  if (opts.back) root.classList.add("vt-back");
   let called = false;
   const vt = doc.startViewTransition.call(doc, () => {
     called = true;
@@ -48,6 +53,7 @@ export async function runTransition(update: () => void, opts: { reduced?: boolea
     doc.removeEventListener("pointerdown", skip, { capture: true });
     doc.removeEventListener("keydown", skip, { capture: true });
     if (reduced) root.classList.remove("vt-reduced");
+    if (opts.back) root.classList.remove("vt-back");
   }
   // Une exception du rappel remonte à l'appelant.
   await vt.updateCallbackDone;
