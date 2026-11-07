@@ -77,3 +77,66 @@ export function rosette(R: number, r: number, d: number, c: number, s = 1, pts =
   }
   return p + "Z";
 }
+
+// ---------- Écran « partage détruit » (UI §9.10.1) : document qui se défait en points ----------
+
+/** Document de l'illustration (repère 120 × 128) : coin haut-gauche, taille, pas de la Trame. */
+export const DOC = { x: 16, y: 8, w: 80, h: 112, step: 8 } as const;
+
+/** Part du bord droit et bas qui se défait : cellules de 8 px dont la diagonale dépasse ce seuil. */
+const CUT = 1.1;
+
+/** Cellules (8 × 8) retirées du document, en bas à droite, en escalier. Déterministe. */
+export function dissolveCells(): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  for (let y = DOC.y; y < DOC.y + DOC.h; y += DOC.step)
+    for (let x = DOC.x; x < DOC.x + DOC.w; x += DOC.step) {
+      const s = (x + DOC.step - DOC.x) / DOC.w + (y + DOC.step - DOC.y) / DOC.h;
+      if (s > CUT) out.push({ x, y });
+    }
+  return out;
+}
+
+export type Dot = {
+  /** Position de départ (centre d'une cellule retirée, carré de 4 px). */
+  x: number;
+  y: number;
+  /** Dérive vers le haut et la droite (px). */
+  dx: number;
+  dy: number;
+  /** Départ (ms) : colonne par colonne, de gauche à droite, en 900 ms au plus avec la durée. */
+  delay: number;
+  /** Opacité finale. */
+  o: number;
+  /** 22 % des points en couleur d'accent. */
+  accent: boolean;
+};
+
+/** Durée de la dérive d'un point (ms) ; délai maximal + durée ≤ 900 ms. */
+export const DOT_MS = 420;
+
+/** `n` points de la Trame tirés de `seed` parmi les cellules retirées. Pur calcul, déterministe. */
+export function dissolveDots(seed = 0x5d41, n = 48): Dot[] {
+  const r = rng(seed);
+  const cells = dissolveCells();
+  // Mélange déterministe, puis les n premiers (cellules réutilisées s'il en manquait).
+  for (let i = cells.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    [cells[i], cells[j]] = [cells[j]!, cells[i]!];
+  }
+  const out: Dot[] = [];
+  for (let k = 0; k < n; k++) {
+    const c = cells[k % cells.length]!;
+    const col = (c.x - DOC.x) / DOC.w;
+    out.push({
+      x: c.x + 2,
+      y: c.y + 2,
+      dx: Math.round(6 + r() * 30),
+      dy: -Math.round(6 + r() * 34),
+      delay: Math.round(col * (900 - DOT_MS)),
+      o: Math.round((0.18 + r() * 0.6) * 100) / 100,
+      accent: k % 9 === 1 || k % 9 === 5, // 2 sur 9 ≈ 22 %
+    });
+  }
+  return out;
+}

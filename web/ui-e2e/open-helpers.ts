@@ -105,3 +105,6 @@ export const settle = (page: Page) =>
         .map((a) => a.finished.catch(() => undefined)),
     ),
   );
+
+/** Ligne d'une note dans la liste du contenu (sa première ligne y est montrée en extrait). */
+export const noteRow = (page: Page, text: string) => page.locator("li.row").filter({ hasText: text.split("\n")[0]!.trim().slice(0, 80) });

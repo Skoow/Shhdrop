@@ -17,6 +17,10 @@
     disabled?: boolean;
     /** Nom accessible du bouton d'origine, s'il doit en dire plus que `label` (il commence par `label`, WCAG 2.5.3). */
     triggerName?: string;
+    /** Bouton d'origine de 44 px (listes compactes). */
+    dense?: boolean;
+    /** Libellé du bouton d'origine caché sur téléphone (icône seule ; nom accessible inchangé). */
+    narrowIcon?: boolean;
   };
   let {
     label,
@@ -29,6 +33,8 @@
     icon,
     disabled = false,
     triggerName,
+    dense = false,
+    narrowIcon = false,
   }: Props = $props();
 
   let asking = $state(false);
@@ -68,7 +74,7 @@
     </div>
   </div>
 {:else}
-  <Button variant={triggerVariant} bind:el={trigger} {icon} {disabled} onpress={ask} aria-label={triggerName}>{label}</Button>
+  <Button variant={triggerVariant} {dense} bind:el={trigger} {icon} {disabled} onpress={ask} aria-label={triggerName}>{#if narrowIcon}<span class="hide-narrow">{label}</span>{:else}{label}{/if}</Button>
 {/if}
 
 <style>

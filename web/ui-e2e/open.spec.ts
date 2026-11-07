@@ -4,7 +4,7 @@
 import type { Page } from "@playwright/test";
 import { NotFoundError, PW_TRIES, fetchMeta, shareStatus } from "../src/index";
 import { axe, capture, expect, test } from "./fixtures";
-import { freshPage, pwField, sendShare, settle, unlock, unlockButton } from "./open-helpers";
+import { freshPage, noteRow, pwField, sendShare, settle, unlock, unlockButton } from "./open-helpers";
 import { armed } from "./send-helpers";
 
 const INSTAGRAM =
@@ -91,7 +91,7 @@ test("mauvais mot de passe deux fois → « 3 essais restants », bon → conten
   await capture(page, "open-badpw");
 
   await unlock(page, sent.password);
-  await expect(page.locator("pre").filter({ hasText: TEXT })).toBeVisible();
+  await expect(noteRow(page, TEXT)).toBeVisible();
   // M6 : même élément, de « locked » à « open », sans remontage.
   await expect(capsule).toHaveAttribute("data-state", "open");
   expect(await capsule.evaluate((el) => el === (window as unknown as { __cap: Element }).__cap)).toBe(true);

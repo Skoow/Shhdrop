@@ -1,6 +1,7 @@
 // Options de l'envoi (UI §9.3, spec §31, §34) : durée, ouvertures, mot de passe, droits du
 // destinataire. En mémoire seulement : le mot de passe n'est jamais rangé ni journalisé.
 // Le mot de passe est toujours généré (D41-15) : aucune saisie, donc aucun contrôle ici.
+import { ASSUMED_UP_BPS } from "./estimate";
 import { MAX_OPENS, OPENS_DEFAULT, PREVIEW_MAX, TTL_DEFAULT, TTL_HOURS, type TtlHours } from "../index";
 
 export type Rights = "voir" | "enregistrer" | "coffre";
@@ -80,7 +81,7 @@ export function sendRights(o: Pick<Options, "rights" | "ttlHours">): { rights: R
 
 // Débits de référence pour l'estimation (octets par seconde, envoi) : honnêtes et prudents.
 const FAST = 5_000_000; // fibre ou bon wifi, environ 40 Mbit/s en envoi
-const SLOW = 1_000_000; // réseau mobile moyen, environ 8 Mbit/s en envoi
+const SLOW = ASSUMED_UP_BPS; // réseau mobile moyen, environ 8 Mbit/s en envoi (flows/estimate.ts)
 const MANIFEST_RESERVED = 65536; // un morceau : manifeste ≤ 65 532 octets + sa longueur (spec §29.3)
 const TAG_RATIO = 16 / 65536;
 

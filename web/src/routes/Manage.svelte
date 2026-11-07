@@ -14,6 +14,7 @@
   import Countdown from "../ui/Countdown.svelte";
   import { RefreshCw, Trash2 } from "../ui/Icon";
   import InlineConfirm from "../ui/InlineConfirm.svelte";
+  import DestroyedArt from "../ui/DestroyedArt.svelte";
   import Logo from "../ui/Logo.svelte";
   import TimeRim from "../ui/TimeRim.svelte";
   import Invalid from "./Invalid.svelte";
@@ -109,7 +110,7 @@
 {:else if phase === "gone"}
   <section class="manage" aria-labelledby="m-gone">
     <div class="gone-logo"><Logo bind:this={logo} /></div>
-    <span class="dashed" aria-hidden="true"></span>
+    <DestroyedArt />
     <h1 id="m-gone" class="title" tabindex="-1" bind:this={goneTitle}>{t("manage.gone")}</h1>
     <p class="lede">{t("manage.gone.body")}</p>
     <p><a class="send" href={href("/")} onclick={(e) => followLink(e, "/")}>{t("invalid.send")}</a></p>
@@ -207,12 +208,6 @@
   }
   .gone-logo {
     height: 34px;
-  }
-  .dashed {
-    width: 96px;
-    height: 60px;
-    border: 2px dashed var(--line-strong);
-    border-radius: var(--r-pill);
   }
   .send {
     display: inline-flex;

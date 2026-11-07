@@ -297,8 +297,8 @@ test.describe("fr-FR : envoi (Tasks 17–18)", () => {
     await page.getByLabel("Mot de passe", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Déverrouiller" }).click();
     await expect(page.getByRole("heading", { name: "Contenu du partage" })).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator("pre").filter({ hasText: "Le code de la porte est 4471." })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Enregistrer releve.bin" })).toBeVisible();
+    await expect(page.locator("li.row").filter({ hasText: "Le code de la porte est 4471." })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Télécharger releve.bin" })).toBeVisible();
     await capture(page, "demo-content");
     await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
     await page.getByRole("button", { name: "Détruire", exact: true }).click();

@@ -2,7 +2,7 @@
 // gestion minimale par l'expéditeur (UI §9.6), sur le vrai serveur.
 import { NotFoundError, fetchMeta } from "../src/index";
 import { axe, capture, expect, test } from "./fixtures";
-import { freshPage, sendShare, settle, unlock } from "./open-helpers";
+import { freshPage, noteRow, sendShare, settle, unlock } from "./open-helpers";
 
 const TEXT = "Repère de fin de vie 5e1b : le code est 8812.";
 test.use({ locale: "fr-FR" });
@@ -41,7 +41,7 @@ test("Détruire : pied séparé par un filet, confirmation, reçu après la rép
   await page.getByRole("button", { name: "Détruire", exact: true }).click();
   await page.waitForTimeout(800);
   await expect(page.locator("[data-receipt]")).toHaveCount(0); // rien avant la réponse
-  await expect(page.locator("pre").filter({ hasText: TEXT })).toBeVisible();
+  await expect(noteRow(page, TEXT)).toBeVisible();
   release();
 
   await expect(page.getByRole("heading", { name: "Détruit" })).toBeVisible({ timeout: 20_000 });
@@ -72,7 +72,7 @@ test("429 pendant Détruire : « Trop de demandes, réessayez dans un instant »
   await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
   await page.getByRole("button", { name: "Détruire", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Trop de demandes, réessayez dans un instant." })).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator("pre").filter({ hasText: TEXT })).toBeVisible();
+  await expect(noteRow(page, TEXT)).toBeVisible();
   await expect(page.locator("[data-receipt]")).toHaveCount(0);
   limited = false;
   await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();

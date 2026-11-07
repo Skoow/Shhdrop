@@ -6,12 +6,15 @@
   import type { ComposeItem } from "../flows/compose.svelte";
   import { metaNoteKey } from "../flows/compose.svelte";
   import { NAME_MAX, STRIP_MAX } from "../index";
-  import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { formatClock, mediaDuration } from "../media/duration";
   import { ArrowDown, ArrowUp, Ellipsis, Pencil, X } from "./Icon";
   import ItemNotes from "./ItemNotes.svelte";
-  import { canThumb as thumbable, firstLine, iconFor, thumb as thumbAttach } from "./itemView";
+  import { transferSeconds, ASSUMED_UP_BPS } from "../flows/estimate";
+  import { formatBytes, formatDuration } from "../i18n/format";
+  import FormatIcon from "./FormatIcon.svelte";
+  import { formatOf, typeKey } from "./formats";
+  import { firstLine } from "./itemView";
   import IconButton from "./IconButton.svelte";
   import ReorderHandle from "./ReorderHandle.svelte";
 
@@ -40,10 +43,8 @@
   let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, danger = false, el = $bindable() }: Props = $props();
 
   const name = $derived(item.base + item.ext);
-  const Icon = $derived(iconFor(item));
-  const canThumb = $derived(thumbable(item));
-  let thumbFailed = $state(false);
-  const thumb = $derived(thumbAttach(item, () => (thumbFailed = true)));
+  const format = $derived(formatOf({ kind: item.kind, ext: item.ext.slice(1).toLowerCase(), sniffed: item.sniffed ?? null }));
+  const eta = $derived(transferSeconds(item.size, ASSUMED_UP_BPS));
 
   let duration = $state<number | null>(null);
   $effect(() => {
@@ -150,14 +151,7 @@
     <span class="grip-slot" aria-hidden="true"></span>
   {/if}
 
-  <span class="pic" aria-hidden="true">
-    {#if canThumb && !thumbFailed}
-      <img alt="" decoding="async" {@attach thumb} />
-    {:else}
-      <Icon size={20} strokeWidth={1.6} />
-    {/if}
-    {#if duration !== null && item.category === "videos"}<span class="dur num">{formatClock(duration)}</span>{/if}
-  </span>
+  <span class="pic"><FormatIcon {format} /></span>
 
   <div class="main">
     {#if editing}
@@ -189,9 +183,10 @@
         <span class="b">{item.base}</span>{#if item.kind !== "text"}<span class="e">{item.ext}</span>{/if}
       </bdi>
       <span class="meta">
-        {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi><span class="sep" aria-hidden="true">·</span>{/if}
+        {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi><span class="sep" aria-hidden="true">·</span>{:else if item.kind === "file"}<span>{t(typeKey(format))}</span><span class="sep" aria-hidden="true">·</span>{/if}
         <span class="num">{formatBytes(item.size, getLang())}</span>
         {#if duration !== null}<span class="sep" aria-hidden="true">·</span><span class="num">{formatClock(duration)}</span>{/if}
+        {#if item.kind === "file"}<span class="sep" aria-hidden="true">·</span><span class="num" title={t("compose.eta.title")}>{t("compose.eta", { time: formatDuration(eta, getLang()) })}<span class="sr-only"> ({t("compose.eta.title")})</span></span>{/if}
         <ItemNotes {item} {cannotOpen} badgesOnly />
       </span>
       <ItemNotes {item} {cannotOpen} lines />
@@ -223,8 +218,8 @@
     grid-template-columns: auto 44px minmax(0, 1fr) auto;
     align-items: center;
     column-gap: var(--sp-3);
-    min-height: 52px;
-    padding: 6px 4px 6px 0;
+    min-height: 48px;
+    padding: 2px 4px 2px 0;
     border-radius: 16px;
     background: transparent;
     transition:
@@ -259,32 +254,10 @@
     margin-inline: -6px;
   }
   .pic {
-    position: relative;
     display: grid;
     place-items: center;
     width: 44px;
     height: 44px;
-    overflow: hidden;
-    border-radius: 12px;
-    background: rgb(255 255 255 / 0.045);
-    box-shadow: inset 0 0 0 1px var(--hair);
-    color: var(--text-2);
-  }
-  .pic img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .dur {
-    position: absolute;
-    inset-inline-end: 3px;
-    inset-block-end: 3px;
-    padding: 0 3px;
-    border-radius: 4px;
-    background: rgb(5 7 10 / 0.78);
-    color: var(--text);
-    font-size: 0.625rem;
-    line-height: 1.4;
   }
   .main {
     display: grid;

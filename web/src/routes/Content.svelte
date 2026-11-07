@@ -1,25 +1,39 @@
 <script lang="ts">
-  // Contenu d'un partage ouvert (UI §9.8, §9.10, §12.2) : éléments regroupés comme à l'envoi,
-  // dans l'ordre du manifeste ; visionneuses natives ; Enregistrer si l'expéditeur l'a permis ;
-  // pied : Terminer et effacer, Détruire pour tout le monde, Signaler. Les noms viennent de
-  // safeName, les visionneuses de previewKind ; rien n'est écrit dans la console, le titre,
-  // l'adresse ni un stockage. Le bandeau collé (temps restant) est la capsule d'Open.svelte.
+  // Contenu d'un partage ouvert (UI §9.8, §9.8.6, §9.10 ; décisions du propriétaire du
+  // 7 novembre : listes compactes, icône par format, temps estimés, téléchargements contrôlés,
+  // « Voir » vers un panneau). Éléments regroupés comme à l'envoi, dans l'ordre du manifeste.
+  // Noms par safeName, visionneuse par previewKind ; rien n'est écrit dans la console, le
+  // titre, l'adresse ni un stockage. « Voir seulement » : aucune action de téléchargement ni de
+  // copie dans le DOM (ni barre, ni ligne, ni visionneuse).
+  import { lowMemory } from "../app/env";
   import { guardUnload } from "../app/lifecycle";
+  import { createDownloads, readSkipping, summarize, type Target } from "../flows/downloads.svelte";
   import { destroyFromContent, finish, type DestroyOutcome } from "../flows/endoflife";
+  import { ASSUMED_DOWN_BPS, transferSeconds } from "../flows/estimate";
   import { WATCH_READY } from "../flows/features";
   import type { Gone } from "../flows/gone.svelte";
+  import { CATEGORY_ORDER, categoryOfReceived, extOf, type Category } from "../flows/kinds";
+  import { createReadMeter } from "../flows/read-meter";
   import { browserWatchDeps, startWatch } from "../flows/watch";
-  import { CATEGORY_ORDER, categoryOfReceived, type Category } from "../flows/kinds";
-  import { t, type Key } from "../i18n/i18n.svelte";
+  import { formatBytes, formatDuration } from "../i18n/format";
+  import { getLang, t, type Key } from "../i18n/i18n.svelte";
+  import type { ItemSink } from "../flows/downloads.svelte";
   import type { Opened } from "../index";
   import { announce } from "../ui/announce";
   import Button from "../ui/Button.svelte";
-  import { Eye, Flag, Trash2 } from "../ui/Icon";
+  import { copyText } from "../ui/clipboard";
+  import DownloadBar from "../ui/DownloadBar.svelte";
+  import { formatOf } from "../ui/formats";
+  import { Download, Eye, Flag, Pause, Play, Square, Trash2 } from "../ui/Icon";
+  import IconButton from "../ui/IconButton.svelte";
   import InlineConfirm from "../ui/InlineConfirm.svelte";
   import { reducedMotion } from "../ui/motion";
+  import ReceivedRow from "../ui/ReceivedRow.svelte";
   import ReportSheet from "../ui/ReportSheet.svelte";
-  import { previewQueue } from "../viewers/collect";
-  import ReceivedItem from "../viewers/ReceivedItem.svelte";
+  import { collectPreview, previewQueue } from "../viewers/collect";
+  import { blobDownloads, clickDownload, inDirectory, pickFile, type DirHandle, type SavePicker } from "../viewers/save";
+  import ViewerPanel, { type ViewItem } from "../viewers/ViewerPanel.svelte";
+  import { ZIP_BLOB_MAX, ZIP_BLOB_MAX_SMALL, createZip, zipName } from "../zip/store-zip";
 
   type ContentEnd = "finished" | Exclude<DestroyOutcome, "network" | "limit">;
   type Props = {
@@ -32,8 +46,26 @@
     gone: Gone;
   };
   let { opened, expired, onend, gone: closer }: Props = $props();
+  const lang = $derived(getLang());
 
-  const viewOnly = $derived(opened.manifest.rights === "voir");
+  // Le manifeste ne change pas pendant la vie de l'écran : lu une fois.
+  // svelte-ignore state_referenced_locally
+  const o = opened;
+  const viewOnly = o.manifest.rights === "voir";
+  const entries = o.manifest.items;
+  const enc = new TextEncoder();
+  const totals = entries.map((e) => (e.kind === "text" ? enc.encode(e.text ?? "").length : e.size));
+  const names = entries.map((_, i) => o.safeName(i));
+  const kinds = entries.map((_, i) => o.previewKind(i));
+  const formats = entries.map((e, i) => formatOf({ kind: e.kind, ext: extOf(names[i]!), preview: kinds[i] }));
+  const viewKind = (i: number): ViewItem["kind"] | null => {
+    const k = kinds[i];
+    if (entries[i]!.kind === "text" || k === "text") return "text";
+    return k === "image" || k === "video" || k === "audio" ? k : null; // PDF : Task 22 (pas de bouton d'ici là)
+  };
+  /** Nom de fichier d'un élément : une note devient un .txt. */
+  const fileName = (i: number) => (entries[i]!.kind === "text" && !/\.txt$/i.test(names[i]!) ? `${names[i]}.txt` : names[i]!);
+
   const CAT_KEY: Record<Category, Key> = {
     texte: "compose.cat.text",
     photos: "compose.cat.photos",
@@ -43,40 +75,181 @@
     archives: "compose.cat.archives",
     autres: "compose.cat.autres",
   };
-  const groups = $derived.by(() => {
+  const groups = (() => {
     const by = new Map<Category, number[]>();
-    opened.manifest.items.forEach((e, i) => {
-      const c = categoryOfReceived(e.kind, opened.previewKind(i), opened.safeName(i), e.mime);
+    entries.forEach((e, i) => {
+      const c = categoryOfReceived(e.kind, kinds[i]!, names[i]!, e.mime);
       by.set(c, [...(by.get(c) ?? []), i]);
     });
     return CATEGORY_ORDER.filter((c) => by.has(c)).map((c) => ({ c, items: by.get(c)! }));
+  })();
+  const all = entries.map((_, i) => i);
+  const viewItems: ViewItem[] = groups.flatMap((g) =>
+    g.items.flatMap((i) => {
+      const k = viewKind(i);
+      return k ? [{ i, name: names[i]!, kind: k, size: totals[i]!, text: entries[i]!.kind === "text" ? (entries[i]!.text ?? "") : undefined }] : [];
+    }),
+  );
+
+  // ---------- Lectures : budget estimé, aperçus en mémoire, file de téléchargements ----------
+  const meter = createReadMeter(entries.map((e) => ({ kind: e.kind, offset: e.offset, size: e.size })));
+  /** Aperçus déjà lus (Blob), réutilisés par « Télécharger » et l'archive (aucune relecture). */
+  const previews = new Map<number, Blob>();
+  const PREVIEW_CACHE_MAX = 256 * 1048576;
+  function remember(i: number, b: Blob) {
+    previews.set(i, b);
+    let sum = 0;
+    for (const x of previews.values()) sum += x.size;
+    for (const k of previews.keys()) {
+      if (sum <= PREVIEW_CACHE_MAX) break;
+      if (k === i) continue;
+      sum -= previews.get(k)!.size;
+      previews.delete(k);
+    }
+  }
+  const serverRead = readSkipping((i, sink) => o.saveItem(i, sink));
+  async function blobRead(b: Blob, from: number, on: (c: Uint8Array<ArrayBuffer>) => Promise<void>) {
+    const r = b.slice(from).stream().getReader();
+    for (;;) {
+      const { done, value } = await r.read();
+      if (done) return;
+      await on(new Uint8Array(value));
+    }
+  }
+  const dl = createDownloads(totals, {
+    read: (i, from, on) => {
+      const b = previews.get(i);
+      return b ? blobRead(b, from, on) : serverRead(i, from, on);
+    },
+    openSink: (i, target) => (target as (name: string) => Promise<ItemSink | null>)(fileName(i)),
+    meter,
+    now: () => performance.now(),
+    track: (i) => closer.begin(names[i]!, totals[i]!),
+    ongone: () => closer.closeToGone("http410"),
+    cached: (i) => previews.has(i),
   });
 
   const queue = previewQueue();
-  let busy = $state(0);
-  const onbusy = (d: 1 | -1) => (busy = Math.max(0, busy + d));
-  // UI §9.8 : avertir avant de quitter seulement pendant un aperçu ou un enregistrement.
-  $effect(() => guardUnload(() => busy > 0));
+  let previewing = $state(0);
+  async function loadPreview(i: number, onBytes: (d: number) => void, signal: AbortSignal): Promise<Blob> {
+    const hit = previews.get(i);
+    if (hit) return hit;
+    previewing++;
+    try {
+      return await queue(async () => {
+        if (signal.aborted) throw new DOMException("annulé", "AbortError");
+        const again = previews.get(i);
+        if (again) return again;
+        if (!meter.canRead(i)) throw Object.assign(new Error("budget_epuise"), { name: "ReadBudgetError" });
+        meter.charge(i);
+        try {
+          const b = await collectPreview(o, i, (d) => onBytes(d), signal);
+          remember(i, b);
+          return b;
+        } catch (e) {
+          meter.interrupted();
+          if (e instanceof Error && e.name === "NotFoundError") closer.closeToGone("http410");
+          throw e;
+        }
+      });
+    } finally {
+      previewing--;
+    }
+  }
+
+  // ---------- Destinations ----------
+  type W = Window & { showSaveFilePicker?: SavePicker; showDirectoryPicker?: (o?: { mode?: string }) => Promise<DirHandle> };
+  const w = typeof window === "undefined" ? undefined : (window as W);
+  const savePicker = typeof w?.showSaveFilePicker === "function" ? w.showSaveFilePicker.bind(w) : undefined;
+  const dirPicker = typeof w?.showDirectoryPicker === "function" ? w.showDirectoryPicker.bind(w) : undefined;
+  const series = blobDownloads({ click: clickDownload, now: () => performance.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) });
+  const blobTarget = async (name: string) => series(name);
+  const single: Target = savePicker ? (name: string) => pickFile(savePicker, name) : blobTarget;
+
+  const named = (e: unknown, n: string) => typeof e === "object" && e !== null && (e as { name?: unknown }).name === n;
+  /** Plusieurs fichiers : un dossier choisi une fois, sinon des téléchargements à la suite. */
+  async function batch(items: number[]) {
+    if (disabled) return;
+    let target: Target = blobTarget;
+    if (dirPicker) {
+      try {
+        target = inDirectory(await dirPicker({ mode: "readwrite" }));
+      } catch (e) {
+        if (named(e, "AbortError")) return;
+        target = blobTarget;
+      }
+    }
+    dl.start(items, target);
+  }
+
+  // ---------- Archive .zip (spec §41.6) ----------
+  const zipBytes = totals.reduce((a, n) => a + n, 0) + entries.reduce((a, _, i) => a + 2 * fileName(i).length * 4 + 160, 0) + 120;
+  const zipTooBig = !savePicker && typeof navigator !== "undefined" && zipBytes > (lowMemory(navigator, Number.MAX_SAFE_INTEGER) ? ZIP_BLOB_MAX_SMALL : ZIP_BLOB_MAX);
+  async function startZip() {
+    if (disabled) return;
+    const name = "shhdrop.zip";
+    let sink: ItemSink | null;
+    try {
+      sink = savePicker ? await pickFile(savePicker, name) : series(name);
+    } catch {
+      return;
+    }
+    if (!sink) return;
+    const z = createZip(sink as Parameters<typeof createZip>[0]);
+    dl.startZip({
+      total: totals.reduce((a, n) => a + n, 0),
+      abort: () => z.abort(),
+      run: async (pipe) => {
+        const taken = new Set<string>();
+        for (const i of all) {
+          const e = await z.entry(zipName(fileName(i), taken), totals[i]!);
+          await pipe(i, (c) => e.write(c));
+          await e.end();
+        }
+        await z.finish();
+      },
+    });
+  }
+
+  // ---------- Résumés ----------
+  const rate = $derived(dl.measured ?? ASSUMED_DOWN_BPS);
+  const est = (i: number) => (entries[i]!.kind === "text" ? null : transferSeconds(totals[i]!, rate));
+  const sum = (items: number[]) => {
+    const s = summarize(dl.rows, items);
+    return { ...s, bytes: s.done, n: items.length, finished: s.count.done, running: s.count.downloading + s.count.queued, paused: s.count.paused };
+  };
+  const allSum = $derived(sum(all.filter((i) => entries[i]!.kind === "file")));
+  const totalBytes = totals.reduce((a, n) => a + n, 0);
+  const risky = entries.flatMap((_, i) => (o.isRiskyFile(i) ? [names[i]!] : []));
+
+  // ---------- Fin de vie ----------
+  $effect(() => guardUnload(() => dl.busy || previewing > 0));
 
   let ended = $state<ContentEnd | null>(null);
   const disabled = $derived(expired || closer.closed || ended !== null);
   let wiped = false;
 
   // UI §12.2 : sortie de page → done (keepalive), wipe, révocation. Démontage (nouveau lien
-  // collé dans la barre, autre route) : même effacement.
+  // collé dans la barre, autre route) : même effacement. Partage disparu : la lecture en cours
+  // continue (spec §41.8), le reste s'arrête ; la fin de lecture l'attend (gone.svelte.ts).
   function leave() {
-    // Fermeture « partage disparu » : la fin de lecture attend les enregistrements en cours.
-    if (wiped || closer.closedNow()) return;
+    if (closer.closedNow()) {
+      dl.close();
+      return;
+    }
+    if (wiped) return;
     wiped = true;
-    void finish(opened);
+    dl.dispose();
+    previews.clear();
+    void finish(o);
   }
   $effect(() => () => leave());
 
   // Spec §41.8 : surveillance de la disparition (route serveur de la Task M2 ; drapeau).
   $effect(() => {
     if (!WATCH_READY) return;
-    const w = startWatch((s) => opened.watch(s), () => closer.closeToGone("watch410"), browserWatchDeps());
-    return () => w.stop();
+    const wt = startWatch((s) => o.watch(s), () => closer.closeToGone("watch410"), browserWatchDeps());
+    return () => wt.stop();
   });
 
   let heading: HTMLHeadingElement | undefined = $state();
@@ -103,7 +276,6 @@
     await a.finished.catch(() => undefined);
   }
 
-  // La fin s'affiche dans Open (Ended.svelte), une fois cet écran démonté.
   function arrive(kind: ContentEnd) {
     ended = kind;
     onend(kind);
@@ -112,7 +284,10 @@
   async function finishNow() {
     if (ended !== null) return;
     wiped = true;
-    await finish(opened);
+    dl.dispose();
+    previews.clear();
+    viewAt = null;
+    await finish(o);
     await dissolve();
     arrive("finished");
   }
@@ -122,7 +297,7 @@
     if (ended !== null || wiped) return null;
     destroyError = "";
     let dissolving: Promise<void> = Promise.resolve();
-    const out = await destroyFromContent(opened, report, { onDestroyed: () => (dissolving = dissolve()) });
+    const out = await destroyFromContent(o, report, { onDestroyed: () => (dissolving = dissolve()) });
     if (out === "network" || out === "limit") {
       const msg = t(out === "limit" ? "content.destroy.limit" : "content.destroy.net");
       if (!report) destroyError = msg;
@@ -130,82 +305,179 @@
     }
     wiped = true;
     reportOpen = false;
-    // Un enregistrement en cours : l'interface se ferme sur l'écran « partage disparu », qui le
-    // montre jusqu'à sa fin (spec §41.8 ; un signalement coupe tout côté serveur, l'écran dira
-    // « Téléchargement interrompu. »). Sinon, la fin ordinaire.
+    viewAt = null;
+    previews.clear();
+    // Un téléchargement en cours : l'interface se ferme sur l'écran « partage disparu », qui le
+    // montre jusqu'à sa fin (spec §41.8 ; un signalement coupe tout côté serveur). Sinon, la fin.
     if (closer.running > 0) {
       closer.closeToGone(out === "gone" ? "http410" : "destroyed-here");
       return null;
     }
+    dl.dispose();
     await dissolving;
     arrive(out);
     return null;
   }
   let reportOpen = $state(false);
+
+  // ---------- Visionneuse ----------
+  let viewAt = $state<number | null>(null);
+  function openViewer(i: number) {
+    const k = viewItems.findIndex((v) => v.i === i);
+    if (k >= 0 && !disabled) viewAt = k;
+  }
+
+  async function copy(i: number) {
+    if (viewOnly || entries[i]!.kind !== "text") return;
+    if ((await copyText(entries[i]!.text ?? "")) === "copied") announce(t("content.copied"));
+  }
+  const excerpt = (i: number) => (entries[i]!.kind === "text" ? (entries[i]!.text ?? "").split("\n").find((l) => l.trim() !== "")?.trim().slice(0, 80) : undefined);
 </script>
 
 <svelte:window onpagehide={leave} />
 
-  <div class="content" bind:this={panel}>
+<div class="content" bind:this={panel}>
+  <header class="top">
     <h1 class="title" tabindex="-1" bind:this={heading}>{t("content.title")}</h1>
-    {#if viewOnly}
-      <p class="notice"><Eye size={18} aria-hidden="true" /> <span>{t("content.viewOnly")}</span></p>
-    {/if}
+    <p class="sum num">
+      {viewOnly
+        ? t("content.summary.view", { n: entries.length, size: formatBytes(totalBytes, lang) })
+        : t("content.summary", { n: entries.length, size: formatBytes(totalBytes, lang), time: formatDuration(transferSeconds(totalBytes, rate), lang) })}
+    </p>
+  </header>
+  {#if viewOnly}
+    <p class="notice"><Eye size={18} aria-hidden="true" /> <span>{t("content.viewOnly")}</span></p>
+  {:else}
+    <DownloadBar
+      all={allSum}
+      zip={dl.zip}
+      {zipTooBig}
+      {risky}
+      multi={!dirPicker}
+      {disabled}
+      onall={() => batch(all)}
+      onzip={startZip}
+      onpause={() => dl.pause(all)}
+      onresume={() => dl.resume(all)}
+      onstop={() => dl.stop(all)}
+      onpausezip={() => dl.pauseZip()}
+      onresumezip={() => dl.resumeZip()}
+      onstopzip={() => dl.stopZip()}
+    />
+  {/if}
 
-    {#each groups as g (g.c)}
-      <section class="group" aria-labelledby="g-{g.c}">
-        <h2 id="g-{g.c}" class="gh">{t(CAT_KEY[g.c])}<span class="sr-only">,</span> <span class="count num">{g.items.length}</span></h2>
-        <ul class="items">
-          {#each g.items as i (i)}
-            <ReceivedItem {opened} {i} {queue} {disabled} {expired} {viewOnly} {onbusy} gone={closer} ongone={() => closer.closeToGone("http410")} />
-          {/each}
-        </ul>
-      </section>
-    {/each}
-
-    <footer class="eol" data-eol>
-      <Button variant="secondary" onpress={finishNow}>{t("content.finish")}</Button>
-      {#if !closer.closed}
-        <div class="danger-zone">
-          <p class="hint">{t("content.destroy.hint")}</p>
-          <div class="row">
-            <InlineConfirm
-              label={t("content.destroy")}
-              message={t("content.destroy.confirm")}
-              confirmLabel={t("content.destroy.yes")}
-              kind="danger"
-              triggerVariant="ghost"
-              onconfirm={async () => void (await destroy(false))}
-            >
-              {#snippet icon()}<Trash2 size={18} />{/snippet}
-            </InlineConfirm>
-            <Button variant="ghost" onpress={() => void (reportOpen = true)}>
-              {#snippet icon()}<Flag size={18} />{/snippet}
-              {t("content.report")}
-            </Button>
+  {#each groups as g (g.c)}
+    {@const files = g.items.filter((i) => entries[i]!.kind === "file")}
+    {@const s = sum(files)}
+    {@const bytes = g.items.reduce((a, i) => a + totals[i]!, 0)}
+    {@const cat = t(CAT_KEY[g.c])}
+    {@const catRisky = files.filter((i) => o.isRiskyFile(i)).map((i) => names[i]!)}
+    <section class="group" aria-labelledby="g-{g.c}" data-group={g.c}>
+      <div class="gh">
+        <h2 id="g-{g.c}" class="gt">{cat}</h2>
+        <span class="gm num">{g.items.length} · {formatBytes(bytes, lang)}</span>
+        {#if !viewOnly && files.length > 0 && s.active === 0}<span class="gm eta num" title={t("dl.estimate.title")}>{t("dl.estimate", { time: formatDuration(transferSeconds(bytes, rate), lang) })}</span>{/if}
+        {#if !viewOnly && files.length > 0}
+          <div class="gacts">
+            {#if s.active > 0}
+              {#if s.running > 0}<IconButton label={t("dl.cat.pause", { cat })} onpress={() => dl.pause(files)}><Pause size={18} /></IconButton>{/if}
+              {#if s.paused > 0}<IconButton label={t("dl.cat.resume", { cat })} onpress={() => dl.resume(files)}><Play size={18} /></IconButton>{/if}
+              <IconButton label={t("dl.cat.stop", { cat })} onpress={() => dl.stop(files)}><Square size={16} /></IconButton>
+            {:else if files.length > 1}
+              {#if catRisky.length > 0}
+                <InlineConfirm dense narrowIcon label={t("dl.download")} triggerName={t("dl.cat.download", { cat })} message={t("dl.risky.batch", { names: catRisky.join(", ") })} confirmLabel={t("dl.risky.confirm")} kind="warn" triggerVariant="ghost" {disabled} onconfirm={() => batch(files)}>
+                  {#snippet icon()}<Download size={18} />{/snippet}
+                </InlineConfirm>
+              {:else}
+                <Button variant="ghost" dense {disabled} onpress={() => batch(files)} aria-label={t("dl.cat.download", { cat })}>
+                  {#snippet icon()}<Download size={18} />{/snippet}
+                  <span class="hide-narrow">{t("dl.download")}</span>
+                </Button>
+              {/if}
+            {/if}
           </div>
-          {#if destroyError}<p class="err" role="alert">{destroyError}</p>{/if}
+        {/if}
+      </div>
+      <ul class="items">
+        {#each g.items as i (i)}
+          <ReceivedRow
+            {i}
+            name={names[i]!}
+            format={formats[i]!}
+            kind={entries[i]!.kind}
+            row={dl.rows[i]!}
+            estimate={est(i)}
+            canView={viewKind(i) !== null}
+            risky={o.isRiskyFile(i)}
+            {viewOnly}
+            {disabled}
+            excerpt={excerpt(i)}
+            onview={() => openViewer(i)}
+            ondownload={() => !disabled && dl.start([i], single)}
+            onpause={() => dl.pause([i])}
+            onresume={() => dl.resume([i])}
+            onstop={() => dl.stop([i])}
+            onretry={() => dl.retry(i)}
+            oncopy={() => copy(i)}
+          />
+        {/each}
+      </ul>
+    </section>
+  {/each}
+
+  <footer class="eol" data-eol>
+    <Button variant="secondary" onpress={finishNow}>{t("content.finish")}</Button>
+    {#if !closer.closed}
+      <div class="danger-zone">
+        <p class="hint">{t("content.destroy.hint")}</p>
+        <div class="row">
+          <InlineConfirm
+            label={t("content.destroy")}
+            message={t("content.destroy.confirm")}
+            confirmLabel={t("content.destroy.yes")}
+            kind="danger"
+            triggerVariant="ghost"
+            onconfirm={async () => void (await destroy(false))}
+          >
+            {#snippet icon()}<Trash2 size={18} />{/snippet}
+          </InlineConfirm>
+          <Button variant="ghost" onpress={() => void (reportOpen = true)}>
+            {#snippet icon()}<Flag size={18} />{/snippet}
+            {t("content.report")}
+          </Button>
         </div>
-      {/if}
-    </footer>
-  </div>
-  <ReportSheet bind:open={reportOpen} onconfirm={() => destroy(true)} />
+        {#if destroyError}<p class="err" role="alert">{destroyError}</p>{/if}
+      </div>
+    {/if}
+  </footer>
+</div>
+<ViewerPanel items={viewItems} bind:at={viewAt} {viewOnly} load={loadPreview} held={dl.readerHeld} ondownload={(i) => dl.start([i], single)} onclose={() => undefined} />
+<ReportSheet bind:open={reportOpen} onconfirm={() => destroy(true)} />
 
 <style>
   .content {
     display: grid;
-    gap: var(--sp-5);
+    gap: var(--sp-4);
     min-width: 0;
+  }
+  .top {
+    display: grid;
+    gap: var(--sp-1);
   }
   .title {
     margin: 0;
-    font-size: var(--fs-h1);
-    font-weight: var(--fw-h1);
-    font-stretch: var(--wd-h1);
-    line-height: var(--lh-h1);
+    font-size: var(--fs-h2);
+    font-weight: var(--fw-h2);
+    font-stretch: var(--wd-h2);
+    line-height: var(--lh-h2);
   }
   .title:focus {
     outline: none;
+  }
+  .sum {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--fs-small);
   }
   .notice {
     margin: 0;
@@ -217,35 +489,59 @@
     background: var(--surface-1);
     border: 1px solid var(--hair-2);
     color: var(--text-2);
+    font-size: var(--fs-small);
     max-width: 65ch;
   }
   .group {
     display: grid;
-    gap: var(--sp-2);
+    gap: 4px;
     min-width: 0;
   }
   .gh {
-    margin: 0;
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: var(--sp-2);
-    font-size: var(--fs-h3);
-    font-weight: var(--fw-h3);
+    min-height: 44px;
+    padding-inline: 4px 0;
   }
-  .count {
-    color: var(--text-3);
+  .gt {
+    margin: 0;
     font-size: var(--fs-small);
-    font-weight: 500;
+    font-weight: 640;
+    letter-spacing: 0.01em;
+  }
+  .gm {
+    color: var(--text-2);
+    font-size: var(--fs-micro);
+    min-width: 0;
+  }
+  .gm.eta::before {
+    content: "·";
+    margin-inline-end: 6px;
+  }
+  .gacts {
+    margin-inline-start: auto;
+  }
+  .gacts {
+    display: flex;
+    align-items: center;
+    gap: 2px;
   }
   .num {
     font-variant-numeric: tabular-nums;
   }
+  @media (max-width: 560px) {
+    .gacts :global(button.ghost) {
+      gap: 0;
+      padding-inline: 10px;
+    }
+  }
   .items {
     margin: 0;
-    padding: 0 var(--sp-4);
+    padding: 0;
     list-style: none;
     border: 1px solid var(--hair-2);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-lg);
     background: var(--vessel);
     box-shadow: var(--edge-hi);
     min-width: 0;

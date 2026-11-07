@@ -16,6 +16,7 @@
   import Button from "../ui/Button.svelte";
   import { copyText } from "../ui/clipboard";
   import Countdown from "../ui/Countdown.svelte";
+  import DestroyedArt from "../ui/DestroyedArt.svelte";
   import { ChevronDown, Copy, Eye, EyeOff, Lock, LockOpen, ShieldCheck, TriangleAlert } from "../ui/Icon";
   import TimeRim from "../ui/TimeRim.svelte";
   import { finish } from "../flows/endoflife";
@@ -168,9 +169,14 @@
       {:else if r.state === "open" && end === null && !expired && !gone.closed}
         <TimeRim remainingS={r.remainingS()} totalS={r.expiresInS} radius={23} />
       {/if}
-      <span class="lockbox" aria-hidden="true">
-        {#if capState === "locked"}<Lock size={26} strokeWidth={1.75} />{:else}<LockOpen size={capState === "open" ? 20 : 26} strokeWidth={1.75} />{/if}
-      </span>
+      {#if capState === "destroyed"}
+        <!-- UI §9.10.1 : ni cadenas ouvert ni pointillés ; le document qui se défait. -->
+        <span class="art"><DestroyedArt /></span>
+      {:else}
+        <span class="lockbox" aria-hidden="true">
+          {#if capState === "locked"}<Lock size={26} strokeWidth={1.75} />{:else}<LockOpen size={20} strokeWidth={1.75} />{/if}
+        </span>
+      {/if}
       <div class="cap-tx">
         {#if r.state === "open"}
           {#if end === null && !gone.closed}
@@ -304,8 +310,11 @@
   .capsule[data-state="destroyed"] {
     background: transparent;
     box-shadow: none;
-    outline: 2px dashed var(--line-strong);
-    outline-offset: -2px;
+    padding-inline: 0;
+  }
+  .art {
+    flex: none;
+    display: block;
   }
   .capsule.bar {
     position: sticky;
@@ -354,10 +363,6 @@
     width: 40px;
     height: 40px;
     border-radius: var(--r-md);
-  }
-  [data-state="destroyed"] .lockbox {
-    background: transparent;
-    color: var(--text-3);
   }
   .cap-tx {
     display: grid;
@@ -597,7 +602,7 @@
       border: 1px solid CanvasText;
     }
     .capsule[data-state="destroyed"] {
-      outline-color: CanvasText;
+      border: 0;
     }
   }
 </style>

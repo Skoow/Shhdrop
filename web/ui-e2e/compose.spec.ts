@@ -1,6 +1,6 @@
 // Composeur (UI §9.2, §9.3), v3 : passage de l'accueil au composeur au premier ajout.
-// Ordinateur (≥ 760 px) : en-tête de capacité, zone de dépôt, « Créer sur place », photos en
-// grille, documents et archives en tableau, notes et audio en lignes ; options dans une colonne
+// Ordinateur (≥ 760 px) : en-tête de capacité, zone de dépôt, « Créer sur place », une seule
+// liste compacte partout (icône de format, nom, type, taille, temps estimé) ; options dans une colonne
 // collée dont le pied (Chiffrer et envoyer) reste visible. Téléphone : app (lignes compactes,
 // menu « … », barre collée, options en feuille). Captures fr-FR à 1440 × 900, 1920 × 1080, 390 × 844.
 import { closeSync, ftruncateSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
@@ -60,6 +60,7 @@ async function options(page: Page, isMobile: boolean): Promise<Locator> {
 }
 /** Retire un élément : bouton « Retirer » de la ligne ou du tableau, sinon menu « … ». */
 async function removeItem(page: Page, name: string) {
+  await expect(page.locator("[data-row]").filter({ hasText: name })).toBeVisible();
   const direct = page.getByRole("button", { name: `Retirer ${name}` });
   if (await direct.isVisible()) return direct.click();
   await page.getByRole("button", { name: `Actions pour ${name}` }).click();
@@ -83,7 +84,7 @@ test.describe("fr-FR", () => {
     if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   });
 
-  test("vide, puis 10 éléments mêlés : capacité en tête, grille, tableau, archive ; bouton d'envoi toujours visible ; axe ; captures", async ({ page, shh, isMobile }) => {
+  test("vide, puis 10 éléments mêlés : capacité en tête, listes compactes, archive ; bouton d'envoi toujours visible ; axe ; captures", async ({ page, shh, isMobile }) => {
     await open(page, shh.origin);
     await page.waitForTimeout(900);
     await capture(page, "compose-empty");
@@ -118,9 +119,14 @@ test.describe("fr-FR", () => {
     // pastilles « Non nettoyé », honnêtes, restent (scan UX B3).
     await expect(page.getByRole("button", { name: "Nettoyer tous les fichiers" })).toHaveCount(0);
     await expect(page.locator(".badge.warn").filter({ hasText: "Non nettoyé" }).first()).toBeVisible();
-    await expect(page.locator("[data-row]").filter({ hasText: "plage-nuit.jpg" }).locator("img")).toHaveAttribute("src", /^blob:/);
-    // Légende raccourcie au milieu (« anniversair…-lou.webm ») : la vignette se trouve par son nom accessible.
-    await expect(page.locator("[data-row]").filter({ has: page.getByRole("button", { name: "Actions pour anniversaire-lou.webm" }) })).toContainText("1:12");
+    // Listes compactes (décision du 7 novembre) : aucune vignette, une icône de format par ligne,
+    // type, taille, durée et temps d'envoi estimé.
+    await expect(page.locator("[data-row] img")).toHaveCount(0);
+    await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator("svg.fi")).toHaveAttribute("data-format", "JPG");
+    await expect(rows(page).filter({ hasText: "archive.zip" }).locator("svg.fi")).toHaveAttribute("data-format", "ZIP");
+    await expect(rows(page).filter({ hasText: "contrat.pdf" })).toContainText(/Document PDF.*octets.*env\.\s/);
+    await expect(rows(page).filter({ hasText: "anniversaire-lou.webm" })).toContainText("1:12");
+    await expect(page.locator(".group .meta").first()).toContainText(/^1 · /);
     expect(await noHScroll(page)).toBe(true);
 
     if (isMobile) {
@@ -131,10 +137,8 @@ test.describe("fr-FR", () => {
       await expect(make).toHaveText(["Note texte", "Mémo vocal", "Photo", "Vidéo", "Conversation Bientôt"]);
       expect(await longParagraphs(page.locator("main"))).toEqual([]);
     } else {
-      // Ordinateur : photos en grille, documents en tableau ; « Créer sur place » sans Photo ni Vidéo.
-      await expect(page.locator(".grid .tile")).toHaveCount(7); // 6 photos + 1 vidéo
-      await expect(page.getByRole("table", { name: "Documents" })).toBeVisible();
-      await expect(page.getByRole("table", { name: "Archives" }).getByRole("cell", { name: "ZIP", exact: true })).toBeVisible();
+      // Ordinateur : une seule présentation (ni grille ni tableau) ; « Créer sur place » sans Photo ni Vidéo.
+      await expect(page.locator(".groups .grid, .groups table, .groups .tile")).toHaveCount(0);
       await expect(page.getByRole("group", { name: "Créer sur place" }).getByRole("button")).toHaveText(["Note texte", "Mémo vocal", "Conversation Bientôt"]);
       await expect(page.getByRole("button", { name: /^Déposez des fichiers n'importe où sur la page/ })).toBeVisible();
       // Exigence du propriétaire : tout tient dans l'écran, sans défilement de page ; le bouton
@@ -200,7 +204,9 @@ test.describe("fr-FR", () => {
     await expect(exe.getByText("Programme ou script : il peut agir sur l'appareil du destinataire.")).toBeVisible();
     await expect(rows(page).filter({ hasText: "vacances.jpg" }).getByText("Attention : c'est un programme, malgré son extension.")).toBeVisible();
     await expect(rows(page).filter({ hasText: "sauvegarde" }).getByText("Archive : son contenu n'est ni vérifié ni nettoyé.")).toBeVisible();
-    if (!isMobile) await expect(page.getByRole("table", { name: "Autres" }).getByRole("cell", { name: "EXE", exact: true })).toBeVisible();
+    await expect(exe.locator("svg.fi")).toHaveAttribute("data-format", "EXE");
+    await expect(rows(page).filter({ hasText: "vacances.jpg" }).locator("svg.fi")).toHaveAttribute("data-format", "EXE");
+    await expect(rows(page).filter({ hasText: "budget-2026.xlsx" }).locator("svg.fi")).toHaveAttribute("data-format", "XLS");
     await expect(page.getByRole("button", { name: "Nettoyer tous les fichiers" })).toHaveCount(0);
     expect(await axe(page)).toEqual([]);
   });
@@ -324,7 +330,7 @@ test.describe("fr-FR", () => {
     await expect(page.getByText("Ne pourra pas être ouvert sans téléchargement")).toHaveCount(0);
   });
 
-  test("retrait et Annuler (grille, tableau) ; Tout retirer revient à l'accueil, Annuler rouvre le composeur", async ({ page, shh }) => {
+  test("retrait et Annuler ; Tout retirer revient à l'accueil, Annuler rouvre le composeur", async ({ page, shh }) => {
     await open(page, shh.origin);
     await browse(page, [...PHOTOS.slice(0, 2), f("contrat.pdf")]);
     await removeItem(page, "plage-nuit.jpg");
@@ -341,37 +347,21 @@ test.describe("fr-FR", () => {
     await expect(rows(page)).toHaveCount(3);
   });
 
-  test("ordinateur : grille (Alt + →, menu « … »), notes (glisser, Alt + ↓), tableau (renommer) ; doublon", async ({ page, shh, isMobile }) => {
-    test.skip(isMobile, "ordinateur : grille, tableau, lignes");
+  test("ordinateur : lignes (Alt + ↓, renommer en place), notes (glisser, Alt + ↓) ; doublon ; nom long", async ({ page, shh, isMobile }) => {
+    test.skip(isMobile, "ordinateur : lignes avec poignée et boutons");
     await open(page, shh.origin);
     await browse(page, PHOTOS.slice(0, 2));
-    const more = page.getByRole("button", { name: "Actions pour plage-nuit.jpg" });
-    await more.focus();
-    await page.keyboard.press("Alt+ArrowRight");
+    const grip = page.getByRole("button", { name: "Déplacer plage-nuit.jpg" });
+    await grip.focus();
+    await page.keyboard.press("Alt+ArrowDown");
     expect(await names(page)).toEqual(["toits-belleville.jpg", "plage-nuit.jpg"]);
     await expect(page.getByRole("status").filter({ hasText: "plage-nuit.jpg : position 2 sur 2 dans Photos." })).toHaveCount(1);
-    await expect(more).toBeFocused();
-    await more.click();
-    const menu = page.getByRole("dialog", { name: "plage-nuit.jpg" });
-    // Ordinateur : menu ancré sous le bouton (popover), pas une fenêtre modale (scan UX).
-    await expect(menu).toHaveAttribute("popover", "auto");
-    await expect(page.locator("dialog[open]")).toHaveCount(0);
-    await expect(menu.getByRole("button", { name: "Renommer" })).toBeFocused();
-    const [mb, ab] = [(await menu.boundingBox())!, (await more.boundingBox())!];
-    expect(Math.abs(mb.y - (ab.y + ab.height)) <= 12 || Math.abs(mb.y + mb.height - ab.y) <= 12).toBe(true);
-    expect(Math.min(Math.abs(mb.x + mb.width - (ab.x + ab.width)), Math.abs(mb.x - ab.x))).toBeLessThanOrEqual(2);
-    await settle(page);
-    await capture(page, "compose-item-popover");
-    await page.keyboard.press("Escape");
-    await expect(menu).toBeHidden();
-    await expect(more).toBeFocused();
-    await more.click();
-    await menu.getByRole("button", { name: "Monter" }).click();
+    await expect(grip).toBeFocused();
+    await page.keyboard.press("Alt+ArrowUp");
     expect(await names(page)).toEqual(["plage-nuit.jpg", "toits-belleville.jpg"]);
-    await menu.getByRole("button", { name: "Renommer" }).click();
-    await menu.getByLabel("Nouveau nom de plage-nuit.jpg").fill("Plage");
+    await page.getByRole("button", { name: "Renommer plage-nuit.jpg" }).click();
+    await page.getByLabel("Nouveau nom de plage-nuit.jpg").fill("Plage");
     await page.keyboard.press("Enter");
-    await expect(menu).toBeHidden();
     expect(await names(page)).toContain("Plage.jpg");
 
     // Notes en lignes : glisser à la souris, Alt + ↓.
@@ -394,27 +384,24 @@ test.describe("fr-FR", () => {
     await expect(ed.getByLabel("Contenu")).toHaveValue("un");
     await page.keyboard.press("Escape");
 
-    // Tableau : Renommer ouvre la feuille de renommage ; doublon.
+    // Renommer en place : caractère interdit refusé, puis accepté ; doublon.
     await browse(page, [f("contrat.pdf")]);
     await page.getByRole("button", { name: "Renommer contrat.pdf" }).click();
-    const rn = page.getByRole("dialog", { name: "contrat.pdf" });
-    await rn.getByLabel("Nouveau nom de contrat.pdf").fill("a/b");
+    const field = page.getByLabel("Nouveau nom de contrat.pdf");
+    await field.fill("a/b");
     await page.keyboard.press("Enter");
-    await expect(rn.getByRole("alert")).toContainText("Caractère non permis");
-    await rn.getByLabel("Nouveau nom de contrat.pdf").fill("Contrat signé");
+    await expect(page.getByRole("alert").filter({ hasText: "Caractère non permis" })).toBeVisible();
+    await field.fill("Contrat signé");
     await page.keyboard.press("Enter");
     expect(await names(page)).toContain("Contrat signé.pdf");
     await browse(page, [f("toits-belleville.jpg")]);
-    // Grille : le doublon est dit dans la description de la vignette (et sa pastille).
     await expect(page.getByText("En double ?")).toHaveCount(2);
 
-    // Un seul en-tête de tableau visible, même avec plusieurs catégories en tableau (scan UX).
-    await browse(page, [{ name: "sauvegarde-complete-du-telephone-2026.zip", mimeType: "application/zip", buffer: readFileSync(f("archive.zip")) }]);
-    await expect(page.locator("table.ft")).toHaveCount(2);
-    expect(await page.locator("table.ft th.c-name").evaluateAll((ths) => ths.map((th) => th.getBoundingClientRect().height > 1))).toEqual([true, false]);
-    // Légende de vignette : raccourcie au milieu, extension lisible.
-    await browse(page, [{ name: "photo-de-vacances-ete-2026-bretagne.jpg", mimeType: "image/jpeg", buffer: readFileSync(f("plage-nuit.jpg")) }]);
-    await expect(page.locator(".tile .nm").filter({ hasText: "…" })).toHaveText(/^photo-de-.+….+\.jpg$/);
+    // Nom long : coupé avec des points de suspension, l'extension reste lisible.
+    await browse(page, [{ name: "photo-de-vacances-ete-2026-bretagne-au-bord-de-la-mer-avec-toute-la-famille.jpg", mimeType: "image/jpeg", buffer: readFileSync(f("plage-nuit.jpg")) }]);
+    const long = rows(page).filter({ hasText: "photo-de-vacances" });
+    await expect(long.locator(".e")).toHaveText(".jpg");
+    expect(await long.locator(".b").evaluate((e) => getComputedStyle(e).textOverflow)).toBe("ellipsis");
   });
 
   test("téléphone : menu « … » (Renommer, Monter, Descendre, Retirer) ; feuille Options : focus piégé, Échap rend le focus", async ({ page, shh, isMobile }) => {
@@ -551,7 +538,7 @@ test.describe("fr-FR", () => {
     await expect(page.locator("[data-row] .nm", { hasText: "Image collée 1.png" })).toHaveCount(1);
   });
 
-  test("2 notes, 3 photos, 1 vidéo, 2 documents, 1 archive : toutes les catégories visibles, sans défilement de page ; captures", async ({ page, shh, isMobile }) => {
+  test("2 notes, 3 photos, 1 vidéo, 2 documents, 1 archive : sans défilement de page ; catégories visibles à 1920, atteignables dans la liste à 1440 ; captures", async ({ page, shh, isMobile }) => {
     await open(page, shh.origin);
     await browse(page, [...PHOTOS.slice(0, 3), f("anniversaire-lou.webm"), f("contrat.pdf"), f("budget-2026.xlsx"), f("archive.zip")]);
     await expect(rows(page)).toHaveCount(7);
@@ -575,7 +562,14 @@ test.describe("fr-FR", () => {
         });
         await capture(page, `compose-mix9-${size.width}`);
         expect(heads.map((h) => h.t)).toEqual(["Texte", "Photos", "Vidéos", "Documents", "Archives"]);
-        expect(heads.filter((h) => !h.ok), `${size.width}`).toEqual([]);
+        // Listes compactes (décision du 7 novembre) : à 1440 × 900, la liste défile en elle-même
+        // (la page, jamais) ; à 1920 × 1080, tout tient.
+        if (size.width === 1920) expect(heads.filter((h) => !h.ok), `${size.width}`).toEqual([]);
+        else {
+          await page.locator(".group h3", { hasText: "Archives" }).scrollIntoViewIfNeeded();
+          expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight)).toBe(true);
+          await expect(page.locator(".group h3", { hasText: "Archives" })).toBeInViewport();
+        }
       }
     } else await capture(page, "compose-mix9");
     expect(await axe(page)).toEqual([]);

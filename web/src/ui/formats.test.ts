@@ -1,0 +1,37 @@
+import { describe, expect, it } from "vitest";
+import { formatOf } from "./formats";
+
+const f = (ext: string, sniffed: Parameters<typeof formatOf>[0]["sniffed"] = null, preview?: Parameters<typeof formatOf>[0]["preview"]) => formatOf({ kind: "file", ext, sniffed, preview });
+
+describe("formatOf", () => {
+  it("une étiquette par format, par l'extension", () => {
+    const want: [string, string, string][] = [
+      ["pdf", "PDF", "pdf"], ["docx", "DOC", "doc"], ["xlsx", "XLS", "sheet"], ["pptx", "PPT", "slides"], ["zip", "ZIP", "archive"],
+      ["rar", "RAR", "archive"], ["7z", "7Z", "archive"], ["txt", "TXT", "text"], ["csv", "CSV", "sheet"], ["mp3", "MP3", "audio"],
+      ["mp4", "MP4", "video"], ["mov", "MOV", "video"], ["jpeg", "JPG", "image"], ["png", "PNG", "image"], ["heic", "HEIC", "image"],
+      ["svg", "SVG", "image"], ["exe", "EXE", "exec"], ["apk", "APK", "exec"], ["iso", "ISO", "disk"], ["ts", "CODE", "code"],
+      ["html", "HTML", "code"], ["epub", "EPUB", "book"], ["woff2", "WOFF", "font"],
+    ];
+    for (const [ext, label, family] of want) expect(f(ext)).toEqual({ label, family });
+  });
+  it("le contenu l'emporte : exécutable renommé en .jpg, PDF sans extension, image disque", () => {
+    expect(f("jpg", "exe")).toEqual({ label: "EXE", family: "exec" });
+    expect(f("", "pdf")).toEqual({ label: "PDF", family: "pdf" });
+    expect(f("txt", "iso")).toEqual({ label: "ISO", family: "disk" });
+    expect(f("png", "jpeg")).toEqual({ label: "JPG", family: "image" });
+  });
+  it("un document bureautique est un zip : l'extension précise ; un .m4a reste de l'audio", () => {
+    expect(f("docx", "zip")).toEqual({ label: "DOC", family: "doc" });
+    expect(f("apk", "zip")).toEqual({ label: "APK", family: "exec" });
+    expect(f("zip", "zip")).toEqual({ label: "ZIP", family: "archive" });
+    expect(f("m4a", "mp4")).toEqual({ label: "M4A", family: "audio" });
+    expect(f("bin", "mp4")).toEqual({ label: "MP4", family: "video" });
+  });
+  it("inconnu : famille par la visionneuse permise, sinon fichier ; étiquette de 4 caractères au plus", () => {
+    expect(f("xyz", null, "image")).toEqual({ label: "XYZ", family: "image" });
+    expect(f("", null, "video")).toEqual({ label: "", family: "video" });
+    expect(f("verylong")).toEqual({ label: "", family: "file" });
+    expect(f("dat")).toEqual({ label: "DAT", family: "file" });
+    expect(formatOf({ kind: "text", ext: "" })).toEqual({ label: "", family: "note" });
+  });
+});

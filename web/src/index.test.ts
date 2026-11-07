@@ -8,6 +8,11 @@ describe("interface publique", () => {
       [
         "BadPasswordError",
         "CAPTCHA_MIN_MS",
+        "CHUNK",
+        "SEG_CHUNKS",
+        "bucketFor",
+        "segmentCount",
+        "segmentSize",
         "CONTENT_MAX",
         "MAX_ITEMS",
         "MANIFEST_MAX",

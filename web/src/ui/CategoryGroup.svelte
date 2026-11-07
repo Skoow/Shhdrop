@@ -8,9 +8,9 @@
   import type { Category } from "../flows/kinds";
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
-  import FileTable from "./FileTable.svelte";
+  import { ASSUMED_UP_BPS, transferSeconds } from "../flows/estimate";
+  import { formatDuration } from "../i18n/format";
   import ItemRow from "./ItemRow.svelte";
-  import MediaGrid from "./MediaGrid.svelte";
   import { reducedMotion } from "./motion";
   import { edgeScroll, shiftFor, targetIndex } from "./reorder";
 
@@ -27,18 +27,14 @@
     /** Téléphone : lignes compactes, menu « … ». */
     compact?: boolean;
     onmenu?: (id: string) => void;
-    /** Renommer depuis le tableau (feuille de renommage). */
-    onrenamesheet?: (id: string) => void;
     cannotOpen?: (item: ComposeItem) => boolean;
-    /** Tableau : en-tête visible (le premier tableau de la liste seulement). */
-    tableHeader?: boolean;
     /** Élément en cause d'un blocage ou d'un risque : marqué en rouge (S6). */
     danger?: (item: ComposeItem) => boolean;
   };
-  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, onrenamesheet, cannotOpen, tableHeader = true, danger }: Props = $props();
-  // Ordinateur : grille de vignettes (photos, vidéos), tableau (documents, archives, autres),
-  // lignes pour les notes et l'audio. Téléphone : lignes compactes partout.
-  const view = $derived(compact ? "rows" : category === "photos" || category === "videos" ? "grid" : category === "texte" || category === "audio" ? "rows" : "table");
+  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, cannotOpen, danger }: Props = $props();
+  // Une seule présentation partout (décision du propriétaire du 7 novembre) : lignes compactes,
+  // icône de format, nom, type, taille, temps d'envoi estimé, actions.
+  const files = $derived(items.filter((i) => i.kind === "file").reduce((a, i) => a + i.size, 0));
 
   const KEY = {
     texte: "compose.cat.text",
@@ -127,16 +123,13 @@
   });
 </script>
 
-<section class={["group", { compact, media: view === "grid" }]} aria-labelledby="{uid}-h">
+<section class={["group", { compact }]} aria-labelledby="{uid}-h">
   <div class="head">
     <h3 id="{uid}-h">{t(KEY[category])}</h3>
-    <span class="meta num">{items.length} · {formatBytes(bytes, getLang())}</span>
+    <span class="meta num"
+      >{items.length} · {formatBytes(bytes, getLang())}{#if files > 0}<span title={t("compose.eta.title")}>{" · " + t("compose.eta", { time: formatDuration(transferSeconds(files, ASSUMED_UP_BPS), getLang()) })}</span>{/if}</span
+    >
   </div>
-  {#if view === "grid"}
-    <MediaGrid {items} {helpId} onmenu={(id) => onmenu?.(id)} {onmove} {cannotOpen} {danger} />
-  {:else if view === "table"}
-    <FileTable caption={t(KEY[category])} {items} {helpId} onrename={(id) => onrenamesheet?.(id)} {onremove} onmenu={(id) => onmenu?.(id)} {onmove} header={tableHeader} {cannotOpen} {danger} />
-  {:else}
   <ol bind:this={list} class="rows">
     {#each items as item (item.id)}
       <li class="li" data-row={item.id} animate:flip={{ duration: reducedMotion() ? 0 : flipMs }}>
@@ -159,7 +152,6 @@
       </li>
     {/each}
   </ol>
-  {/if}
 </section>
 
 <style>

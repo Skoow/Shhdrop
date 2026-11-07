@@ -25,6 +25,8 @@ export { prepareCaptcha, type PreparedCaptcha } from "./transfer/prepare";
 export { SERVER_STALL_MS } from "./transfer/upload";
 export { isRiskyName, safeName as cleanName } from "./transfer/safety";
 export { MANIFEST_MAX, PREVIEW_MAX, type KeepTtl, type Rights } from "./crypto/container";
+// Géométrie publique du paquet (aucune clé) : budget de lecture estimé par la page (flows/read-meter.ts).
+export { CHUNK, SEG_CHUNKS, bucketFor, segmentCount, segmentSize } from "./crypto/container";
 export {
   CONTENT_MAX,
   MAX_ITEMS,

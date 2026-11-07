@@ -24,7 +24,7 @@
   video {
     display: block;
     width: 100%;
-    max-height: min(70vh, 720px);
+    max-height: 100%;
     border-radius: var(--r-lg);
     background: var(--bg-deep);
   }

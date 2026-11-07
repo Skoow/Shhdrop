@@ -1,112 +1,118 @@
-// Enregistrer un élément reçu (UI §9.9, spec §12, §18.7). En flux vers le sélecteur de
-// fichier quand il existe (fichier partiel supprimé par abort() en cas d'échec ou
-// d'annulation), sinon assemblage en Blob application/octet-stream puis <a download>. Le nom
-// proposé est toujours safeName(i) ; le type MIME du manifeste n'est jamais utilisé ici.
-// « saved » n'est rendu qu'après close() réussi, ou après le déclenchement du lien (repli).
-// « gone » : le serveur ne sert plus ce partage pendant l'enregistrement (spec §41.8) ; le
-// fichier partiel est supprimé comme pour tout échec.
-import { NotFoundError, type Opened } from "../index";
-
-export type SaveResult = "saved" | "cancelled" | "failed" | "disk_full" | "gone";
-
-type Writable = { write(chunk: Uint8Array<ArrayBuffer>): Promise<void>; close(): Promise<void>; abort(reason?: unknown): Promise<void> };
-type Handle = { createWritable(): Promise<Writable> };
-export type SaveDeps = {
-  showSaveFilePicker?: (o: { suggestedName: string }) => Promise<Handle>;
-  collectToBlob: (o: Opened, i: number) => Promise<Blob>;
-  /** Déclenche le téléchargement de `url` sous le nom `name` (lien <a download> cliqué par le code). */
-  click: (url: string, name: string) => void;
-  /** Horloge en millisecondes (vitesse mesurée). */
-  now: () => number;
-};
+// Destinations des téléchargements reçus (UI §9.9, §9.8.6 ; spec §12, §18.7). Chaque
+// destination rend, pour un élément, un puits { write, close, abort } :
+// - fichier choisi (showSaveFilePicker) : écriture en flux, abort() supprime le partiel ;
+// - dossier choisi une fois (showDirectoryPicker) : un fichier par élément, jamais d'écrasement
+//   (« (2) ») ;
+// - repli : assemblage en Blob application/octet-stream puis <a download>, 1 s entre deux.
+// Le nom est toujours le nom nettoyé (safeName, puis zipName pour le dossier) ; le type MIME
+// du manifeste n'est jamais utilisé. close() n'est appelé qu'à la fin d'une lecture complète.
+import type { ItemSink } from "../flows/downloads.svelte";
+import { zipName } from "../zip/store-zip";
 
 /** Délai avant la révocation de l'URL du repli : le téléchargement a le temps de démarrer. */
 export const REVOKE_AFTER_MS = 60_000;
+/** Écart entre deux téléchargements du repli (« Tout télécharger » sans dossier). */
+export const CLICK_GAP_MS = 1000;
+/** Tranches repliées dans le Blob tous les 64 Mio (au plus ~64 Mio de tranches en mémoire JS). */
+export const FOLD_BYTES = 64 * 1048576;
 
-const abortError = () => new DOMException("Enregistrement annulé", "AbortError");
+type Writable = { write(chunk: Uint8Array<ArrayBuffer>): Promise<void>; close(): Promise<void>; abort(reason?: unknown): Promise<void> };
+type FileHandle = { createWritable(): Promise<Writable> };
+export type DirHandle = { getFileHandle(name: string, o?: { create?: boolean }): Promise<FileHandle> };
+export type SavePicker = (o: { suggestedName: string }) => Promise<FileHandle>;
+
 const named = (e: unknown, name: string) => typeof e === "object" && e !== null && (e as { name?: unknown }).name === name;
 
-export async function saveItemTo(
-  opened: Opened,
-  i: number,
-  deps: SaveDeps,
-  onBytes: (done: number, total: number, bytesPerS: number) => void,
-  signal?: AbortSignal,
-): Promise<SaveResult> {
-  const name = opened.safeName(i);
-  const total = opened.manifest.items[i]?.size ?? 0;
-  const start = deps.now();
-  let done = 0;
-  const count = (n: number) => {
-    done += n;
-    const s = (deps.now() - start) / 1000;
-    onBytes(done, total, s > 0 ? done / s : 0);
-  };
-  if (signal?.aborted) return "cancelled";
+/** Puits d'un fichier ouvert en écriture ; abort() efface le partiel. */
+function writableSink(w: Writable): ItemSink {
+  return { write: (c) => w.write(c), close: () => w.close(), abort: () => w.abort() };
+}
 
-  if (deps.showSaveFilePicker) {
-    let handle: Handle;
-    try {
-      handle = await deps.showSaveFilePicker({ suggestedName: name });
-    } catch (e) {
-      // Sélecteur fermé : retour silencieux, rien n'a été écrit.
-      if (named(e, "AbortError")) return "cancelled";
-      return "failed";
-    }
-    let w: Writable;
-    try {
-      w = await handle.createWritable();
-    } catch (e) {
-      return named(e, "QuotaExceededError") ? "disk_full" : "failed";
-    }
-    try {
-      await opened.saveItem(i, async (chunk) => {
-        if (signal?.aborted) throw abortError();
-        await w.write(chunk);
-        count(chunk.length);
-      });
-      if (signal?.aborted) throw abortError();
-      await w.close();
-      return "saved";
-    } catch (e) {
-      await w.abort().catch(() => undefined); // le fichier partiel est supprimé
-      if (signal?.aborted) return "cancelled";
-      if (e instanceof NotFoundError) return "gone";
-      return named(e, "QuotaExceededError") ? "disk_full" : "failed";
-    }
-  }
-
-  // Repli : même progression, en lisant à travers un Opened qui compte et s'arrête au signal.
-  const counted: Opened = {
-    ...opened,
-    saveItem: (j, sink) =>
-      opened.saveItem(j, async (chunk) => {
-        if (signal?.aborted) throw abortError();
-        const n = chunk.length; // avant sink : collectToBlob peut remettre la tranche à zéro
-        await sink(chunk);
-        count(n);
-      }),
-  };
-  let blob: Blob;
+/** Un fichier choisi par élément ; null si le sélecteur est fermé (AbortError). */
+export async function pickFile(picker: SavePicker, name: string): Promise<ItemSink | null> {
+  let h: FileHandle;
   try {
-    blob = await deps.collectToBlob(counted, i);
+    h = await picker({ suggestedName: name });
   } catch (e) {
-    if (signal?.aborted) return "cancelled";
-    if (e instanceof NotFoundError) return "gone";
-    return named(e, "QuotaExceededError") ? "disk_full" : "failed";
+    if (named(e, "AbortError")) return null;
+    throw e;
   }
-  if (signal?.aborted) return "cancelled";
-  // collectToBlob rend déjà du application/octet-stream ; on l'impose de toute façon.
-  const safe = blob.type === "application/octet-stream" ? blob : new Blob([blob], { type: "application/octet-stream" });
-  const url = URL.createObjectURL(safe);
-  try {
-    deps.click(url, name);
-  } catch {
-    URL.revokeObjectURL(url);
-    return "failed";
-  }
-  setTimeout(() => URL.revokeObjectURL(url), REVOKE_AFTER_MS);
-  return "saved";
+  return writableSink(await h.createWritable());
+}
+
+/** Dossier choisi une fois : chaque élément y reçoit un nom libre (aucun écrasement). */
+export function inDirectory(dir: DirHandle) {
+  const taken = new Set<string>();
+  return async (name: string): Promise<ItemSink> => {
+    for (;;) {
+      const n = zipName(name, taken);
+      try {
+        await dir.getFileHandle(n); // déjà présent : on essaie le nom suivant
+        continue;
+      } catch (e) {
+        if (!named(e, "NotFoundError")) throw e;
+      }
+      return writableSink(await (await dir.getFileHandle(n, { create: true })).createWritable());
+    }
+  };
+}
+
+export type BlobDeps = {
+  click: (url: string, name: string) => void;
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+};
+
+/**
+ * Repli : assemblage en Blob puis lien <a download>. Les déclenchements d'une même série sont
+ * espacés de CLICK_GAP_MS (les navigateurs bloquent les rafales).
+ */
+export function blobDownloads(d: BlobDeps, foldBytes = FOLD_BYTES) {
+  let lastClick = -Infinity;
+  return (name: string): ItemSink => {
+    const mime = "application/octet-stream";
+    let acc: Blob | null = new Blob([], { type: mime });
+    let parts: Uint8Array<ArrayBuffer>[] = [];
+    let pending = 0;
+    const zero = () => {
+      for (const p of parts) p.fill(0);
+      parts = [];
+      pending = 0;
+    };
+    const fold = () => {
+      acc = new Blob([acc!, ...parts], { type: mime });
+      zero();
+    };
+    return {
+      async write(c) {
+        if (!acc) throw new Error("ferme");
+        parts.push(c);
+        pending += c.length;
+        if (pending >= foldBytes) fold();
+      },
+      async close() {
+        if (!acc) throw new Error("ferme");
+        fold();
+        const blob = acc;
+        acc = null;
+        const wait = lastClick + CLICK_GAP_MS - d.now();
+        if (wait > 0) await d.sleep(wait);
+        lastClick = d.now();
+        const url = URL.createObjectURL(blob);
+        try {
+          d.click(url, name);
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          throw e;
+        }
+        setTimeout(() => URL.revokeObjectURL(url), REVOKE_AFTER_MS);
+      },
+      async abort() {
+        zero();
+        acc = null;
+      },
+    };
+  };
 }
 
 /** Lien <a download> cliqué par le code, retiré aussitôt (repli sans sélecteur). */

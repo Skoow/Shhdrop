@@ -66,12 +66,12 @@ test("(a) expiration pendant un enregistrement : fermeture aussitôt, fichier no
     await gate;
     await r.continue();
   });
-  await page.getByRole("button", { name: "Enregistrer rapport.bin" }).click();
-  await expect(page.locator(".save .progress")).toBeVisible();
+  await page.getByRole("button", { name: "Télécharger rapport.bin" }).click();
+  await expect(page.locator('li.row[data-state="downloading"]')).toBeVisible();
   await page.clock.fastForward("12:30:00");
   // Fermeture immédiate : plus de liste, de texte ni de bouton ; le fichier en cours est nommé.
   await expect(page.getByRole("heading", { name: "Ce partage a expiré." })).toBeVisible();
-  await expect(page.locator(".item, pre[dir=auto]")).toHaveCount(0);
+  await expect(page.locator("li.row, pre[dir=auto]")).toHaveCount(0);
   await expect(page.getByText(/^Le fichier en cours \(rapport\.bin\) est autorisé à se terminer\s; vous ne pouvez plus rien ouvrir d'autre\.$/)).toBeVisible();
   const row = page.locator('[data-transfer]');
   await expect(row).toHaveAttribute("data-transfer", "running");
@@ -116,8 +116,8 @@ test("(c) destruction faite ici pendant un enregistrement : nommé, puis « Term
     await gate;
     await r.continue();
   });
-  await page.getByRole("button", { name: "Enregistrer rapport.bin" }).click();
-  await expect(page.locator(".save .progress")).toBeVisible();
+  await page.getByRole("button", { name: "Télécharger rapport.bin" }).click();
+  await expect(page.locator('li.row[data-state="downloading"]')).toBeVisible();
   await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
   await page.getByRole("button", { name: "Détruire", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Ce partage a été détruit." })).toBeVisible({ timeout: 20_000 });
@@ -148,15 +148,15 @@ test("(d) suppression par l'expéditeur pendant un enregistrement : fermeture en
     await gate;
     await r.continue();
   });
-  await page.getByRole("button", { name: "Enregistrer rapport.bin" }).click();
-  await expect(page.locator(".save .progress")).toBeVisible();
+  await page.getByRole("button", { name: "Télécharger rapport.bin" }).click();
+  await expect(page.locator('li.row[data-state="downloading"]')).toBeVisible();
   // La surveillance est tenue (aucun signal avant la suppression).
   await page.waitForRequest((r) => r.url().endsWith("/api/shares/watch"));
   const t0 = Date.now();
   await senderDeletes(shh.origin, sent.manage);
   await expect(page.getByRole("heading", { name: "Ce partage a été supprimé." })).toBeVisible({ timeout: 5_000 });
   expect(Date.now() - t0).toBeLessThan(1_500); // 410 de watch en moins d'une seconde (+ rendu)
-  await expect(page.locator(".item, pre[dir=auto]")).toHaveCount(0);
+  await expect(page.locator("li.row, pre[dir=auto]")).toHaveCount(0);
   release();
   const row = page.locator("[data-transfer]");
   await expect(row).toHaveAttribute("data-transfer", "done", { timeout: 60_000 });
@@ -176,8 +176,8 @@ test("(e) pause de plus de 120 s après la suppression : grâce perdue → « T�
     await gate;
     await r.continue();
   });
-  await page.getByRole("button", { name: "Enregistrer rapport.bin" }).click();
-  await expect(page.locator(".save .progress")).toBeVisible();
+  await page.getByRole("button", { name: "Télécharger rapport.bin" }).click();
+  await expect(page.locator('li.row[data-state="downloading"]')).toBeVisible();
   await senderDeletes(shh.origin, sent.manage); // ouverture encore active : grâce accordée
   await expect(page.getByRole("heading", { name: "Ce partage a été supprimé." })).toBeVisible({ timeout: 5_000 });
   await page.waitForTimeout(125_000); // plus de 120 s sans segment : droit perdu (horloge réelle du serveur)

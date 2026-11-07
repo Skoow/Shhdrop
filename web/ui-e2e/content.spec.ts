@@ -26,18 +26,23 @@ test("groupes et ordre de l'envoi ; texte, image, audio, vidéo ; pièges jamais
 
   await page.goto(sent.link);
   await unlock(page, sent.password);
-  const groups = await page.locator("section.group h2").evaluateAll((hs) => hs.map((h) => h.firstChild?.textContent?.trim()));
+  const groups = await page.locator("section.group h2").allTextContents();
   expect(groups).toEqual(["Texte", "Photos", "Vidéos", "Audio et vocaux", "Documents"]);
-  const names = await page.locator(".item .name").allTextContents();
+  const names = await page.locator("li.row .name").allTextContents();
   expect(names.slice(1)).toEqual(["foret-brume.jpg", "trap.svg", "anniversaire-lou.webm", "hevc.mov", "vocal.ogg", "trap.html"]);
+  const viewer = page.getByRole("dialog");
 
-  // Texte brut, sens automatique, jamais de HTML.
-  const pre = page.locator("pre[dir=auto]");
+  // Texte brut dans la visionneuse, sens automatique, jamais de HTML.
+  await page.getByRole("button", { name: `Voir ${names[0]}` }).click();
+  const pre = viewer.locator("pre[dir=auto]");
   await expect(pre).toHaveText(TEXT);
   expect(await pre.evaluate((e) => e.children.length)).toBe(0);
+  await page.keyboard.press("Escape");
+  await expect(viewer).toHaveCount(0);
 
-  // Image chargée d'office (≤ 20 Mio), URL blob révoquée dès le chargement.
-  const img = page.locator('.item[data-kind="image"] img');
+  // Image : URL blob révoquée dès le chargement.
+  await page.getByRole("button", { name: "Voir foret-brume.jpg" }).click();
+  const img = viewer.locator("img");
   await expect(img).toBeVisible();
   await expect.poll(() => img.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0)).toBe(true);
   const revoked = await img.evaluate(
@@ -50,30 +55,33 @@ test("groupes et ordre de l'envoi ; texte, image, audio, vidéo ; pièges jamais
       }),
   );
   expect(revoked).toBe(true);
+  await page.keyboard.press("Escape");
 
-  // Pièges : SVG et HTML en Enregistrer seulement, aucun aperçu, aucun script exécuté.
+  // Pièges : SVG et HTML en Télécharger seulement, aucun aperçu, aucun script exécuté.
   for (const n of ["trap.svg", "trap.html"]) {
-    const row = page.locator(".item").filter({ hasText: n });
-    await expect(row).toHaveAttribute("data-kind", "none");
-    await expect(row.getByRole("button", { name: /^(Afficher|Regarder|Écouter)/ })).toHaveCount(0);
-    await expect(row.getByRole("button", { name: /^Enregistrer/ })).toBeVisible();
+    const row = page.locator("li.row").filter({ hasText: n });
+    await expect(row.getByRole("button", { name: /^Voir/ })).toHaveCount(0);
+    await expect(row.getByRole("button", { name: `Télécharger ${n}` })).toBeVisible();
     expect(await row.locator("img, iframe, object, embed, svg image").count()).toBe(0);
   }
 
-  // Audio et vidéo : téléchargés à la demande, lisibles.
-  await page.getByRole("button", { name: "Écouter vocal.ogg" }).click();
-  const audio = page.locator("audio");
+  // Audio et vidéo : téléchargés à la demande, lisibles dans le panneau.
+  await page.getByRole("button", { name: "Voir vocal.ogg" }).click();
+  const audio = viewer.locator("audio");
   await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
-  await page.getByRole("button", { name: "Regarder anniversaire-lou.webm" }).click();
-  const video = page.locator('.item[data-kind="video"]').filter({ hasText: "anniversaire-lou.webm" }).locator("video");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Voir anniversaire-lou.webm" }).click();
+  const video = viewer.locator("video");
   await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
   await expect(video).toHaveAttribute("playsinline", "");
 
-  // HEVC : Chromium ne le décode pas → message, Enregistrer reste.
-  await page.getByRole("button", { name: "Regarder hevc.mov" }).click();
-  const hevc = page.locator(".item").filter({ hasText: "hevc.mov" });
-  await expect(hevc.getByText("Ce fichier ne peut pas être lu sur cet appareil.", { exact: false })).toBeVisible({ timeout: 20_000 });
-  await expect(hevc.locator("video")).toHaveCount(0);
+  // HEVC : Chromium ne le décode pas → message, Télécharger reste dans le panneau.
+  await page.keyboard.press("ArrowRight");
+  await expect(viewer.getByRole("heading", { name: "hevc.mov" })).toBeVisible();
+  await expect(viewer.getByText("Ce fichier ne peut pas être lu sur cet appareil.", { exact: false })).toBeVisible({ timeout: 20_000 });
+  await expect(viewer.locator("video")).toHaveCount(0);
+  await expect(viewer.getByRole("button", { name: "Télécharger hevc.mov" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   expect(await page.evaluate(() => (window as unknown as { __pwned?: unknown }).__pwned)).toBeUndefined();
   // Rien d'autre que le partage : aucun cadre, aucune offre.
@@ -82,8 +90,6 @@ test("groupes et ordre de l'envoi ; texte, image, audio, vidéo ; pièges jamais
   expect(await axe(page)).toEqual([]);
   await page.evaluate(() => window.scrollTo(0, 0));
   await capture(page, "content");
-  await page.locator('.item[data-kind="image"]').scrollIntoViewIfNeeded();
-  await capture(page, "content-image");
 });
 
 test("expiration pendant la lecture, rien en cours → l'interface se ferme aussitôt (spec §41.8) ; capture", async ({ page, shh, browser }) => {
@@ -97,7 +103,7 @@ test("expiration pendant la lecture, rien en cours → l'interface se ferme auss
   await page.clock.fastForward("12:30:00");
   await expect(page.getByRole("heading", { name: "Ce partage a expiré." })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Contenu du partage" })).toHaveCount(0);
-  await expect(page.locator(".item, pre[dir=auto], video, audio, img[src^=blob]")).toHaveCount(0);
+  await expect(page.locator("li.row, pre[dir=auto], video, audio, img[src^=blob]")).toHaveCount(0);
   expect(await page.evaluate(() => document.body.innerText)).not.toMatch(/anniversaire-lou|trap\.svg|4471/);
   await expect(page).toHaveTitle("Partage indisponible · Shhdrop");
   expect(api.filter((u) => !u.endsWith("/api/shares/done"))).toEqual([]); // aucune requête pour fermer
@@ -116,7 +122,7 @@ test("destruction par l'expéditeur pendant la lecture → l'interface se ferme 
   // Spec §41.8 : la surveillance (410) ferme l'interface sans geste de la personne.
   await destroyShare(sent.manage, shh.origin);
   await expect(page.getByRole("heading", { name: "Ce partage a été supprimé." })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole("button", { name: "Regarder anniversaire-lou.webm" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Voir anniversaire-lou.webm" })).toHaveCount(0);
 
   // Un fichier déposé sur la page ne la fait pas naviguer.
   const prevented = await page.evaluate(() => {
@@ -146,7 +152,7 @@ test.describe("390 × 844", () => {
     await s.ctx.close();
     await page.goto(sent.link);
     await unlock(page, sent.password);
-    await expect(page.locator(".item img")).toBeVisible();
+    await expect(page.locator("li.row").first()).toBeVisible();
     await settle(page);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await capture(page, "content-390");

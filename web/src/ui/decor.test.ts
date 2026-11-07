@@ -82,3 +82,32 @@ describe("motifs d'impression (accueil v3)", () => {
     }
   });
 });
+
+import { DOC, DOT_MS, dissolveCells, dissolveDots } from "./decor";
+
+describe("illustration « détruit » (UI §9.10.1)", () => {
+  it("48 points déterministes, sur la grille de 8 px, dans la partie défaite, vers le haut et la droite", () => {
+    const a = dissolveDots();
+    expect(a).toEqual(dissolveDots());
+    expect(a).toHaveLength(48);
+    const cells = new Set(dissolveCells().map((c) => `${c.x},${c.y}`));
+    for (const d of a) {
+      expect(cells.has(`${d.x - 2},${d.y - 2}`)).toBe(true);
+      expect(d.dx).toBeGreaterThan(0);
+      expect(d.dy).toBeLessThan(0);
+      expect(d.delay + DOT_MS).toBeLessThanOrEqual(900);
+      expect(d.o).toBeGreaterThan(0);
+      expect(d.o).toBeLessThanOrEqual(1);
+    }
+    const accent = a.filter((d) => d.accent).length / a.length;
+    expect(accent).toBeGreaterThan(0.18);
+    expect(accent).toBeLessThan(0.26);
+    expect(dissolveDots(7)).not.toEqual(a);
+  });
+  it("le coin haut-gauche reste intact, le coin bas-droite est défait", () => {
+    const cells = dissolveCells();
+    expect(cells.some((c) => c.x === DOC.x && c.y === DOC.y)).toBe(false);
+    expect(cells.some((c) => c.x === DOC.x + DOC.w - DOC.step && c.y === DOC.y + DOC.h - DOC.step)).toBe(true);
+    expect(cells.length).toBeGreaterThanOrEqual(48);
+  });
+});

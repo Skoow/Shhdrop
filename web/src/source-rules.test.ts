@@ -91,6 +91,15 @@ describe("règles de sources", () => {
       everySource.filter((f) => !f.rel.startsWith("viewers/") && /getImageData/.test(f.text)).map((f) => f.rel),
     ).toEqual([]));
 
+  // Task R2 (spec §28.3, §41.6) : l'écrivain .zip, les visionneuses et les écrans sont importés
+  // statiquement ; aucun import() dynamique hors de main.ts (démo).
+  it("aucun import() dynamique dans zip/, viewers/, flows/, ui/, routes/", () =>
+    expect(
+      everySource
+        .filter((f) => /^(zip|viewers|flows|ui|routes)\//.test(f.rel) && /\bimport\s*\(/.test(f.text))
+        .map((f) => f.rel),
+    ).toEqual([]));
+
   it("demo/ importé seulement par main.ts, sous la forme import(\"./demo/install\")", () => {
     for (const f of files) {
       const found = f.text.match(RE_DEMO_IMPORT) ?? [];
