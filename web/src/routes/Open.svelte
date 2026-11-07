@@ -37,6 +37,22 @@
     },
   });
 
+  // ---------- Garde de sortie (ruling 3) ----------
+  // Le « # » est retiré de l'adresse dès la lecture : recharger ou fermer l'écran verrouillé
+  // perdrait le lien sans bruit. Confirmation du navigateur tant que le lien est tenu ici
+  // (verrouillé, déverrouillage, erreur de lecture) ; jamais dans un navigateur intégré, qui
+  // garde le « # ».
+  const holdsLink = $derived(r.state === "locked" || r.state === "unlocking" || r.state === "error");
+  $effect(() => {
+    if (!holdsLink) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  });
+
   // ---------- Champ (UI §12.3) ----------
   let pw = $state("");
   let shown = $state(false);
@@ -197,7 +213,7 @@
           </div>
         {/if}
         <p id="open-tries" class="small">{t("open.tries", { n: PW_TRIES })}</p>
-        <p id="open-cost" class="cost">{t("open.oneOpen")}</p>
+        <p id="open-cost" class="cost">{t("open.oneOpen", { n: r.opensLeft })}</p>
         <Button variant="primary" busy={busy} disabled={pw === "" || limited} onpress={unlock} aria-describedby="open-cost">
           {#snippet icon()}<LockOpen size={18} />{/snippet}
           {busy ? t("open.unlocking") : t("open.unlock")}

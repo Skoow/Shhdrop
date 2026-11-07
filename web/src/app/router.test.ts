@@ -17,9 +17,15 @@ describe("match", () => {
     expect(JSON.stringify(match("/", `#${KEY}`))).not.toContain(KEY);
   });
 
-  it("fragment invalide → accueil (App retire ensuite le « # »)", () => {
-    for (const h of ["", "#", `#${KEY.slice(1)}`, `#${KEY}A`, `#m${KEY.slice(2)}`, `#m${KEY}A`, `#${KEY.slice(1)}+`, `#x${KEY}`])
+  it("fragment sans rapport avec une clé → accueil (App retire ensuite le « # »)", () => {
+    for (const h of ["", "#", "#contenu", `#${KEY.slice(0, 19)}`, `#m${KEY}A`, `#${KEY.slice(1)}+`, `#${KEY.slice(0, 30)}é`])
       expect(match("/", h), h).toEqual({ name: "home" });
+  });
+
+  it("fragment de 20 à 44 caractères qui n'est pas une clé valide → ouverture, qui dira « Lien incomplet » (ruling 2)", () => {
+    for (const h of [`#${KEY.slice(0, 20)}`, `#${KEY.slice(1)}`, `#${KEY}A`, `#m${KEY.slice(2)}`, `#x${KEY}`])
+      expect(match("/", h), h).toEqual({ name: "open" });
+    expect(match("/Shhdrop/", `#${KEY.slice(0, 30)}`, "/Shhdrop/")).toEqual({ name: "open" });
   });
 
   it("fragment de bonne forme ailleurs qu'à la racine : pas d'ouverture", () => {

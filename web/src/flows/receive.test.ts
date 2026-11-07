@@ -9,7 +9,7 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 function setup(over: Partial<ReceiverDeps> = {}, link: string | null = LINK) {
   let t = 1_000_000;
   const clock = { advance: (ms: number) => (t += ms) };
-  const fetchMeta = vi.fn(async () => ({ expiresInS: 3600 }));
+  const fetchMeta = vi.fn(async () => ({ expiresInS: 3600, opensLeft: 3 }));
   const opened = { manifest: { v: 2, rights: "enregistrer", items: [] } } as unknown as Opened;
   const openShare = vi.fn(async (): Promise<Opened> => opened);
   const scrub = vi.fn();
@@ -40,6 +40,7 @@ describe("createReceiver (UI §9.7)", () => {
     await flush();
     expect(r.state).toBe("locked");
     expect(r.expiresInS).toBe(3600);
+    expect(r.opensLeft).toBe(3); // ruling 5 : « encore 3 fois »
     expect(fetchMeta).toHaveBeenCalledWith(LINK, "https://x.test");
     expect(exposed(r)).not.toContain("A".repeat(43));
   });
@@ -54,7 +55,7 @@ describe("createReceiver (UI §9.7)", () => {
 
   it("réseau à fetchMeta → error/network, puis Réessayer ; LimitError(120) → error/limit", async () => {
     let fail = true;
-    const { r } = setup({ fetchMeta: vi.fn(async () => (fail ? Promise.reject(new Error("reseau")) : { expiresInS: 60 })) });
+    const { r } = setup({ fetchMeta: vi.fn(async () => (fail ? Promise.reject(new Error("reseau")) : { expiresInS: 60, opensLeft: 1 })) });
     await flush();
     expect([r.state, r.error]).toEqual(["error", "network"]);
     fail = false;

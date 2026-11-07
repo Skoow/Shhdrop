@@ -23,7 +23,7 @@ export type ReceiveState =
 export type ReceiveError = "bad_password" | "password_required" | "limit" | "network" | null;
 
 export type ReceiverDeps = {
-  fetchMeta: (link: string, expectedOrigin: string) => Promise<{ expiresInS: number }>;
+  fetchMeta: (link: string, expectedOrigin: string) => Promise<{ expiresInS: number; opensLeft: number }>;
   openShare: (link: string, password: string, expectedOrigin: string) => Promise<Opened>;
   /** Horloge en millisecondes. */
   now: () => number;
@@ -39,6 +39,8 @@ export type Receiver = {
   readonly state: ReceiveState;
   /** Durée de vie restante lue par fetchMeta (secondes, au moment de la réponse). */
   readonly expiresInS: number;
+  /** Ouvertures restantes lues par fetchMeta (0 avant), pour « encore N fois » (ruling 5). */
+  readonly opensLeft: number;
   /** Secondes restantes, recalculées à chaque lecture (0 avant fetchMeta). */
   remainingS(): number;
   readonly attemptsLeft: number | undefined;
@@ -79,6 +81,7 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
   const s = $state({
     state: "meta" as ReceiveState,
     expiresInS: 0,
+    opensLeft: 0,
     attemptsLeft: undefined as number | undefined,
     retryAfterS: undefined as number | undefined,
     error: null as ReceiveError,
@@ -102,6 +105,7 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
       if (secret === null) return; // déjà terminé pendant l'attente
       expiresAt = d.now() + m.expiresInS * 1000;
       s.expiresInS = m.expiresInS;
+      s.opensLeft = m.opensLeft;
       if (m.expiresInS <= 0) end("invalid");
       else s.state = "locked";
     } catch (e) {
@@ -143,6 +147,9 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
     },
     get expiresInS() {
       return s.expiresInS;
+    },
+    get opensLeft() {
+      return s.opensLeft;
     },
     remainingS() {
       return expiresAt === 0 ? 0 : Math.max(0, Math.ceil((expiresAt - d.now()) / 1000));

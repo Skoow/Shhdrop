@@ -60,11 +60,11 @@ describe("destroyFromContent", () => {
     expect(o.wipe).toHaveBeenCalledTimes(1);
     expect(onDestroyed).toHaveBeenCalledTimes(1);
   });
-  it("reseau (ou limite) → network, wipe et onDestroyed jamais appelés", async () => {
-    for (const e of [new Error("reseau"), new LimitError(5)]) {
+  it("reseau → network ; 429 → limit (ruling 7) ; wipe et onDestroyed jamais appelés", async () => {
+    for (const [e, want] of [[new Error("reseau"), "network"], [new LimitError(5), "limit"]] as const) {
       const { o } = fake(async () => Promise.reject(e));
       const onDestroyed = vi.fn();
-      expect(await destroyFromContent(o, true, { onDestroyed })).toBe("network");
+      expect(await destroyFromContent(o, true, { onDestroyed })).toBe(want);
       expect(o.wipe).not.toHaveBeenCalled();
       expect(onDestroyed).not.toHaveBeenCalled();
     }

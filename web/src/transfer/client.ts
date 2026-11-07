@@ -450,13 +450,17 @@ export async function createShare(
   }
 }
 
-export async function fetchMeta(link: string, expectedOrigin: string, net?: api.Net): Promise<{ expiresInS: number }> {
+/**
+ * Durée de vie restante et ouvertures restantes (ruling 5 : déjà connues de qui a K_accès,
+ * pour annoncer « encore N fois » avant le geste irréversible).
+ */
+export async function fetchMeta(link: string, expectedOrigin: string, net?: api.Net): Promise<{ expiresInS: number; opensLeft: number }> {
   const p = parseShare(link, expectedOrigin);
   return guarded(async () => {
     const { kAcces } = await deriveAccess(p.kLien);
     try {
       const m = await api.meta(api.ctx(p.origin, net), kAcces);
-      return { expiresInS: m.expiresInS };
+      return { expiresInS: m.expiresInS, opensLeft: m.opensLeft };
     } finally {
       kAcces.fill(0);
     }

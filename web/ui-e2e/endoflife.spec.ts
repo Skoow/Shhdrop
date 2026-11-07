@@ -59,6 +59,27 @@ test("Détruire : pied séparé par un filet, confirmation, reçu après la rép
   await capture(page, "destroyed");
 });
 
+test("429 pendant Détruire : « Trop de demandes, réessayez dans un instant », rien d'effacé ; puis Détruire réussit (ruling 7)", async ({ page, shh, browser }) => {
+  test.setTimeout(150_000);
+  const sent = await opened(browser, shh.origin, 3);
+  await page.goto(sent.link);
+  await unlock(page, sent.password);
+  let limited = true;
+  await page.route("**/api/shares/destroy", async (r) => {
+    if (!limited) return r.continue();
+    await r.fulfill({ status: 429, contentType: "application/json", headers: { "Retry-After": "1" }, body: '{"error":"limit","retry_after_s":1}' });
+  });
+  await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
+  await page.getByRole("button", { name: "Détruire", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Trop de demandes, réessayez dans un instant." })).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator("pre").filter({ hasText: TEXT })).toBeVisible();
+  await expect(page.locator("[data-receipt]")).toHaveCount(0);
+  limited = false;
+  await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
+  await page.getByRole("button", { name: "Détruire", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Détruit" })).toBeVisible({ timeout: 20_000 });
+});
+
 test("maxOpens = 1 (draining) : Détruire fonctionne quand même", async ({ page, shh, browser }) => {
   test.setTimeout(150_000);
   const sent = await opened(browser, shh.origin, 1);

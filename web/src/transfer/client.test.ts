@@ -82,7 +82,7 @@ type Reply = Response | "net";
 type Route = (method: string, path: string) => Reply | undefined;
 const j = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 const SALT = new Uint8Array(16).fill(3);
-const META = { expires_in_s: 3000, salt: b64u(SALT), kdf: { ops: 3, mem: 67108864 }, bucket: 16, segments: 1 };
+const META = { expires_in_s: 3000, salt: b64u(SALT), kdf: { ops: 3, mem: 67108864 }, bucket: 16, segments: 1, opens_left: 2 };
 const ENV0 = b64u(new Uint8Array(60)); // enveloppe quelconque (jamais déballée : paquet invalide)
 
 // Paquet v2 tel que createShare le produirait pour LINK et PW (K_lien = 1…1, sel = SALT) :
@@ -205,7 +205,10 @@ describe("fetchMeta, shareStatus, destroyShare : correspondance des erreurs", ()
     expect(await reject(fetchMeta(LINK, ORIGIN, server(() => j(429, { error: "limit", retry_after_s: 0 })).net))).toBeInstanceOf(LimitError);
     expect(await reject(fetchMeta(LINK, ORIGIN, server(() => "net").net))).toEqual(new Error("reseau"));
     expect(await reject(fetchMeta(LINK, ORIGIN, server(() => j(200, { nope: 1 })).net))).toBeInstanceOf(NotFoundError);
-    expect(await fetchMeta(LINK, ORIGIN, server(() => undefined).net)).toEqual({ expiresInS: 3000 });
+    expect(await fetchMeta(LINK, ORIGIN, server(() => undefined).net)).toEqual({ expiresInS: 3000, opensLeft: 2 });
+    // Ouvertures restantes absentes ou hors bornes : réponse refusée (ruling 5).
+    for (const bad of [{ ...META, opens_left: undefined }, { ...META, opens_left: 0 }, { ...META, opens_left: 1.5 }])
+      expect(await reject(fetchMeta(LINK, ORIGIN, server((_m, path) => (path.endsWith("/meta") ? j(200, bad) : undefined)).net))).toBeInstanceOf(NotFoundError);
   });
   it("shareStatus", async () => {
     expect(await reject(shareStatus(MANAGE, ORIGIN, server(() => j(404, { error: "not_found" })).net))).toBeInstanceOf(NotFoundError);
@@ -1136,7 +1139,7 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
       fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input).slice(ORIGIN.length);
         rd.calls.push(`${init?.method ?? "GET"} ${path}`);
-        if (path.endsWith("/meta")) return j(200, { expires_in_s: 60, salt: fin.salt, kdf: { ops: 3, mem: 67108864 }, bucket: 400, segments: 7 });
+        if (path.endsWith("/meta")) return j(200, { expires_in_s: 60, salt: fin.salt, kdf: { ops: 3, mem: 67108864 }, bucket: 400, segments: 7, opens_left: 1 });
         if (path.endsWith("/unlock")) return j(200, { download_token: "t", segments: 7, envelope: fin.envelope });
         const m = /\/segments\/(\d+)$/.exec(path);
         if (m) return new Response(new Uint8Array(segs[Number(m[1])]!), { status: 200 });
@@ -1163,7 +1166,7 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
       const fin = s.finals[0]!;
       const f = (async (input: RequestInfo | URL) => {
         const path = String(input).slice(ORIGIN.length);
-        if (path.endsWith("/meta")) return j(200, { expires_in_s: 60, salt: fin.salt, kdf: { ops: 3, mem: 67108864 }, bucket: 1, segments: 1 });
+        if (path.endsWith("/meta")) return j(200, { expires_in_s: 60, salt: fin.salt, kdf: { ops: 3, mem: 67108864 }, bucket: 1, segments: 1, opens_left: 1 });
         if (path.endsWith("/unlock")) return j(200, { download_token: "t", segments: 1, envelope: fin.envelope });
         if (path.endsWith("/segments/0")) return new Response(new Uint8Array(sent[0]!), { status: 200 });
         return new Response(null, { status: 204 });
@@ -1389,8 +1392,11 @@ describe("base de l'application (scan de sécurité du 7 novembre, F2)", () => {
     const s = server(() => j(404, { error: "not_found" }));
     expect(await reject(destroyShare(atBase, ORIGIN, s.net))).toBeInstanceOf(NotFoundError);
     expect(await reject(shareStatus(atBase, ORIGIN, s.net))).toBeInstanceOf(NotFoundError);
-    expect(await fetchMeta(LINK.replace("/#", "/Shhdrop/#"), ORIGIN, server(() => undefined).net)).toEqual({ expiresInS: 3000 });
-    expect(await fetchMeta(LINK, ORIGIN, server(() => undefined).net)).toEqual({ expiresInS: 3000 });
+    expect(await fetchMeta(LINK.replace("/#", "/Shhdrop/#"), ORIGIN, server(() => undefined).net)).toEqual({ expiresInS: 3000, opensLeft: 2 });
+    expect(await fetchMeta(LINK, ORIGIN, server(() => undefined).net)).toEqual({ expiresInS: 3000, opensLeft: 2 });
+    // Ouvertures restantes absentes ou hors bornes : réponse refusée (ruling 5).
+    for (const bad of [{ ...META, opens_left: undefined }, { ...META, opens_left: 0 }, { ...META, opens_left: 1.5 }])
+      expect(await reject(fetchMeta(LINK, ORIGIN, server((_m, path) => (path.endsWith("/meta") ? j(200, bad) : undefined)).net))).toBeInstanceOf(NotFoundError);
     // Autre chemin, ancien format : toujours refusés, sans requête.
     const none = server(() => undefined);
     for (const bad of [MANAGE.replace("/#m", "/autre/#m"), `${ORIGIN}/s/${b64u(new Uint8Array(16).fill(5))}#${b64u(KLIEN())}`]) {

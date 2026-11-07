@@ -201,7 +201,7 @@ func TestFullFlow(t *testing.T) {
 	}
 	m, err := s.Meta(k.acces)
 	if err != nil || m.Bucket != 1600 || m.Segments != 25 || m.KdfOps != 3 || m.KdfMem != 67108864 ||
-		len(m.Salt) != 16 || m.ExpiresIn != 73*time.Minute {
+		len(m.Salt) != 16 || m.ExpiresIn != 73*time.Minute || m.OpensLeft != 1 {
 		t.Fatalf("%+v %v", m, err)
 	}
 	openN, _, err := s.Unlock(id, k.acces, k.preuve)

@@ -646,6 +646,9 @@ Ordre (révisé le 7 novembre, scan UX « Lien prêt ») : avertissement en têt
    - `Countdown` « Disponible encore 5 h 31 ». **À zéro** (avant déverrouillage) : passage local à « Lien invalide », sans requête (§18, A22).
    - Champ mot de passe (attributs §12.3), Afficher/Masquer, **Déverrouiller** (`primary`, `lock-open`), Entrée par `keydown`.
    - Note : « Déverrouiller utilise une ouverture. Si le téléchargement échoue ensuite, cette ouverture est perdue. »
+   - Ouvertures restantes (ruling 5, 7 novembre) : `fetchMeta` rend aussi `opensLeft` (déjà connu de qui a `K_accès`) ; la mention de coût se lit « L'ouvrir compte une ouverture, même si vous rechargez la page. Il peut encore être ouvert {n} fois. »
+   - Garde de sortie (ruling 3) : tant que l'écran tient le lien (verrouillé, déverrouillage, erreur de lecture), `beforeunload` demande confirmation : le `#` n'est jamais conservé, recharger perdrait le lien sans bruit. Jamais dans un navigateur intégré (le `#` y reste).
+   - Navigation privée : « Pour laisser moins de traces, ouvrez ce lien en navigation privée » (ruling 1 : jamais « aucune trace »).
 4. Pendant `openShare` : bouton en chargement, « Déchiffrement de la clé… » (Argon2id, environ 1 s, plus sur un vieux téléphone). Double appui sans effet (bouton désactivé synchrone).
 5. Erreurs :
    - `BadPasswordError{attemptsLeft}` → « Mot de passe incorrect · {n} essai(s) restant(s) » ; avec 1 restant, en plus : « Au prochain échec, le partage sera détruit. » Le champ garde sa valeur, sélectionnée, focus.
@@ -688,7 +691,7 @@ Ordre (révisé le 7 novembre, scan UX « Lien prêt ») : avertissement en têt
 
 ### 9.10 Détruire, signaler (destinataire)
 
-- **Détruire maintenant** : `InlineConfirm` `danger` « Détruire ce partage pour tout le monde ? C'est immédiat et définitif. » → `opened.destroy()` → `wipe()` → dissolution → « Ce partage a été détruit. »
+- **Détruire maintenant** : `InlineConfirm` `danger` « Détruire ce partage pour tout le monde ? C'est immédiat et définitif. » → `opened.destroy()` → `wipe()` → dissolution → « Ce partage a été détruit. » `LimitError` (429, ruling 7) : rien n'est effacé, « Trop de demandes, réessayez dans un instant. » ; `Error("reseau")` : « Connexion impossible : le partage n'a pas été détruit. »
 - **Signaler** : `Sheet` « Signaler ce contenu » : « Le partage sera détruit immédiatement pour tout le monde. Shhdrop ne peut pas voir le contenu et ne garde aucune trace de votre signalement. Pour un contenu illégal, vous pouvez aussi le signaler aux autorités (en France : PHAROS, internet-signalement.gouv.fr). » → **Signaler et détruire** (`danger`) / **Annuler**. Appel : `opened.destroy("report")`. Pas de choix de motif : le serveur n'en garde aucun (§18, A13).
 - `NotFoundError` (déjà détruit ou expiré) : même fin (« Ce partage n'existe plus. »), `wipe()`.
 - `Error("reseau")` : « Connexion impossible : le partage n'a pas été détruit. » + Réessayer (rien n'est effacé localement).
@@ -699,7 +702,7 @@ Ordre (révisé le 7 novembre, scan UX « Lien prêt ») : avertissement en têt
 | État | Quand | Texte |
 |---|---|---|
 | Lien invalide | `NotFoundError` à `fetchMeta` ou `openShare`, `Error("lien_invalide")`, ou compte à rebours à zéro avant déverrouillage | « Ce lien n'existe pas ou n'est plus disponible. » (message unique, spec §5.2). Visuel : la capsule déjà dissoute (grain immobile), lien « Envoyer quelque chose » vers `/` |
-| Lien incomplet | Pas de `#`, ou `parseLink` refuse localement (la requête `?…` est ignorée avant l'analyse : nos liens n'en portent jamais, les applications y ajoutent `?fbclid=…`) | « Ce lien est incomplet. Rouvrez-le depuis le message d'origine. » + « La partie secrète a peut-être été retirée de la barre d'adresse après une première visite. » |
+| Lien incomplet | Pas de `#`, ou `parseLink` refuse localement (la requête `?…` est ignorée avant l'analyse : nos liens n'en portent jamais, les applications y ajoutent `?fbclid=…`) ; depuis le 7 novembre (ruling 2), aussi tout fragment de **20 à 44 caractères** de l'alphabet des clés qui n'est pas une clé valide (lien coupé), au lieu de l'accueil | « Ce lien est incomplet. Rouvrez-le depuis le message d'origine. » + « Il manque une partie du lien : il a peut-être été coupé lors d'un copier-coller, ou sa partie secrète a été retirée de la barre d'adresse après une première visite. Rien n'a été demandé au serveur. » |
 | Navigateur non pris en charge | Une capacité de §9 manque | « Ce navigateur ne permet pas de chiffrer en sécurité. Utilisez une version récente de Safari, Chrome, Firefox ou Edge. » Rien n'est envoyé (spec §10) |
 | 404 | Route inconnue | « Cette page n'existe pas. » + lien accueil |
 

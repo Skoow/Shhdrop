@@ -166,7 +166,7 @@ test.describe("en-US", () => {
     await s.ctx.close();
     await page.goto(sent.link);
     await expect(page.getByRole("heading", { name: "An encrypted share is waiting for you" })).toBeVisible();
-    await expect(page.getByText("Opening it counts as one open, even if you reload the page.")).toBeVisible();
+    await expect(page.getByText("Opening it counts as one open, even if you reload the page. It can be opened 1\u00a0more time.")).toBeVisible();
     await settle(page);
     await capture(page, "open-en");
     await page.getByLabel("Password", { exact: true }).fill(sent.password);

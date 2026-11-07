@@ -80,6 +80,9 @@ type Meta struct {
 	ExpiresIn                        time.Duration
 	Salt                             []byte
 	KdfOps, KdfMem, Bucket, Segments int
+	// Ouvertures restantes : déjà connues de qui a K_accès (il peut les compter en ouvrant),
+	// rendues pour annoncer « encore N fois » avant le geste (ruling 5).
+	OpensLeft int
 }
 
 type Status struct {
@@ -501,9 +504,9 @@ func (s *Service) Meta(kAcces []byte) (Meta, error) {
 	now := s.now()
 	var m Meta
 	var exp int64
-	err := s.DB.QueryRow(`SELECT id, expires_at, salt, kdf_ops, kdf_mem, bucket FROM shares
+	err := s.DB.QueryRow(`SELECT id, expires_at, salt, kdf_ops, kdf_mem, bucket, opens_left FROM shares
 		WHERE access_v=? AND state='ready' AND expires_at>? AND failed_attempts<?`, v, now, maxAttempts).
-		Scan(&m.ID, &exp, &m.Salt, &m.KdfOps, &m.KdfMem, &m.Bucket)
+		Scan(&m.ID, &exp, &m.Salt, &m.KdfOps, &m.KdfMem, &m.Bucket, &m.OpensLeft)
 	if err != nil {
 		return Meta{}, notFound(err)
 	}

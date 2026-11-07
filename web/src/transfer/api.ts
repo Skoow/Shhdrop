@@ -289,7 +289,7 @@ export async function finalize(c: Ctx, token: string, b: FinalizeBody, signal?: 
   return num(o, "expires_in_s");
 }
 
-export type Meta = { expiresInS: number; salt: string; kdf: { ops: number; mem: number }; bucket: number; segments: number };
+export type Meta = { expiresInS: number; salt: string; kdf: { ops: number; mem: number }; bucket: number; segments: number; opensLeft: number };
 
 export async function meta(c: Ctx, kAcces: KAcces): Promise<Meta> {
   const o = await send(
@@ -304,7 +304,14 @@ export async function meta(c: Ctx, kAcces: KAcces): Promise<Meta> {
     kdf: { ops: num(k, "ops"), mem: num(k, "mem") },
     bucket: num(o, "bucket"),
     segments: num(o, "segments"),
+    opensLeft: opensLeft(num(o, "opens_left")),
   };
+}
+
+/** Un partage lisible a au moins une ouverture restante (ruling 5). */
+function opensLeft(n: number): number {
+  if (n < 1) throw new BadResponse();
+  return n;
 }
 
 /** Enveloppe E rendue par unlock : 60 octets, soit 80 caractères base64url exactement. */

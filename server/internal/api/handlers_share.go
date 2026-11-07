@@ -249,7 +249,8 @@ func (s *server) meta(w http.ResponseWriter, r *http.Request) {
 		Kdf       kdfJSON `json:"kdf"`
 		Bucket    int     `json:"bucket"`
 		Segments  int     `json:"segments"`
-	}{secs(m.ExpiresIn), b64.EncodeToString(m.Salt), kdfJSON{m.KdfOps, m.KdfMem}, m.Bucket, m.Segments})
+		OpensLeft int     `json:"opens_left"`
+	}{secs(m.ExpiresIn), b64.EncodeToString(m.Salt), kdfJSON{m.KdfOps, m.KdfMem}, m.Bucket, m.Segments, m.OpensLeft})
 }
 
 func (s *server) unlock(w http.ResponseWriter, r *http.Request) {

@@ -5,6 +5,7 @@ import type { Page } from "@playwright/test";
 import { NotFoundError, PW_TRIES, fetchMeta, shareStatus } from "../src/index";
 import { axe, capture, expect, test } from "./fixtures";
 import { freshPage, pwField, sendShare, settle, unlock, unlockButton } from "./open-helpers";
+import { armed } from "./send-helpers";
 
 const INSTAGRAM =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 307.0.0.34.111 (iPhone15,3; iOS 17_1; fr_FR; fr; scale=3.00; 1290x2796; 532277534)";
@@ -33,13 +34,17 @@ test("mauvais mot de passe deux fois → « 3 essais restants », bon → conten
   await expect(title).toBeVisible();
   // Le « # » a quitté la barre juste après la lecture.
   await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
+  // Écran verrouillé : recharger ou fermer demande confirmation (le « # » n'est plus là, ruling 3).
+  expect(await armed(page)).toBe(true);
   const capsule = page.locator("[data-capsule]");
   await expect(capsule).toHaveAttribute("data-state", "locked");
   await capsule.evaluate((el) => ((window as unknown as { __cap: Element }).__cap = el));
 
   // M9 : le geste irréversible annoncé avant, relié au bouton ; textes de confiance.
-  await expect(page.getByText("L'ouvrir compte une ouverture, même si vous rechargez la page.")).toBeVisible();
-  await expect(unlockButton(page)).toHaveAccessibleDescription("L'ouvrir compte une ouverture, même si vous rechargez la page.");
+  // Ruling 5 : ouvertures restantes lues par fetchMeta (partage à 3 ouvertures).
+  const cost = "L'ouvrir compte une ouverture, même si vous rechargez la page. Il peut encore être ouvert 3\u00a0fois.";
+  await expect(page.getByText(cost)).toBeVisible();
+  await expect(unlockButton(page)).toHaveAccessibleDescription(cost);
   await expect(page.getByText("Le serveur ne reçoit que des données chiffrées, jamais la clé.")).toBeVisible();
   await expect(page.getByText(`${PW_TRIES} essais ratés, et le partage est détruit.`)).toBeVisible();
   await expect(page.getByText(/^Disponible encore \d+\sh/)).toBeVisible();
@@ -54,14 +59,16 @@ test("mauvais mot de passe deux fois → « 3 essais restants », bon → conten
   await expect(f).toHaveAttribute("enterkeyhint", "go");
   expect(await page.locator("form").count()).toBe(0);
   // Navigation privée (demande du propriétaire) : repliée, Safari, Chrome, Firefox.
-  await page.getByText("Pour ne laisser aucune trace, ouvrez ce lien en navigation privée").click();
+  await page.getByText("Pour laisser moins de traces, ouvrez ce lien en navigation privée").click();
   for (const b of ["Safari", "Chrome", "Firefox"]) await expect(page.getByText(new RegExp(`^${b}\\s:`))).toBeVisible();
   await settle(page);
   expect(await axe(page)).toEqual([]);
   await capture(page, "open");
 
   // Le lien rouvert deux fois sans déverrouiller (recharger ne le peut pas : le « # » est déjà
-  // retiré, la page revient à l'accueil) : aucune ouverture consommée.
+  // retiré, la page revient à l'accueil) : aucune ouverture consommée. La confirmation de sortie
+  // (ruling 3) est acceptée ici, comme le ferait la personne.
+  page.on("dialog", (d) => void (d.type() === "beforeunload" ? d.accept() : d.dismiss()));
   await page.reload();
   await expect(title).toHaveCount(0);
   for (let k = 0; k < 2; k++) {
@@ -123,6 +130,23 @@ test("clé mal formée (« # » abîmé) → « Lien incomplet », aucune requê
   await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
   expect(api).toEqual([]);
   expect(await axe(page)).toEqual([]);
+});
+
+test("lien coupé (fragment de 20 à 44 caractères qui n'est pas une clé) → « Lien incomplet » expliqué, aucune requête ; « # » retiré (ruling 2)", async ({ page, shh }) => {
+  const api = apiPaths(page);
+  for (const frag of ["Lr97TWFReo303xtSXonjjKhgrah", `m${"A".repeat(30)}`, "A".repeat(44)]) {
+    await page.goto(`${shh.origin}/#${frag}`);
+    await expect(page.getByRole("heading", { name: "Ce lien est incomplet. Rouvrez-le depuis le message d'origine." })).toBeVisible();
+    await expect(page.getByText("Il manque une partie du lien", { exact: false })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
+  }
+  // Une ancre courte reste l'accueil.
+  await page.goto(`${shh.origin}/#contenu`);
+  await expect(page.getByRole("heading", { name: "Ce lien est incomplet. Rouvrez-le depuis le message d'origine." })).toHaveCount(0);
+  expect(api).toEqual([]);
+  await page.goto(`${shh.origin}/#Lr97TWFReo303xtSXonjjKhgrah`);
+  await expect(page.getByText("Il manque une partie du lien", { exact: false })).toBeVisible();
+  await capture(page, "incomplete-truncated");
 });
 
 test("lien inconnu → « Lien invalide » (message unique), sans phrase de démo ; capture", async ({ page, shh }) => {

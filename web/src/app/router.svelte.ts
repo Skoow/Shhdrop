@@ -7,6 +7,13 @@ export type Route = {
   name: "home" | "open" | "manage" | "securite" | "confidentialite" | "notfound";
 };
 
+/**
+ * Fragment de 20 à 44 caractères de l'alphabet des clés qui n'est pas une clé valide : un lien
+ * coupé (copier-coller, message tronqué). L'écran d'ouverture dit « Lien incomplet » au lieu de
+ * l'accueil, qui laisserait croire que le lien n'était qu'une adresse du site (ruling 2).
+ */
+const TRUNCATED_FRAGMENT = /^#[A-Za-z0-9_-]{20,44}$/;
+
 export function match(pathname: string, hash = "", base: string = import.meta.env.BASE_URL): Route {
   const prefix = base.endsWith("/") ? base.slice(0, -1) : base; // "" ou "/Shhdrop"
   let p = pathname;
@@ -18,6 +25,7 @@ export function match(pathname: string, hash = "", base: string = import.meta.en
   if (p === "/") {
     if (SHARE_FRAGMENT.test(hash)) return { name: "open" };
     if (MANAGE_FRAGMENT.test(hash)) return { name: "manage" };
+    if (TRUNCATED_FRAGMENT.test(hash)) return { name: "open" };
     return { name: "home" };
   }
   if (p === "/securite") return { name: "securite" };

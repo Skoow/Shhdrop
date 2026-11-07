@@ -422,7 +422,7 @@ export const fr = {
   "invalid": "Ce lien n'existe pas ou n'est plus disponible.",
   "incomplete": "Ce lien est incomplet. Rouvrez-le depuis le message d'origine.",
   "incomplete.hint":
-    "La partie secrète a peut-être été retirée de la barre d'adresse après une première visite.",
+    "Il manque une partie du lien\u202f: il a peut-être été coupé lors d'un copier-coller, ou sa partie secrète a été retirée de la barre d'adresse après une première visite. Rien n'a été demandé au serveur.",
   "unsupported":
     "Ce navigateur ne permet pas de chiffrer en sécurité. Utilisez une version récente de Safari, Chrome, Firefox ou Edge.",
 
@@ -446,7 +446,8 @@ export const fr = {
   "open.title": "Un partage chiffré vous attend",
   "open.loading": "Lecture du partage…",
   "open.available": "Disponible encore",
-  "open.oneOpen": "L'ouvrir compte une ouverture, même si vous rechargez la page.",
+  "open.oneOpen.one": "L'ouvrir compte une ouverture, même si vous rechargez la page. Il peut encore être ouvert {n}\u00a0fois.",
+  "open.oneOpen.other": "L'ouvrir compte une ouverture, même si vous rechargez la page. Il peut encore être ouvert {n}\u00a0fois.",
   "open.password": "Mot de passe",
   "open.pw.show": "Afficher le mot de passe",
   "open.pw.hide": "Masquer le mot de passe",
@@ -462,7 +463,7 @@ export const fr = {
     "Vous êtes dans le navigateur intégré de {app}, qui peut lire cette page. Ouvrez ce lien dans votre navigateur habituel (menu de l'app, puis « Ouvrir dans le navigateur »).",
   "open.inapp.copy": "Copier le lien",
   "open.inapp.continue": "Continuer ici quand même",
-  "open.private": "Pour ne laisser aucune trace, ouvrez ce lien en navigation privée",
+  "open.private": "Pour laisser moins de traces, ouvrez ce lien en navigation privée",
   "open.private.safari": "Safari : menu Fichier, puis Nouvelle fenêtre privée. Sur iPhone : bouton des onglets, puis Privée.",
   "open.private.chrome": "Chrome : menu à trois points, puis Nouvelle fenêtre de navigation privée.",
   "open.private.firefox": "Firefox : menu, puis Nouvelle fenêtre privée.",
@@ -492,6 +493,7 @@ export const fr = {
   "content.destroy.confirm": "Détruire ce partage pour tout le monde ? C'est immédiat et définitif.",
   "content.destroy.yes": "Détruire",
   "content.destroy.net": "Connexion impossible : le partage n'a pas été détruit.",
+  "content.destroy.limit": "Trop de demandes, réessayez dans un instant.",
   "content.report": "Signaler",
   "report.title": "Signaler ce contenu",
   "report.confirm": "Signaler et détruire",

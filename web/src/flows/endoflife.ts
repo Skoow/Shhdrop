@@ -2,7 +2,7 @@
 // - Terminer et effacer : done() (fin de lecture, keepalive) → wipe() → révocation des URL.
 // - Détruire, Signaler : opened.destroy() (ou destroy("report"), motif non conservé), puis
 //   wipe() ; la dissolution (onDestroyed) ne commence qu'après la réponse du serveur.
-import { NotFoundError, type Opened } from "../index";
+import { LimitError, NotFoundError, type Opened } from "../index";
 import { revokeAll } from "../viewers/blobs";
 
 /**
@@ -20,13 +20,14 @@ export async function finish(opened: Opened): Promise<void> {
   }
 }
 
-export type DestroyOutcome = "destroyed" | "gone" | "network";
+export type DestroyOutcome = "destroyed" | "gone" | "network" | "limit";
 
 /**
  * Détruire (report = false) ou Signaler (report = true) depuis l'écran de contenu.
  * - succès → wipe(), révocation, onDestroyed(), « destroyed » ;
  * - NotFoundError (déjà expiré ou détruit) → même fin, « gone » ;
- * - toute autre erreur (réseau, limite) → rien n'est effacé, « network » : Réessayer reste possible.
+ * - 429 (LimitError) → rien n'est effacé, « limit » : « Trop de demandes… » (ruling 7) ;
+ * - toute autre erreur (réseau) → rien n'est effacé, « network » : Réessayer reste possible.
  */
 export async function destroyFromContent(
   opened: Opened,
@@ -38,6 +39,7 @@ export async function destroyFromContent(
     await (report ? opened.destroy("report") : opened.destroy());
     outcome = "destroyed";
   } catch (e) {
+    if (e instanceof LimitError) return "limit";
     if (!(e instanceof NotFoundError)) return "network";
     outcome = "gone";
   }

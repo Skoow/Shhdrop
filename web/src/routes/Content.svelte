@@ -18,7 +18,7 @@
   import { previewQueue } from "../viewers/collect";
   import ReceivedItem from "../viewers/ReceivedItem.svelte";
 
-  type ContentEnd = "finished" | Exclude<DestroyOutcome, "network">;
+  type ContentEnd = "finished" | Exclude<DestroyOutcome, "network" | "limit">;
   type Props = {
     opened: Opened;
     /** Compte à rebours à zéro (porté par la capsule d'Open). */
@@ -111,9 +111,10 @@
     destroyError = "";
     let dissolving: Promise<void> = Promise.resolve();
     const out = await destroyFromContent(opened, report, { onDestroyed: () => (dissolving = dissolve()) });
-    if (out === "network") {
-      if (!report) destroyError = t("content.destroy.net");
-      return t("content.destroy.net");
+    if (out === "network" || out === "limit") {
+      const msg = t(out === "limit" ? "content.destroy.limit" : "content.destroy.net");
+      if (!report) destroyError = msg;
+      return msg;
     }
     wiped = true;
     reportOpen = false;

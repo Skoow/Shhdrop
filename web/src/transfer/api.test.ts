@@ -167,7 +167,7 @@ describe("API v2 (spec §29.8)", () => {
       bodies.push(i?.body);
       heads.push(new Headers(i?.headers));
       const p = new URL(String(u)).pathname;
-      if (p.endsWith("/meta")) return new Response('{"expires_in_s":1,"salt":"s","kdf":{"ops":3,"mem":1},"bucket":1,"segments":1}');
+      if (p.endsWith("/meta")) return new Response('{"expires_in_s":1,"salt":"s","kdf":{"ops":3,"mem":1},"bucket":1,"segments":1,"opens_left":1}');
       if (p.endsWith("/status")) return new Response('{"opens_used":0,"max_opens":1,"expires_in_s":1,"state":"ready"}');
       if (p.includes("/segments/")) return new Response(new Uint8Array(1));
       return new Response(null, { status: 204 });

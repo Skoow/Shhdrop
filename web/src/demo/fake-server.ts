@@ -374,6 +374,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
       kdf: { ...s.kdf! },
       bucket: s.bucket,
       segments: segmentCount(s.bucket),
+      opens_left: s.opensLeft,
     });
   }
 

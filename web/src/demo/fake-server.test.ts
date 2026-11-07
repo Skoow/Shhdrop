@@ -11,6 +11,7 @@ import {
   collectToBlob,
   createShare,
   destroyShare,
+  fetchMeta,
   openShare,
   parseLink,
   shareStatus,
@@ -128,6 +129,15 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     await o.done();
     expect(fake.shares()).toBe(0);
     await expect(shareStatus(r.manage, ORIGIN, net)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("fetchMeta : ouvertures restantes, une de moins après chaque ouverture (ruling 5)", async ({ expect }) => {
+    const { net } = setup();
+    const r = await share(net, 3);
+    expect((await fetchMeta(r.link, ORIGIN, net)).opensLeft).toBe(3);
+    const o = await openShare(r.link, PW, ORIGIN, undefined, net);
+    await o.done();
+    expect((await fetchMeta(r.link, ORIGIN, net)).opensLeft).toBe(2);
   });
 
   it("destroyShare par le lien de gestion, puis par lien + mot de passe", async ({ expect }) => {

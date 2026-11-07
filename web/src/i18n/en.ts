@@ -418,7 +418,7 @@ export const en = {
   "invalid": "This link does not exist or is no longer available.",
   "incomplete": "This link is incomplete. Reopen it from the original message.",
   "incomplete.hint":
-    "The secret part may have been removed from the address bar after a first visit.",
+    "Part of the link is missing: it may have been cut off when copied, or its secret part was removed from the address bar after a first visit. Nothing was requested from the server.",
   "unsupported":
     "This browser cannot encrypt safely. Use a recent version of Safari, Chrome, Firefox or Edge.",
 
@@ -442,7 +442,8 @@ export const en = {
   "open.title": "An encrypted share is waiting for you",
   "open.loading": "Reading the share…",
   "open.available": "Available for",
-  "open.oneOpen": "Opening it counts as one open, even if you reload the page.",
+  "open.oneOpen.one": "Opening it counts as one open, even if you reload the page. It can be opened {n}\u00a0more time.",
+  "open.oneOpen.other": "Opening it counts as one open, even if you reload the page. It can be opened {n}\u00a0more times.",
   "open.password": "Password",
   "open.pw.show": "Show password",
   "open.pw.hide": "Hide password",
@@ -458,7 +459,7 @@ export const en = {
     "You are in the built-in browser of {app}, which can read this page. Open this link in your usual browser (app menu, then “Open in browser”).",
   "open.inapp.copy": "Copy the link",
   "open.inapp.continue": "Continue here anyway",
-  "open.private": "To leave no trace, open this link in a private window",
+  "open.private": "To leave fewer traces, open this link in a private window",
   "open.private.safari": "Safari: File menu, then New Private Window. On iPhone: tabs button, then Private.",
   "open.private.chrome": "Chrome: three-dot menu, then New Incognito window.",
   "open.private.firefox": "Firefox: menu, then New private window.",
@@ -486,6 +487,7 @@ export const en = {
   "content.destroy.confirm": "Destroy this share for everyone? It is immediate and final.",
   "content.destroy.yes": "Destroy",
   "content.destroy.net": "Can't connect: the share was not destroyed.",
+  "content.destroy.limit": "Too many requests, try again in a moment.",
   "content.report": "Report",
   "report.title": "Report this content",
   "report.confirm": "Report and destroy",

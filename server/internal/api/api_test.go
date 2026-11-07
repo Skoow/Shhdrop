@@ -306,7 +306,7 @@ func TestFullFlow(t *testing.T) {
 	m := jsonOf(t, w)
 	kdf := m["kdf"].(map[string]any)
 	if m["bucket"].(float64) != bucket || m["segments"].(float64) != 2 || kdf["ops"].(float64) != 3 ||
-		kdf["mem"].(float64) != 67108864 || m["expires_in_s"].(float64) < 3600 {
+		kdf["mem"].(float64) != 67108864 || m["expires_in_s"].(float64) < 3600 || m["opens_left"] != float64(2) {
 		t.Fatalf("meta: %v", m)
 	}
 	if salt, err := b64.DecodeString(m["salt"].(string)); err != nil || len(salt) != 16 {
@@ -332,6 +332,10 @@ func TestFullFlow(t *testing.T) {
 	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/2", hdr: auth(dl)}), 400, badRequest)
 	expect(t, e.do(req{method: "POST", path: "/api/shares/done", hdr: auth(dl)}), 204, "")
 	expect(t, e.do(req{method: "POST", path: "/api/shares/done", hdr: auth(dl)}), 204, "") // idempotent
+	// Ouvertures restantes (ruling 5) : connues de qui a K_accès, une de moins après l'ouverture.
+	if m := jsonOf(t, e.do(req{method: "GET", path: "/api/shares/meta", hdr: access(k)})); m["opens_left"] != float64(1) || len(m) != 6 {
+		t.Fatalf("meta après ouverture : %v", m)
+	}
 	// Ouverture terminée : son jeton ne lit plus rien.
 	expect(t, e.do(req{method: "GET", path: "/api/shares/segments/0", hdr: auth(dl)}), 404, notFound)
 
