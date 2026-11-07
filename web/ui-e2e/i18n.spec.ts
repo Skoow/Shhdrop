@@ -7,14 +7,24 @@ test.describe("français par défaut", () => {
     await page.goto(shh.origin + "/inconnu");
     await expect(page.locator("html")).toHaveAttribute("lang", "fr");
     await expect(page.getByRole("heading", { name: "Cette page n'existe pas." })).toBeVisible();
+    await expect(page).toHaveTitle("Page introuvable · Shhdrop");
 
     await page.getByRole("button", { name: "Passer l'interface en anglais" }).click();
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.getByRole("heading", { name: "This page does not exist." })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Security" })).toBeVisible();
+    await expect(page).toHaveTitle("Page not found · Shhdrop");
+    // Titre par route (scan UX B9) : accueil, puis Sécurité.
+    await page.getByRole("link", { name: "Security" }).click();
+    await expect(page).toHaveTitle("Security · Shhdrop");
+    await page.goto(shh.origin + "/");
+    await expect(page).toHaveTitle("Envoyer · Shhdrop");
+    await expect(page.getByRole("link", { name: "Sécurité", exact: true })).toBeVisible();
 
+    await page.getByRole("button", { name: "Passer l'interface en anglais" }).click();
+    await expect(page).toHaveTitle("Send · Shhdrop");
     await page.getByRole("button", { name: "Switch the interface to French" }).click();
     await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+    await expect(page).toHaveTitle("Envoyer · Shhdrop");
 
     const stored = await page.evaluate(async () => ({
       local: localStorage.length,

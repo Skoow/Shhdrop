@@ -12,6 +12,7 @@ describe("installDemo", async () => {
   });
   window.fetch = realFetch as typeof fetch;
   document.title = "Shhdrop";
+  setLang("fr");
   expect(getDemo()).toBeNull();
   const { installDemo } = await import("./install");
   installDemo(window);
@@ -30,6 +31,17 @@ describe("installDemo", async () => {
     document.title = "Ouvrir";
     await new Promise((r) => setTimeout(r, 0));
     expect(document.title).toBe("Démo · Ouvrir");
+  });
+
+  it("préfixe traduit : « Demo · » en anglais, jamais doublé (scan UX B9)", async () => {
+    setLang("en");
+    document.title = "Send · Shhdrop";
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.title).toBe("Demo · Send · Shhdrop");
+    setLang("fr");
+    document.title = "Envoyer · Shhdrop";
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.title).toBe("Démo · Envoyer · Shhdrop");
   });
 
   it("crochets : preuve factice, phrase de « Lien invalide » et écarts dans la langue courante", async () => {

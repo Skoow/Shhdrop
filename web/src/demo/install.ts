@@ -3,6 +3,7 @@
 // seules URL /api/* de l'origine (faux serveur en mémoire), préfixe le titre de l'onglet et
 // remplit les crochets lus par les écrans (app/demo-hooks.ts). Aucun stockage navigateur.
 import { setDemo } from "../app/demo-hooks";
+import { demoPrefixed } from "../app/title";
 import { getLang } from "../i18n/i18n.svelte";
 import { SHARE_FRAGMENT, type CaptchaProof } from "../index";
 import DemoBanner from "./DemoBanner.svelte";
@@ -17,7 +18,6 @@ const SLOW_RATE = 1_000_000;
 /** `?coupure` : réseau coupé 20 s au milieu du premier envoi. */
 const OUTAGE = { atFraction: 0.5, ms: 20_000 };
 
-const TITLE_PREFIX = "Démo · ";
 
 const INVALID_LINK_NOTE = {
   fr: "(normal en démo : le partage n'existait que dans l'onglet d'origine)",
@@ -71,11 +71,12 @@ export function installDemo(w: Window): void {
   const g = w as Window & { XMLHttpRequest: typeof XMLHttpRequest };
   g.XMLHttpRequest = fakeXHRClass(g.XMLHttpRequest, isApi, (r) => fake.handle(r), rate);
 
-  // Titre des onglets : toujours « Démo · … », même si un écran le change.
+  // Titre des onglets : toujours « Démo · … » (« Demo · … » en anglais), même si un écran le change.
   const d = w.document;
   d.documentElement.setAttribute("data-shh-demo", MARK);
   const prefix = () => {
-    if (!d.title.startsWith(TITLE_PREFIX)) d.title = TITLE_PREFIX + d.title;
+    const want = demoPrefixed(d.title, d.documentElement.lang);
+    if (d.title !== want) d.title = want;
   };
   prefix();
   new MutationObserver(prefix).observe(d.head, { subtree: true, childList: true, characterData: true });

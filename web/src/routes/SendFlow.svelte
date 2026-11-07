@@ -6,6 +6,7 @@
   // de Ready, oubliés à Terminé ou Supprimer.
   import { flushSync, tick } from "svelte";
   import { getDemo } from "../app/demo-hooks";
+  import { setScreenTitle } from "../app/title";
   import { createWakeLock } from "../app/wakelock";
   import { solvePow } from "../captcha/pow";
   import { categoryOf } from "../flows/kinds";
@@ -142,6 +143,12 @@
   }
 
   const lang = $derived(getLang());
+  // Titre de l'onglet (scan UX B9) ; pendant le scellement, Sealing.svelte le tient.
+  $effect(() => {
+    void lang;
+    if (view === "compose") setScreenTitle("home");
+    else if (view === "ready") setScreenTitle("ready");
+  });
   const summary = $derived(sent ? t("seal.summary", { n: sent.names.length, size: formatBytes(sent.bytes, lang) }) : "");
 </script>
 

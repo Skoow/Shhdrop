@@ -201,6 +201,7 @@ test.describe("fr-FR", () => {
     expect(logs.join("\n")).not.toContain(password);
     expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
     expect(await page.title()).not.toContain(password);
+    expect(await page.title()).toBe("Lien prêt · Shhdrop");
   });
 
   test("mouvement réduit : aucune animation ; sinon, montée en éventail ≤ 640 ms et boutons cliquables", async ({ page, shh, context }) => {

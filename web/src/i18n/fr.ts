@@ -349,6 +349,15 @@ export const fr = {
   "verif.cancel": "Annuler l'envoi",
   "verif.more": "En savoir plus",
 
+  "title.home": "Envoyer",
+  "title.sealing": "Envoi en cours",
+  "title.ready": "Lien prêt",
+  "title.open": "Ouvrir un partage",
+  "title.manage": "Gérer un partage",
+  "title.notfound": "Page introuvable",
+  "title.securite": "Sécurité",
+  "title.confidentialite": "Confidentialité",
+  "title.unsupported": "Navigateur non pris en charge",
   "ready.title": "Lien prêt",
   "ready.created": "Partage créé.",
   "ready.pw.reminder":

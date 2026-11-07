@@ -5,6 +5,8 @@
   import { guardFileDrop, reloadIfRestored } from "./app/lifecycle";
   import { readLink, scrubAddressBar, type LinkState } from "./app/link";
   import { href, router } from "./app/router.svelte";
+  import { setScreenTitle } from "./app/title";
+  import { getLang } from "./i18n/i18n.svelte";
   import { watchKeyboard } from "./app/viewport";
   import Manage from "./routes/Manage.svelte";
   import NotFound from "./routes/NotFound.svelte";
@@ -76,6 +78,14 @@
   // UI §9.2.2 : hors de l'accueil, un fichier déposé ne fait jamais naviguer l'onglet. Sur
   // l'accueil, Home reçoit le dépôt (voile pleine page), sauf pendant un envoi.
   $effect(() => guardFileDrop(window, () => supported && router.current.name === "home" && !sending));
+
+  // Titre de l'onglet par route et par langue (scan UX B9) ; l'accueil (SendFlow) tient le sien.
+  $effect(() => {
+    void getLang();
+    const name = router.current.name;
+    if (!supported) setScreenTitle("unsupported");
+    else if (name !== "home") setScreenTitle(name);
+  });
 
   // UI §9 : clavier virtuel ouvert → classe kbd-open sur <html> (barres collées dans le flux).
   $effect(() => watchKeyboard(window, (open) => document.documentElement.classList.toggle("kbd-open", open)));

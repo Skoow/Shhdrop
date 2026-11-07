@@ -4,6 +4,7 @@
   // « Lien prêt » n'est jamais monté ici : l'écran parent l'affiche après onsealed(), c'est-à-
   // dire après la résolution de createShare puis la fermeture du sceau.
   import { tick } from "svelte";
+  import { setScreenTitle } from "../app/title";
   import type { Sender, Step } from "../flows/send.svelte";
   import type { Category } from "../flows/kinds";
   import { formatBytes, formatDuration } from "../i18n/format";
@@ -208,17 +209,13 @@
   });
 
   // ---------- Titre de l'onglet, annonces de progression (tous les 10 %) ----------
-  $effect(() => {
-    const before = document.title;
-    return () => {
-      document.title = before;
-    };
-  });
+  // Pourcentage seulement, jamais un nom : « 42 % · Shhdrop » ; sinon « Envoi en cours · Shhdrop ».
+  // La démo y ajoute son préfixe (demo/install.ts).
   const sending = $derived(phase === "upload" || phase === "paused" || phase === "offline" || phase === "finalize");
   $effect(() => {
-    if (!sending) return;
-    const pct = `${s.percent} % · Shhdrop`;
-    document.title = document.title.startsWith("Démo · ") ? `Démo · ${pct}` : pct;
+    void getLang();
+    if (sending) document.title = `${s.percent} % · Shhdrop`;
+    else setScreenTitle("sealing");
   });
   let lastDecile = 0;
   $effect(() => {
