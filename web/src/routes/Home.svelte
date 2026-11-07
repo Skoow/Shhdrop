@@ -40,8 +40,10 @@
     onfiles?: (files: File[], source: Source, folders: string[]) => void;
     /** Vocal, Texte : ouvrent leur interface dans la page (le collage passe par Ctrl/Cmd + V). */
     onaction?: (action: Action) => void;
+    /** Faux pendant un envoi : le glisser-déposer n'ouvre pas le voile et n'ajoute rien (S9). */
+    active?: boolean;
   };
-  let { compact = false, children, onfiles, onaction }: Props = $props();
+  let { compact = false, children, onfiles, onaction, active = true }: Props = $props();
 
   // Décidé au montage seulement : un repli ultérieur ne rejoue pas l'entrée.
   let reveal = $state(!revealed && !untrack(() => compact));
@@ -97,7 +99,7 @@
     over = false;
   }
   function dragenter(e: DragEvent) {
-    if (!dragHasFiles(e)) return;
+    if (!active || !dragHasFiles(e)) return;
     e.preventDefault();
     over = depth.enter(e);
   }
@@ -111,7 +113,7 @@
     over = depth.leave(e);
   }
   function drop(e: DragEvent) {
-    if (!dragHasFiles(e)) return;
+    if (!active || !dragHasFiles(e)) return;
     e.preventDefault();
     close();
     void filesFromDrop(e.dataTransfer!).then(({ files, folders }) => give(files, "depot", folders));

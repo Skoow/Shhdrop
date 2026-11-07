@@ -441,6 +441,27 @@ export function createComposer(deps: ComposeDeps = {}) {
     return null;
   }
 
+  /**
+   * Éléments en cause, marqués en rouge (S6) : programmes et scripts ; textes trop longs ;
+   * au-delà de la taille permise, les plus gros fichiers qu'il suffit de retirer pour passer
+   * sous la limite.
+   */
+  function culprits(): Set<string> {
+    const out = new Set<string>();
+    for (const i of items) {
+      if (i.risky) out.add(i.id);
+      if (i.kind === "text" && codePoints(i.text ?? "") > TEXT_MAX) out.add(i.id);
+    }
+    let over = totalBytes - CONTENT_MAX;
+    if (over > 0)
+      for (const i of [...items].filter((x) => x.kind === "file").sort((a, b) => b.size - a.size)) {
+        if (over <= 0) break;
+        out.add(i.id);
+        over -= i.size;
+      }
+    return out;
+  }
+
   function groups(): { category: Category; items: ComposeItem[]; count: number; bytes: number }[] {
     return CATEGORY_ORDER.map((category) => {
       const list = items.filter((i) => i.category === category);
@@ -483,6 +504,7 @@ export function createComposer(deps: ComposeDeps = {}) {
     moveTo,
     positionOf,
     blockReason,
+    culprits,
     toApiItems,
   };
 }

@@ -5,19 +5,19 @@
   // Tout reste en mémoire (aucun stockage) ; l'envoi lui-même est la Task 17 (`onsend`).
   import { flushSync, tick } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
-  import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, PW_MIN_CHARS, TEXT_MAX, checkPassword, generatePassword, type Item } from "../index";
+  import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, PW_MIN_CHARS, TEXT_MAX, checkPassword, generatePassword, type Item, type KeepTtl } from "../index";
   import { blockKey, createComposer, type AddReport, type Source } from "../flows/compose.svelte";
   import { CLEANER_READY, cleanFile } from "../flows/clean";
-  import { VOICE_RECORDER_READY } from "../flows/features";
+  import { CHAT_READY, VOICE_RECORDER_READY } from "../flows/features";
   import { fromPasteEvent } from "../flows/intake";
-  import { createOptions, estimateUpload, viewableInBrowser, viewOnlyBlockers, type Rights } from "../flows/options.svelte";
+  import { createOptions, estimateUpload, sendRights, viewableInBrowser, viewOnlyBlockers, type Rights } from "../flows/options.svelte";
   import { formatBytes, formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { announce } from "../ui/announce";
   import Button from "../ui/Button.svelte";
   import CapacityGauge from "../ui/CapacityGauge.svelte";
   import CategoryGroup from "../ui/CategoryGroup.svelte";
-  import { ArrowDown, ArrowUp, BrushCleaning, Camera, ChevronDown, Lock, Mic, NotebookPen, Pencil, ShieldAlert, SlidersHorizontal, Upload, Video, X } from "../ui/Icon";
+  import { ArrowDown, ArrowUp, BrushCleaning, MessagesSquare, Camera, ChevronDown, Lock, Mic, NotebookPen, Pencil, ShieldAlert, SlidersHorizontal, Upload, Video, X } from "../ui/Icon";
   import TextField from "../ui/TextField.svelte";
   import Sheet from "../ui/Sheet.svelte";
   import TextArea from "../ui/TextArea.svelte";
@@ -26,14 +26,16 @@
   import Home, { type Action } from "./Home.svelte";
   import Options from "./Options.svelte";
 
-  export type SendState = { items: Item[]; ttlHours: number; maxOpens: number; password: string; rights: Rights };
+  export type SendState = { items: Item[]; ttlHours: number; maxOpens: number; password: string; rights: Rights; keepTtlH?: KeepTtl };
   type Props = {
     /** Envoi (Task 17). Sans lui : avis « Envoi : prochaine étape ». */
     onsend?: (state: SendState) => void;
     /** Droit « coffre » proposé (spec §27 : jamais en démo). */
     vaultAllowed?: boolean;
+    /** Faux pendant un envoi (composeur caché) : ni collage ni dépôt n'ajoutent rien (S9). */
+    active?: boolean;
   };
-  let { onsend, vaultAllowed = false }: Props = $props();
+  let { onsend, vaultAllowed = false, active = true }: Props = $props();
 
   let online = $state(typeof navigator === "undefined" || navigator.onLine !== false);
 
@@ -176,6 +178,8 @@
 
   // ---------- Vocal (Task 12) ----------
   let voiceOpen = $state(false);
+  // « Conversation » (V2, pas encore construite) : feuille d'attente derrière CHAT_READY.
+  let chatOpen = $state(false);
 
   // ---------- Coller ----------
   const isTextEntry = (n: Element | null) =>
@@ -184,6 +188,7 @@
     (n instanceof HTMLInputElement && !["button", "checkbox", "radio", "submit", "reset", "file", "range", "color", "image"].includes(n.type));
 
   function onPaste(e: ClipboardEvent) {
+    if (!active) return; // envoi en cours : le collage n'ajoute rien (S9)
     const r = fromPasteEvent(e, isTextEntry(document.activeElement));
     if (r.native) return;
     if (r.files.length === 0 && r.text === null) return;
@@ -199,10 +204,12 @@
     let raf = 0;
     const fit = () => {
       raf = 0;
-      node.style.removeProperty("--app-h");
-      const top = node.getBoundingClientRect().top + scrollY;
-      const tail = document.documentElement.scrollHeight - (top + node.offsetHeight);
-      node.style.setProperty("--app-h", `${Math.max(520, Math.floor(innerHeight - top - tail))}px`);
+      // Ce qui est sous l'app (bas du cadre, pied de page), mesuré jusqu'au bas du pied de page :
+      // la hauteur du document (et du corps) vaut au moins celle de l'écran, elle fausserait la mesure.
+      const r = node.getBoundingClientRect();
+      const end = document.querySelector("body > footer, footer.foot") ?? document.body;
+      const tail = end.getBoundingClientRect().bottom - r.bottom;
+      node.style.setProperty("--app-h", `${Math.max(520, Math.floor(innerHeight - (r.top + scrollY) - tail))}px`);
     };
     const queue = () => {
       if (!raf) raf = requestAnimationFrame(fit);
@@ -326,6 +333,7 @@
         : "",
   );
   const estimate = $derived(estimateUpload(composer.totalBytes));
+  const culprits = $derived(composer.culprits());
   const unviewable = $derived(viewOnlyBlockers(composer.items));
   const cannotOpen = (i: (typeof composer.items)[number]) => !options.allowDownload && !viewableInBrowser(i);
   const shortSummary = $derived(
@@ -387,7 +395,7 @@
 
   function send() {
     if (reasonText) return;
-    const state: SendState = { items: composer.toApiItems(), ttlHours: options.ttlHours, maxOpens: options.maxOpens, password: options.password, rights: options.rights };
+    const state: SendState = { items: composer.toApiItems(), ttlHours: options.ttlHours, maxOpens: options.maxOpens, password: options.password, ...sendRights(options) };
     if (onsend) onsend(state);
     else say(t("compose.send.soon"));
   }
@@ -416,44 +424,62 @@
   </button>
 {/snippet}
 
+{#snippet adder()}
+  <!-- Ajouter : zone de dépôt (un clic ouvre le sélecteur ; on dépose aussi n'importe où sur la
+       page) et « Créer sur place ». Ordinateur : barre fine en bas de la liste ; téléphone : en haut. -->
+  <div class={["adder", { bar: !narrow }]}>
+    <button type="button" class="dropzone" onclick={() => filesIn?.click()}>
+      <span class="dz-ic" aria-hidden="true"><Upload size={18} strokeWidth={1.8} /></span>
+      <span class="dz-tx">
+        <span class="dz-t">{coarse ? t("compose.dropzone.touch") : t("compose.dropzone.title")}</span>
+        {#if !coarse}<span class="dz-s">{t("compose.dropzone.sub", { keys: pasteKeys })}</span>{/if}
+      </span>
+    </button>
+    <div class="make" role="group" aria-label={t("compose.create.label")}>
+      {@render create(t("compose.create.note"), NotebookPen, () => act("texte"))}
+      {@render create(t("compose.create.voice"), Mic, () => act("vocal"))}
+      {#if coarse}
+        {@render create(t("compose.add.photo"), Camera, () => photoIn?.click())}
+        {@render create(t("compose.add.video"), Video, () => videoIn?.click())}
+      {/if}
+      {#if !CHAT_READY}
+        <button type="button" class="mk soon-mk" onclick={() => (chatOpen = true)}>
+          <MessagesSquare size={18} strokeWidth={1.8} aria-hidden="true" />
+          <span>{t("compose.create.chat")}</span>
+          <span class="soon-b">{t("compose.soon.badge")}</span>
+        </button>
+      {/if}
+    </div>
+  </div>
+{/snippet}
+
 {#snippet app()}
   <div class={["app", { narrow }]} {@attach narrow ? null : fitViewport}>
     <div class="list-col">
       <div class="top">
         <h2 id="compose-title" class="title" tabindex="-1" bind:this={title}>{t("compose.title")}</h2>
+        {#if anyNotCleanedFiles && !narrow}
+          <!-- Ordinateur : dans l'en-tête, pour laisser la place à la liste ; la légende en description. -->
+          <button type="button" class="cleanbtn small" aria-busy={cleaning} disabled={cleaning} title={t("compose.meta.legend")} aria-describedby="clean-legend" onclick={cleanAll}>
+            <BrushCleaning size={16} strokeWidth={1.8} aria-hidden="true" />{t("compose.clean.all")}
+          </button>
+          <span id="clean-legend" class="sr-only">{t("compose.meta.legend")}</span>
+        {/if}
         <button type="button" class="clear" onclick={clearAll}><X size={16} strokeWidth={2} aria-hidden="true" />{t("compose.clear")}</button>
         <div class="cap"><CapacityGauge bytes={composer.totalBytes} count={composer.count} head /></div>
       </div>
 
       <!-- Ajouter : une zone de dépôt (un clic ouvre le sélecteur), puis « Créer sur place ». -->
-      <div class="adder">
-      <button type="button" class="dropzone" onclick={() => filesIn?.click()}>
-        <span class="dz-ic" aria-hidden="true"><Upload size={20} strokeWidth={1.8} /></span>
-        <span class="dz-tx">
-          <span class="dz-t">{coarse ? t("compose.dropzone.touch") : t("compose.dropzone.title")}</span>
-          {#if !coarse}<span class="dz-s">{t("compose.dropzone.sub", { keys: pasteKeys })}</span>{/if}
-        </span>
-      </button>
-      <div class="make" role="group" aria-label={t("compose.create.label")}>
-        {@render create(t("compose.create.note"), NotebookPen, () => act("texte"))}
-        {@render create(t("compose.create.voice"), Mic, () => act("vocal"))}
-        {#if coarse}
-          {@render create(t("compose.add.photo"), Camera, () => photoIn?.click())}
-          {@render create(t("compose.add.video"), Video, () => videoIn?.click())}
-        {/if}
-      </div>
-      </div>
+      {#if narrow}{@render adder()}{/if}
       <input bind:this={filesIn} type="file" multiple hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "fichiers")} />
       <input bind:this={photoIn} type="file" accept="image/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "photo")} />
       <input bind:this={videoIn} type="file" accept="video/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "video")} />
 
-      {#if anyNotCleanedFiles}
-        <div class="cleanbar">
-          <button type="button" class="cleanbtn" aria-busy={cleaning} disabled={cleaning} onclick={cleanAll}>
-            <BrushCleaning size={18} strokeWidth={1.8} aria-hidden="true" />{t("compose.clean.all")}
-          </button>
-          <span class="cl-t">{t("compose.meta.legend")}</span>
-        </div>
+      {#if anyNotCleanedFiles && narrow}
+        <button type="button" class="cleanbtn wide" aria-busy={cleaning} disabled={cleaning} aria-describedby="clean-legend-m" onclick={cleanAll}>
+          <BrushCleaning size={18} strokeWidth={1.8} aria-hidden="true" />{t("compose.clean.all")}
+        </button>
+        <span id="clean-legend-m" class="sr-only">{t("compose.meta.legend")}</span>
       {/if}
 
       <!-- Seule la liste défile (ordinateur) : la page, jamais. -->
@@ -487,6 +513,7 @@
             onmenu={openMenu}
             onrenamesheet={openRename}
             {cannotOpen}
+            danger={(i) => culprits.has(i.id)}
           />
         {/each}
       </div>
@@ -495,6 +522,7 @@
         <p><Lock size={15} strokeWidth={2} aria-hidden="true" />{t("compose.trust.names")}</p>
       </div>
       </div>
+      {#if !narrow}{@render adder()}{/if}
     </div>
 
     {#if narrow}
@@ -524,7 +552,7 @@
   </div>
 {/snippet}
 
-<Home compact={filled} children={filled ? app : undefined} onfiles={(f, s, folders) => void addFiles(f, s, folders)} onaction={act} />
+<Home {active} compact={filled} children={filled ? app : undefined} onfiles={(f, s, folders) => void addFiles(f, s, folders)} onaction={act} />
 
 <Sheet bind:open={editorOpen} title={editorId ? t("text.title.edit") : t("text.title.new")}>
   <div class="editor">
@@ -613,6 +641,10 @@
   {/if}
 </Sheet>
 
+<Sheet bind:open={chatOpen} title={t("compose.create.chat")}>
+  <p class="soon">{t("compose.soon.chat")}</p>
+</Sheet>
+
 <Sheet bind:open={voiceOpen} title={t("compose.voice.title")}>
   <!-- VOICE_RECORDER_READY : héberger ici <VoiceRecorder onrecorded={(file) => …} /> (autre chantier). -->
   {#if !VOICE_RECORDER_READY}<p class="soon">{t("compose.soon.voice")}</p>{/if}
@@ -654,7 +686,7 @@
   /* En-tête : « Votre envoi », « Tout retirer », et la capacité bien visible (nombre et taille). */
   .top {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
     gap: var(--sp-2) var(--sp-3);
     padding-inline: 4px;
@@ -768,14 +800,14 @@
       color: var(--accent);
     }
   }
-  .cleanbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--sp-2) var(--sp-3);
-    padding: 10px 12px;
-    border-radius: 14px;
-    background: var(--warn-tint);
+  .soon-b {
+    padding: 0 7px;
+    border-radius: var(--r-pill);
+    background: rgb(141 178 255 / 0.14);
+    color: var(--info);
+    font-size: var(--fs-micro);
+    font-weight: 600;
+    line-height: 1.6;
   }
   .cleanbtn {
     display: inline-flex;
@@ -793,17 +825,30 @@
     cursor: pointer;
     transition: transform var(--dur-press) var(--ease-out);
   }
+  .cleanbtn.wide {
+    justify-content: center;
+    width: 100%;
+  }
+  /* Téléphone : pastilles « Créer » plus serrées (deux rangées au plus). */
+  .narrow .make {
+    gap: 6px;
+  }
+  .narrow .mk {
+    min-height: 44px;
+    padding: 0 12px 0 10px;
+    font-size: var(--fs-micro);
+  }
+  .cleanbtn.small {
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: var(--fs-micro);
+  }
   .cleanbtn:active {
     transform: scale(0.97);
   }
   .cleanbtn:disabled {
     cursor: progress;
     opacity: 0.7;
-  }
-  .cl-t {
-    flex: 1 1 14rem;
-    color: var(--text);
-    font-size: var(--fs-small);
   }
   .title {
     font-size: var(--fs-h3);
@@ -1128,25 +1173,77 @@
       gap: var(--sp-3);
       min-height: 0;
     }
-    .adder {
-      display: flex;
-      align-items: stretch;
-      gap: var(--sp-2);
-    }
-    .adder .dropzone {
-      flex: 1 1 auto;
-      min-height: 60px;
-      padding-block: 8px;
-    }
-    .adder .make {
+    /* Barre fine en bas de la liste : déposer ou choisir, puis « Créer sur place ». */
+    .adder.bar {
       flex: none;
-      flex-direction: column;
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      padding-top: var(--sp-3);
+      border-top: 1px solid var(--hair);
+    }
+    .adder.bar .dropzone {
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 48px;
+      padding: 4px 12px 4px 6px;
+      gap: var(--sp-3);
+      border-radius: 14px;
+    }
+    .adder.bar .dz-ic {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+    }
+    .adder.bar .dz-tx {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .adder.bar .dz-t {
+      font-size: var(--fs-small);
+    }
+    .adder.bar .dz-s {
+      margin-inline-start: 8px;
+      font-size: var(--fs-micro);
+    }
+    /* Photos et vidéos côte à côte (petites vignettes) : toutes les catégories tiennent ensemble. */
+    .groups {
+      display: flex;
+      flex-wrap: wrap;
+      column-gap: var(--sp-5);
+      row-gap: var(--sp-2);
+    }
+    .groups > :global(section) {
+      flex: 1 1 100%;
+      min-width: 0;
+    }
+    .groups > :global(section.media) {
+      flex: 1 1 200px;
+    }
+    .adder.bar .make {
+      flex: none;
       flex-wrap: nowrap;
-      justify-content: center;
       gap: 6px;
     }
-    .adder .mk {
-      min-height: 44px;
+    /* Liste étroite : les pastilles « Créer » gardent leur icône (et « Bientôt »), le libellé passe
+       aux lecteurs d'écran ; la zone de dépôt garde sa phrase. */
+    .list-col {
+      container-type: inline-size;
+    }
+    @container (max-width: 760px) {
+      .adder.bar .mk {
+        padding: 0 12px;
+      }
+      .adder.bar .mk > span:not(.soon-b) {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
     }
     /* position: relative : les éléments « sr-only » (absolus) restent dans le défilement de la liste. */
     .lc-scroll {
@@ -1198,7 +1295,7 @@
   }
   @media (min-width: 1180px) {
     .app {
-      grid-template-columns: minmax(0, 1fr) minmax(320px, 360px) minmax(220px, 270px);
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 340px) minmax(210px, 250px);
       column-gap: 36px;
       padding: var(--sp-5) 32px;
     }

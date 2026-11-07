@@ -171,6 +171,16 @@ test.describe("fr-FR", () => {
     await slowSegments(page, 1500);
     await sendButton(page).click();
     await expect(page.getByRole("heading", { name: "Chiffrement et envoi" })).toBeVisible({ timeout: 30_000 });
+    // S9 : pendant l'envoi, Ctrl/Cmd + V (fichier ou texte) n'ajoute rien au composeur caché.
+    await page.evaluate(() => {
+      const f = new DataTransfer();
+      f.items.add(new File(["x"], "colle.txt", { type: "text/plain" }));
+      document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: f, bubbles: true, cancelable: true }));
+      const t = new DataTransfer();
+      t.setData("text/plain", "collé pendant l'envoi");
+      document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: t, bubbles: true, cancelable: true }));
+    });
+    await expect(page.getByRole("dialog", { name: "Nouveau texte" })).toHaveCount(0);
     await page.getByRole("button", { name: "Annuler", exact: true }).click();
     await expect(page.getByText("Annuler l'envoi ? Ce qui a été envoyé sera effacé du serveur.")).toBeVisible();
     await page.getByRole("button", { name: "Annuler l'envoi" }).click();

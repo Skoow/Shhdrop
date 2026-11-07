@@ -163,7 +163,7 @@ test.describe("fr-FR", () => {
     expect(await page.title()).not.toContain(password);
   });
 
-  test("mouvement réduit : aucune animation ; sinon, montée en éventail ≤ 640 ms et boutons cliquables", async ({ page, shh, context, isMobile }) => {
+  test("mouvement réduit : aucune animation ; sinon, montée en éventail ≤ 640 ms et boutons cliquables", async ({ page, shh, context }) => {
     test.setTimeout(120_000);
     // Toutes les animations WAAPI lancées dans « Lien prêt » : durée + délai ≤ 640 ms.
     await page.addInitScript(() => {
@@ -182,10 +182,10 @@ test.describe("fr-FR", () => {
     // Boutons cliquables pendant l'animation : la copie répond tout de suite.
     await page.getByRole("group", { name: "Lien" }).getByRole("button", { name: /^Copier/ }).click();
 
-    // Téléphone + mouvement réduit : le bouton « Ajouter » de la feuille texte du composeur v3 ne
-    // devient jamais « stable » pour Playwright (signalé ; hors du périmètre de cette tâche).
-    if (isMobile) return;
+    // Seconde page au premier plan : sinon l'onglet est en arrière-plan, requestAnimationFrame
+    // y est suspendu et Playwright ne voit jamais un bouton « stable » (S11, téléphone).
     const p2 = await context.newPage();
+    await p2.bringToFront();
     await p2.emulateMedia({ reducedMotion: "reduce" });
     await p2.goto(shh.origin + "/");
     await addText(p2, "réduit");

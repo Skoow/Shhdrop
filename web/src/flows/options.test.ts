@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { en } from "../i18n/en";
 import { fr } from "../i18n/fr";
-import { createOptions, estimateUpload, viewableInBrowser, viewOnlyBlockers, type OptionsDeps } from "./options.svelte";
+import { createOptions, estimateUpload, sendRights, viewableInBrowser, viewOnlyBlockers, type OptionsDeps } from "./options.svelte";
 import { CONTENT_MAX, MAX_OPENS, PW_TRIES, generatePassword, PASSWORD_ALPHABET } from "../index";
 
 const check: OptionsDeps["check"] = (pw) =>
@@ -89,6 +89,16 @@ describe("createOptions (UI §9.3)", () => {
     expect(p.rights).toBe("enregistrer");
     p.rights = "voir";
     expect(p.allowDownload).toBe(false);
+  });
+
+  it("sendRights : le coffre porte la durée du partage (keep_ttl_h, S5), les autres droits non", () => {
+    const o = make({ vaultAllowed: () => true });
+    o.ttlHours = 6;
+    expect(sendRights(o)).toEqual({ rights: "enregistrer" });
+    o.keepVault = true;
+    expect(sendRights(o)).toEqual({ rights: "coffre", keepTtlH: 6 });
+    o.allowDownload = false;
+    expect(sendRights(o)).toEqual({ rights: "voir" });
   });
 
   it("chaque raison de blocage a son texte FR et EN", () => {

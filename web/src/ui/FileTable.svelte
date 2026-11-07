@@ -20,8 +20,9 @@
     onmenu: (id: string) => void;
     onmove: (id: string, delta: -1 | 1) => void;
     cannotOpen?: (item: ComposeItem) => boolean;
+    danger?: (item: ComposeItem) => boolean;
   };
-  let { caption, items, helpId, onrename, onremove, onmenu, onmove, cannotOpen }: Props = $props();
+  let { caption, items, helpId, onrename, onremove, onmenu, onmove, cannotOpen, danger }: Props = $props();
 
   function key(e: KeyboardEvent, id: string) {
     if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
@@ -45,13 +46,16 @@
       {@const Icon = iconFor(item)}
       {@const name = item.base + item.ext}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-      <tr data-row={item.id} animate:flip={{ duration: reducedMotion() ? 0 : 180 }} onkeydown={(e) => key(e, item.id)}>
+      <tr class={{ danger: danger?.(item) }} data-row={item.id} animate:flip={{ duration: reducedMotion() ? 0 : 180 }} onkeydown={(e) => key(e, item.id)}>
         <td class="c-name">
           <span class="cell">
             <span class={["ic", { risky: item.risky }]} aria-hidden="true"><Icon size={18} strokeWidth={1.7} /></span>
             <span class="txt">
-              <bdi class="nm" title={name} translate="no"><span class="b">{item.base}</span><span class="e">{item.ext}</span></bdi>
-              <ItemNotes {item} cannotOpen={cannotOpen?.(item) ?? false} />
+              <span class="l1">
+                <bdi class="nm" title={name} translate="no"><span class="b">{item.base}</span><span class="e">{item.ext}</span></bdi>
+                <ItemNotes {item} badgesOnly />
+              </span>
+              <ItemNotes {item} cannotOpen={cannotOpen?.(item) ?? false} lines />
             </span>
           </span>
         </td>
@@ -89,7 +93,7 @@
     border-bottom: 1px solid var(--hair-2);
   }
   td {
-    padding: 10px var(--sp-3);
+    padding: 4px var(--sp-3);
     vertical-align: middle;
     border-bottom: 1px solid var(--hair);
   }
@@ -103,6 +107,11 @@
   }
   tbody tr:focus-within {
     background: rgb(255 255 255 / 0.035);
+  }
+  /* Élément en cause (S6) : fond et filet rouges, sans dépendre de la seule couleur (badge, texte). */
+  tbody tr.danger {
+    background: var(--danger-tint);
+    box-shadow: inset 3px 0 0 var(--danger);
   }
   .c-type {
     width: 5.5rem;
@@ -135,9 +144,9 @@
     display: grid;
     place-items: center;
     flex: none;
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
     background: rgb(255 255 255 / 0.045);
     box-shadow: inset 0 0 0 1px var(--hair);
     color: var(--text-2);
@@ -147,9 +156,18 @@
   }
   .txt {
     display: grid;
-    gap: 3px;
+    gap: 1px;
     min-width: 0;
-    padding-top: 7px;
+    padding-top: 5px;
+  }
+  .l1 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .l1 .nm {
+    flex: 0 1 auto;
   }
   .nm {
     display: flex;

@@ -379,6 +379,8 @@ describe("Icon.ts (UI §6)", () => {
     "ellipsis", "sliders-horizontal",
     // Composeur v3 : archives, dépôt, notes, programmes, nettoyage.
     "file-archive", "upload", "notebook-pen", "file-terminal", "brush-cleaning",
+    // Composeur v3.1 : « Conversation ».
+    "messages-square",
   ];
   const pascal = (s: string) =>
     s.split("-").map((p) => p[0]!.toUpperCase() + p.slice(1)).join("");

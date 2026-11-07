@@ -30,8 +30,10 @@
     /** Renommer depuis le tableau (feuille de renommage). */
     onrenamesheet?: (id: string) => void;
     cannotOpen?: (item: ComposeItem) => boolean;
+    /** Élément en cause d'un blocage ou d'un risque : marqué en rouge (S6). */
+    danger?: (item: ComposeItem) => boolean;
   };
-  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, onrenamesheet, cannotOpen }: Props = $props();
+  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, onrenamesheet, cannotOpen, danger }: Props = $props();
   // Ordinateur : grille de vignettes (photos, vidéos), tableau (documents, archives, autres),
   // lignes pour les notes et l'audio. Téléphone : lignes compactes partout.
   const view = $derived(compact ? "rows" : category === "photos" || category === "videos" ? "grid" : category === "texte" || category === "audio" ? "rows" : "table");
@@ -123,15 +125,15 @@
   });
 </script>
 
-<section class={["group", { compact }]} aria-labelledby="{uid}-h">
+<section class={["group", { compact, media: view === "grid" }]} aria-labelledby="{uid}-h">
   <div class="head">
     <h3 id="{uid}-h">{t(KEY[category])}</h3>
     <span class="meta num">{items.length} · {formatBytes(bytes, getLang())}</span>
   </div>
   {#if view === "grid"}
-    <MediaGrid {items} {helpId} onmenu={(id) => onmenu?.(id)} {onmove} {cannotOpen} />
+    <MediaGrid {items} {helpId} onmenu={(id) => onmenu?.(id)} {onmove} {cannotOpen} {danger} />
   {:else if view === "table"}
-    <FileTable caption={t(KEY[category])} {items} {helpId} onrename={(id) => onrenamesheet?.(id)} {onremove} onmenu={(id) => onmenu?.(id)} {onmove} {cannotOpen} />
+    <FileTable caption={t(KEY[category])} {items} {helpId} onrename={(id) => onrenamesheet?.(id)} {onremove} onmenu={(id) => onmenu?.(id)} {onmove} {cannotOpen} {danger} />
   {:else}
   <ol bind:this={list} class="rows">
     {#each items as item (item.id)}
@@ -150,6 +152,7 @@
           {compact}
           onmenu={() => onmenu?.(item.id)}
           cannotOpen={cannotOpen?.(item) ?? false}
+          danger={danger?.(item) ?? false}
         />
       </li>
     {/each}
@@ -170,7 +173,7 @@
     padding: var(--sp-2) 4px 4px var(--sp-6);
   }
   .group:not(.compact) .head {
-    padding-inline-start: 4px;
+    padding: 2px 4px 2px;
   }
   .compact .head {
     padding-inline-start: 4px;

@@ -91,6 +91,7 @@
       maxOpens: state.maxOpens,
       password: state.password,
       rights: state.rights,
+      keepTtlH: state.keepTtlH,
     };
     setView("sealing");
     void s.start(state.items, opts);
@@ -153,7 +154,7 @@
         } }}>{note}</Banner></div>
   {/if}
   {#key composeKey}
-    <Compose {vaultAllowed} onsend={start} />
+    <Compose {vaultAllowed} active={view === "compose"} onsend={start} />
   {/key}
 </div>
 

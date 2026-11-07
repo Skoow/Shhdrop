@@ -32,10 +32,12 @@
     onmenu?: () => void;
     /** Sans téléchargement, le destinataire ne pourra pas l'ouvrir (spec §34). */
     cannotOpen?: boolean;
+    /** En cause d'un blocage ou d'un risque (S6). */
+    danger?: boolean;
     /** Bouton « Retirer » (le parent y remet le focus après un déplacement ou une annulation). */
     el?: HTMLDivElement | undefined;
   };
-  let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, el = $bindable() }: Props = $props();
+  let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, danger = false, el = $bindable() }: Props = $props();
 
   const name = $derived(item.base + item.ext);
   const Icon = $derived(iconFor(item));
@@ -137,7 +139,7 @@
 
 <!-- Alt + ↑/↓ depuis la poignée ou un bouton de la ligne (l'événement remonte). -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div bind:this={el} class={["row", { editing, moving, compact }]} onkeydown={key}>
+<div bind:this={el} class={["row", { editing, moving, compact, danger }]} onkeydown={key}>
   {#if compact}
     <!-- Téléphone : l'ordre se change par le menu « … » (Monter, Descendre). -->
   {:else if movable}
@@ -186,8 +188,8 @@
       <bdi class="nm" title={name} translate="no">
         <span class="b">{item.base}</span>{#if item.kind !== "text"}<span class="e">{item.ext}</span>{/if}
       </bdi>
-      {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi>{/if}
       <span class="meta">
+        {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi><span class="sep" aria-hidden="true">·</span>{/if}
         <span class="num">{formatBytes(item.size, getLang())}</span>
         {#if duration !== null}<span class="sep" aria-hidden="true">·</span><span class="num">{formatClock(duration)}</span>{/if}
         <ItemNotes {item} {cannotOpen} badgesOnly />
@@ -221,7 +223,7 @@
     grid-template-columns: auto 44px minmax(0, 1fr) auto;
     align-items: center;
     column-gap: var(--sp-3);
-    min-height: 64px;
+    min-height: 52px;
     padding: 6px 4px 6px 0;
     border-radius: 16px;
     background: transparent;
@@ -237,6 +239,10 @@
   .row.moving {
     background: var(--surface-3);
     box-shadow: var(--e-2), inset 0 0 0 1px var(--hair-2);
+  }
+  .row.danger {
+    background: var(--danger-tint);
+    box-shadow: inset 3px 0 0 var(--danger);
   }
   .row.compact {
     grid-template-columns: 44px minmax(0, 1fr) auto;
@@ -303,6 +309,7 @@
   }
   .sub {
     min-width: 0;
+    max-width: 60%;
     overflow: hidden;
     color: var(--text-2);
     font-size: var(--fs-small);
@@ -312,6 +319,7 @@
   .meta {
     display: flex;
     flex-wrap: wrap;
+    min-width: 0;
     align-items: center;
     gap: 4px 8px;
     color: var(--text-2);

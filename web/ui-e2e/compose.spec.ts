@@ -124,14 +124,14 @@ test.describe("fr-FR", () => {
       await expect(page.getByRole("button", { name: /^Retirer / })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Choisir des fichiers" })).toBeVisible();
       const make = page.getByRole("group", { name: "Créer sur place" }).getByRole("button");
-      await expect(make).toHaveText(["Note texte", "Mémo vocal", "Photo", "Vidéo"]);
+      await expect(make).toHaveText(["Note texte", "Mémo vocal", "Photo", "Vidéo", "Conversation Bientôt"]);
       expect(await longParagraphs(page.locator("main"))).toEqual([]);
     } else {
       // Ordinateur : photos en grille, documents en tableau ; « Créer sur place » sans Photo ni Vidéo.
       await expect(page.locator(".grid .tile")).toHaveCount(7); // 6 photos + 1 vidéo
       await expect(page.getByRole("table", { name: "Documents" })).toBeVisible();
       await expect(page.getByRole("table", { name: "Archives" }).getByRole("cell", { name: "ZIP", exact: true })).toBeVisible();
-      await expect(page.getByRole("group", { name: "Créer sur place" }).getByRole("button")).toHaveText(["Note texte", "Mémo vocal"]);
+      await expect(page.getByRole("group", { name: "Créer sur place" }).getByRole("button")).toHaveText(["Note texte", "Mémo vocal", "Conversation Bientôt"]);
       await expect(page.getByRole("button", { name: /^Déposez des fichiers n'importe où sur la page/ })).toBeVisible();
       // Exigence du propriétaire : tout tient dans l'écran, sans défilement de page ; le bouton
       // d'envoi est entièrement visible (1440 × 900 puis 1920 × 1080).
@@ -191,6 +191,8 @@ test.describe("fr-FR", () => {
     expect(await page.locator(".group h3").allTextContents()).toEqual(["Documents", "Archives", "Autres"]);
     const exe = rows(page).filter({ hasText: "installer.exe" });
     await expect(exe.getByText("À risque")).toBeVisible();
+    // S6 : l'élément en cause est marqué en rouge.
+    await expect(page.locator("[data-row].danger, [data-row] .row.danger").filter({ hasText: "installer.exe" })).toHaveCount(1);
     await expect(exe.getByText("Programme ou script : il peut agir sur l'appareil du destinataire.")).toBeVisible();
     await expect(rows(page).filter({ hasText: "vacances.jpg" }).getByText("Attention : c'est un programme, malgré son extension.")).toBeVisible();
     await expect(rows(page).filter({ hasText: "sauvegarde" }).getByText("Archive : son contenu n'est ni vérifié ni nettoyé.")).toBeVisible();
@@ -362,7 +364,8 @@ test.describe("fr-FR", () => {
     await page.keyboard.press("Enter");
     expect(await names(page)).toContain("Contrat signé.pdf");
     await browse(page, [f("toits-belleville.jpg")]);
-    await expect(page.locator(".badge", { hasText: "En double ?" })).toHaveCount(2);
+    // Grille : le doublon est dit dans la description de la vignette (et sa pastille).
+    await expect(page.getByText("En double ?")).toHaveCount(2);
   });
 
   test("téléphone : menu « … » (Renommer, Monter, Descendre, Retirer) ; feuille Options : focus piégé, Échap rend le focus", async ({ page, shh, isMobile }) => {
@@ -470,6 +473,45 @@ test.describe("fr-FR", () => {
       document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
     }, png);
     await expect(page.locator("[data-row] .nm", { hasText: "Image collée 1.png" })).toHaveCount(1);
+  });
+
+  test("2 notes, 3 photos, 1 vidéo, 2 documents, 1 archive : toutes les catégories visibles, sans défilement de page ; captures", async ({ page, shh, isMobile }) => {
+    await open(page, shh.origin);
+    await browse(page, [...PHOTOS.slice(0, 3), f("anniversaire-lou.webm"), f("contrat.pdf"), f("budget-2026.xlsx"), f("archive.zip")]);
+    await expect(rows(page)).toHaveCount(7);
+    await addNote(page, "Le code de la porte est 4512B.", "Code de la porte");
+    await addNote(page, "Pain, lait, café.", "Courses");
+    await expect(rows(page)).toHaveCount(9);
+    await settle(page);
+    if (!isMobile) {
+      for (const size of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
+        await page.setViewportSize(size);
+        await page.waitForTimeout(700);
+        expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight), `${size.width} : pas de défilement`).toBe(true);
+        expect(await inViewport(send(page))).toBe(true);
+        // Chaque catégorie présente a son titre visible, dans l'écran et dans la zone de la liste.
+        const heads = await page.locator(".group h3").evaluateAll((hs) => {
+          const box = document.querySelector(".lc-scroll")!.getBoundingClientRect();
+          return hs.map((h) => {
+            const r = h.getBoundingClientRect();
+            return { t: h.textContent, ok: r.top >= box.top - 1 && r.bottom <= box.bottom + 1 && r.bottom <= innerHeight };
+          });
+        });
+        await capture(page, `compose-mix9-${size.width}`);
+        expect(heads.map((h) => h.t)).toEqual(["Texte", "Photos", "Vidéos", "Documents", "Archives"]);
+        expect(heads.filter((h) => !h.ok), `${size.width}`).toEqual([]);
+      }
+    } else await capture(page, "compose-mix9");
+    expect(await axe(page)).toEqual([]);
+  });
+
+  test("Conversation : entrée « Bientôt », feuille d'explication sans date", async ({ page, shh }) => {
+    await open(page, shh.origin);
+    await browse(page, [f("contrat.pdf")]);
+    const b = page.getByRole("group", { name: "Créer sur place" }).getByRole("button", { name: /^Conversation/ });
+    await expect(b.locator(".soon-b")).toHaveText("Bientôt");
+    await b.click();
+    await expect(page.getByRole("dialog", { name: "Conversation" })).toContainText("Bientôt : un salon de discussion chiffré et éphémère, partagé par un lien et un mot de passe.");
   });
 
   test("Mémo vocal : entrée « Créer sur place », feuille d'attente (enregistreur à venir)", async ({ page, shh }) => {

@@ -408,3 +408,16 @@ describe("notes (titre et contenu) et nettoyage de tous les fichiers", () => {
     expect(r2).toEqual({ cleaned: [], failed: ["d.pdf"] });
   });
 });
+
+describe("éléments en cause (S6)", () => {
+  it("programme, texte trop long, plus gros fichiers au-delà de la limite", async () => {
+    const c = make({ probe: async (f) => new Uint8Array(await f.slice(0, 4).arrayBuffer()) });
+    await c.add([big("a.bin", CONTENT_MAX - 10), big("b.bin", 100), new File([new Uint8Array([0x4d, 0x5a])], "x.exe")], "fichiers");
+    const id = (n: string) => c.items.find((i) => i.base + i.ext === n)!.id;
+    expect([...c.culprits()].sort()).toEqual([id("a.bin"), id("x.exe")].sort());
+    const t = c.addText("a".repeat(10_001))!;
+    expect(c.culprits().has(t)).toBe(true);
+    c.remove(id("a.bin"));
+    expect([...c.culprits()].sort()).toEqual([t, id("x.exe")].sort());
+  });
+});

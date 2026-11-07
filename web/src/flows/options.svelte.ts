@@ -101,6 +101,14 @@ export function createOptions(deps: OptionsDeps) {
 }
 export type Options = ReturnType<typeof createOptions>;
 
+/**
+ * Droit écrit dans le manifeste et, pour le coffre, la durée de garde (spec §27.4, §34.1) :
+ * `keep_ttl_h` = durée du partage. Sans elle, createShare refuse « coffre » (S5).
+ */
+export function sendRights(o: Pick<Options, "rights" | "ttlHours">): { rights: Rights; keepTtlH?: TtlHours } {
+  return o.rights === "coffre" ? { rights: "coffre", keepTtlH: o.ttlHours } : { rights: o.rights };
+}
+
 // Débits de référence pour l'estimation (octets par seconde, envoi) : honnêtes et prudents.
 const FAST = 5_000_000; // fibre ou bon wifi, environ 40 Mbit/s en envoi
 const SLOW = 1_000_000; // réseau mobile moyen, environ 8 Mbit/s en envoi

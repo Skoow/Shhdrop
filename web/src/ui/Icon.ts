@@ -65,3 +65,5 @@ export { default as Upload } from "@lucide/svelte/icons/upload";
 export { default as NotebookPen } from "@lucide/svelte/icons/notebook-pen";
 export { default as FileTerminal } from "@lucide/svelte/icons/file-terminal";
 export { default as BrushCleaning } from "@lucide/svelte/icons/brush-cleaning";
+// Composeur v3.1 : « Conversation » (bientôt).
+export { default as MessagesSquare } from "@lucide/svelte/icons/messages-square";
