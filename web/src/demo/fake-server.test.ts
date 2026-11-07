@@ -482,3 +482,36 @@ describe("faux serveur de démo : requêtes brutes", () => {
     }
   });
 });
+
+describe("persistance de la démo (rechargement de l'onglet)", { timeout: 60_000 }, () => {
+  it("instantané + segments : un nouveau faux serveur ouvre le partage, octets intacts ; instantané clonable", async () => {
+    let last: ReturnType<ReturnType<typeof createFakeServer>["snapshot"]> | undefined;
+    const segs = new Map<string, Uint8Array>();
+    const a = setup({
+      rateBytesPerS: 1e9,
+      onChange: (s) => (last = structuredClone(s)),
+      onSegment: (id, n, d) => segs.set(`${id}:${n}`, d.slice()),
+    });
+    const big = bigFile();
+    const r = await share(a.net, 2, [big]);
+    expect(last).toBeDefined();
+    expect(segs.size).toBeGreaterThan(1);
+
+    const b = setup({ rateBytesPerS: 1e9, restore: { snap: last!, segment: (id, n) => segs.get(`${id}:${n}`) } });
+    expect(b.fake.snapshot()).toEqual(last);
+    expect(b.fake.shares()).toBe(1);
+    const o = await openShare(r.link, PW, ORIGIN, undefined, b.net);
+    const blob = await collectToBlob(o, 0);
+    expect(Buffer.from(await blob.arrayBuffer()).equals(Buffer.from(big.data))).toBe(true);
+    await o.done();
+    o.wipe();
+    expect(await shareStatus(r.manage, ORIGIN, b.net)).toMatchObject({ opensUsed: 1, maxOpens: 2 });
+  });
+
+  it("sans restore ni rappels : comportement inchangé (aucun état gardé)", async () => {
+    const { fake, net } = setup();
+    await share(net);
+    expect(fake.snapshot().shares).toHaveLength(1);
+    expect(createFakeServer().snapshot().shares).toHaveLength(0);
+  });
+});

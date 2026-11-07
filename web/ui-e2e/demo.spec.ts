@@ -13,7 +13,8 @@ const TITLE_FR = "Un lien, un mot de passe, puis plus rien.";
 const ID = Buffer.from(Uint8Array.from({ length: 16 }, (_, i) => i * 11 + 3)).toString("base64url");
 const KEY = Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => 200 - i * 5)).toString("base64url");
 
-const storage = (page: Page) => page.evaluate(() => localStorage.length + sessionStorage.length);
+// Seule entrée admise : l'identifiant d'onglet de la persistance de la démo (demo/persist.ts, exception démo).
+const storage = (page: Page) => page.evaluate(() => localStorage.length + Object.keys(sessionStorage).filter((k) => k !== "shh.demo.tab").length);
 
 test.describe("fr-FR", () => {
   test.use({ locale: "fr-FR" });
@@ -106,7 +107,7 @@ test.describe("fr-FR", () => {
       // Route d'ouverture ou de gestion : le faux serveur de cet onglet ne connaît pas ce partage.
       if (what === "partage") {
         await expect(page.getByRole("heading", { level: 1, name: "Ce lien n'existe pas ou n'est plus disponible." })).toBeVisible();
-        await expect(page.getByText("(normal en démo : le partage n'existait que dans l'onglet d'origine)")).toBeVisible();
+        await expect(page.getByText("(normal en démo : un partage n'existe que dans l'onglet qui l'a créé)")).toBeVisible();
       } else {
         await expect(page.getByRole("heading", { level: 1, name: "Supprimé" })).toBeVisible();
       }
@@ -300,6 +301,15 @@ test.describe("fr-FR : envoi (Tasks 17–18)", () => {
     await expect(page.locator("li.row").filter({ hasText: "Le code de la porte est 4471." })).toBeVisible();
     await expect(page.getByRole("button", { name: "Télécharger releve.bin" })).toBeVisible();
     await capture(page, "demo-content");
+    // Rechargement : le faux serveur de l'onglet survit (demo/persist.ts, exception démo) :
+    // « Rouvrir ce partage », comme en production, au lieu de « Lien invalide ».
+    await page.waitForTimeout(300);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Rouvrir ce partage" })).toBeVisible({ timeout: 20_000 });
+    await page.getByLabel("Mot de passe", { exact: true }).fill(password);
+    await page.getByRole("button", { name: /^(Rouvrir|Déchiffrement)/ }).click();
+    await expect(page.getByRole("heading", { name: "Contenu du partage" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator("li.row").filter({ hasText: "Le code de la porte est 4471." })).toBeVisible();
     await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
     await page.getByRole("button", { name: "Détruire", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Détruit" })).toBeVisible({ timeout: 20_000 });

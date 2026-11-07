@@ -15,7 +15,7 @@ describe("installDemo", async () => {
   setLang("fr");
   expect(getDemo()).toBeNull();
   const { installDemo } = await import("./install");
-  installDemo(window);
+  await installDemo(window);
 
   it("/api/* de l'origine → faux serveur ; le reste → réseau", async () => {
     const cap = await (await window.fetch("/api/captcha")).json();
@@ -48,11 +48,11 @@ describe("installDemo", async () => {
     const d = getDemo()!;
     expect(await d.solveCaptcha({}, { fallbackOrigin: null, mode: "pow" })).toEqual({ kind: "pow", payload: "demo" });
     setLang("fr");
-    expect(d.invalidLinkNote).toBe("(normal en démo : le partage n'existait que dans l'onglet d'origine)");
+    expect(d.invalidLinkNote).toBe("(normal en démo : un partage n'existe que dans l'onglet qui l'a créé)");
     expect(d.securityGaps).toContain("frame-ancestors");
     expect(d.securityGaps).toContain("GitHub reçoit votre adresse IP");
     setLang("en");
-    expect(d.invalidLinkNote).toBe("(expected in the demo: the share only existed in the original tab)");
+    expect(d.invalidLinkNote).toBe("(expected in the demo: a share only exists in the tab that created it)");
     expect(d.securityGaps).toContain("HSTS");
     expect(d.securityGaps).toContain("GitHub receives your IP address");
   });

@@ -1,7 +1,8 @@
 // Installation de la démo GitHub Pages (UI §14.3), appelée par main.ts en mode « demo »
 // seulement, avant le montage de l'application. Remplace fetch et XMLHttpRequest pour les
 // seules URL /api/* de l'origine (faux serveur en mémoire), préfixe le titre de l'onglet et
-// remplit les crochets lus par les écrans (app/demo-hooks.ts). Aucun stockage navigateur.
+// remplit les crochets lus par les écrans (app/demo-hooks.ts). Seul stockage : l'état du faux
+// serveur de cet onglet (demo/persist.ts, exception démo), pour survivre à un rechargement.
 import { setDemo } from "../app/demo-hooks";
 import { demoPrefixed } from "../app/title";
 import { getLang } from "../i18n/i18n.svelte";
@@ -9,6 +10,7 @@ import { SHARE_FRAGMENT, type CaptchaProof } from "../index";
 import DemoBanner from "./DemoBanner.svelte";
 import { createFakeServer } from "./fake-server";
 import { fakeXHRClass } from "./fake-xhr";
+import { openDemoStore } from "./persist";
 
 export const MARK = "__SHH_DEMO__";
 
@@ -20,8 +22,8 @@ const OUTAGE = { atFraction: 0.5, ms: 20_000 };
 
 
 const INVALID_LINK_NOTE = {
-  fr: "(normal en démo : le partage n'existait que dans l'onglet d'origine)",
-  en: "(expected in the demo: the share only existed in the original tab)",
+  fr: "(normal en démo : un partage n'existe que dans l'onglet qui l'a créé)",
+  en: "(expected in the demo: a share only exists in the tab that created it)",
 } as const;
 
 // Écarts avec la production (UI §14.3), pour la page Sécurité de la démo : une ligne par écart.
@@ -56,10 +58,18 @@ const SECURITY_GAPS = {
 
 const isApiPath = (p: string) => /^\/api(\/|$)/i.test(p);
 
-export function installDemo(w: Window): void {
+export async function installDemo(w: Window): Promise<void> {
   const q = new URLSearchParams(w.location.search);
   const rate = q.has("lent") ? SLOW_RATE : RATE;
-  const fake = createFakeServer({ rateBytesPerS: rate, outage: q.has("coupure") ? OUTAGE : undefined });
+  const store = await openDemoStore(w).catch(() => null);
+  const fake = createFakeServer({
+    rateBytesPerS: rate,
+    outage: q.has("coupure") ? OUTAGE : undefined,
+    restore: store?.snap ? { snap: store.snap, segment: (id, n) => store.segment(id, n) } : undefined,
+    onChange: store ? (s) => store.saveMeta(s) : undefined,
+    onSegment: store ? (id, n, d) => store.saveSegment(id, n, d) : undefined,
+  });
+  store?.release();
   const isApi = (u: URL) => u.origin === w.location.origin && isApiPath(u.pathname);
 
   // Seules les URL /api/* de l'origine sont détournées ; le reste (fichiers du site) part normalement.

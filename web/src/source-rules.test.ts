@@ -81,6 +81,19 @@ describe("règles de sources", () => {
   it("sessionStorage seulement dans session/open-grant.ts (et chat/session.ts)", () =>
     expect(offenders(/sessionStorage/, (r) => r !== "session/open-grant.ts" && r !== "chat/session.ts")).toEqual([]));
   it("pas de console.log", () => expect(offenders(/console\.log/)).toEqual([]));
+  // Exception démo (UI §14.3) : le faux serveur de la démo garde son état (ce que garderait le
+  // vrai serveur : empreintes, segments chiffrés) en IndexedDB, rangé par onglet (identifiant
+  // en sessionStorage), pour qu'un rechargement retrouve le partage. Seulement dans
+  // demo/persist.ts, jamais dans le build de production (demoGuard, check-dist).
+  it("démo : stockage navigateur seulement dans demo/persist.ts", () => {
+    const demoFiles = walk(join(srcDir, "demo"))
+      .filter((a) => /\.(ts|svelte)$/.test(a) && !/\.test\.ts$/.test(a))
+      .map((a) => ({ rel: relative(srcDir, a).split(sep).join("/"), text: readFileSync(a, "utf8") }));
+    const bad = demoFiles.filter((f) => f.rel !== "demo/persist.ts" && /localStorage|indexedDB|sessionStorage|document\.cookie/.test(f.text));
+    expect(bad.map((f) => f.rel)).toEqual([]);
+    const p = demoFiles.find((f) => f.rel === "demo/persist.ts");
+    expect(p?.text).not.toMatch(/localStorage|document\.cookie/);
+  });
 
   // UI §20.2 S6 et §20.4 (poussière) : styles par CSSOM et WAAPI seulement, aucune lecture de
   // pixels du contenu hors des visionneuses. Ces deux règles valent pour TOUS les sources.

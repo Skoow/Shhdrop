@@ -11,8 +11,10 @@
 // segment dans les 120 s) servies jusqu'à 2 h après l'échéance ou la suppression ;
 // signalement : aucune grâce, lectures en cours coupées ; GET /api/shares/watch tenue 25 s.
 // Il ne reçoit et ne garde que ce que reçoit le
-// vrai serveur (empreintes, sel, enveloppe, segments chiffrés), dans une Map de la page :
-// rien n'est écrit ailleurs.
+// vrai serveur (empreintes, sel, enveloppe, segments chiffrés), dans des Map de la page.
+// Persistance (exception démo, demo/persist.ts) : `onChange` et `onSegment` livrent ces mêmes
+// données, et elles seules, pour qu'un rechargement de l'onglet retrouve ses partages
+// (`restore`) ; aucun secret du client (lien, mot de passe, clé) n'en fait partie.
 // Non simulés : limites par connexion, quotas, place disque, gel. Aucune preuve anti-robot
 // n'est vérifiée (anti-robot désactivé en démo ; `fallback: null`).
 import { BUCKETS, segmentCount, segmentSize } from "../crypto/container";
@@ -60,6 +62,21 @@ type Share = {
 
 type Token = { kind: "upload" | "download"; id: string; openN: number; exp: number };
 
+/** Partage sans ses segments (gardés à part, un enregistrement par segment). */
+export type SnapShare = Omit<Share, "segments"> & { nSegs: number };
+/** État complet du faux serveur, clonable (structuredClone, IndexedDB) ; sans les segments. */
+export type Snapshot = {
+  v: 1;
+  shares: [string, SnapShare][];
+  dead: [string, { share: SnapShare; graceEnd: number; opens: number[] }][];
+  tokens: [string, Token][];
+  shownAt: [string, number][];
+  active: [string, number][]; // dernier segment (s) ; les lectures en cours ne survivent pas
+  revoked: string[];
+  grantStr: [string, { id: string; openN: number; exp: number }][];
+  grantOf: [string, { exp: number; reopens: number }][];
+};
+
 export type FakeServerOpts = {
   /** Horloge en millisecondes (tests). Par défaut Date.now. */
   now?: () => number;
@@ -69,6 +86,12 @@ export type FakeServerOpts = {
   rateBytesPerS?: number;
   /** Coupure simulée : à `atFraction` des octets du premier envoi, tout /api échoue pendant `ms`. */
   outage?: { atFraction: number; ms: number };
+  /** État repris (rechargement de la démo) : instantané et segments enregistrés. */
+  restore?: { snap: Snapshot; segment(id: string, n: number): Uint8Array | undefined };
+  /** Après chaque requête traitée : nouvel état (sans segments). */
+  onChange?: (snap: Snapshot) => void;
+  /** Segment reçu ou bourrage tiré (à garder avec l'état). */
+  onSegment?: (id: string, n: number, data: Uint8Array) => void;
 };
 
 export type FakeServer = {
@@ -76,6 +99,8 @@ export type FakeServer = {
   handle(req: Request): Promise<Response>;
   /** Nombre de partages en mémoire (tests). */
   shares(): number;
+  /** État courant, sans les segments (persistance de la démo). */
+  snapshot(): Snapshot;
 };
 
 class HttpFail {
@@ -193,6 +218,40 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
   // rechargements, comme le serveur (en mémoire ; rien n'est gardé ailleurs).
   const grantStr = new Map<string, { id: string; openN: number; exp: number }>();
   const grantOf = new Map<string, { exp: number; reopens: number }>();
+  if (opts.restore !== undefined) restoreFrom(opts.restore);
+  function restoreFrom(r: NonNullable<FakeServerOpts["restore"]>): void {
+    const { snap } = r;
+    if (snap.v !== 1) return;
+    const thaw = (id: string, x: SnapShare): Share => {
+      const { nSegs, ...rest } = x;
+      return { ...rest, segments: Array.from({ length: nSegs }, (_, n) => r.segment(id, n)) };
+    };
+    for (const [id, x] of snap.shares) shares.set(id, thaw(id, x));
+    for (const [id, d] of snap.dead) dead.set(id, { share: thaw(id, d.share), graceEnd: d.graceEnd, opens: new Set(d.opens) });
+    for (const [k, v] of snap.tokens) tokens.set(k, v);
+    for (const [k, v] of snap.shownAt) shownAt.set(k, v);
+    for (const [k, last] of snap.active) active.set(k, { last, inflight: 0 });
+    for (const id of snap.revoked) revoked.add(id);
+    for (const [k, v] of snap.grantStr) grantStr.set(k, v);
+    for (const [k, v] of snap.grantOf) grantOf.set(k, v);
+  }
+  function snapshot(): Snapshot {
+    const freeze = (x: Share): SnapShare => {
+      const { segments, ...rest } = x;
+      return { ...rest, kdf: rest.kdf && { ...rest.kdf }, nSegs: segments.length };
+    };
+    return {
+      v: 1,
+      shares: [...shares].map(([id, x]) => [id, freeze(x)]),
+      dead: [...dead].map(([id, d]) => [id, { share: freeze(d.share), graceEnd: d.graceEnd, opens: [...d.opens] }]),
+      tokens: [...tokens].map(([k, v]) => [k, { ...v }]),
+      shownAt: [...shownAt],
+      active: [...active].map(([k, a]) => [k, a.last]),
+      revoked: [...revoked],
+      grantStr: [...grantStr].map(([k, v]) => [k, { ...v }]),
+      grantOf: [...grantOf].map(([k, v]) => [k, { ...v }]),
+    };
+  }
   function grant(id: string, openN: number, cap: number): string {
     const t = now();
     const exp = Math.min(t + GRANT_TTL_S, cap);
@@ -393,6 +452,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     if (s.state !== "uploading" || s.uploadDeadline <= now()) throw notFound();
     if (n >= s.segments.length || body.length !== segmentSize(s.bucket, n)) throw badRequest();
     s.segments[n] = body;
+    opts.onSegment?.(id, n, body);
     s.progressAt = minute(now());
     return empty(204);
   }
@@ -427,6 +487,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
       const pad = new Uint8Array(segmentSize(s.bucket, n));
       for (let o = 0; o < pad.length; o += 65536) crypto.getRandomValues(pad.subarray(o, o + 65536));
       s.segments[n] = pad;
+      opts.onSegment?.(id, n, pad);
     }
     Object.assign(s, { salt, kdf: { ops, mem }, proofV, envelope, ttlHours: ttl, maxOpens, opensLeft: maxOpens });
     s.state = "ready";
@@ -705,11 +766,14 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
       } catch (e) {
         if (e instanceof HttpFail) return json(e.status, { error: e.error, ...e.extra });
         throw e; // coupure simulée ou annulation
+      } finally {
+        opts.onChange?.(snapshot());
       }
     },
     shares: () => {
       sweep();
       return shares.size;
     },
+    snapshot,
   };
 }
