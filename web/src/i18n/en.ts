@@ -36,7 +36,7 @@ export const en = {
   "home.why.e2e.t": "End-to-end encrypted, on your device",
   "home.why.e2e.p": "Everything is encrypted in your browser before it leaves. Only someone with the link and the password can open it.",
   "home.why.link.t": "A unique link, a password",
-  "home.why.link.p": "The link is drawn at random on your device and never reused.",
+  "home.why.link.p": "The link is drawn at random on your device and never reused. Like any address you open, it may stay in the browser's history, synced or not, and on disk for tab restore: without the password, it opens nothing.",
   "home.why.ttl.t": "It self-destructs",
   "home.why.ttl.p": "After the delay you choose, from 1\u00a0to 24\u00a0hours, or after the number of opens you choose, from 1\u00a0to 10: whichever comes first.",
   "home.why.tries.t": "Five wrong passwords, and it's destroyed",

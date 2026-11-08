@@ -1,6 +1,8 @@
 // Octroi d'ouverture gardé dans l'onglet (spec §41.4, UI §9.7.1) : seul module autorisé à
 // toucher sessionStorage (source-rules.test.ts). Exception écrite à « aucun stockage
-// navigateur » : l'entrée est propre à l'onglet et disparaît à sa fermeture. Elle ne contient
+// navigateur » : l'entrée est propre à l'onglet. Elle ne disparaît PAS forcément à sa
+// fermeture : Chromium l'écrit sur le disque du profil (« Session Storage ») et la rend à
+// l'onglet restauré (audit M2, constaté par persist.spec.ts) ; d'où RESTORE_MS. Elle contient
 // que K_lien (43 caractères, déjà dans le « # » du lien) et l'octroi : JAMAIS le mot de passe,
 // R, une clé de contenu ni le clair. Sans mot de passe, elle n'ouvre rien ; elle évite
 // seulement qu'un rechargement compte une ouverture de plus.
@@ -8,6 +10,12 @@
 export const OPEN_GRANT_KEY = "shh.og";
 /** 30 min sans activité (clic, touche, défilement, visibilité) : l'entrée est effacée. */
 export const INACTIVITY_MS = 30 * 60_000;
+/**
+ * Audit M2 : hors rechargement (onglet fermé puis restauré, retour arrière), l'entrée ne vaut que
+ * 2 min après la dernière sortie de page (`last`, posé à pagehide) : un rechargement prend
+ * moins, une réouverture plus tardive redemande une ouverture.
+ */
+export const RESTORE_MS = 2 * 60_000;
 
 export type OpenGrantEntry = { v: 1; link: string /* K_lien, 43 car. */; grant: string /* 54 car. */; last: number };
 

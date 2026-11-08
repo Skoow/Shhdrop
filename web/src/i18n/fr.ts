@@ -36,7 +36,7 @@ export const fr = {
   "home.why.e2e.t": "Chiffré de bout en bout, sur votre appareil",
   "home.why.e2e.p": "Tout est chiffré dans votre navigateur avant de partir. Seule la personne qui a le lien et le mot de passe peut l'ouvrir.",
   "home.why.link.t": "Un lien unique, un mot de passe",
-  "home.why.link.p": "Le lien est tiré au hasard sur votre appareil et n'est jamais réutilisé.",
+  "home.why.link.p": "Le lien est tiré au hasard sur votre appareil et n'est jamais réutilisé. Comme toute adresse ouverte, il peut rester dans l'historique du navigateur, synchronisé ou non, et sur le disque pour la restauration des onglets : sans le mot de passe, il n'ouvre rien.",
   "home.why.ttl.t": "Il s'autodétruit",
   "home.why.ttl.p": "Après le délai choisi, de 1\u202fà 24\u202fheures, ou après le nombre d'ouvertures choisi, de 1\u202fà 10\u202f: le premier atteint.",
   "home.why.tries.t": "Cinq mauvais mots de passe, et il est détruit",

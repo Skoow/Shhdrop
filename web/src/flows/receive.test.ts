@@ -309,6 +309,36 @@ describe("rechargement et autres onglets (spec §41.4, UI §9.7.1)", () => {
     expect([r.state, r.error, r.attemptsLeft]).toEqual(["reopen", "bad_password", 4]);
   });
 
+  // Audit M2 : Chromium écrit sessionStorage sur le disque et le restaure avec l'onglet
+  // fermé (type de navigation « back_forward », constaté par persist.spec.ts). Hors
+  // rechargement, l'entrée ne vaut que 2 min après la dernière sortie de page.
+  it.each([
+    ["back_forward", 3 * 60_000, "incomplete"],
+    ["navigate", 3 * 60_000, "incomplete"],
+    ["", 2 * 60_000, "incomplete"],
+    ["back_forward", 2 * 60_000 - 1, "reopen"],
+    ["reload", 10 * 60_000, "reopen"],
+  ])("navigation « %s », sortie il y a %i ms → %s", async (nav, ago, want) => {
+    const store = memStore(entry({ last: 1_000_000 - ago }));
+    const { r } = setup({ grants: store, navType: () => nav }, null);
+    await flush();
+    expect(r.state).toBe(want);
+    if (want === "incomplete") expect(store.value).toBeNull();
+  });
+
+  it("pagehide : l'heure de sortie est notée dans l'entrée (last), rien d'autre", async () => {
+    let hide: () => void = () => undefined;
+    const store = memStore(entry({ last: 0 }));
+    const { clock } = setup({ grants: store, navType: () => "reload", onHide: (f) => ((hide = f), () => undefined) }, null);
+    await flush();
+    clock.advance(5_000);
+    hide();
+    expect(store.value).toEqual(entry({ last: 1_005_000 }));
+    store.clear();
+    hide();
+    expect(store.value).toBeNull();
+  });
+
   it("un « # » différent du lien gardé efface l'entrée (autre partage)", async () => {
     const store = memStore(entry({ link: "B".repeat(43) }));
     const { r, fetchMeta } = setup({ grants: store });

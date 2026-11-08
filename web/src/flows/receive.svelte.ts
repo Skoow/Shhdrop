@@ -26,6 +26,7 @@ import {
 } from "../index";
 import {
   INACTIVITY_MS,
+  RESTORE_MS,
   clearOpenGrant,
   loadOpenGrant,
   saveOpenGrant,
@@ -88,6 +89,10 @@ export type ReceiverDeps = {
   origin: string;
   /** Faux si le navigateur se sait hors ligne (navigator.onLine) : page « hors ligne » sans requête. */
   online: () => boolean;
+  /** Type de la navigation qui a chargé la page (PerformanceNavigationTiming.type), "" inconnu. */
+  navType: () => string;
+  /** Sortie de la page (pagehide) ; rend l'arrêt. */
+  onHide: (f: () => void) => () => void;
 };
 
 export type Receiver = {
@@ -146,6 +151,18 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
     scrub: () => undefined,
     origin: typeof location === "undefined" ? "" : location.origin,
     online: () => typeof navigator === "undefined" || navigator.onLine !== false,
+    navType: () => {
+      try {
+        return (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.type ?? "";
+      } catch {
+        return "";
+      }
+    },
+    onHide: (f) => {
+      if (typeof addEventListener !== "function") return () => undefined;
+      addEventListener("pagehide", f);
+      return () => removeEventListener("pagehide", f);
+    },
     ...deps,
   };
 
@@ -162,11 +179,21 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
   const stored = d.grants.load();
   if (secret !== null && stored !== null && stored.link !== keyOf(secret)) d.grants.clear(); // autre partage
   else if (stored !== null && d.now() - stored.last >= INACTIVITY_MS) d.grants.clear();
+  // Audit M2 : le navigateur écrit sessionStorage sur le disque et le rend avec un onglet
+  // restauré (Ctrl+Maj+T, reprise après panne ; Chromium : navigation « back_forward »).
+  // Hors rechargement, l'entrée ne vaut que RESTORE_MS après la dernière sortie de page.
+  else if (stored !== null && d.navType() !== "reload" && d.now() - stored.last >= RESTORE_MS) d.grants.clear();
   else if (stored !== null) {
     if (secret === null) secret = d.origin + "/#" + stored.link; // rechargement : plus de « # »
     grant = stored.grant;
     reloaded = true;
   }
+  // Heure de sortie de page notée dans l'entrée (RESTORE_MS). Jamais retirée : sans entrée,
+  // elle ne fait rien, et une ouverture suivante dans la page en a besoin.
+  d.onHide(() => {
+    const e = d.grants.load();
+    if (e !== null) d.grants.save({ ...e, last: d.now() });
+  });
   let expiresAt = 0;
   let limitedUntil = 0;
   let inflight = false;
