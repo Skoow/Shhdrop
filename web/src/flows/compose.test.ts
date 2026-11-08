@@ -4,7 +4,7 @@ import { fr } from "../i18n/fr";
 import { readFileSync } from "node:fs";
 import { BLOCK_REASONS, blockKey, createComposer, splitName, type ComposeDeps } from "./compose.svelte";
 import { gate } from "./clean-gate";
-import { cleanLabelKey, uncleanedReasonKey } from "../media/clean-label";
+import { cleanLabelKey, cleanNoteKeys, uncleanedReasonKey } from "../media/clean-label";
 import type { StripResult } from "../media/strip";
 import { CATEGORY_ORDER, categoryOf } from "./kinds";
 import { HEAD_BYTES } from "./sniff";
@@ -76,15 +76,15 @@ describe("createComposer : ajout", () => {
     expect(c.uncleanedCount).toBe(1);
   });
 
-  it("non pris en charge : raison courte par format (PDF, bureautique, vidéo, audio, archive, inconnu), envoi libre", async () => {
-    const fmt: Record<string, "pdf" | "ooxml" | "mp4" | "mp3" | "inconnu"> = { "application/pdf": "pdf", "application/zip": "inconnu", "image/svg+xml": "inconnu", "video/mp4": "mp4", "audio/mpeg": "mp3", "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "ooxml" };
+  it("non pris en charge : raison courte par format (vidéo, audio, archive, inconnu), envoi libre", async () => {
+    const fmt: Record<string, "mp4" | "mp3" | "inconnu"> = { "application/zip": "inconnu", "image/svg+xml": "inconnu", "video/mp4": "mp4", "audio/mpeg": "mp3" };
     const c = make({ strip: async (_f, mime) => ({ state: "non_pris_en_charge", soon: fmt[mime] !== "inconnu", format: fmt[mime]! }) });
-    const files = Object.keys(fmt).map((m, k) => file(["a.pdf", "b.zip", "c.svg", "d.mp4", "e.mp3", "f.docx"][k]!, 3, m));
+    const files = Object.keys(fmt).map((m, k) => file(["b.zip", "c.svg", "d.mp4", "e.mp3"][k]!, 3, m));
     await c.add(files, "fichiers");
     const by = (n: string) => uncleanedReasonKey(c.items.find((i) => i.base === n)!);
-    expect([by("a"), by("b"), by("c"), by("d"), by("e"), by("f")]).toEqual(["clean.why.pdf", "clean.why.archive", "clean.why.unknown", "clean.why.video", "clean.why.audio", "clean.why.office"]);
+    expect([by("b"), by("c"), by("d"), by("e")]).toEqual(["clean.why.archive", "clean.why.unknown", "clean.why.video", "clean.why.audio"]);
     expect(c.blockReason()).toBeNull();
-    expect(c.uncleanedCount).toBe(6);
+    expect(c.uncleanedCount).toBe(4);
     for (const i of c.items) await expect(gate(i.data as Blob)).resolves.toBe(i.data);
   });
 
@@ -118,6 +118,21 @@ describe("createComposer : ajout", () => {
     expect(new TextDecoder("latin1").decode(await (img.data as Blob).arrayBuffer())).not.toMatch(/Reper|2001:02:03/);
     expect(txt.clean).toBe("sans");
     expect(c.blockReason()).toBeNull();
+  });
+
+  it("vrai nettoyage d'un .docx (Task 9b) : « Nettoyé » bureautique, remarque des modifications suivies ; PDF protégé marqué", async () => {
+    const c = createComposer({ probe: async () => undefined, online: () => true });
+    const fx = (n: string) => new Uint8Array(readFileSync(new URL(`../media/fixtures/${n}`, import.meta.url)));
+    await c.add([new File([fx("meta.docx")], "rapport.docx"), new File([fx("signed.pdf")], "devis.pdf", { type: "application/pdf" })], "fichiers");
+    const doc = c.items.find((i) => i.ext === ".docx")!;
+    expect(doc).toMatchObject({ clean: "nettoye", cleanFamily: "bureautique", cleanNotes: ["suivi_modifs"] });
+    expect(cleanLabelKey(doc)).toBe("clean.done.office");
+    expect(cleanNoteKeys(doc)).toEqual(["clean.note.suivi_modifs"]);
+    expect(new TextDecoder("latin1").decode(await (doc.data as Blob).arrayBuffer())).not.toMatch(/ReperAuteur|ReperSociete|ReperCommentateur/);
+    const pdf = c.items.find((i) => i.ext === ".pdf")!;
+    expect(pdf.clean).toBe("protege");
+    expect(uncleanedReasonKey(pdf)).toBe("clean.why.protege");
+    expect(cleanNoteKeys(pdf)).toEqual([]);
   });
 
   it("MAX_ITEMS + 2 fichiers → MAX_ITEMS ajoutés, 2 refusés (noms rendus) ; 200 acceptés, le 201ᵉ refusé (fichiers minuscules)", async () => {
@@ -427,7 +442,7 @@ describe("blocages et textes de raison", () => {
     const c = make();
     c.addText("t");
     expect(cleanLabelKey(c.items[0]!)).toBeNull();
-    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.pdf", "clean.done.office", "clean.why.echec", "clean.why.protege", "clean.why.pdf", "clean.why.office", "clean.why.video", "clean.why.audio", "clean.why.archive", "clean.why.unknown", "clean.uncleaned.hint", "compose.uncleaned.one", "compose.uncleaned.other", "clean.original", "clean.original.hint", "clean.mark", "clean.mark.not"]) {
+    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.pdf", "clean.done.office", "clean.why.echec", "clean.why.protege", "clean.note.suivi_modifs", "clean.note.pdf_revisions", "clean.why.video", "clean.why.audio", "clean.why.archive", "clean.why.unknown", "clean.uncleaned.hint", "compose.uncleaned.one", "compose.uncleaned.other", "clean.original", "clean.original.hint", "clean.mark", "clean.mark.not"]) {
       expect(fr[k as keyof typeof fr], k).toBeTruthy();
       expect(en[k as keyof typeof en], k).toBeTruthy();
     }

@@ -86,7 +86,8 @@ test("états à l'écran : Nettoyé, Non nettoyé avec raison (échec, PDF, arch
   await expect(row(page, "IMG_GPS").locator('[data-clean="non-nettoye"]')).toHaveCount(0);
   const mark = (n: string) => row(page, n).locator('[data-clean="non-nettoye"]');
   await expect(mark("abime")).toHaveText(/^Non nettoyé · Échec du nettoyage/);
-  await expect(mark("contrat")).toHaveText(/^Non nettoyé · PDF\s:\sbientôt pris en charge/);
+  // contrat.pdf : ni table xref ni « startxref » (fichier d'essai minimal) → échec honnête.
+  await expect(mark("contrat")).toHaveText(/^Non nettoyé · Échec du nettoyage/);
   await expect(mark("archive")).toHaveText(/^Non nettoyé · Archive\s:\scontenu non inspecté/);
   await expect(mark("dessin")).toHaveText(/^Non nettoyé · Format non reconnu/);
   // Aucun choix à faire : plus de bouton, envoi permis, résumé discret près d'Envoyer.
@@ -98,6 +99,33 @@ test("états à l'écran : Nettoyé, Non nettoyé avec raison (échec, PDF, arch
   await expect.poll(() => puts.length, { timeout: 30_000 }).toBe(5);
   await expect(page.locator('[data-up]:not([data-up="pret"])')).toHaveCount(0, { timeout: 30_000 });
   if (isMobile) await page.screenshot({ path: `${SHOTS}compose-clean-states-390.png` });
+});
+
+test("document Word avec auteur (Task 9b) : « Nettoyé » à l'ajout, remarque des modifications suivies, reçu sans auteur ni société", async ({ page, shh, browser }) => {
+  test.setTimeout(120_000);
+  const doc = { name: "rapport.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: FX("meta.docx") };
+  const s = await freshPage(browser);
+  await s.page.goto(shh.origin + "/");
+  await (await openFilePicker(s.page)).setFiles(doc);
+  const r = row(s.page, "rapport");
+  await expect(r.locator('[data-clean="nettoye"]')).toHaveText(/^Nettoyé/);
+  await expect(r.locator('[data-clean="nettoye"]')).toHaveAttribute("title", "Nettoyé · auteur, société et dates retirés, auteurs des commentaires remplacés");
+  await expect(r.locator("[data-clean-note]")).toHaveText("Les modifications suivies gardent le nom de leurs auteurs.");
+  await s.ctx.close();
+  const s2 = await freshPage(browser);
+  const sent = await sendShare(s2.page, shh.origin + "/", { files: [doc] });
+  await s2.ctx.close();
+  await fakePicker(page);
+  await page.goto(sent.link);
+  await unlock(page, sent.password);
+  await page.getByRole("button", { name: "Télécharger rapport.docx" }).click();
+  await expect(page.locator('li.row[data-state="done"]')).toBeVisible({ timeout: 30_000 });
+  const got = Buffer.from((await page.evaluate(() => (window as unknown as { __bytes: string }).__bytes)) as string, "base64");
+  const want = await cleaned("meta.docx", doc.mimeType);
+  expect(got.equals(want)).toBe(true);
+  expect(got.subarray(0, 4).toString("latin1")).toBe("PK\x03\x04");
+  expect(got.toString("latin1")).not.toMatch(/ReperAuteur|ReperSociete|ReperCommentateur|ReperCompte|ReperMiniature/);
+  expect(doc.buffer.toString("latin1")).toMatch(/ReperAuteur/);
 });
 
 test("réglage « Nettoyer automatiquement les fichiers » désactivé : marque « Original », rien de modifié", async ({ page, shh }) => {

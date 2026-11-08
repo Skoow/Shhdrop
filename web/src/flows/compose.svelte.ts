@@ -10,7 +10,7 @@
 import { CONTENT_MAX, DATA_SEGMENTS, MANIFEST_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, cleanName, isRiskyName, segmentsNeeded, type Item } from "../index";
 import { isUncleaned, type ItemCleanState } from "../media/clean-label";
 import type { Format } from "../media/format";
-import { stripMetadata, type CleanFamily, type StripResult } from "../media/strip";
+import { stripMetadata, type CleanFamily, type CleanNote, type StripResult } from "../media/strip";
 import { approve } from "./clean-gate";
 import { CATEGORY_ORDER, categoryOf, extOf, type Category } from "./kinds";
 import { HEAD_BYTES, isExecutableSniff, sniff, type Sniffed } from "./sniff";
@@ -37,6 +37,8 @@ export type ComposeItem = {
   readonly cleanFamily?: CleanFamily;
   /** Format reconnu d'un fichier non pris en charge (raison de la marque « Non nettoyé »). */
   readonly cleanFormat?: Format;
+  /** Remarques d'un élément nettoyé (modifications suivies, versions précédentes d'un PDF). */
+  readonly cleanNotes?: readonly CleanNote[];
   readonly duplicate: boolean;
   /** Type reconnu par le contenu (octets de tête), ou null. */
   readonly sniffed?: Sniffed;
@@ -130,7 +132,7 @@ function takeCodePoints(s: string, n: number): string {
   return out;
 }
 
-type CleanFields = Pick<ComposeItem, "clean" | "cleanFamily" | "cleanFormat">;
+type CleanFields = Pick<ComposeItem, "clean" | "cleanFamily" | "cleanFormat" | "cleanNotes">;
 /**
  * Contenu passé par la décision de nettoyage (nettoyé, sans objet, original, ou « non
  * nettoyable » marqué) : seul celui-là peut être chiffré (clean-gate.ts).
@@ -188,7 +190,7 @@ export function createComposer(deps: ComposeDeps = {}) {
     if (source === "video-ici" && captureStripped !== undefined) return { data: f, c: captureStripped ? { clean: "nettoye", cleanFamily: "video" } : { clean: "echec" } };
     if (!autoClean()) return { data: f, c: { clean: "original" } };
     const r = await strip(f, f.type, name, { recorded: source === "video-ici" });
-    if (r.state === "nettoye") return { data: r.data, c: { clean: "nettoye", cleanFamily: r.family } };
+    if (r.state === "nettoye") return { data: r.data, c: { clean: "nettoye", cleanFamily: r.family, ...(r.notes.length ? { cleanNotes: r.notes } : {}) } };
     if (r.state === "non_pris_en_charge") return { data: f, c: { clean: r.state, cleanFormat: r.format } };
     return { data: f, c: { clean: r.state } };
   }

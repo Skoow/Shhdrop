@@ -3,7 +3,7 @@
   // « Non nettoyé » avec sa raison courte, D41-23 : le fichier part sans clic), doublon,
   // programme à risque, illisible sans téléchargement. Une ligne chacun.
   import type { ComposeItem } from "../flows/compose.svelte";
-  import { cleanLabelKey, uncleanedReasonKey } from "../media/clean-label";
+  import { cleanLabelKey, cleanNoteKeys, uncleanedReasonKey } from "../media/clean-label";
   import { t } from "../i18n/i18n.svelte";
   import { ShieldAlert, ShieldCheck, TriangleAlert } from "./Icon";
 
@@ -13,6 +13,7 @@
   let { item, cannotOpen = false, badgesOnly = false, lines = false, unclean }: Props = $props();
   const label = $derived(cleanLabelKey(item));
   const why = $derived(uncleanedReasonKey(item));
+  const cleanNotes = $derived(cleanNoteKeys(item));
 </script>
 
 {#if unclean === "only"}
@@ -30,6 +31,7 @@
 </span>{/if}
 {#if !badgesOnly && unclean !== "only"}
   {#if item.risky}<span class="line danger"><TriangleAlert size={14} strokeWidth={2} aria-hidden="true" />{t(item.mismatch ? "compose.mismatch" : "compose.risky")}</span>{/if}
+  {#each cleanNotes as k (k)}<span class="line warn" data-clean-note><TriangleAlert size={14} strokeWidth={2} aria-hidden="true" />{t(k)}</span>{/each}
   {#if cannotOpen}<span class="line warn"><TriangleAlert size={14} strokeWidth={2} aria-hidden="true" />{t("compose.cannotOpen")}</span>{/if}
 {/if}
 

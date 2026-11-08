@@ -4,9 +4,11 @@ import { ascii, startsWith } from "./bytes";
 
 /** Images : nettoyées ici (Task 9a). */
 export const IMAGE_FORMATS = ["jpeg", "png", "webp", "gif", "heif"] as const;
-/** Nettoyage prévu (Tasks 9b et 9c) : « bientôt pris en charge » d'ici là. */
-export const SOON_FORMATS = ["pdf", "ooxml", "odf", "mp4", "webm", "mp3", "ogg", "flac", "wav"] as const;
-export type Format = (typeof IMAGE_FORMATS)[number] | (typeof SOON_FORMATS)[number] | "texte" | "inconnu";
+/** Documents : nettoyés ici (Task 9b). */
+export const DOC_FORMATS = ["pdf", "ooxml", "odf"] as const;
+/** Nettoyage prévu (Task 9c) : « bientôt pris en charge » d'ici là. */
+export const SOON_FORMATS = ["mp4", "webm", "mp3", "ogg", "flac", "wav"] as const;
+export type Format = (typeof IMAGE_FORMATS)[number] | (typeof DOC_FORMATS)[number] | (typeof SOON_FORMATS)[number] | "texte" | "inconnu";
 
 /** Octets de tête à lire pour `detectFormat`. */
 export const FORMAT_HEAD = 64;
@@ -48,6 +50,8 @@ export function detectFormat(head: Uint8Array, mime: string, name: string): Form
   if (startsWith(head, 0, "OggS")) return "ogg";
   if (startsWith(head, 0, "fLaC")) return "flac";
   if (startsWith(head, 0, "ID3")) return "mp3";
+  // Document Office protégé par mot de passe : conteneur OLE (refusé en « protégé » par office.ts).
+  if (startsWith(head, 0, "\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1") && OOXML_EXT.has(ext)) return "ooxml";
   if (startsWith(head, 0, "PK\x03\x04")) return OOXML_EXT.has(ext) ? "ooxml" : ODF_EXT.has(ext) ? "odf" : "inconnu";
   const m = mime.split(";")[0]!.trim().toLowerCase();
   if (m === "audio/mpeg" || ext === "mp3") return head[0] === 0xff && (head[1]! & 0xe0) === 0xe0 ? "mp3" : "inconnu";

@@ -9,7 +9,9 @@ import { FORMAT_HEAD, SOON_FORMATS, detectFormat, type Format } from "./format";
 import { cleanGif } from "./gif";
 import { cleanHeif } from "./heif";
 import { cleanJpeg } from "./jpeg";
+import { cleanOffice } from "./office";
 import { patchedBlob } from "./patch";
+import { cleanPdf } from "./pdf";
 import { cleanPng } from "./png";
 import { stripCaptureMeta } from "./strip-capture";
 import { cleanWebp } from "./webp";
@@ -20,7 +22,7 @@ export type CleanFamily = "image" | "video" | "audio" | "pdf" | "bureautique" | 
 export type StripResult =
   | { state: "nettoye"; data: Blob; notes: CleanNote[]; family: CleanFamily }
   | { state: "echec" | "protege"; reason: string } // reason : code interne, jamais affiché tel quel
-  /** `soon` : nettoyage prévu (PDF, bureautique, vidéo, audio : Tasks 9b et 9c) ; `format` reconnu. */
+  /** `soon` : nettoyage prévu (vidéo, audio : Task 9c) ; `format` reconnu. */
   | { state: "non_pris_en_charge"; soon: boolean; format: Format }
   | { state: "sans" };
 
@@ -44,6 +46,21 @@ async function run(file: Blob, mime: string, fmt: Format, opts: StripOpts): Prom
     opts.signal?.throwIfAborted();
     if ((await cleanHeif(data)).length > 0) return { state: "echec", reason: "verification" };
     return { state: "nettoye", data, notes: [], family: "image" };
+  }
+  if (fmt === "pdf") {
+    const r = await cleanPdf(file);
+    if (r.state === "protege") return { state: "protege", reason: "pdf" };
+    const data = patchedBlob(file, r.patches, [], type);
+    opts.signal?.throwIfAborted();
+    const again = await cleanPdf(data);
+    if (again.state !== "ok" || again.patches.length > 0 || data.size !== file.size) return { state: "echec", reason: "verification" };
+    return { state: "nettoye", data, notes: r.notes, family: "pdf" };
+  }
+  if (fmt === "ooxml" || fmt === "odf") {
+    const r = await cleanOffice(file, fmt, type);
+    opts.signal?.throwIfAborted();
+    if (r.state === "protege") return { state: "protege", reason: fmt };
+    return { state: "nettoye", data: r.data, notes: r.notes, family: "bureautique" };
   }
   if (opts.recorded && (fmt === "webm" || fmt === "mp4")) {
     // Vidéos et vocaux pris dans l'interface : nom du navigateur et dates (strip-capture.ts).

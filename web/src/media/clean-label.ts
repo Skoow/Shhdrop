@@ -2,11 +2,17 @@
 // D41-23 du propriétaire : nettoyage automatique et non bloquant — un fichier qui n'a pas pu
 // être nettoyé part sans clic, avec une marque « Non nettoyé » bien visible et sa raison).
 import type { Format } from "./format";
-import type { CleanFamily, CleanState } from "./strip";
+import type { CleanFamily, CleanNote, CleanState } from "./strip";
 
 /** `original` : nettoyage automatique désactivé dans les Réglages (rien n'est modifié). */
 export type ItemCleanState = CleanState | "original";
-export type ItemClean = { clean: ItemCleanState; cleanFamily?: CleanFamily; cleanFormat?: Format; category?: string };
+export type ItemClean = { clean: ItemCleanState; cleanFamily?: CleanFamily; cleanFormat?: Format; cleanNotes?: readonly CleanNote[]; category?: string };
+
+/** Remarques d'un élément nettoyé (modifications suivies, versions précédentes d'un PDF). */
+export function cleanNoteKeys(i: ItemClean) {
+  if (i.clean !== "nettoye") return [];
+  return (i.cleanNotes ?? []).map((n) => (n === "suivi_modifs" ? ("clean.note.suivi_modifs" as const) : ("clean.note.pdf_revisions" as const)));
+}
 
 const DONE = {
   image: "clean.done.image",
@@ -29,11 +35,6 @@ export function uncleanedReasonKey(i: ItemClean) {
   if (i.clean !== "non_pris_en_charge") return null;
   if (i.category === "archives") return "clean.why.archive" as const;
   switch (i.cleanFormat) {
-    case "pdf":
-      return "clean.why.pdf" as const;
-    case "ooxml":
-    case "odf":
-      return "clean.why.office" as const;
     case "mp4":
     case "webm":
       return "clean.why.video" as const;
