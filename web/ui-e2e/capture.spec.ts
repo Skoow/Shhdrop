@@ -202,7 +202,54 @@ test("API absente : « Photo ou vidéo » ouvre directement la galerie ; pas de 
 
 test("en-têtes : caméra et micro permis à la page, jamais au cadre PDF", async ({ page, shh }) => {
   const r = await page.request.get(shh.origin + "/");
-  expect(r.headers()["permissions-policy"]).toBe("microphone=(self), camera=(self), geolocation=()");
+  expect(r.headers()["permissions-policy"]).toMatch(/^microphone=\(self\), camera=\(self\), geolocation=\(\), /);
   const f = await page.request.get(shh.origin + "/pdf-frame.html");
-  expect(f.headers()["permissions-policy"]).toBe("microphone=(), camera=(), geolocation=()");
+  expect(f.headers()["permissions-policy"]).toMatch(/^microphone=\(\), camera=\(\), geolocation=\(\), /);
 });
+
+// Audit F7 : un format que le nettoyage ne reconnaît pas ne part plus en silence. Le premier
+// morceau de MediaRecorder est préfixé de 4 octets nuls : ni WebM ni MP4 pour strip-capture.
+for (const keep of [true, false]) {
+  test(`vocal au format inattendu : averti, ${keep ? "« Garder tel quel » l'ajoute" : "« Annuler » n'ajoute rien"}`, async ({ page, shh }) => {
+    test.setTimeout(60_000);
+    await spyStreams(page);
+    await page.addInitScript(() => {
+      const proto = window.MediaRecorder?.prototype;
+      const d = proto && Object.getOwnPropertyDescriptor(proto, "ondataavailable");
+      if (!d?.set || !d.get) return;
+      const { set, get } = d;
+      Object.defineProperty(proto, "ondataavailable", {
+        configurable: true,
+        get() {
+          return get.call(this);
+        },
+        set(f: ((e: BlobEvent) => void) | null) {
+          let first = true;
+          set.call(
+            this,
+            f &&
+              ((e: BlobEvent) => {
+                const data = first ? new Blob([new Uint8Array(4), e.data], { type: e.data.type }) : e.data;
+                first = false;
+                f({ data } as BlobEvent);
+              }),
+          );
+        },
+      });
+    });
+    await page.goto(shh.origin + "/");
+    await pick(page, "Vocal");
+    const rec = page.getByRole("dialog", { name: "Enregistrer un vocal" });
+    const start = rec.getByRole("button", { name: "Démarrer l'enregistrement" });
+    await expect(start).toBeEnabled({ timeout: 15_000 });
+    await start.click();
+    await page.waitForTimeout(1200);
+    await rec.getByRole("button", { name: "Arrêter l'enregistrement" }).click();
+    await expect(rec.getByRole("alert")).toHaveText(/n'a pas pu être nettoyé/);
+    await expect(rec.getByRole("button", { name: "Utiliser le vocal" })).toHaveCount(0);
+    await rec.getByRole("button", { name: keep ? "Garder tel quel" : "Annuler" }).click();
+    await expect(rec).toBeHidden();
+    await expect(page.locator("[data-row]").filter({ hasText: "Vocal 1" })).toHaveCount(keep ? 1 : 0);
+    expect(await liveTracks(page)).toBe(0);
+  });
+}

@@ -689,6 +689,8 @@ export const fr = {
   "cap.shoot": "Prendre la photo",
   "cap.rec.start": "Démarrer l'enregistrement",
   "cap.rec.stop": "Arrêter l'enregistrement",
+  "cap.unclean": "Ce format n'a pas pu être nettoyé : la date de l'enregistrement et le nom du navigateur peuvent y rester. Le garder tel quel ou annuler ?",
+  "cap.keepAsIs": "Garder tel quel",
   "cap.retake": "Reprendre",
   "cap.use.photo": "Utiliser la photo",
   "cap.use.video": "Utiliser la vidéo",

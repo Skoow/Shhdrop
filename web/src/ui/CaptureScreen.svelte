@@ -51,6 +51,9 @@
   let limitHit = $state(false);
   let url = $state<string | null>(null);
   let flash = $state(false);
+  // Audit F7 : format que le nettoyage ne reconnaît pas (dates, nom du navigateur peut-être
+  // restés) : dit à l'écran, et la personne choisit « Garder tel quel » ou « Annuler ».
+  let unclean = $state(false);
 
   let dlg: HTMLDialogElement | undefined = $state();
   let live: HTMLVideoElement | undefined = $state();
@@ -187,9 +190,11 @@
     stopStream(stream);
     stream = null;
     if (live) live.srcObject = null;
-    // Nom du navigateur (WebM) et dates (MP4) effacés ; format inattendu : fichier gardé tel quel.
-    const { blob } = await stripCaptureMeta(raw);
+    // Nom du navigateur (WebM) et dates (MP4) effacés ; format inattendu : rien ne part sans
+    // que la personne l'ait choisi (unclean).
+    const { blob, stripped } = await stripCaptureMeta(raw);
     if (my !== gen) return; // fermé entre-temps
+    unclean = !stripped;
     result = { mode: kind, blob, mime: pickedNow.mime.split(";")[0]!, ext: pickedNow.ext };
     url = URL.createObjectURL(blob);
     phase = "review";
@@ -198,6 +203,7 @@
   function retake() {
     clearUrl();
     result = null;
+    unclean = false;
     elapsed = 0;
     limitHit = false;
     void start();
@@ -303,6 +309,9 @@
     </div>
 
     <div class="bottom">
+      {#if phase === "review" && unclean}
+        <p class="note warn" role="alert">{t("cap.unclean")}</p>
+      {/if}
       {#if limitHit}
         <p class="note warn" role="status">{t("cap.limit")}{#if upsell}<span class="up">{upsell}</span>{/if}</p>
       {/if}
@@ -314,7 +323,10 @@
         </div>
       {/if}
       <div class={["ctl", { three: cam && phase !== "review" }]}>
-        {#if phase === "review"}
+        {#if phase === "review" && unclean}
+          <button type="button" class="pill" onclick={() => dlg?.close()}>{t("common.cancel")}</button>
+          <button type="button" class="pill solid" onclick={use}>{t("cap.keepAsIs")}</button>
+        {:else if phase === "review"}
           <button type="button" class="pill" onclick={retake}>{t("cap.retake")}</button>
           <button type="button" class="pill solid" onclick={use}>{t(`cap.use.${kind}`)}</button>
         {:else}
