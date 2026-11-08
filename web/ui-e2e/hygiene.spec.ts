@@ -209,6 +209,17 @@ test("fichier déposé sur /s/x : défaut empêché, l'adresse ne change pas", a
   expect(page.url()).toBe(url);
 });
 
+// Sécurité : lien du pied de page ; téléphone avec onglets (pied masqué) : onglet Réglages ;
+// écrans sans onglets (destinataire, gestion) : Réglages de l'en-tête. Même feuille Réglages.
+async function goSecurity(page: Page) {
+  const foot = page.locator("footer.foot").getByRole("link", { name: "Sécurité", exact: true });
+  if (await foot.isVisible()) return foot.click();
+  const tab = page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Réglages" });
+  if (await tab.isVisible()) await tab.click();
+  else await page.getByRole("banner").getByRole("button", { name: "Réglages" }).click();
+  await page.getByRole("dialog", { name: "Réglages" }).getByRole("link", { name: "Sécurité", exact: true }).click();
+}
+
 // I1 : liens abîmés (ponctuation ajoutée par une messagerie, autre chemin, ancien format
 // /s/{id}, majuscule) : le routeur les classe en accueil ou en 404, le « # » est retiré quand même.
 for (const [what, path, frag] of [
@@ -225,7 +236,7 @@ for (const [what, path, frag] of [
     await page.goto(`${shh.origin}${path}${frag}`);
     await expect.poll(() => hash(page)).toBe("");
     expect(page.url()).toBe(`${shh.origin}${path}`);
-    await page.getByRole("link", { name: "Sécurité", exact: true }).click();
+    await goSecurity(page);
     await expect(page).toHaveURL(`${shh.origin}/securite`);
     await page.goBack();
     await expect(page).toHaveURL(`${shh.origin}${path}`);
