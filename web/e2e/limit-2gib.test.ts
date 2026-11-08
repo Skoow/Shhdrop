@@ -27,7 +27,7 @@ describe("limite de 2 Gio", () => {
     await srv.dispose();
   });
   const blobs = () => (existsSync(join(srv.dataDir, "blobs")) ? readdirSync(join(srv.dataDir, "blobs")) : []);
-  const opts = { ttlHours: 1 as const, maxOpens: 1, password: "Lm3?Gq9!HdK", solveCaptcha: solveAltcha };
+  const opts = { ttlHours: 1 as const, maxOpens: 1, password: "Lm3?Gq9!H#K", solveCaptcha: solveAltcha };
 
   it("2 Gio + 1 octet : refusé, rien n'est créé sur le serveur", async () => {
     await expect(createShare(srv.origin, [{ kind: "file", name: "a.bin", mime: "application/octet-stream", data: hollow(CONTENT_MAX + 1) }], opts)).rejects.toThrow(

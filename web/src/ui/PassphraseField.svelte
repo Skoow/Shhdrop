@@ -52,7 +52,6 @@
       {#if copied}<Check size={19} strokeWidth={2.2} aria-hidden="true" />{:else}<Copy size={19} strokeWidth={1.9} aria-hidden="true" />{/if}
     </button>
   </div>
-  <span class="note">{t("options.pw.random")}</span>
 </div>
 
 <style>
@@ -144,10 +143,6 @@
       transform: rotate(90deg);
       transition: transform 420ms var(--ease-out);
     }
-  }
-  .note {
-    color: var(--text-3);
-    font-size: var(--fs-small);
   }
   @media (prefers-reduced-motion: reduce) {
     .ib {

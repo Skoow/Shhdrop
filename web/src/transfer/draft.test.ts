@@ -11,7 +11,7 @@ import { openShare, type CaptchaProof, type Item } from "../index";
 import { createDraft } from "./draft";
 
 const ORIGIN = "https://demo.test";
-const PW = "Kq7!mP2#xYa";
+const PW = "Kq7!mP2#x?a";
 const solveCaptcha = async (): Promise<CaptchaProof> => ({ kind: "pow", payload: "demo" });
 
 function setup(rate = 40 * 1048576) {

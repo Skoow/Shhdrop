@@ -2,11 +2,15 @@
 // propriétaire) : tirés uniformément dans un alphabet de 63 symboles : lettres et chiffres sans
 // les ambigus ni les sosies (ni 0 O o 1 l I i j, ni les sosies S s Z z B ;
 // 5, 2 et 8 n'ont donc plus de sosie), 14 caractères spéciaux courants sur un clavier de téléphone, aucun espace.
-// Le mot de passe entier est recommencé tant que les quatre familles ne sont pas toutes présentes
-// (au moins une minuscule, une majuscule, un chiffre, un spécial) : chaque mot de passe valide a
-// la même probabilité. 43 300 477 597 441 680 000 possibilités, soit 2^65,23 (exigence : au moins
-// 60 bits). Ce contrôle de forme ne sert qu'à la création ; à l'ouverture, tout mot de passe non
+// Le mot de passe entier est recommencé tant que la contrainte n'est pas tenue (au moins une
+// minuscule, une majuscule, un chiffre et AU MOINS TROIS caractères spéciaux, décision du
+// propriétaire du 8 novembre) : chaque mot de passe valide a la même probabilité.
+// 19 417 033 820 665 958 400 possibilités, soit 2^64,07 (exigence : au moins 60 bits). Environ
+// 31 % des tirages bruts passent : un peu plus de trois tirages en moyenne. Ce contrôle de forme ne sert qu'à la création ; à l'ouverture, tout mot de passe non
 // vide est accepté (anciens alphabets et longueurs compris).
+
+/** Nombre minimal de caractères spéciaux (famille 4) dans un mot de passe généré. */
+export const PASSWORD_MIN_SPECIALS = 3;
 
 /** Mot de passe produit par generatePassword (11 caractères), seul accepté à la création (D41-15). */
 export type GeneratedPassword = string & { readonly __gen: unique symbol };
@@ -18,13 +22,16 @@ export const PASSWORD_LEN = 11;
 
 /**
  * Vrai si `pw` a la forme d'un mot de passe généré : exactement 11 caractères de l'alphabet,
- * les quatre familles présentes (D41-15 : le mot de passe d'un partage est toujours généré,
+ * les quatre familles présentes dont au moins 3 spéciaux (D41-15 : le mot de passe d'un partage est toujours généré,
  * plus aucune saisie). La forme ne prouve pas le tirage ; elle refuse toute autre chaîne qui
  * arriverait jusqu'à la création (erreur de programmation), sans liste ni copie gardée.
  */
 export function isGeneratedPassword(pw: string): pw is GeneratedPassword {
   const chars = [...pw];
-  return chars.length === PASSWORD_LEN && chars.every((c) => PASSWORD_ALPHABET.includes(c)) && PASSWORD_FAMILIES.every((f) => chars.some((c) => f.includes(c)));
+  return (
+    chars.length === PASSWORD_LEN && chars.every((c) => PASSWORD_ALPHABET.includes(c)) && PASSWORD_FAMILIES.every((f) => chars.some((c) => f.includes(c))) &&
+    chars.filter((c) => PASSWORD_FAMILIES[3].includes(c)).length >= PASSWORD_MIN_SPECIALS
+  );
 }
 
 export function generatePassword(): GeneratedPassword {

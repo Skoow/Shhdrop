@@ -241,7 +241,6 @@ export const fr = {
   "options.tries.one": "{n}\u202fessai raté, et le partage est détruit.",
   "options.tries.other": "{n}\u202fessais ratés, et le partage est détruit.",
   "options.pw.generated": "Mot de passe généré",
-  "options.pw.random": "Tiré au hasard sur cet appareil.",
   "options.pw.regenerate": "Générer un autre",
   "options.pw.regenerated": "Nouveau mot de passe généré",
   "options.rights.label": "Destinataire",

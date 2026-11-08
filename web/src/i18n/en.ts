@@ -240,7 +240,6 @@ export const en = {
   "options.tries.one": "{n}\u00a0failed attempt and the share is destroyed.",
   "options.tries.other": "{n}\u00a0failed attempts and the share is destroyed.",
   "options.pw.generated": "Generated password",
-  "options.pw.random": "Drawn at random on this device.",
   "options.pw.regenerate": "Generate another",
   "options.pw.regenerated": "New password generated",
   "options.rights.label": "Recipient",
