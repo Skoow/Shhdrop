@@ -21,7 +21,14 @@ func prodServer(t *testing.T, h http.Handler) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewUnstartedServer(h)
 	srv.Config = &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 300 * time.Second,
-		WriteTimeout: 300 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+		WriteTimeout: 300 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10,
+		// Petit tampon d'émission : sans lui, le noyau absorbe un segment entier (tcp_wmem
+		// jusqu'à 4 Mio) et un client qui ne lit pas libère sa place trop tôt (test instable).
+		ConnState: func(c net.Conn, st http.ConnState) {
+			if tc, ok := c.(*net.TCPConn); ok && st == http.StateNew {
+				tc.SetWriteBuffer(4096)
+			}
+		}}
 	srv.Start()
 	t.Cleanup(srv.Close)
 	return srv
@@ -144,12 +151,30 @@ func TestSegmentConcurrencyCap(t *testing.T) {
 				resp.Header.Get("Retry-After") == "5"
 		}
 	}
+	// Une sonde rend sa place juste après sa réponse : un GET tenu lancé à cet instant peut
+	// être refusé. On ne garde donc qu'un GET tenu qui a bien reçu 200 (sinon on recommence).
+	hold := func(id, tok, ip string) net.Conn {
+		t.Helper()
+		for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
+			cn := slowGET(t, srv, id, 0, tok, ip)
+			cn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			line := make([]byte, 12)
+			_, err := io.ReadFull(cn, line)
+			cn.SetReadDeadline(time.Time{})
+			if err == nil && string(line) == "HTTP/1.1 200" {
+				return cn
+			}
+			cn.Close()
+		}
+		t.Fatal("GET tenu jamais accepté")
+		return nil
+	}
 	var held []net.Conn
-	held = append(held, slowGET(t, srv, ids[0], 0, toks[0], a1), slowGET(t, srv, ids[1], 0, toks[1], a1))
+	held = append(held, hold(ids[0], toks[0], a1), hold(ids[1], toks[1], a1))
 	waitFor(t, "3ᵉ transfert de la connexion refusé (429)", refused(a1, 429, "limit"))
-	held = append(held, slowGET(t, srv, ids[2], 0, toks[2], a2))
+	held = append(held, hold(ids[2], toks[2], a2))
 	waitFor(t, "4ᵉ transfert du /48 refusé (429)", refused(a3, 429, "limit"))
-	held = append(held, slowGET(t, srv, ids[3], 0, toks[3], b))
+	held = append(held, hold(ids[3], toks[3], b))
 	waitFor(t, "5ᵉ transfert du serveur refusé (503)", refused("2001:db8:3::1", 503, "busy"))
 	for _, cn := range held {
 		cn.Close()
