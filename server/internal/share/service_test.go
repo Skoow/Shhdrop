@@ -806,9 +806,9 @@ func TestFinalizeValidation(t *testing.T) {
 		func(r *FinalizeReq) { r.MaxOpens = 0 },
 		func(r *FinalizeReq) { r.MaxOpens = 11 },
 		func(r *FinalizeReq) { r.KdfOps = 2 },
-		func(r *FinalizeReq) { r.KdfOps = 11 },
+		func(r *FinalizeReq) { r.KdfOps = 4 }, // audit F4 : plafond = paramètres de création (3 passes, 64 Mio)
 		func(r *FinalizeReq) { r.KdfMem = 67108863 },
-		func(r *FinalizeReq) { r.KdfMem = 268435457 },
+		func(r *FinalizeReq) { r.KdfMem = 67108865 },
 		func(r *FinalizeReq) { r.Salt = rnd(15) },
 		func(r *FinalizeReq) { r.ProofV = rnd(33) },
 		func(r *FinalizeReq) { r.Envelope = rnd(59) },
@@ -831,7 +831,7 @@ func TestFinalizeValidation(t *testing.T) {
 	}
 	for _, ttl := range []int{1, 6, 12, 24} {
 		r := fin(id)
-		r.TTLHours, r.KdfOps, r.KdfMem = ttl, 10, 268435456
+		r.TTLHours, r.KdfOps, r.KdfMem = ttl, 3, 67108864
 		if err := ValidateFinalize(r); err != nil {
 			t.Fatal(ttl, err)
 		}

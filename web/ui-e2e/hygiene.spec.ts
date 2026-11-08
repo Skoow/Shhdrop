@@ -284,3 +284,23 @@ test("kbd-open seulement sur écran tactile (pointer: coarse)", async ({ page, s
   await page.setViewportSize(size);
   await expect(page.locator("html")).not.toHaveClass(/kbd-open/);
 });
+
+// Audit F3 : Permissions-Policy refuse ce qui ne sert pas ; le navigateur n'y signale aucune
+// fonction inconnue, et la page ne peut plus lire le presse-papiers ni capturer l'écran.
+test("Permissions-Policy : refus explicites reconnus, presse-papiers illisible, capture d'écran refusée", async ({ page, shh, browserName }) => {
+  const policyMsgs: string[] = [];
+  page.on("console", (m) => {
+    if (/permissions.policy/i.test(m.text())) policyMsgs.push(m.text());
+  });
+  const resp = await page.goto(shh.origin + "/");
+  expect(resp?.headers()["permissions-policy"]).toContain("clipboard-read=()");
+  await expect(page.locator("main")).toBeVisible();
+  if (browserName === "chromium") {
+    const allowed = await page.evaluate(() => {
+      const fp = (document as unknown as { featurePolicy?: { allowsFeature(f: string): boolean } }).featurePolicy;
+      return fp && ["clipboard-read", "display-capture", "usb", "camera", "microphone", "clipboard-write"].map((f) => fp.allowsFeature(f));
+    });
+    expect(allowed).toEqual([false, false, false, true, true, true]);
+  }
+  expect(policyMsgs).toEqual([]);
+});

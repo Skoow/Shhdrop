@@ -164,6 +164,9 @@ describe("openShare : correspondance des erreurs", () => {
     ["403 sans attempts_left", (_, p) => (p.endsWith("/unlock") ? j(403, { error: "bad_password" }) : undefined)],
     ["KDF trop faible", (_, p) => (p.endsWith("/meta") ? j(200, { ...META, kdf: { ops: 1, mem: 8192 } }) : undefined)],
     ["KDF trop forte", (_, p) => (p.endsWith("/meta") ? j(200, { ...META, kdf: { ops: 3, mem: 2 ** 30 } }) : undefined)],
+    // Audit F4 : rien au-delà des paramètres de création (3 passes, 64 Mio).
+    ["KDF 4 passes", (_, p) => (p.endsWith("/meta") ? j(200, { ...META, kdf: { ops: 4, mem: 67108864 } }) : undefined)],
+    ["KDF 256 Mio, 10 passes", (_, p) => (p.endsWith("/meta") ? j(200, { ...META, kdf: { ops: 10, mem: 268435456 } }) : undefined)],
     ["meta sans sel", (_, p) => (p.endsWith("/meta") ? j(200, { ...META, salt: undefined }) : undefined)],
     ["sel de 15 octets", (_, p) => (p.endsWith("/meta") ? j(200, { ...META, salt: b64u(new Uint8Array(15)) }) : undefined)],
     ["palier inconnu", (_, p) => (p.endsWith("/meta") ? j(200, { ...META, bucket: 2 }) : undefined)],
@@ -194,9 +197,11 @@ describe("openShare : correspondance des erreurs", () => {
     const s = server(() => undefined);
     await reject(openShare(LINK, PW, ORIGIN, undefined, s.net));
     expect(s.calls).toEqual(["GET /api/shares/meta", "POST /api/shares/unlock", "GET /api/shares/segments/0", "POST /api/shares/done"]);
-    const k = server((_, p) => (p.endsWith("/meta") ? j(200, { ...META, kdf: { ops: 2, mem: 67108864 } }) : undefined));
-    await reject(openShare(LINK, PW, ORIGIN, undefined, k.net));
-    expect(k.calls).toEqual(["GET /api/shares/meta"]);
+    for (const kdf of [{ ops: 2, mem: 67108864 }, { ops: 4, mem: 67108864 }, { ops: 3, mem: 67108865 }, { ops: 10, mem: 268435456 }]) {
+      const k = server((_, p) => (p.endsWith("/meta") ? j(200, { ...META, kdf }) : undefined));
+      expect(await reject(openShare(LINK, PW, ORIGIN, undefined, k.net))).toBeInstanceOf(NotFoundError);
+      expect(k.calls, JSON.stringify(kdf)).toEqual(["GET /api/shares/meta"]);
+    }
   });
   it("lien invalide : erreur locale lien_invalide", async () => {
     await expect(openShare(MANAGE, PW, ORIGIN)).rejects.toThrow("lien_invalide");

@@ -19,8 +19,9 @@ var pdfFrameFiles = map[string]bool{
 // (plus de X-Robots-Tag : les liens sont à la racine, le secret après « # », spec §32) :
 //   - Cross-Origin-Resource-Policy: cross-origin sur les trois fichiers du cadre PDF ;
 //   - frame-ancestors 'self' (au lieu de 'none') et Permissions-Policy fermée sur /pdf-frame.html seulement.
+//
 // pdfFramePermissions : le cadre PDF n'a jamais besoin du micro, de la caméra ni de la position.
-const pdfFramePermissions = "microphone=(), camera=(), geolocation=()"
+const pdfFramePermissions = "microphone=(), camera=(), " + deniedFeatures
 
 func pathHeaders(h http.Header, p string) {
 	if pdfFrameFiles[p] {

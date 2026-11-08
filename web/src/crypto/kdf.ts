@@ -4,7 +4,11 @@ import { isGeneratedPassword } from "./password";
 import type { KAcces, KLien, KMdp, SGestion } from "./types";
 
 export const KDF_MIN = { ops: 3, mem: 67108864 } as const;
-export const KDF_MAX = { ops: 10, mem: 268435456 } as const;
+/**
+ * Plafond accepté du serveur (audit F4) : les paramètres de création, seuls utilisés. Plus haut,
+ * un serveur compromis ferait allouer jusqu'à 256 Mio et planter l'onglet d'un petit téléphone.
+ */
+export const KDF_MAX = { ops: 3, mem: 67108864 } as const;
 export type KdfParams = { ops: number; mem: number };
 /** Paramètres Argon2id des nouveaux partages (spec §29.2 : 64 Mio, 3 passes), imposés par passwordKeyForCreate. */
 export const KDF_CREATE = { ops: KDF_MIN.ops, mem: KDF_MIN.mem } as const;

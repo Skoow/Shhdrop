@@ -3,7 +3,7 @@
 // aucune requête hors de l'origine).
 import type { Page } from "@playwright/test";
 import { NotFoundError, PW_TRIES, fetchMeta, shareStatus } from "../src/index";
-import { axe, capture, expect, test } from "./fixtures";
+import { axe, capture, expect, readClipboard, test } from "./fixtures";
 import { freshPage, noteRow, pwField, sendShare, settle, unlock, unlockButton } from "./open-helpers";
 import { armed } from "./send-helpers";
 
@@ -190,7 +190,7 @@ test.describe("navigateur intégré (Instagram)", () => {
     expect(await page.evaluate(() => location.hash)).toBe(new URL(sent.link).hash);
     expect(api).toEqual([]);
     await page.getByRole("button", { name: "Copier le lien" }).click();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(sent.link);
+    expect(await readClipboard(page)).toBe(sent.link);
     expect(await axe(page)).toEqual([]);
     await capture(page, "open-inapp");
     await page.getByRole("button", { name: "Continuer ici quand même" }).click();

@@ -356,11 +356,15 @@ func Validate(r CreateReq) error {
 	return nil
 }
 
+// kdfOps, kdfMem : seuls paramètres Argon2id acceptés (spec §29.2, audit F4) ; le navigateur
+// refuse d'ouvrir tout autre réglage, l'accepter ici créerait un partage que personne n'ouvre.
+const kdfOps, kdfMem = 3, 64 << 20
+
 // ValidateFinalize vérifie les champs d'une finalisation qui ne dépendent pas du palier
 // (le bourrage est vérifié par Finalize, contre le palier du partage).
 func ValidateFinalize(r FinalizeReq) error {
 	if !validTTL(r.TTLHours) || r.MaxOpens < 1 || r.MaxOpens > 10 ||
-		r.KdfOps < 3 || r.KdfOps > 10 || r.KdfMem < 67108864 || r.KdfMem > 268435456 ||
+		r.KdfOps != kdfOps || r.KdfMem != kdfMem ||
 		len(r.Salt) != 16 || len(r.ProofV) != 32 || len(r.Envelope) != EnvelopeLen || !notEmptyHash(r.ProofV) {
 		return ErrBadRequest
 	}

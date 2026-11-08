@@ -216,3 +216,24 @@ export async function axe(page: Page) {
   const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   return r.violations;
 }
+
+/**
+ * Lit le presse-papiers depuis une page témoin : le site refuse `clipboard-read=()` (audit F3),
+ * la page testée ne peut donc pas le lire elle-même. Page vierge servie par Playwright sur
+ * une origine sûre (localhost) sans Permissions-Policy, puis l'onglet testé reprend la main.
+ */
+const CLIP_ORIGIN = "http://localhost:9/";
+export async function readClipboard(page: Page): Promise<string> {
+  const ctx = page.context();
+  await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: CLIP_ORIGIN.slice(0, -1) });
+  const p = await ctx.newPage();
+  try {
+    await p.route(CLIP_ORIGIN, (r) => r.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>clip</title>" }));
+    await p.goto(CLIP_ORIGIN);
+    await p.bringToFront();
+    return await p.evaluate(() => navigator.clipboard.readText());
+  } finally {
+    await p.close();
+    await page.bringToFront();
+  }
+}

@@ -4,7 +4,7 @@
 import type { BrowserContext, Page } from "@playwright/test";
 import { NotFoundError, fetchMeta } from "../src/index";
 import { qrPath } from "../src/qr/qr";
-import { axe, capture, expect, test } from "./fixtures";
+import { axe, capture, expect, readClipboard, test } from "./fixtures";
 import { addText, armed, readyHeading, sendButton } from "./send-helpers";
 
 const LINK_RE = /^http:\/\/127\.0\.0\.1:\d+\/#[A-Za-z0-9_-]{43}$/;
@@ -16,7 +16,7 @@ async function toReady(page: Page, context: BrowserContext, origin: string, text
   await sendButton(page).click();
   await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
 }
-const clip = (page: Page) => page.evaluate(() => navigator.clipboard.readText());
+const clip = (page: Page) => readClipboard(page);
 const linkCard = (page: Page) => page.getByRole("group", { name: "Lien" });
 const pwCard = (page: Page) => page.getByRole("group", { name: "Mot de passe" });
 /** Valeur complète d'un CopyField (texte pour lecteur d'écran). */
@@ -89,9 +89,12 @@ test.describe("fr-FR", () => {
     await capture(page, "ready-qr");
     if (isMobile) await page.keyboard.press("Escape"); // téléphone : QR en feuille
 
-    // Vider le presse-papier.
+    // Vider le presse-papier (audit F2, F3) : la page ne peut pas lire le presse-papier
+    // (clipboard-read=()), elle ne vérifie donc pas qu'il contient encore le mot de passe :
+    // rien n'est effacé, et l'écran le dit.
     await page.getByRole("button", { name: "Vider le presse-papier" }).click();
-    await expect.poll(() => clip(page)).toBe("");
+    await expect(page.getByTestId("clip-msg")).toHaveText(/rien n'a été effacé/);
+    expect(await clip(page)).toBe(password);
 
     // Garde de sortie jusqu'à Terminé ; puis composeur vide, plus aucun secret à l'écran.
     expect(await armed(page)).toBe(true);

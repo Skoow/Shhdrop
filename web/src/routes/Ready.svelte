@@ -102,9 +102,17 @@
     if (result) await sharePassword(result.password); // le mot de passe seul, jamais avec le lien
   }
 
+  // Résultat du dernier « Vider » (audit F2) : dit à l'écran quand rien n'a été effacé.
+  let clipMsg = $state("");
+  const CLIP_MSG = {
+    cleared: "ready.cleared",
+    changed: "ready.clipChanged",
+    unverified: "ready.clipUnverified",
+    nothing: "ready.clipNothing",
+  } as const;
   async function clearClip() {
-    await clearClipboard();
-    announce(t("ready.cleared"));
+    clipMsg = t(CLIP_MSG[await clearClipboard()]);
+    announce(clipMsg);
   }
 
   // ---------- Terminé, Supprimer ----------
@@ -241,6 +249,7 @@
 
       <div class="clip">
         <Button variant="ghost" dense onpress={clearClip}>{t("ready.clear")}</Button>
+        {#if clipMsg}<p class="hint clip-msg" data-testid="clip-msg">{clipMsg}</p>{/if}
         <p class="hint">{t("ready.clear.note")}</p>
       </div>
 

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
-import { axe, capture, expect, test } from "./fixtures";
+import { axe, capture, expect, readClipboard, test } from "./fixtures";
 import { openFilePicker, pickInAddSheet } from "./send-helpers";
 
 const FILES = fileURLToPath(new URL("./files/", import.meta.url));
@@ -241,7 +241,7 @@ test.describe("fr-FR", () => {
       await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
       await copy.click();
       await expect(box.getByRole("button", { name: "Copié" })).toBeVisible();
-      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await pw.textContent());
+      expect(await readClipboard(page)).toBe(await pw.textContent());
     }
 
     // D41-15 : aucune saisie possible, nulle part (ordinateur et feuille du téléphone).

@@ -77,8 +77,11 @@ describe("bornes et tailles", () => {
     expect(() => checkKdfParams({ ...KDF_MAX })).not.toThrow();
     expect(() => checkKdfParams({ ops: 2, mem: KDF_MIN.mem })).toThrow("paramètres KDF trop faibles");
     expect(() => checkKdfParams({ ops: 3, mem: KDF_MIN.mem - 1 })).toThrow("paramètres KDF trop faibles");
-    expect(() => checkKdfParams({ ops: 11, mem: 67108864 })).toThrow("paramètres KDF invalides");
-    expect(() => checkKdfParams({ ops: 3, mem: 268435457 })).toThrow("paramètres KDF invalides");
+    // Audit F4 : plafond = paramètres de création (un serveur ne fait pas allouer 256 Mio).
+    expect(KDF_MAX).toEqual(KDF_CREATE);
+    expect(() => checkKdfParams({ ops: 4, mem: 67108864 })).toThrow("paramètres KDF invalides");
+    expect(() => checkKdfParams({ ops: 3, mem: 67108865 })).toThrow("paramètres KDF invalides");
+    expect(() => checkKdfParams({ ops: 10, mem: 268435456 })).toThrow("paramètres KDF invalides");
     expect(() => checkKdfParams({ ops: 3.5, mem: 67108864 })).toThrow("paramètres KDF invalides");
     expect(() => checkKdfParams({ ops: 3, mem: 67108864.5 })).toThrow("paramètres KDF invalides");
     expect(() => checkKdfParams({ ops: NaN, mem: 67108864 })).toThrow("paramètres KDF invalides");

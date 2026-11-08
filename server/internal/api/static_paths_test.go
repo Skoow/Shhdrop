@@ -91,11 +91,11 @@ func TestSecurityHeadersKept(t *testing.T) {
 // Caméra et micro : permis à la page (vocal, photo et vidéo prises dans l'interface), jamais au cadre PDF.
 func TestPermissionsPolicy(t *testing.T) {
 	e := newEnv(t, false, nil)
-	if got := get(e, "/")["Permissions-Policy"]; len(got) != 1 || got[0] != "microphone=(self), camera=(self), geolocation=()" {
+	if got := get(e, "/")["Permissions-Policy"]; len(got) != 1 || got[0] != "microphone=(self), camera=(self), geolocation=(), display-capture=(), clipboard-read=(), usb=(), serial=(), hid=(), payment=(), gyroscope=(), accelerometer=(), magnetometer=(), midi=(), xr-spatial-tracking=(), browsing-topics=(), interest-cohort=()" {
 		t.Errorf("/ : Permissions-Policy = %v", got)
 	}
 	for _, p := range []string{"/pdf-frame.html"} {
-		if got := get(e, p)["Permissions-Policy"]; len(got) != 1 || got[0] != "microphone=(), camera=(), geolocation=()" {
+		if got := get(e, p)["Permissions-Policy"]; len(got) != 1 || got[0] != "microphone=(), camera=(), geolocation=(), display-capture=(), clipboard-read=(), usb=(), serial=(), hid=(), payment=(), gyroscope=(), accelerometer=(), magnetometer=(), midi=(), xr-spatial-tracking=(), browsing-topics=(), interest-cohort=()" {
 			t.Errorf("%s : Permissions-Policy = %v", p, got)
 		}
 	}

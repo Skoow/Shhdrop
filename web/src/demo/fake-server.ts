@@ -521,8 +521,8 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     if (
       ![1, 6, 12, 24].includes(ttl) ||
       !(maxOpens >= 1 && maxOpens <= 10) ||
-      !(ops >= 3 && ops <= 10) ||
-      !(mem >= 67108864 && mem <= 268435456) ||
+      ops !== 3 || // audit F4 : seuls paramètres de création, comme le vrai serveur
+      mem !== 67108864 ||
       equal(proofV, emptyHash)
     )
       throw badRequest();
