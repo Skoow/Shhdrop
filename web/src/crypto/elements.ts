@@ -70,14 +70,18 @@ export function isSmall(size: number): boolean {
  * puissance de deux de morceaux (1, 2, 4… 64), pour que la longueur de sa requête d'envoi ne
  * dise au serveur que sa classe de taille ; les morceaux en plus sont des zéros chiffrés sous
  * la clé de l'élément (comme la fin de son dernier morceau), indiscernables de l'aléa. Un
- * élément d'un segment ou plus : ses morceaux, sans arrondi.
+ * élément d'un segment ou plus : ses segments pleins, puis le reste arrondi de même.
  */
 export function footprintFor(size: number): number {
   const n = chunksFor(size);
-  if (!isSmall(size)) return n;
+  // Q-H2-2 (D41-21) : le dernier segment d'un grand élément suit la même règle, pour que la
+  // longueur de sa dernière requête ne donne que la classe de taille de sa fin.
+  const full = isSmall(size) ? 0 : Math.floor(n / SEG_CHUNKS) * SEG_CHUNKS;
+  const rest = n - full;
+  if (rest === 0) return n;
   let p = 1;
-  while (p < n) p *= 2;
-  return Math.min(p, SEG_CHUNKS);
+  while (p < rest) p *= 2;
+  return full + Math.min(p, SEG_CHUNKS);
 }
 
 /**

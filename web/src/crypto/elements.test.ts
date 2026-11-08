@@ -195,6 +195,8 @@ describe("éléments (spec §41.14)", () => {
     // 20 photos de 1 Mo : 16 morceaux chacune, 320 morceaux, 5 segments (et non 20).
     expect(segmentsNeeded(Array(20).fill(1_000_000))).toBe(5);
     expect(segmentsNeeded([SEG_PLAIN + 1, 10, 10])).toBe(3);
+    // Q-H2-2 (D41-21) : dernier segment d'un grand élément arrondi à une puissance de deux de morceaux.
+    expect([SEG_PLAIN + 3 * CHUNK, SEG_PLAIN + 33 * CHUNK, 2 * SEG_PLAIN, 2 * SEG_PLAIN + 5 * CHUNK + 1].map(footprintFor)).toEqual([68, 128, 128, 136]);
     await expect(elementSealer(new Blob([pseudo(2 * CHUNK, 1)]), 63)).rejects.toThrow("place_invalide"); // déborde du segment
     await expect(elementSealer(new Blob([pseudo(SEG_PLAIN, 1)]), 1)).rejects.toThrow("place_invalide"); // grand hors frontière
     const a = pseudo(100_000, 11); // morceaux 0-1
