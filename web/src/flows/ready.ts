@@ -12,6 +12,6 @@ export function roundQuarter(ms: number): number {
 /** Heure locale « 9 h 45 » (FR, espaces fines insécables) ou « 9:45 AM » (EN). */
 export function clockText(ms: number, lang: Lang): string {
   const d = new Date(ms);
-  if (lang === "fr") return `${d.getHours()} h ${String(d.getMinutes()).padStart(2, "0")}`;
+  if (lang === "fr") return `${String(d.getHours()).padStart(2, "0")} h ${String(d.getMinutes()).padStart(2, "0")}`;
   return new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(d).replace(/\s/g, " ");
 }

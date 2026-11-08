@@ -111,7 +111,9 @@ func (s *server) create(w http.ResponseWriter, r *http.Request) {
 	// V_accès ou V_gestion déjà pris : seul un détenteur du secret peut le provoquer (deux
 	// créations avec le même lien). Réponse identique à une création invalide (400
 	// bad_request), création comptée au quota et dans la difficulté anti-robot.
-	switch retry, err := s.lim.BeginUpload(ip, req.ID, share.ContentBytes(b.Bucket)); {
+	// Envoi dès l'ajout (spec §41.14) : rien n'est réservé à la création, les octets reçus
+	// sont comptés à chaque segment (Receive) et le palier final payé à la finalisation (Settle).
+	switch retry, err := s.lim.BeginUpload(ip, req.ID, 0); {
 	case errors.Is(err, limits.ErrDuplicate): // id interne de 128 bits déjà en cours : impossible
 		fail(w, errors.New("id interne en double"))
 		return
@@ -181,6 +183,11 @@ func (s *server) putSegment(w http.ResponseWriter, r *http.Request) {
 		fail(w, errBadRequest)
 		return
 	}
+	// Octets reçus comptés au quota du jour, même si le segment est effacé ensuite (§41.14).
+	if retry, err := s.lim.Receive(id, int64(len(body))); err != nil {
+		writeLimit(w, retry)
+		return
+	}
 	if err := s.svc.PutSegment(id, n, body); err != nil {
 		fail(w, err)
 		return
@@ -204,8 +211,12 @@ func (s *server) finalize(w http.ResponseWriter, r *http.Request) {
 		MaxOpens int    `json:"max_opens"`
 		FillFrom *int   `json:"fill_from"`
 		FillTo   *int   `json:"fill_to"`
+		// Brouillon (spec §41.14) : palier final, en-tête et manifeste chiffré, sans fill_*.
+		Bucket *int    `json:"bucket"`
+		Header *string `json:"header"`
+		Tail   *string `json:"tail"`
 	}
-	if err := readJSON(w, r, &b); err != nil {
+	if err := readJSONMax(w, r, &b, maxFinalizeJSON); err != nil {
 		fail(w, err)
 		return
 	}
@@ -223,11 +234,32 @@ func (s *server) finalize(w http.ResponseWriter, r *http.Request) {
 	if b.FillFrom != nil {
 		req.FillFrom, req.FillTo = *b.FillFrom, *b.FillTo
 	}
+	draft := b.Bucket != nil
+	if draft != (b.Header != nil) || draft != (b.Tail != nil) || draft && b.FillFrom != nil {
+		fail(w, errBadRequest)
+		return
+	}
+	final := 0
+	if draft {
+		var e1, e2 error
+		req.Bucket = *b.Bucket
+		req.Header, e1 = secret(*b.Header, share.Header)
+		req.Tail, e2 = secret(*b.Tail, share.ChunkCT)
+		if e1 != nil || e2 != nil || req.Bucket == 0 {
+			fail(w, errBadRequest)
+			return
+		}
+		final = req.Bucket
+	} else if final, err = s.svc.UploadBucket(id); err != nil {
+		fail(w, err)
+		return
+	}
 	left, err := s.svc.Finalize(id, req)
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	s.lim.Settle(id, share.ContentBytes(final))
 	s.lim.FinishUpload(id)
 	writeJSON(w, http.StatusOK, map[string]int64{"expires_in_s": secs(left)})
 }
@@ -411,6 +443,68 @@ func (s *server) destroy(w http.ResponseWriter, r *http.Request) {
 	}
 	if report {
 		s.reports.add(s.svc.Now())
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /api/shares/grow {"bucket": b} : agrandit la réservation d'un brouillon (spec §41.14).
+func (s *server) grow(w http.ResponseWriter, r *http.Request) {
+	id, _, err := s.checkToken(r, token.Upload)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	var b struct {
+		Bucket *int `json:"bucket"`
+	}
+	if err := readJSON(w, r, &b); err != nil || b.Bucket == nil {
+		fail(w, errBadRequest)
+		return
+	}
+	if err := s.svc.Grow(id, *b.Bucket); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /api/shares/erase {"from": a, "to": b} : efface tout de suite, sur le disque, les
+// segments [a, b) d'un élément retiré du brouillon (spec §41.14).
+func (s *server) erase(w http.ResponseWriter, r *http.Request) {
+	id, _, err := s.checkToken(r, token.Upload)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	var b struct {
+		From *int `json:"from"`
+		To   *int `json:"to"`
+	}
+	if err := readJSON(w, r, &b); err != nil || b.From == nil || b.To == nil {
+		fail(w, errBadRequest)
+		return
+	}
+	if err := s.svc.Erase(id, *b.From, *b.To); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /api/shares/keep : signe de vie de la page qui compose, corps vide (spec §41.14).
+func (s *server) keep(w http.ResponseWriter, r *http.Request) {
+	id, _, err := s.checkToken(r, token.Upload)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	if r.ContentLength > 0 {
+		fail(w, errBadRequest)
+		return
+	}
+	if err := s.svc.Keep(id); err != nil {
+		fail(w, err)
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -521,3 +521,43 @@ func TestCountersEmptyAfterRotation(t *testing.T) {
 		t.Fatal("place non rendue", s.Len(), n)
 	}
 }
+
+// Envoi dès l'ajout (spec §41.14) : les octets reçus comptent au quota du jour, même
+// effacés ou abandonnés ; Settle porte un envoi finalisé aux données utiles de son palier.
+func TestReceivedBytesCount(t *testing.T) {
+	now := t0
+	l := newLim(&now)
+	const gib = int64(1) << 30
+	if _, err := l.BeginUpload(ip("1.2.3.4"), "a", 0); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := l.Receive("a", gib); err != nil {
+			t.Fatal(i, err)
+		}
+	}
+	l.AbandonUpload("a") // reçus puis abandonnés : toujours comptés
+	if _, err := l.BeginUpload(ip("1.2.3.4"), "b", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Receive("b", gib/2); err != nil {
+		t.Fatal(err)
+	}
+	if ra, err := l.Receive("b", gib); !errors.Is(err, ErrQuota) || ra <= 0 {
+		t.Fatal("au-delà de 6 Gio reçus", ra, err)
+	}
+	l.Settle("b", gib/2+100) // 100 octets de bourrage à payer
+	l.FinishUpload("b")
+	if _, err := l.BeginUpload(ip("1.2.3.4"), "c", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Receive("c", gib/2-100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Receive("c", 1); !errors.Is(err, ErrQuota) {
+		t.Fatal("bourrage non compté", err)
+	}
+	if _, err := l.Receive("inconnu", gib); err != nil {
+		t.Fatal("envoi inconnu (jour changé) : ignoré", err)
+	}
+}

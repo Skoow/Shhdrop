@@ -65,10 +65,16 @@ type CreateReq struct {
 
 // FinalizeReq : tout ce qui dépend du mot de passe, la durée, les ouvertures, et le
 // bourrage [FillFrom, FillTo) que le serveur remplit d'aléa (spec §29.3, §29.8).
+//
+// Envoi dès l'ajout (spec §41.14) : Bucket ≠ 0 donne le palier final (≤ la réservation) ;
+// Header (48 octets) et Tail (morceau chiffré du manifeste) sont écrits par le serveur, et
+// tous les segments manquants du palier final sont remplis d'aléa (FillFrom = FillTo = 0).
 type FinalizeReq struct {
 	TTLHours, MaxOpens, KdfOps, KdfMem int
 	FillFrom, FillTo                   int
 	Salt, ProofV, Envelope             []byte
+	Bucket                             int
+	Header, Tail                       []byte
 }
 
 // EnvelopeLen : taille de E (nonce 12 ‖ R chiffrée 32 ‖ tag 16).
@@ -346,6 +352,11 @@ func ValidateFinalize(r FinalizeReq) error {
 		len(r.Salt) != 16 || len(r.ProofV) != 32 || len(r.Envelope) != EnvelopeLen || !notEmptyHash(r.ProofV) {
 		return ErrBadRequest
 	}
+	draft := r.Bucket != 0
+	if draft && (!validBucket(r.Bucket) || len(r.Header) != Header || len(r.Tail) != ChunkCT || r.FillFrom != 0 || r.FillTo != 0) ||
+		!draft && (r.Header != nil || r.Tail != nil) {
+		return ErrBadRequest
+	}
 	return nil
 }
 
@@ -487,6 +498,9 @@ func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 	if err != nil {
 		return 0, notFound(err)
 	}
+	if r.Bucket != 0 {
+		return s.finalizeDraft(id, bucket, r)
+	}
 	segs := SegmentCount(bucket)
 	if !validFill(r.FillFrom, r.FillTo, segs) {
 		return 0, ErrBadRequest
@@ -585,8 +599,11 @@ func (s *Service) fillRandom(id string, bucket, from, to int) error {
 	if from >= to {
 		return nil
 	}
-	start := segOffset(bucket, from)
-	end := segOffset(bucket, to)
+	return s.fillRange(id, segOffset(bucket, from), segOffset(bucket, to))
+}
+
+// fillRange écrit des octets de crypto/rand dans [start, end) du fichier id.
+func (s *Service) fillRange(id string, start, end int64) error {
 	buf := make([]byte, fillChunk)
 	for off := start; off < end; {
 		n := min(int64(len(buf)), end-off)

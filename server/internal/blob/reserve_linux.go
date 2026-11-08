@@ -39,3 +39,14 @@ func openRead(path string) (*os.File, error) {
 	}
 	return f, err
 }
+
+// punchHole rend la plage au système de fichiers (FALLOC_FL_PUNCH_HOLE, taille gardée) ;
+// faux si le système de fichiers ne le permet pas (l'appelant écrit alors des zéros).
+// Les blocs libérés ne sont pas réalloués : la place logique reste comptée (UsedBytes),
+// une écriture ultérieure les reprend.
+func punchHole(f *os.File, off, n int64) bool {
+	if n == 0 {
+		return true
+	}
+	return unix.Fallocate(int(f.Fd()), unix.FALLOC_FL_PUNCH_HOLE|unix.FALLOC_FL_KEEP_SIZE, off, n) == nil
+}

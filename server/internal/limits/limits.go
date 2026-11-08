@@ -78,7 +78,8 @@ type Limiter struct {
 
 type upload struct {
 	k64, k48 string
-	bytes    int64
+	bytes    int64 // réservés à la création (rendus si l'envoi n'aboutit pas)
+	recv     int64 // reçus (Receive) ou payés à la finalisation (Settle) : jamais rendus
 }
 
 func New(now func() time.Time) *Limiter {
@@ -218,6 +219,45 @@ func (l *Limiter) endLocked(id string, refund bool) (upload, bool) {
 	return u, true
 }
 
+// Receive compte n octets reçus pour l'envoi id (spec §41.14) : refusé (ErrQuota, délai
+// jusqu'à minuit UTC) s'ils dépassent les octets du jour de la connexion ou de son /48. Un
+// segment effacé ensuite reste compté. Un id inconnu (jour changé, redémarrage) est ignoré.
+func (l *Limiter) Receive(id string, n int64) (time.Duration, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	l.rotateLocked(now)
+	u, ok := l.uploads[id]
+	if !ok {
+		return 0, nil
+	}
+	if n < 0 || n > BytesPer64-l.bytes64[u.k64] || n > BytesPer48-l.bytes48[u.k48] {
+		return time.Unix((l.day+1)*day, 0).Sub(now), ErrQuota
+	}
+	l.bytes64[u.k64] += n
+	l.bytes48[u.k48] += n
+	u.recv += n
+	l.uploads[id] = u
+	return 0, nil
+}
+
+// Settle porte le compte de l'envoi id à au moins min octets (données utiles du palier
+// final, bourrage rempli par le serveur compris), sans refus : appelé à la finalisation.
+func (l *Limiter) Settle(id string, min int64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rotateLocked(l.now())
+	u, ok := l.uploads[id]
+	if !ok || u.bytes+u.recv >= min {
+		return
+	}
+	d := min - u.bytes - u.recv
+	l.bytes64[u.k64] += d
+	l.bytes48[u.k48] += d
+	u.recv += d
+	l.uploads[id] = u
+}
+
 func decr(m map[string]int, k string) {
 	if m[k]--; m[k] <= 0 {
 		delete(m, k)
@@ -238,15 +278,16 @@ func (l *Limiter) CancelUpload(id string) {
 	l.endLocked(id, true)
 }
 
-// AbandonUpload : l'envoi id a été effacé sans finalize (abandon, échéance) ; sa
-// réservation est rendue et ses octets comptent comme abandonnés. Un id inconnu (serveur
+// AbandonUpload : l'envoi id a été effacé sans finalize (abandon, échéance) ; sa création et
+// sa réservation sont rendues, ses octets reçus restent comptés (spec §41.14), et tous
+// comptent comme abandonnés. Un id inconnu (serveur
 // redémarré, jour changé) est ignoré.
 func (l *Limiter) AbandonUpload(id string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if u, ok := l.endLocked(id, true); ok {
-		l.aband64[u.k64] += u.bytes
-		l.aband48[u.k48] += u.bytes
+		l.aband64[u.k64] += u.bytes + u.recv
+		l.aband48[u.k48] += u.bytes + u.recv
 	}
 }
 

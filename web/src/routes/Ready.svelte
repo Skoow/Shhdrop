@@ -167,7 +167,7 @@
         <div class="hd-tx">
           <h2 id="ready-title" class="title" tabindex="-1" data-large-title bind:this={heading}>{t("ready.title")}</h2>
           <p class="meta num">{summary}</p>
-          <p class="active num"><span class="dot" aria-hidden="true"></span>{t("ready.active", { time: around })}</p>
+          <p class="active num"><span class="dot" aria-hidden="true"></span>{t("ready.active", { left: formatDuration(result?.expiresInS ?? 0, lang, { coarse: true }), time: around })}</p>
           <p class="self">{selfDestruct}</p>
         </div>
       </header>

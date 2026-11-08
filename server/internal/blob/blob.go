@@ -246,3 +246,69 @@ func (s *Store) UsedBytes() (int64, error) {
 	}
 	return total, nil
 }
+
+// withFile ouvre le fichier id en écriture ; les dates sont remises à l'epoch à la fermeture.
+func (s *Store) withFile(id string, f func(*os.File) error) (err error) {
+	path, err := s.path(id)
+	if err != nil {
+		return err
+	}
+	fh, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if werr := wipeTimes(path); err == nil {
+			err = werr
+		}
+	}()
+	defer func() {
+		if cerr := fh.Close(); err == nil {
+			err = cerr
+		}
+	}()
+	return f(fh)
+}
+
+// Resize porte le fichier à size octets : agrandi, la nouvelle place est allouée comme par
+// Reserve ; réduit, la fin est rendue au système de fichiers (spec §41.14).
+func (s *Store) Resize(id string, size int64) error {
+	if size < 0 {
+		return errors.New("blob : taille négative")
+	}
+	return s.withFile(id, func(f *os.File) error {
+		fi, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		if size <= fi.Size() {
+			return f.Truncate(size)
+		}
+		return allocate(f, size, s.NoSparse)
+	})
+}
+
+// Erase efface la plage [off, off+n) : trou rendu au système de fichiers quand il le permet
+// (relu comme des zéros), sinon écriture de zéros ; puis fsync. Refuse tout dépassement.
+func (s *Store) Erase(id string, off, n int64) error {
+	return s.withFile(id, func(f *os.File) error {
+		fi, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		if off < 0 || n < 0 || off > fi.Size() || n > fi.Size()-off {
+			return errors.New("blob : effacement hors du fichier")
+		}
+		if !punchHole(f, off, n) {
+			zero := make([]byte, min(n, 4<<20))
+			for done := int64(0); done < n; {
+				k := min(int64(len(zero)), n-done)
+				if _, err := f.WriteAt(zero[:k], off+done); err != nil {
+					return err
+				}
+				done += k
+			}
+		}
+		return f.Sync()
+	})
+}

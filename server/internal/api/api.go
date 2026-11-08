@@ -29,9 +29,12 @@ import (
 )
 
 const (
-	maxJSON    = 4 << 10
-	captchaTTL = 2 * time.Minute // durée du jeton shown_at (= celle du défi ALTCHA)
-	uploadTTL  = 6 * time.Hour   // = share.uploadWindow (spec §24, §41.2)
+	maxJSON = 4 << 10
+	// maxFinalizeJSON : finalize d'un brouillon, avec le manifeste chiffré (65 552 octets en
+	// base64url, 87 403 caractères) et l'en-tête.
+	maxFinalizeJSON = 96 << 10
+	captchaTTL      = 2 * time.Minute // durée du jeton shown_at (= celle du défi ALTCHA)
+	uploadTTL       = 6 * time.Hour   // = share.uploadWindow (spec §24, §41.2)
 	// downloadTTL : durée du jeton de téléchargement, qui n'est plus plafonnée à expires_at :
 	// elle borne la grâce d'une ouverture active après l'échéance (spec §41.8).
 	downloadTTL   = 6 * time.Hour
@@ -148,6 +151,9 @@ func newHandler(s *server, static http.Handler) http.Handler {
 	// jeton signé (envoi, lecture), par K_accès (meta, unlock, destroy) ou par S_gestion.
 	api.HandleFunc("PUT /api/shares/segments/{n}", s.putSegment)
 	api.HandleFunc("POST /api/shares/finalize", s.finalize)
+	api.HandleFunc("POST /api/shares/grow", s.grow)
+	api.HandleFunc("POST /api/shares/erase", s.erase)
+	api.HandleFunc("POST /api/shares/keep", s.keep)
 	api.HandleFunc("GET /api/shares/meta", s.meta)
 	api.HandleFunc("POST /api/shares/unlock", s.unlock)
 	api.HandleFunc("GET /api/shares/segments/{n}", s.getSegment)
@@ -404,7 +410,13 @@ func bearer(r *http.Request) (string, error) {
 // casse des clés et garde le dernier doublon (audit F2) : les clés sont d'abord vérifiées
 // une à une (exactes, sensibles à la casse, sans doublon) par strictKeys.
 func readJSON(w http.ResponseWriter, r *http.Request, v any) error {
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxJSON))
+	return readJSONMax(w, r, v, maxJSON)
+}
+
+// readJSONMax : readJSON avec un plafond de corps choisi (finalize d'un brouillon porte le
+// morceau chiffré du manifeste, spec §41.14).
+func readJSONMax(w http.ResponseWriter, r *http.Request, v any, max int64) error {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, max))
 	if err != nil {
 		return errBadRequest
 	}

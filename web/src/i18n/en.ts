@@ -336,7 +336,7 @@ export const en = {
   "ready.created": "Share created.",
   "ready.delete.confirm": "Delete this share for everyone? The link will lead nowhere.",
   "ready.never": "This link and this password will never be shown again.",
-  "ready.active": "Active · erases itself around {time}",
+  "ready.active": "Active · erases itself in {left} (at {time})",
   "ready.selfdestruct": "Erases itself: after {opens}, or after {ttl}.",
   "ready.opens.one": "{n} open",
   "ready.opens.other": "{n} opens",

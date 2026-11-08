@@ -153,7 +153,7 @@ test.describe("fr-FR", () => {
     await exact(page);
     await page.clock.setFixedTime(new Date("2026-11-05T21:41:00+01:00"));
     await toReady(page, context, shh.origin);
-    await expect(page.getByText(/^Actif · s'efface vers 9\sh\s45$/)).toBeVisible();
+    await expect(page.getByText(/^Actif · s'efface dans 12\sh \(à 09\sh\s45\)$/)).toBeVisible();
     await expect(page.getByText(/^S'efface tout seul\s: après 1\souverture, ou au bout de 12\sh\.$/)).toBeVisible();
     await expect(page.getByText(/disparaît de partout/)).toHaveCount(0);
 
@@ -169,7 +169,7 @@ test.describe("fr-FR", () => {
     await sendButton(p2).click();
     await expect(readyHeading(p2)).toBeVisible({ timeout: 60_000 });
     await expect(p2.getByText(/^S'efface tout seul\s: après 3\souvertures, ou au bout de 6\sh\.$/)).toBeVisible();
-    await expect(p2.getByText(/^Actif · s'efface vers 3\sh\s30$/)).toBeVisible();
+    await expect(p2.getByText(/^Actif · s'efface dans 6\sh \(à 03\sh\s30\)$/)).toBeVisible();
   });
 
   test("mot de passe affiché tout collé (10 caractères, sans groupe ni point), sans « Épeler » ; rien dans la console ni le stockage", async ({ page, shh, context }) => {

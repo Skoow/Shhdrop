@@ -337,7 +337,7 @@ export const fr = {
   "ready.created": "Partage créé.",
   "ready.delete.confirm": "Supprimer ce partage pour tout le monde\u202f? Le lien ne mènera plus à rien.",
   "ready.never": "Ce lien et ce mot de passe ne seront plus jamais affichés.",
-  "ready.active": "Actif · s'efface vers {time}",
+  "ready.active": "Actif · s'efface dans {left} (à {time})",
   "ready.selfdestruct": "S'efface tout seul : après {opens}, ou au bout de {ttl}.",
   "ready.opens.one": "{n} ouverture",
   "ready.opens.other": "{n} ouvertures",
