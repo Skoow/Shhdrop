@@ -289,7 +289,8 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     const { fake, net, statuses } = setup();
     const ac = new AbortController();
     let during = -1;
-    const e = await createShare(ORIGIN, [text("x")], {
+    // Un fichier : un texte seul ne fait aucun PUT (spec §41.14).
+    const e = await createShare(ORIGIN, [{ kind: "file", name: "x", mime: "text/plain", data: utf8("x") }], {
       ttlHours: 1,
       maxOpens: 1,
       password: PW,
@@ -310,7 +311,7 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
   it("coupure simulée au milieu de l'envoi : le client réessaie et réussit", async ({ expect }) => {
     const { fake, net, statuses } = setup({ outage: { atFraction: 0.5, ms: 300 } });
     const retries: number[] = [];
-    const r = await createShare(ORIGIN, [text("x")], {
+    const r = await createShare(ORIGIN, [text("x"), { kind: "file", name: "f", mime: "text/plain", data: utf8("f") }], {
       ttlHours: 1,
       maxOpens: 1,
       password: PW,

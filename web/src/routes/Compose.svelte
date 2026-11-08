@@ -3,12 +3,13 @@
   // élément (Parcourir, Photo, Vidéo, Texte, Coller, dépôt), une transition de vue ouvre le
   // composeur dans le réceptacle : liste par catégories, jauge, options, « Chiffrer et envoyer ».
   // Tout reste en mémoire (aucun stockage) ; l'envoi lui-même est la Task 17 (`onsend`).
-  import { flushSync, tick } from "svelte";
+  import { flushSync, tick, untrack } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import { chrome } from "../app/chrome.svelte";
-  import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, TTL_MAX_HOURS, generatePassword, type Item, type KeepTtl } from "../index";
+  import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, TTL_MAX_HOURS, generatePassword, type ElementStatus, type Item, type KeepTtl } from "../index";
   import type { PaidTier } from "../limits";
   import { blockKey, createComposer, type AddReport, type Source } from "../flows/compose.svelte";
+  import { rowStatus, toDraftList } from "../flows/preupload";
   import { CLEANER_READY, cleanFile } from "../flows/clean";
   import { addActions, desktopActions, type AddId } from "../flows/add-actions";
   import { captureSupport } from "../media/capture";
@@ -33,7 +34,8 @@
   import Home, { type Action } from "./Home.svelte";
   import Options from "./Options.svelte";
 
-  export type SendState = { items: Item[]; ttlHours: number; maxOpens: number; password: string; rights: Rights; keepTtlH?: KeepTtl };
+  /** ids : identifiants des lignes, dans l'ordre de `items` (brouillon d'envoi, spec §41.14). */
+  export type SendState = { items: Item[]; ids: string[]; ttlHours: number; maxOpens: number; password: string; rights: Rights; keepTtlH?: KeepTtl };
   type Props = {
     /** Envoi (Task 17). Sans lui : avis « Envoi : prochaine étape ». */
     onsend?: (state: SendState) => void;
@@ -41,8 +43,18 @@
     vaultAllowed?: boolean;
     /** Faux pendant un envoi (composeur caché) : ni collage ni dépôt n'ajoutent rien (S9). */
     active?: boolean;
+    /**
+     * Envoi dès l'ajout (spec §41.14) : la liste des fichiers à chaque changement, l'état de
+     * chaque ligne (relu quand `uploadVersion` change), Réessayer, et les octets retirés dont
+     * l'effacement sur le serveur n'est pas encore confirmé (jauge).
+     */
+    onitems?: (list: { id: string; data: Blob }[]) => void;
+    uploadOf?: (id: string) => ElementStatus | undefined;
+    uploadVersion?: number;
+    onretry?: (id: string) => void;
+    removing?: number;
   };
-  let { onsend, vaultAllowed = false, active = true }: Props = $props();
+  let { onsend, vaultAllowed = false, active = true, onitems, uploadOf, uploadVersion = 0, onretry, removing = 0 }: Props = $props();
 
   let online = $state(typeof navigator === "undefined" || navigator.onLine !== false);
 
@@ -366,6 +378,13 @@
   const reasonText = $derived(composerBlock ? t(blockKey(composerBlock), { max: composerBlock === "trop_gros" ? formatBytes(CONTENT_MAX, lang) : num(TEXT_MAX) }) : "");
   const freeText = $derived(t("compose.free", { size: formatBytes(CONTENT_MAX, lang), ttl: formatDuration(TTL_MAX_HOURS * 3600, lang) }));
   const estimate = $derived(estimateUpload(composer.totalBytes));
+  // Chaque fichier part dès son ajout ; un retrait interrompt son envoi et l'efface du serveur.
+  // untrack : le brouillon met à jour l'état des lignes pendant l'appel (pas une dépendance).
+  $effect(() => {
+    const list = toDraftList(composer.items);
+    untrack(() => onitems?.(list));
+  });
+  const upload = (i: (typeof composer.items)[number]) => (void uploadVersion, rowStatus(uploadOf?.(i.id)));
   const culprits = $derived(composer.culprits());
   const unviewable = $derived(viewOnlyBlockers(composer.items));
   const cannotOpen = (i: (typeof composer.items)[number]) => !options.allowDownload && !viewableInBrowser(i);
@@ -421,7 +440,7 @@
 
   function send() {
     if (reasonText) return;
-    const state: SendState = { items: composer.toApiItems(), ttlHours: options.ttlHours, maxOpens: options.maxOpens, password: options.password, ...sendRights(options) };
+    const state: SendState = { items: composer.toApiItems(), ids: composer.items.map((i) => i.id), ttlHours: options.ttlHours, maxOpens: options.maxOpens, password: options.password, ...sendRights(options) };
     if (onsend) onsend(state);
     else say(t("compose.send.soon"));
   }
@@ -484,7 +503,8 @@
           </Button>
         </div>
         <p class="free num" data-free>{freeText}</p>
-        <div class="cap"><CapacityGauge bytes={composer.totalBytes} count={composer.count} head onpaid={showPaid} /></div>
+        <div class="cap"><CapacityGauge bytes={composer.totalBytes + removing} count={composer.count} head onpaid={showPaid} /></div>
+        {#if removing > 0}<p class="removing" role="status">{t("compose.up.removing")}</p>{/if}
       </div>
 
 
@@ -526,6 +546,8 @@
             onmenu={openMenu}
             {cannotOpen}
             danger={(i) => culprits.has(i.id)}
+            {upload}
+            {onretry}
           />
         {/each}
       </div>
@@ -731,6 +753,11 @@
     align-items: center;
     gap: var(--sp-2) var(--sp-3);
     padding-inline: 4px;
+  }
+  .removing {
+    margin: 0;
+    font-size: var(--fs-xs, 0.8125rem);
+    color: var(--ink-3, var(--muted));
   }
   .cap {
     grid-column: 1 / -1;

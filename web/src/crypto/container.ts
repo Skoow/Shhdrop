@@ -2,7 +2,8 @@
 // façon STREAM sous K_contenu = HKDF(R). Clair de B morceaux : données des éléments (à
 // partir de l'octet 0, dans l'ordre d'ajout) ‖ zéros ‖ manifeste ‖ longueur du manifeste
 // (4 octets, gros-boutiste) en toute fin.
-import { concat, utf8 } from "./encoding";
+import { concat, unb64u, utf8 } from "./encoding";
+import { hkdf } from "./kdf";
 import type { ContentKeys } from "./envelope";
 
 export const CHUNK = 65536, TAG = 16, CHUNK_CT = 65552, HEADER = 48, SEG_CHUNKS = 64;
@@ -52,7 +53,23 @@ export type ManifestEntry = {
   size: number;
   offset: number;
   text?: string;
+  /** Graine de la clé de l'élément (spec §41.14), base64url de 32 octets ; absente : ancien format (K_contenu). */
+  k?: string;
 };
+
+/** Données authentifiées des morceaux d'un élément (spec §41.14) ; distinctes de l'info HKDF de sa clé. */
+export const ELEMENT_AD = utf8("shhdrop/v2/element-ad");
+
+/** K_élément = HKDF(k, « shhdrop/v2/element »), AES-256-GCM non extractible (spec §41.14). */
+export async function elementKey(k: Uint8Array<ArrayBuffer>): Promise<CryptoKey> {
+  if (k.length !== 32) throw new Error("graine invalide");
+  const raw = await hkdf(k, "shhdrop/v2/element");
+  try {
+    return await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+  } finally {
+    raw.fill(0);
+  }
+}
 export type ManifestV2 = { v: 2; rights: Rights; keep_ttl_h?: KeepTtl; items: ManifestEntry[] };
 export type Manifest = ManifestV2;
 
@@ -85,7 +102,7 @@ export function segmentSize(bucket: number, n: number): number {
   return (n === 0 ? HEADER : 0) + chunks * CHUNK_CT;
 }
 
-function header(engagement: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
+export function header(engagement: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
   if (engagement.length !== 32) throw new Error("engagement invalide");
   return concat(MAGIC, new Uint8Array([VERSION]), new Uint8Array(11), engagement);
 }
@@ -106,7 +123,7 @@ export function readHeader(seg0: Uint8Array): { header: Uint8Array<ArrayBuffer>;
 }
 
 // Nonce : indice big-endian sur 11 octets (octets 0..10) + drapeau « dernier morceau ».
-function nonce(index: number, last: boolean): Uint8Array<ArrayBuffer> {
+export function nonce(index: number, last: boolean): Uint8Array<ArrayBuffer> {
   const iv = new Uint8Array(12);
   let x = index;
   for (let i = 10; i >= 0 && x > 0; i--) {
@@ -285,14 +302,16 @@ function parseManifest(raw: Uint8Array<ArrayBuffer>, dataLen: number): Manifest 
   const out: ManifestEntry[] = [];
   for (const e of items as unknown[]) {
     if (typeof e !== "object" || e === null) throw corrupt();
-    const { kind, name, mime, size, offset, text } = e as Record<string, unknown>;
+    const { kind, name, mime, size, offset, text, k } = e as Record<string, unknown>;
     if (typeof name !== "string" || typeof mime !== "string" || !isNat(size) || !isNat(offset)) throw corrupt();
     if (kind === "text") {
-      if (typeof text !== "string" || size !== 0 || offset !== 0 || codePoints(text) > TEXT_MAX) throw corrupt();
+      if (typeof text !== "string" || size !== 0 || offset !== 0 || k !== undefined || codePoints(text) > TEXT_MAX) throw corrupt();
       out.push({ kind, name, mime, size, offset, text });
     } else if (kind === "file") {
       if (text !== undefined || offset > dataLen || size > dataLen - offset) throw corrupt();
-      out.push({ kind, name, mime, size, offset });
+      if (k === undefined) out.push({ kind, name, mime, size, offset });
+      else if (typeof k === "string" && k.length === 43) out.push({ kind, name, mime, size, offset, k });
+      else throw corrupt();
     } else {
       throw corrupt();
     }
@@ -354,7 +373,7 @@ export async function openStream(
     cache = { n, data };
     return data;
   }
-  async function chunk(i: number): Promise<Uint8Array<ArrayBuffer>> {
+  async function chunk(i: number, key: CryptoKey = keys.kContenu, ad: Uint8Array<ArrayBuffer> = hdr): Promise<Uint8Array<ArrayBuffer>> {
     const n = Math.floor(i / SEG_CHUNKS);
     let s = await seg(n);
     // wipe() a pu vider le cache pendant l'attente : recharger plutôt que lire des zéros.
@@ -364,8 +383,8 @@ export async function openStream(
       // decrypt copie ses entrées dès l'appel : le cache peut changer ensuite.
       return new Uint8Array(
         await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv: nonce(i, i === bucket - 1), additionalData: hdr, tagLength: 128 },
-          keys.kContenu,
+          { name: "AES-GCM", iv: nonce(i, i === bucket - 1), additionalData: ad, tagLength: 128 },
+          key,
           s.subarray(start, start + CHUNK_CT),
         ),
       );
@@ -389,10 +408,15 @@ export async function openStream(
     if (diff !== 0) throw corrupt();
 
     // Passe à `out` les tranches du clair [a, a + len), morceau par morceau.
-    async function range(a: number, len: number, out: (part: Uint8Array<ArrayBuffer>, pos: number) => Promise<void> | void) {
+    async function range(
+      a: number,
+      len: number,
+      out: (part: Uint8Array<ArrayBuffer>, pos: number) => Promise<void> | void,
+      key?: { k: CryptoKey; ad: Uint8Array<ArrayBuffer> },
+    ) {
       for (let pos = 0; pos < len; ) {
         const i = Math.floor((a + pos) / CHUNK);
-        const pt = await chunk(i);
+        const pt = await chunk(i, key?.k, key?.ad);
         const lo = a + pos - i * CHUNK;
         const n = Math.min(CHUNK - lo, len - pos);
         const part = pt.slice(lo, lo + n);
@@ -429,6 +453,23 @@ export async function openStream(
       throw corrupt();
     }
     if (canonical !== bucket) throw corrupt();
+    // Clés des éléments (spec §41.14) : une par entrée de fichier qui porte `k`.
+    const elKeys = new Map<number, { k: CryptoKey; ad: Uint8Array<ArrayBuffer> }>();
+    for (const [i, e] of manifest.items.entries()) {
+      if (e.k === undefined) continue;
+      let seed: Uint8Array<ArrayBuffer>;
+      try {
+        seed = unb64u(e.k);
+      } catch {
+        throw corrupt();
+      }
+      if (seed.length !== 32) throw corrupt();
+      try {
+        elKeys.set(i, { k: await elementKey(seed), ad: ELEMENT_AD });
+      } finally {
+        seed.fill(0);
+      }
+    }
 
     function entry(i: number): ManifestEntry {
       const e = manifest.items[i];
@@ -451,10 +492,15 @@ export async function openStream(
         if (e.size > PREVIEW_MAX) throw new Error("trop_gros_pour_apercu");
         const res = new Uint8Array(e.size);
         try {
-          await range(e.offset, e.size, (part, pos) => {
-            res.set(part, pos);
-            part.fill(0);
-          });
+          await range(
+            e.offset,
+            e.size,
+            (part, pos) => {
+              res.set(part, pos);
+              part.fill(0);
+            },
+            elKeys.get(i),
+          );
         } catch (err) {
           res.fill(0);
           throw err;
@@ -468,7 +514,7 @@ export async function openStream(
           if (t.length > 0) await sink(t);
           return;
         }
-        await range(e.offset, e.size, (part) => sink(part));
+        await range(e.offset, e.size, (part) => sink(part), elKeys.get(i));
       }),
       wipe,
     };

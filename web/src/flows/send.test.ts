@@ -84,6 +84,15 @@ describe("createSender : phases (UI §9.4.1)", () => {
     expect(JSON.stringify({ ...t.s, result: undefined })).not.toContain("pw-generated");
   });
 
+  it("texte seul (spec §41.14) : onProgress(0, 0) → créé sur le serveur, puis finalisation directe", async () => {
+    const t = setup();
+    void t.s.start(ITEMS, OPTS);
+    await t.last().opts.solveCaptcha({ c: 1 }, { fallbackOrigin: null, mode: "pow" });
+    t.last().opts.onProgress!(0, 0);
+    expect(t.s.createdOnServer).toBe(true);
+    expect(t.s.phase).toBe("finalize");
+  });
+
   it("start deux fois → un seul createShare (refus hors idle)", async () => {
     const t = setup();
     void t.s.start(ITEMS, OPTS);

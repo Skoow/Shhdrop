@@ -17,11 +17,12 @@
 // (`restore`) ; aucun secret du client (lien, mot de passe, clé) n'en fait partie.
 // Non simulés : limites par connexion, quotas, place disque, gel. Aucune preuve anti-robot
 // n'est vérifiée (anti-robot désactivé en démo ; `fallback: null`).
-import { BUCKETS, segmentCount, segmentSize } from "../crypto/container";
+import { BUCKETS, CHUNK_CT, HEADER, SEG_CHUNKS, segmentCount, segmentSize } from "../crypto/container";
 
 export const MARK = "__SHH_DEMO__";
 
 const MAX_JSON = 4096;
+const MAX_FINALIZE_JSON = 96 * 1024; // finalize d'un brouillon : manifeste chiffré (spec §41.14)
 const MAX_ATTEMPTS = 5;
 const UPLOAD_WINDOW_S = 6 * 3600; // jeton d'envoi et échéance d'envoi (spec §24, §41.2)
 const PURGE_WINDOW_S = 6 * 3600; // jeton de téléchargement (spec §24, §41.2)
@@ -101,6 +102,8 @@ export type FakeServer = {
   shares(): number;
   /** État courant, sans les segments (persistance de la démo). */
   snapshot(): Snapshot;
+  /** Tests : état, palier et segments présents de chaque partage. */
+  inspect(): { state: State; bucket: number; present: number[] }[];
 };
 
 class HttpFail {
@@ -160,9 +163,9 @@ async function matches(x: Uint8Array | undefined, stored: Uint8Array): Promise<b
 let emptyHash: Uint8Array | undefined;
 
 /** Corps JSON : ≤ 4 Kio, un objet, aucune clé inconnue (readJSON du serveur). */
-async function readJSON(req: Request, keys: readonly string[]): Promise<Record<string, unknown>> {
+async function readJSON(req: Request, keys: readonly string[], max = MAX_JSON): Promise<Record<string, unknown>> {
   const buf = new Uint8Array(await req.arrayBuffer());
-  if (buf.length > MAX_JSON) throw badRequest();
+  if (buf.length > max) throw badRequest();
   let v: unknown;
   try {
     v = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(buf));
@@ -457,11 +460,57 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     return empty(204);
   }
 
-  const FINALIZE_KEYS = ["salt", "kdf_ops", "kdf_mem", "proof_v", "envelope", "ttl_hours", "max_opens", "fill_from", "fill_to"];
+  const FINALIZE_KEYS = ["salt", "kdf_ops", "kdf_mem", "proof_v", "envelope", "ttl_hours", "max_opens", "fill_from", "fill_to", "bucket", "header", "tail"];
+
+  function uploading(req: Request): [string, Share] {
+    const { id } = checkToken(req, "upload");
+    const s = live(id);
+    if (s.state !== "uploading" || s.uploadDeadline <= now()) throw notFound();
+    return [id, s];
+  }
+
+  // Brouillon (spec §41.14) : agrandir la réservation, effacer un élément retiré, signe de vie.
+  async function grow(req: Request): Promise<Response> {
+    const [, s] = uploading(req);
+    const b = await readJSON(req, ["bucket"]);
+    const bucket = int(b.bucket);
+    if (b.bucket === undefined || !(BUCKETS as readonly number[]).includes(bucket) || bucket <= s.bucket) throw badRequest();
+    const old = s.bucket;
+    const next: (Uint8Array | undefined)[] = new Array(segmentCount(bucket)).fill(undefined);
+    s.segments.forEach((x, n) => (next[n] = x));
+    if (old % SEG_CHUNKS !== 0) next[segmentCount(old) - 1] = undefined; // dernier segment partiel
+    s.segments = next;
+    s.bucket = bucket;
+    s.progressAt = minute(now());
+    return empty(204);
+  }
+
+  async function erase(req: Request): Promise<Response> {
+    const [, s] = uploading(req);
+    const b = await readJSON(req, ["from", "to"]);
+    const from = int(b.from), to = int(b.to);
+    if (b.from === undefined || b.to === undefined || !(from >= 0 && from < to && to <= s.segments.length)) throw badRequest();
+    for (let n = from; n < to; n++) {
+      s.segments[n]?.fill(0);
+      s.segments[n] = undefined;
+    }
+    s.progressAt = minute(now());
+    return empty(204);
+  }
+
+  async function keep(req: Request): Promise<Response> {
+    const [, s] = uploading(req);
+    if ((await req.arrayBuffer()).byteLength > 0) throw badRequest();
+    s.progressAt = minute(now());
+    return empty(204);
+  }
 
   async function finalize(req: Request): Promise<Response> {
     const { id } = checkToken(req, "upload");
-    const b = await readJSON(req, FINALIZE_KEYS);
+    const b = await readJSON(req, FINALIZE_KEYS, MAX_FINALIZE_JSON);
+    const draft = b.bucket !== undefined;
+    if (draft !== (b.header !== undefined) || draft !== (b.tail !== undefined)) throw badRequest();
+    if (draft && (b.fill_from !== undefined || b.fill_to !== undefined)) throw badRequest();
     const ttl = int(b.ttl_hours), maxOpens = int(b.max_opens), ops = int(b.kdf_ops), mem = int(b.kdf_mem);
     // fill_from et fill_to ensemble, ou aucun des deux (spec §36 S4 : tout le bourrage envoyé).
     const noFill = b.fill_from === undefined && b.fill_to === undefined;
@@ -479,6 +528,34 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
       throw badRequest();
     const s = live(id);
     if (s.state !== "uploading" || s.uploadDeadline <= now()) throw notFound();
+    if (draft) {
+      const fb = int(b.bucket);
+      const hdr = decodeB64(b.header, HEADER), tail = decodeB64(b.tail, CHUNK_CT);
+      if (!(BUCKETS as readonly number[]).includes(fb) || fb > s.bucket) throw badRequest();
+      const segs = segmentCount(fb);
+      const out: Uint8Array[] = [];
+      for (let n = 0; n < segs; n++) {
+        const size = segmentSize(fb, n);
+        const got = s.segments[n];
+        const seg = new Uint8Array(size);
+        if (got) seg.set(got.subarray(0, size));
+        else for (let o = 0; o < size; o += 65536) crypto.getRandomValues(seg.subarray(o, Math.min(size, o + 65536)));
+        out.push(seg);
+      }
+      out[0]!.set(hdr, 0);
+      const L = Math.floor((fb - 1) / SEG_CHUNKS);
+      out[L]!.set(tail, (L === 0 ? HEADER : 0) + ((fb - 1) % SEG_CHUNKS) * CHUNK_CT);
+      for (const x of s.segments) x?.fill(0);
+      s.segments = out;
+      s.bucket = fb;
+      out.forEach((x, n) => opts.onSegment?.(id, n, x));
+      Object.assign(s, { salt, kdf: { ops, mem }, proofV, envelope, ttlHours: ttl, maxOpens, opensLeft: maxOpens });
+      s.state = "ready";
+      s.expiresAt = ceil15(now() + ttl * 3600);
+      s.uploadDeadline = 0;
+      s.progressAt = null;
+      return json(200, { expires_in_s: s.expiresAt - now() });
+    }
     const segs = s.segments.length;
     // Bourrage : vide [k, k), ou [from, to) avec 1 ≤ from < to ≤ dernier segment (exclu).
     if (!(from >= 0 && from <= to && to <= segs - 1 && (from === to || from >= 1))) throw badRequest();
@@ -741,6 +818,12 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     switch (`${m} ${path}`) {
       case "POST /api/shares/finalize":
         return await finalize(req);
+      case "POST /api/shares/grow":
+        return await grow(req);
+      case "POST /api/shares/erase":
+        return await erase(req);
+      case "POST /api/shares/keep":
+        return await keep(req);
       case "GET /api/shares/meta":
         return meta(req);
       case "POST /api/shares/unlock":
@@ -775,5 +858,11 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
       return shares.size;
     },
     snapshot,
+    inspect: () =>
+      [...shares.values()].map((x) => ({
+        state: x.state,
+        bucket: x.bucket,
+        present: x.segments.flatMap((v, n) => (v ? [n] : [])),
+      })),
   };
 }

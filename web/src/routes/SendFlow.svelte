@@ -13,7 +13,7 @@
   import { createSender, type Sender, type SendOpts } from "../flows/send.svelte";
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
-  import { createShare, type CaptchaCtx, type TtlHours } from "../index";
+  import { createDraft, type CaptchaCtx, type Draft, type TtlHours } from "../index";
   import { announce } from "../ui/announce";
   import Banner from "../ui/Banner.svelte";
   import { runTransition } from "../ui/viewTransition";
@@ -45,8 +45,42 @@
     return solvePow(challenge, ctx, powAbort.signal);
   }
 
+  // Brouillon d'envoi (spec §41.14) : créé au premier fichier, chaque fichier envoyé dès son
+  // ajout ; détruit (keepalive) si la liste est vidée, la page quittée ou l'écran démonté.
+  let uploadVersion = $state(0);
+  let removing = $state(0);
+  function newDraft(): Draft {
+    const d = createDraft(typeof location === "undefined" ? "http://localhost" : location.origin, {
+      solveCaptcha,
+      auto: true,
+      onChange: () => {
+        if (d !== draft) return;
+        uploadVersion++;
+        removing = d.removing;
+      },
+    });
+    return d;
+  }
+  let draft: Draft = newDraft();
+  let draftUsed = false;
+  function onitems(list: { id: string; data: Blob }[]) {
+    if (list.length === 0 && draftUsed) {
+      void draft.abandon();
+      draft = newDraft();
+      draftUsed = false;
+      removing = 0;
+      uploadVersion++;
+      return;
+    }
+    if (list.length > 0) draftUsed = true;
+    draft.sync(list);
+  }
+
   // Démontage (autre route, démo « Ouvrir comme destinataire ») : plus d'envoi en cours.
-  $effect(() => () => onbusy?.(false));
+  $effect(() => () => {
+    onbusy?.(false);
+    void draft.abandon();
+  });
 
   const wake = typeof document === "undefined" ? undefined : createWakeLock();
   $effect(() => () => wake?.dispose());
@@ -71,8 +105,10 @@
   function start(state: SendState) {
     if (sender && view !== "compose") return; // double envoi : un seul parcours à la fois
     note = "";
+    const ids = state.ids;
+    const d = draft;
     const s = createSender({
-      createShare,
+      createShare: (_origin, items, o) => d.finalize(items.map((item, k) => ({ id: ids[k]!, item })), o),
       solveCaptcha,
       wakeLock: wake,
       onBeforeUnload: (armed) => (unloadArmed = armed),
@@ -118,6 +154,9 @@
 
   function sealed() {
     unloadArmed = false;
+    // Brouillon finalisé : le prochain envoi aura le sien.
+    draft = newDraft();
+    draftUsed = false;
     setView("ready");
   }
 
@@ -135,9 +174,11 @@
   }
 
   // pagehide pendant l'envoi : abort (le partage créé est détruit en keepalive), arrêt du Worker.
-  function onPageHide() {
+  function onPageHide(e: PageTransitionEvent) {
     sender?.cancel();
     powAbort?.abort();
+    // Page gardée en cache (bfcache) : elle peut revenir ; sinon le brouillon est détruit.
+    if (!e.persisted) void draft.abandon();
   }
   function onOffline() {
     sender?.markOffline();
@@ -162,7 +203,16 @@
         } }}>{note}</Banner></div>
   {/if}
   {#key composeKey}
-    <Compose {vaultAllowed} active={view === "compose"} onsend={start} />
+    <Compose
+      {vaultAllowed}
+      active={view === "compose"}
+      onsend={start}
+      {onitems}
+      uploadOf={(id) => draft.status(id)}
+      {uploadVersion}
+      onretry={(id) => draft.retry(id)}
+      {removing}
+    />
   {/key}
 </div>
 

@@ -26,11 +26,15 @@ export {
   type PreviewKind,
 } from "./transfer/client";
 export { prepareCaptcha, type PreparedCaptcha } from "./transfer/prepare";
+// Envoi dès l'ajout (spec §41.14) : brouillon et état des lignes.
+export { createDraft, type Draft, type ElementStatus } from "./transfer/draft";
 export { SERVER_STALL_MS } from "./transfer/upload";
 export { isRiskyName, safeName as cleanName } from "./transfer/safety";
 export { MANIFEST_MAX, PREVIEW_MAX, type KeepTtl, type Rights } from "./crypto/container";
 // Géométrie publique du paquet (aucune clé) : budget de lecture estimé par la page (flows/read-meter.ts).
 export { CHUNK, SEG_CHUNKS, bucketFor, segmentCount, segmentSize } from "./crypto/container";
+// Place d'un fichier dans un envoi dès l'ajout (segments entiers, spec §41.14) : géométrie seulement.
+export { DATA_SEGMENTS, segmentsFor } from "./crypto/elements";
 export {
   CONTENT_MAX,
   MAX_ITEMS,

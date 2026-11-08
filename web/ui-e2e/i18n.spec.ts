@@ -12,6 +12,19 @@ async function switchLang(page: Page, to: "English" | "Français") {
   await expect(dlg).toBeHidden();
 }
 
+/**
+ * Va à la page Sécurité : lien du pied de page (ordinateur) ; sur téléphone, le pied de page
+ * est masqué : on passe par Réglages.
+ */
+async function openSecurity(page: Page) {
+  const foot = page.getByRole("link", { name: /^(Sécurité|Security)$/ }).filter({ visible: true }).first();
+  if (await foot.isVisible().catch(() => false)) return foot.click();
+  const gear = page.getByRole("banner").getByRole("button", { name: /^(Réglages|Settings)$/ });
+  if (await gear.isVisible()) await gear.click();
+  else await page.locator("[data-tabbar]").getByRole("button", { name: /^(Réglages|Settings)$/ }).click();
+  await page.getByRole("dialog", { name: /^(Réglages|Settings)$/ }).getByRole("link", { name: /^(Sécurité|Security)$/ }).click();
+}
+
 test.describe("français par défaut", () => {
   test.use({ locale: "fr-FR" });
 
@@ -26,11 +39,10 @@ test.describe("français par défaut", () => {
     await expect(page.getByRole("heading", { name: "This page does not exist." })).toBeVisible();
     await expect(page).toHaveTitle("Page not found · Shhdrop");
     // Titre par route (scan UX B9) : accueil, puis Sécurité.
-    await page.getByRole("link", { name: "Security" }).click();
+    await openSecurity(page);
     await expect(page).toHaveTitle("Security · Shhdrop");
     await page.goto(shh.origin + "/");
     await expect(page).toHaveTitle("Envoyer · Shhdrop");
-    await expect(page.getByRole("link", { name: "Sécurité", exact: true })).toBeVisible();
 
     await switchLang(page, "English");
     await expect(page).toHaveTitle("Send · Shhdrop");
@@ -67,12 +79,12 @@ test.describe("français par défaut", () => {
     expect(new URL(page.url()).hash).toBe("");
   });
 
-  test("navigation interne sans rechargement, focus sur le contenu, retour arrière", async ({ page, shh }) => {
+  test("navigation interne sans rechargement, focus sur le contenu, retour arrière", async ({ page, shh, isMobile }) => {
     await page.goto(shh.origin + "/");
     await page.evaluate(() => ((window as unknown as { __marque: number }).__marque = 1));
-    await page.getByRole("link", { name: "Sécurité", exact: true }).click();
+    await openSecurity(page);
     await expect(page).toHaveURL(shh.origin + "/securite");
-    await expect(page.getByRole("link", { name: "Sécurité", exact: true })).toHaveAttribute("aria-current", "page");
+    if (!isMobile) await expect(page.getByRole("link", { name: "Sécurité", exact: true })).toHaveAttribute("aria-current", "page");
     await expect(page.locator("main#contenu")).toBeFocused();
     await page.goBack();
     await expect(page).toHaveURL(shh.origin + "/");
@@ -137,7 +149,7 @@ test("le secret du # ne fuit ni dans le DOM, ni dans le titre, ni dans la consol
   await expect(page.locator("main#contenu")).toBeVisible();
   // Navigation interne et bascule de langue : le routeur travaille sous l'adresse complète.
   await switchLang(page, "English");
-  await page.getByRole("link", { name: /Sécurité|Security/ }).click();
+  await openSecurity(page);
   await page.goBack();
   await page.evaluate(() => 0);
   expect(await page.content()).not.toContain(SECRET);

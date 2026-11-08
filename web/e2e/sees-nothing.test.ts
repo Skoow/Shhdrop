@@ -38,7 +38,7 @@ import { startServer, type TestServer } from "./server";
 
 const MARKER = "MOT-REPERE-7f3a";
 const NAME = "nom-repere-91c2.pdf";
-const PASSWORD = "Rp4#Wz8?Tm"; // repère de la forme générée (D41-15 : plus de mot de passe saisi)
+const PASSWORD = "Rp4#Wx8?TmQ"; // repère de la forme générée (D41-15 : plus de mot de passe saisi)
 const MIB = 1048576;
 const GENERATED = generatePassword();
 const hk = (ikm: Uint8Array, info: string) => new Uint8Array(hkdfSync("sha256", ikm, new Uint8Array(0), info, 32));
@@ -244,11 +244,11 @@ describe("le serveur ne voit rien", () => {
     expect(log.map((r) => `${r.method} ${r.url.replace(/^https?:\/\/[^/]+/, "")}`)).toEqual([
       "GET /api/captcha",
       "POST /api/shares",
-      // Segments 3 à 5 : bourrage, jamais envoyés (le serveur les remplit d'aléa).
+      // Segments 3 à 6 : bourrage et manifeste, jamais envoyés en PUT (spec §41.14 : le
+      // serveur remplit les trous d'aléa, l'en-tête et le manifeste chiffré viennent avec finalize).
       "PUT /api/shares/segments/0",
       "PUT /api/shares/segments/1",
       "PUT /api/shares/segments/2",
-      "PUT /api/shares/segments/6",
       "POST /api/shares/finalize",
       "GET /api/shares/meta",
       "POST /api/shares/unlock",
@@ -262,7 +262,7 @@ describe("le serveur ne voit rien", () => {
       // Second partage : Opened.destroy("report") puis done (404 toléré).
       "GET /api/captcha",
       "POST /api/shares",
-      "PUT /api/shares/segments/0",
+      // Texte seul : aucun PUT (il est dans le manifeste).
       "POST /api/shares/finalize",
       "GET /api/shares/meta",
       "POST /api/shares/unlock",

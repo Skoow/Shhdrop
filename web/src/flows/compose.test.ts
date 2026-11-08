@@ -116,6 +116,17 @@ describe("createComposer : ajout", () => {
     expect(c.blockReason()).toBe("trop_gros");
   });
 
+  it("segments entiers (spec §41.14) : 512 segments de 4 Mio au plus ; au-delà, « segments » même sous 2 Gio", async () => {
+    const c = make();
+    const MIB = 1048576;
+    await c.add([big("a.bin", 400 * 4 * MIB)], "fichiers"); // 400 segments
+    for (let i = 0; i < 112; i++) await c.add([big(`p${i}.bin`, 1)], "fichiers"); // 112 segments
+    expect(c.blockReason()).toBeNull();
+    await c.add([big("x.bin", 1)], "fichiers"); // 513ᵉ segment ; total ≈ 1,6 Gio
+    expect(c.totalBytes).toBeLessThan(CONTENT_MAX);
+    expect(c.blockReason()).toBe("segments");
+  });
+
   it("photo de la source « photo » → Photo 1.jpg, Photo 2.jpg ; vidéo → Vidéo 1.mov", async () => {
     const c = make();
     await c.add([jpeg("image.jpg")], "photo");
@@ -347,7 +358,7 @@ describe("blocages et textes de raison", () => {
   });
 
   it("chaque raison a son texte en français et en anglais", () => {
-    expect(BLOCK_REASONS).toEqual(["vide", "trop_gros", "texte_trop_long", "manifeste", "nettoyage", "hors_ligne"]);
+    expect(BLOCK_REASONS).toEqual(["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "nettoyage", "hors_ligne"]);
     for (const r of BLOCK_REASONS) {
       const k = blockKey(r);
       expect(fr[k as keyof typeof fr], r).toBeTruthy();

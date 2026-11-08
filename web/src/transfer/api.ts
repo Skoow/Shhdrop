@@ -292,7 +292,32 @@ export type FinalizeBody = {
 };
 
 /** Un seul essai (le budget de coupure de createShare réessaie). */
-export async function finalize(c: Ctx, token: string, b: FinalizeBody, signal?: AbortSignal): Promise<number> {
+/**
+ * Finalisation d'un brouillon (spec §41.14) : palier final, en-tête (48 octets) et morceau
+ * chiffré du manifeste, en base64url ; jamais de fill_* (le serveur remplit tous les trous).
+ */
+export type DraftFinalizeBody = Omit<FinalizeBody, "fill_from" | "fill_to"> & { bucket: number; header: string; tail: string };
+
+/** Agrandit la réservation d'un brouillon au palier `bucket` (un essai). */
+export async function grow(c: Ctx, token: string, bucket: number, signal?: AbortSignal): Promise<void> {
+  const q: Req = { method: "POST", path: "/api/shares/grow", ...json({ bucket }), signal };
+  q.headers = { ...q.headers, ...bearer(token) };
+  await send(c, q, none);
+}
+
+/** Efface sur le serveur les segments [from, to) d'un élément retiré (un essai). */
+export async function erase(c: Ctx, token: string, from: number, to: number, signal?: AbortSignal): Promise<void> {
+  const q: Req = { method: "POST", path: "/api/shares/erase", ...json({ from, to }), signal };
+  q.headers = { ...q.headers, ...bearer(token) };
+  await send(c, q, none);
+}
+
+/** Signe de vie d'un brouillon (corps vide, un essai). */
+export async function keep(c: Ctx, token: string): Promise<void> {
+  await send(c, { method: "POST", path: "/api/shares/keep", headers: bearer(token) }, none);
+}
+
+export async function finalize(c: Ctx, token: string, b: FinalizeBody | DraftFinalizeBody, signal?: AbortSignal): Promise<number> {
   const q: Req = { method: "POST", path: "/api/shares/finalize", ...json(b), signal };
   q.headers = { ...q.headers, ...bearer(token) };
   const o = await send(c, q, readJSON);

@@ -252,7 +252,8 @@ export function createSender(deps: SendDeps) {
               createdAt ??= t;
               if (phase === "keys" || phase === "captcha" || phase === "fallback") phase = "upload";
             } else backOnline();
-            if (done === n && n > 0) {
+            // n = 0 : texte seul, rien à envoyer (spec §41.14) : finalisation tout de suite.
+            if (done === n) {
               step("chiffre");
               step("envoye");
               if (phase === "upload" || phase === "offline") phase = "finalize";

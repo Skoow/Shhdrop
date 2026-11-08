@@ -2,7 +2,7 @@
 // Toute addition passe par `add` (sélecteur, dépôt, collage, photo, vidéo) ou `addText` /
 // `addVoice` : lecture d'essai → limite de nombre → nettoyage des images → doublons →
 // insertion à la fin de sa catégorie. L'ordre de `items` est l'ordre du manifeste.
-import { CONTENT_MAX, MANIFEST_MAX, MAX_ITEMS, NAME_MAX, STRIP_MAX, TEXT_MAX, cleanName, isRiskyName, type Item } from "../index";
+import { CONTENT_MAX, DATA_SEGMENTS, MANIFEST_MAX, MAX_ITEMS, NAME_MAX, STRIP_MAX, TEXT_MAX, cleanName, isRiskyName, segmentsFor, type Item } from "../index";
 import { CATEGORY_ORDER, categoryOf, extOf, type Category } from "./kinds";
 import { HEAD_BYTES, isExecutableSniff, sniff, type Sniffed } from "./sniff";
 
@@ -47,7 +47,7 @@ export type AddReport = {
   duplicates: string[];
 };
 
-export const BLOCK_REASONS = ["vide", "trop_gros", "texte_trop_long", "manifeste", "nettoyage", "hors_ligne"] as const;
+export const BLOCK_REASONS = ["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "nettoyage", "hors_ligne"] as const;
 export type BlockReason = (typeof BLOCK_REASONS)[number];
 export function blockKey(r: BlockReason) {
   return `compose.block.${r}` as const;
@@ -433,9 +433,12 @@ export function createComposer(deps: ComposeDeps = {}) {
   }
 
   const totalBytes = $derived(items.reduce((s, i) => s + i.size, 0));
+  // Envoi dès l'ajout (spec §41.14) : chaque fichier occupe des segments entiers de 4 Mio.
+  const segments = $derived(items.reduce((s, i) => s + (i.kind === "file" ? segmentsFor(i.size) : 0), 0));
   // Taille du manifeste, majorée (D41-17) : mêmes noms et textes que toApiItems, tailles et
   // positions à leur plus grand nombre de chiffres, droit le plus long. Au-delà de
-  // MANIFEST_MAX, sealStream refuserait (« manifeste_trop_gros ») : on bloque avant.
+  // MANIFEST_MAX, sealFinal refuserait (« manifeste_trop_gros ») : on bloque avant. Chaque
+  // fichier porte sa graine `k` (43 caractères, spec §41.14).
   const manifestBytes = $derived(
     new TextEncoder().encode(
       JSON.stringify({
@@ -445,7 +448,7 @@ export function createComposer(deps: ComposeDeps = {}) {
         items: items.map((i) =>
           i.kind === "text"
             ? { kind: "text", name: cleanName(i.base), mime: i.mime, size: 0, offset: 0, text: i.text ?? "" }
-            : { kind: "file", name: cleanName(i.base + i.ext), mime: i.mime || "application/octet-stream", size: CONTENT_MAX, offset: CONTENT_MAX },
+            : { kind: "file", name: cleanName(i.base + i.ext), mime: i.mime || "application/octet-stream", size: CONTENT_MAX, offset: CONTENT_MAX, k: "k".repeat(43) },
         ),
       }),
     ).length,
@@ -454,6 +457,7 @@ export function createComposer(deps: ComposeDeps = {}) {
   function blockReason(): BlockReason | null {
     if (items.length === 0) return "vide";
     if (totalBytes > CONTENT_MAX) return "trop_gros";
+    if (segments > DATA_SEGMENTS) return "segments";
     if (items.some((i) => i.kind === "text" && codePoints(i.text ?? "") > TEXT_MAX)) return "texte_trop_long";
     if (manifestBytes > MANIFEST_MAX) return "manifeste";
     if (pending > 0) return "nettoyage";

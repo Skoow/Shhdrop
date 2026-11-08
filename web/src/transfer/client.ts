@@ -1,5 +1,6 @@
 // Client de transfert : création, ouverture, destruction et suivi d'un partage
-// (spec §29, §7.6). Tout le chiffrement a lieu ici ; le serveur ne reçoit que des
+// (spec §29, §7.6, §41.14 : la création passe par le brouillon de transfer/draft.ts). Tout
+// le chiffrement a lieu dans le navigateur ; le serveur ne reçoit que des
 // empreintes (V_accès, V_preuve, V_gestion), K_accès, K_preuve ou S_gestion, l'enveloppe E
 // (R chiffrée sous K_env) et des segments chiffrés. K_lien, le mot de passe, K_mdp, R, les
 // noms et le contenu ne sortent jamais.
@@ -7,7 +8,6 @@ import {
   BUCKETS,
   openStream,
   readHeader,
-  sealStream,
   segmentCount,
   segmentSize,
   type Item,
@@ -16,25 +16,18 @@ import {
   type Rights,
 } from "../crypto/container";
 import { b64u, unb64u } from "../crypto/encoding";
-import { accessKeys, contentKeys, contentKeysChecked, newSeed, open, seal, shareId } from "../crypto/envelope";
-import {
-  checkKdfParams,
-  deriveAccess,
-  KDF_CREATE,
-  newKLien,
-  newSGestion,
-  passwordKey,
-  passwordKeyForCreate,
-  randomBytes,
-} from "../crypto/kdf";
+import { accessKeys, contentKeysChecked, open, shareId } from "../crypto/envelope";
+import { checkKdfParams, deriveAccess, KDF_CREATE, passwordKey } from "../crypto/kdf";
 import type { GeneratedPassword } from "../crypto/password";
 import type { KLien } from "../crypto/types";
 import { MAX_OPENS, TTL_HOURS, type TtlHours } from "../limits";
 import * as api from "./api";
-import { checkOrigin, manageLink, parseLink, shareLink, type ParsedLink } from "./link";
-import { readCaptcha, takeCaptcha, type PreparedCaptcha } from "./prepare";
+import { checkOrigin, parseLink, type ParsedLink } from "./link";
+import { type PreparedCaptcha } from "./prepare";
 import { isRiskyName, previewKindOf, safeName, type PreviewKind } from "./safety";
-import { SERVER_STALL_MS, abortError } from "./upload";
+import { abortError } from "./upload";
+import { createDraft } from "./draft";
+import { DATA_SEGMENTS, segmentsFor } from "../crypto/elements";
 
 export type { Net } from "./api";
 export type { PreparedCaptcha } from "./prepare";
@@ -158,7 +151,7 @@ export function senderError(e: unknown): unknown {
   return e;
 }
 
-async function guarded<T>(f: () => Promise<T>, map: (e: unknown) => unknown): Promise<T> {
+export async function guarded<T>(f: () => Promise<T>, map: (e: unknown) => unknown): Promise<T> {
   try {
     return await f();
   } catch (e) {
@@ -255,14 +248,14 @@ export type CreateOpts = api.Net & {
 };
 
 /** Validité minimale d'un défi préparé pour être utilisé. */
-const PREPARED_MIN_LEFT_MS = 15_000;
+export const PREPARED_MIN_LEFT_MS = 15_000;
 
-function throwIfAborted(signal?: AbortSignal): void {
+export function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw abortError();
 }
 
 /** Attend `p`, mais rejette en AbortError dès l'annulation (p continue, son échec est absorbé). */
-function abortable<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+export function abortable<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (signal === undefined) return p;
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(abortError());
@@ -282,7 +275,7 @@ function abortable<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
 }
 
 /** Attente interruptible : AbortError sur `signal` ; fin anticipée sur l'événement `online` si `wakeOnline`. */
-function sleep(ms: number, signal?: AbortSignal, wakeOnline = false): Promise<void> {
+export function sleep(ms: number, signal?: AbortSignal, wakeOnline = false): Promise<void> {
   return new Promise((resolve, reject) => {
     const g = globalThis as { addEventListener?: typeof addEventListener; removeEventListener?: typeof removeEventListener };
     const done = () => {
@@ -315,7 +308,7 @@ const retryable = (e: unknown) =>
  * part avant l'échéance `deadline` (dernier segment acquitté + SERVER_STALL_MS). Un essai en
  * cours à l'échéance est interrompu. Au-delà : Error("reseau"). Les autres erreurs passent.
  */
-async function withBudget<T>(deadline: number, o: CreateOpts, step: (signal: AbortSignal, attempt: number) => Promise<T>): Promise<T> {
+export async function withBudget<T>(deadline: number, o: Pick<CreateOpts, "signal" | "onRetry">, step: (signal: AbortSignal, attempt: number) => Promise<T>): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     throwIfAborted(o.signal);
     const ac = new AbortController();
@@ -341,7 +334,7 @@ async function withBudget<T>(deadline: number, o: CreateOpts, step: (signal: Abo
   }
 }
 
-function proofFields(p: CaptchaProof, cap: api.Captcha): { altcha: string } | { recaptcha: string; captcha_salt: string } {
+export function proofFields(p: CaptchaProof, cap: api.Captcha): { altcha: string } | { recaptcha: string; captcha_salt: string } {
   if (p.kind === "pow" && typeof p.payload === "string") return { altcha: p.payload };
   if (p.kind === "recaptcha" && typeof p.token === "string") {
     if (cap.salt === null) throw new api.BadResponse();
@@ -351,22 +344,10 @@ function proofFields(p: CaptchaProof, cap: api.Captcha): { altcha: string } | { 
 }
 
 /**
- * Crée un partage (spec §29.2 à §29.4, ici sans envoi anticipé : tout part au clic).
- * Clés neuves à chaque appel : K_lien (donc id), sel, S_gestion et graine R. Le contenu est
- * chiffré sous K_contenu = HKDF(R) ; R est enveloppée sous K_env (lien + mot de passe) puis
- * mise à zéro. Ordre : préparation du paquet (manifeste, palier, refus locaux), Argon2id,
- * enveloppe, puis défi anti-robot (valable 2 min ; défi préparé s'il reste plus de 15 s),
- * puis création, au plus tôt CAPTCHA_MIN_MS après la réception du défi — createShare attend
- * lui-même le temps restant. Envoi : chaque segment hors bourrage est chiffré juste avant de
- * partir (une seule fois : un nouvel essai renvoie les mêmes octets) ; `pause` attendue
- * avant chaque segment ; coupures réessayées jusqu'à l'échéance SERVER_STALL_MS (voir
- * withBudget). `finalize` porte le sel, Argon2id, V_preuve, E, la durée, les ouvertures et le
- * bourrage [fill_from, fill_to), que le serveur remplit d'aléa. La requête de création n'est
- * jamais interrompue (sinon un partage créé resterait inconnu) : l'annulation est constatée
- * juste après. En cas d'échec ou d'annulation après la création, l'envoi est détruit (au
- * mieux, en keepalive) pour libérer la place réservée. L'id (HKDF de K_lien) ne sert qu'aux
- * données authentifiées et n'est jamais envoyé : le serveur trouve le partage par V_accès et
- * V_gestion, qu'il calcule depuis K_accès et S_gestion reçus en en-tête (spec §29.8).
+ * Crée un partage en une fois (spec §41.14) : brouillon créé, fichiers chiffrés chacun sous sa
+ * clé et envoyés, puis finalisation (R, sel, Argon2id, enveloppe, manifeste). Même contrat que
+ * l'envoi dès l'ajout du composeur (transfer/draft.ts), sans création en arrière-plan. Un échec
+ * ou une annulation détruit le brouillon (au mieux, en keepalive).
  */
 export async function createShare(
   origin: string,
@@ -376,121 +357,25 @@ export async function createShare(
   checkOrigin(origin);
   if (!(TTL_HOURS as readonly number[]).includes(o.ttlHours)) throw new Error("duree_invalide");
   if (!Number.isInteger(o.maxOpens) || o.maxOpens < 1 || o.maxOpens > MAX_OPENS) throw new Error("ouvertures_invalides");
-  // Une preuve préparée qui n'est pas utilisée peut échouer plus tard : jamais de rejet non géré.
   o.prepared?.proof.catch(() => undefined);
   throwIfAborted(o.signal);
-  const c = api.ctx(origin, o);
-  const signal = o.signal;
-
-  const kLien = newKLien();
-  const salt = randomBytes(16);
-  const sGestion = newSGestion();
-  const r = newSeed();
-  const wipe: Uint8Array<ArrayBuffer>[] = [kLien, sGestion, r]; // mis à zéro quoi qu'il arrive
+  if (items.length === 0) throw new Error("vide");
+  // Refus locaux avant toute requête : place (segments entiers, spec §41.14).
+  let segs = 0;
+  for (const it of items) if (it.kind === "file") segs += segmentsFor(it.data instanceof Uint8Array ? it.data.byteLength : it.data.size);
+  if (segs > DATA_SEGMENTS) throw new Error("trop_gros");
+  const list = items.map((item, i) => {
+    // Copie d'un Uint8Array dans un Blob : l'appelant ne peut plus le modifier ensuite.
+    const data = item.kind === "file" && item.data instanceof Uint8Array ? new Blob([item.data]) : item.data;
+    return { id: String(i), item: { ...item, data } };
+  });
+  const d = createDraft(origin, { fetch: o.fetch, retryDelayMs: o.retryDelayMs, upload: o.upload });
+  d.sync(list.filter((x) => x.item.kind === "file").map((x) => ({ id: x.id, data: x.item.data as Blob })));
   try {
-    return await guarded(async () => {
-      const acc = await deriveAccess(kLien);
-      wipe.push(acc.kAcces); // envoyée une fois, à la création
-      const idBytes = await shareId(kLien);
-      const sealed = await sealStream(items, await contentKeys(r), { rights: o.rights, keepTtlH: o.keepTtlH });
-      throwIfAborted(signal);
-      // Refuse un mot de passe trop court ou trop courant (Error("mot_de_passe_…")).
-      const kMdp = await passwordKeyForCreate(o.password, salt);
-      wipe.push(kMdp);
-      const ak = await accessKeys(kLien, kMdp);
-      kMdp.fill(0);
-      wipe.push(ak.kPreuve); // inutile à l'expéditeur
-      const envelope = b64u(await seal(ak.kEnv, r, idBytes, sealed.header));
-      r.fill(0); // R n'existe plus qu'enveloppée ; K_contenu (non extractible) chiffre la suite
-      throwIfAborted(signal);
-
-      const pre = o.prepared;
-      // Horloge monotone du client seulement (voir api.captcha).
-      let cap = pre && pre.cap.expiresAt - performance.now() > PREPARED_MIN_LEFT_MS ? takeCaptcha(pre.cap, origin) : undefined;
-      let proof: Promise<CaptchaProof>;
-      if (cap !== undefined) {
-        proof = pre!.proof;
-      } else {
-        const fresh = await abortable(readCaptcha(c), signal);
-        throwIfAborted(signal);
-        cap = takeCaptcha(fresh, origin)!;
-        proof = o.solveCaptcha(fresh.challenge, { fallbackOrigin: fresh.fallbackOrigin, mode: "pow" });
-      }
-      const fields = proofFields(await abortable(proof, signal), cap);
-      const wait = cap.receivedAt + CAPTCHA_MIN_MS - performance.now();
-      if (wait > 0) await sleep(wait, signal);
-      throwIfAborted(signal);
-
-      const created = await api.create(c, acc.kAcces, sGestion, {
-        bucket: sealed.bucket,
-        hp: "",
-        shown_at: cap.shownAt,
-        ...fields,
-      });
-      // Le serveur efface un envoi sans segment depuis 15 min, à compter de la création.
-      let deadline = Date.now() + SERVER_STALL_MS;
-      try {
-        throwIfAborted(signal);
-        if (created.segments !== sealed.segmentCount) throw new api.BadResponse();
-        const send = sealed.toSend;
-        let totalBytes = 0;
-        for (const n of send) totalBytes += segmentSize(sealed.bucket, n);
-        let acked = 0;
-        let shown = 0;
-        const bytes = (v: number) => {
-          if (v <= shown) return; // maximum atteint : un nouvel essai ne fait pas reculer
-          shown = v;
-          o.onBytes?.(v, totalBytes);
-        };
-        o.onProgress?.(0, send.length);
-        o.onBytes?.(0, totalBytes);
-        for (let k = 0; k < send.length; k++) {
-          const n = send[k]!;
-          await abortable(Promise.resolve().then(() => o.pause?.()), signal);
-          throwIfAborted(signal);
-          const data = await sealed.segment(n); // chiffré une fois ; les nouveaux essais renvoient `data`
-          await withBudget(deadline, o, (s) =>
-            api.putSegment(c, created.uploadToken, n, data, (b) => bytes(acked + Math.min(b, data.length)), s),
-          );
-          acked += data.length;
-          bytes(acked);
-          deadline = Date.now() + SERVER_STALL_MS;
-          o.onProgress?.(k + 1, send.length);
-        }
-        const fin: api.FinalizeBody = {
-          salt: b64u(salt),
-          kdf_ops: KDF_CREATE.ops,
-          kdf_mem: KDF_CREATE.mem,
-          proof_v: b64u(ak.vPreuve),
-          envelope,
-          ttl_hours: o.ttlHours,
-          max_opens: o.maxOpens,
-          fill_from: sealed.fill.from,
-          fill_to: sealed.fill.to,
-        };
-        const expiresInS = await withBudget(deadline, o, async (s, attempt) => {
-          try {
-            return await api.finalize(c, created.uploadToken, fin, s);
-          } catch (e) {
-            // Un essai précédent a pu aboutir sur le serveur sans que la réponse arrive
-            // (finalize n'y est pas rejouable : 404 ensuite). status avec S_gestion tranche :
-            // « ready » → envoi terminé ; sinon (404, autre état, échec) → erreur et destruction.
-            if (attempt > 1 && e instanceof api.HttpError && e.status === 404) {
-              const st = await api.status(c, sGestion).catch(() => undefined);
-              if (st?.state === "ready") return st.expiresInS;
-            }
-            throw e;
-          }
-        });
-        const base = o.base ?? "/";
-        return { link: shareLink(origin, kLien, base), manage: manageLink(origin, sGestion, base), expiresInS };
-      } catch (e) {
-        await api.destroy(c, { sGestion }, undefined, true).catch(() => undefined);
-        throw e;
-      }
-    }, senderError);
-  } finally {
-    for (const b of wipe) b.fill(0);
+    return await d.finalize(list, o);
+  } catch (e) {
+    await d.abandon();
+    throw e;
   }
 }
 

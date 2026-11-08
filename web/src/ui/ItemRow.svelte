@@ -14,6 +14,7 @@
   import { ArrowDown, ArrowUp, Ellipsis, Pencil, X } from "./Icon";
   import ItemNotes from "./ItemNotes.svelte";
   import { formatBytes } from "../i18n/format";
+  import type { RowStatus } from "../flows/preupload";
   import FormatIcon from "./FormatIcon.svelte";
   import { formatOf, typeKey } from "./formats";
   import { firstLine } from "./itemView";
@@ -41,8 +42,11 @@
     danger?: boolean;
     /** Bouton « Retirer » (le parent y remet le focus après un déplacement ou une annulation). */
     el?: HTMLDivElement | undefined;
+    /** Envoi dès l'ajout (spec §41.14) : état de la ligne ; absent pour un texte. */
+    upload?: RowStatus | null;
+    onretry?: () => void;
   };
-  let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, danger = false, el = $bindable() }: Props = $props();
+  let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, danger = false, el = $bindable(), upload = null, onretry }: Props = $props();
 
   const name = $derived(item.base + item.ext);
   const mid = $derived(midSplit(item.base));
@@ -188,6 +192,14 @@
         {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi><span class="sep" aria-hidden="true">·</span>{:else if item.kind === "file"}<span>{t(typeKey(format))}</span><span class="sep" aria-hidden="true">·</span>{/if}
         <span class="num">{formatBytes(item.size, getLang())}</span>
         {#if duration !== null}<span class="sep" aria-hidden="true">·</span><span class="num">{formatClock(duration)}</span>{/if}
+        {#if upload}
+          <span class="sep" aria-hidden="true">·</span>
+          <span class={["up", upload.key.slice(11)]} data-up={upload.key.slice(11)} role={upload.key === "compose.up.erreur" ? "alert" : undefined}>
+            {#if upload.key !== "compose.up.pret"}<span class="bar" aria-hidden="true"><span style:width="{upload.percent}%"></span></span>{/if}
+            <span class="num">{t(upload.key, { n: upload.percent })}</span>
+            {#if upload.key === "compose.up.erreur" && onretry}<button type="button" class="retry" onclick={onretry} aria-label={t("compose.up.retry", { name })}>{t("common.retry")}</button>{/if}
+          </span>
+        {/if}
         <ItemNotes {item} {cannotOpen} badgesOnly />
       </span>
       <ItemNotes {item} {cannotOpen} lines />
@@ -289,6 +301,35 @@
     flex: none;
     /* pre : l'espace en tête de la queue (« … 2026.jpg ») reste visible. */
     white-space: pre;
+  }
+  .up {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1, 4px);
+  }
+  .up.erreur {
+    color: var(--danger, #b3261e);
+  }
+  .up .bar {
+    inline-size: 2.5rem;
+    block-size: 3px;
+    border-radius: 2px;
+    background: var(--line, rgb(0 0 0 / 0.12));
+    overflow: hidden;
+  }
+  .up .bar > span {
+    display: block;
+    block-size: 100%;
+    background: var(--accent, currentColor);
+  }
+  .retry {
+    font: inherit;
+    color: inherit;
+    text-decoration: underline;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
   }
   .sub {
     min-width: 0;

@@ -1,6 +1,6 @@
 // Correspondance des erreurs du client (serveur simulé) et effacement des clés.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { b64u, concat, utf8 } from "../crypto/encoding";
+import { b64u, concat, unb64u, utf8 } from "../crypto/encoding";
 import { CHUNK, sealStream, segmentSize, type Item, type SealOpts } from "../crypto/container";
 import { accessKeys, contentKeys, newSeed, seal, shareId } from "../crypto/envelope";
 import { KDF_MIN, deriveAccess, passwordKey } from "../crypto/kdf";
@@ -264,10 +264,11 @@ describe("createShare : clés effacées même en cas d'échec", () => {
     retryDelayMs: 1,
   });
   const secrets = () => captured.buffers.filter((b) => b.length === 32);
-  // K_lien, S_gestion, R, K_accès, K_contenu brute, K_mdp, K_maître, K_env brute, K_preuve.
+  // Échec avant la création (spec §41.14 : la création du brouillon précède Argon2id) :
+  // K_lien, S_gestion, K_accès, tous à zéro ; aucun K_mdp calculé.
   const allWiped = () => {
-    expect(secrets().length).toBeGreaterThanOrEqual(9);
-    expect(captured.kMdp).toHaveLength(1);
+    expect(secrets().length).toBeGreaterThanOrEqual(3);
+    expect(captured.kMdp).toHaveLength(0);
     for (const b of secrets()) expect(b.every((x) => x === 0)).toBe(true);
   };
   it("échec au défi anti-robot (réseau)", async () => {
@@ -280,10 +281,9 @@ describe("createShare : clés effacées même en cas d'échec", () => {
   });
   it("échec au scellement (aucun élément)", async () => {
     await expect(createShare(ORIGIN, [], opts(globalThis.fetch))).rejects.toThrow("vide");
-    // Refusé avant Argon2id : K_lien, S_gestion, R, K_accès, K_contenu brute — tous à zéro.
+    // Refusé avant tout : aucune clé tirée, aucun Argon2id.
     expect(captured.kMdp).toEqual([]);
-    expect(secrets().length).toBeGreaterThanOrEqual(5);
-    for (const b of secrets()) expect(b.every((x) => x === 0)).toBe(true);
+    expect(secrets()).toEqual([]);
   });
   it("429 à la création → LimitError", async () => {
     const f = (async (input: RequestInfo | URL) =>
@@ -308,6 +308,20 @@ function pseudo(n: number, seed: number): Uint8Array<ArrayBuffer> {
   return out;
 }
 const same = (a: Uint8Array, b: Uint8Array) => Buffer.from(a).equals(Buffer.from(b));
+
+/** Fichier du serveur après finalize d'un brouillon (spec §41.14) : segments reçus, trous à zéro, en-tête, manifeste. */
+function serverFile(bucket: number, sent: Map<number, Uint8Array>, fin: Record<string, unknown>): Uint8Array<ArrayBuffer>[] {
+  const segs = Array.from({ length: Math.ceil(bucket / 64) }, (_, n) => {
+    const out = new Uint8Array(segmentSize(bucket, n));
+    const got = sent.get(n);
+    if (got) out.set(got.subarray(0, out.length));
+    return out;
+  });
+  segs[0]!.set(unb64u(fin.header as string), 0);
+  const L = Math.floor((bucket - 1) / 64);
+  segs[L]!.set(unb64u(fin.tail as string), (L === 0 ? 48 : 0) + ((bucket - 1) % 64) * 65552);
+  return segs;
+}
 
 describe("openShare en flux : segments à la demande, saveItem, collectToBlob", () => {
   const a = pseudo(3 * 1048576 + 7, 1);
@@ -418,7 +432,7 @@ describe("createShare en flux", () => {
       return j(404, { error: "not_found" });
     }) as typeof fetch;
     const prog: [number, number][] = [];
-    const items = [{ kind: "file" as const, name: "x", mime: "x/y", data: new Blob([pseudo(5.5 * 1048576, 3)]) }];
+    const items = [{ kind: "file" as const, name: "x", mime: "x/y", data: new Blob([pseudo(9 * 1048576, 3)]) }];
     const r = await createShare(ORIGIN, items, {
       ttlHours: 1,
       maxOpens: 1,
@@ -429,7 +443,7 @@ describe("createShare en flux", () => {
       onProgress: (d, t) => prog.push([d, t]),
     });
     expect(r.expiresInS).toBe(3600);
-    expect(puts).toEqual([0, 1, 2].map((n) => [`/api/shares/segments/${n}`, segmentSize(160, n)]));
+    expect(puts).toEqual([0, 1, 2].map((n) => [`/api/shares/segments/${n}`, segmentSize(400, n)]));
     expect(prog).toEqual([[0, 3], [1, 3], [2, 3], [3, 3]]);
   }, 20_000);
 });
@@ -623,10 +637,13 @@ function sender(o: {
   return { fetch: f, upload, calls, at, bodies, finals, creates, destroys, attempts };
 }
 
-const SMALL = [{ kind: "text" as const, name: "", mime: "text/plain", data: new Uint8Array([97]) }];
-const BIG_DATA = pseudo(5.5 * 1048576, 7); // palier 160 : 3 segments
+// Petit fichier : un segment de données (0) ; un texte seul ne fait aucun PUT (spec §41.14).
+const SMALL = [{ kind: "file" as const, name: "a", mime: "text/plain", data: new Uint8Array([97]) }];
+// 9 Mio : 3 segments de données pleins (spec §41.14 : chaque fichier en segments entiers) ;
+// le manifeste part avec finalize (tail).
+const BIG_DATA = pseudo(9 * 1048576, 7);
 const BIG = [{ kind: "file" as const, name: "x", mime: "x/y", data: new Blob([BIG_DATA]) }];
-const BIG_SIZES = [0, 1, 2].map((n) => segmentSize(160, n));
+const BIG_SIZES = [0, 1, 2].map((n) => segmentSize(400, n));
 
 const base = (s: ReturnType<typeof sender>) => ({
   ttlHours: 1 as const,
@@ -661,10 +678,11 @@ describe("createShare : annulation (signal)", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
   });
   afterEach(() => vi.useRealTimers());
-  // K_lien, S_gestion, R, K_accès, K_contenu brute, K_mdp, K_maître, K_env brute, K_preuve.
-  const wiped = () => {
+  // Au moins K_lien, S_gestion, K_accès (et, dès l'envoi, graine et clé brute de l'élément ;
+  // au succès, R, K_contenu brute, K_mdp, K_maître, K_env brute, K_preuve) : tous à zéro.
+  const wiped = (min = 3) => {
     const s = captured.buffers.filter((b) => b.length === 32);
-    expect(s.length).toBeGreaterThanOrEqual(9);
+    expect(s.length).toBeGreaterThanOrEqual(min);
     for (const b of s) expect(b.every((x) => x === 0)).toBe(true);
   };
 
@@ -741,7 +759,7 @@ describe("createShare : annulation (signal)", () => {
     const r = await drive(createShare(ORIGIN, SMALL, base(s)));
     expect(r.expiresInS).toBe(3600);
     expect(s.destroys).toEqual([]);
-    wiped();
+    wiped(11);
   });
 });
 
@@ -1102,7 +1120,7 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
   });
   afterEach(() => vi.useRealTimers());
 
-  it("palier 400 (11 Mio) : création sans proof_v ; segments 0, 1, 2 et 6 ; finalize avec envelope et fill [3, 6) ; le lien s'ouvre", async () => {
+  it("11 Mio (spec §41.14) : création au palier de réservation ; segments 0, 1, 2 ; finalize avec bucket, header et tail, sans fill ; le lien s'ouvre", async () => {
     const data = pseudo(11 * 1048576, 9);
     const s = sender({ segments: 7 });
     const sent = new Map<number, Uint8Array<ArrayBuffer>>();
@@ -1120,32 +1138,29 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
         onProgress: (d, t) => prog.push([d, t]),
       }),
     );
-    // Création : palier et preuve dans le corps ; K_accès et S_gestion en en-tête ; ni id ni
-    // vérificateur (spec §29.8, §32 : le serveur indexe par V_accès et V_gestion qu'il calcule).
+    // Création : palier et preuve dans le corps ; K_accès et S_gestion en en-tête (spec §29.8, §32).
     expect(Object.keys(s.bodies[0]!).sort()).toEqual(["altcha", "bucket", "hp", "shown_at"]);
-    expect(s.bodies[0]!.bucket).toBe(400);
+    expect(s.bodies[0]!.bucket).toBe(400); // 3 segments pleins + morceau du manifeste
     expect(s.creates[0]!.access).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(s.creates[0]!.manage).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect([...sent.keys()]).toEqual([0, 1, 2, 6]);
-    expect(s.calls.filter((c) => c.startsWith("PUT"))).toEqual(["PUT 0", "PUT 1", "PUT 2", "PUT 6"]);
-    expect(prog).toEqual([[0, 4], [1, 4], [2, 4], [3, 4], [4, 4]]);
+    expect(s.calls.filter((c) => c.startsWith("PUT"))).toEqual(["PUT 0", "PUT 1", "PUT 2"]);
+    expect(prog).toEqual([[0, 3], [1, 3], [2, 3], [3, 3]]);
     const fin = s.finals[0]!;
-    expect(Object.keys(fin).sort()).toEqual(["envelope", "fill_from", "fill_to", "kdf_mem", "kdf_ops", "max_opens", "proof_v", "salt", "ttl_hours"]);
-    expect(fin).toMatchObject({ fill_from: 3, fill_to: 6, kdf_ops: 3, kdf_mem: 67108864, ttl_hours: 6, max_opens: 3 });
+    expect(Object.keys(fin).sort()).toEqual(["bucket", "envelope", "header", "kdf_mem", "kdf_ops", "max_opens", "proof_v", "salt", "tail", "ttl_hours"]);
+    expect(fin).toMatchObject({ bucket: 400, kdf_ops: 3, kdf_mem: 67108864, ttl_hours: 6, max_opens: 3 });
     expect(fin.envelope).toMatch(/^[A-Za-z0-9_-]{80}$/);
+    expect(fin.header).toMatch(/^[A-Za-z0-9_-]{64}$/);
+    expect(fin.tail).toMatch(/^[A-Za-z0-9_-]{87403}$/);
     expect(fin.proof_v).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(fin.salt).toMatch(/^[A-Za-z0-9_-]{22}$/);
-    allZero();
 
-    // Le lien produit s'ouvre avec ce que le serveur a reçu (bourrage : zéros, jamais lus).
     vi.useRealTimers();
-    // Lien court (spec §32) : origine, « /#», K_lien ; K_accès envoyée = HKDF(K_lien).
     expect(r.link).toMatch(/^https:\/\/srv\.test\/#[A-Za-z0-9_-]{43}$/);
     expect(r.manage).toMatch(/^https:\/\/srv\.test\/#m[A-Za-z0-9_-]{43}$/);
     const lk = parseLink(r.link);
     expect(lk.kind === "s" && b64u((await deriveAccess(lk.kLien)).kAcces)).toBe(s.creates[0]!.access);
     expect(r.manage.slice(r.manage.indexOf("#m") + 2)).toBe(s.creates[0]!.manage);
-    const segs = [0, 1, 2, 3, 4, 5, 6].map((n) => sent.get(n) ?? new Uint8Array(segmentSize(400, n)));
+    const segs = serverFile(400, sent, fin);
     const rd = server(() => undefined);
     const net = {
       retryDelayMs: 1,
@@ -1165,23 +1180,21 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
     expect(rd.calls.filter((c) => /segments\/[345]$/.test(c))).toEqual([]); // bourrage jamais lu
   }, 60_000);
 
-  it("droit par défaut « enregistrer » ; rights et keepTtlH écrits dans le manifeste chiffré", async () => {
+  it("droit par défaut « enregistrer » ; rights et keepTtlH écrits dans le manifeste chiffré ; texte seul : aucun PUT", async () => {
     const t = [{ kind: "text" as const, name: "", mime: "text/plain", data: utf8("x") }];
     const open1 = async (o: Partial<{ rights: "voir" | "enregistrer" | "coffre"; keepTtlH: 12 }>) => {
       const s = sender({ segments: 1 });
-      const sent: Uint8Array<ArrayBuffer>[] = [];
-      const upload: typeof s.upload = async (url, h, body, onBytes, signal) => {
-        sent.push(new Uint8Array(body));
-        return s.upload(url, h, body, onBytes, signal);
-      };
-      const r = await drive(createShare(ORIGIN, t, { ...base(s), upload, ...o }));
+      const r = await drive(createShare(ORIGIN, t, { ...base(s), ...o }));
       vi.useRealTimers();
+      expect(s.calls.some((c) => c.startsWith("PUT"))).toBe(false);
       const fin = s.finals[0]!;
+      expect(fin.bucket).toBe(1);
+      const segs = serverFile(1, new Map(), fin);
       const f = (async (input: RequestInfo | URL) => {
         const path = String(input).slice(ORIGIN.length);
         if (path.endsWith("/meta")) return j(200, { expires_in_s: 60, salt: fin.salt, kdf: { ops: 3, mem: 67108864 }, bucket: 1, segments: 1, opens_left: 1 });
         if (path.endsWith("/unlock")) return j(200, { download_token: "t", segments: 1, envelope: fin.envelope, grant: GRANT0 });
-        if (path.endsWith("/segments/0")) return new Response(new Uint8Array(sent[0]!), { status: 200 });
+        if (path.endsWith("/segments/0")) return new Response(new Uint8Array(segs[0]!), { status: 200 });
         return new Response(null, { status: 204 });
       }) as typeof fetch;
       const opened = await openShare(r.link, PW, ORIGIN, undefined, { fetch: f, retryDelayMs: 1 });
@@ -1221,14 +1234,15 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
         expect(v).toHaveLength(3);
         expect(new Set(v).size).toBe(1);
       }
-      // Morceaux du contenu : 160 chiffrements, 160 nonces distincts (même clé) ; plus E (autre clé).
+      // Morceaux de l'élément : 192 chiffrements (3 segments), 192 nonces distincts sous sa
+      // clé ; plus le manifeste (K_contenu) et E (K_env).
       const byKey = new Map<CryptoKey, string[]>();
       for (const c of spy.mock.calls) {
         const iv = Buffer.from((c[0] as AesGcmParams).iv as Uint8Array).toString("hex");
         (byKey.get(c[1]) ?? byKey.set(c[1], []).get(c[1])!).push(iv);
       }
       const sizes = [...byKey.values()].map((v) => v.length).sort((a, b) => a - b);
-      expect(sizes).toEqual([1, 160]);
+      expect(sizes).toEqual([1, 1, 192]);
       for (const v of byKey.values()) expect(new Set(v).size).toBe(v.length);
     } finally {
       spy.mockRestore();
@@ -1244,14 +1258,12 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
     allZero();
   });
 
+  // Création refusée : aucune clé de contenu ni Argon2id ; K_lien, S_gestion, K_accès à zéro.
   const allZero = () => {
     const sec = captured.buffers.filter((b) => b.length === 32);
-    expect(sec.length).toBeGreaterThanOrEqual(9);
-    expect(captured.kMdp).toHaveLength(1);
+    expect(sec.length).toBeGreaterThanOrEqual(3);
+    expect(captured.kMdp).toHaveLength(0);
     for (const b of sec) expect(b.every((x) => x === 0)).toBe(true);
-    for (const l of ["shhdrop/v2/id", "shhdrop/v2/contenu", "shhdrop/v2/maitre", "shhdrop/v2/enveloppe", "shhdrop/v2/preuve"]) {
-      expect(captured.hkdf).toContain(l);
-    }
   };
 });
 

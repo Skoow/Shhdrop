@@ -12,6 +12,7 @@
   import { Trash2 } from "./Icon";
   import { reducedMotion } from "./motion";
   import { edgeScroll, shiftFor, targetIndex } from "./reorder";
+  import type { RowStatus } from "../flows/preupload";
 
   type Props = {
     category: Category;
@@ -29,8 +30,11 @@
     cannotOpen?: (item: ComposeItem) => boolean;
     /** Élément en cause d'un blocage ou d'un risque : marqué en rouge (S6). */
     danger?: (item: ComposeItem) => boolean;
+    /** Envoi dès l'ajout (spec §41.14) : état de chaque ligne, et Réessayer. */
+    upload?: (item: ComposeItem) => RowStatus | null;
+    onretry?: (id: string) => void;
   };
-  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, cannotOpen, danger }: Props = $props();
+  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, cannotOpen, danger, upload, onretry }: Props = $props();
   // Une seule présentation partout (décision du propriétaire du 7 novembre) : lignes compactes,
   // icône de format, nom, type, taille, temps d'envoi estimé, actions.
 
@@ -147,6 +151,8 @@
           onmenu={() => onmenu?.(item.id)}
           cannotOpen={cannotOpen?.(item) ?? false}
           danger={danger?.(item) ?? false}
+          upload={upload?.(item) ?? null}
+          onretry={() => onretry?.(item.id)}
         />
       </li>
     {/each}

@@ -61,7 +61,8 @@ describe("création puis ouverture (texte, image 300 Kio, fichier 5 Mio)", () =>
     expect(r.expiresInS).toBeLessThanOrEqual(3600 + 900);
     expect(parseLink(r.link).kind).toBe("s");
     expect(parseLink(r.manage).kind).toBe("m");
-    expect(prog.at(-1)).toEqual([3, 3]); // 5,3 Mio → palier 160 → 3 segments
+    // Spec §41.14 : image au segment 0, fichier aux segments 1 et 2 (9 Mio) → palier 160.
+    expect(prog.at(-1)).toEqual([3, 3]);
 
     expect((await fetchMeta(r.link, srv().origin)).expiresInS).toBeGreaterThan(3500);
     const dl: [number, number][] = [];
@@ -75,7 +76,7 @@ describe("création puis ouverture (texte, image 300 Kio, fichier 5 Mio)", () =>
     expect(o.manifest.items[0]!.text).toBe("Bonjour é😀");
     expect(Buffer.from(await o.item(1)).equals(Buffer.from(image))).toBe(true);
     expect(Buffer.from(await o.item(2)).equals(Buffer.from(fichier))).toBe(true);
-    expect(dl.at(-1)).toEqual([2, 3]); // le segment 2 ne contient que du bourrage : jamais lu
+    expect(dl.at(-1)).toEqual([3, 3]); // le segment 2 porte la fin du fichier et le manifeste
     await o.done();
     // maxOpens = 1 et téléchargement terminé : partage effacé.
     await expect(fetchMeta(r.link, srv().origin)).rejects.toBeInstanceOf(NotFoundError);
@@ -181,7 +182,7 @@ describe("réseau coupé pendant l'envoi", () => {
     const o = await openShare(r.link, PW, srv().origin);
     expect(Buffer.from(await o.item(0)).equals(Buffer.from(data))).toBe(true);
     await o.done();
-  });
+  }, 20_000); // défi (3,1 s) + nouveaux essais (1 s, 2 s) + Argon2id après l'envoi (spec §41.14)
   it("coupure persistante puis annulation : AbortError, le partage créé est détruit (keepalive)", async () => {
     let n = 0;
     let manage = "";
@@ -201,7 +202,9 @@ describe("réseau coupé pendant l'envoi", () => {
       }
       return r;
     };
-    const e = await share(srv(), [textItem("x")], 1, { fetch: dead, signal: ac.signal }).catch((x: unknown) => x);
+    // Un fichier : un texte seul ne fait aucun PUT (il part dans le manifeste, spec §41.14).
+    const one: Item = { kind: "file", name: "x", mime: "text/plain", data: utf8("x") };
+    const e = await share(srv(), [one], 1, { fetch: dead, signal: ac.signal }).catch((x: unknown) => x);
     expect(e).toBeInstanceOf(DOMException);
     expect((e as DOMException).name).toBe("AbortError");
     expect(n).toBe(3); // un appel par essai (1 s, puis 2 s d'attente)
@@ -210,7 +213,7 @@ describe("réseau coupé pendant l'envoi", () => {
     expect(manage).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const again = await globalThis.fetch(url, { method: "POST", headers: { "X-Shh-Manage": manage } });
     expect(again.status).toBe(404);
-  });
+  }, 20_000);
 });
 
 // Spec §24 : gros fichier (File/Blob adossé au disque) chiffré, envoyé, reçu et déchiffré en

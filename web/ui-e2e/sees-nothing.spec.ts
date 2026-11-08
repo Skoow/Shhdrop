@@ -8,7 +8,7 @@ import { shareId } from "../src/crypto/envelope";
 import type { KLien } from "../src/crypto/types";
 import { findIn, needle, scanDir, type Needle } from "../e2e/scan";
 import { expect, test } from "./fixtures";
-import { addText, readyHeading, sendButton } from "./send-helpers";
+import { addText, openFilePicker, readyHeading, sendButton } from "./send-helpers";
 
 const TEXT = "MOT-REPERE-NAVIGATEUR-5d1e : le code de la porte est 4471";
 const NAME = "nom-repere-navigateur-a83f.pdf";
@@ -35,8 +35,8 @@ test.describe("fr-FR", () => {
 
     await page.goto(shh.origin + "/");
     await addText(page, TEXT);
-    const chooser = page.waitForEvent("filechooser");
-    await page.locator(".dropzone").click();
+    // Geste visible (téléphone : feuille « Ajouter » ; le .dropzone de l'ordinateur y est absent).
+    const chooser = openFilePicker(page);
     await (await chooser).setFiles({ name: NAME, mimeType: "application/octet-stream", buffer: Buffer.from(CONTENT) });
     await expect(page.locator("[data-row]")).toHaveCount(2);
     await sendButton(page).click();

@@ -198,13 +198,23 @@ test.describe("fr-FR", () => {
     });
     await expect(page.getByRole("dialog", { name: "Nouveau texte" })).toHaveCount(0);
     await page.getByRole("button", { name: "Annuler", exact: true }).click();
-    await expect(page.getByText("Annuler l'envoi ? Ce qui a été envoyé sera effacé du serveur.")).toBeVisible();
+    await expect(page.getByText("Annuler l'envoi ? Le lien ne sera pas créé ; vos éléments restent dans la liste.")).toBeVisible();
     await page.getByRole("button", { name: "Annuler l'envoi" }).click();
-    await expect(page.locator(".note").getByText("Envoi annulé. Il compte quand même dans la limite d'envois du jour.")).toBeVisible();
+    await expect(page.locator(".note").getByText("Envoi annulé. Vos éléments restent dans la liste, déjà envoyés ; videz-la pour les effacer du serveur.")).toBeVisible();
     await expect(page.locator("[data-row]")).toHaveCount(2);
     await expect(sendButton(page)).toBeVisible();
     await expect(page.getByRole("list", { name: "Étapes confirmées" })).toHaveCount(0);
     expect(m.link()).toBeDefined();
+    // Spec §41.14 : le brouillon reste (les éléments sont toujours là) ; vider la liste l'efface.
+    expect(await gone(m.link()!, shh.origin)).toBe(false);
+    for (const name of ["doc.bin", "Note"]) {
+      const direct = page.getByRole("button", { name: new RegExp(`^Retirer ${name}`) }).first();
+      if (await direct.isVisible()) await direct.click();
+      else {
+        await page.getByRole("button", { name: new RegExp(`^Actions pour ${name}`) }).first().click();
+        await page.getByRole("dialog").getByRole("button", { name: "Retirer" }).click();
+      }
+    }
     await expect.poll(() => gone(m.link()!, shh.origin), { timeout: 15_000 }).toBe(true);
   });
 
@@ -244,8 +254,9 @@ test.describe("fr-FR", () => {
   test("partage disparu pendant l'envoi (404 aux PUT) → « Le transfert a été interrompu »", async ({ page, shh }) => {
     test.setTimeout(90_000);
     await page.goto(shh.origin + "/");
-    await addText(page, "disparu");
+    // Un fichier (un texte seul ne fait aucun PUT, spec §41.14) ; 404 dès l'envoi anticipé.
     await page.route(SEG, (route) => route.fulfill({ status: 404, contentType: "application/json", body: '{"error":"not_found"}' }));
+    await addFile(page, "disparu.bin", 1000);
     await sendButton(page).click();
     const alert = page.getByRole("alert");
     await expect(alert).toHaveText("Le transfert a été interrompu (le serveur a peut-être redémarré). Réessayez.", { timeout: 30_000 });
@@ -330,14 +341,15 @@ test.describe("captures 390", () => {
 
   test("scellement en cours à 390 × 844", async ({ page, shh }) => {
     test.setTimeout(90_000);
+    await slowSegments(page, 8000, [], 1);
     await page.goto(shh.origin + "/");
     await addText(page, "Le code de la porte est 4471.");
     await addRealFile(page, "toits-belleville.jpg");
     await addRealFile(page, "anniversaire-lou.webm");
     await addFile(page, "releve-annuel.bin", 9 * MIB);
-    await slowSegments(page, 8000, [], 1);
     await sendButton(page).click();
-    await expect(page.getByText(/^Bloc 1 \/ 3$/)).toBeVisible({ timeout: 30_000 });
+    // Photo, vidéo : un segment chacune ; relevé : 3 (spec §41.14).
+    await expect(page.getByText(/^Bloc \d \/ 5$/)).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(800);
     await capture(page, "seal-progress-390");
     expect(await noHScroll(page)).toBe(true);
