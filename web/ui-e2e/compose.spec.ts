@@ -219,7 +219,7 @@ test.describe("fr-FR", () => {
     expect(await axe(page)).toEqual([]);
   });
 
-  test("mot de passe : toujours généré, 10 caractères, « Générer un autre » et « Copier » dans le champ ; aucune saisie (D41-15)", async ({ page, shh, isMobile, browserName }) => {
+  test("mot de passe : toujours généré, 11 caractères, « Générer un autre » et « Copier » dans le champ ; aucune saisie (D41-15)", async ({ page, shh, isMobile, browserName }) => {
     await open(page, shh.origin);
     await browse(page, [f("contrat.pdf")]);
     const opts = await options(page, isMobile);
@@ -234,7 +234,7 @@ test.describe("fr-FR", () => {
     }
     const pw = box.locator(".val .sr-only");
     const first = await pw.textContent();
-    expect(first).toMatch(/^[a-km-np-zA-HJ-NP-Z2-9!#$%+=?@&*\-/:;()]{10}$/);
+    expect(first).toMatch(/^[abcdefghkmnpqrtuvwxyACDEFGHJKLMNPQRTUVWXY23456789!?@#$%&*+\-=/()]{11}$/);
     await regen.click();
     await expect(pw).not.toHaveText(first!);
     if (browserName === "chromium") {

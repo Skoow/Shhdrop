@@ -79,7 +79,7 @@ const ORIGIN = "https://srv.test";
 const KLIEN = () => new Uint8Array(32).fill(1) as KLien;
 const LINK = shareLink(ORIGIN, new Uint8Array(32).fill(1) as KLien);
 const MANAGE = manageLink(ORIGIN, new Uint8Array(32).fill(2) as SGestion);
-const PW = "Kq7!mP2#xZ"; // forme d'un mot de passe généré (D41-15)
+const PW = "Kq7!mP2#xYa"; // forme d'un mot de passe généré (D41-15)
 
 type Reply = Response | "net";
 type Route = (method: string, path: string) => Reply | undefined;

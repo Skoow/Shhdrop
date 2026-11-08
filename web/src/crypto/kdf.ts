@@ -67,7 +67,7 @@ export async function deriveAccess(kLien: KLien): Promise<AccessKeys> {
 
 /**
  * K_mdp pour CRÉER un partage (spec §29.2, §31, D41-15) : seulement un mot de passe de la forme
- * de generatePassword (10 caractères, quatre familles) ; sinon Error("mot_de_passe_non_genere").
+ * de generatePassword (11 caractères, quatre familles) ; sinon Error("mot_de_passe_non_genere").
  * Paramètres Argon2id fixés à KDF_CREATE (64 Mio, 3 passes). Audit F9.
  */
 export async function passwordKeyForCreate(password: string, salt: Uint8Array<ArrayBuffer>): Promise<KMdp> {

@@ -12,7 +12,7 @@ import { parseLink } from "../src/transfer/link";
 import { solveAltcha } from "./altcha";
 import { startServer, type TestServer } from "./server";
 
-const PW = "Kq7!mP2#xZ"; // forme d'un mot de passe généré (D41-15)
+const PW = "Kq7!mP2#xYa"; // forme d'un mot de passe généré (D41-15)
 const KIB = 1024;
 const MIB = 1024 * KIB;
 

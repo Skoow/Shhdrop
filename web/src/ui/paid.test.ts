@@ -44,7 +44,7 @@ describe("options : mot de passe généré seulement, choix payants verrouillés
     (document.querySelector('button[aria-label="Générer un autre"]') as HTMLButtonElement).click();
     flushSync();
     expect(options.password).not.toBe(before);
-    expect(options.password).toHaveLength(10);
+    expect(options.password).toHaveLength(11);
   });
   it("2, 3 et 7 jours, « Démarrer à la première ouverture », « Jusqu'à 50 » : verrouillés, badge Plus, aucun effet sur les options", () => {
     const { options, onpaid } = opts();

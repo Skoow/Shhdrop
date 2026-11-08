@@ -128,12 +128,12 @@ test.describe("fr-FR", () => {
     expect(await armed(page)).toBe(false);
   });
 
-  test("mot de passe généré de 10 caractères : affiché exactement comme il est copié (scan UX B5 ; D41-15 : plus de saisie)", async ({ page, shh, context }) => {
+  test("mot de passe généré de 11 caractères : affiché exactement comme il est copié (scan UX B5 ; D41-15 : plus de saisie)", async ({ page, shh, context }) => {
     test.setTimeout(120_000);
     await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: shh.origin });
     await toReady(page, context, shh.origin);
     const gen = await valueOf(page, pwCard(page));
-    expect(gen).toHaveLength(10);
+    expect(gen).toHaveLength(11);
     // Affiché tout collé, sans groupe ni séparateur (décision du 8 novembre) : ce qu'on lit = la copie.
     await expect(pwCard(page).locator(".val.vis")).toHaveText(gen);
     await pwCard(page).getByRole("button", { name: /^Copier/ }).click();
@@ -172,13 +172,13 @@ test.describe("fr-FR", () => {
     await expect(p2.getByText(/^Actif · s'efface dans 6\sh \(à 03\sh\s30\)$/)).toBeVisible();
   });
 
-  test("mot de passe affiché tout collé (10 caractères, sans groupe ni point), sans « Épeler » ; rien dans la console ni le stockage", async ({ page, shh, context }) => {
+  test("mot de passe affiché tout collé (11 caractères, sans groupe ni point), sans « Épeler » ; rien dans la console ni le stockage", async ({ page, shh, context }) => {
     test.setTimeout(120_000);
     const logs: string[] = [];
     page.on("console", (m) => logs.push(m.text()));
     await toReady(page, context, shh.origin);
     const password = await valueOf(page, pwCard(page));
-    expect(password).toMatch(/^[abcdefghkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!?@#$%&*+\-=/()]{10}$/);
+    expect(password).toMatch(/^[abcdefghkmnpqrtuvwxyACDEFGHJKLMNPQRTUVWXY23456789!?@#$%&*+\-=/()]{11}$/);
     await expect(pwCard(page).locator(".val.vis")).toHaveText(password);
     await expect(pwCard(page).locator(".gsep, .g")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Épeler" })).toHaveCount(0);

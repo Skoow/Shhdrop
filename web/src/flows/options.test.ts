@@ -101,7 +101,7 @@ describe("mot de passe généré (spec §31)", () => {
   it("10 caractères de l'alphabet, 4 familles, aucun ambigu (répartition : crypto/password.test.ts)", () => {
     for (let i = 0; i < 500; i++) {
       const p = generatePassword();
-      expect(p).toHaveLength(10);
+      expect(p).toHaveLength(11);
       expect([...p].every((c) => PASSWORD_ALPHABET.includes(c))).toBe(true);
       expect(/[a-z]/.test(p) && /[A-Z]/.test(p) && /[2-9]/.test(p) && /[!#$%+=?@&*\-/:;()]/.test(p)).toBe(true);
       expect(/[0O1lIo|]/.test(p)).toBe(false);

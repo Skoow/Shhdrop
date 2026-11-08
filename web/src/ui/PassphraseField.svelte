@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Mot de passe de l'envoi (UI §9.3, spec §31) : toujours généré sur l'appareil, 10 caractères
+  // Mot de passe de l'envoi (UI §9.3, spec §31) : toujours généré sur l'appareil, 11 caractères
   // (D41-15 : plus de mot de passe écrit à la main). Un seul champ, ses deux boutons dedans,
   // en fin de champ : « Générer un autre » et « Copier ». La copie lit l'état, jamais le DOM
   // animé (K9).
