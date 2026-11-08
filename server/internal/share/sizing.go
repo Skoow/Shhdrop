@@ -49,3 +49,6 @@ func totalSize(bucket int) int64 { return Header + int64(bucket)*ChunkCT }
 // ContentBytes : données utiles d'un palier (le dernier morceau est celui du manifeste),
 // unité des quotas d'octets (spec §4, §24) : 0 pour le palier 1, 2 Gio pour le plus grand.
 func ContentBytes(bucket int) int64 { return int64(bucket-1) * 65536 }
+
+// ValidBucket : b est un palier gratuit (spec §41.2).
+func ValidBucket(b int) bool { return validBucket(b) }

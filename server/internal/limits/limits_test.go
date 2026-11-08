@@ -523,7 +523,8 @@ func TestCountersEmptyAfterRotation(t *testing.T) {
 }
 
 // Envoi dès l'ajout (spec §41.14) : les octets reçus comptent au quota du jour, même
-// effacés ou abandonnés ; Settle porte un envoi finalisé aux données utiles de son palier.
+// effacés ou abandonnés ; la réservation (création, grow) est débitée d'avance et couvre
+// les octets reçus jusqu'à elle (compte = max(réservé, reçus)).
 func TestReceivedBytesCount(t *testing.T) {
 	now := t0
 	l := newLim(&now)
@@ -546,18 +547,49 @@ func TestReceivedBytesCount(t *testing.T) {
 	if ra, err := l.Receive("b", gib); !errors.Is(err, ErrQuota) || ra <= 0 {
 		t.Fatal("au-delà de 6 Gio reçus", ra, err)
 	}
-	l.Settle("b", gib/2+100) // 100 octets de bourrage à payer
-	l.FinishUpload("b")
-	if _, err := l.BeginUpload(ip("1.2.3.4"), "c", 0); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := l.Receive("c", gib/2-100); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := l.Receive("c", 1); !errors.Is(err, ErrQuota) {
-		t.Fatal("bourrage non compté", err)
-	}
 	if _, err := l.Receive("inconnu", gib); err != nil {
 		t.Fatal("envoi inconnu (jour changé) : ignoré", err)
+	}
+}
+
+func TestReserveDebitsQuota(t *testing.T) {
+	now := t0
+	l := newLim(&now)
+	const gib = int64(1) << 30
+	if _, err := l.BeginUpload(ip("1.2.3.4"), "a", gib); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Reserve("a", 5*gib); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Receive("a", 4*gib); err != nil { // couverts par la réservation
+		t.Fatal(err)
+	}
+	if ra, err := l.Reserve("a", 7*gib); !errors.Is(err, ErrQuota) || ra <= 0 {
+		t.Fatal("réservation au-delà du quota", err)
+	}
+	if _, err := l.Receive("a", 2*gib); err != nil { // 6 Gio reçus : +1 Gio
+		t.Fatal(err)
+	}
+	if _, err := l.Receive("a", 1); !errors.Is(err, ErrQuota) {
+		t.Fatal(err)
+	}
+	l.AbandonUpload("a") // tout a été reçu : rien à rendre
+	if _, err := l.BeginUpload(ip("1.2.3.4"), "b", 1); !errors.Is(err, ErrQuota) {
+		t.Fatal("quota rendu à tort", err)
+	}
+	// Réservation non remplie, abandonnée : rendue.
+	if _, err := l.BeginUpload(ip("5.6.7.8"), "c", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Reserve("c", 6*gib); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Receive("c", gib); err != nil {
+		t.Fatal(err)
+	}
+	l.AbandonUpload("c")
+	if _, err := l.BeginUpload(ip("5.6.7.8"), "d", 5*gib); err != nil {
+		t.Fatal("réservation non remplie non rendue", err)
 	}
 }

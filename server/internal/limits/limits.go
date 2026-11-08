@@ -79,7 +79,7 @@ type Limiter struct {
 type upload struct {
 	k64, k48 string
 	bytes    int64 // réservés à la création (rendus si l'envoi n'aboutit pas)
-	recv     int64 // reçus (Receive) ou payés à la finalisation (Settle) : jamais rendus
+	recv     int64 // reçus (Receive) : jamais rendus
 }
 
 func New(now func() time.Time) *Limiter {
@@ -211,17 +211,34 @@ func (l *Limiter) endLocked(id string, refund bool) (upload, bool) {
 	decr(l.pend64, u.k64)
 	decr(l.pend48, u.k48)
 	if refund {
+		// La création et la réservation non remplie sont rendues ; les octets reçus, jamais.
 		decr(l.count64, u.k64)
 		decr(l.count48, u.k48)
-		l.bytes64[u.k64] -= u.bytes
-		l.bytes48[u.k48] -= u.bytes
+		l.bytes64[u.k64] -= u.counted() - u.recv
+		l.bytes48[u.k48] -= u.counted() - u.recv
 	}
 	return u, true
 }
 
-// Receive compte n octets reçus pour l'envoi id (spec §41.14) : refusé (ErrQuota, délai
-// jusqu'à minuit UTC) s'ils dépassent les octets du jour de la connexion ou de son /48. Un
-// segment effacé ensuite reste compté. Un id inconnu (jour changé, redémarrage) est ignoré.
+// counted : octets comptés au quota pour un envoi : sa réservation (création, grow), ou
+// ses octets reçus s'ils la dépassent (segments effacés et renvoyés compris).
+func (u upload) counted() int64 { return max(u.bytes, u.recv) }
+
+// debitLocked ajoute d au compte de u (d ≤ 0 : rend) ; refuse un débit au-delà du jour.
+func (l *Limiter) debitLocked(id string, u upload, next upload, now time.Time) (time.Duration, error) {
+	d := next.counted() - u.counted()
+	if d > 0 && (d > BytesPer64-l.bytes64[u.k64] || d > BytesPer48-l.bytes48[u.k48]) {
+		return time.Unix((l.day+1)*day, 0).Sub(now), ErrQuota
+	}
+	l.bytes64[u.k64] += d
+	l.bytes48[u.k48] += d
+	l.uploads[id] = next
+	return 0, nil
+}
+
+// Receive compte n octets reçus pour l'envoi id (spec §41.14) : au-delà de sa réservation,
+// débités au quota du jour (refus ErrQuota, délai jusqu'à minuit UTC). Un segment effacé
+// reste compté. Un id inconnu (jour changé, redémarrage) est ignoré.
 func (l *Limiter) Receive(id string, n int64) (time.Duration, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -231,37 +248,33 @@ func (l *Limiter) Receive(id string, n int64) (time.Duration, error) {
 	if !ok {
 		return 0, nil
 	}
-	if n < 0 || n > BytesPer64-l.bytes64[u.k64] || n > BytesPer48-l.bytes48[u.k48] {
-		return time.Unix((l.day+1)*day, 0).Sub(now), ErrQuota
+	if n < 0 {
+		return 0, ErrQuota
 	}
-	l.bytes64[u.k64] += n
-	l.bytes48[u.k48] += n
-	u.recv += n
-	l.uploads[id] = u
-	return 0, nil
+	next := u
+	next.recv += n
+	return l.debitLocked(id, u, next, now)
 }
 
-// Settle porte le compte de l'envoi id à au moins min octets (données utiles du palier
-// final, bourrage rempli par le serveur compris), sans refus : appelé à la finalisation.
-func (l *Limiter) Settle(id string, min int64) {
+// Reserve porte la réservation de l'envoi id à bytes (grow d'un brouillon, spec §41.14) :
+// le supplément est débité d'avance (refus ErrQuota) ; plus bas, la différence est rendue
+// (annulation d'un grow échoué). Un id inconnu (jour changé, redémarrage) est ignoré, comme
+// pour Receive : la place reste bornée par les segments reçus (share.Grow).
+func (l *Limiter) Reserve(id string, bytes int64) (time.Duration, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.rotateLocked(l.now())
+	now := l.now()
+	l.rotateLocked(now)
 	u, ok := l.uploads[id]
-	if !ok || u.bytes+u.recv >= min {
-		return
+	if !ok {
+		return 0, nil
 	}
-	d := min - u.bytes - u.recv
-	l.bytes64[u.k64] += d
-	l.bytes48[u.k48] += d
-	u.recv += d
-	l.uploads[id] = u
-}
-
-func decr(m map[string]int, k string) {
-	if m[k]--; m[k] <= 0 {
-		delete(m, k)
+	if bytes < 0 {
+		return 0, ErrQuota
 	}
+	next := u
+	next.bytes = bytes
+	return l.debitLocked(id, u, next, now)
 }
 
 // FinishUpload : l'envoi id est finalisé ; sa création et ses octets restent comptés.
@@ -286,8 +299,8 @@ func (l *Limiter) AbandonUpload(id string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if u, ok := l.endLocked(id, true); ok {
-		l.aband64[u.k64] += u.bytes + u.recv
-		l.aband48[u.k48] += u.bytes + u.recv
+		l.aband64[u.k64] += u.counted()
+		l.aband48[u.k48] += u.counted()
 	}
 }
 
@@ -318,4 +331,10 @@ func (l *Limiter) AllowSegment(ip netip.Addr) bool {
 	l.seg[k64]++
 	l.seg48[k48]++
 	return true
+}
+
+func decr(m map[string]int, k string) {
+	if m[k]--; m[k] <= 0 {
+		delete(m, k)
+	}
 }

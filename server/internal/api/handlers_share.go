@@ -111,9 +111,9 @@ func (s *server) create(w http.ResponseWriter, r *http.Request) {
 	// V_accès ou V_gestion déjà pris : seul un détenteur du secret peut le provoquer (deux
 	// créations avec le même lien). Réponse identique à une création invalide (400
 	// bad_request), création comptée au quota et dans la difficulté anti-robot.
-	// Envoi dès l'ajout (spec §41.14) : rien n'est réservé à la création, les octets reçus
-	// sont comptés à chaque segment (Receive) et le palier final payé à la finalisation (Settle).
-	switch retry, err := s.lim.BeginUpload(ip, req.ID, 0); {
+	// Envoi dès l'ajout (spec §41.14) : la réservation (création, puis chaque grow) est
+	// débitée d'avance ; les octets reçus au-delà (segments effacés et renvoyés) aussi.
+	switch retry, err := s.lim.BeginUpload(ip, req.ID, share.ContentBytes(b.Bucket)); {
 	case errors.Is(err, limits.ErrDuplicate): // id interne de 128 bits déjà en cours : impossible
 		fail(w, errors.New("id interne en double"))
 		return
@@ -239,7 +239,6 @@ func (s *server) finalize(w http.ResponseWriter, r *http.Request) {
 		fail(w, errBadRequest)
 		return
 	}
-	final := 0
 	if draft {
 		var e1, e2 error
 		req.Bucket = *b.Bucket
@@ -249,17 +248,13 @@ func (s *server) finalize(w http.ResponseWriter, r *http.Request) {
 			fail(w, errBadRequest)
 			return
 		}
-		final = req.Bucket
-	} else if final, err = s.svc.UploadBucket(id); err != nil {
-		fail(w, err)
-		return
 	}
+	// Bourrage déjà payé : le palier final ne dépasse pas la réservation débitée (audit M1).
 	left, err := s.svc.Finalize(id, req)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	s.lim.Settle(id, share.ContentBytes(final))
 	s.lim.FinishUpload(id)
 	writeJSON(w, http.StatusOK, map[string]int64{"expires_in_s": secs(left)})
 }
@@ -461,7 +456,20 @@ func (s *server) grow(w http.ResponseWriter, r *http.Request) {
 		fail(w, errBadRequest)
 		return
 	}
+	old, err := s.svc.UploadBucket(id)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	// Place débitée d'avance au quota du jour (audit H1) ; rendue si l'agrandissement échoue.
+	if share.ValidBucket(*b.Bucket) && *b.Bucket > old {
+		if retry, err := s.lim.Reserve(id, share.ContentBytes(*b.Bucket)); err != nil {
+			writeLimit(w, retry)
+			return
+		}
+	}
 	if err := s.svc.Grow(id, *b.Bucket); err != nil {
+		s.lim.Reserve(id, share.ContentBytes(old))
 		fail(w, err)
 		return
 	}

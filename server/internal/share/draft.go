@@ -21,6 +21,28 @@ func (s *Service) draftRow(id string) (int, []byte, error) {
 	return bucket, mask, notFound(err)
 }
 
+// growMargin : segments réservables au-delà du dernier segment reçu (audit H1) : le client
+// agrandit au fil de l'envoi, jamais d'avance pour tout un fichier.
+const growMargin = 2
+
+// growLimit : plus grand palier permis par Grow, le plus petit qui contient les segments
+// jusqu'au dernier reçu, plus growMargin segments pleins, plus le morceau du manifeste.
+func growLimit(mask []byte, segs int) int {
+	hi := -1
+	for n := 0; n < segs; n++ {
+		if mask[n/8]&(1<<(n%8)) != 0 {
+			hi = n
+		}
+	}
+	need := (hi+1+growMargin)*SegChunks + 1
+	for _, b := range Buckets {
+		if b >= need {
+			return b
+		}
+	}
+	return Buckets[len(Buckets)-1]
+}
+
 // Grow porte la réservation de l'envoi id au palier bucket (strictement plus grand) : place
 // vérifiée contre StorageMax comme à la création, fichier agrandi, masque prolongé (segments
 // reçus gardés). Refusé pendant un Finalize (ErrBusy).
@@ -38,7 +60,7 @@ func (s *Service) Grow(id string, bucket int) error {
 	if err != nil {
 		return err
 	}
-	if !validBucket(bucket) || bucket <= old {
+	if !validBucket(bucket) || bucket <= old || bucket > growLimit(mask, SegmentCount(old)) {
 		return ErrBadRequest
 	}
 	s.createMu.Lock()

@@ -259,3 +259,29 @@ func TestFinalizeDraftFillsHolesWithRandom(t *testing.T) {
 		t.Fatal("segment gardé écrasé")
 	}
 }
+
+// Audit H1 : la réservation ne dépasse jamais les segments reçus de plus de growMargin.
+func TestGrowBoundedByReceivedSegments(t *testing.T) {
+	s, _ := newSvc(t)
+	id, _, err := s.Create(newKeys().req(80, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Grow(id, 400); !errors.Is(err, ErrBadRequest) {
+		t.Fatal("réservation sans segment reçu", err)
+	}
+	if err := s.Grow(id, 160); err != nil {
+		t.Fatal(err)
+	}
+	for n := 0; n < 2; n++ {
+		if err := s.PutSegment(id, n, segBody(160, n, 1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Grow(id, 800); !errors.Is(err, ErrBadRequest) {
+		t.Fatal(err)
+	}
+	if err := s.Grow(id, 400); err != nil {
+		t.Fatal(err)
+	}
+}

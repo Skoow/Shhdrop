@@ -3,9 +3,10 @@ package api
 import (
 	"bytes"
 	"fmt"
+	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/skoow/shhdrop/server/internal/share"
@@ -106,5 +107,27 @@ func TestDraftReceivedBytesQuota(t *testing.T) {
 	expect(t, w, 429, "")
 	if jsonOf(t, w)["retry_after_s"].(float64) <= 60 {
 		t.Fatal("refus de débit, pas de quota")
+	}
+}
+
+// Audit H1 : grow débite la place au quota du jour (429), et ne dépasse pas les segments
+// reçus de plus de deux segments (400).
+func TestDraftGrowDebitsQuota(t *testing.T) {
+	e := newEnv(t, false, nil)
+	c := e.create(t, "", newKeys(), 80, 1)
+	grow := func(b int) *httptest.ResponseRecorder {
+		return e.do(req{method: "POST", path: "/api/shares/grow", body: mustJSON(map[string]int{"bucket": b}), hdr: auth(c.UploadToken)})
+	}
+	expect(t, grow(400), 400, "") // aucun segment reçu : 160 au plus
+	if _, err := e.srv.lim.BeginUpload(netip.MustParseAddr("203.0.113.7"), "autre", 6<<30-share.ContentBytes(160)+1); err != nil {
+		t.Fatal(err)
+	}
+	w := grow(160)
+	expect(t, w, 429, "")
+	if jsonOf(t, w)["retry_after_s"].(float64) <= 60 {
+		t.Fatal("refus de quota attendu")
+	}
+	if got, _ := e.svc.UploadBucket(c.ID); got != 80 {
+		t.Fatal("réservation agrandie malgré le refus", got)
 	}
 }
