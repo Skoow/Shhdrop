@@ -168,7 +168,7 @@ describe("réseau coupé pendant l'envoi", () => {
     let putAttempts = 0;
     const flaky: typeof fetch = async (input, init) => {
       const url = String(input);
-      if (init?.method === "PUT" && url.endsWith("/segments/1")) {
+      if (init?.method === "PUT" && /\/segments\/1(\?|$)/.test(url)) {
         putAttempts++;
         if (putAttempts <= 2) throw new TypeError("fetch failed"); // comme une coupure réseau
       }

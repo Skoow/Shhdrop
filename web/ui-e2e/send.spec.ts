@@ -6,7 +6,7 @@ import { NotFoundError, shareStatus } from "../src/index";
 import { capture, expect, test } from "./fixtures";
 import { addFile, addRealFile, addText, armed, noHScroll, readyHeading, sendButton, sleep } from "./send-helpers";
 
-const SEG = /\/api\/shares\/segments\/\d+$/;
+const SEG = /\/api\/shares\/segments\/\d+(\?from=\d+)?$/; // plage de morceaux : ?from (audit H-2)
 const MIB = 1048576;
 
 const stepItem = (page: Page, name: string) => page.getByRole("list", { name: "Étapes confirmées" }).getByRole("listitem").filter({ hasText: name });

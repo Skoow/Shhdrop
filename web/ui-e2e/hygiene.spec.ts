@@ -109,6 +109,9 @@ for (const [kind, frag] of [
     await page.goto(`${shh.origin}/${frag}`);
     await expect.poll(() => hash(page)).toBe("");
     expect(page.url()).toBe(`${shh.origin}/`);
+    // La lecture de l'état part avant de quitter la page (sinon, sous charge, l'écran est
+    // quitté avant elle et le décompte ci-dessous échoue).
+    await expect.poll(() => api.length).toBe(1);
 
     // Retour / Avant : aucune entrée d'historique ne réaffiche le #, et le retrait n'a pas
     // ajouté d'entrée (replaceState) : une seule entrée « / » de l'origine avant « /securite ».

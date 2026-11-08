@@ -523,6 +523,9 @@ test.describe("fr-FR", () => {
     await dlg.getByRole("button", { name: "Enregistrer" }).click();
     await expect(rows(page).first().locator(".nm")).toHaveText("Courses");
     await expect(rows(page).first().locator(".sub")).toHaveText("Pain");
+    // Collage seulement une fois l'éditeur fermé : pendant sa fermeture, editorOpen est encore
+    // vrai et le texte collé est ignoré (cause de l'instabilité en suite).
+    await expect(dlg).toBeHidden();
 
     await page.evaluate(() => {
       (document.activeElement as HTMLElement | null)?.blur();
@@ -536,6 +539,7 @@ test.describe("fr-FR", () => {
     await expect(nd.getByLabel("Contenu")).toBeFocused();
     await nd.getByRole("button", { name: "Ajouter" }).click();
     await expect(rows(page)).toHaveCount(2);
+    await expect(nd).toBeHidden();
 
     const png = [...readFileSync(f("schema.png"))];
     await page.evaluate((bytes) => {

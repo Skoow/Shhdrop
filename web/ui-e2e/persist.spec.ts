@@ -57,7 +57,7 @@ test.use({ locale: "fr-FR" });
 
 for (const late of [false, true]) {
   test(`profil persistant : # absent de l'historique et du disque ; onglet restauré ${late ? "après 3 min : clé oubliée" : "aussitôt : « Rouvrir »"}`, async ({ shh, browser, browserName }) => {
-    test.skip(browserName !== "chromium", "contexte persistant Chromium seulement");
+    test.skip(browserName !== "chromium" || test.info().project.name !== "chromium-desktop", "contexte persistant Chromium, un seul projet (il ne suit pas l'appareil du projet)");
     test.setTimeout(180_000);
     const s = await freshPage(browser);
     const sent = await sendShare(s.page, shh.origin + "/", { text: TEXT, opens: 3 });

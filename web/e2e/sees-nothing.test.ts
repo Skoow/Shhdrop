@@ -248,7 +248,7 @@ describe("le serveur ne voit rien", () => {
       // serveur remplit les trous d'aléa, l'en-tête et le manifeste chiffré viennent avec finalize).
       "PUT /api/shares/segments/0",
       "PUT /api/shares/segments/1",
-      "PUT /api/shares/segments/2",
+      "PUT /api/shares/segments/2?from=0", // fin du fichier : ses morceaux seulement (audit H-2)
       "POST /api/shares/finalize",
       "GET /api/shares/meta",
       "POST /api/shares/unlock",
