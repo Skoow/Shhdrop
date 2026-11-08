@@ -16,7 +16,6 @@ const MIME: Record<string, string> = {
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   odt: "application/vnd.oasis.opendocument.text",
 };
-const MARKERS = ["ReperAuteur", "ReperSociete", "ReperModele", "ReperLogiciel", "ReperCustom", "ReperCommentateur", "ReperCompte", "ReperMiniature", "ReperCommentaireZip", "ReperTitre", "ReperResponsable", "ReperPersonne", "ReperMotcle", "ReperMake", "ReperModel", "ReperXMP", "2001-02-03", "2001:02:03", "PT42M"];
 const dec = new TextDecoder();
 
 async function clean(name: string, bytes: Uint8Array = fx(name)): Promise<StripResult> {
@@ -35,15 +34,32 @@ const allBytes = (parts: Map<string, Uint8Array>) => [...parts.values()];
 describe("bureautique (spec §35.2)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("DOCX : propriétés minimales, auteurs des commentaires « Auteur », dates retirées, comptes retirés, miniature retirée, image nettoyée ; suivi des modifications intact et signalé", async () => {
+  /** Parties du document d'origine, décompressées. */
+  async function sourceParts(name: string) {
+    const blob = new Blob([fx(name)]);
+    const z = await readZip(blob);
+    const m = new Map<string, Uint8Array>();
+    for (const e of z.entries) m.set(e.name, await entryData(blob, e, 1 << 26));
+    return m;
+  }
+  /** Règle du propriétaire (D41-27) : seules ces parties changent ; tout le reste (commentaires,
+   *  personnes, suivi des modifications, corps du document) est recopié octet pour octet. */
+  const TOUCHED = /^(docProps\/|meta\.xml$|_rels\/\.rels$|\[Content_Types\]\.xml$|META-INF\/manifest\.xml$|Thumbnails\/|(word|xl|ppt)\/media\/|Pictures\/)/u;
+  async function untouched(name: string, parts: Map<string, Uint8Array>) {
+    for (const [n, b] of await sourceParts(name)) if (!TOUCHED.test(n)) expect(parts.get(n), `${name} ${n}`).toEqual(b);
+  }
+  const PROPS_MARKERS = ["ReperSociete", "ReperModele", "ReperLogiciel", "ReperCustom", "ReperMiniature", "ReperCommentaireZip", "ReperTitre", "ReperResponsable", "ReperMotcle", "ReperMake", "ReperModel", "ReperXMP", "2001:02:03", "PT42M"];
+
+  it("DOCX : propriétés minimales, miniature retirée, image nettoyée ; commentaires, personnes et suivi des modifications intacts (D41-27)", async () => {
     const r = await clean("meta.docx");
     expect(r.state).toBe("nettoye");
     if (r.state !== "nettoye") return;
     expect(r.family).toBe("bureautique");
-    expect(r.notes).toEqual(["suivi_modifs"]);
     const { zip, parts, raw, text } = await open(r);
-    expect(found(raw, MARKERS)).toEqual([]);
-    for (const b of allBytes(parts)) expect(found(b, MARKERS)).toEqual([]);
+    expect(found(raw, ["ReperCommentaireZip"])).toEqual([]);
+    for (const n of ["docProps/core.xml", "docProps/app.xml", "docProps/custom.xml"]) expect(found(parts.get(n)!, [...PROPS_MARKERS, "ReperAuteur", "2001-02-03"]), n).toEqual([]);
+    for (const b of allBytes(parts)) expect(found(b, PROPS_MARKERS)).toEqual([]);
+    await untouched("meta.docx", parts);
     // Toutes les parties XML bien formées ; mêmes noms de parties, miniature exceptée.
     const before = await readZip(new Blob([fx("meta.docx")]));
     expect(zip.entries.map((e) => e.name)).toEqual(before.entries.map((e) => e.name).filter((n) => n !== "docProps/thumbnail.jpeg"));
@@ -51,18 +67,16 @@ describe("bureautique (spec §35.2)", () => {
     expect(text("docProps/core.xml")).toMatch(/^<\?xml[^>]+\?>\n<cp:coreProperties [^>]+\/>$/u);
     expect(text("docProps/app.xml")).toMatch(/<Properties xmlns="http:\/\/schemas.openxmlformats.org\/officeDocument\/2006\/extended-properties" xmlns:vt="[^"]+"\/>$/u);
     expect(text("docProps/custom.xml")).toMatch(/custom-properties" xmlns:vt="[^"]+"\/>$/u);
-    expect(text("word/comments.xml")).toContain('<w:comment w:id="0" w:author="Auteur" w:initials="A">');
-    expect(text("word/comments.xml")).toContain("Un commentaire");
-    expect(text("word/people.xml")).not.toContain("w15:person");
-    expect(text("word/commentsExtensible.xml")).toContain('w16cex:durableId="1A2B3C4D"/>');
+    // Commentaires et suivi des modifications : laissés tels quels, auteurs et dates compris.
+    expect(text("word/comments.xml")).toContain('w:author="ReperCommentateur" w:date="2001-02-03T04:05:06Z"');
+    expect(text("word/people.xml")).toContain("w15:person");
+    expect(text("word/document.xml")).toContain('<w:ins w:id="1" w:author="ReperSuivi" w:date="2002-03-04T05:06:07Z">');
     expect(text("_rels/.rels")).not.toContain("thumbnail");
     expect(text("_rels/.rels")).toContain("docProps/core.xml");
     expect(text("[Content_Types].xml")).not.toContain("thumbnail");
     expect(text("[Content_Types].xml")).toContain('Extension="jpeg"');
-    // Suivi des modifications : laissé tel quel (décision de la spécification).
-    expect(text("word/document.xml")).toContain('<w:ins w:id="1" w:author="ReperSuivi" w:date="2002-03-04T05:06:07Z">');
-    // Image intégrée : nettoyée par les règles des images (orientation et ICC gardés).
-    const jpg = (await entryData(new Blob([fx("meta.docx")]), before.entries.find((e) => e.name === "word/media/image1.jpeg")!, 1 << 26));
+    // Image intégrée : métadonnées retirées par les règles des images (pixels, orientation et ICC gardés).
+    const jpg = await entryData(new Blob([fx("meta.docx")]), before.entries.find((e) => e.name === "word/media/image1.jpeg")!, 1 << 26);
     expect(parts.get("word/media/image1.jpeg")).toEqual(cleanJpeg(jpg));
     // Entrées inchangées : données compressées et CRC identiques ; toutes normalisées.
     const doc = (z: { entries: readonly ZipEntry[] }) => z.entries.find((e) => e.name === "word/document.xml")!;
@@ -74,40 +88,36 @@ describe("bureautique (spec §35.2)", () => {
     expect(zip.commentLength).toBe(0);
   });
 
-  it("XLSX et PPTX : auteurs, personnes, comptes et dates des commentaires retirés", async () => {
+  it("XLSX et PPTX : propriétés retirées ; commentaires, personnes et auteurs intacts", async () => {
     for (const n of ["meta.xlsx", "meta.pptx"]) {
       const r = await clean(n);
       expect(r.state, n).toBe("nettoye");
       const { parts } = await open(r);
-      for (const [p, b] of parts) expect(found(b, [...MARKERS, "ReperAuteurXL", "ReperAuteurPPT"]), `${n} ${p}`).toEqual([]);
-      if (r.state === "nettoye") expect(r.notes).toEqual([]);
+      for (const [p, b] of parts) expect(found(b, PROPS_MARKERS), `${n} ${p}`).toEqual([]);
+      for (const p of ["docProps/core.xml", "docProps/app.xml"]) if (parts.has(p)) expect(found(parts.get(p)!, ["ReperAuteur", "2001-02-03"]), `${n} ${p}`).toEqual([]);
+      await untouched(n, parts);
     }
     const x = await open(await clean("meta.xlsx"));
-    expect(x.text("xl/comments1.xml")).toContain("<authors><author>Auteur</author></authors>");
-    expect(x.text("xl/persons/person.xml")).toContain('<person displayName="Auteur" id="{00000000-0000-0000-0000-000000000001}"/>');
-    expect(x.text("xl/threadedComments/threadedComment1.xml")).not.toContain("dT=");
+    expect(x.text("xl/persons/person.xml")).toContain('displayName="ReperPersonne"');
     const p = await open(await clean("meta.pptx"));
-    expect(p.text("ppt/commentAuthors.xml")).toContain('name="Auteur" initials="A"');
-    expect(p.text("ppt/authors.xml")).toContain('name="Auteur" initials="A" userId="" providerId=""');
-    expect(p.text("ppt/comments/comment1.xml")).toContain('<p:cm authorId="0" idx="1">');
-    expect(p.text("ppt/comments/modernComment_1.xml")).toContain('created="1980-01-01T00:00:00Z"');
+    expect(p.text("ppt/commentAuthors.xml")).toContain("ReperAuteurPPT");
   });
 
-  it("ODT : mimetype premier et stocké, meta.xml minimal (même version), annotation « Auteur », modification suivie gardée et signalée, miniature retirée", async () => {
+  it("ODT : mimetype premier et stocké, meta.xml minimal (même version), annotations et suivi intacts, miniature retirée", async () => {
     const r = await clean("meta.odt");
     expect(r.state).toBe("nettoye");
     if (r.state !== "nettoye") return;
-    expect(r.notes).toEqual(["suivi_modifs"]);
     const { zip, parts, raw, text } = await open(r);
     expect(zip.entries[0]!.name).toBe("mimetype");
     expect(zip.entries[0]!.method).toBe(0);
     expect(dec.decode(raw.subarray(30, 38 + 39))).toBe("mimetypeapplication/vnd.oasis.opendocument.text");
     expect(text("meta.xml")).toMatch(/<office:document-meta xmlns:office="[^"]+"[^>]* office:version="1\.3"><office:meta\/><\/office:document-meta>$/u);
-    expect(text("content.xml")).toContain("<office:annotation><dc:creator>Auteur</dc:creator><text:p>Un commentaire</text:p></office:annotation>");
+    expect(text("content.xml")).toContain("<dc:creator>ReperAuteurODF</dc:creator><dc:date>2001-02-03T04:05:06</dc:date>");
     expect(text("content.xml")).toContain("<dc:creator>ReperSuivi</dc:creator>");
+    await untouched("meta.odt", parts);
     expect(parts.has("Thumbnails/thumbnail.png")).toBe(false);
     expect(text("META-INF/manifest.xml")).not.toContain("Thumbnails");
-    for (const [p, b] of parts) expect(found(b, [...MARKERS, "ReperAuteurODF"]), p).toEqual([]);
+    for (const [p, b] of parts) expect(found(b, PROPS_MARKERS), p).toEqual([]);
     expect(found(raw, ["ReperCommentaireZip"])).toEqual([]);
   });
 
@@ -141,7 +151,7 @@ describe("bureautique (spec §35.2)", () => {
         const b = k % 2 ? src.subarray(0, Math.floor(rnd() * src.length)) : src.slice();
         if (!(k % 2)) for (let j = 0; j < 4; j++) b[Math.floor(rnd() * b.length)] = Math.floor(rnd() * 256);
         const r = await clean(n, b);
-        if (r.state === "nettoye") for (const p of allBytes((await open(r)).parts)) expect(found(p, ["ReperAuteur", "ReperSociete", "ReperCommentateur"])).toEqual([]);
+        if (r.state === "nettoye") for (const p of allBytes((await open(r)).parts)) expect(found(p, ["ReperSociete", "ReperTitre", "ReperMiniature"])).toEqual([]);
       }
     }
   });

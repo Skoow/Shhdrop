@@ -11,20 +11,20 @@ import { cleanHeif } from "./heif";
 import { cleanJpeg } from "./jpeg";
 import { cleanOffice } from "./office";
 import { patchedBlob } from "./patch";
-import { cleanPdf } from "./pdf";
 import { cleanPng } from "./png";
 import { stripCaptureMeta } from "./strip-capture";
 import { cleanWebp } from "./webp";
 
-export type CleanState = "nettoye" | "echec" | "protege" | "non_pris_en_charge" | "sans";
-export type CleanNote = "suivi_modifs" | "pdf_revisions";
-export type CleanFamily = "image" | "video" | "audio" | "pdf" | "bureautique" | "vocal";
+/** `intact` : laissé tel quel par décision (PDF, D41-27 : on n'ouvre pas un PDF pour le nettoyer). */
+export type CleanState = "nettoye" | "echec" | "protege" | "non_pris_en_charge" | "sans" | "intact";
+export type CleanFamily = "image" | "video" | "audio" | "bureautique" | "vocal";
 export type StripResult =
-  | { state: "nettoye"; data: Blob; notes: CleanNote[]; family: CleanFamily }
+  | { state: "nettoye"; data: Blob; family: CleanFamily }
   | { state: "echec" | "protege"; reason: string } // reason : code interne, jamais affiché tel quel
   /** `soon` : nettoyage prévu (vidéo, audio : Task 9c) ; `format` reconnu. */
   | { state: "non_pris_en_charge"; soon: boolean; format: Format }
-  | { state: "sans" };
+  | { state: "sans" }
+  | { state: "intact" };
 
 export type StripOpts = { recorded?: boolean; signal?: AbortSignal };
 
@@ -39,34 +39,27 @@ async function run(file: Blob, mime: string, fmt: Format, opts: StripOpts): Prom
     opts.signal?.throwIfAborted();
     const out = small(src);
     if (!equal(small(out), out)) return { state: "echec", reason: "verification" };
-    return { state: "nettoye", data: new Blob([out], { type }), notes: [], family: "image" };
+    return { state: "nettoye", data: new Blob([out], { type }), family: "image" };
   }
   if (fmt === "heif") {
     const data = patchedBlob(file, await cleanHeif(file), [], type);
     opts.signal?.throwIfAborted();
     if ((await cleanHeif(data)).length > 0) return { state: "echec", reason: "verification" };
-    return { state: "nettoye", data, notes: [], family: "image" };
+    return { state: "nettoye", data, family: "image" };
   }
-  if (fmt === "pdf") {
-    const r = await cleanPdf(file);
-    if (r.state === "protege") return { state: "protege", reason: "pdf" };
-    const data = patchedBlob(file, r.patches, [], type);
-    opts.signal?.throwIfAborted();
-    const again = await cleanPdf(data);
-    if (again.state !== "ok" || again.patches.length > 0 || data.size !== file.size) return { state: "echec", reason: "verification" };
-    return { state: "nettoye", data, notes: r.notes, family: "pdf" };
-  }
+  // PDF : jamais ouvert ni modifié (décision du propriétaire, D41-27) ; il part octet pour octet.
+  if (fmt === "pdf") return { state: "intact" };
   if (fmt === "ooxml" || fmt === "odf") {
     const r = await cleanOffice(file, fmt, type);
     opts.signal?.throwIfAborted();
     if (r.state === "protege") return { state: "protege", reason: fmt };
-    return { state: "nettoye", data: r.data, notes: r.notes, family: "bureautique" };
+    return { state: "nettoye", data: r.data, family: "bureautique" };
   }
   if (opts.recorded && (fmt === "webm" || fmt === "mp4")) {
     // Vidéos et vocaux pris dans l'interface : nom du navigateur et dates (strip-capture.ts).
     const r = await stripCaptureMeta(file);
     if (!r.stripped) return { state: "echec", reason: "capture" };
-    return { state: "nettoye", data: r.blob, notes: [], family: type.startsWith("audio/") ? "vocal" : "video" };
+    return { state: "nettoye", data: r.blob, family: type.startsWith("audio/") ? "vocal" : "video" };
   }
   if (fmt === "texte") return { state: "sans" };
   return { state: "non_pris_en_charge", soon: (SOON_FORMATS as readonly string[]).includes(fmt), format: fmt };

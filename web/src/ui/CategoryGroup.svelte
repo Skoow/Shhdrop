@@ -161,25 +161,27 @@
 </section>
 
 <style>
+  /* Groupe (retours UI4) : un seul contenant ; le titre de catégorie sur un bandeau à part,
+     séparé de ses éléments par un filet. */
   .group {
     display: grid;
-    gap: 2px;
+    border: 1px solid var(--hair-2);
+    border-radius: 18px;
+    background: var(--vessel);
+    box-shadow: var(--edge-hi);
   }
   .head {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: var(--sp-3);
-    padding: var(--sp-2) 4px 4px var(--sp-6);
-  }
-  .group:not(.compact) .head {
-    padding: 2px 4px 2px;
-  }
-  .compact .head {
-    padding-inline-start: 4px;
+    padding: 3px var(--sp-4) 2px;
+    border-radius: 17px 17px 0 0;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--hair-2);
   }
   h3 {
-    font-size: 1rem;
+    font-size: 0.9375rem;
     font-weight: 640;
     letter-spacing: -0.005em;
   }
@@ -192,7 +194,7 @@
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 2px;
+    gap: 0;
   }
   .li {
     position: relative;

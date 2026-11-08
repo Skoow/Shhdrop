@@ -1,6 +1,6 @@
 <script lang="ts">
   // Reçu de destruction (benchmark S4) : affiché seulement après la réponse du serveur à
-  // Détruire ou Signaler (jamais pour « Terminer et effacer »). Dit ce qui est effacé, et ce
+  // Détruire ou Signaler. Dit ce qui est effacé, et ce
   // qui ne l'est pas : jamais « il n'existe plus nulle part ».
   import { t } from "../i18n/i18n.svelte";
 </script>

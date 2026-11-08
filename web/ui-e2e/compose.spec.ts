@@ -73,7 +73,8 @@ async function removeItem(page: Page, name: string) {
 const longParagraphs = (scope: Locator) =>
   scope.locator("p, .h, .line").evaluateAll((els) =>
     els
-      .filter((e) => (e as HTMLElement).offsetParent !== null && !e.closest(".sr-only, .cnote") && e.textContent!.trim() !== "")
+      // .trust : phrase sur les noms imposée mot pour mot par le propriétaire (retours UI4), trois lignes à 390 px.
+      .filter((e) => (e as HTMLElement).offsetParent !== null && !e.closest(".sr-only, .cnote, .trust") && e.textContent!.trim() !== "")
       .filter((e) => {
         const lh = parseFloat(getComputedStyle(e).lineHeight) || 20;
         return e.getBoundingClientRect().height > lh * 2 + 4;
@@ -115,11 +116,11 @@ test.describe("fr-FR", () => {
     // Note : titre, puis la première ligne du contenu.
     const note = rows(page).filter({ hasText: "Code de la porte" });
     await expect(note.locator(".sub")).toHaveText("Le code de la porte est 4512B.");
-    // Archive : catégorie, marque honnête.
-    await expect(rows(page).filter({ hasText: "archive.zip" }).locator('[data-clean="non-nettoye"]')).toHaveText(/^Non nettoyé · Archive\s:\scontenu non inspecté/);
-    // Nettoyage automatique (Task 9a, D41-23) : photos « Nettoyé » ; vidéo, PDF, archive partent
-    // sans clic, marqués « Non nettoyé ». Plus aucun bouton « Nettoyer tous les fichiers ».
-    await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator('[data-clean="nettoye"]')).toHaveText(/^Nettoyé/);
+    // Archive : catégorie, laissée intacte (D41-27), pastille neutre.
+    await expect(rows(page).filter({ hasText: "archive.zip" }).locator('[data-clean="intact"]')).toHaveText("Archive laissée intacte");
+    // Nettoyage automatique (Task 9a, D41-23) : photos « Nettoyé » ; vidéo part sans clic,
+    // marquée « Non nettoyé ». Plus aucun bouton « Nettoyer tous les fichiers ».
+    await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator('[data-clean="nettoye"]')).toHaveAccessibleName("Nettoyé");
     await expect(page.getByRole("button", { name: "Nettoyer tous les fichiers" })).toHaveCount(0);
     await expect(page.locator('[data-clean="non-nettoye"]').first()).toHaveText(/^Non nettoyé/);
     // Listes compactes (décision du 7 novembre) : aucune vignette, une icône de format par ligne,
@@ -214,7 +215,7 @@ test.describe("fr-FR", () => {
     await expect(page.locator("[data-row].danger, [data-row] .row.danger").filter({ hasText: "installer.exe" })).toHaveCount(1);
     await expect(exe.getByText("Programme ou script : il peut agir sur l'appareil du destinataire.")).toBeVisible();
     await expect(rows(page).filter({ hasText: "vacances.jpg" }).getByText("Attention : c'est un programme, malgré son extension.")).toBeVisible();
-    await expect(rows(page).filter({ hasText: "sauvegarde" }).getByText(/Archive\s:\scontenu non inspecté/)).toBeVisible();
+    await expect(rows(page).filter({ hasText: "sauvegarde" }).locator('[data-clean="intact"]')).toHaveText("Archive laissée intacte");
     await expect(exe.locator("svg.fi")).toHaveAttribute("data-format", "EXE");
     await expect(rows(page).filter({ hasText: "vacances.jpg" }).locator("svg.fi")).toHaveAttribute("data-format", "EXE");
     await expect(rows(page).filter({ hasText: "budget-2026.xlsx" }).locator("svg.fi")).toHaveAttribute("data-format", "XLS");

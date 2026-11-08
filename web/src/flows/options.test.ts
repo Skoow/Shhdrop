@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { en } from "../i18n/en";
 import { fr } from "../i18n/fr";
-import { createOptions, estimateUpload, sendRights, viewableInBrowser, viewOnlyBlockers, type OptionsDeps } from "./options.svelte";
-import { CONTENT_MAX, MAX_OPENS, PW_TRIES, generatePassword, PASSWORD_ALPHABET } from "../index";
+import { createOptions, sendRights, viewableInBrowser, viewOnlyBlockers, type OptionsDeps } from "./options.svelte";
+import { MAX_OPENS, PW_TRIES, generatePassword, PASSWORD_ALPHABET } from "../index";
 
 function make(over: Partial<OptionsDeps> = {}) {
   let n = 0;
@@ -113,17 +113,6 @@ describe("mot de passe généré (spec §31)", () => {
     generatePassword();
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
-  });
-});
-
-describe("estimation du temps d'envoi", () => {
-  it("octets envoyés : contenu + manifeste réservé + étiquettes (le bourrage est rempli par le serveur, spec §29.3)", () => {
-    const e = estimateUpload(100 * 1048576);
-    expect(e.bytes).toBeGreaterThan(100 * 1048576 + 65536);
-    expect(e.bytes).toBeLessThan(100.2 * 1048576);
-    expect(e.fastS).toBeLessThan(e.slowS);
-    expect(e.fastS).toBeGreaterThan(0);
-    expect(estimateUpload(CONTENT_MAX).slowS).toBeGreaterThan(estimateUpload(1).slowS);
   });
 });
 

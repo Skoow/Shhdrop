@@ -56,8 +56,10 @@ test("listes compactes : groupes, icônes par format, types, tailles, temps esti
   expect(await fmt("vocal.ogg")).toBe("OGG");
   expect(await fmt("trap.svg")).toBe("SVG");
   await expect(row(page, "contrat.pdf")).toContainText("Document PDF");
-  await expect(row(page, "contrat.pdf")).toContainText(/env\.\s/);
-  await expect(page.locator(".sum")).toContainText("(estimation)");
+  // Aucune estimation avant un débit mesuré dans cette session (retours UI4).
+  await expect(row(page, "contrat.pdf")).not.toContainText(/env\.\s/);
+  await expect(page.locator(".sum")).not.toContainText("(estimation)");
+  await expect(page.locator(".gm.eta")).toHaveCount(0);
   // « Voir » sur image, vidéo, audio, texte ; jamais sur SVG, PDF, programme, archive.
   for (const n of ["foret-brume.jpg", "vocal.ogg", "anniversaire-lou.webm"]) await expect(row(page, n).getByRole("button", { name: `Voir ${n}` })).toBeVisible();
   for (const n of ["trap.svg", "contrat.pdf", "installer.exe", "archive.zip"]) {
@@ -308,7 +310,7 @@ test("destruction ici : illustration du document qui se défait, aucun cadenas ;
   await s.ctx.close();
   await page.goto(sent.link);
   await unlock(page, sent.password);
-  await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
+  await page.getByRole("button", { name: "Détruire ce partage", exact: true }).click();
   await page.getByRole("button", { name: "Détruire", exact: true }).click();
   const art = page.locator('svg[data-state="destroyed"]');
   await expect(art).toBeVisible({ timeout: 20_000 });
@@ -334,7 +336,7 @@ test.describe("mouvement réduit", () => {
     await s.ctx.close();
     await page.goto(sent.link);
     await unlock(page, sent.password);
-    await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
+    await page.getByRole("button", { name: "Détruire ce partage", exact: true }).click();
     await page.getByRole("button", { name: "Détruire", exact: true }).click();
     const art = page.locator('svg[data-state="destroyed"]');
     await expect(art).toBeVisible({ timeout: 20_000 });

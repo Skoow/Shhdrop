@@ -14,9 +14,9 @@ async function opened(browser: import("@playwright/test").Browser, origin: strin
   return sent;
 }
 
-test("Détruire : pied séparé par un filet, confirmation, reçu après la réponse seulement, capsule en pointillés ; captures", async ({ page, shh, browser }) => {
+test("Détruire (dernière ouverture permise) : pied séparé par un filet, confirmation, reçu après la réponse seulement, capsule en pointillés ; captures", async ({ page, shh, browser }) => {
   test.setTimeout(150_000);
-  const sent = await opened(browser, shh.origin, 3);
+  const sent = await opened(browser, shh.origin, 1);
   await page.goto(sent.link);
   await unlock(page, sent.password);
 
@@ -24,9 +24,9 @@ test("Détruire : pied séparé par un filet, confirmation, reçu après la rép
   const eol = page.locator("[data-eol]");
   expect(await eol.evaluate((e) => e === e.parentElement?.lastElementChild)).toBe(true);
   expect(await eol.evaluate((e) => getComputedStyle(e).borderTopStyle)).toBe("solid");
-  const destroy = page.getByRole("button", { name: "Détruire ce partage pour tout le monde" });
+  const destroy = page.getByRole("button", { name: "Détruire ce partage", exact: true });
   await expect(destroy).toHaveClass(/ghost/);
-  await expect(page.getByText("Vous pouvez le détruire à tout moment.")).toBeVisible();
+  await expect(page.getByText("Vous êtes la dernière personne à ouvrir ce partage. Vous pouvez le détruire avant de quitter la page, sans attendre la fin de sa durée.")).toBeVisible();
 
   let release!: () => void;
   const held = new Promise<void>((r) => (release = r));
@@ -61,7 +61,7 @@ test("Détruire : pied séparé par un filet, confirmation, reçu après la rép
 
 test("429 pendant Détruire : « Trop de demandes, réessayez dans un instant », rien d'effacé ; puis Détruire réussit (ruling 7)", async ({ page, shh, browser }) => {
   test.setTimeout(150_000);
-  const sent = await opened(browser, shh.origin, 3);
+  const sent = await opened(browser, shh.origin, 1);
   await page.goto(sent.link);
   await unlock(page, sent.password);
   let limited = true;
@@ -69,13 +69,13 @@ test("429 pendant Détruire : « Trop de demandes, réessayez dans un instant »
     if (!limited) return r.continue();
     await r.fulfill({ status: 429, contentType: "application/json", headers: { "Retry-After": "1" }, body: '{"error":"limit","retry_after_s":1}' });
   });
-  await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
+  await page.getByRole("button", { name: "Détruire ce partage", exact: true }).click();
   await page.getByRole("button", { name: "Détruire", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Trop de demandes, réessayez dans un instant." })).toBeVisible({ timeout: 20_000 });
   await expect(noteRow(page, TEXT)).toBeVisible();
   await expect(page.locator("[data-receipt]")).toHaveCount(0);
   limited = false;
-  await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
+  await page.getByRole("button", { name: "Détruire ce partage", exact: true }).click();
   await page.getByRole("button", { name: "Détruire", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Détruit" })).toBeVisible({ timeout: 20_000 });
 });
@@ -85,7 +85,7 @@ test("maxOpens = 1 (draining) : Détruire fonctionne quand même", async ({ page
   const sent = await opened(browser, shh.origin, 1);
   await page.goto(sent.link);
   await unlock(page, sent.password);
-  await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
+  await page.getByRole("button", { name: "Détruire ce partage", exact: true }).click();
   await page.getByRole("button", { name: "Détruire", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Détruit" })).toBeVisible({ timeout: 20_000 });
   await expect(fetchMeta(sent.link, shh.origin)).rejects.toBeInstanceOf(NotFoundError);
@@ -116,16 +116,17 @@ test("Signaler : feuille sans motif, corps fixe { proof, reason: \"report\" }, d
   await expect(fetchMeta(sent.link, shh.origin)).rejects.toBeInstanceOf(NotFoundError);
 });
 
-test("Terminer et effacer : « Effacé de cet appareil. », texte retiré, aucun reçu ; le partage reste (2 ouvertures)", async ({ page, shh, browser }) => {
+test("ouverture non dernière : ni « Détruire » ni « Terminer » ; « Ce lien peut encore être ouvert 2 fois. » ; « Signaler » en haut", async ({ page, shh, browser }) => {
   test.setTimeout(150_000);
   const sent = await opened(browser, shh.origin, 3);
   await page.goto(sent.link);
   await unlock(page, sent.password);
-  await page.getByRole("button", { name: "Terminer et effacer" }).click();
-  await expect(page.getByRole("heading", { name: "Effacé de cet appareil." })).toBeVisible();
-  await expect(page.locator("[data-receipt]")).toHaveCount(0);
-  expect(await page.content()).not.toContain("5e1b");
-  expect((await fetchMeta(sent.link, shh.origin)).expiresInS).toBeGreaterThan(0);
+  await expect(page.locator("[data-eol]")).toHaveText("Ce lien peut encore être ouvert 2\u202ffois.");
+  await expect(page.getByRole("button", { name: /^Détruire/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Terminer|J'ai fini/ })).toHaveCount(0);
+  const report = page.locator("header.top").getByRole("button", { name: "Signaler" });
+  await expect(report).toBeVisible();
+  expect((await fetchMeta(sent.link, shh.origin)).opensLeft).toBe(2);
 });
 
 test("gestion (#m…) : état, ouvertures, Supprimer maintenant → « Supprimé » ; captures", async ({ page, shh, browser }) => {
@@ -134,7 +135,8 @@ test("gestion (#m…) : état, ouvertures, Supprimer maintenant → « Supprimé
   await page.goto(sent.manage);
   await expect(page.getByRole("heading", { name: "Suivi du partage" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
-  await expect(page.getByText(/^Ouvert 0 \/ 3 · Expire dans \d+\sh/)).toBeVisible();
+  await expect(page.getByText(/^Ouvert 0 \/ 3$/)).toBeVisible();
+  await expect(page.locator("[data-deadline]")).toContainText(/^Se termine le \d+\s\S+ à \d+\sh\s\d{2}/);
   await expect(page.locator("[data-rim-offset]")).toHaveAttribute("data-notches", "3");
   await settle(page);
   expect(await axe(page)).toEqual([]);

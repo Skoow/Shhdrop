@@ -47,8 +47,9 @@ test("photo avec GPS : « Nettoyé » à l'ajout, le destinataire reçoit la pho
   await s.page.goto(shh.origin + "/");
   await (await openFilePicker(s.page)).setFiles(photo);
   const r = row(s.page, "IMG_GPS");
-  await expect(r.locator('[data-clean="nettoye"]')).toHaveText(/^Nettoyé/);
-  await expect(r.locator('[data-clean="nettoye"]')).toHaveAttribute("title", "Nettoyé · lieu, appareil et date retirés");
+  // Retours UI4 : bouclier seul, nom « Nettoyé », détail dans la bulle (aria-describedby).
+  await expect(r.locator('[data-clean="nettoye"]')).toHaveAccessibleName("Nettoyé");
+  await expect(r.locator('[data-clean="nettoye"]')).toHaveAccessibleDescription("Nettoyé · lieu, appareil et date retirés");
   await s.ctx.close();
   const s2 = await freshPage(browser);
   const sent = await sendShare(s2.page, shh.origin + "/", { files: [photo] });
@@ -65,7 +66,7 @@ test("photo avec GPS : « Nettoyé » à l'ajout, le destinataire reçoit la pho
   expect(got.length).toBeLessThan(photo.buffer.length);
 });
 
-test("états à l'écran : Nettoyé, Non nettoyé avec raison (échec, PDF, archive, inconnu) ; tout part sans clic (D41-23) ; résumé près d'Envoyer", async ({ page, shh, isMobile }) => {
+test("états à l'écran : Nettoyé, Non nettoyé avec raison (échec, inconnu), PDF et archive laissés intacts (D41-27) ; tout part sans clic (D41-23) ; résumé près d'Envoyer", async ({ page, shh, isMobile }) => {
   test.setTimeout(90_000);
   if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   const puts: string[] = [];
@@ -85,15 +86,20 @@ test("états à l'écran : Nettoyé, Non nettoyé avec raison (échec, PDF, arch
   await expect(row(page, "IMG_GPS").locator('[data-clean="nettoye"]')).toBeVisible();
   await expect(row(page, "IMG_GPS").locator('[data-clean="non-nettoye"]')).toHaveCount(0);
   const mark = (n: string) => row(page, n).locator('[data-clean="non-nettoye"]');
-  await expect(mark("abime")).toHaveText(/^Non nettoyé · Échec du nettoyage/);
-  // contrat.pdf : ni table xref ni « startxref » (fichier d'essai minimal) → échec honnête.
-  await expect(mark("contrat")).toHaveText(/^Non nettoyé · Échec du nettoyage/);
-  await expect(mark("archive")).toHaveText(/^Non nettoyé · Archive\s:\scontenu non inspecté/);
-  await expect(mark("dessin")).toHaveText(/^Non nettoyé · Format non reconnu/);
+  // « Non nettoyé » : petite pastille visible ; la raison dans le nom et la bulle (retours UI4).
+  await expect(mark("abime")).toHaveText("Non nettoyé");
+  await expect(mark("abime")).toHaveAccessibleName(/^Non nettoyé · Échec du nettoyage/);
+  await expect(mark("dessin")).toHaveAccessibleName(/^Non nettoyé · Format non reconnu/);
+  // PDF et archive : jamais ouverts, pastille neutre (D41-27).
+  const intact = (n: string) => row(page, n).locator('[data-clean="intact"]');
+  await expect(intact("contrat")).toHaveText("PDF laissé intact");
+  await expect(intact("archive")).toHaveText("Archive laissée intacte");
+  await expect(mark("contrat")).toHaveCount(0);
+  await expect(mark("archive")).toHaveCount(0);
   // Aucun choix à faire : plus de bouton, envoi permis, résumé discret près d'Envoyer.
   await expect(page.getByRole("button", { name: /^Envoyer tel quel/ })).toHaveCount(0);
   await expect(page.locator("#send-reason").filter({ visible: true })).toHaveCount(0);
-  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("4 fichiers ne sont pas nettoyés");
+  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("2 fichiers ne sont pas nettoyés");
   await expect(sendButton(page).filter({ visible: true })).toBeEnabled();
   // Chacun part dès l'ajout, nettoyé ou non (une requête d'envoi par petit élément).
   await expect.poll(() => puts.length, { timeout: 30_000 }).toBe(5);
@@ -101,16 +107,16 @@ test("états à l'écran : Nettoyé, Non nettoyé avec raison (échec, PDF, arch
   if (isMobile) await page.screenshot({ path: `${SHOTS}compose-clean-states-390.png` });
 });
 
-test("document Word avec auteur (Task 9b) : « Nettoyé » à l'ajout, remarque des modifications suivies, reçu sans auteur ni société", async ({ page, shh, browser }) => {
+test("document Word avec auteur (Task 9b, D41-27) : « Nettoyé » à l'ajout, aucune remarque, reçu sans propriétés ; commentaires intacts", async ({ page, shh, browser }) => {
   test.setTimeout(120_000);
   const doc = { name: "rapport.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: FX("meta.docx") };
   const s = await freshPage(browser);
   await s.page.goto(shh.origin + "/");
   await (await openFilePicker(s.page)).setFiles(doc);
   const r = row(s.page, "rapport");
-  await expect(r.locator('[data-clean="nettoye"]')).toHaveText(/^Nettoyé/);
-  await expect(r.locator('[data-clean="nettoye"]')).toHaveAttribute("title", "Nettoyé · auteur, société et dates retirés, auteurs des commentaires remplacés");
-  await expect(r.locator("[data-clean-note]")).toHaveText("Les modifications suivies gardent le nom de leurs auteurs.");
+  await expect(r.locator('[data-clean="nettoye"]')).toHaveAccessibleName("Nettoyé");
+  await expect(r.locator('[data-clean="nettoye"]')).toHaveAccessibleDescription("Nettoyé · propriétés du document (auteur, société, dates) et miniature retirées");
+  await expect(r.getByText(/modifications suivies|commentaires/)).toHaveCount(0);
   await s.ctx.close();
   const s2 = await freshPage(browser);
   const sent = await sendShare(s2.page, shh.origin + "/", { files: [doc] });
@@ -124,7 +130,7 @@ test("document Word avec auteur (Task 9b) : « Nettoyé » à l'ajout, remarque 
   const want = await cleaned("meta.docx", doc.mimeType);
   expect(got.equals(want)).toBe(true);
   expect(got.subarray(0, 4).toString("latin1")).toBe("PK\x03\x04");
-  expect(got.toString("latin1")).not.toMatch(/ReperAuteur|ReperSociete|ReperCommentateur|ReperCompte|ReperMiniature/);
+  expect(got.toString("latin1")).not.toMatch(/ReperSociete|ReperMiniature|ReperTitre/);
   expect(doc.buffer.toString("latin1")).toMatch(/ReperAuteur/);
 });
 

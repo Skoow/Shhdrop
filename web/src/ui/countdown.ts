@@ -3,7 +3,7 @@
 // pendant la veille (iOS), la murale continue ; la murale peut reculer ou sauter, la monotone
 // non. Pire cas d'un saut d'heure en avant : une expiration affichée trop tôt, sans danger (le
 // serveur reste l'autorité).
-import { formatDuration, type Lang } from "../i18n/format";
+import { formatCountdown, type Lang } from "../i18n/format";
 
 /** Seuils annoncés aux lecteurs d'écran, en secondes : 1 h, 15 min, 5 min, 1 min, expiration. */
 export const ANNOUNCE_THRESHOLDS = [3600, 900, 300, 60, 0] as const;
@@ -31,7 +31,7 @@ export function createCountdown(expiresInS: number, now?: () => number, wall?: (
   const done = new Set<number>(ANNOUNCE_THRESHOLDS.filter((s) => s > 0 && s >= total));
   return {
     remaining,
-    display: (lang) => formatDuration(remaining(), lang, { precise: true }),
+    display: (lang) => formatCountdown(remaining(), lang),
     announceAt() {
       const r = remaining();
       let hit: number | null = null;

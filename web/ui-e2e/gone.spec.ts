@@ -118,7 +118,7 @@ test("(c) destruction faite ici pendant un enregistrement : nommé, puis « Term
   });
   await page.getByRole("button", { name: "Télécharger rapport.bin" }).click();
   await expect(page.locator('li.row[data-state="downloading"]')).toBeVisible();
-  await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
+  await page.getByRole("button", { name: "Détruire ce partage", exact: true }).click();
   await page.getByRole("button", { name: "Détruire", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Ce partage a été détruit." })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(/^Le fichier en cours \(rapport\.bin\) est autorisé à se terminer\s; vous ne pouvez plus rien ouvrir d'autre\.$/)).toBeVisible();

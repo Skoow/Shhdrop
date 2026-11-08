@@ -140,7 +140,7 @@ test.describe("fr-FR", () => {
     expect(await clip(page)).toBe(gen);
   });
 
-  test("pastille « vers 9 h 45 » (arrondi au quart d'heure) et durée de vie choisie (3 ouvertures, 6 h)", async ({ page, shh, context, isMobile }) => {
+  test("échéance en deux lignes (date et heure exactes, puis décompte) et durée de vie choisie (3 ouvertures, 6 h)", async ({ page, shh, context, isMobile }) => {
     test.setTimeout(120_000);
     // Date.now() figé et durée exacte : le serveur arrondit l'échéance au quart d'heure SUPÉRIEUR
     // de son heure réelle ; la réponse de finalize est fixée ici à 12 h (ou 6 h) pile.
@@ -153,7 +153,9 @@ test.describe("fr-FR", () => {
     await exact(page);
     await page.clock.setFixedTime(new Date("2026-11-05T21:41:00+01:00"));
     await toReady(page, context, shh.origin);
-    await expect(page.getByText(/^Actif · s'efface dans 12\sh \(à 09\sh\s45\)$/)).toBeVisible();
+    await expect(page.getByText("Actif", { exact: true })).toBeVisible();
+    await expect(page.locator("[data-deadline] .ends")).toHaveText(/^Se termine le 6\snov\. à 9\sh\s41$/);
+    await expect(page.locator("[data-deadline] .left")).toHaveText(/^12\sh$/);
     await expect(page.getByText(/^S'efface tout seul\s: après 1\souverture, ou au bout de 12\sh\.$/)).toBeVisible();
     await expect(page.getByText(/disparaît de partout/)).toHaveCount(0);
 
@@ -169,7 +171,8 @@ test.describe("fr-FR", () => {
     await sendButton(p2).click();
     await expect(readyHeading(p2)).toBeVisible({ timeout: 60_000 });
     await expect(p2.getByText(/^S'efface tout seul\s: après 3\souvertures, ou au bout de 6\sh\.$/)).toBeVisible();
-    await expect(p2.getByText(/^Actif · s'efface dans 6\sh \(à 03\sh\s30\)$/)).toBeVisible();
+    await expect(p2.locator("[data-deadline] .ends")).toHaveText(/^Se termine le 6\snov\. à 3\sh\s36$/);
+    await expect(p2.locator("[data-deadline] .left")).toHaveText(/^6\sh$/);
   });
 
   test("mot de passe affiché tout collé (11 caractères, sans groupe ni point), sans « Épeler » ; rien dans la console ni le stockage", async ({ page, shh, context }) => {

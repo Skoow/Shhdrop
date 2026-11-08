@@ -15,7 +15,7 @@
   import { announce } from "../ui/announce";
   import Button from "../ui/Button.svelte";
   import { copyText } from "../ui/clipboard";
-  import Countdown from "../ui/Countdown.svelte";
+  import Deadline from "../ui/Deadline.svelte";
   import DestroyedArt from "../ui/DestroyedArt.svelte";
   import { ChevronDown, Copy, Eye, EyeOff, Lock, LockOpen, ShieldCheck, TriangleAlert } from "../ui/Icon";
   import TimeRim from "../ui/TimeRim.svelte";
@@ -159,16 +159,10 @@
 
   // ---------- Fin de lecture ----------
   let expired = $state(false);
-  let end = $state<"finished" | "destroyed" | "gone" | null>(null);
+  let end = $state<"destroyed" | "gone" | null>(null);
   const capState = $derived(
     r.state === "destroyed_by_password" || end === "destroyed" || end === "gone" || gone.closed ? "destroyed" : r.state === "open" ? "open" : "locked",
   );
-  const banner = $derived.by(() => {
-    const [pre, post] = t("content.banner", { duration: "\u0000" }).split("\u0000");
-    // Téléphone : la durée en tête, chaque précision sur sa ligne (ordinateur : une ligne avec « · »).
-    const rest = (post ?? "").split(" · ").filter((x) => x.trim() !== "");
-    return { pre: pre ?? "", rest };
-  });
 
   let title: HTMLHeadingElement | undefined = $state();
   $effect(() => {
@@ -206,13 +200,15 @@
         {#if r.state === "open"}
           {#if end === null && !gone.closed}
             <p class="banner num">
-              {#if expired}{t("content.expired")}{:else}<span class="b-main">{banner.pre}<Countdown
+              <!-- Retours UI4 : seulement l'échéance (date et heure de fin, puis « Disponible encore … »). -->
+              {#if expired}{t("content.expired")}{:else}<Deadline
                   expiresInS={r.remainingS()}
+                  lead={t("open.available")}
                   onexpire={() => {
                     expired = true;
                     gone.closeToGone("countdown"); // aucune requête : l'horloge locale suffit
                   }}
-                /></span>{#each banner.rest as part, k (k)}<span class="b-sep"> · </span><span class="b-part">{part}</span>{/each}{/if}
+                />{/if}
             </p>
           {/if}
         {:else}
@@ -220,7 +216,7 @@
             {r.state === "destroyed_by_password" ? t("open.destroyedByPw") : r.reopening ? t("open.reopen.title") : t("open.title")}
           </h1>
           {#if r.state === "locked" || r.state === "reopen" || r.state === "unlocking"}
-            <p class="avail num">{t("open.available")} <Countdown expiresInS={r.remainingS()} onexpire={() => r.expire()} /></p>
+            <p class="avail"><Deadline expiresInS={r.remainingS()} lead={t("open.available")} onexpire={() => r.expire()} /></p>
           {:else if r.state === "meta"}
             <p class="avail">{t("open.loading")}</p>
           {/if}
@@ -426,22 +422,6 @@
     .cost {
       font-size: var(--fs-small);
       line-height: var(--lh-small);
-    }
-    .banner {
-      display: grid;
-      gap: 2px;
-    }
-    .b-main {
-      font-weight: 620;
-    }
-    .b-sep {
-      display: none;
-    }
-    .b-part {
-      color: var(--text-2);
-    }
-    .b-part::first-letter {
-      text-transform: uppercase;
     }
   }
   .num {

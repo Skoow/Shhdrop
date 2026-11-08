@@ -305,7 +305,7 @@ describe("langue : aucun libellé visible hors de t()", () => {
       return c.textContent!.trim();
     });
     expect(btns).toEqual(["Copier", "Annuler"]);
-    expect(document.querySelector(".cd")!.textContent).toBe("4\u202fh\u202f15");
+    expect(document.querySelector(".cd")!.textContent).toBe("4\u202fh\u202f15\u202fmin");
   });
   it("EN : mêmes composants", () => {
     setLang("en");
@@ -319,15 +319,15 @@ describe("langue : aucun libellé visible hors de t()", () => {
       return c.textContent!.trim();
     });
     expect(btns).toEqual(["Copy", "Undo"]);
-    expect(document.querySelector(".cd")!.textContent).toBe("4h\u00a015m");
+    expect(document.querySelector(".cd")!.textContent).toBe("4\u00a0h\u00a015\u00a0min");
   });
   it("le Countdown suit un changement de langue", () => {
     setLang("fr");
     show(Countdown, { expiresInS: 15300 });
-    expect(document.querySelector(".cd")!.textContent).toBe("4\u202fh\u202f15");
+    expect(document.querySelector(".cd")!.textContent).toBe("4\u202fh\u202f15\u202fmin");
     setLang("en");
     flushSync();
-    expect(document.querySelector(".cd")!.textContent).toBe("4h\u00a015m");
+    expect(document.querySelector(".cd")!.textContent).toBe("4\u00a0h\u00a015\u00a0min");
   });
 });
 
@@ -365,7 +365,7 @@ describe("Countdown : délai déjà nul (I1)", () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(onexpire).toHaveBeenCalledTimes(1);
     expect(got).toEqual(["Le partage a expiré"]);
-    expect(document.querySelector(".cd")!.textContent).toBe("moins d'une minute");
+    expect(document.querySelector(".cd")!.textContent).toBe("0\u202fs");
     off();
   });
   it("recalcule dès le retour de l'onglet (visibilitychange)", () => {

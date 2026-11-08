@@ -8,13 +8,13 @@
   import { tick } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import { getDemo } from "../app/demo-hooks";
-  import { clockText, roundQuarter } from "../flows/ready";
   import { formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { NotFoundError, destroyShare } from "../index";
   import { announce } from "../ui/announce";
   import Button from "../ui/Button.svelte";
   import CopyField from "../ui/CopyField.svelte";
+  import Deadline from "../ui/Deadline.svelte";
   import { ChevronDown, ClipboardX, Eye, Lock, QrCode as QrIcon, Share2, Trash2 } from "../ui/Icon";
   import InlineConfirm from "../ui/InlineConfirm.svelte";
   import Logo from "../ui/Logo.svelte";
@@ -43,9 +43,6 @@
   const demo = getDemo();
   const narrow = new MediaQuery("max-width: 759px");
 
-  // Échéance fixée à l'arrivée sur l'écran (expiresInS est relatif à la réponse de finalize).
-  const expiresAt = $derived.by(() => Date.now() + (result?.expiresInS ?? 0) * 1000);
-  const around = $derived(clockText(roundQuarter(expiresAt), lang));
   const selfDestruct = $derived(
     t("ready.selfdestruct", { opens: t("ready.opens", { n: maxOpens }), ttl: formatDuration(ttlHours * 3600, lang) }),
   );
@@ -161,7 +158,9 @@
         <div class="hd-tx">
           <h2 id="ready-title" class="title" tabindex="-1" data-large-title bind:this={heading}>{t("ready.title")}</h2>
           <p class="meta num">{summary}</p>
-          <p class="active num"><span class="dot" aria-hidden="true"></span>{t("ready.active", { left: formatDuration(result?.expiresInS ?? 0, lang, { coarse: true }), time: around })}</p>
+          <p class="active num"><span class="dot" aria-hidden="true"></span>{t("ready.active")}</p>
+          <!-- Retours UI4 : date et heure exactes de fin, puis le décompte vivant. -->
+          <p class="when"><Deadline expiresInS={result?.expiresInS ?? 0} /></p>
           <p class="self">{selfDestruct}</p>
         </div>
       </header>
@@ -255,6 +254,11 @@
 {/if}
 
 <style>
+  /* Échéance en deux lignes (Deadline, retours UI4). */
+  .when {
+    margin: 0;
+    font-size: var(--fs-small);
+  }
   .ready,
   .gone {
     width: min(100%, 720px);

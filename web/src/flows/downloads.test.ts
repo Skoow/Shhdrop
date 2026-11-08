@@ -101,6 +101,18 @@ describe("file de téléchargements", () => {
     expect(summarize(d.rows, [0, 1, 2])).toMatchObject({ total: 95, done: 95, active: 0 });
   });
 
+  it("débit mesuré : null tant que moins de 2 s de lecture (jamais d'estimation sur un débit supposé, retours UI4)", async () => {
+    const small = setup([30, 25]);
+    expect(small.d.measured).toBeNull();
+    small.d.start([0, 1]);
+    await until(() => small.d.rows.every((x) => x.state === "done"));
+    expect(small.d.measured).toBeNull(); // 55 octets lus en moins de 2 s : pas assez pour estimer
+    const big = setup([1000]);
+    big.d.start([0]);
+    await until(() => big.d.rows[0]!.state === "done");
+    expect(big.d.measured).toBeGreaterThan(0); // plus de 2 s de lecture : débit de cette session
+  });
+
   it("pause puis reprise : aucune relecture, reprise à l'octet exact, les suivants attendent", async () => {
     const { d, r, s } = setup([100, 20]);
     const release = r.hold();

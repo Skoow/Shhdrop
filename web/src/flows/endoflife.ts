@@ -1,5 +1,6 @@
 // Fin de vie chez le destinataire (UI §9.8 pied, §9.10, §12.2).
-// - Terminer et effacer : done() (fin de lecture, keepalive) → wipe() → révocation des URL.
+// - Fin de lecture complète (fermeture « partage disparu », gone.svelte.ts) : done() → wipe() →
+//   révocation des URL. Plus de bouton « Terminer et effacer » (retours UI4, décision du propriétaire).
 // - Sortie de page (pagehide, démontage) : wipe() et révocation seulement, SANS done() (spec
 //   §41.4) : l'ouverture reste valable le temps de l'octroi, pour qu'un rechargement la rouvre.
 // - Détruire, Signaler : opened.destroy() (ou destroy("report"), motif non conservé), puis
@@ -14,7 +15,7 @@ export function release(opened: Opened): void {
 }
 
 /**
- * Terminer et effacer. Ne lève jamais : un done() en échec (réseau) n'empêche
+ * Fin de lecture complète. Ne lève jamais : un done() en échec (réseau) n'empêche
  * pas l'effacement local ; le serveur efface de toute façon à l'échéance.
  */
 export async function finish(opened: Opened): Promise<void> {

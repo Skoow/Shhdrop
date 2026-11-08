@@ -18,7 +18,6 @@
   const p = $derived(PAID[tier]);
   const eur = (v: number) => new Intl.NumberFormat(lang, { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v);
   const lines = $derived([
-    t("paid.size", { size: formatBytes(p.bytes, lang), free: formatBytes(CONTENT_MAX, lang) }),
     t("paid.ttl", { max: t("paid.days", { n: Math.max(...p.ttlDays) }), free: formatDuration(TTL_MAX_HOURS * 3600, lang) }),
     t("paid.firstOpen.effect"),
     t("paid.opens.effect", { n: p.opens, free: MAX_OPENS }),
@@ -27,6 +26,8 @@
 
 <Sheet bind:open title={t("paid.title", { tier: name })}>
   <div class="paid" data-paid={tier}>
+    <!-- Le stockage maximal de l'offre, en grand (retours UI4). -->
+    <p class="hero num"><b>{formatBytes(p.bytes, lang)}</b><span>{t("paid.hero", { free: formatBytes(CONTENT_MAX, lang) })}</span></p>
     <p class="lead">{t("paid.lead")}</p>
     <h3 class="h">{t("paid.unlocks", { tier: name })}</h3>
     <ul class="list">
@@ -69,7 +70,28 @@
   .list :global(svg) {
     flex: none;
     margin-top: 3px;
-    color: var(--accent);
+    color: var(--plus);
+  }
+  .hero {
+    display: grid;
+    gap: 2px;
+    margin: 0;
+    padding: var(--sp-4);
+    border: 1px solid var(--plus-line);
+    border-radius: 14px;
+    background: var(--plus-tint);
+  }
+  .hero b {
+    color: var(--plus);
+    font-size: var(--fs-h1);
+    font-weight: 680;
+    font-stretch: 108%;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+  }
+  .hero span {
+    color: var(--text-2);
+    font-size: var(--fs-small);
   }
   .soon {
     display: flex;
@@ -78,12 +100,12 @@
     margin: 0;
     padding: var(--sp-3);
     border-radius: 12px;
-    background: var(--accent-tint);
+    background: var(--plus-tint);
     font-size: var(--fs-small);
   }
   .soon :global(svg) {
     flex: none;
     margin-top: 2px;
-    color: var(--accent);
+    color: var(--plus);
   }
 </style>

@@ -14,7 +14,7 @@
   import { addActions, desktopActions, type AddId } from "../flows/add-actions";
   import { captureSupport } from "../media/capture";
   import { fromPasteEvent } from "../flows/intake";
-  import { createOptions, estimateUpload, sendRights, viewableInBrowser, viewOnlyBlockers, type Rights } from "../flows/options.svelte";
+  import { createOptions, sendRights, viewableInBrowser, viewOnlyBlockers, type Rights } from "../flows/options.svelte";
   import { formatBytes, formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { announce } from "../ui/announce";
@@ -369,7 +369,6 @@
   const uncleaned = $derived(composer.uncleanedCount);
   const reasonText = $derived(composerBlock ? t(blockKey(composerBlock), { max: composerBlock === "trop_gros" ? formatBytes(CONTENT_MAX, lang) : num(TEXT_MAX) }) : "");
   const freeText = $derived(t("compose.free", { size: formatBytes(CONTENT_MAX, lang), ttl: formatDuration(TTL_MAX_HOURS * 3600, lang) }));
-  const estimate = $derived(estimateUpload(composer.totalBytes));
   // Chaque fichier part dès son ajout ; un retrait interrompt son envoi et l'efface du serveur.
   // untrack : le brouillon met à jour l'état des lignes pendant l'appel (pas une dépendance).
   $effect(() => {
@@ -559,10 +558,10 @@
       <!-- Ordinateur : colonne collée, défilement propre, pied collé : le bouton reste visible. -->
       <div class="side">
         <div class="side-scroll">
-          <Options {options} {unviewable} {vaultShown} {estimate} part="controls" onpaid={showPaid} />
+          <Options {options} {unviewable} {vaultShown} part="controls" onpaid={showPaid} />
         </div>
         <div class="sendbar foot">
-          <Options {options} {unviewable} {vaultShown} {estimate} part="summary" />
+          <Options {options} {unviewable} {vaultShown} part="summary" />
           <Button variant="primary" lock disabled={reasonText !== ""} aria-describedby={reasonText ? "send-reason" : undefined} onpress={send}>{t("options.submit")}</Button>
           {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{:else if uncleaned > 0}<p class="unclean-sum" data-unclean-sum>{t("compose.uncleaned", { n: uncleaned })}</p>{/if}
         </div>
@@ -618,7 +617,7 @@
 
 <Sheet bind:open={optionsOpen} title={t("options.title")}>
   <div class="opt-sheet">
-    <Options {options} {unviewable} {vaultShown} {estimate} compact onpaid={showPaid} />
+    <Options {options} {unviewable} {vaultShown} compact onpaid={showPaid} />
     <Button variant="primary" onpress={() => void (optionsOpen = false)}>{t("compose.move.done")}</Button>
   </div>
 </Sheet>
@@ -920,26 +919,28 @@
   }
   .groups {
     display: grid;
-    gap: var(--sp-2);
+    gap: 6px;
   }
   .trust {
     display: grid;
     gap: 6px;
-    padding: var(--sp-2) 4px 0;
+    padding: 6px 4px 0;
     border-top: 1px solid var(--hair);
   }
+  /* Phrase sur les noms : centrée (retours UI4), le cadenas dans la ligne. */
   .trust p {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    margin: 0;
+    max-width: 52ch;
+    margin: 0 auto;
     color: var(--text-2);
     font-size: var(--fs-small);
     line-height: 1.45;
+    text-align: center;
+    text-wrap: balance;
   }
   .trust p :global(svg) {
-    flex: none;
-    margin-top: 2px;
+    display: inline-block;
+    vertical-align: -2px;
+    margin-inline-end: 6px;
     color: var(--accent);
   }
 
@@ -1243,7 +1244,7 @@
       display: flex;
       flex-wrap: wrap;
       column-gap: var(--sp-5);
-      row-gap: var(--sp-2);
+      row-gap: 6px;
     }
     .groups > :global(section) {
       flex: 1 1 100%;

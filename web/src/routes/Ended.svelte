@@ -9,7 +9,7 @@
   import DestroyReceipt from "../ui/DestroyReceipt.svelte";
   import Logo from "../ui/Logo.svelte";
 
-  type Props = { kind: "finished" | "destroyed" | "gone" };
+  type Props = { kind: "destroyed" | "gone" };
   let { kind }: Props = $props();
 
   let title: HTMLHeadingElement | undefined = $state();
@@ -25,9 +25,9 @@
 <section class="end" aria-labelledby="end-title" data-end={kind}>
   {#if kind === "destroyed"}<div class="end-logo"><Logo bind:this={logo} /></div>{/if}
   <h2 id="end-title" class="title" tabindex="-1" bind:this={title}>
-    {kind === "finished" ? t("content.finished") : kind === "destroyed" ? t("destroyed.title") : t("gone.title")}
+    {kind === "destroyed" ? t("destroyed.title") : t("gone.title")}
   </h2>
-  <p class="lede">{kind === "finished" ? t("content.finished.body") : t("destroyed.body")}</p>
+  <p class="lede">{t("destroyed.body")}</p>
   {#if kind === "destroyed"}<DestroyReceipt />{/if}
   <p><a class="send" href={href("/")} onclick={(e) => followLink(e, "/")}>{t("invalid.send")}</a></p>
 </section>

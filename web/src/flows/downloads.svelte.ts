@@ -118,12 +118,19 @@ export function readSkipping(
 const IDLE = (total: number): Row => ({ state: "idle", done: 0, total, rate: 0, retryable: false });
 /** Intervalle minimal entre deux mises à jour de progression (ms) : pas une par tranche. */
 const TICK_MS = 120;
+/** Lecture réelle nécessaire avant d'afficher une estimation fondée sur le débit (retours UI4). */
+export const MEASURE_MIN_MS = 2000;
 
 export function createDownloads(totals: readonly number[], deps: DownloadDeps) {
   let rows = $state.raw<Row[]>(totals.map(IDLE));
   let zip = $state.raw<Row | null>(null);
-  /** Débit mesuré (octets/s, moyenne lissée), null tant que rien n'a été lu. */
+  /**
+   * Débit mesuré (octets/s, moyenne lissée) ; null tant que moins de MEASURE_MIN_MS de lecture
+   * réelle (retours UI4 : aucune estimation sur un débit supposé ni sur les premiers instants).
+   */
   let measured = $state<number | null>(null);
+  let smoothed: number | null = null;
+  let measuredMs = 0;
 
   const jobs = new Map<number, Job>();
   const queue: number[] = [];
@@ -141,7 +148,9 @@ export function createDownloads(totals: readonly number[], deps: DownloadDeps) {
   function meterRate(bytes: number, ms: number) {
     if (ms <= 0) return;
     const r = (bytes / ms) * 1000;
-    measured = measured === null ? r : measured * 0.7 + r * 0.3;
+    smoothed = smoothed === null ? r : smoothed * 0.7 + r * 0.3;
+    measuredMs += ms;
+    if (measuredMs >= MEASURE_MIN_MS) measured = smoothed;
   }
 
   async function checkpoint(job: Job) {

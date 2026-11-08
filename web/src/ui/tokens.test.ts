@@ -54,6 +54,11 @@ const PAIRS: [string, string, number, number][] = [
   ["--warn", "--surface-2", 10.34, 4.5],
   ["--accent", "--accent-tint", 9.54, 4.5],
   ["--info", "--surface-2", 7.98, 4.5],
+  ["--plus", "--surface-2", 7.98, 4.5],
+  ["--plus", "--plus-tint", 8.04, 4.5],
+  ["--plus", "--bg", 9.2, 4.5],
+  ["--plus-line", "--surface-2", 5.27, 3],
+  ["--plus-line", "--bg", 6.08, 3],
   ["--line-strong", "--surface-2", 3.5, 3],
 ];
 
@@ -101,6 +106,8 @@ describe("autres jetons (UI §4.2, §5, §7.2)", () => {
       "--text", "--text-2", "--text-3", "--text-disabled", "--accent", "--accent-hover",
       "--on-accent", "--accent-tint", "--danger", "--on-danger", "--danger-tint", "--warn",
       "--warn-tint", "--info", "--selection", "--scrim",
+      // retours UI4 : formules payantes
+      "--plus", "--plus-tint", "--plus-line",
       // §20.3 matière et aurore
       "--bg-deep", "--hair", "--hair-2", "--vessel", "--edge-hi", "--seal-light", "--seal-halo",
       "--paper", "--ink", "--aur-mint-o", "--aur-tide-o", "--aur-ink-o",

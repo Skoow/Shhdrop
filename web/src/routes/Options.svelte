@@ -10,7 +10,7 @@
   import type { Options } from "../flows/options.svelte";
   import { formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
-  import { Lock, ShieldAlert, Timer, TriangleAlert } from "../ui/Icon";
+  import { Lock, ShieldAlert, TriangleAlert } from "../ui/Icon";
   import PassphraseField from "../ui/PassphraseField.svelte";
   import Segmented from "../ui/Segmented.svelte";
   import Switch from "../ui/Switch.svelte";
@@ -21,7 +21,6 @@
     unviewable: string[];
     /** Sous-option du coffre affichée ici (téléphone ou app installée, jamais en démo). */
     vaultShown: boolean;
-    estimate: { fastS: number; slowS: number };
     compact?: boolean;
     /** Appui sur un choix payant verrouillé : ouvre la feuille d'information de la formule. */
     onpaid?: (tier: PaidTier) => void;
@@ -31,18 +30,13 @@
      */
     part?: "all" | "controls" | "summary";
   };
-  let { options, unviewable, vaultShown, estimate, compact = false, onpaid, part = "all" }: Props = $props();
+  let { options, unviewable, vaultShown, compact = false, onpaid, part = "all" }: Props = $props();
 
   const lang = $derived(getLang());
   const ttlLabel = (h: number) => formatDuration(h * 3600, lang);
   const ttlOptions = $derived(TTL_HOURS.map((h) => ({ value: h, label: ttlLabel(h) })));
   const opensOptions = Array.from({ length: MAX_OPENS }, (_, i) => ({ value: i + 1, label: String(i + 1) }));
   // Une seule durée quand les deux s'arrondissent pareil (« environ 1 s », pas « 1 s à 1 s »).
-  const estimateText = $derived.by(() => {
-    const fast = formatDuration(estimate.fastS, lang);
-    const slow = formatDuration(estimate.slowS, lang);
-    return fast === slow ? t("options.estimate.single", { time: fast }) : t("options.estimate", { fast, slow });
-  });
   const opensText = $derived(t("options.opens.count", { n: options.maxOpens }));
   // Nom accessible = texte visible (WCAG 2.5.3) ; « avec Plus, bientôt disponible » en description.
   const lockedId = $props.id();
@@ -67,14 +61,10 @@
 {#snippet badge(tier: PaidTier)}
   <span class="badge">{t(`paid.badge.${tier}`)}</span>
 {/snippet}
-{#snippet est()}
-  <p class="line est num"><Timer size={16} strokeWidth={1.9} aria-hidden="true" /><span>{estimateText}</span></p>
-{/snippet}
 
 {#if part === "summary"}
   <div class="sumpart">
     {@render summary()}
-    {@render est()}
     <div class="trustpart">{@render trust()}</div>
   </div>
 {:else}
@@ -140,7 +130,6 @@
     {/if}
   </div>
 
-  {#if part === "all"}{@render est()}{/if}
 </section>
 {/if}
 
@@ -229,9 +218,6 @@
     margin-top: 2px;
     color: var(--accent);
   }
-  .est > :global(svg) {
-    color: var(--text-3);
-  }
   .rights {
     display: grid;
     border-radius: 14px;
@@ -278,10 +264,10 @@
     gap: 6px;
     min-height: 44px;
     padding: 0 var(--sp-3);
-    border: 1px dashed var(--line-strong);
+    border: 1px dashed var(--plus-line);
     border-radius: var(--r-sm);
     background: transparent;
-    color: var(--text-2);
+    color: var(--plus);
     font: inherit;
     font-size: var(--fs-small);
     font-weight: 560;
@@ -296,16 +282,17 @@
     flex: 1;
     min-width: 0;
   }
+  /* Plus et Pro en bleu (retours UI4), pointillés compris : jamais le vert de l'action. */
   .lk :global(svg),
   .lkrow :global(svg) {
     flex: none;
-    color: var(--text-3);
+    color: var(--plus);
   }
   @media (hover: hover) {
     .lk:hover,
     .lkrow:hover {
-      color: var(--text);
-      border-color: var(--accent);
+      background: var(--plus-tint);
+      border-color: var(--plus);
     }
   }
   .badge {
@@ -313,8 +300,8 @@
     align-items: center;
     padding: 1px 8px;
     border-radius: var(--r-pill);
-    background: var(--accent-tint);
-    color: var(--accent);
+    background: var(--plus-tint);
+    color: var(--plus);
     font-size: 0.75rem;
     font-weight: 680;
     letter-spacing: 0.02em;

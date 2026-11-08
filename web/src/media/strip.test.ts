@@ -218,7 +218,9 @@ describe("nettoyage des images (spec §35.2)", () => {
   it("image au-delà de STRIP_MAX → echec ; types non images", async () => {
     const big = new Blob([fx("iphone-like.jpg"), new Uint8Array(STRIP_MAX)]);
     expect(await stripMetadata(big, "image/jpeg", "x.jpg")).toEqual({ state: "echec", reason: "trop_gros" });
-    expect(await stripMetadata(new Blob(["%PDF-1.7\n"]), "application/pdf", "a.pdf")).toEqual({ state: "echec", reason: "malformed:pdf_startxref" });
+    // PDF : jamais ouvert, laissé intact (D41-27), même avec auteur et dates dedans.
+    expect(await stripMetadata(new Blob(["%PDF-1.7\n"]), "application/pdf", "a.pdf")).toEqual({ state: "intact" });
+    expect(await stripMetadata(new Blob([fx("meta.pdf")]), "application/pdf", "m.pdf")).toEqual({ state: "intact" });
     expect(await stripMetadata(new Blob(["<svg/>"]), "image/svg+xml", "a.svg")).toEqual({ state: "non_pris_en_charge", soon: false, format: "inconnu" });
     expect(await stripMetadata(new Blob(["bonjour"]), "text/plain", "a.txt")).toEqual({ state: "sans" });
     const rec = await stripMetadata(new Blob([fx("chromium.webm")]), "video/webm", "v.webm", { recorded: true });

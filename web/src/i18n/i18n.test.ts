@@ -266,3 +266,28 @@ describe("annonces", () => {
     vi.useRealTimers();
   });
 });
+
+describe("décompte et échéance (retours UI4 : deux lignes, date et heure exactes puis décompte)", () => {
+  it("formatCountdown : heures et minutes au-dessus d'une heure, minutes et secondes en dessous", async () => {
+    const { formatCountdown } = await import("./format");
+    const n = " ";
+    expect(formatCountdown(23 * 3600 + 50 * 60, "fr")).toBe(`23${n}h${n}50${n}min`);
+    expect(formatCountdown(23 * 3600 + 49 * 60 + 1, "fr")).toBe(`23${n}h${n}50${n}min`); // arrondi vers le haut
+    expect(formatCountdown(2 * 3600 + 5 * 60, "fr")).toBe(`2${n}h${n}05${n}min`);
+    expect(formatCountdown(24 * 3600, "fr")).toBe(`24${n}h`);
+    expect(formatCountdown(3600, "fr")).toBe(`1${n}h`);
+    expect(formatCountdown(3599, "fr")).toBe(`59${n}min${n}59${n}s`);
+    expect(formatCountdown(12 * 60 + 5, "fr")).toBe(`12${n}min${n}05${n}s`);
+    expect(formatCountdown(45, "fr")).toBe(`45${n}s`);
+    expect(formatCountdown(0, "fr")).toBe(`0${n}s`);
+    expect(formatCountdown(12 * 60 + 5, "en")).toBe("12 min 05 s");
+    expect(formatCountdown(23 * 3600 + 50 * 60, "en")).toBe("23 h 50 min");
+  });
+  it("formatEndsAt : « Se termine le 9 nov. à 14 h 32 » (24 h) ; « Ends Nov 9 at 2:32 PM »", async () => {
+    const { formatEndsAt } = await import("./format");
+    const at = new Date(2026, 10, 9, 14, 32, 10).getTime();
+    expect(formatEndsAt(at, "fr")).toBe("Se termine le 9 nov. à 14 h 32");
+    expect(formatEndsAt(at, "en").replace(/[  ]/gu, " ")).toBe("Ends Nov 9 at 2:32 PM");
+    expect(formatEndsAt(new Date(2026, 0, 3, 9, 5).getTime(), "fr")).toBe("Se termine le 3 janv. à 9 h 05");
+  });
+});

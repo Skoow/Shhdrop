@@ -70,3 +70,34 @@ export function formatBytes(n: number, lang: Lang): string {
 export function formatRate(bytesPerS: number, lang: Lang): string {
   return `${formatBytes(bytesPerS, lang)}/s`;
 }
+
+/**
+ * Décompte vivant (retours UI4) : « 23 h 50 min » à partir d'une heure (minutes arrondies vers
+ * le haut), « 12 min 05 s » en dessous (à la seconde). Jamais négatif.
+ */
+export function formatCountdown(seconds: number, lang: Lang): string {
+  const x = sp(lang);
+  const sec = Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : 0;
+  const two = (v: number) => String(v).padStart(2, "0");
+  if (sec >= 3600) {
+    const totalMin = Math.ceil(sec / 60);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return m === 0 ? `${h}${x}h` : `${h}${x}h${x}${two(m)}${x}min`;
+  }
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m === 0 ? `${s}${x}s` : `${m}${x}min${x}${two(s)}${x}s`;
+}
+
+/** Date et heure exactes de fin (retours UI4) : « Se termine le 9 nov. à 14 h 32 » ; « Ends Nov 9 at 2:32 PM ». */
+export function formatEndsAt(epochMs: number, lang: Lang): string {
+  const d = new Date(epochMs);
+  if (lang === "fr") {
+    const month = new Intl.DateTimeFormat("fr", { month: "short" }).format(d);
+    return `Se termine le ${d.getDate()} ${month} à ${d.getHours()} h ${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+  const date = new Intl.DateTimeFormat("en", { day: "numeric", month: "short" }).format(d);
+  const time = new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(d);
+  return `Ends ${date} at ${time}`;
+}

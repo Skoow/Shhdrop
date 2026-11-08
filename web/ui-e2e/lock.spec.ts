@@ -31,7 +31,10 @@ test("envoi : cadenas gris tant que le segment n'est pas confirmé, vert après 
   await page.waitForTimeout(300); // la retenue dure : toujours pas vert
   await expect(r.locator('[data-lock="ok"]')).toHaveCount(0);
   release();
-  await expect(r.locator('[data-lock="ok"]')).toHaveText("Chiffré et envoyé", { timeout: 30_000 });
+  // Retours UI4 : plus de texte sur la ligne ; le libellé est le nom du bouton et sa bulle.
+  await expect(r.locator('[data-lock="ok"] button')).toHaveAccessibleName("Chiffré et envoyé", { timeout: 30_000 });
+  await expect(r.locator('[data-lock="ok"]')).toHaveText("", { useInnerText: true });
+  await expect(r.locator('[data-lock="ok"] button')).toHaveAccessibleDescription("Chiffré et envoyé");
   // Capture : cadenas et marques « Non nettoyé ».
   await (await openFilePicker(page)).setFiles([
     { name: "plage-nuit.jpg", mimeType: "image/jpeg", buffer: readFileSync(file("plage-nuit.jpg")) },
@@ -56,14 +59,29 @@ test("réception : vert pour le texte (manifeste vérifié) ; fichier sans caden
   await page.goto(sent.link);
   await unlock(page, sent.password);
   const note = page.locator("li.row").filter({ hasText: "Code de la porte" });
-  await expect(note.locator('[data-lock="ok"]')).toHaveText("Déchiffré et vérifié");
+  const noteLock = note.locator('[data-lock="ok"] button');
+  await expect(noteLock).toHaveAccessibleName("Déchiffré et vérifié");
+  // Bulle : au survol (souris) ou à l'appui (tactile, bascule) ; Échap la ferme.
+  const tip = page.getByRole("tooltip", { name: "Déchiffré et vérifié" });
+  await expect(tip).toBeHidden();
+  if (isMobile) await noteLock.tap();
+  else await noteLock.hover();
+  await expect(tip).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(tip).toBeHidden();
+  if (isMobile) {
+    await noteLock.tap();
+    await expect(tip).toBeVisible();
+    await page.locator("h1").first().tap(); // appui ailleurs : fermée
+    await expect(tip).toBeHidden();
+  }
   const photo = page.locator("li.row").filter({ hasText: "foret-brume" });
   await expect(photo.locator("[data-lock]")).toHaveCount(0);
   for (const n of ["foret-brume.jpg", "contrat.pdf"]) {
     await page.getByRole("button", { name: `Télécharger ${n}` }).click();
     await expect(page.locator("li.row").filter({ hasText: n.split(".")[0]! })).toHaveAttribute("data-state", "done", { timeout: 30_000 });
   }
-  await expect(photo.locator('[data-lock="ok"]')).toHaveText("Déchiffré et vérifié");
+  await expect(photo.locator('[data-lock="ok"] button')).toHaveAccessibleName("Déchiffré et vérifié");
   await expect(page.locator('li.row [data-lock="ok"]')).toHaveCount(3);
   await settle(page);
   await page.screenshot({ path: `${SHOTS}content-locks-${isMobile ? 390 : 1440}.png` });

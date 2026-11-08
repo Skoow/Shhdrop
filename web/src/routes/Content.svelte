@@ -8,8 +8,8 @@
   import { lowMemory } from "../app/env";
   import { guardUnload } from "../app/lifecycle";
   import { createDownloads, readSkipping, summarize, type Target } from "../flows/downloads.svelte";
-  import { destroyFromContent, finish, release, type DestroyOutcome } from "../flows/endoflife";
-  import { ASSUMED_DOWN_BPS, transferSeconds } from "../flows/estimate";
+  import { destroyFromContent, release, type DestroyOutcome } from "../flows/endoflife";
+  import { transferSeconds } from "../flows/estimate";
   import { WATCH_READY } from "../flows/features";
   import type { Gone } from "../flows/gone.svelte";
   import { CATEGORY_ORDER, categoryOfReceived, extOf, type Category } from "../flows/kinds";
@@ -36,13 +36,13 @@
   import ViewerPanel, { type ViewItem } from "../viewers/ViewerPanel.svelte";
   import { ZIP_BLOB_MAX, ZIP_BLOB_MAX_SMALL, createZip, zipName } from "../zip/store-zip";
 
-  type ContentEnd = "finished" | Exclude<DestroyOutcome, "network" | "limit">;
+  type ContentEnd = Exclude<DestroyOutcome, "network" | "limit">;
   type Props = {
     opened: Opened;
     /** Compte à rebours à zéro (porté par la capsule d'Open). */
     expired: boolean;
     /** Fin de lecture : la capsule passe à l'état voulu. */
-    onend: (kind: "finished" | "destroyed" | "gone") => void;
+    onend: (kind: "destroyed" | "gone") => void;
     /** Fermeture « partage disparu » (spec §41.8) : suit les enregistrements en cours. */
     gone: Gone;
   };
@@ -213,8 +213,10 @@
   }
 
   // ---------- Résumés ----------
-  const rate = $derived(dl.measured ?? ASSUMED_DOWN_BPS);
-  const est = (i: number) => (entries[i]!.kind === "text" ? null : transferSeconds(totals[i]!, rate));
+  // Retours UI4 : une estimation seulement sur le débit MESURÉ dans cette session (après les
+  // premières secondes de lecture, downloads.svelte.ts) ; jamais sur un débit supposé.
+  const rate = $derived(dl.measured);
+  const est = (i: number) => (entries[i]!.kind === "text" || rate === null ? null : transferSeconds(totals[i]!, rate));
   const sum = (items: number[]) => {
     const s = summarize(dl.rows, items);
     return { ...s, bytes: s.done, n: items.length, finished: s.count.done, running: s.count.downloading + s.count.queued, paused: s.count.paused };
@@ -232,6 +234,7 @@
   $effect(() => setProgressTitle(dlPct, lang));
   $effect(() => () => setProgressTitle(null, getLang()));
   const totalBytes = totals.reduce((a, n) => a + n, 0);
+  const lastOpen = o.opensLeft === 0;
   const risky = entries.flatMap((_, i) => (o.isRiskyFile(i) ? [names[i]!] : []));
 
   // ---------- Fin de vie ----------
@@ -294,17 +297,6 @@
     onend(kind);
   }
 
-  async function finishNow() {
-    if (ended !== null) return;
-    wiped = true;
-    dl.dispose();
-    previews.clear();
-    viewAt = null;
-    await finish(o);
-    await dissolve();
-    arrive("finished");
-  }
-
   let destroyError = $state("");
   async function destroy(report: boolean): Promise<string | null> {
     if (ended !== null || wiped) return null;
@@ -353,10 +345,19 @@
   <header class="top">
     <h1 class="title" tabindex="-1" data-large-title bind:this={heading}>{t("content.title")}</h1>
     <p class="sum num">
-      {viewOnly
+      {viewOnly || rate === null
         ? t("content.summary.view", { n: entries.length, size: formatBytes(totalBytes, lang) })
         : t("content.summary", { n: entries.length, size: formatBytes(totalBytes, lang), time: formatDuration(transferSeconds(totalBytes, rate), lang) })}
     </p>
+    <!-- Signaler : en haut à droite, toujours visible (décision du propriétaire, retours UI4). -->
+    {#if !closer.closed}
+      <div class="report">
+        <Button variant="ghost" dense onpress={() => void (reportOpen = true)}>
+          {#snippet icon()}<Flag size={18} />{/snippet}
+          {t("content.report")}
+        </Button>
+      </div>
+    {/if}
   </header>
   {#if viewOnly}
     <p class="notice"><Eye size={18} aria-hidden="true" /> <span>{t("content.viewOnly")}</span></p>
@@ -389,7 +390,7 @@
       <div class="gh">
         <h2 id="g-{g.c}" class="gt">{cat}</h2>
         <span class="gm num">{g.items.length} · {formatBytes(bytes, lang)}</span>
-        {#if !viewOnly && files.length > 0 && s.active === 0}<span class="gm eta num" title={t("dl.estimate.title")}>{t("dl.estimate", { time: formatDuration(transferSeconds(bytes, rate), lang) })}</span>{/if}
+        {#if !viewOnly && rate !== null && files.length > 0 && s.active === 0}<span class="gm eta num" title={t("dl.estimate.title")}>{t("dl.estimate", { time: formatDuration(transferSeconds(bytes, rate!), lang) })}</span>{/if}
         {#if !viewOnly && files.length > 0}
           <div class="gacts">
             {#if s.active > 0}
@@ -438,31 +439,28 @@
     </section>
   {/each}
 
-  <footer class="eol" data-eol>
-    <Button variant="secondary" onpress={finishNow}>{t("content.finish")}</Button>
-    {#if !closer.closed}
-      <div class="danger-zone">
-        <p class="hint">{t("content.destroy.hint")}</p>
-        <div class="row">
-          <InlineConfirm
-            label={t("content.destroy")}
-            message={t("content.destroy.confirm")}
-            confirmLabel={t("content.destroy.yes")}
-            kind="danger"
-            triggerVariant="ghost"
-            onconfirm={async () => void (await destroy(false))}
-          >
-            {#snippet icon()}<Trash2 size={18} />{/snippet}
-          </InlineConfirm>
-          <Button variant="ghost" onpress={() => void (reportOpen = true)}>
-            {#snippet icon()}<Flag size={18} />{/snippet}
-            {t("content.report")}
-          </Button>
-        </div>
+  <!-- Pied (retours UI4) : « Détruire ce partage » seulement à la dernière ouverture permise
+       (opens_left = 0 rendu par unlock) ; sinon, combien d'ouvertures restent. -->
+  {#if !closer.closed}
+    <footer class="eol" data-eol data-last={lastOpen ? "" : undefined}>
+      {#if lastOpen}
+        <p class="hint">{t("content.lastOpen")}</p>
+        <InlineConfirm
+          label={t("content.destroy")}
+          message={t("content.destroy.confirm")}
+          confirmLabel={t("content.destroy.yes")}
+          kind="danger"
+          triggerVariant="ghost"
+          onconfirm={async () => void (await destroy(false))}
+        >
+          {#snippet icon()}<Trash2 size={18} />{/snippet}
+        </InlineConfirm>
         {#if destroyError}<p class="err" role="alert">{destroyError}</p>{/if}
-      </div>
-    {/if}
-  </footer>
+      {:else}
+        <p class="hint num">{t("content.opensLeft", { n: o.opensLeft })}</p>
+      {/if}
+    </footer>
+  {/if}
 </div>
 <ViewerPanel items={viewItems} bind:at={viewAt} {viewOnly} load={loadPreview} held={dl.readerHeld} ondownload={(i) => dl.start([i], single)} onclose={() => undefined} />
 <ReportSheet bind:open={reportOpen} onconfirm={() => destroy(true)} />
@@ -505,17 +503,25 @@
     font-size: var(--fs-small);
     max-width: 65ch;
   }
+  /* Groupe (retours UI4) : un seul contenant ; le titre de catégorie sur un bandeau à part,
+     séparé de ses éléments par un filet. */
   .group {
     display: grid;
-    gap: 4px;
     min-width: 0;
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r-lg);
+    background: var(--vessel);
+    box-shadow: var(--edge-hi);
+    overflow: clip;
   }
   .gh {
     display: flex;
     align-items: center;
     gap: var(--sp-2);
     min-height: 44px;
-    padding-inline: 4px 0;
+    padding-inline: var(--sp-3) var(--sp-1);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--hair-2);
   }
   .gt {
     margin: 0;
@@ -553,37 +559,52 @@
     margin: 0;
     padding: 0;
     list-style: none;
-    border: 1px solid var(--hair-2);
-    border-radius: var(--r-lg);
-    background: var(--vessel);
-    box-shadow: var(--edge-hi);
     min-width: 0;
+  }
+  /* En-tête : titre et « Signaler » sur la même ligne, le résumé dessous (retours UI4). */
+  .top {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: var(--sp-2);
+  }
+  .sum {
+    grid-column: 1 / -1;
+  }
+  .report {
+    grid-row: 1;
+    grid-column: 2;
+    margin-inline-end: -10px;
+  }
+  .report :global(button.ghost) {
+    color: var(--text-2);
   }
   .eol {
     display: grid;
     justify-items: start;
-    gap: var(--sp-5);
+    gap: var(--sp-3);
     margin-top: var(--sp-4);
     padding-top: var(--sp-5);
     border-top: 1px solid var(--line);
   }
-  .danger-zone {
-    display: grid;
-    justify-items: start;
-    gap: var(--sp-2);
-  }
-  .danger-zone .row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--sp-2);
-  }
-  .danger-zone :global(button.ghost) {
+  .eol :global(button.ghost) {
     color: var(--danger);
   }
   .hint {
     margin: 0;
+    max-width: 60ch;
     color: var(--text-2);
     font-size: var(--fs-small);
+  }
+  /* Téléphone : tout ce qui suit le contenu est centré (retours UI4). */
+  @media (max-width: 559px) {
+    .eol {
+      justify-items: center;
+      text-align: center;
+    }
+    .report :global(button.ghost) {
+      gap: 6px;
+      padding-inline: 10px;
+    }
   }
   .err {
     margin: 0;

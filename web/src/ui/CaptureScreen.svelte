@@ -566,9 +566,10 @@
   .note.warn {
     color: var(--warn);
   }
+  /* « Avec Plus… » en bleu, comme toute mention des formules payantes (retours UI4). */
   .note .up {
     display: block;
-    color: rgb(255 255 255 / 0.82);
+    color: var(--plus);
   }
   /* Bascule Photo / Vidéo, comme l'app photo du téléphone : le mode choisi en jaune clair. */
   .modes {

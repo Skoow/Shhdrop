@@ -313,7 +313,7 @@ test.describe("fr-FR : envoi (Tasks 17–18)", () => {
     await page.getByRole("button", { name: /^(Rouvrir|Déchiffrement)/ }).click();
     await expect(page.getByRole("heading", { name: "Contenu du partage" })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator("li.row").filter({ hasText: "Le code de la porte est 4471." })).toBeVisible();
-    await page.getByRole("button", { name: "Détruire ce partage pour tout le monde" }).click();
+    await page.getByRole("button", { name: "Détruire ce partage", exact: true }).click();
     await page.getByRole("button", { name: "Détruire", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Détruit" })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator("[data-receipt]")).toBeVisible();

@@ -11,7 +11,7 @@
   import { LimitError, NotFoundError, destroyShare, shareStatus } from "../index";
   import { announce } from "../ui/announce";
   import Button from "../ui/Button.svelte";
-  import Countdown from "../ui/Countdown.svelte";
+  import Deadline from "../ui/Deadline.svelte";
   import { RefreshCw, Trash2 } from "../ui/Icon";
   import InlineConfirm from "../ui/InlineConfirm.svelte";
   import DestroyedArt from "../ui/DestroyedArt.svelte";
@@ -125,10 +125,12 @@
         {/key}
         <p class="status num" data-status={status.state}>
           {#key reads}
-            {t("manage.status", { u: status.opensUsed, max: status.maxOpens, duration: "\u0000" }).split("\u0000")[0]}<Countdown
-              expiresInS={status.expiresInS}
-              onexpire={() => void refresh()}
-            />
+            {t("manage.status", { u: status.opensUsed, max: status.maxOpens })}
+          {/key}
+        </p>
+        <p class="when">
+          {#key reads}
+            <Deadline expiresInS={status.expiresInS} onexpire={() => void refresh()} />
           {/key}
         </p>
         {#if line}<p class="sub">{line}</p>{/if}
@@ -153,6 +155,11 @@
 {/if}
 
 <style>
+  /* Échéance en deux lignes (Deadline, retours UI4). */
+  .when {
+    margin: 0;
+    font-size: var(--fs-small);
+  }
   .manage {
     width: min(100%, 640px);
     margin-inline: auto;

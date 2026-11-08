@@ -70,15 +70,12 @@ test("recharger rouvre sans consommer (1 / 3 avant et après), dix fois ; le onz
   expect((await shareStatus(sent.manage, shh.origin)).opensUsed).toBe(1);
   await expect(page.getByText("Ce partage peut être ouvert encore 2 fois.", { exact: false })).toBeVisible();
 
-  // Nouvelle ouverture (comptée), puis « Terminer et effacer » : un rechargement redemande le lien.
+  // Nouvelle ouverture (comptée) : le pied dit combien d'ouvertures restent (plus de bouton
+  // « Terminer et effacer », retours UI4).
   await page.getByRole("button", { name: /^(Déverrouiller|Déchiffrement)/ }).click();
   await expect(noteRow(page, TEXT)).toBeVisible({ timeout: 30_000 });
   expect((await shareStatus(sent.manage, shh.origin)).opensUsed).toBe(2);
-  await page.getByRole("button", { name: "Terminer et effacer" }).click();
-  await expect(noteRow(page, TEXT)).toHaveCount(0);
-  expect(await page.evaluate(() => sessionStorage.getItem("shh.og"))).toBeNull();
-  await page.reload();
-  await expect(incomplete(page)).toBeVisible();
+  await expect(page.locator("[data-eol]")).toHaveText("Ce lien peut encore être ouvert 1\u202ffois.");
 });
 
 test("deuxième onglet : avec le premier ouvert, même ouverture ; sans premier onglet, une de plus, annoncée", async ({ page, shh, browser }) => {

@@ -83,9 +83,7 @@ test.describe("fr-FR", () => {
     await expect(page.locator("li.row").filter({ hasText: TEXT })).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: `Télécharger ${NAME}` }).click();
     await expect.poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__closed)).toBe(true);
-    await page.getByRole("button", { name: "Terminer et effacer" }).click();
-    await expect(page.getByRole("heading", { name: "Effacé de cet appareil." })).toBeVisible();
-    for (const route of ["GET /api/shares/meta", "POST /api/shares/unlock", "GET /api/shares/segments/0", "POST /api/shares/done"])
+    for (const route of ["GET /api/shares/meta", "POST /api/shares/unlock", "GET /api/shares/segments/0"])
       expect(sent.some((s) => s.label === route), route).toBe(true);
     needles.push(needle("mot de passe faux", password + "x"));
 

@@ -1,9 +1,9 @@
 // Nettoyage des documents Office (OOXML : .docx, .xlsx, .pptx et variantes) et ODF (.odt,
 // .ods, .odp…) (spec §35.2, Task 9b) : propriétés du document remplacées par des versions
-// minimales de même nom, auteurs des commentaires remplacés par « Auteur », dates des
-// commentaires retirées, miniatures retirées (et leurs références), images intégrées
-// nettoyées, ZIP réécrit (zip.ts). Le suivi des modifications est laissé intact (décision
-// de la spécification) mais signalé. Le résultat est relu par le même analyseur : il ne doit
+// minimales de même nom, miniatures retirées (et leurs références), métadonnées des images
+// intégrées retirées (pixels inchangés), ZIP réécrit (zip.ts). Règle du propriétaire (8
+// novembre, D41-27) : on ne retire que ce qui n'altère pas le document lui-même ; commentaires,
+// personnes et suivi des modifications restent intacts (auteurs et dates compris). Le résultat est relu par le même analyseur : il ne doit
 // plus rien demander, sinon `Malformed` (→ `echec`).
 import { STRIP_MAX } from "../limits";
 import { Malformed, equal } from "./bytes";
@@ -13,89 +13,22 @@ import { cleanHeif } from "./heif";
 import { cleanJpeg } from "./jpeg";
 import { patchedBlob } from "./patch";
 import { cleanPng } from "./png";
-import type { CleanNote } from "./strip";
 import { cleanWebp } from "./webp";
 import { decodeXml, encodeXml, qn, rewriteXml, rootTag, type XmlRule } from "./xmlattr";
 import { entryData, isNormalized, readZip, writeZip, type ZipEntry, type ZipFile } from "./zip";
 
 export type OfficeKind = "ooxml" | "odf";
-export type OfficeResult = { state: "protege" } | { state: "ok"; data: Blob; notes: CleanNote[] };
+export type OfficeResult = { state: "protege" } | { state: "ok"; data: Blob };
 
-const AUTHOR = "Auteur";
-const INITIAL = "A";
-const FIXED_DATE = "1980-01-01T00:00:00Z";
 
-// Espaces de noms (OOXML transitionnel et strict).
-const W = ["http://schemas.openxmlformats.org/wordprocessingml/2006/main", "http://purl.oclc.org/ooxml/wordprocessingml/main"];
-const SML = ["http://schemas.openxmlformats.org/spreadsheetml/2006/main", "http://purl.oclc.org/ooxml/spreadsheetml/main"];
-const PML = ["http://schemas.openxmlformats.org/presentationml/2006/main", "http://purl.oclc.org/ooxml/presentationml/main"];
-const W15 = "http://schemas.microsoft.com/office/word/2012/wordml";
-const W16CEX = "http://schemas.microsoft.com/office/word/2018/wordml/cex";
-const XTC = "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
-const P188 = "http://schemas.microsoft.com/office/powerpoint/2018/8/main";
 const RELS = "http://schemas.openxmlformats.org/package/2006/relationships";
 const CT = "http://schemas.openxmlformats.org/package/2006/content-types";
 const THUMB_REL = /\/metadata\/thumbnail$/u;
-const OFFICE = "urn:oasis:names:tc:opendocument:xmlns:office:1.0";
-const META = "urn:oasis:names:tc:opendocument:xmlns:meta:1.0";
-const DC = "http://purl.org/dc/elements/1.1/";
-const TEXT = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
 const MANIFEST = "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0";
 
-const each = (nss: string[], f: (ns: string) => XmlRule[]) => nss.flatMap(f);
-
-/** Règles par partie (OOXML). */
-const OOXML_RULES: [RegExp, XmlRule[]][] = [
-  [
-    /^word\/comments\.xml$/u,
-    each(W, (ns) => [
-      { el: qn(ns, "comment"), attr: qn(ns, "author"), set: AUTHOR },
-      { el: qn(ns, "comment"), attr: qn(ns, "initials"), set: INITIAL },
-      { el: qn(ns, "comment"), attr: qn(ns, "date"), remove: true },
-    ]),
-  ],
-  [/^word\/commentsExtensible\.xml$/u, [{ el: qn(W16CEX, "commentExtensible"), attr: qn(W16CEX, "dateUtc"), remove: true }]],
-  // Personnes (noms, identifiants de compte) : toutes retirées ; la partie reste, vide.
-  [/^word\/people\.xml$/u, [{ el: qn(W15, "person"), drop: true }]],
-  [/^xl\/comments[^/]*\.xml$/u, each(SML, (ns) => [{ el: qn(ns, "author"), within: qn(ns, "authors"), text: AUTHOR }])],
-  [/^xl\/threadedComments\/[^/]+\.xml$/u, [{ el: qn(XTC, "threadedComment"), attr: "dT", remove: true }]],
-  [
-    /^xl\/persons\/[^/]+\.xml$/u,
-    [
-      { el: qn(XTC, "person"), attr: "displayName", set: AUTHOR },
-      { el: qn(XTC, "person"), attr: "userId", remove: true },
-      { el: qn(XTC, "person"), attr: "providerId", remove: true },
-    ],
-  ],
-  [
-    /^ppt\/commentAuthors\.xml$/u,
-    each(PML, (ns) => [
-      { el: qn(ns, "cmAuthor"), attr: "name", set: AUTHOR },
-      { el: qn(ns, "cmAuthor"), attr: "initials", set: INITIAL },
-    ]),
-  ],
-  [/^ppt\/comments\/[^/]+\.xml$/u, [...each(PML, (ns) => [{ el: qn(ns, "cm"), attr: "dt", remove: true } as XmlRule]), { el: qn(P188, "cm"), attr: "created", set: FIXED_DATE }, { el: qn(P188, "reply"), attr: "created", set: FIXED_DATE }]],
-  [
-    /^ppt\/authors\.xml$/u,
-    [
-      { el: qn(P188, "author"), attr: "name", set: AUTHOR },
-      { el: qn(P188, "author"), attr: "initials", set: INITIAL },
-      { el: qn(P188, "author"), attr: "userId", set: "" },
-      { el: qn(P188, "author"), attr: "providerId", set: "" },
-    ],
-  ],
-];
 const OOXML_PROPS = new Set(["docProps/core.xml", "docProps/app.xml", "docProps/custom.xml"]);
 const OOXML_MEDIA = /^(word|xl|ppt)\/media\/[^/]+$/u;
-const OOXML_TRACKED_PARTS = /^word\/(document|header\d*|footer\d*|footnotes|endnotes)\.xml$/u;
-const WORD_TRACKED = /<[A-Za-z0-9_]+:(ins|del|moveFrom|moveTo|rPrChange|pPrChange|sectPrChange|tblPrChange|trPrChange|tcPrChange|numberingChange)[\s>/]/u;
 
-// ODF : auteurs et dates des annotations seulement (pas des modifications suivies).
-const ODF_ANNOTATION: XmlRule[] = [
-  { el: qn(DC, "creator"), within: qn(OFFICE, "annotation"), text: AUTHOR },
-  { el: qn(DC, "date"), within: qn(OFFICE, "annotation"), drop: true },
-  { el: qn(META, "creator-initials"), within: qn(OFFICE, "annotation"), drop: true },
-];
 const ODF_MEDIA = /^Pictures\/[^/]+$/u;
 
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
@@ -119,10 +52,10 @@ async function cleanImage(bytes: Uint8Array<ArrayBuffer>, name: string): Promise
   return bytes; // autres formats (EMF, WMF, SVG…) : laissés tels quels
 }
 
-type Plan = { protege: boolean; edits: Map<string, Uint8Array | null>; notes: Set<CleanNote> };
+type Plan = { protege: boolean; edits: Map<string, Uint8Array | null> };
 
 async function plan(file: Blob, zip: ZipFile, kind: OfficeKind): Promise<Plan> {
-  const p: Plan = { protege: false, edits: new Map(), notes: new Set() };
+  const p: Plan = { protege: false, edits: new Map() };
   const byName = new Map(zip.entries.map((e) => [e.name, e]));
   const xml = async (en: ZipEntry) => decodeXml(await entryData(file, en, STRIP_MAX));
   const edit = async (en: ZipEntry, next: string) => {
@@ -164,12 +97,6 @@ async function plan(file: Blob, zip: ZipFile, kind: OfficeKind): Promise<Plan> {
       if (thumbs.has(en.name) || en.name === "_rels/.rels" || en.name === "[Content_Types].xml") continue;
       if (OOXML_PROPS.has(en.name)) await edit(en, minimalPart(await xml(en), () => false));
       else if (OOXML_MEDIA.test(en.name)) await image(en);
-      else {
-        const r = OOXML_RULES.find(([re]) => re.test(en.name));
-        if (r) await rewrite(en, r[1]);
-      }
-      if (OOXML_TRACKED_PARTS.test(en.name) && WORD_TRACKED.test(await xml(en))) p.notes.add("suivi_modifs");
-      if (/^xl\/revisions\//u.test(en.name)) p.notes.add("suivi_modifs");
     }
     return p;
   }
@@ -191,10 +118,6 @@ async function plan(file: Blob, zip: ZipFile, kind: OfficeKind): Promise<Plan> {
       const src = await xml(en);
       const office = rootTag(src).name.split(":")[0]!;
       await edit(en, minimalPart(src, (a) => a === `${office}:version`, `<${office}:meta/>`));
-    } else if (en.name === "content.xml" || en.name === "styles.xml") {
-      const s = new Set<string>();
-      await edit(en, rewriteXml(await xml(en), ODF_ANNOTATION, s));
-      if (s.has(qn(TEXT, "changed-region"))) p.notes.add("suivi_modifs");
     } else if (ODF_MEDIA.test(en.name)) await image(en);
   }
   return p;
@@ -212,5 +135,5 @@ export async function cleanOffice(file: Blob, kind: OfficeKind, type: string): P
   const zip2 = await readZip(data);
   const p2 = await plan(data, zip2, kind);
   if (p2.protege || p2.edits.size > 0 || zip2.commentLength > 0 || !zip2.entries.every(isNormalized)) throw new Malformed("verification");
-  return { state: "ok", data, notes: [...p.notes] };
+  return { state: "ok", data };
 }

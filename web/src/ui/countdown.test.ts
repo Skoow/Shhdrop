@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration } from "../i18n/format";
 import { createCountdown } from "./countdown";
 
 function clock(start = 1000) {
@@ -29,15 +28,15 @@ describe("createCountdown", () => {
     expect(createCountdown(Number.NaN, c.now).remaining()).toBe(0);
   });
 
-  it("display suit formatDuration dans la langue demandée", () => {
+  it("display : décompte « 4 h 15 min » au-dessus d'une heure, « 12 min 05 s » en dessous (retours UI4)", () => {
     const c = clock();
     const cd = createCountdown(4 * 3600 + 15 * 60, c.now);
-    expect(cd.display("fr")).toBe(formatDuration(15300, "fr"));
-    expect(cd.display("en")).toBe(formatDuration(15300, "en"));
-    c.advance(15300 - 245);
-    expect(cd.display("fr")).toBe("4\u202fmin\u202f05\u202fs"); // sous 5 min : à la seconde
-    c.advance(200);
-    expect(cd.display("fr")).toBe(formatDuration(45, "fr"));
+    expect(cd.display("fr")).toBe("4\u202fh\u202f15\u202fmin");
+    expect(cd.display("en")).toBe("4\u00a0h\u00a015\u00a0min");
+    c.advance(15300 - 725);
+    expect(cd.display("fr")).toBe("12\u202fmin\u202f05\u202fs"); // sous 1 h : à la seconde
+    c.advance(680);
+    expect(cd.display("fr")).toBe("45\u202fs");
   });
 
   it("announceAt : une fois par seuil 3600, 900, 300, 60, 0, dans l'ordre", () => {

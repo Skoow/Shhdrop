@@ -46,7 +46,9 @@
   const ext = $derived(kind === "file" && dot > 0 ? name.slice(dot) : "");
   const mid = $derived(midSplit(base));
   const pct = $derived(row.total > 0 ? Math.min(100, Math.floor((row.done / row.total) * 100)) : row.state === "done" ? 100 : 0);
-  const left = $derived(row.rate > 0 ? (row.total - row.done) / row.rate : null);
+  // Temps restant : seulement quand le débit de cette session est mesuré (estimate non nul,
+  // retours UI4), jamais sur les premiers instants.
+  const left = $derived(estimate !== null && row.rate > 0 ? (row.total - row.done) / row.rate : null);
   const FAIL = { network: "dl.fail.network", budget: "dl.fail.budget", limit: "dl.fail.limit", disk_full: "dl.fail.disk", write: "dl.fail.write", gone: "dl.fail.gone" } as const;
   let viewBtn: HTMLButtonElement | undefined = $state();
   const lock = $derived(receiveLock(kind, row.state));
@@ -69,8 +71,9 @@
         {#if lock}
           <span aria-hidden="true">·</span><LockMark tone={lock.tone} text={t(lock.key)} />
         {/if}
+        <!-- Téléchargé : dit par l'icône verte de la ligne (retours UI4) ; le texte reste pour les lecteurs d'écran. -->
         {#if row.state === "done"}
-          <span aria-hidden="true">·</span><span class="ok">{t("dl.done")}</span>
+          <span class="sr-only">{t("dl.done")}</span>
         {:else if estimate !== null && !viewOnly}
           <span aria-hidden="true">·</span><span class="eta" title={t("dl.estimate.title")}>{t("dl.estimate", { time: formatDuration(estimate, lang) })}<span class="sr-only"> ({t("dl.estimate.title")})</span></span>
         {/if}
@@ -118,7 +121,7 @@
           {#snippet icon()}<Download size={18} />{/snippet}
         </InlineConfirm>
       {:else}
-        <Button variant="ghost" dense {disabled} onpress={ondownload} aria-label={t(row.state === "done" ? "dl.row.again" : "dl.row.download", { name })}>
+        <Button variant="ghost" dense {disabled} onpress={ondownload} aria-label={t(row.state === "done" ? "dl.row.again" : "dl.row.download", { name })} title={row.state === "done" ? t("dl.done") : undefined} data-done={row.state === "done" ? "" : undefined}>
           {#snippet icon()}<Download size={18} />{/snippet}
           <span class="hide-narrow">{t("dl.download")}</span>
         </Button>
@@ -192,10 +195,8 @@
   .st {
     color: var(--text);
   }
-  .ok {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
+  /* Téléchargé : l'icône de téléchargement passe au vert (retours UI4). */
+  [data-state="done"] .actions :global(button.ghost) {
     color: var(--accent);
   }
   progress {

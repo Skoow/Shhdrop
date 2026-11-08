@@ -4,7 +4,7 @@ import { fr } from "../i18n/fr";
 import { readFileSync } from "node:fs";
 import { BLOCK_REASONS, blockKey, createComposer, splitName, type ComposeDeps } from "./compose.svelte";
 import { gate } from "./clean-gate";
-import { cleanLabelKey, cleanNoteKeys, uncleanedReasonKey } from "../media/clean-label";
+import { cleanLabelKey, intactKey, isUncleaned, uncleanedReasonKey } from "../media/clean-label";
 import type { StripResult } from "../media/strip";
 import { CATEGORY_ORDER, categoryOf } from "./kinds";
 import { HEAD_BYTES } from "./sniff";
@@ -23,7 +23,7 @@ const jpeg = (name = "IMG_20261104.jpg") => new File([new Uint8Array([0xff, 0xd8
 function make(deps: Partial<ComposeDeps> = {}) {
   return createComposer({ probe: async () => undefined, online: () => true, strip: async () => ({ state: "sans" }), ...deps });
 }
-const nettoye = (data: Blob): StripResult => ({ state: "nettoye", data, notes: [], family: "image" });
+const nettoye = (data: Blob): StripResult => ({ state: "nettoye", data, family: "image" });
 
 describe("catégories (UI §9.2.4)", () => {
   it("ordre fixe et attribution", () => {
@@ -76,15 +76,22 @@ describe("createComposer : ajout", () => {
     expect(c.uncleanedCount).toBe(1);
   });
 
-  it("non pris en charge : raison courte par format (vidéo, audio, archive, inconnu), envoi libre", async () => {
+  it("non pris en charge : raison courte par format (vidéo, audio, inconnu), envoi libre ; archive laissée intacte sans analyse (D41-27)", async () => {
     const fmt: Record<string, "mp4" | "mp3" | "inconnu"> = { "application/zip": "inconnu", "image/svg+xml": "inconnu", "video/mp4": "mp4", "audio/mpeg": "mp3" };
-    const c = make({ strip: async (_f, mime) => ({ state: "non_pris_en_charge", soon: fmt[mime] !== "inconnu", format: fmt[mime]! }) });
+    const seen: string[] = [];
+    const c = make({ strip: async (f, mime) => (seen.push((f as File).name), { state: "non_pris_en_charge", soon: fmt[mime] !== "inconnu", format: fmt[mime]! }) });
     const files = Object.keys(fmt).map((m, k) => file(["b.zip", "c.svg", "d.mp4", "e.mp3"][k]!, 3, m));
     await c.add(files, "fichiers");
     const by = (n: string) => uncleanedReasonKey(c.items.find((i) => i.base === n)!);
-    expect([by("b"), by("c"), by("d"), by("e")]).toEqual(["clean.why.archive", "clean.why.unknown", "clean.why.video", "clean.why.audio"]);
+    expect([by("b"), by("c"), by("d"), by("e")]).toEqual([null, "clean.why.unknown", "clean.why.video", "clean.why.audio"]);
+    const zip = c.items.find((i) => i.base === "b")!;
+    expect(zip.clean).toBe("intact");
+    expect(intactKey(zip)).toBe("clean.intact.archive");
+    expect(cleanLabelKey(zip)).toBe("clean.intact.archive.hint");
+    expect(zip.data).toBe(files[0]);
+    expect(seen).not.toContain("b.zip");
     expect(c.blockReason()).toBeNull();
-    expect(c.uncleanedCount).toBe(4);
+    expect(c.uncleanedCount).toBe(3);
     for (const i of c.items) await expect(gate(i.data as Blob)).resolves.toBe(i.data);
   });
 
@@ -120,19 +127,23 @@ describe("createComposer : ajout", () => {
     expect(c.blockReason()).toBeNull();
   });
 
-  it("vrai nettoyage d'un .docx (Task 9b) : « Nettoyé » bureautique, remarque des modifications suivies ; PDF protégé marqué", async () => {
+  it("vrai nettoyage d'un .docx (Task 9b) : « Nettoyé » bureautique, aucune remarque ; PDF laissé intact octet pour octet (D41-27)", async () => {
     const c = createComposer({ probe: async () => undefined, online: () => true });
     const fx = (n: string) => new Uint8Array(readFileSync(new URL(`../media/fixtures/${n}`, import.meta.url)));
-    await c.add([new File([fx("meta.docx")], "rapport.docx"), new File([fx("signed.pdf")], "devis.pdf", { type: "application/pdf" })], "fichiers");
+    const pdfFile = new File([fx("meta.pdf")], "devis.pdf", { type: "application/pdf" });
+    await c.add([new File([fx("meta.docx")], "rapport.docx"), pdfFile], "fichiers");
     const doc = c.items.find((i) => i.ext === ".docx")!;
-    expect(doc).toMatchObject({ clean: "nettoye", cleanFamily: "bureautique", cleanNotes: ["suivi_modifs"] });
+    expect(doc).toMatchObject({ clean: "nettoye", cleanFamily: "bureautique" });
     expect(cleanLabelKey(doc)).toBe("clean.done.office");
-    expect(cleanNoteKeys(doc)).toEqual(["clean.note.suivi_modifs"]);
-    expect(new TextDecoder("latin1").decode(await (doc.data as Blob).arrayBuffer())).not.toMatch(/ReperAuteur|ReperSociete|ReperCommentateur/);
+    expect(new TextDecoder("latin1").decode(await (doc.data as Blob).arrayBuffer())).not.toMatch(/ReperSociete|ReperTitre|ReperMiniature/);
     const pdf = c.items.find((i) => i.ext === ".pdf")!;
-    expect(pdf.clean).toBe("protege");
-    expect(uncleanedReasonKey(pdf)).toBe("clean.why.protege");
-    expect(cleanNoteKeys(pdf)).toEqual([]);
+    expect(pdf.clean).toBe("intact");
+    expect(pdf.data).toBe(pdfFile);
+    expect(uncleanedReasonKey(pdf)).toBeNull();
+    expect(isUncleaned(pdf)).toBe(false);
+    expect(intactKey(pdf)).toBe("clean.intact");
+    expect(cleanLabelKey(pdf)).toBe("clean.intact.hint");
+    expect(c.uncleanedCount).toBe(0);
   });
 
   it("MAX_ITEMS + 2 fichiers → MAX_ITEMS ajoutés, 2 refusés (noms rendus) ; 200 acceptés, le 201ᵉ refusé (fichiers minuscules)", async () => {
@@ -442,7 +453,7 @@ describe("blocages et textes de raison", () => {
     const c = make();
     c.addText("t");
     expect(cleanLabelKey(c.items[0]!)).toBeNull();
-    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.pdf", "clean.done.office", "clean.why.echec", "clean.why.protege", "clean.note.suivi_modifs", "clean.note.pdf_revisions", "clean.why.video", "clean.why.audio", "clean.why.archive", "clean.why.unknown", "clean.uncleaned.hint", "compose.uncleaned.one", "compose.uncleaned.other", "clean.original", "clean.original.hint", "clean.mark", "clean.mark.not"]) {
+    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.office", "clean.why.echec", "clean.why.protege", "clean.why.video", "clean.why.audio", "clean.intact", "clean.intact.hint", "clean.intact.archive", "clean.intact.archive.hint", "clean.why.unknown", "clean.uncleaned.hint", "compose.uncleaned.one", "compose.uncleaned.other", "clean.original", "clean.original.hint", "clean.mark", "clean.mark.not"]) {
       expect(fr[k as keyof typeof fr], k).toBeTruthy();
       expect(en[k as keyof typeof en], k).toBeTruthy();
     }
@@ -463,7 +474,7 @@ describe("type par le contenu, archives, exécutables (sniff)", () => {
       "a.tar.gz": "archives",
       "x.7z": "archives",
     });
-    expect(c.items.find((i) => i.ext === ".zip")!.clean).toBe("sans");
+    expect(c.items.find((i) => i.ext === ".zip")!.clean).toBe("intact");
   });
   it("exécutable déguisé en photo : classé Autres, à risque, contenu ≠ extension", async () => {
     const c = make({ probe: async (f) => new Uint8Array(await f.slice(0, HEAD_BYTES).arrayBuffer()) });

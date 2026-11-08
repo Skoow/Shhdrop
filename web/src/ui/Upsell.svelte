@@ -9,10 +9,12 @@
   type Props = { onpaid: (tier: "plus") => void };
   let { onpaid }: Props = $props();
   const lang = $derived(getLang());
+  const parts = $derived(t("paid.upsell", { size: "\u0000", days: t("paid.days", { n: Math.max(...PAID.plus.ttlDays) }) }).split("\u0000"));
 </script>
 
 <p class="upsell num" data-upsell>
-  <span>{t("paid.upsell", { size: formatBytes(PAID.plus.bytes, lang), days: t("paid.days", { n: Math.max(...PAID.plus.ttlDays) }) })}</span>
+  <!-- Le stockage maximal de l'offre ressort (retours UI4). -->
+  <span>{parts[0]}<b class="size">{formatBytes(PAID.plus.bytes, lang)}</b>{parts[1]}</span>
   <button type="button" class="more" aria-haspopup="dialog" onclick={() => onpaid("plus")}>{t("paid.upsell.more")}</button>
 </p>
 
@@ -26,12 +28,16 @@
     color: var(--text-2);
     font-size: var(--fs-small);
   }
+  .size {
+    color: var(--plus);
+    font-weight: 680;
+  }
   .more {
     min-height: 44px;
     padding: 0 2px;
     border: 0;
     background: none;
-    color: var(--accent);
+    color: var(--plus);
     font: inherit;
     font-weight: 560;
     text-decoration: underline;

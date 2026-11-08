@@ -1,7 +1,6 @@
 // Options de l'envoi (UI §9.3, spec §31, §34) : durée, ouvertures, mot de passe, droits du
 // destinataire. En mémoire seulement : le mot de passe n'est jamais rangé ni journalisé.
 // Le mot de passe est toujours généré (D41-15) : aucune saisie, donc aucun contrôle ici.
-import { ASSUMED_UP_BPS } from "./estimate";
 import { MAX_OPENS, OPENS_DEFAULT, PREVIEW_MAX, TTL_DEFAULT, TTL_HOURS, type TtlHours } from "../index";
 
 export type Rights = "voir" | "enregistrer" | "coffre";
@@ -79,20 +78,6 @@ export function sendRights(o: Pick<Options, "rights" | "ttlHours">): { rights: R
   return o.rights === "coffre" ? { rights: "coffre", keepTtlH: o.ttlHours } : { rights: o.rights };
 }
 
-// Débits de référence pour l'estimation (octets par seconde, envoi) : honnêtes et prudents.
-const FAST = 5_000_000; // fibre ou bon wifi, environ 40 Mbit/s en envoi
-const SLOW = ASSUMED_UP_BPS; // réseau mobile moyen, environ 8 Mbit/s en envoi (flows/estimate.ts)
-const MANIFEST_RESERVED = 65536; // un morceau : manifeste ≤ 65 532 octets + sa longueur (spec §29.3)
-const TAG_RATIO = 16 / 65536;
-
-/**
- * Estimation du temps d'envoi, avant l'envoi : contenu + manifeste réservé + étiquettes de
- * chiffrement. Le bourrage du palier n'est pas envoyé (rempli par le serveur, spec §29.3).
- */
-export function estimateUpload(contentBytes: number): { bytes: number; fastS: number; slowS: number } {
-  const bytes = Math.ceil((contentBytes + MANIFEST_RESERVED) * (1 + TAG_RATIO));
-  return { bytes, fastS: bytes / FAST, slowS: bytes / SLOW };
-}
 
 // SVG : jamais affiché (scan de sécurité du 7 novembre). PDF : pas de visionneuse tant que la
 // Task 22 (cadre isolé) n'est pas livrée ; le remettre ici avec elle.
