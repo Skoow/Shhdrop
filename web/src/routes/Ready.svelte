@@ -2,7 +2,7 @@
   // « Lien prêt » (UI §9.5) : affiché seulement après la résolution de createShare. L'avertissement
   // « plus jamais affichés » en tête ; deux cartes pour deux secrets (M18, S2) : le lien (Copier,
   // Partager, QR) et le mot de passe (Copier, Partager), chacun partagé à part ; lien de gestion
-  // replié ; Supprimer ce partage (secondaire) ; Vider le presse-papier ; Terminé (principal,
+  // replié ; Supprimer ce partage (secondaire) ; Terminé (principal,
   // collé en bas sur téléphone). Les valeurs ne viennent que des props (Copier lit l'état, jamais le
   // DOM) ; rien n'est écrit dans la console, le titre, l'URL ou un stockage.
   import { tick } from "svelte";
@@ -14,7 +14,6 @@
   import { NotFoundError, destroyShare } from "../index";
   import { announce } from "../ui/announce";
   import Button from "../ui/Button.svelte";
-  import { clearClipboard } from "../ui/clipboard";
   import CopyField from "../ui/CopyField.svelte";
   import { ChevronDown, ClipboardX, Eye, Lock, QrCode as QrIcon, Share2, Trash2 } from "../ui/Icon";
   import InlineConfirm from "../ui/InlineConfirm.svelte";
@@ -100,19 +99,6 @@
   // ---------- Mot de passe : partagé seul, jamais avec le lien ----------
   async function sharePw() {
     if (result) await sharePassword(result.password); // le mot de passe seul, jamais avec le lien
-  }
-
-  // Résultat du dernier « Vider » (audit F2) : dit à l'écran quand rien n'a été effacé.
-  let clipMsg = $state("");
-  const CLIP_MSG = {
-    cleared: "ready.cleared",
-    changed: "ready.clipChanged",
-    unverified: "ready.clipUnverified",
-    nothing: "ready.clipNothing",
-  } as const;
-  async function clearClip() {
-    clipMsg = t(CLIP_MSG[await clearClipboard()]);
-    announce(clipMsg);
   }
 
   // ---------- Terminé, Supprimer ----------
@@ -247,12 +233,6 @@
         {#if deleteError}<p class="del-err" role="alert">{deleteError}</p>{/if}
       </div>
 
-      <div class="clip">
-        <Button variant="ghost" dense onpress={clearClip}>{t("ready.clear")}</Button>
-        {#if clipMsg}<p class="hint clip-msg" data-testid="clip-msg">{clipMsg}</p>{/if}
-        <p class="hint">{t("ready.clear.note")}</p>
-      </div>
-
       <div class="done">
         <InlineConfirm
           label={t("ready.done")}
@@ -381,11 +361,6 @@
     font-size: var(--fs-small);
     color: var(--text-2);
   }
-  .clip {
-    display: grid;
-    justify-items: start;
-    gap: var(--sp-2);
-  }
   .never {
     max-width: none;
     margin: 0;
@@ -485,9 +460,10 @@
       width: 100%;
       justify-content: center;
     }
-    .clip,
+    /* Supprimer reste loin de la barre collée de Terminé (pas de geste raté). */
     .danger-zone {
       justify-items: stretch;
+      margin-block-end: var(--sp-6);
     }
     /* Terminé, l'action principale, sous le pouce ; la suppression reste dans le fil. */
     .done {

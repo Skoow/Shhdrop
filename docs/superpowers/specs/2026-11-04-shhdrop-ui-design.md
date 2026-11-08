@@ -644,7 +644,7 @@ Ordre (révisé le 7 novembre, scan UX « Lien prêt ») : avertissement en têt
 2. **Mot de passe** : `CopyField` en chasse fixe, **montré en entier** (`whole` : jamais tronqué, espaces gardées ; ce qu'on lit est ce qu'on copie) : « Envoyez-le par un **autre moyen** que le lien. Les deux dans la même messagerie, c'est comme ne pas en mettre. »
 3. **Gérer ce partage** : `<details>` **replié par défaut** ; dedans, le lien de gestion (`CopyField`) + « Gardez-le pour vous : il permet de suivre et de supprimer le partage. »
 4. **Supprimer ce partage** (`ghost` en `--danger`, icône `trash-2`, action secondaire, dans le fil de la page, **jamais collée en bas**) → `InlineConfirm` `danger` « Supprimer ce partage pour tout le monde ? Le lien ne mènera plus à rien. » → `destroyShare(manage, location.origin)` → dissolution du panneau → « Partage supprimé. » + **Nouvel envoi**. `NotFoundError` (déjà expiré ou détruit) : même résultat (« Partage supprimé. »). `Error("reseau")` : « Connexion impossible : le partage n'a pas été supprimé. » + Réessayer.
-5. **Vider le presse-papier** + « Ne vide pas l'historique du clavier ni le presse-papier partagé entre appareils. »
+5. ~~Vider le presse-papier~~ : **retiré** (8 novembre 2026). Le site refuse `clipboard-read=()` (spec §10) : la page ne peut pas vérifier que le presse-papier contient encore sa copie, et effacer sans vérifier écraserait ce que la personne y a mis depuis (audit F2). Rien n'est effacé ; on copie autre chose par-dessus.
 6. **Terminé** (`primary`, dernier bloc ; **collé en bas sur téléphone**, sous le pouce) → `InlineConfirm` « Vous ne pourrez plus les afficher. Terminer ? » → efface l'état (chaînes oubliées, références nulles) et revient au composeur vide.
 - **`beforeunload`** reste actif sur cet écran jusqu'à « Terminé » ou « Supprimer » : recharger ou fermer par erreur ferait perdre le lien et le mot de passe d'un partage qui existe (§18, A12).
 
@@ -1020,7 +1020,7 @@ Clés principales (extrait normatif ; le plan fixe la liste complète) :
 
 - Écriture seulement sur geste explicite ; repli : sélection du texte et « Copiez-le manuellement ».
 - Lecture seulement sur geste explicite (Ctrl/Cmd + V, bouton Coller), seulement sur l'accueil (§9.2.3).
-- « Vider le presse-papier » écrit une chaîne vide, avec la mention honnête de §9.5.
+- Pas de « Vider le presse-papier » (retiré, §9.5) : `clipboard-read=()` empêche toute vérification.
 
 ---
 

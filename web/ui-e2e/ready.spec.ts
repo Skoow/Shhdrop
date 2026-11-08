@@ -25,7 +25,7 @@ const valueOf = (page: Page, card: ReturnType<typeof linkCard>) => card.locator(
 test.describe("fr-FR", () => {
   test.use({ locale: "fr-FR", timezoneId: "Europe/Paris" });
 
-  test("deux cartes, copie depuis l'état, partage natif sans mot de passe, QR du lien seul, Vider, Terminé", async ({ page, shh, context, isMobile }) => {
+  test("deux cartes, copie depuis l'état, partage natif sans mot de passe, QR du lien seul, Terminé", async ({ page, shh, context, isMobile }) => {
     test.setTimeout(120_000);
     await page.addInitScript(() => {
       const shared: unknown[] = [];
@@ -36,12 +36,12 @@ test.describe("fr-FR", () => {
     await expect(readyHeading(page)).toBeFocused();
 
     // Ordre du DOM : avertissement → carte lien → carte mot de passe → gestion repliée →
-    // Supprimer → Vider → Terminé (scan UX, « Lien prêt » : hiérarchie).
+    // Supprimer → Terminé (scan UX, « Lien prêt » : hiérarchie).
     const order = await page.evaluate(() => {
-      const els = [...document.querySelectorAll(".ready p.never, .ready [role=group][aria-label], .ready details.manage, .ready .danger-zone, .ready .clip, .ready .done")];
+      const els = [...document.querySelectorAll(".ready p.never, .ready [role=group][aria-label], .ready details.manage, .ready .danger-zone, .ready .done")];
       return els.map((e) => e.getAttribute("aria-label") ?? e.className.split(" ").find((c) => c && !c.startsWith("svelte-") && c !== "card"));
     });
-    expect(order).toEqual(["never", "Lien", "Mot de passe", "manage", "danger-zone", "clip", "done"]);
+    expect(order).toEqual(["never", "Lien", "Mot de passe", "manage", "danger-zone", "done"]);
     await expect(page.locator(".ready p.never")).toHaveText("Ce lien et ce mot de passe ne seront plus jamais affichés.");
     // Terminé : action principale ; Supprimer : secondaire.
     await expect(page.getByRole("button", { name: "Terminé" })).toHaveClass(/\bprimary\b/);
@@ -89,11 +89,8 @@ test.describe("fr-FR", () => {
     await capture(page, "ready-qr");
     if (isMobile) await page.keyboard.press("Escape"); // téléphone : QR en feuille
 
-    // Vider le presse-papier (audit F2, F3) : la page ne peut pas lire le presse-papier
-    // (clipboard-read=()), elle ne vérifie donc pas qu'il contient encore le mot de passe :
-    // rien n'est effacé, et l'écran le dit.
-    await page.getByRole("button", { name: "Vider le presse-papier" }).click();
-    await expect(page.getByTestId("clip-msg")).toHaveText(/rien n'a été effacé/);
+    // Aucun « Vider le presse-papier » (clipboard-read=() : rien à vérifier) ; la copie reste.
+    await expect(page.getByRole("button", { name: "Vider le presse-papier" })).toHaveCount(0);
     expect(await clip(page)).toBe(password);
 
     // Garde de sortie jusqu'à Terminé ; puis composeur vide, plus aucun secret à l'écran.
