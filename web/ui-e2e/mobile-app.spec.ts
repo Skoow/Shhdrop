@@ -86,6 +86,10 @@ test.describe("téléphone façon app", () => {
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).overscrollBehaviorY)).toBe("none");
     expect(await noHScroll(page)).toBe(true);
     await expect(page.locator("footer.foot")).toBeHidden(); // liens dans Réglages
+    // Plus de sélecteur de langue en haut à droite : la langue se change dans Réglages.
+    const banner = page.getByRole("banner");
+    await expect(banner.getByRole("button", { name: /English|Français/ })).toHaveCount(0);
+    await expect(banner.getByRole("button", { name: "Réglages" })).toBeHidden(); // l'onglet suffit
     await shot(page, "accueil");
 
     // Comparatif : cartes (pas de tableau large), aucun nom de marque.
@@ -141,6 +145,8 @@ test.describe("téléphone façon app", () => {
     await page.keyboard.press("Escape");
     await addText(page, "Le code de la porte est 4471.");
     await expect(tabbar(page)).toHaveCount(0);
+    // Composeur (sans onglets) : rien en haut à droite, ni langue ni Réglages.
+    await expect(page.getByRole("banner").getByRole("button", { name: /Réglages|English|Français/ })).toBeHidden();
     const send = sendButton(page);
     expect(await inViewport(page, send)).toBe(true);
     // « + » (Ajouter) collé à gauche de l'envoi, même hauteur, sous le pouce.
@@ -228,6 +234,12 @@ test.describe("téléphone façon app", () => {
     await page.goto(s.link);
     await expect(pwField(page)).toBeVisible();
     await expect(tabbar(page)).toHaveCount(0);
+    // Sans onglets : la langue reste accessible par l'entrée Réglages de l'en-tête.
+    await page.getByRole("banner").getByRole("button", { name: "Réglages" }).click();
+    await page.getByRole("dialog", { name: "Réglages" }).getByRole("button", { name: "English" }).click();
+    await page.getByRole("dialog", { name: "Settings" }).getByRole("button", { name: "Français" }).click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Réglages" })).toBeHidden();
     expect(await smallFields(page)).toEqual([]);
     expect(await inViewport(page, unlockButton(page))).toBe(true);
     expect((await unlockButton(page).boundingBox())!.width).toBeGreaterThan(300); // pleine largeur
@@ -249,6 +261,21 @@ test.describe("ordinateur : rien ne change", () => {
     await page.goto(shh.origin + "/");
     await expect(tabbar(page)).toBeHidden();
     await expect(page.locator("footer.foot")).toBeVisible();
+    // En-tête : plus de sélecteur de langue ; une entrée Réglages discrète (engrenage) ouvre le même panneau.
+    const banner = page.getByRole("banner");
+    await expect(banner.getByRole("button", { name: /English|Français/ })).toHaveCount(0);
+    const gear = banner.getByRole("button", { name: "Réglages" });
+    await expect(gear).toBeVisible();
+    await gear.click();
+    const sheet = page.getByRole("dialog", { name: "Réglages" });
+    for (const n of ["Langue", "Informations", "À propos"]) await expect(sheet.getByRole("heading", { name: n })).toBeVisible();
+    await expect(sheet.getByRole("link", { name: "Sécurité" })).toBeVisible();
+    await expect(sheet.getByRole("link", { name: "Confidentialité" })).toBeVisible();
+    await sheet.getByRole("button", { name: "English" }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await page.getByRole("dialog", { name: "Settings" }).getByRole("button", { name: "Français" }).click();
+    await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
     const table = page.locator("[data-compare] table");
     await table.scrollIntoViewIfNeeded();
     await expect(table).toBeVisible();

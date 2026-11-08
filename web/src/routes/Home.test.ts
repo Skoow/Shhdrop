@@ -132,7 +132,7 @@ describe("Home (UI §9.1)", () => {
     }
   });
 
-  it("fenêtre de dépôt : Parcourir ouvre le sélecteur ; Photo et Vidéo passent par onaction (caméra maison ou repli) ; un clic sur le verre n'ouvre rien", () => {
+  it("fenêtre de dépôt : Parcourir ouvre le sélecteur ; « Photo ou vidéo » passe par onaction (caméra maison ou galerie) ; un clic sur le verre n'ouvre rien", () => {
     const onfiles = vi.fn();
     const onaction = vi.fn();
     const onadd = vi.fn();
@@ -145,10 +145,9 @@ describe("Home (UI §9.1)", () => {
     const click = vi.spyOn(files, "click").mockImplementation(() => undefined);
     const button = (name: string) => [...document.querySelectorAll("button")].find((b) => b.textContent!.trim() === name)!;
     button("Parcourir les fichiers").click();
-    button("Photo").click();
-    button("Vidéo").click();
+    button("Photo ou vidéo").click();
     expect(click).toHaveBeenCalledTimes(1);
-    expect(onaction.mock.calls).toEqual([["photo"], ["video"]]);
+    expect(onaction.mock.calls).toEqual([["media"]]);
     // Téléphone : un seul bouton « Ajouter » (feuille d'ajout, tenue par le composeur).
     (document.querySelector(".add-big") as HTMLButtonElement).click();
     expect(onadd).toHaveBeenCalledOnce();
@@ -175,7 +174,7 @@ describe("Home (UI §9.1)", () => {
     const group = document.querySelector('[role="group"]')!;
     expect(document.getElementById(group.getAttribute("aria-labelledby")!)!.textContent).toBe("Ou créez sur place");
     const names = [...group.querySelectorAll("button")].map((b) => b.textContent!.trim());
-    expect(names).toEqual(["Photo", "Vidéo", "Note"]);
+    expect(names).toEqual(["Photo ou vidéo", "Note"]);
   });
 
   it("actions : Vocal présent quand MediaRecorder existe ; rappel onaction", () => {
@@ -185,9 +184,9 @@ describe("Home (UI §9.1)", () => {
       show({ onaction });
       const group = document.querySelector('[role="group"]')!;
       const buttons = [...group.querySelectorAll("button")];
-      expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Photo", "Vidéo", "Vocal", "Note"]);
+      expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Photo ou vidéo", "Vocal", "Note"]);
+      buttons[1]!.click();
       buttons[2]!.click();
-      buttons[3]!.click();
       expect(onaction.mock.calls).toEqual([["vocal"], ["texte"]]);
     } finally {
       vi.unstubAllGlobals();

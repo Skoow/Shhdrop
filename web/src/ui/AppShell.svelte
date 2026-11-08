@@ -1,18 +1,20 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { followLink, href, navigate, router } from "../app/router.svelte";
-  import { getLang, setLang, t } from "../i18n/i18n.svelte";
+  import { t } from "../i18n/i18n.svelte";
   import Aurora from "./Aurora.svelte";
-  import { ChevronLeft, Languages } from "./Icon";
+  import GearIcon from "./GearIcon.svelte";
+  import { ChevronLeft } from "./Icon";
   import LiveRegion from "./LiveRegion.svelte";
   import Logo from "./Logo.svelte";
+  import SettingsSheet from "./SettingsSheet.svelte";
   import TabBar from "./TabBar.svelte";
 
   type Props = {
     children: Snippet;
     /** Emplacement du bandeau de démo (vide hors démo). */
     banner?: Snippet;
-    /** Vrai pendant un envoi : la bascule de langue est inerte (UI §10). */
+    /** Vrai pendant un envoi : la langue ne change pas (UI §10, panneau Réglages). */
     langLocked?: boolean;
     /** Barre d'onglets du téléphone (app/tabbar.ts) ; rendue sous 900 px seulement (CSS). */
     tabs?: boolean;
@@ -56,10 +58,12 @@
     main?.focus();
   }
 
-  const other = $derived(getLang() === "fr" ? "en" : "fr");
-  function toggleLang() {
-    if (!langLocked) setLang(other);
-  }
+  // Réglages (langue, Sécurité, Confidentialité, À propos) : entrée discrète de l'en-tête sur
+  // ordinateur et sur les écrans du téléphone sans barre d'onglets ; sinon l'onglet Réglages.
+  let settingsOpen = $state(false);
+  // Téléphone : l'onglet Réglages suffit ; l'en-tête ne garde l'entrée que chez le destinataire
+  // et sur la gestion (pas d'onglets, sinon plus aucun moyen de changer de langue).
+  const gearOnPhone = $derived(router.current.name === "open" || router.current.name === "manage");
 
   const here = (name: string) => (router.current.name === name ? "page" : undefined);
 
@@ -116,18 +120,9 @@
       <!-- Logo « Trame » (scripts/gen-logo.mjs) ; l'introduction ne se joue que sur l'accueil, une fois par chargement. -->
       <Logo />
     </a>
-    <button
-      type="button"
-      class="lang"
-      aria-label={t("shell.lang.switch")}
-      aria-disabled={langLocked}
-      aria-describedby={langLocked ? "lang-locked" : undefined}
-      onclick={toggleLang}
-    >
-      <Languages size={20} strokeWidth={1.75} aria-hidden="true" />
-      <span lang={other} class="lang-l">{t("shell.lang.label")}</span>
+    <button type="button" class={["gear", { phone: gearOnPhone }]} aria-label={t("settings.title")} title={t("settings.title")} aria-haspopup="dialog" aria-expanded={settingsOpen} onclick={() => (settingsOpen = true)}>
+      <GearIcon size={22} />
     </button>
-    {#if langLocked}<span id="lang-locked" class="sr">{t("shell.lang.locked")}</span>{/if}
   </div>
 </header>
 
@@ -145,6 +140,8 @@
 </footer>
 
 {#if tabs}<TabBar />{/if}
+
+<SettingsSheet bind:open={settingsOpen} locked={langLocked} />
 
 <LiveRegion />
 
@@ -259,36 +256,34 @@
     text-decoration: none;
     border-radius: var(--r-sm);
   }
-  .lang {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--sp-2);
-    min-height: 44px;
-    min-width: 44px;
-    padding-inline: 14px;
-    border: 1px solid var(--hair-2);
-    border-radius: 10px;
+  /* Réglages : discret, une icône seule (nom accessible « Réglages »), sans cadre. */
+  .gear {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    margin-inline-start: auto;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
     background: transparent;
-    color: var(--text);
-    font: inherit;
-    font-size: var(--fs-small);
-    font-weight: 560;
+    color: var(--text-2);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     transition:
+      color var(--dur-fast) var(--ease-out),
       background-color var(--dur-fast) var(--ease-out),
       transform var(--dur-press) var(--ease-out);
   }
-  .lang:active:not([aria-disabled="true"]) {
-    transform: scale(0.97);
+  .gear:active {
+    transform: scale(0.94);
   }
-  .lang[aria-disabled="true"] {
-    color: var(--text-disabled);
-    border-color: var(--line);
-    cursor: not-allowed;
+  .gear[aria-expanded="true"] {
+    color: var(--text);
   }
   @media (hover: hover) {
-    .lang:not([aria-disabled="true"]):hover {
+    .gear:hover {
+      color: var(--text);
       background: rgb(255 255 255 / 0.05);
     }
   }
@@ -340,14 +335,6 @@
     }
   }
 
-  .sr {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
 
   .back,
   .small {
@@ -360,7 +347,7 @@
       flex-wrap: nowrap;
       min-height: 52px;
     }
-    /* Retour à la place du logo ; la langue en icône seule (nom accessible inchangé). */
+    /* Retour à la place du logo. */
     .has-back .logo {
       display: none;
     }
@@ -412,21 +399,8 @@
       opacity: 0;
       pointer-events: none;
     }
-    .lang {
-      margin-inline-start: auto;
-      padding-inline: 0;
-      border-color: transparent;
-    }
-    .lang-l {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip-path: inset(50%);
-      white-space: nowrap;
-    }
-    /* Écrans racine : la langue est dans l'onglet Réglages. */
-    .top.tabs .lang {
+    /* Téléphone : rien en haut à droite, sauf chez le destinataire et sur la gestion. */
+    .gear:not(.phone) {
       display: none;
     }
     main {
@@ -438,10 +412,10 @@
     .small {
       transition: none;
     }
-    .lang {
+    .gear {
       transition: none;
     }
-    .lang:active:not([aria-disabled="true"]) {
+    .gear:active {
       transform: none;
     }
   }
@@ -449,8 +423,8 @@
     .top.scrolled {
       background: Canvas;
     }
-    .lang {
-      border-color: ButtonText;
+    .gear {
+      color: ButtonText;
     }
   }
 </style>

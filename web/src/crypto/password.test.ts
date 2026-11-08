@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { PASSWORD_ALPHABET, PASSWORD_FAMILIES, PASSWORD_LEN, generatePassword, isGeneratedPassword } from "./password";
 
-const FAMILIES = ["abcdefghijkmnpqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789", "!#$%+=?@&*-/:;()"];
+const FAMILIES = ["abcdefghkmnpqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789", "!?@#$%&*+-=/()"];
 
 // Nombre de compositions (n_min, n_maj, n_chiffres, n_symboles), chacune ≥ 1, et poids
 // multinomial : sert à calculer l'espérance exacte d'apparition de chaque symbole sous la
@@ -28,18 +28,29 @@ function exact(): { total: bigint; expectedPerSymbol: number[] } {
 }
 
 describe("PASSWORD_ALPHABET (spec §31)", () => {
-  it("72 symboles distincts, quatre familles, aucun caractère ambigu ; l'ancien alphabet (64) est inclus", () => {
-    expect(PASSWORD_ALPHABET).toBe("abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!#$%+=?@&*-/:;()");
-    expect(new Set(PASSWORD_ALPHABET).size).toBe(72);
-    for (const c of "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!#$%+=?@") expect(PASSWORD_ALPHABET).toContain(c);
+  it("68 symboles distincts, quatre familles ; ni ambigus (0 O o 1 l I i j) ni espace ni caractère inhabituel", () => {
+    expect(PASSWORD_ALPHABET).toBe("abcdefghkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!?@#$%&*+-=/()");
+    expect(new Set(PASSWORD_ALPHABET).size).toBe(68);
     expect(PASSWORD_FAMILIES).toEqual(FAMILIES);
     expect(FAMILIES.join("")).toBe(PASSWORD_ALPHABET);
-    for (const c of "0O1lIo|`'\" ") expect(PASSWORD_ALPHABET).not.toContain(c);
+    for (const c of "0Oo1lIij|`'\" :;.,_~^[]{}<>\\") expect(PASSWORD_ALPHABET).not.toContain(c);
+    // Caractères spéciaux : seulement ceux des claviers de symboles des téléphones.
+    for (const c of FAMILIES[3]!) expect("!?@#$%&*+-=/()").toContain(c);
   });
-  it("nombre exact de mots de passe : 2 245 913 002 660 331 520 (2^60,96) : au moins 60 bits d'entropie", () => {
+  it("entropie réelle (après la contrainte des 4 familles) : 1 282 818 246 439 403 520 mots de passe, 2^60,15 ≥ 60 bits", () => {
     const { total } = exact();
-    expect(total).toBe(2_245_913_002_660_331_520n);
-    expect(Math.log2(Number(total))).toBeCloseTo(60.96, 2);
+    expect(total).toBe(1_282_818_246_439_403_520n);
+    // Inclusion-exclusion, indépendante du calcul par compositions.
+    const sizes = FAMILIES.map((f) => BigInt(f.length));
+    let ie = 0n;
+    for (let m = 0; m < 16; m++) {
+      const picked = sizes.filter((_, i) => (m >> i) & 1);
+      const sign = (4 - picked.length) % 2 === 0 ? 1n : -1n;
+      ie += sign * picked.reduce((a, b) => a + b, 0n) ** 10n;
+    }
+    expect(ie).toBe(total);
+    // Tirage uniforme sur l'ensemble des mots de passe valides : entropie = log2(total).
+    expect(Math.log2(Number(total))).toBeCloseTo(60.15, 2);
     expect(Math.log2(Number(total))).toBeGreaterThanOrEqual(60);
   });
 });
@@ -57,7 +68,7 @@ describe("generatePassword", () => {
         counts.set(c, (counts.get(c) ?? 0) + 1);
       }
       for (const f of FAMILIES) expect([...p].some((c) => f.includes(c)), `${p} : famille ${f}`).toBe(true);
-      for (const c of "0O1lIo") expect(p).not.toContain(c);
+      for (const c of "0O1lIoij") expect(p).not.toContain(c);
     }
     const { expectedPerSymbol } = exact();
     FAMILIES.forEach((f, i) => {
@@ -70,11 +81,11 @@ describe("generatePassword", () => {
     });
   });
 
-  it("tirage par crypto.getRandomValues et rejet (octet ≥ 216 jeté, puis octet % 72 : aucun biais) ; recommence sans les 4 familles", () => {
-    // Premier tirage : 20 × « a » (une seule famille) → refusé ; second : 216 et 255 jetés,
-    // puis a A 2 ! (72 → a, 168 → A, 120 → 2, 128 → !) a A.
+  it("tirage par crypto.getRandomValues et rejet (octet ≥ 204 jeté, puis octet % 68 : aucun biais) ; recommence sans les 4 familles", () => {
+    // Premier tirage : 20 × « a » (une seule famille) → refusé ; second : 204 et 255 jetés,
+    // puis a A 2 ! (68 → a, 158 → A, 114 → 2, 122 → !) a A.
     const pad = (a: number[]) => [...a, ...new Array(20 - a.length).fill(0)];
-    const draws = [new Array(20).fill(0), pad([216, 0, 24, 255, 48, 56, 72, 168, 120, 128, 0, 24])];
+    const draws = [new Array(20).fill(0), pad([204, 0, 22, 255, 46, 54, 68, 158, 114, 122, 0, 22])];
     const spy = vi.spyOn(crypto, "getRandomValues").mockImplementation(<T extends ArrayBufferView | null>(a: T): T => {
       (a as unknown as Uint8Array).set(draws.shift()!);
       return a;
@@ -96,8 +107,8 @@ describe("isGeneratedPassword : seule la forme générée est acceptée (D41-15)
     expect(isGeneratedPassword([...first].join(""))).toBe(true);
     expect(isGeneratedPassword("aB3!cD5?eF")).toBe(true);
   });
-  it("refuse toute autre chaîne : longueur, alphabet (ambigus l, o, I, O, 0, 1), familles", () => {
-    for (const pw of ["", "aB3!cD5?e", "aB3!cD5?eFg", "cheval-agrafe-pile", "aB3!cD5?el", "aB3!cD5?eO", "aB3!cD5?e0", "aB3!cD5?e1", "aB3!cD5?e|", "abcdefghij", "aB3cD5eF7g", "aB3!cD5?e ", "aB3!cD5?é2"])
+  it("refuse toute autre chaîne à la création : longueur, alphabet (ambigus, anciens spéciaux), familles", () => {
+    for (const pw of ["", "aB3!cD5?e", "aB3!cD5?eFg", "cheval-agrafe-pile", "aB3!cD5?el", "aB3!cD5?eO", "aB3!cD5?e0", "aB3!cD5?e1", "aB3!cD5?ei", "aB3!cD5?ej", "aB3!cD5?e:", "aB3!cD5?e;", "aB3!cD5?e|", "abcdefghkm", "aB3cD5eF7g", "aB3!cD5?e ", "aB3!cD5?é2"])
       expect(isGeneratedPassword(pw), pw).toBe(false);
   });
 });

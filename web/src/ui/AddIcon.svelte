@@ -2,18 +2,14 @@
   // Icônes maison de la feuille « Ajouter » (24 × 24, trait 1,75 comme le jeu Lucide de l'UI §6).
   // Dessinées pour Shhdrop : chaque glyphe porte un petit détail « scellé » (point, verrou).
   import type { AddId } from "../flows/add-actions";
-  let { id, size = 24 }: { id: AddId; size?: number } = $props();
+  let { id, size = 24 }: { id: AddId | "gallery"; size?: number } = $props();
 </script>
 
 <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-  {#if id === "photo"}
+  {#if id === "media"}
     <path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.6l1.3-2h5.2l1.3 2h1.6A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5z" />
     <circle cx="12" cy="12.5" r="3.4" />
     <circle cx="17" cy="9" r="0.6" fill="currentColor" stroke="none" />
-  {:else if id === "video"}
-    <rect x="3" y="6.5" width="12.5" height="11" rx="2.5" />
-    <path d="m15.5 10.5 4.2-2.4a.8.8 0 0 1 1.3.7v6.4a.8.8 0 0 1-1.3.7l-4.2-2.4" />
-    <circle cx="7.2" cy="10.5" r="1.3" fill="currentColor" stroke="none" />
   {:else if id === "voice"}
     <path d="M4 12h1.5M8 8.5v7M11.5 5.5v13M15 9v6M18.5 11v2" />
     <circle cx="20.6" cy="12" r="0.6" fill="currentColor" stroke="none" />

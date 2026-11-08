@@ -32,7 +32,7 @@ export async function openFilePicker(page: Page) {
 }
 
 export async function addText(page: Page, text: string) {
-  if (!(await pickInAddSheet(page, "Écrire une note"))) {
+  if (!(await pickInAddSheet(page, "Note"))) {
     const inComposer = page.getByRole("group", { name: "Créer sur place" });
     if (await inComposer.isVisible()) await inComposer.getByRole("button", { name: "Note", exact: true }).click();
     else await page.getByRole("group", { name: "Ou créez sur place" }).getByRole("button", { name: "Note", exact: true }).click();

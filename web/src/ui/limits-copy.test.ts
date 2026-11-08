@@ -35,10 +35,10 @@ describe("limites : 200 éléments (toutes formules), 2 Go gratuits", () => {
 
   it("accueil : ligne de preuves, en français et en anglais", () => {
     show(Home);
-    expect(document.querySelector(".proof")!.textContent).toContain("200 éléments · 2 Go · 24 h au plus");
+    expect(document.querySelector(".proof")!.textContent).toContain("200 éléments · 2 Go · 24 h maximum");
     setLang("en");
     flushSync();
-    expect(document.querySelector(".proof")!.textContent).toContain("200 items · 2 GB · 24 h at most");
+    expect(document.querySelector(".proof")!.textContent).toContain("200 items · 2 GB · 24 h max");
   });
 
   it("jauge : « 340 Mo / 2 Go » et « 3 / 200 », barre du nombre (plus de crans)", () => {

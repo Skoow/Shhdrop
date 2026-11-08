@@ -1,15 +1,17 @@
-// Mot de passe généré par défaut (spec §31, 10 caractères depuis le 5 novembre) : tirés
-// uniformément dans un alphabet de 72 symboles sans caractères ambigus (ni 0 O o 1 l I |),
-// recommencé jusqu'à ce que les quatre familles soient présentes (au moins une minuscule, une
-// majuscule, un chiffre, un caractère spécial). 2 245 913 002 660 331 520 possibilités
-// (2^60,96 ; exigence du propriétaire du 7 novembre : au moins 60 bits). L'alphabet précédent
-// (64 symboles, 2^59,0) en est un sous-ensemble : les anciens mots de passe restent valides.
+// Mot de passe généré par défaut (spec §31, 10 caractères) : tirés uniformément dans un alphabet
+// de 68 symboles (décision du propriétaire du 8 novembre) : lettres et chiffres sans les ambigus
+// (ni 0 O o 1 l I i j), 14 caractères spéciaux courants sur un clavier de téléphone, aucun espace.
+// Le mot de passe entier est recommencé tant que les quatre familles ne sont pas toutes présentes
+// (au moins une minuscule, une majuscule, un chiffre, un spécial) : chaque mot de passe valide a
+// la même probabilité. 1 282 818 246 439 403 520 possibilités, soit 2^60,15 (exigence : au moins
+// 60 bits ; avec seulement 10 spéciaux, on tombait à 2^59,19). Ce contrôle de forme ne sert qu'à
+// la création ; à l'ouverture, tout mot de passe non vide est accepté (anciens alphabets compris).
 
 /** Mot de passe produit par generatePassword (10 caractères), seul accepté à la création (D41-15). */
 export type GeneratedPassword = string & { readonly __gen: unique symbol };
 
-/** Minuscules sans l ni o, majuscules sans I ni O, chiffres 2 à 9, 16 symboles (premier clavier de symboles des téléphones, sans « | »). */
-export const PASSWORD_FAMILIES = ["abcdefghijkmnpqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789", "!#$%+=?@&*-/:;()"] as const;
+/** Minuscules sans i j l o (22), majuscules sans I O (24), chiffres 2 à 9 (8), 14 spéciaux courants. */
+export const PASSWORD_FAMILIES = ["abcdefghkmnpqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789", "!?@#$%&*+-=/()"] as const;
 export const PASSWORD_ALPHABET = PASSWORD_FAMILIES.join("");
 export const PASSWORD_LEN = 10;
 
@@ -26,9 +28,9 @@ export function isGeneratedPassword(pw: string): pw is GeneratedPassword {
 
 export function generatePassword(): GeneratedPassword {
   const n = PASSWORD_ALPHABET.length;
-  if (n !== 72) throw new Error("alphabet invalide");
-  // Tirage par rejet : un octet uniforme n'est gardé que sous 216 = 3 × 72 ; octet % 72 est
-  // alors uniforme (aucun biais de modulo). Les octets ≥ 216 sont jetés.
+  if (n !== 68) throw new Error("alphabet invalide");
+  // Tirage par rejet : un octet uniforme n'est gardé que sous 204 = 3 × 68 ; octet % 68 est
+  // alors uniforme (aucun biais de modulo). Les octets ≥ 204 sont jetés.
   const limit = 256 - (256 % n);
   const buf = new Uint8Array(PASSWORD_LEN * 2);
   for (;;) {

@@ -27,7 +27,7 @@ async function browse(page: Page, files: string[] | { name: string; mimeType: st
   await (await openFilePicker(page)).setFiles(files as never);
 }
 async function addNote(page: Page, body: string, title = "") {
-  if (!(await pickInAddSheet(page, "Écrire une note"))) {
+  if (!(await pickInAddSheet(page, "Note"))) {
     const inComposer = page.getByRole("group", { name: "Créer sur place" });
     if (await inComposer.isVisible()) await inComposer.getByRole("button", { name: "Note", exact: true }).click();
     else await page.getByRole("group", { name: "Ou créez sur place" }).getByRole("button", { name: "Note", exact: true }).click();
@@ -120,11 +120,17 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("button", { name: "Nettoyer tous les fichiers" })).toHaveCount(0);
     await expect(page.locator(".badge.warn").filter({ hasText: "Non nettoyé" }).first()).toBeVisible();
     // Listes compactes (décision du 7 novembre) : aucune vignette, une icône de format par ligne,
-    // type, taille, durée et temps d'envoi estimé.
+    // type, taille, durée ; plus d'estimation par fichier ni par catégorie (décision du 8 novembre).
     await expect(page.locator("[data-row] img")).toHaveCount(0);
     await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator("svg.fi")).toHaveAttribute("data-format", "JPG");
     await expect(rows(page).filter({ hasText: "archive.zip" }).locator("svg.fi")).toHaveAttribute("data-format", "ZIP");
-    await expect(rows(page).filter({ hasText: "contrat.pdf" })).toContainText(/Document PDF.*octets.*env\.\s/);
+    await expect(rows(page).filter({ hasText: "contrat.pdf" })).toContainText(/Document PDF.*octets/);
+    await expect(page.locator("[data-row], .group .meta").filter({ hasText: /env\.\s/ })).toHaveCount(0);
+    // « Tout retirer » : un vrai bouton secondaire avec icône, dans l'en-tête de la liste, au-dessus des tailles.
+    const clear = page.getByRole("button", { name: "Tout retirer" });
+    await expect(clear).toHaveClass(/secondary/);
+    await expect(clear.locator("svg")).toHaveCount(1);
+    expect((await clear.boundingBox())!.y).toBeLessThan((await page.locator(".cap").boundingBox())!.y);
     await expect(rows(page).filter({ hasText: "anniversaire-lou.webm" })).toContainText("1:12");
     await expect(page.locator(".group .meta").first()).toContainText(/^1 · /);
     expect(await noHScroll(page)).toBe(true);
@@ -141,7 +147,7 @@ test.describe("fr-FR", () => {
       // Ordinateur : une seule présentation (ni grille ni tableau) ; « Créer sur place » sans Photo ni Vidéo.
       await expect(page.locator(".groups .grid, .groups table, .groups .tile")).toHaveCount(0);
       // Même liste d'actions que la feuille du téléphone ; la zone de dépôt tient lieu de « Fichiers ».
-      await expect(page.getByRole("group", { name: "Créer sur place" }).getByRole("button")).toHaveText(["Photo", "Vidéo", "Vocal", "Note"]);
+      await expect(page.getByRole("group", { name: "Créer sur place" }).getByRole("button")).toHaveText(["Photo ou vidéo", "Vocal", "Note"]);
       await expect(page.getByRole("button", { name: /^Déposez des fichiers n'importe où sur la page/ })).toBeVisible();
       // Exigence du propriétaire : tout tient dans l'écran, sans défilement de page ; le bouton
       // d'envoi est entièrement visible (1440 × 900 puis 1920 × 1080).
@@ -262,7 +268,7 @@ test.describe("fr-FR", () => {
   test("limites gratuites en clair ; choix payants verrouillés (badge Plus) → feuille honnête « Bientôt disponible » (D41-16)", async ({ page, shh, isMobile }) => {
     await open(page, shh.origin);
     await browse(page, [f("contrat.pdf")]);
-    await expect(page.locator("[data-free]")).toHaveText("Gratuit\u202f: 2\u202fGo · 24\u202fh max");
+    await expect(page.locator("[data-free]")).toHaveText("Gratuit\u202f: 2\u202fGo · 24\u202fh maximum");
     const opts = await options(page, isMobile);
     const locked = opts.locator("[data-locked] button, button[data-locked]");
     await expect(locked).toHaveCount(5);
@@ -451,7 +457,7 @@ test.describe("fr-FR", () => {
     await expect(send(page)).toBeEnabled();
     await browse(page, [note(200)]);
     await expect(rows(page)).toHaveCount(200);
-    await expect(page.locator(".cnote")).toContainText("1 élément n'a pas été ajouté : 200 au plus.");
+    await expect(page.locator(".cnote")).toContainText("1 élément n'a pas été ajouté : 200 maximum.");
     await expect(page.locator(".cnote")).toContainText("n201.txt");
     await expect(page.locator(".cnote [data-upsell]")).toHaveCount(0); // le nombre n'est pas vendu
     await capture(page, "compose-limit-count");
@@ -511,7 +517,7 @@ test.describe("fr-FR", () => {
       await expect(dlg.getByLabel("Contenu")).toHaveAttribute(k, v);
     await dlg.getByLabel("Contenu").fill("x".repeat(10_001));
     await expect(dlg.getByRole("button", { name: "Enregistrer" })).toBeDisabled();
-    await expect(dlg.getByText("10 000 caractères au plus.")).toBeVisible();
+    await expect(dlg.getByText("10 000 caractères maximum.")).toBeVisible();
     await dlg.getByLabel("Titre").fill("Courses");
     await dlg.getByLabel("Contenu").fill("Pain\nLait");
     await dlg.getByRole("button", { name: "Enregistrer" }).click();
@@ -577,24 +583,24 @@ test.describe("fr-FR", () => {
     expect(await axe(page)).toEqual([]);
   });
 
-  test("ajout : feuille « Ajouter » en liste groupée (téléphone), rangée sobre sans doublon (ordinateur) ; plus de « Conversation » ici (onglet Salon)", async ({ page, shh, isMobile }) => {
+  test("ajout : feuille « Ajouter » en quatre lignes (téléphone), rangée sobre sans doublon (ordinateur) ; plus de « Conversation » ici (onglet Salon)", async ({ page, shh, isMobile }) => {
     await open(page, shh.origin);
     await browse(page, [f("contrat.pdf")]);
     await expect(page.getByRole("button", { name: /^Conversation/ })).toHaveCount(0);
     if (isMobile) {
       await page.getByRole("button", { name: "Ajouter", exact: true }).click();
       const sheet = page.getByRole("dialog", { name: "Ajouter" });
-      expect(await sheet.getByRole("heading", { level: 3 }).allTextContents()).toEqual(["Prendre ici", "Créer", "Depuis l'appareil"]);
       const labels = await sheet.locator("[data-add] .lb").allTextContents();
-      expect(labels).toEqual(["Prendre une photo", "Filmer une vidéo", "Enregistrer un vocal", "Écrire une note", "Photos et vidéos", "Fichiers"]);
+      expect(labels).toEqual(["Photo ou vidéo", "Vocal", "Note", "Fichiers"]);
+      await expect(sheet.locator("[data-add=voice]")).toContainText("Micro seulement, 30\u202fmin\u202fmaximum");
       for (const b of await sheet.locator("[data-add]").all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(56);
       await capture(page, "add-sheet");
-      // « Photos et vidéos » : la galerie (sans capture) ; « Fichiers » : tout type.
+      // « Fichiers » : tout type, plusieurs.
       const chooser = page.waitForEvent("filechooser");
-      await sheet.getByRole("button", { name: /^Photos et vidéos/ }).click();
-      const el = (await chooser).element();
-      expect(await el.getAttribute("accept")).toBe("image/*,video/*");
-      expect(await el.getAttribute("capture")).toBeNull();
+      await sheet.getByRole("button", { name: /^Fichiers/ }).click();
+      const fc = await chooser;
+      expect(await fc.element().getAttribute("accept")).toBeNull();
+      expect(fc.isMultiple()).toBe(true);
     } else {
       await expect(page.getByRole("button", { name: "Ajouter", exact: true })).toHaveCount(0);
       await expect(page.locator(".dropzone")).toBeVisible();

@@ -4,12 +4,11 @@
   // Visibilité décidée par app/tabbar.ts ; masquée sur ordinateur par la CSS seule.
   import { currentTab, TABS, type TabId } from "../app/tabbar";
   import { followLink, href, router } from "../app/router.svelte";
-  import { getLang, setLang, t, type Key } from "../i18n/i18n.svelte";
+  import { t, type Key } from "../i18n/i18n.svelte";
   import { announce } from "./announce";
-  import { ArrowRight, MessagesSquare, Send, SlidersHorizontal, Clock } from "./Icon";
-  import Sheet from "./Sheet.svelte";
+  import { MessagesSquare, Send, SlidersHorizontal, Clock } from "./Icon";
+  import SettingsSheet from "./SettingsSheet.svelte";
 
-  const CODE_URL = "https://github.com/Skoow/Shhdrop";
   const ICONS = { send: Send, shares: Clock, chat: MessagesSquare, settings: SlidersHorizontal } as const;
 
   let settings = $state(false);
@@ -48,27 +47,7 @@
   </ul>
 </nav>
 
-<Sheet bind:open={settings} title={t("settings.title")}>
-  <div class="set">
-    <section aria-labelledby="set-lang">
-      <h3 id="set-lang">{t("settings.lang")}</h3>
-      <div class="langs">
-        <button type="button" class="row" lang="fr" aria-pressed={getLang() === "fr"} onclick={() => setLang("fr")}>Français</button>
-        <button type="button" class="row" lang="en" aria-pressed={getLang() === "en"} onclick={() => setLang("en")}>English</button>
-      </div>
-    </section>
-    <section aria-labelledby="set-info">
-      <h3 id="set-info">{t("settings.info")}</h3>
-      <a class="row link" href={href("/securite")} onclick={(e) => go(e, "/securite")}>{t("shell.security")}<ArrowRight size={18} strokeWidth={1.8} aria-hidden="true" /></a>
-      <a class="row link" href={href("/confidentialite")} onclick={(e) => go(e, "/confidentialite")}>{t("shell.privacy")}<ArrowRight size={18} strokeWidth={1.8} aria-hidden="true" /></a>
-    </section>
-    <section aria-labelledby="set-about">
-      <h3 id="set-about">{t("settings.about")}</h3>
-      <p class="about">{t("settings.about.body")}</p>
-      <a class="row link" href={CODE_URL} rel="noopener noreferrer" target="_blank">{t("settings.code")}<ArrowRight size={18} strokeWidth={1.8} aria-hidden="true" /></a>
-    </section>
-  </div>
-</Sheet>
+<SettingsSheet bind:open={settings} />
 
 <style>
   .tabbar {
@@ -170,57 +149,6 @@
     box-shadow: 0 0 0 2px var(--bg);
   }
 
-  .set {
-    display: grid;
-    gap: var(--sp-5);
-  }
-  section {
-    display: grid;
-    gap: var(--sp-2);
-  }
-  h3 {
-    font-size: var(--fs-small);
-    color: var(--text-2);
-    font-weight: 600;
-  }
-  .langs {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--sp-2);
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--sp-3);
-    min-height: 52px;
-    padding: 0 var(--sp-4);
-    border: 0;
-    border-radius: 12px;
-    background: rgb(255 255 255 / 0.05);
-    box-shadow: inset 0 0 0 1px var(--hair-2);
-    color: var(--text);
-    font: inherit;
-    font-weight: 560;
-    text-decoration: none;
-    cursor: pointer;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .langs .row {
-    justify-content: center;
-  }
-  .row:active {
-    background: rgb(255 255 255 / 0.1);
-  }
-  .row[aria-pressed="true"] {
-    background: var(--accent-tint);
-    box-shadow: inset 0 0 0 2px var(--accent);
-  }
-  .about {
-    margin: 0;
-    color: var(--text-2);
-  }
   @media (prefers-reduced-motion: reduce) {
     .tab {
       transition: none;

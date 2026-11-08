@@ -1,13 +1,19 @@
 <script lang="ts">
-  // Caméra et micro dans NOTRE interface (spec §35.3, Q-REC1 acceptée) : la photo ou la vidéo ne
-  // passe jamais par la galerie du téléphone. Plein écran sur téléphone. Photo : <canvas> → JPEG
-  // (aucune métadonnée par construction) ; vidéo et vocal : MediaRecorder, minuteur visible,
-  // arrêt, aperçu, Reprendre / Utiliser. Tout reste en mémoire ; les pistes sont arrêtées à la
-  // sortie, au passage en arrière-plan et quand la page se ferme. Refus ou API absente : message
-  // clair et repli sur l'appareil photo du système (<input capture>, géré par le parent).
-  import { t } from "../i18n/i18n.svelte";
+  // Caméra et micro dans NOTRE interface (spec §35.3, Q-REC1 acceptée), comme une app photo :
+  // bascule Photo / Vidéo, déclencheur, caméra avant / arrière, et en bas à gauche la vignette
+  // « Galerie » (sélecteur du système, géré par le parent). Plein écran sur téléphone. Photo :
+  // <canvas> → JPEG (aucune métadonnée par construction) ; vidéo et vocal : MediaRecorder,
+  // minuteur « 4:12 / 5:00 maximum », arrêt propre à la limite (limits.ts), puis nom du navigateur
+  // et dates effacés de l'en-tête (media/strip-capture.ts). Tout reste en mémoire ; les pistes sont
+  // arrêtées à la sortie, au passage en arrière-plan et quand la page se ferme. Refus ou API
+  // absente : message clair et repli sur l'appareil photo du système (<input capture>, parent).
+  import { getLang, t } from "../i18n/i18n.svelte";
+  import { formatDuration } from "../i18n/format";
+  import { CAPTURE_MAX_S, CAPTURE_TIER } from "../limits";
   import {
     CaptureFailure,
+    clock,
+    limitMs,
     openStream,
     pickMime,
     snapshot,
@@ -18,20 +24,27 @@
     type Facing,
     type Recording,
   } from "../media/capture";
+  import { stripCaptureMeta } from "../media/strip-capture";
+  import AddIcon from "./AddIcon.svelte";
   import { Mic, RefreshCw, X } from "./Icon";
 
   export type Captured = { mode: CaptureMode; blob: Blob; mime: string; ext: string };
   type Props = {
     open: boolean;
-    mode: CaptureMode;
+    /** « camera » : photo d'abord, bascule vers la vidéo si `canVideo` ; « voice » : micro seul. */
+    mode: "camera" | "voice";
+    canVideo?: boolean;
     ondone: (c: Captured) => void;
     /** Photo, vidéo : repli sur l'appareil photo du système (appel synchrone, même geste). */
     onfallback?: (mode: "photo" | "video") => void;
+    /** Vignette « Galerie » : ouvre le sélecteur photos et vidéos du système (même geste). */
+    ongallery?: () => void;
   };
-  let { open = $bindable(false), mode, ondone, onfallback }: Props = $props();
+  let { open = $bindable(false), mode, canVideo = false, ondone, onfallback, ongallery }: Props = $props();
 
   type Phase = "starting" | "live" | "recording" | "review" | "error";
   let phase = $state<Phase>("starting");
+  let kind = $state<CaptureMode>("photo");
   let error = $state<CaptureError | null>(null);
   let facing = $state<Facing>("environment");
   let elapsed = $state(0);
@@ -48,10 +61,12 @@
   let tick: ReturnType<typeof setInterval> | undefined;
   let gen = 0; // une ouverture de flux plus récente annule les précédentes
 
-  const cam = $derived(mode !== "voice");
+  const cam = $derived(kind !== "voice");
   // Repli : « l'appareil photo du téléphone » au doigt ; sinon le sélecteur de fichiers.
   const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
-  const title = $derived(t(`cap.title.${mode}`));
+  const title = $derived(t(`cap.title.${kind}`));
+  const maxMs = $derived(kind === "voice" ? limitMs("voice") : limitMs("video"));
+  const lang = $derived(getLang());
 
   async function start() {
     const my = ++gen;
@@ -60,7 +75,7 @@
     stopStream(stream);
     stream = null;
     try {
-      const s = await openStream(navigator.mediaDevices, mode, facing);
+      const s = await openStream(navigator.mediaDevices, kind, facing);
       if (my !== gen || !open) return stopStream(s);
       stream = s;
       phase = "live";
@@ -100,6 +115,7 @@
     if (open && !dlg.open) {
       dlg.showModal();
       facing = "environment";
+      kind = mode === "voice" ? "voice" : "photo";
       void start();
     } else if (!open && dlg.open) dlg.close();
   });
@@ -110,6 +126,13 @@
     open = false;
   }
 
+  /** Bascule Photo / Vidéo (la vidéo demande aussi le micro : nouveau flux). */
+  function setKind(k: "photo" | "video") {
+    if (k === kind || (phase !== "live" && phase !== "starting" && phase !== "error")) return;
+    kind = k;
+    void start();
+  }
+
   async function shoot() {
     if (!live || phase !== "live") return;
     flash = true;
@@ -118,7 +141,7 @@
       const blob = await snapshot(live);
       stopStream(stream); // l'aperçu suffit : la caméra s'éteint pendant la relecture
       stream = null;
-      result = { mode, blob, mime: "image/jpeg", ext: "jpg" };
+      result = { mode: "photo", blob, mime: "image/jpeg", ext: "jpg" };
       url = URL.createObjectURL(blob);
       phase = "review";
     } catch {
@@ -130,14 +153,16 @@
   function record() {
     if (!stream || phase !== "live") return;
     const sup = (m: string) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m);
-    const picked = pickMime(mode === "voice" ? "voice" : "video", sup);
+    const what = kind === "voice" ? "voice" : "video";
+    const picked = pickMime(what, sup);
     if (!picked) {
       error = "inconnu";
       phase = "error";
       return;
     }
     limitHit = false;
-    rec = startRecorder(stream, picked, mode === "voice" ? "voice" : "video", {
+    rec = startRecorder(stream, picked, what, {
+      maxMs,
       onlimit: () => {
         limitHit = true;
         void finish();
@@ -145,7 +170,7 @@
     });
     const r = rec;
     elapsed = 0;
-    tick = setInterval(() => (elapsed = r.elapsedMs()), 250);
+    tick = setInterval(() => (elapsed = Math.min(r.elapsedMs(), maxMs)), 250);
     phase = "recording";
     result = null;
     pickedNow = picked;
@@ -155,12 +180,17 @@
     if (!rec || !pickedNow) return;
     clearInterval(tick);
     const r = rec;
+    const my = gen;
     rec = null;
-    const blob = await r.stop();
+    elapsed = Math.min(r.elapsedMs(), maxMs);
+    const raw = await r.stop();
     stopStream(stream);
     stream = null;
     if (live) live.srcObject = null;
-    result = { mode, blob, mime: pickedNow.mime.split(";")[0]!, ext: pickedNow.ext };
+    // Nom du navigateur (WebM) et dates (MP4) effacés ; format inattendu : fichier gardé tel quel.
+    const { blob } = await stripCaptureMeta(raw);
+    if (my !== gen) return; // fermé entre-temps
+    result = { mode: kind, blob, mime: pickedNow.mime.split(";")[0]!, ext: pickedNow.ext };
     url = URL.createObjectURL(blob);
     phase = "review";
   }
@@ -183,10 +213,15 @@
     void start(); // start() coupe l'ancienne piste avant d'ouvrir la nouvelle
   }
   function fallback() {
-    if (mode === "voice") return;
-    const m = mode;
+    if (kind === "voice") return;
+    const m = kind;
     dlg?.close();
     onfallback?.(m);
+  }
+  function gallery() {
+    teardown(); // caméra éteinte tout de suite (l'événement close arrive plus tard), même geste
+    dlg?.close();
+    ongallery?.();
   }
 
   // Arrière-plan : on garde ce qui est enregistré, mais caméra et micro s'éteignent.
@@ -203,20 +238,21 @@
     } else if (phase === "starting") void start();
   }
 
-  const mmss = (ms: number) => {
-    const s = Math.floor(ms / 1000);
-    return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-  };
   const errText = $derived(
     error === "refuse" ? t(cam ? "cap.err.refuse.cam" : "cap.err.refuse.mic") : error === "absent" ? t("cap.err.absent") : error === "occupe" ? t("cap.err.occupe") : t("cap.err.misc"),
   );
-  const canFlip = $derived(cam && (phase === "live" || phase === "starting"));
+  const ready = $derived(phase === "live" || phase === "starting");
+  const canFlip = $derived(cam && ready);
+  const showModes = $derived(mode === "camera" && canVideo && (ready || phase === "error"));
+  const upsell = $derived(
+    CAPTURE_TIER === "free" && kind !== "photo" ? t("cap.upsell", { max: formatDuration(CAPTURE_MAX_S.plus[kind === "voice" ? "voice" : "video"], lang) }) : "",
+  );
 </script>
 
 <svelte:document onvisibilitychange={onvisibility} />
 <svelte:window onpagehide={teardown} />
 
-<dialog bind:this={dlg} class={["cam", { voice: !cam }]} aria-labelledby="cap-title" onclose={closed} data-capture={mode}>
+<dialog bind:this={dlg} class={["cam", { voice: !cam }]} aria-labelledby="cap-title" onclose={closed} data-capture={kind}>
   {#if open}
     <div class="stage">
       {#if cam}
@@ -231,9 +267,9 @@
         ></video>
       {/if}
       {#if phase === "review" && url}
-        {#if mode === "photo"}
+        {#if kind === "photo"}
           <img class="still" src={url} alt={t("cap.preview.photo")} />
-        {:else if mode === "video"}
+        {:else if kind === "video"}
           <!-- svelte-ignore a11y_media_has_caption -->
           <video class="still" src={url} controls playsinline></video>
         {/if}
@@ -247,7 +283,7 @@
         <div class="err" role="alert">
           <p>{errText}</p>
           <div class="err-act">
-            {#if mode !== "voice" && onfallback}<button type="button" class="pill solid" onclick={fallback}>{t(mode === "photo" ? (touch ? "cap.fallback.photo" : "cap.fallback.photo.pick") : touch ? "cap.fallback.video" : "cap.fallback.video.pick")}</button>{/if}
+            {#if kind !== "voice" && onfallback}<button type="button" class="pill solid" onclick={fallback}>{t(kind === "photo" ? (touch ? "cap.fallback.photo" : "cap.fallback.photo.pick") : touch ? "cap.fallback.video" : "cap.fallback.video.pick")}</button>{/if}
             <button type="button" class="pill" onclick={() => void start()}>{t("cap.retry")}</button>
           </div>
         </div>
@@ -257,30 +293,52 @@
 
     <div class="top">
       <button type="button" class="round" aria-label={t("common.close")} onclick={() => dlg?.close()}><X size={22} strokeWidth={2} /></button>
-      <h2 id="cap-title" class={{ hide: phase === "recording" }}>{title}</h2>
-      {#if phase === "recording" || (phase === "review" && mode !== "photo")}
-        <p class="timer num" class:rec={phase === "recording"}><span class="dot" aria-hidden="true"></span><span class="sr-only">{t("cap.recording")} </span>{mmss(elapsed)}</p>
+      <h2 id="cap-title" class={{ hide: phase === "recording" || (phase === "review" && kind !== "photo"), "sr-only": cam }}>{title}</h2>
+      {#if phase === "recording"}
+        <p class="timer num rec"><span class="dot" aria-hidden="true"></span><span class="sr-only">{t("cap.recording")} </span>{t("cap.timer", { elapsed: clock(elapsed), max: clock(maxMs) })}</p>
+      {:else if phase === "review" && kind !== "photo"}
+        <p class="timer num"><span class="dot" aria-hidden="true"></span>{clock(elapsed)}</p>
       {/if}
-      {#if canFlip}
-        <button type="button" class="round" aria-label={t("cap.flip")} onclick={flip}><RefreshCw size={20} strokeWidth={2} /></button>
-      {:else}
-        <span class="round ghost" aria-hidden="true"></span>
-      {/if}
+      <span class="round ghost" aria-hidden="true"></span>
     </div>
 
     <div class="bottom">
-      {#if limitHit}<p class="note warn" role="status">{t("cap.limit")}</p>{/if}
-      <p class="note">{t(mode === "photo" ? "cap.note.photo" : "cap.note.media")}</p>
-      <div class="ctl">
+      {#if limitHit}
+        <p class="note warn" role="status">{t("cap.limit")}{#if upsell}<span class="up">{upsell}</span>{/if}</p>
+      {/if}
+      <p class="note">{t(cam ? "cap.note.camera" : "cap.note.voice")}</p>
+      {#if showModes}
+        <div class="modes" role="group" aria-label={t("cap.mode")}>
+          <button type="button" class="mode" aria-pressed={kind === "photo"} onclick={() => setKind("photo")}>{t("cap.mode.photo")}</button>
+          <button type="button" class="mode" aria-pressed={kind === "video"} onclick={() => setKind("video")}>{t("cap.mode.video")}</button>
+        </div>
+      {/if}
+      <div class={["ctl", { three: cam && phase !== "review" }]}>
         {#if phase === "review"}
           <button type="button" class="pill" onclick={retake}>{t("cap.retake")}</button>
-          <button type="button" class="pill solid" onclick={use}>{t(`cap.use.${mode}`)}</button>
-        {:else if phase === "recording"}
-          <button type="button" class="shutter stop" aria-label={t("cap.rec.stop")} onclick={() => void finish()}><span></span></button>
-        {:else if mode === "photo"}
-          <button type="button" class="shutter" aria-label={t("cap.shoot")} disabled={phase !== "live"} onclick={() => void shoot()}><span></span></button>
+          <button type="button" class="pill solid" onclick={use}>{t(`cap.use.${kind}`)}</button>
         {:else}
-          <button type="button" class="shutter recb" aria-label={t("cap.rec.start")} disabled={phase !== "live"} onclick={record}><span></span></button>
+          {#if cam}
+            {#if ongallery && phase !== "recording"}
+              <button type="button" class="side gal" aria-label={t("cap.gallery")} onclick={gallery}><AddIcon id="gallery" size={24} /></button>
+            {:else}
+              <span class="side ghost" aria-hidden="true"></span>
+            {/if}
+          {/if}
+          {#if phase === "recording"}
+            <button type="button" class="shutter stop" aria-label={t("cap.rec.stop")} onclick={() => void finish()}><span></span></button>
+          {:else if kind === "photo"}
+            <button type="button" class="shutter" aria-label={t("cap.shoot")} disabled={phase !== "live"} onclick={() => void shoot()}><span></span></button>
+          {:else}
+            <button type="button" class="shutter recb" aria-label={t("cap.rec.start")} disabled={phase !== "live"} onclick={record}><span></span></button>
+          {/if}
+          {#if cam}
+            {#if canFlip}
+              <button type="button" class="side flip" aria-label={t("cap.flip")} onclick={flip}><RefreshCw size={22} strokeWidth={2} /></button>
+            {:else}
+              <span class="side ghost" aria-hidden="true"></span>
+            {/if}
+          {/if}
         {/if}
       </div>
     </div>
@@ -446,6 +504,14 @@
   .top h2.hide {
     visibility: hidden;
   }
+  .top h2.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
   .timer {
     grid-column: 2;
     grid-row: 1;
@@ -487,12 +553,76 @@
   .note.warn {
     color: var(--warn);
   }
+  .note .up {
+    display: block;
+    color: rgb(255 255 255 / 0.82);
+  }
+  /* Bascule Photo / Vidéo, comme l'app photo du téléphone : le mode choisi en jaune clair. */
+  .modes {
+    display: flex;
+    justify-content: center;
+    gap: var(--sp-1);
+  }
+  .mode {
+    min-height: 36px;
+    padding: 0 var(--sp-4);
+    border: 0;
+    border-radius: var(--r-pill);
+    background: transparent;
+    color: rgb(255 255 255 / 0.78);
+    font: inherit;
+    font-size: var(--fs-small);
+    font-weight: 640;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color 140ms var(--ease-out), background-color 140ms var(--ease-out);
+  }
+  .mode[aria-pressed="true"] {
+    background: rgb(0 0 0 / 0.45);
+    color: var(--warn);
+  }
   .ctl {
     display: flex;
     justify-content: center;
     align-items: center;
     gap: var(--sp-3);
     min-height: 76px;
+  }
+  /* Galerie à gauche, déclencheur au centre, caméra avant / arrière à droite. */
+  .ctl.three {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    justify-items: center;
+    max-width: 420px;
+    width: 100%;
+    margin-inline: auto;
+  }
+  .side {
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    padding: 0;
+    border: 0;
+    color: #fff;
+    cursor: pointer;
+    transition: transform 120ms var(--ease-out);
+  }
+  .side.ghost {
+    visibility: hidden;
+  }
+  .side.gal {
+    border-radius: 14px;
+    background: rgb(255 255 255 / 0.12);
+    box-shadow: inset 0 0 0 2px rgb(255 255 255 / 0.85);
+  }
+  .side.flip {
+    border-radius: 50%;
+    background: rgb(255 255 255 / 0.16);
+  }
+  .side:active {
+    transform: scale(0.94);
   }
   .round {
     display: grid;
@@ -576,6 +706,10 @@
     outline-offset: 3px;
   }
   @media (prefers-reduced-motion: reduce) {
+    .mode,
+    .side {
+      transition: none;
+    }
     .mic.on,
     .flash {
       animation: none;

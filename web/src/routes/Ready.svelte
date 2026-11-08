@@ -1,14 +1,13 @@
 <script lang="ts">
   // « Lien prêt » (UI §9.5) : affiché seulement après la résolution de createShare. L'avertissement
   // « plus jamais affichés » en tête ; deux cartes pour deux secrets (M18, S2) : le lien (Copier,
-  // Partager, QR) et le mot de passe (Copier, dictée), séparées par le rappel ; lien de gestion
+  // Partager, QR) et le mot de passe (Copier, Partager), chacun partagé à part ; lien de gestion
   // replié ; Supprimer ce partage (secondaire) ; Vider le presse-papier ; Terminé (principal,
   // collé en bas sur téléphone). Les valeurs ne viennent que des props (Copier lit l'état, jamais le
   // DOM) ; rien n'est écrit dans la console, le titre, l'URL ou un stockage.
   import { tick } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import { getDemo } from "../app/demo-hooks";
-  import { dictate } from "../flows/dictate";
   import { clockText, roundQuarter } from "../flows/ready";
   import { formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
@@ -17,7 +16,7 @@
   import Button from "../ui/Button.svelte";
   import { clearClipboard } from "../ui/clipboard";
   import CopyField from "../ui/CopyField.svelte";
-  import { AudioLines, ChevronDown, ClipboardX, Eye, Lock, QrCode as QrIcon, Share2, ShieldCheck, Trash2 } from "../ui/Icon";
+  import { ChevronDown, ClipboardX, Eye, Lock, QrCode as QrIcon, Share2, Trash2 } from "../ui/Icon";
   import InlineConfirm from "../ui/InlineConfirm.svelte";
   import Logo from "../ui/Logo.svelte";
   import QrCode from "../ui/QrCode.svelte";
@@ -98,9 +97,7 @@
     else qrShown = !qrShown;
   }
 
-  // ---------- Dictée du mot de passe (S5) ----------
-  let dictating = $state(false);
-  const chars = $derived(result ? dictate(result.password, lang) : []);
+  // ---------- Mot de passe : partagé seul, jamais avec le lien ----------
   async function sharePw() {
     if (result) await sharePassword(result.password); // le mot de passe seul, jamais avec le lien
   }
@@ -205,22 +202,16 @@
         {/if}
       </div>
 
-      <p class="two" data-fan><ShieldCheck size={18} strokeWidth={1.9} aria-hidden="true" />{t("ready.two")}</p>
-
       <div class="card" role="group" aria-label={t("ready.pw.title")} data-fan>
-        <CopyField label={t("ready.pw.title")} value={result.password} whole grouped />
-        <div class="row">
-          <Button variant="secondary" dense onpress={() => void (dictating = true)}>
-            {#snippet icon()}<AudioLines size={20} strokeWidth={1.75} />{/snippet}
-            {t("ready.dictate")}
-          </Button>
-          {#if canShare}
+        <CopyField label={t("ready.pw.title")} value={result.password} whole />
+        {#if canShare}
+          <div class="row">
             <Button variant="secondary" dense onpress={sharePw}>
               {#snippet icon()}<Share2 size={20} strokeWidth={1.75} />{/snippet}
               {t("ready.share.pw")}
             </Button>
-          {/if}
-        </div>
+          </div>
+        {/if}
       </div>
 
       <details class="card manage">
@@ -272,14 +263,6 @@
     </figure>
   </Sheet>
 
-  <Sheet bind:open={dictating} title={t("ready.dictate.title")}>
-    <!-- Épeler : tout le mot de passe d'un coup, un caractère par ligne, en alphabet radio. -->
-    <ol class="spell" translate="no">
-      {#each chars as c, i (i)}
-        <li><span class="ch" aria-hidden="true">{c.ch}</span><span class="w">{c.label}</span></li>
-      {/each}
-    </ol>
-  </Sheet>
 {/if}
 
 <style>
@@ -373,22 +356,6 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--sp-2);
-  }
-  .two {
-    margin: 0;
-    display: flex;
-    align-items: flex-start;
-    gap: var(--sp-2);
-    padding: var(--sp-3) var(--sp-4);
-    border-radius: var(--r-md);
-    background: var(--accent-tint);
-    color: var(--text);
-    font-weight: 560;
-  }
-  .two :global(svg) {
-    flex: none;
-    margin-top: 3px;
-    color: var(--accent);
   }
   .hint {
     margin: 0;
@@ -523,32 +490,6 @@
       padding: var(--sp-2) var(--sp-4) calc(var(--sp-2) + env(safe-area-inset-bottom));
       background: var(--bg);
     }
-  }
-  .spell {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    border-radius: var(--r-lg);
-    background: var(--surface-1);
-    box-shadow: inset 0 0 0 1px var(--hair);
-  }
-  .spell li {
-    display: grid;
-    grid-template-columns: 2.5rem minmax(0, 1fr);
-    align-items: center;
-    gap: var(--sp-3);
-    min-height: 52px;
-    padding: var(--sp-2) var(--sp-4);
-  }
-  .spell li + li {
-    border-block-start: 1px solid var(--hair);
-  }
-  .ch {
-    font-family: var(--font-mono);
-    font-size: var(--fs-mono-block);
-    font-weight: 600;
-    color: var(--accent);
-    text-align: center;
   }
   .gone {
     display: grid;

@@ -32,3 +32,17 @@ export const PAID: Readonly<Record<PaidTier, { bytes: number; opens: number; ttl
   plus: { bytes: 10 * 1024 ** 3, opens: 50, ttlDays: [2, 3, 7], month: 7, year: 70 },
   pro: { bytes: 50 * 1024 ** 3, opens: 100, ttlDays: [2, 3, 7], month: 20, year: 220 },
 };
+
+/**
+ * Durées maximales de capture dans l'interface (caméra et micro maison), en secondes, par
+ * formule (décision du propriétaire du 8 novembre). Plafonds techniques : l'enregistrement vit
+ * en mémoire jusqu'au chiffrement (vidéo à VIDEO_BPS : 5 min ≈ 94 Mo, 30 min ≈ 560 Mo).
+ */
+export type CaptureTier = "free" | PaidTier;
+export const CAPTURE_MAX_S: Readonly<Record<CaptureTier, { video: number; voice: number }>> = {
+  free: { video: 5 * 60, voice: 30 * 60 },
+  plus: { video: 15 * 60, voice: 2 * 3600 },
+  pro: { video: 30 * 60, voice: 2 * 3600 },
+};
+/** Formule en vigueur : aucune offre payante n'est active, seule la limite gratuite s'applique. */
+export const CAPTURE_TIER: CaptureTier = "free";

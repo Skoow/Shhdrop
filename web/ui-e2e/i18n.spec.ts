@@ -1,4 +1,16 @@
+import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
+
+/** La langue se change dans Réglages : entrée de l'en-tête (ordinateur, écrans sans onglets) ou onglet. */
+async function switchLang(page: Page, to: "English" | "Français") {
+  const gear = page.getByRole("banner").getByRole("button", { name: /^(Réglages|Settings)$/ });
+  if (await gear.isVisible()) await gear.click();
+  else await page.locator("[data-tabbar]").getByRole("button", { name: /^(Réglages|Settings)$/ }).click();
+  const dlg = page.getByRole("dialog", { name: /^(Réglages|Settings)$/ });
+  await dlg.getByRole("button", { name: to }).click();
+  await page.keyboard.press("Escape");
+  await expect(dlg).toBeHidden();
+}
 
 test.describe("français par défaut", () => {
   test.use({ locale: "fr-FR" });
@@ -9,7 +21,7 @@ test.describe("français par défaut", () => {
     await expect(page.getByRole("heading", { name: "Cette page n'existe pas." })).toBeVisible();
     await expect(page).toHaveTitle("Page introuvable · Shhdrop");
 
-    await page.getByRole("button", { name: "Passer l'interface en anglais" }).click();
+    await switchLang(page, "English");
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.getByRole("heading", { name: "This page does not exist." })).toBeVisible();
     await expect(page).toHaveTitle("Page not found · Shhdrop");
@@ -20,9 +32,9 @@ test.describe("français par défaut", () => {
     await expect(page).toHaveTitle("Envoyer · Shhdrop");
     await expect(page.getByRole("link", { name: "Sécurité", exact: true })).toBeVisible();
 
-    await page.getByRole("button", { name: "Passer l'interface en anglais" }).click();
+    await switchLang(page, "English");
     await expect(page).toHaveTitle("Send · Shhdrop");
-    await page.getByRole("button", { name: "Switch the interface to French" }).click();
+    await switchLang(page, "Français");
     await expect(page.locator("html")).toHaveAttribute("lang", "fr");
     await expect(page).toHaveTitle("Envoyer · Shhdrop");
 
@@ -38,7 +50,7 @@ test.describe("français par défaut", () => {
 
   test("pas de mémorisation : un rechargement revient à la langue du navigateur", async ({ page, shh }) => {
     await page.goto(shh.origin + "/inconnu");
-    await page.getByRole("button", { name: "Passer l'interface en anglais" }).click();
+    await switchLang(page, "English");
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("lang", "fr");
@@ -100,16 +112,19 @@ test("le verre de l'en-tête apparaît au défilement et pas avant", async ({ pa
   await expect(header).not.toHaveClass(/scrolled/);
 });
 
-test("bouton de langue : lang sur le texte visible seulement, pas sur le bouton (nom accessible)", async ({ page, shh }) => {
+test("Réglages, langue : chaque bouton porte sa langue (lang) et son état (aria-pressed)", async ({ page, shh }) => {
   await page.goto(shh.origin + "/inconnu");
-  const button = page.locator("button.lang");
-  await expect(button).not.toHaveAttribute("lang", /.*/);
-  await expect(button.locator("span[lang]")).toHaveAttribute("lang", /^(fr|en)$/);
+  await expect(page.getByRole("banner").getByRole("button", { name: /English|Français/ })).toHaveCount(0);
   const html = await page.locator("html").getAttribute("lang");
-  await expect(button.locator("span[lang]")).toHaveAttribute("lang", html === "fr" ? "en" : "fr");
-  await button.click();
-  const html2 = await page.locator("html").getAttribute("lang");
-  await expect(button.locator("span[lang]")).toHaveAttribute("lang", html2 === "fr" ? "en" : "fr");
+  await switchLang(page, html === "fr" ? "English" : "Français");
+  await expect(page.locator("html")).toHaveAttribute("lang", html === "fr" ? "en" : "fr");
+  const gear = page.getByRole("banner").getByRole("button", { name: /^(Réglages|Settings)$/ });
+  if (await gear.isVisible()) await gear.click();
+  else await page.locator("[data-tabbar]").getByRole("button", { name: /^(Réglages|Settings)$/ }).click();
+  const dlg = page.getByRole("dialog", { name: /^(Réglages|Settings)$/ });
+  await expect(dlg.getByRole("button", { name: "Français" })).toHaveAttribute("lang", "fr");
+  await expect(dlg.getByRole("button", { name: "English" })).toHaveAttribute("lang", "en");
+  await expect(dlg.getByRole("button", { name: html === "fr" ? "English" : "Français" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("le secret du # ne fuit ni dans le DOM, ni dans le titre, ni dans la console, ni dans une requête", async ({ page, shh }) => {
@@ -121,7 +136,7 @@ test("le secret du # ne fuit ni dans le DOM, ni dans le titre, ni dans la consol
   await page.goto(`${shh.origin}/s/AbCdEfGhIjKlMnOpQrStUv#${SECRET}`);
   await expect(page.locator("main#contenu")).toBeVisible();
   // Navigation interne et bascule de langue : le routeur travaille sous l'adresse complète.
-  await page.getByRole("button", { name: /English|Français/ }).click();
+  await switchLang(page, "English");
   await page.getByRole("link", { name: /Sécurité|Security/ }).click();
   await page.goBack();
   await page.evaluate(() => 0);

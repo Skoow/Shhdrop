@@ -35,6 +35,6 @@ describe("MAX_ITEMS à 7", () => {
     document.body.innerHTML = "";
     c = mount(DropOverlay as never, { target: document.body, props: { open: true } }) as Record<string, unknown>;
     flushSync();
-    expect(document.body.textContent).toContain("7 éléments et 2 Go au plus");
+    expect(document.body.textContent).toContain("7 éléments et 2 Go maximum");
   });
 });

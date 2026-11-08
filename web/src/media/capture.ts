@@ -2,6 +2,7 @@
 // <canvas> (aucune métadonnée EXIF ni position par construction), vidéo et vocal par
 // MediaRecorder. Tout reste en mémoire : rien n'est écrit sur l'appareil ni envoyé tel quel.
 // Les pistes sont arrêtées dès qu'on n'en a plus besoin (stopStream). Aucun appel réseau.
+import { CAPTURE_MAX_S, CAPTURE_TIER, type CaptureTier } from "../limits";
 
 export type CaptureMode = "photo" | "video" | "voice";
 export type Facing = "user" | "environment";
@@ -11,9 +12,22 @@ export type CaptureError = "indisponible" | "refuse" | "absent" | "occupe" | "bl
 type MediaLike = { getUserMedia?: (c: MediaStreamConstraints) => Promise<MediaStream> };
 type RecorderStatic = { isTypeSupported?: (m: string) => boolean };
 
-/** Durées maximales d'enregistrement (vidéo : 5 min à 2,5 Mbit/s ≈ 94 Mo ; vocal : 30 min). */
-export const LIMIT_MS = { video: 300_000, voice: 1_800_000 } as const;
+/** Débit vidéo plafonné : 5 min ≈ 94 Mo en mémoire. */
 export const VIDEO_BPS = 2_500_000;
+
+/** Durée maximale d'enregistrement en ms (limits.ts : formule en vigueur par défaut). */
+export function limitMs(mode: "video" | "voice", tier: CaptureTier = CAPTURE_TIER): number {
+  return CAPTURE_MAX_S[tier][mode] * 1000;
+}
+
+/** Minuteur : « 4:12 », « 30:00 », « 1:02:05 » (secondes entières, arrondi vers le bas). */
+export function clock(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
 
 const MIMES = {
   voice: [
@@ -119,7 +133,7 @@ export function startRecorder(
   stream: MediaStream,
   picked: Picked,
   mode: "video" | "voice",
-  o: { Recorder?: RecorderCtor; now?: () => number; onlimit?: () => void } = {},
+  o: { Recorder?: RecorderCtor; now?: () => number; onlimit?: () => void; maxMs?: number } = {},
 ): Recording {
   const Rec = o.Recorder ?? (globalThis.MediaRecorder as unknown as RecorderCtor);
   const now = o.now ?? (() => performance.now());
@@ -135,7 +149,7 @@ export function startRecorder(
   });
   const t0 = now();
   rec.start(1000);
-  const limit = setTimeout(() => o.onlimit?.(), LIMIT_MS[mode]);
+  const limit = setTimeout(() => o.onlimit?.(), o.maxMs ?? limitMs(mode));
   const halt = () => {
     clearTimeout(limit);
     if (rec.state !== "inactive") rec.stop();

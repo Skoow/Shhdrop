@@ -50,3 +50,11 @@ describe("limites : mêmes valeurs côté serveur (Go)", () => {
     expect(/StorageMaxBytes: (\d+),/.exec(go("config/config.go"))?.[1]).toBe(String(200 * 2 ** 30));
   });
 });
+
+describe("durées de capture (décision du 8 novembre)", () => {
+  it("gratuit 5 min / 30 min ; Plus 15 min / 2 h ; Pro 30 min / 2 h ; seule la limite gratuite s'applique", async () => {
+    const { CAPTURE_MAX_S, CAPTURE_TIER } = await import("./limits");
+    expect(CAPTURE_MAX_S).toEqual({ free: { video: 300, voice: 1800 }, plus: { video: 900, voice: 7200 }, pro: { video: 1800, voice: 7200 } });
+    expect(CAPTURE_TIER).toBe("free");
+  });
+});

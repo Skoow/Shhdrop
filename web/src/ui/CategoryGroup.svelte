@@ -8,8 +8,6 @@
   import type { Category } from "../flows/kinds";
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
-  import { ASSUMED_UP_BPS, transferSeconds } from "../flows/estimate";
-  import { formatDuration } from "../i18n/format";
   import ItemRow from "./ItemRow.svelte";
   import { Trash2 } from "./Icon";
   import { reducedMotion } from "./motion";
@@ -35,7 +33,6 @@
   let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, cannotOpen, danger }: Props = $props();
   // Une seule présentation partout (décision du propriétaire du 7 novembre) : lignes compactes,
   // icône de format, nom, type, taille, temps d'envoi estimé, actions.
-  const files = $derived(items.filter((i) => i.kind === "file").reduce((a, i) => a + i.size, 0));
 
   const KEY = {
     texte: "compose.cat.text",
@@ -128,7 +125,7 @@
   <div class="head">
     <h3 id="{uid}-h">{t(KEY[category])}</h3>
     <span class="meta num"
-      >{items.length} · {formatBytes(bytes, getLang())}{#if files > 0}<span title={t("compose.eta.title")}>{" · " + t("compose.eta", { time: formatDuration(transferSeconds(files, ASSUMED_UP_BPS), getLang()) })}</span>{/if}</span
+      >{items.length} · {formatBytes(bytes, getLang())}</span
     >
   </div>
   <ol bind:this={list} class="rows">

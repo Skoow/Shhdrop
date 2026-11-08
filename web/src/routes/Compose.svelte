@@ -10,7 +10,7 @@
   import type { PaidTier } from "../limits";
   import { blockKey, createComposer, type AddReport, type Source } from "../flows/compose.svelte";
   import { CLEANER_READY, cleanFile } from "../flows/clean";
-  import { addGroups, desktopActions, type AddId } from "../flows/add-actions";
+  import { addActions, desktopActions, type AddId } from "../flows/add-actions";
   import { captureSupport } from "../media/capture";
   import { fromPasteEvent } from "../flows/intake";
   import { createOptions, estimateUpload, sendRights, viewableInBrowser, viewOnlyBlockers, type Rights } from "../flows/options.svelte";
@@ -20,7 +20,7 @@
   import Button from "../ui/Button.svelte";
   import CapacityGauge from "../ui/CapacityGauge.svelte";
   import CategoryGroup from "../ui/CategoryGroup.svelte";
-  import { ArrowDown, ArrowUp, BrushCleaning, ChevronDown, Lock, Pencil, Plus, ShieldAlert, SlidersHorizontal, Upload, X } from "../ui/Icon";
+  import { ArrowDown, ArrowUp, BrushCleaning, ChevronDown, Lock, Pencil, Plus, ShieldAlert, SlidersHorizontal, Trash2, Upload, X } from "../ui/Icon";
   import AddIcon from "../ui/AddIcon.svelte";
   import AddSheet from "../ui/AddSheet.svelte";
   import CaptureScreen, { type Captured } from "../ui/CaptureScreen.svelte";
@@ -135,17 +135,16 @@
   }
 
   // ---------- Ajouts : feuille « Ajouter » (téléphone), zone de dépôt et rangée (ordinateur) ----------
-  // Photo, vidéo, vocal pris dans l'interface (CaptureScreen) ; sinon l'appareil photo du système.
+  // Photo, vidéo, vocal pris dans l'interface (CaptureScreen) ; sinon la galerie du système.
   const support = captureSupport({
     mediaDevices: typeof navigator === "undefined" ? undefined : navigator.mediaDevices,
     MediaRecorder: typeof MediaRecorder === "undefined" ? undefined : MediaRecorder,
   });
-  const touch = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
-  const groups = addGroups({ support, touch });
+  const sheetActions = addActions(support);
   const rowActions = desktopActions(support);
   let addOpen = $state(false);
   let capOpen = $state(false);
-  let capMode = $state<"photo" | "video" | "voice">("photo");
+  let capMode = $state<"camera" | "voice">("camera");
   let filesIn: HTMLInputElement | undefined = $state();
   let galleryIn: HTMLInputElement | undefined = $state();
   let photoIn: HTMLInputElement | undefined = $state();
@@ -156,19 +155,17 @@
     void addFiles(list, source);
   }
 
-  /** Une action d'ajout ; `live` faux : repli sur le sélecteur (appel synchrone, même geste). */
-  function addAct(id: AddId, live = groups.flatMap((g) => g.actions).find((a) => a.id === id)?.live ?? false) {
+  /** Une action d'ajout ; `live` faux : la galerie du système (appel synchrone, même geste). */
+  function addAct(id: AddId, live = sheetActions.find((a) => a.id === id)?.live ?? false) {
     if (id === "note") openEditor(null, "");
     else if (id === "files") filesIn?.click();
-    else if (id === "gallery") galleryIn?.click();
     else if (id === "voice" || live) {
-      capMode = id === "voice" ? "voice" : id;
+      capMode = id === "voice" ? "voice" : "camera";
       capOpen = true;
-    } else if (id === "photo") photoIn?.click();
-    else videoIn?.click();
+    } else galleryIn?.click();
   }
   function act(a: Action) {
-    addAct(a === "texte" ? "note" : a === "vocal" ? "voice" : a);
+    addAct(a === "texte" ? "note" : a === "vocal" ? "voice" : "media");
   }
   function captured(c: Captured) {
     const name = `capture.${c.ext}`;
@@ -461,7 +458,7 @@
       {#each rowActions as a (a.id)}
         <button type="button" class="mk" data-add={a.id} onclick={() => addAct(a.id, a.live)}>
           <AddIcon id={a.id} size={18} />
-          <span>{t(`compose.row.${a.id as "photo" | "video" | "voice" | "note"}`)}</span>
+          <span>{t(`compose.row.${a.id as "media" | "voice" | "note"}`)}</span>
         </button>
       {/each}
     </div>
@@ -480,7 +477,12 @@
           </button>
           <span id="clean-legend" class="sr-only">{t("compose.meta.legend")}</span>
         {/if}
-        <button type="button" class="clear" onclick={clearAll}><X size={16} strokeWidth={2} aria-hidden="true" />{t("compose.clear")}</button>
+        <div class="clear">
+          <Button variant="secondary" dense onpress={clearAll}>
+            {#snippet icon()}<Trash2 size={18} strokeWidth={1.8} />{/snippet}
+            {t("compose.clear")}
+          </Button>
+        </div>
         <p class="free num" data-free>{freeText}</p>
         <div class="cap"><CapacityGauge bytes={composer.totalBytes} count={composer.count} head onpaid={showPaid} /></div>
       </div>
@@ -667,9 +669,16 @@
 
 <PaidSheet bind:open={paidOpen} tier={paidTier} />
 
-<AddSheet bind:open={addOpen} {groups} onpick={addAct} />
+<AddSheet bind:open={addOpen} actions={sheetActions} onpick={addAct} />
 
-<CaptureScreen bind:open={capOpen} mode={capMode} ondone={captured} onfallback={(m) => (m === "photo" ? photoIn : videoIn)?.click()} />
+<CaptureScreen
+  bind:open={capOpen}
+  mode={capMode}
+  canVideo={support.video}
+  ondone={captured}
+  onfallback={(m) => (m === "photo" ? photoIn : videoIn)?.click()}
+  ongallery={() => galleryIn?.click()}
+/>
 
 {#if toast}
   <div class="toast-slot" style:--lift="{filled ? barH : 0}px">
@@ -890,24 +899,7 @@
     outline: none;
   }
   .clear {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 44px;
-    padding: 0 12px;
-    border: 0;
-    border-radius: 10px;
-    background: transparent;
-    color: var(--text-2);
-    font: inherit;
-    font-size: var(--fs-small);
-    cursor: pointer;
-  }
-  @media (hover: hover) {
-    .clear:hover {
-      color: var(--text);
-      background: rgb(255 255 255 / 0.05);
-    }
+    display: flex;
   }
   .notes {
     list-style: none;

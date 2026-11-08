@@ -1,15 +1,18 @@
 <script lang="ts">
-  // Feuille « Ajouter » (téléphone) : une liste groupée façon app native, au lieu d'une rangée
-  // de boutons. Chaque ligne : icône maison, action, précision honnête. Rien n'est en double.
+  // Feuille « Ajouter » (téléphone) : une liste façon app native, quatre lignes : Photo ou vidéo
+  // (caméra intégrée, qui mène aussi à la galerie), Vocal, Note, Fichiers. Icône maison, action,
+  // précision honnête. Rien n'est en double.
   import { flushSync } from "svelte";
-  import type { AddGroup, AddId } from "../flows/add-actions";
-  import { t, type Key } from "../i18n/i18n.svelte";
+  import type { AddAction, AddId } from "../flows/add-actions";
+  import { getLang, t } from "../i18n/i18n.svelte";
+  import { formatDuration } from "../i18n/format";
+  import { CAPTURE_MAX_S, CAPTURE_TIER } from "../limits";
   import AddIcon from "./AddIcon.svelte";
   import { ChevronDown } from "./Icon";
   import Sheet from "./Sheet.svelte";
 
-  type Props = { open: boolean; groups: AddGroup[]; onpick: (id: AddId, live: boolean) => void };
-  let { open = $bindable(false), groups, onpick }: Props = $props();
+  type Props = { open: boolean; actions: AddAction[]; onpick: (id: AddId, live: boolean) => void };
+  let { open = $bindable(false), actions, onpick }: Props = $props();
 
   function pick(id: AddId, live: boolean) {
     // Fermeture synchrone (flushSync : le <dialog> modal se ferme tout de suite, la page n'est
@@ -17,50 +20,32 @@
     flushSync(() => (open = false));
     onpick(id, live);
   }
-  const sub = (id: AddId, live: boolean): Key => (id === "photo" || id === "video") && !live ? `add.${id}.sys` : `add.${id}.sub`;
+  const sub = (a: AddAction): string =>
+    a.id === "media"
+      ? t(a.live ? "add.media.sub" : "add.media.sys")
+      : a.id === "voice"
+        ? t("add.voice.sub", { max: formatDuration(CAPTURE_MAX_S[CAPTURE_TIER].voice, getLang()) })
+        : t(`add.${a.id}.sub`);
 </script>
 
 <Sheet bind:open title={t("add.title")}>
-  <div class="groups">
-    {#each groups as g (g.id)}
-      <section class="grp" aria-labelledby="add-g-{g.id}">
-        <h3 id="add-g-{g.id}">{t(`add.group.${g.id}`)}</h3>
-        <ul>
-          {#each g.actions as a (a.id)}
-            <li>
-              <button type="button" class={["row", a.id]} data-add={a.id} onclick={() => pick(a.id, a.live)}>
-                <span class="ic"><AddIcon id={a.id} /></span>
-                <span class="tx">
-                  <span class="lb">{t(`add.${a.id}`)}</span>
-                  <span class="sb">{t(sub(a.id, a.live))}</span>
-                </span>
-                <span class="chev" aria-hidden="true"><ChevronDown size={18} strokeWidth={1.9} /></span>
-              </button>
-            </li>
-          {/each}
-        </ul>
-        {#if g.id === "capture" && g.actions.some((a) => a.live)}<p class="foot">{t("add.capture.note")}</p>{/if}
-      </section>
+  <ul>
+    {#each actions as a (a.id)}
+      <li>
+        <button type="button" class={["row", a.id]} data-add={a.id} onclick={() => pick(a.id, a.live)}>
+          <span class="ic"><AddIcon id={a.id} /></span>
+          <span class="tx">
+            <span class="lb">{t(`add.${a.id}`)}</span>
+            <span class="sb">{sub(a)}</span>
+          </span>
+          <span class="chev" aria-hidden="true"><ChevronDown size={18} strokeWidth={1.9} /></span>
+        </button>
+      </li>
     {/each}
-  </div>
+  </ul>
 </Sheet>
 
 <style>
-  .groups {
-    display: grid;
-    gap: var(--sp-5);
-  }
-  .grp {
-    display: grid;
-    gap: var(--sp-2);
-  }
-  h3 {
-    margin: 0;
-    padding-inline: var(--sp-1);
-    color: var(--text-2);
-    font-size: var(--fs-small);
-    font-weight: 560;
-  }
   ul {
     list-style: none;
     margin: 0;
@@ -118,7 +103,6 @@
     color: var(--accent);
   }
   .row.note .ic,
-  .row.gallery .ic,
   .row.files .ic {
     background: var(--surface-3);
     color: var(--text);
@@ -140,12 +124,6 @@
     display: grid;
     color: var(--text-3);
     transform: rotate(-90deg);
-  }
-  .foot {
-    margin: 0;
-    padding-inline: var(--sp-1);
-    color: var(--text-3);
-    font-size: var(--fs-small);
   }
   @media (forced-colors: active) {
     .row {

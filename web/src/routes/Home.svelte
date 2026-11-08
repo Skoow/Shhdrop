@@ -5,7 +5,7 @@
   /** D'où viennent les fichiers remis à `onfiles` (composer.add, Task 10). */
   export type Source = "fichiers" | "photo" | "video" | "depot";
   /** Actions qui ouvrent une interface dans la page (Tasks 10 à 12). */
-  export type Action = "photo" | "video" | "vocal" | "texte";
+  export type Action = "media" | "vocal" | "texte";
 </script>
 
 <script lang="ts">
@@ -20,7 +20,7 @@
   import { magnet, tilt } from "../ui/attach";
   import DropOverlay from "../ui/DropOverlay.svelte";
   import Guilloche from "../ui/Guilloche.svelte";
-  import { Camera, ChevronDown, Lock, Mic, Paperclip, Plus, Timer, Type, UserX, Video } from "../ui/Icon";
+  import { Camera, ChevronDown, Lock, Mic, Paperclip, Plus, Timer, Type, UserX } from "../ui/Icon";
   import { reducedMotion } from "../ui/motion";
   import SealBand from "../ui/SealBand.svelte";
   import SealMark from "../ui/SealMark.svelte";
@@ -203,8 +203,7 @@
             <div class="make" role="group" aria-labelledby="make-title">
               <p class="make-t" id="make-title">{t("compose.add.make")}</p>
               <div class="tiles">
-                {@render tile(t("compose.add.photo"), Camera, () => act("photo"), "flash")}
-                {@render tile(t("compose.add.video"), Video, () => act("video"), "rec")}
+                {@render tile(t("compose.add.media"), Camera, () => act("media"), "flash")}
                 {#if canVoice}{@render tile(t("compose.add.voice"), Mic, () => act("vocal"), "bars")}{/if}
                 {@render tile(t("compose.add.text"), Type, () => act("texte"), "caret")}
               </div>

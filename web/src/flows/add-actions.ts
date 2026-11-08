@@ -1,31 +1,22 @@
 // Ce qu'on peut ajouter (composeur et accueil). Téléphone : une seule action « Ajouter » ouvre
-// une feuille en liste groupée ; ordinateur : la zone de dépôt (fichiers) et une rangée sobre.
-// `live` : capture dans l'interface (media/capture.ts) ; sinon repli sur l'appareil photo du
-// système (<input capture>). Le vocal n'a pas de repli : sans enregistreur, il n'est pas proposé.
+// une feuille : Photo ou vidéo, Vocal, Note, Fichiers. Ordinateur : la zone de dépôt (fichiers)
+// et une rangée sobre. « Photo ou vidéo » ouvre la caméra intégrée (media/capture.ts), qui donne
+// aussi accès à la galerie ; sans caméra dans la page (`live` faux), directement la galerie.
+// Le vocal n'a pas de repli : sans enregistreur, il n'est pas proposé.
 import type { CaptureMode } from "../media/capture";
 
-export type AddId = "photo" | "video" | "voice" | "note" | "gallery" | "files";
+export type AddId = "media" | "voice" | "note" | "files";
 export type AddAction = { id: AddId; live: boolean };
-export type AddGroup = { id: "capture" | "create" | "device"; actions: AddAction[] };
 
-function captureRow(support: Record<CaptureMode, boolean>): AddAction[] {
-  const row: AddAction[] = [
-    { id: "photo", live: support.photo },
-    { id: "video", live: support.video },
-  ];
-  if (support.voice) row.push({ id: "voice", live: true });
-  return row;
+const media = (support: Record<CaptureMode, boolean>): AddAction => ({ id: "media", live: support.photo });
+const voice = (support: Record<CaptureMode, boolean>): AddAction[] => (support.voice ? [{ id: "voice", live: true }] : []);
+
+/** Feuille « Ajouter » (téléphone). */
+export function addActions(support: Record<CaptureMode, boolean>): AddAction[] {
+  return [media(support), ...voice(support), { id: "note", live: false }, { id: "files", live: false }];
 }
 
-export function addGroups(o: { support: Record<CaptureMode, boolean>; touch: boolean }): AddGroup[] {
-  const device: AddAction[] = o.touch ? [{ id: "gallery", live: false }, { id: "files", live: false }] : [{ id: "files", live: false }];
-  return [
-    { id: "capture", actions: captureRow(o.support) },
-    { id: "create", actions: [{ id: "note", live: false }] },
-    { id: "device", actions: device },
-  ];
-}
-
+/** Rangée de l'ordinateur : la zone de dépôt tient lieu de « Fichiers ». */
 export function desktopActions(support: Record<CaptureMode, boolean>): AddAction[] {
-  return [...captureRow(support), { id: "note", live: false }];
+  return [media(support), ...voice(support), { id: "note", live: false }];
 }

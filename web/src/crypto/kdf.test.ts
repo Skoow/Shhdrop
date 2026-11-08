@@ -113,4 +113,8 @@ describe("mot de passe à la création et à l'ouverture (audit F9, spec §31)",
     expect(hex(await passwordKeyForCreate(g, salt))).toBe(hex(await passwordKey(g, salt, KDF_CREATE)));
     expect(KDF_CREATE).toEqual(KDF_MIN);
   }, T);
+  it("à l'ouverture, les mots de passe des alphabets précédents restent acceptés (i, j, « : », « ; », groupes)", async () => {
+    // Générés avant le 8 novembre : hors du nouvel alphabet, mais toujours valides à la saisie.
+    for (const old of ["ij:K7m;X2p", "ta-Gq3k6zp", "K7m4 · Xq2p · 9r"]) expect((await passwordKey(old, salt, KDF_MIN)).length, old).toBe(32);
+  }, T);
 });

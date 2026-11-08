@@ -13,8 +13,7 @@
   import { formatClock, mediaDuration } from "../media/duration";
   import { ArrowDown, ArrowUp, Ellipsis, Pencil, X } from "./Icon";
   import ItemNotes from "./ItemNotes.svelte";
-  import { transferSeconds, ASSUMED_UP_BPS } from "../flows/estimate";
-  import { formatBytes, formatDuration } from "../i18n/format";
+  import { formatBytes } from "../i18n/format";
   import FormatIcon from "./FormatIcon.svelte";
   import { formatOf, typeKey } from "./formats";
   import { firstLine } from "./itemView";
@@ -48,7 +47,6 @@
   const name = $derived(item.base + item.ext);
   const mid = $derived(midSplit(item.base));
   const format = $derived(formatOf({ kind: item.kind, ext: item.ext.slice(1).toLowerCase(), sniffed: item.sniffed ?? null }));
-  const eta = $derived(transferSeconds(item.size, ASSUMED_UP_BPS));
 
   let duration = $state<number | null>(null);
   $effect(() => {
@@ -190,7 +188,6 @@
         {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi><span class="sep" aria-hidden="true">·</span>{:else if item.kind === "file"}<span>{t(typeKey(format))}</span><span class="sep" aria-hidden="true">·</span>{/if}
         <span class="num">{formatBytes(item.size, getLang())}</span>
         {#if duration !== null}<span class="sep" aria-hidden="true">·</span><span class="num">{formatClock(duration)}</span>{/if}
-        {#if item.kind === "file"}<span class="sep" aria-hidden="true">·</span><span class="num" title={t("compose.eta.title")}>{t("compose.eta", { time: formatDuration(eta, getLang()) })}<span class="sr-only"> ({t("compose.eta.title")})</span></span>{/if}
         <ItemNotes {item} {cannotOpen} badgesOnly />
       </span>
       <ItemNotes {item} {cannotOpen} lines />

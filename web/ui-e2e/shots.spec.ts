@@ -55,23 +55,30 @@ test("audit : tous les écrans", async ({ page, shh, browser }) => {
   const cmp = page.locator("[data-compare]");
   await cmp.scrollIntoViewIfNeeded();
   await shot(page, "02-pourquoi");
-  if (PHONE) {
-    await page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Réglages" }).click();
-    await shot(page, "03-reglages");
-    await page.keyboard.press("Escape");
-  }
+  if (PHONE) await page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Réglages" }).click();
+  else await page.getByRole("banner").getByRole("button", { name: "Réglages" }).click();
+  await shot(page, "03-reglages");
+  await page.keyboard.press("Escape");
   await page.evaluate(() => scrollTo(0, 0));
   if (PHONE) {
     await page.getByRole("button", { name: /^Ajouter/ }).click();
     await shot(page, "03b-feuille-ajouter");
-    await page.getByRole("dialog", { name: "Ajouter" }).getByRole("button", { name: /^Prendre une photo/ }).click();
-  } else await page.getByRole("group", { name: "Ou créez sur place" }).getByRole("button", { name: "Photo", exact: true }).click();
+    await page.getByRole("dialog", { name: "Ajouter" }).getByRole("button", { name: /^Photo ou vidéo/ }).click();
+  } else await page.getByRole("group", { name: "Ou créez sur place" }).getByRole("button", { name: "Photo ou vidéo", exact: true }).click();
   const cam = page.getByRole("dialog", { name: "Prendre une photo" });
   await expect(cam.getByRole("button", { name: "Prendre la photo" })).toBeEnabled({ timeout: 15_000 });
   await page.waitForTimeout(800);
   await shot(page, "03c-camera");
   await cam.getByRole("button", { name: "Prendre la photo" }).click();
   await shot(page, "03d-camera-apercu");
+  await cam.getByRole("button", { name: "Reprendre" }).click();
+  await cam.getByRole("button", { name: "Vidéo", exact: true }).click();
+  const vid = page.getByRole("dialog", { name: "Filmer une vidéo" });
+  await vid.getByRole("button", { name: "Démarrer l'enregistrement" }).click({ timeout: 15_000 });
+  await expect(vid.locator(".timer")).toContainText("0:03", { timeout: 8_000 });
+  await shot(page, "03e-camera-video");
+  await vid.getByRole("button", { name: "Arrêter l'enregistrement" }).click();
+  await expect(vid.locator("video.still")).toBeVisible();
   await page.keyboard.press("Escape");
   await page.goto(shh.origin + "/nope");
   await shot(page, "15-erreur-404");

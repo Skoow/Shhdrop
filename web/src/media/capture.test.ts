@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { captureSupport, constraintsFor, errorKind, LIMIT_MS, openStream, pickMime, startRecorder, stopStream } from "./capture";
+import { captureSupport, clock, constraintsFor, errorKind, limitMs, openStream, pickMime, startRecorder, stopStream } from "./capture";
 
 /** Faux MediaStream : des pistes dont on suit l'arrêt. */
 function fakeStream(kinds: ("audio" | "video")[] = ["video", "audio"]) {
@@ -86,13 +86,18 @@ describe("enregistreur", () => {
     expect(blob.type).toBe("video/webm");
     expect(blob.size).toBe(5);
   });
-  it("arrêt automatique à la durée maximale (vidéo 5 min, vocal 30 min)", async () => {
+  it("arrêt automatique à la durée maximale de la formule en vigueur (gratuit : vidéo 5 min, vocal 30 min)", async () => {
     vi.useFakeTimers();
     try {
-      expect(LIMIT_MS).toEqual({ video: 300_000, voice: 1_800_000 });
+      expect(limitMs("video")).toBe(300_000);
+      expect(limitMs("voice")).toBe(1_800_000);
+      expect(limitMs("video", "plus")).toBe(900_000);
+      expect(limitMs("voice", "pro")).toBe(7_200_000);
       const onlimit = vi.fn();
       startRecorder(fakeStream(["audio"]), { mime: "audio/webm", ext: "webm" }, "voice", { Recorder: FakeRecorder as never, onlimit });
-      vi.advanceTimersByTime(1_800_000);
+      vi.advanceTimersByTime(1_799_999);
+      expect(onlimit).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
       expect(onlimit).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
@@ -102,5 +107,17 @@ describe("enregistreur", () => {
     const r = startRecorder(fakeStream(), { mime: "video/webm", ext: "webm" }, "video", { Recorder: FakeRecorder as never });
     r.cancel();
     expect(FakeRecorder.last.state).toBe("inactive");
+  });
+});
+
+describe("minuteur affiché (« 4:12 / 5:00 maximum »)", () => {
+  it("m:ss sous une heure, h:mm:ss au-delà ; jamais négatif", () => {
+    expect(clock(0)).toBe("0:00");
+    expect(clock(252_400)).toBe("4:12");
+    expect(clock(300_000)).toBe("5:00");
+    expect(clock(1_800_000)).toBe("30:00");
+    expect(clock(7_200_000)).toBe("2:00:00");
+    expect(clock(3_725_000)).toBe("1:02:05");
+    expect(clock(-5)).toBe("0:00");
   });
 });

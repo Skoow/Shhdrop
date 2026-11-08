@@ -52,7 +52,7 @@ test.describe("fr-FR", () => {
     // Ordinateur : « Parcourir les fichiers » ; téléphone : une seule action, « Ajouter ».
     await expect(page.getByRole("button", { name: isMobile ? /^Ajouter/ : "Parcourir les fichiers" })).toBeVisible();
     // Limites gratuites (spec §41.2), lues des constantes.
-    await expect(page.locator("p.proof")).toHaveText("200\u202féléments · 2\u202fGo · 24\u202fh au plus · 5\u202fessais, puis destruction");
+    await expect(page.locator("p.proof")).toHaveText("200\u202féléments · 2\u202fGo · 24\u202fh maximum · 5\u202fessais, puis destruction");
     for (const h of ["Comment ça marche", "Pourquoi c'est sûr", "Vos questions", "Quelque chose à transmettre ?"])
       await expect(page.getByRole("heading", { level: 2, name: h, exact: true })).toHaveCount(1);
     await expect(page.getByRole("img", { name: SCHEMA_FR })).toHaveCount(1);
@@ -210,7 +210,7 @@ test.describe("fr-FR", () => {
     expect((await chooser).isMultiple()).toBe(true);
   });
 
-  test("Photo et Vidéo : caméra dans la page ; sans caméra, repli sur le sélecteur filtré (capture) ; les fichiers choisis ouvrent le composeur", async ({ page, shh, isMobile }) => {
+  test("Photo ou vidéo : caméra dans la page ; sans caméra, repli sur le sélecteur filtré (capture) ; les fichiers choisis ouvrent le composeur", async ({ page, shh, isMobile }) => {
     test.skip(isMobile, "téléphone : feuille « Ajouter » (capture.spec.ts)");
     // Aucune caméra ici : la page le dit et propose le sélecteur (fausse caméra : capture.spec.ts).
     await page.addInitScript(() => {
@@ -218,9 +218,10 @@ test.describe("fr-FR", () => {
     });
     await page.goto(shh.origin + "/");
     await page.waitForTimeout(900);
-    for (const [name, accept, fallback] of [["Photo", "image/*", "Choisir une photo"], ["Vidéo", "video/*", "Choisir une vidéo"]] as const) {
-      await page.getByRole("group", { name: "Ou créez sur place" }).getByRole("button", { name, exact: true }).click();
+    for (const [mode, accept, fallback] of [["Photo", "image/*", "Choisir une photo"], ["Vidéo", "video/*", "Choisir une vidéo"]] as const) {
+      await page.getByRole("group", { name: "Ou créez sur place" }).getByRole("button", { name: "Photo ou vidéo", exact: true }).click();
       const cam = page.locator("dialog[data-capture]");
+      if (mode === "Vidéo") await cam.getByRole("button", { name: "Vidéo", exact: true }).click();
       await expect(cam.getByRole("alert")).toContainText("Aucune caméra ni aucun micro utilisable");
       const chooser = page.waitForEvent("filechooser");
       await cam.getByRole("button", { name: fallback }).click();
@@ -424,7 +425,7 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
     for (const sel of [".aurora", ".grain", ".guil"])
       expect(await page.locator(sel).first().evaluate((e) => getComputedStyle(e).display), sel).toBe("none");
-    for (const name of isMobile ? ["Ajouter Photo, vidéo, vocal, note ou fichiers"] : ["Parcourir les fichiers", "Photo", "Vidéo"]) {
+    for (const name of isMobile ? ["Ajouter Photo, vidéo, vocal, note ou fichiers"] : ["Parcourir les fichiers", "Photo ou vidéo"]) {
       const b = page.getByRole("button", { name, exact: true });
       expect(await b.evaluate((e) => getComputedStyle(e).borderTopStyle)).toBe("solid");
     }

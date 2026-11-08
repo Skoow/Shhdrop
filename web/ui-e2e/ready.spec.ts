@@ -35,13 +35,13 @@ test.describe("fr-FR", () => {
     await toReady(page, context, shh.origin);
     await expect(readyHeading(page)).toBeFocused();
 
-    // Ordre du DOM : avertissement → carte lien → rappel → carte mot de passe → gestion repliée →
+    // Ordre du DOM : avertissement → carte lien → carte mot de passe → gestion repliée →
     // Supprimer → Vider → Terminé (scan UX, « Lien prêt » : hiérarchie).
     const order = await page.evaluate(() => {
-      const els = [...document.querySelectorAll(".ready p.never, .ready [role=group][aria-label], .ready p.two, .ready details.manage, .ready .danger-zone, .ready .clip, .ready .done")];
+      const els = [...document.querySelectorAll(".ready p.never, .ready [role=group][aria-label], .ready details.manage, .ready .danger-zone, .ready .clip, .ready .done")];
       return els.map((e) => e.getAttribute("aria-label") ?? e.className.split(" ").find((c) => c && !c.startsWith("svelte-") && c !== "card"));
     });
-    expect(order).toEqual(["never", "Lien", "two", "Mot de passe", "manage", "danger-zone", "clip", "done"]);
+    expect(order).toEqual(["never", "Lien", "Mot de passe", "manage", "danger-zone", "clip", "done"]);
     await expect(page.locator(".ready p.never")).toHaveText("Ce lien et ce mot de passe ne seront plus jamais affichés.");
     // Terminé : action principale ; Supprimer : secondaire.
     await expect(page.getByRole("button", { name: "Terminé" })).toHaveClass(/\bprimary\b/);
@@ -54,7 +54,8 @@ test.describe("fr-FR", () => {
     await expect(manage).toHaveAttribute("open");
     await expect(manage.getByRole("button", { name: /^Copier/ })).toBeVisible();
     await expect(manage.locator(".sr-only").first()).toHaveText(/#m[A-Za-z0-9_-]{43}$/);
-    await expect(page.locator(".ready").getByText("Envoyez le mot de passe par un autre moyen que le lien.", { exact: false })).toBeVisible();
+    // Plus d'avertissement « par un autre moyen » (décision du propriétaire du 8 novembre).
+    await expect(page.locator(".ready").getByText("autre moyen", { exact: false })).toHaveCount(0);
 
     const link = await valueOf(page, linkCard(page));
     const password = await valueOf(page, pwCard(page));
@@ -133,10 +134,8 @@ test.describe("fr-FR", () => {
     await toReady(page, context, shh.origin);
     const gen = await valueOf(page, pwCard(page));
     expect(gen).toHaveLength(10);
-    // Affiché par groupes de 4 (« K7m4 · Xq2p · 9r ») ; recollé sans séparateurs = la copie.
-    const shown = await pwCard(page).locator(".val.vis .g").allInnerTexts();
-    expect(shown).toEqual([gen.slice(0, 4), gen.slice(4, 8), gen.slice(8)]);
-    expect(shown.join("")).toBe(gen);
+    // Affiché tout collé, sans groupe ni séparateur (décision du 8 novembre) : ce qu'on lit = la copie.
+    await expect(pwCard(page).locator(".val.vis")).toHaveText(gen);
     await pwCard(page).getByRole("button", { name: /^Copier/ }).click();
     expect(await clip(page)).toBe(gen);
   });
@@ -173,23 +172,18 @@ test.describe("fr-FR", () => {
     await expect(p2.getByText(/^Actif · s'efface vers 3\sh\s30$/)).toBeVisible();
   });
 
-  test("Épeler : chaque caractère en alphabet radio (« K comme Kilo ») ; Échap ferme ; rien dans la console ni le stockage", async ({ page, shh, context }) => {
+  test("mot de passe affiché tout collé (10 caractères, sans groupe ni point), sans « Épeler » ; rien dans la console ni le stockage", async ({ page, shh, context }) => {
     test.setTimeout(120_000);
     const logs: string[] = [];
     page.on("console", (m) => logs.push(m.text()));
     await toReady(page, context, shh.origin);
     const password = await valueOf(page, pwCard(page));
-    await pwCard(page).getByRole("button", { name: "Épeler" }).click();
-    const dlg = page.getByRole("dialog", { name: "Épeler le mot de passe" });
-    await expect(dlg).toBeVisible();
-    await expect(dlg.locator(".spell li")).toHaveCount(password.length);
-    const first = password[0]!;
-    if (/[a-z]/i.test(first)) await expect(dlg.locator(".spell li .w").first()).toHaveText(new RegExp(`^${first} comme [A-Z][a-z-]+, (minuscule|majuscule)$`));
-    await page.keyboard.press("Escape");
-    await expect(dlg).toBeHidden();
+    expect(password).toMatch(/^[abcdefghkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!?@#$%&*+\-=/()]{10}$/);
+    await expect(pwCard(page).locator(".val.vis")).toHaveText(password);
+    await expect(pwCard(page).locator(".gsep, .g")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Épeler" })).toHaveCount(0);
     expect(logs.join("\n")).not.toContain(password);
     expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
-    expect(await page.title()).not.toContain(password);
     expect(await page.title()).toBe("Lien prêt · Shhdrop");
   });
 
@@ -238,7 +232,7 @@ test.describe("390 × 844", () => {
     const done = page.getByRole("button", { name: "Terminé" });
     const del = page.getByRole("button", { name: "Supprimer ce partage" });
     await expect(done).toBeInViewport();
-    await expect(del).not.toBeInViewport();
+    // (Plus court depuis le 8 novembre : Supprimer peut être visible d'emblée ; il reste dans le fil.)
     await page.evaluate(() => window.scrollTo(0, 300));
     await expect(done).toBeInViewport();
     expect(await del.evaluate((e) => getComputedStyle(e.closest(".danger-zone")!).position)).toBe("static");
@@ -263,14 +257,15 @@ test.describe("en-US", () => {
     await page.goto(shh.origin + "/");
     if (await page.getByRole("button", { name: /^Add/ }).filter({ visible: true }).first().isVisible()) {
       await page.getByRole("button", { name: /^Add/ }).filter({ visible: true }).first().click();
-      await page.getByRole("dialog", { name: "Add" }).getByRole("button", { name: /^Write a note/ }).click();
+      await page.getByRole("dialog", { name: "Add" }).getByRole("button", { name: /^Note/ }).click();
     } else await page.getByRole("group", { name: "Or create one here" }).getByRole("button", { name: "Note", exact: true }).click();
     const dlg = page.getByRole("dialog");
     await dlg.locator("textarea").fill("The door code is 4471.");
     await dlg.getByRole("button", { name: "Add", exact: true }).click();
     await page.getByRole("button", { name: "Encrypt and send" }).click();
     await expect(page.getByRole("heading", { name: "Link ready" })).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByText("Send the password by a different channel than the link.", { exact: false }).last()).toBeVisible();
+    await expect(page.getByRole("group", { name: "Password" })).toBeVisible();
+    await expect(page.getByText("different channel", { exact: false })).toHaveCount(0);
     await page.waitForTimeout(700);
     await capture(page, "ready-en");
   });
