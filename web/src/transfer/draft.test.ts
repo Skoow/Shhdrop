@@ -3,6 +3,7 @@
 // seuls éléments gardés, abandon, et « le serveur ne voit rien ».
 import { describe, expect, it } from "vitest";
 import { findIn, needle } from "../../e2e/scan";
+import { CHUNK_CT, HEADER, SEG_CHUNKS } from "../crypto/container";
 import { SEG_PLAIN } from "../crypto/elements";
 import { utf8 } from "../crypto/encoding";
 import { createFakeServer } from "../demo/fake-server";
@@ -93,8 +94,11 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     );
     const o = await openShare(r.link, PW, ORIGIN, undefined, net);
     expect(o.manifest.items.map((e) => e.name)).toEqual(["note-repere", "b-repere.bin", "a-repere.bin"]);
-    // Petits éléments empaquetés (audit H-2) : a (300 000 octets, 5 morceaux) puis b au morceau 5.
-    expect(o.manifest.items.map((e) => e.offset)).toEqual([0, 5 * 65536, 0]);
+    // Petits éléments empaquetés (audit H-2) ; emprise en puissance de deux (Q-H2-1) :
+    // a (300 000 octets, 5 morceaux) occupe 8 morceaux, b commence au morceau 8.
+    expect(o.manifest.items.map((e) => e.offset)).toEqual([0, 8 * 65536, 0]);
+    const smallPuts = seen.filter((x) => x.method === "PUT").map((x) => (x.body.length % CHUNK_CT === 0 ? x.body.length : x.body.length - HEADER) / CHUNK_CT);
+    expect(smallPuts).toEqual([8, 1]);
     const kLien = r.link.split("#")[1]!;
     const hay = Buffer.concat(seen.filter((x) => !x.path.includes("/unlock") && !x.path.includes("/meta")).map((x) => Buffer.concat([x.body, Buffer.from(x.path + x.headers)])));
     expect(findIn(hay, [needle("contenu", MARK), needle("nom", "a-repere"), needle("mdp", PW), needle("lien", kLien)])).toEqual([]);
@@ -220,7 +224,15 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     // Arrondi au morceau de 64 Kio par élément (et 16 octets d'étiquette) : moins de 6 % ici ;
     // avant (un segment au moins par élément) : 20 × 4 Mio + 2 × 4 Mio = 88 Mio.
     expect(sent).toBeLessThan(sum * 1.06);
+    expect(sent).toBeLessThanOrEqual(sum * 1.5); // Q-H2-1 : emprise en puissance de deux
     expect(sent).toBeGreaterThanOrEqual(sum);
+    // Emprise de chaque petit élément (une requête chacun) : une puissance de deux de morceaux.
+    const smallPuts = puts.filter((r) => r.body.length < SEG_CHUNKS * CHUNK_CT);
+    expect(smallPuts.length).toBeGreaterThanOrEqual(20);
+    for (const r of smallPuts.slice(0, 20)) {
+      const n = (r.body.length % CHUNK_CT === 0 ? r.body.length : r.body.length - HEADER) / CHUNK_CT;
+      expect(Number.isInteger(n) && (n & (n - 1)) === 0).toBe(true);
+    }
     expect(puts.filter((r) => r.path.endsWith("/segments/0") || r.path.includes("?")).length).toBeGreaterThan(0);
     d.sync([...smalls.slice(1), big]); // retrait du premier petit
     await new Promise((r) => setTimeout(r, 20));

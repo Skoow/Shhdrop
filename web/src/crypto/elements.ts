@@ -66,13 +66,28 @@ export function isSmall(size: number): boolean {
 }
 
 /**
+ * Emprise d'un élément, en morceaux (Q-H2-1, D41-20) : un petit élément est arrondi à une
+ * puissance de deux de morceaux (1, 2, 4… 64), pour que la longueur de sa requête d'envoi ne
+ * dise au serveur que sa classe de taille ; les morceaux en plus sont des zéros chiffrés sous
+ * la clé de l'élément (comme la fin de son dernier morceau), indiscernables de l'aléa. Un
+ * élément d'un segment ou plus : ses morceaux, sans arrondi.
+ */
+export function footprintFor(size: number): number {
+  const n = chunksFor(size);
+  if (!isSmall(size)) return n;
+  let p = 1;
+  while (p < n) p *= 2;
+  return Math.min(p, SEG_CHUNKS);
+}
+
+/**
  * Segments d'une liste de fichiers, empaquetage compris (estimation de la place : les petits
  * éléments, à 64 Kio près, se partagent des segments) ; borne « trop gros » de l'interface.
  */
 export function segmentsNeeded(sizes: readonly number[]): number {
   let big = 0, small = 0;
   for (const n of sizes) {
-    if (isSmall(n)) small += chunksFor(n);
+    if (isSmall(n)) small += footprintFor(n);
     else big += segmentsFor(n);
   }
   return big + Math.ceil(small / SEG_CHUNKS);
@@ -88,8 +103,8 @@ export type ElementSealer = {
   pieces: Piece[];
   /**
    * Chiffre la j-ième plage, une seule fois : un nouvel essai d'envoi renvoie les octets
-   * gardés par l'appelant. Seuls les morceaux de l'élément (zéros chiffrés après la fin du
-   * fichier, dans son dernier morceau) : aucun bourrage. Plage qui commence au morceau 0 du
+   * gardés par l'appelant. Les morceaux de l'emprise (`footprintFor`) : zéros chiffrés après la
+   * fin du fichier, jusqu'à la puissance de deux d'un petit élément. Plage qui commence au morceau 0 du
    * paquet : 48 octets nuls d'abord (en-tête écrit par le serveur à la finalisation).
    */
   piece(j: number): Promise<Uint8Array<ArrayBuffer>>;
@@ -103,7 +118,7 @@ export type ElementSealer = {
  * l'ajout fait échouer la lecture (NotReadableError).
  */
 export async function elementSealer(blob: Blob, first: number): Promise<ElementSealer> {
-  const n = chunksFor(blob.size);
+  const n = footprintFor(blob.size);
   if (!Number.isSafeInteger(first) || first < 0 || first + n > DATA_CHUNKS) throw new Error("trop_gros");
   if (isSmall(blob.size) ? Math.floor(first / SEG_CHUNKS) !== Math.floor((first + n - 1) / SEG_CHUNKS) : first % SEG_CHUNKS !== 0) {
     throw new Error("place_invalide");
@@ -134,10 +149,13 @@ export async function elementSealer(blob: Blob, first: number): Promise<ElementS
         for (let c = 0; c < p.chunks; c++) {
           chunk.fill(0);
           const lo = (g0 + c - first) * CHUNK;
-          const part = new Uint8Array(await blob.slice(lo, Math.min(blob.size, lo + CHUNK)).arrayBuffer());
-          if (part.length !== Math.min(CHUNK, blob.size - lo)) throw new Error("lecture_incomplete");
-          chunk.set(part);
-          part.fill(0);
+          if (lo < blob.size) {
+            // Au-delà de la fin (emprise arrondie, Q-H2-1) : morceau de zéros chiffrés.
+            const part = new Uint8Array(await blob.slice(lo, Math.min(blob.size, lo + CHUNK)).arrayBuffer());
+            if (part.length !== Math.min(CHUNK, blob.size - lo)) throw new Error("lecture_incomplete");
+            chunk.set(part);
+            part.fill(0);
+          }
           const ct = await crypto.subtle.encrypt(
             { name: "AES-GCM", iv: nonce(g0 + c, false), additionalData: ELEMENT_AD, tagLength: 128 },
             key,

@@ -2,7 +2,7 @@
 // de segment, manifeste et en-tête produits au clic, palier final canonique.
 import { describe, expect, it, vi } from "vitest";
 import { CHUNK, CHUNK_CT, HEADER, SEG_CHUNKS, bucketFor, openStream, segmentCount, segmentSize } from "./container";
-import { DATA_SEGMENTS, SEG_PLAIN, chunksFor, elementSealer, isSmall, reservationFor, sealFinal, segmentsFor, segmentsNeeded } from "./elements";
+import { DATA_SEGMENTS, SEG_PLAIN, chunksFor, elementSealer, footprintFor, isSmall, reservationFor, sealFinal, segmentsFor, segmentsNeeded } from "./elements";
 import { utf8 } from "./encoding";
 import { contentKeys, newSeed } from "./envelope";
 
@@ -189,27 +189,30 @@ describe("éléments (spec §41.14)", () => {
   it("empaquetage : petits éléments par morceaux dans un segment partagé, grand élément sur sa frontière ; lecture", async () => {
     expect([0, 1, CHUNK, CHUNK + 1, SEG_PLAIN - 1, SEG_PLAIN].map(chunksFor)).toEqual([0, 1, 1, 2, 64, 64]);
     expect([0, 1, SEG_PLAIN - 1, SEG_PLAIN].map(isSmall)).toEqual([false, true, true, false]);
+    // Emprise (Q-H2-1) : petit élément arrondi à une puissance de deux de morceaux, jusqu'au segment.
+    expect([0, 1, CHUNK + 1, 3 * CHUNK, 5 * CHUNK, 33 * CHUNK, SEG_PLAIN - 1, SEG_PLAIN, SEG_PLAIN + 1].map(footprintFor)).toEqual([0, 1, 2, 4, 8, 64, 64, 64, 65]);
+    expect(segmentsNeeded([5 * CHUNK, 5 * CHUNK, 5 * CHUNK, 5 * CHUNK, 5 * CHUNK, 5 * CHUNK, 5 * CHUNK, 5 * CHUNK, 1])).toBe(2); // 8 × 8 + 1
     // 20 photos de 1 Mo : 16 morceaux chacune, 320 morceaux, 5 segments (et non 20).
     expect(segmentsNeeded(Array(20).fill(1_000_000))).toBe(5);
     expect(segmentsNeeded([SEG_PLAIN + 1, 10, 10])).toBe(3);
     await expect(elementSealer(new Blob([pseudo(2 * CHUNK, 1)]), 63)).rejects.toThrow("place_invalide"); // déborde du segment
     await expect(elementSealer(new Blob([pseudo(SEG_PLAIN, 1)]), 1)).rejects.toThrow("place_invalide"); // grand hors frontière
     const a = pseudo(100_000, 11); // morceaux 0-1
-    const gone = pseudo(150_000, 12); // morceaux 2-4, retiré
-    const c = pseudo(10, 13); // morceau 5
+    const gone = pseudo(150_000, 12); // 3 morceaux, emprise 4 (Q-H2-1) : morceaux 2-5, retiré
+    const c = pseudo(10, 13); // morceau 6
     const big = pseudo(SEG_PLAIN + 5, 14); // segments 1-2 (1 morceau au segment 2)
     const up = new Map<number, Uint8Array>();
     const ea = await upload(new Blob([a]), 0, up);
     const eg = await elementSealer(new Blob([gone]), 2);
-    expect(eg.pieces).toEqual([{ seg: 0, from: 2, chunks: 3 }]);
-    expect((await eg.piece(0)).length).toBe(3 * CHUNK_CT);
-    const ec = await upload(new Blob([c]), 5, up);
+    expect(eg.pieces).toEqual([{ seg: 0, from: 2, chunks: 4 }]);
+    expect((await eg.piece(0)).length).toBe(4 * CHUNK_CT);
+    const ec = await upload(new Blob([c]), 6, up);
     const eb = await upload(new Blob([big]), 64, up);
     expect(eb.pieces.map((p) => p.chunks)).toEqual([64, 1]);
     const keys = await contentKeys(newSeed());
     const fin = await sealFinal(
       [
-        { kind: "file", name: "c", mime: "x/y", size: c.length, first: 5, k: ec.k },
+        { kind: "file", name: "c", mime: "x/y", size: c.length, first: 6, k: ec.k },
         { kind: "file", name: "big", mime: "x/y", size: big.length, first: 64, k: eb.k },
         { kind: "file", name: "a", mime: "x/y", size: a.length, first: 0, k: ea.k },
       ],
@@ -219,7 +222,7 @@ describe("éléments (spec §41.14)", () => {
     expect(fin.bucket).toBe(bucketFor(64 * CHUNK + big.length));
     const segs = assemble(fin.bucket, up, fin.header, fin.tail);
     const rd = await openStream(async (n) => new Uint8Array(segs[n]!), fin.bucket, keys);
-    expect(rd.manifest.items.map((e) => e.offset)).toEqual([5 * CHUNK, SEG_PLAIN, 0]);
+    expect(rd.manifest.items.map((e) => e.offset)).toEqual([6 * CHUNK, SEG_PLAIN, 0]);
     expect(same(await rd.item(0), c)).toBe(true);
     expect(same(await rd.item(1), big)).toBe(true);
     expect(same(await rd.item(2), a)).toBe(true);

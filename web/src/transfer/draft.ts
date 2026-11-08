@@ -6,7 +6,7 @@
 // Le serveur ne reçoit que K_accès et S_gestion (création), des segments chiffrés, des numéros
 // de segments, et à la fin le sel, Argon2id, V_preuve, E, l'en-tête et le manifeste chiffré.
 import { SEG_CHUNKS, CHUNK_CT, HEADER, type Item, type KeepTtl, type Rights } from "../crypto/container";
-import { DATA_CHUNKS, DATA_SEGMENTS, chunksFor, elementSealer, isSmall, reservationFor, sealFinal, segmentsNeeded, type FinalEntry } from "../crypto/elements";
+import { DATA_CHUNKS, DATA_SEGMENTS, elementSealer, footprintFor, isSmall, reservationFor, sealFinal, segmentsNeeded, type FinalEntry } from "../crypto/elements";
 import { b64u } from "../crypto/encoding";
 import { accessKeys, contentKeys, newSeed, seal, shareId } from "../crypto/envelope";
 import { KDF_CREATE, deriveAccess, newKLien, newSGestion, passwordKeyForCreate, randomBytes } from "../crypto/kdf";
@@ -62,7 +62,7 @@ type El = {
   src: Blob;
   data?: Blob;
   first: number; // premier morceau ; -1 : pas encore placé
-  chunks: number; // morceaux occupés (audit H-2 : rien au-delà, aucun bourrage envoyé)
+  chunks: number; // emprise en morceaux (audit H-2 ; petit élément : puissance de deux, Q-H2-1)
   parts: number; // requêtes d'envoi (une par segment touché)
   partsDone: number;
   phase: ElementPhase;
@@ -253,7 +253,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
   }
 
   function place(size: number): number {
-    const n = chunksFor(size);
+    const n = footprintFor(size);
     if (n === 0) return 0;
     const t = takenChunks();
     if (isSmall(size)) {
@@ -300,7 +300,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       changed();
       e.data ??= o.prepare ? await o.prepare(e.src) : e.src;
       throwIfAborted(signal);
-      e.chunks = chunksFor(e.data.size);
+      e.chunks = footprintFor(e.data.size);
       e.first = place(e.data.size);
       const sealer = await elementSealer(e.data, e.first);
       e.k = sealer.k;
@@ -399,7 +399,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
   }
 
   function fresh(id: string, src: Blob): El {
-    const chunks = chunksFor(src.size);
+    const chunks = footprintFor(src.size);
     return { id, src, first: -1, chunks, parts: Math.ceil(chunks / SEG_CHUNKS), partsDone: 0, phase: "attente", acked: 0, inflight: 0, ac: new AbortController(), touched: false };
   }
 
