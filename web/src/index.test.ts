@@ -18,6 +18,7 @@ describe("interface publique", () => {
         "segmentSize",
         "DATA_SEGMENTS",
         "segmentsFor",
+        "segmentsNeeded",
         "createDraft",
         "CONTENT_MAX",
         "MAX_ITEMS",

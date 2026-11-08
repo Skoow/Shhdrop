@@ -43,6 +43,19 @@ func TestDraftRoutes(t *testing.T) {
 	}
 	put(1, 400, 2)
 	put(2, 400, 3)
+	// Plages de morceaux (audit H-2) : ?from=c, segment 3 partagé ; from invalide → 400.
+	putFrom := func(n int, from string, k int, code int) {
+		w := e.do(req{method: "PUT", path: fmt.Sprintf("/api/shares/segments/%d?from=%s", n, from),
+			body: bytes.Repeat([]byte{4}, k*share.ChunkCT), hdr: auth(c.UploadToken)})
+		if w.Code != code {
+			t.Fatal("PUT ?from", n, from, k, w.Code)
+		}
+	}
+	putFrom(3, "2", 3, 204)
+	putFrom(3, "5", 1, 204)
+	putFrom(3, "-1", 1, 400)
+	putFrom(3, "01", 1, 400)
+	putFrom(3, "63", 2, 400)
 	if code := post("/api/shares/erase", map[string]any{"from": 1, "to": 9}, c.UploadToken); code != 400 {
 		t.Fatal("erase hors palier", code)
 	}
@@ -73,6 +86,11 @@ func TestDraftRoutes(t *testing.T) {
 	}
 	delete(fin, "fill_from")
 	delete(fin, "fill_to")
+	fin["void"] = [][2]int{{0, 400}}
+	if code := post("/api/shares/finalize", fin, c.UploadToken); code != 400 {
+		t.Fatal("void hors palier", code)
+	}
+	fin["void"] = [][2]int{{3*64 + 5, 3*64 + 6}}
 	if code := post("/api/shares/finalize", fin, c.UploadToken); code != 200 {
 		t.Fatal("finalize", code)
 	}
@@ -87,6 +105,12 @@ func TestDraftRoutes(t *testing.T) {
 	expect(t, w, 200, "")
 	if w.Body.Bytes()[0] != 3 {
 		t.Fatal("segment gardé")
+	}
+	w = e.do(req{method: "GET", path: "/api/shares/segments/3", hdr: auth(dl)})
+	expect(t, w, 200, "")
+	got := w.Body.Bytes()
+	if got[2*share.ChunkCT] != 4 || bytes.Equal(got[5*share.ChunkCT:6*share.ChunkCT], bytes.Repeat([]byte{4}, share.ChunkCT)) {
+		t.Fatal("plage gardée ou morceau retiré non remplacé")
 	}
 }
 

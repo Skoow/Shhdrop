@@ -93,7 +93,8 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     );
     const o = await openShare(r.link, PW, ORIGIN, undefined, net);
     expect(o.manifest.items.map((e) => e.name)).toEqual(["note-repere", "b-repere.bin", "a-repere.bin"]);
-    expect(o.manifest.items.map((e) => e.offset)).toEqual([0, SEG_PLAIN, 0]); // a ajouté d'abord : segment 0
+    // Petits éléments empaquetés (audit H-2) : a (300 000 octets, 5 morceaux) puis b au morceau 5.
+    expect(o.manifest.items.map((e) => e.offset)).toEqual([0, 5 * 65536, 0]);
     const kLien = r.link.split("#")[1]!;
     const hay = Buffer.concat(seen.filter((x) => !x.path.includes("/unlock") && !x.path.includes("/meta")).map((x) => Buffer.concat([x.body, Buffer.from(x.path + x.headers)])));
     expect(findIn(hay, [needle("contenu", MARK), needle("nom", "a-repere"), needle("mdp", PW), needle("lien", kLien)])).toEqual([]);
@@ -133,10 +134,16 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     d.sync([{ id: "a", data: v1 }]);
     await until(() => d.status("a")?.phase === "pret");
     d.sync([{ id: "a", data: v2 }]);
-    await until(() => d.status("a")?.phase === "pret" && seen.some((r) => r.path === "/api/shares/erase"));
+    await until(() => d.status("a")?.phase === "pret");
     const r = await d.finalize([{ id: "a", item: fileItem("a", v2) }], { ttlHours: 1, maxOpens: 1, password: PW, solveCaptcha });
     const o = await openShare(r.link, PW, ORIGIN, undefined, net);
     expect((await o.item(0)).length).toBe(80);
+    expect(o.manifest.items[0]!.offset).toBe(65536); // nouvelle place : l'ancienne n'est jamais réutilisée
+    // Petit élément remplacé (audit H-2) : aucun effacement immédiat ; ses morceaux sont
+    // remplacés par de l'aléa à finalize (void).
+    expect(seen.some((x) => x.path === "/api/shares/erase")).toBe(false);
+    const fin = JSON.parse(seen.find((x) => x.path === "/api/shares/finalize")!.body.toString());
+    expect(fin.void).toEqual([[0, 1]]);
   });
 
   it("place au-delà de la réservation : grow avant le segment", async () => {
@@ -165,7 +172,8 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
       return net.fetch(u, i);
     }) as typeof globalThis.fetch;
     const d = createDraft(ORIGIN, { fetch, retryDelayMs: 1, solveCaptcha, auto: true });
-    const a = file(100, 1), b = file(100, 2), c = file(100, 3);
+    // Grands éléments (un segment chacun) : seuls effacés sur le serveur (audit H-2).
+    const a = file(SEG_PLAIN, 1), b = file(SEG_PLAIN, 2), c = file(SEG_PLAIN, 3);
     d.sync([
       { id: "a", data: a },
       { id: "b", data: b },
@@ -173,7 +181,7 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     ]);
     await until(() => ["a", "b", "c"].every((x) => d.status(x)?.phase === "pret"));
     d.sync([{ id: "a", data: a }]);
-    expect(d.removing).toBe(200);
+    expect(d.removing).toBe(2 * SEG_PLAIN);
     await until(() => d.removing === 0, 10_000);
     expect(seen.filter((r) => r.path === "/api/shares/erase").length).toBe(2);
     expect(fake.inspect()[0]!.present).toEqual([0]);
@@ -195,5 +203,40 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     const prog: [number, number][] = [];
     await d.finalize([{ id: "a", item: fileItem("a", a) }], { ttlHours: 1, maxOpens: 1, password: PW, solveCaptcha, onProgress: (x, n) => prog.push([x, n]) });
     expect(prog).toEqual([[0, 1], [1, 1]]);
+  });
+
+  // Audit H-2 : 20 petits fichiers de 1 Mo envoyés sans bourrage (≈ 20 Mo, pas 80 Mio) ;
+  // un grand n'envoie que ses morceaux ; un petit retiré n'est pas lu par le destinataire.
+  it("empaquetage : octets envoyés ≈ somme des tailles ; petit retiré absent pour le destinataire", async () => {
+    const { seen, fake, net } = setup();
+    const d = createDraft(ORIGIN, { ...net, solveCaptcha, auto: true });
+    const smalls = Array.from({ length: 20 }, (_, i) => ({ id: `p${i}`, data: file(1_000_000, i + 1) }));
+    const big = { id: "big", data: file(5 * 1048576, 99) };
+    d.sync([...smalls, big]);
+    await until(() => [...smalls, big].every((x) => d.status(x.id)?.phase === "pret"));
+    const puts = seen.filter((r) => r.method === "PUT");
+    const sent = puts.reduce((n, r) => n + r.body.length, 0);
+    const sum = 20 * 1_000_000 + 5 * 1048576;
+    // Arrondi au morceau de 64 Kio par élément (et 16 octets d'étiquette) : moins de 6 % ici ;
+    // avant (un segment au moins par élément) : 20 × 4 Mio + 2 × 4 Mio = 88 Mio.
+    expect(sent).toBeLessThan(sum * 1.06);
+    expect(sent).toBeGreaterThanOrEqual(sum);
+    expect(puts.filter((r) => r.path.endsWith("/segments/0") || r.path.includes("?")).length).toBeGreaterThan(0);
+    d.sync([...smalls.slice(1), big]); // retrait du premier petit
+    await new Promise((r) => setTimeout(r, 20));
+    expect(d.removing).toBe(0); // place rendue tout de suite
+    const r = await d.finalize(
+      [...smalls.slice(1), big].map((x) => ({ id: x.id, item: fileItem(`${x.id}.bin`, x.data) })),
+      { ttlHours: 1, maxOpens: 1, password: PW, solveCaptcha },
+    );
+    expect(seen.some((x) => x.path === "/api/shares/erase")).toBe(false);
+    const fin = JSON.parse(seen.find((x) => x.path === "/api/shares/finalize")!.body.toString());
+    expect(fin.void).toEqual([[0, 16]]);
+    const o = await openShare(r.link, PW, ORIGIN, undefined, net);
+    expect(o.manifest.items.map((e) => e.name)).toEqual([...smalls.slice(1).map((x) => `${x.id}.bin`), "big.bin"]);
+    const got = await o.item(0);
+    expect(Buffer.from(got).equals(Buffer.from(await smalls[1]!.data.arrayBuffer()))).toBe(true);
+    expect(Buffer.from(await o.item(19)).equals(Buffer.from(await big.data.arrayBuffer()))).toBe(true);
+    expect(fake.inspect()[0]!.state).toBe("draining"); // ouverture unique consommée
   });
 });

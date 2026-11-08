@@ -311,7 +311,8 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
   it("coupure simulée au milieu de l'envoi : le client réessaie et réussit", async ({ expect }) => {
     const { fake, net, statuses } = setup({ outage: { atFraction: 0.5, ms: 300 } });
     const retries: number[] = [];
-    const r = await createShare(ORIGIN, [text("x"), { kind: "file", name: "f", mime: "text/plain", data: utf8("f") }], {
+    // 3 Mio (48 morceaux, envoyés sans bourrage, audit H-2) : plus de la moitié du palier 80.
+    const r = await createShare(ORIGIN, [text("x"), { kind: "file", name: "f", mime: "text/plain", data: new Uint8Array(3 * 1048576) }], {
       ttlHours: 1,
       maxOpens: 1,
       password: PW,

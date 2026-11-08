@@ -285,3 +285,165 @@ func TestGrowBoundedByReceivedSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Audit H-2 (§41.14) : petits éléments empaquetés dans des segments partagés, envoyés par
+// plages de morceaux (sans bourrage) ; le serveur remplit d'aléa, à finalize, les morceaux
+// jamais reçus et ceux des petits éléments retirés (void).
+func chunkBody(n, from, k int, fill byte) []byte {
+	pre := 0
+	if n == 0 && from == 0 {
+		pre = Header
+	}
+	return bytes.Repeat([]byte{fill}, pre+k*ChunkCT)
+}
+
+func chunkAt(b []byte, bucket, n, c int) []byte {
+	off := segOffset(bucket, n) + int64(c)*ChunkCT
+	if n == 0 {
+		off += Header
+	}
+	return b[off : off+ChunkCT]
+}
+
+func mostlyRandom(b []byte) bool { return bytes.Count(b, []byte{0}) < len(b)/100 }
+
+func TestPutChunksPackedAndFinalizeFills(t *testing.T) {
+	s, _ := newSvc(t)
+	id, _, err := s.Create(newKeys().req(160, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutChunks(id, 0, 0, chunkBody(0, 0, 3, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutChunks(id, 0, 3, chunkBody(0, 3, 2, 2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutChunks(id, 1, 10, chunkBody(1, 10, 1, 3)); err != nil {
+		t.Fatal(err)
+	}
+	for i, c := range []struct {
+		n, from int
+		body    []byte
+	}{
+		{0, 63, chunkBody(0, 63, 2, 9)}, // dépasse le segment
+		{0, -1, chunkBody(0, 1, 1, 9)},  // début négatif
+		{0, 1, chunkBody(0, 0, 1, 9)},   // en-tête hors du morceau 0
+		{0, 5, make([]byte, ChunkCT+1)}, // pas un nombre entier de morceaux
+		{0, 5, nil},                     // vide
+		{2, 31, chunkBody(2, 31, 2, 9)}, // dernier segment du palier : 32 morceaux
+		{3, 0, chunkBody(3, 0, 1, 9)},   // hors palier
+		{1, 64, chunkBody(1, 64, 1, 9)}, // début hors segment
+	} {
+		if err := s.PutChunks(id, c.n, c.from, c.body); !errors.Is(err, ErrBadSegment) {
+			t.Fatal(i, err)
+		}
+	}
+	var mask []byte
+	if err := s.DB.QueryRow(`SELECT segments_mask FROM shares WHERE id=?`, id).Scan(&mask); err != nil {
+		t.Fatal(err)
+	}
+	if mask[0] != 0 {
+		t.Fatal("segment partiel compté comme reçu", mask)
+	}
+	r := draftFin(id, 160)
+	r.Void = [][2]int{{3, 4}} // petit élément retiré : son premier morceau remplacé
+	if _, err := s.Finalize(id, r); err != nil {
+		t.Fatal(err)
+	}
+	b := fileBytes(t, s, id)
+	for c := 0; c < 3; c++ {
+		if !bytes.Equal(chunkAt(b, 160, 0, c), bytes.Repeat([]byte{1}, ChunkCT)) {
+			t.Fatal("morceau gardé", c)
+		}
+	}
+	if !mostlyRandom(chunkAt(b, 160, 0, 3)) || bytes.Contains(chunkAt(b, 160, 0, 3), bytes.Repeat([]byte{2}, 64)) {
+		t.Fatal("morceau retiré non remplacé")
+	}
+	if !bytes.Equal(chunkAt(b, 160, 0, 4), bytes.Repeat([]byte{2}, ChunkCT)) {
+		t.Fatal("morceau 4 gardé")
+	}
+	if !bytes.Equal(chunkAt(b, 160, 1, 10), bytes.Repeat([]byte{3}, ChunkCT)) {
+		t.Fatal("morceau du segment 1 gardé")
+	}
+	for _, x := range [][2]int{{0, 5}, {0, 63}, {1, 0}, {1, 9}, {1, 11}, {1, 63}, {2, 0}} {
+		if !mostlyRandom(chunkAt(b, 160, x[0], x[1])) {
+			t.Fatal("morceau jamais reçu non rempli", x)
+		}
+	}
+}
+
+func TestPutChunksCompletesSegment(t *testing.T) {
+	s, _ := newSvc(t)
+	id, _, err := s.Create(newKeys().req(80, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutChunks(id, 0, 0, chunkBody(0, 0, 40, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutChunks(id, 0, 40, chunkBody(0, 40, 24, 2)); err != nil {
+		t.Fatal(err)
+	}
+	var mask []byte
+	if err := s.DB.QueryRow(`SELECT segments_mask FROM shares WHERE id=?`, id).Scan(&mask); err != nil {
+		t.Fatal(err)
+	}
+	if mask[0] != 1 {
+		t.Fatal("segment complété par plages non compté", mask)
+	}
+}
+
+func TestEraseClearsPartialSegment(t *testing.T) {
+	s, _ := newSvc(t)
+	id, _, err := s.Create(newKeys().req(160, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutChunks(id, 1, 0, chunkBody(1, 0, 5, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Erase(id, 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Finalize(id, draftFin(id, 160)); err != nil {
+		t.Fatal(err)
+	}
+	if !mostlyRandom(chunkAt(fileBytes(t, s, id), 160, 1, 0)) {
+		t.Fatal("plage effacée non remplie")
+	}
+}
+
+func TestGrowCountsPartialSegments(t *testing.T) {
+	s, _ := newSvc(t)
+	id, _, err := s.Create(newKeys().req(160, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutChunks(id, 1, 0, chunkBody(1, 0, 1, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Grow(id, 400); err != nil { // dernier reçu : segment 1 (partiel)
+		t.Fatal(err)
+	}
+}
+
+func TestFinalizeDraftVoidValidation(t *testing.T) {
+	s, _ := newSvc(t)
+	id, _, err := s.Create(newKeys().req(80, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range [][][2]int{{{-1, 2}}, {{3, 3}}, {{5, 2}}, {{0, 80}}, {{70, 80}}, make([][2]int, maxVoid+1)} {
+		r := draftFin(id, 80)
+		r.Void = v
+		if _, err := s.Finalize(id, r); !errors.Is(err, ErrBadRequest) {
+			t.Fatal(v[:min(len(v), 2)], err)
+		}
+	}
+	r := fin(id)
+	r.Void = [][2]int{{0, 1}}
+	if err := ValidateFinalize(r); !errors.Is(err, ErrBadRequest) {
+		t.Fatal("void hors brouillon", err)
+	}
+}

@@ -272,9 +272,12 @@ export async function putSegment(
   data: Uint8Array<ArrayBuffer>,
   onBytes: (sent: number) => void,
   signal?: AbortSignal,
+  /** Plage de morceaux à partir du morceau `from` du segment (brouillon, audit H-2). */
+  from?: number,
 ): Promise<void> {
   const headers = { ...bearer(token), "Content-Type": "application/octet-stream" };
-  const r = await c.upload(`${c.origin}/api/shares/segments/${n}`, headers, data, onBytes, signal);
+  const q = from === undefined ? "" : `?from=${from}`;
+  const r = await c.upload(`${c.origin}/api/shares/segments/${n}${q}`, headers, data, onBytes, signal);
   if (r.status < 200 || r.status > 299) throw httpErrorOf(r.status, r.json);
 }
 
@@ -296,7 +299,13 @@ export type FinalizeBody = {
  * Finalisation d'un brouillon (spec §41.14) : palier final, en-tête (48 octets) et morceau
  * chiffré du manifeste, en base64url ; jamais de fill_* (le serveur remplit tous les trous).
  */
-export type DraftFinalizeBody = Omit<FinalizeBody, "fill_from" | "fill_to"> & { bucket: number; header: string; tail: string };
+export type DraftFinalizeBody = Omit<FinalizeBody, "fill_from" | "fill_to"> & {
+  bucket: number;
+  header: string;
+  tail: string;
+  /** Plages [début, fin) de morceaux de petits éléments retirés, remplies d'aléa (audit H-2). */
+  void?: [number, number][];
+};
 
 /** Agrandit la réservation d'un brouillon au palier `bucket` (un essai). */
 export async function grow(c: Ctx, token: string, bucket: number, signal?: AbortSignal): Promise<void> {

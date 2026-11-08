@@ -33,9 +33,9 @@ test.describe("fr-FR", () => {
     const puts: number[] = [];
     const erases: unknown[] = [];
     // Chaque PUT après le premier est retardé : l'envoi du second fichier dure.
-    await page.route(/\/api\/shares\/segments\/\d+$/, async (route) => {
+    await page.route(/\/api\/shares\/segments\/\d+(\?from=\d+)?$/, async (route) => {
       if (route.request().method() === "PUT") {
-        puts.push(Number(/(\d+)$/.exec(route.request().url())![1]));
+        puts.push(Number(/segments\/(\d+)/.exec(route.request().url())![1]));
         if (puts.length > 1) await sleep(1500);
       }
       await route.continue().catch(() => undefined);
@@ -60,7 +60,7 @@ test.describe("fr-FR", () => {
     await expect(kept.locator("[data-up]")).toHaveAttribute("data-up", "pret", { timeout: 30_000 });
     await expect(gone.locator("[data-up]")).toHaveAttribute("data-up", "envoi", { timeout: 30_000 });
     await expect(gone.locator("[data-up]")).toContainText(/Envoi \d+ %/);
-    expect(puts[0]).toBe(0);
+    expect(puts[0]).toBe(0); // garde.bin (3 Mio, petit) : 48 morceaux du segment 0 partagé
 
     const blobs = join(shh.server.dataDir, "blobs");
     const [file] = readdirSync(blobs);
@@ -90,5 +90,42 @@ test.describe("fr-FR", () => {
     expect(Buffer.from(await o.item(0)).equals(fill(3 * MIB, 3))).toBe(true);
     await o.done();
     expect(errors).toEqual([]);
+  });
+
+  // Audit H-2 : 20 photos de 1 Mo envoient ≈ 20 Mo (et non 80 Mio de segments à moitié
+  // vides) ; un petit élément retiré n'est pas effacé tout de suite (clé oubliée), ses morceaux
+  // sont remplacés à finalize ; le destinataire ne le voit pas.
+  test("petits fichiers empaquetés : octets envoyés ≈ somme des tailles ; petit retiré invisible pour le destinataire", async ({ page, shh }) => {
+    test.setTimeout(180_000);
+    let putBytes = 0;
+    let finalize: Record<string, unknown> | undefined;
+    const erases: unknown[] = [];
+    page.on("request", (r) => {
+      const path = new URL(r.url()).pathname;
+      if (r.method() === "PUT" && path.startsWith("/api/shares/segments/")) putBytes += r.postDataBuffer()?.length ?? 0;
+      if (path === "/api/shares/erase") erases.push(r.postDataJSON());
+      if (path === "/api/shares/finalize") finalize = r.postDataJSON() as Record<string, unknown>;
+    });
+    await page.goto(shh.origin + "/");
+    const files = Array.from({ length: 20 }, (_, i) => ({ name: `photo-${String(i + 1).padStart(2, "0")}.bin`, mimeType: "application/octet-stream", buffer: fill(1_000_000, i + 2) }));
+    await (await openFilePicker(page)).setFiles(files);
+    await expect(page.locator("[data-row]")).toHaveCount(20);
+    await expect(page.locator("[data-up]:not([data-up=pret])")).toHaveCount(0, { timeout: 60_000 });
+    const sum = 20 * 1_000_000;
+    expect(putBytes).toBeGreaterThanOrEqual(sum);
+    expect(putBytes).toBeLessThan(sum * 1.06); // morceaux de 64 Kio ; avant : 20 × 4 Mio = 80 Mio
+    await removeItem(page, "photo-01.bin");
+    await expect(page.locator("[data-row]")).toHaveCount(19);
+    await sendButton(page).click();
+    await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
+    expect(erases).toEqual([]);
+    expect(finalize?.void).toEqual([[0, 16]]);
+    const read = async (name: string) => (await page.getByRole("group", { name }).locator(".sr-only").first().textContent()) ?? "";
+    const o = await openShare(await read("Lien"), await read("Mot de passe"), shh.origin);
+    const names = o.manifest.items.map((e) => e.name);
+    expect(names).toHaveLength(19);
+    expect(names).not.toContain("photo-01.bin");
+    expect(Buffer.from(await o.item(0)).equals(files[1]!.buffer)).toBe(true);
+    await o.done();
   });
 });

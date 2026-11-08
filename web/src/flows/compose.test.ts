@@ -116,15 +116,19 @@ describe("createComposer : ajout", () => {
     expect(c.blockReason()).toBe("trop_gros");
   });
 
-  it("segments entiers (spec §41.14) : 512 segments de 4 Mio au plus ; au-delà, « segments » même sous 2 Gio", async () => {
+  it("place (spec §41.14, audit H-2) : 512 segments de 4 Mio au plus, petits fichiers empaquetés ; au-delà, « segments » même sous 2 Gio", async () => {
     const c = make();
     const MIB = 1048576;
     await c.add([big("a.bin", 400 * 4 * MIB)], "fichiers"); // 400 segments
-    for (let i = 0; i < 112; i++) await c.add([big(`p${i}.bin`, 1)], "fichiers"); // 112 segments
+    for (let i = 0; i < 56; i++) await c.add([big(`g${i}.bin`, 4 * MIB + 1)], "fichiers"); // 2 segments chacun : 512
     expect(c.blockReason()).toBeNull();
-    await c.add([big("x.bin", 1)], "fichiers"); // 513ᵉ segment ; total ≈ 1,6 Gio
+    for (let i = 0; i < 100; i++) await c.add([big(`p${i}.bin`, 1)], "fichiers"); // 100 morceaux : 2 segments partagés
     expect(c.totalBytes).toBeLessThan(CONTENT_MAX);
     expect(c.blockReason()).toBe("segments");
+    const d = make();
+    for (let i = 0; i < 64; i++) await d.add([big(`p${i}.bin`, 1)], "fichiers"); // 64 petits : un seul segment
+    await d.add([big("a.bin", 511 * 4 * MIB)], "fichiers");
+    expect(d.blockReason()).toBeNull();
   });
 
   it("photo de la source « photo » → Photo 1.jpg, Photo 2.jpg ; vidéo → Vidéo 1.mov", async () => {

@@ -448,7 +448,11 @@ describe("createShare en flux", () => {
       onProgress: (d, t) => prog.push([d, t]),
     });
     expect(r.expiresInS).toBe(3600);
-    expect(puts).toEqual([0, 1, 2].map((n) => [`/api/shares/segments/${n}`, segmentSize(400, n)]));
+    expect(puts).toEqual([
+      ["/api/shares/segments/0", segmentSize(400, 0)],
+      ["/api/shares/segments/1", segmentSize(400, 1)],
+      ["/api/shares/segments/2?from=0", 16 * 65552], // fin du fichier seulement (audit H-2)
+    ]);
     expect(prog).toEqual([[0, 3], [1, 3], [2, 3], [3, 3]]);
   }, 20_000);
 });
@@ -633,7 +637,7 @@ function sender(o: {
     return j(404, { error: "not_found" });
   }) as typeof fetch;
   const upload = async (url: string, _h: Record<string, string>, body: Uint8Array, onBytes: (b: number) => void, signal?: AbortSignal) => {
-    const n = Number(/\/segments\/(\d+)$/.exec(url)![1]);
+    const n = Number(/\/segments\/(\d+)(?:\?from=\d+)?$/.exec(url)![1]);
     log(`PUT ${n}`);
     const a = (attempts.get(n) ?? 0) + 1;
     attempts.set(n, a);
@@ -644,11 +648,11 @@ function sender(o: {
 
 // Petit fichier : un segment de données (0) ; un texte seul ne fait aucun PUT (spec §41.14).
 const SMALL = [{ kind: "file" as const, name: "a", mime: "text/plain", data: new Uint8Array([97]) }];
-// 9 Mio : 3 segments de données pleins (spec §41.14 : chaque fichier en segments entiers) ;
+// 9 Mio : 2 segments pleins puis 16 morceaux du segment 2 (audit H-2 : aucun bourrage envoyé) ;
 // le manifeste part avec finalize (tail).
 const BIG_DATA = pseudo(9 * 1048576, 7);
 const BIG = [{ kind: "file" as const, name: "x", mime: "x/y", data: new Blob([BIG_DATA]) }];
-const BIG_SIZES = [0, 1, 2].map((n) => segmentSize(400, n));
+const BIG_SIZES = [segmentSize(400, 0), segmentSize(400, 1), 16 * 65552];
 
 const base = (s: ReturnType<typeof sender>) => ({
   ttlHours: 1 as const,
@@ -1130,7 +1134,7 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
     const s = sender({ segments: 7 });
     const sent = new Map<number, Uint8Array<ArrayBuffer>>();
     const upload: typeof s.upload = async (url, h, body, onBytes, signal) => {
-      sent.set(Number(/\/segments\/(\d+)$/.exec(url)![1]), new Uint8Array(body));
+      sent.set(Number(/\/segments\/(\d+)(?:\?from=0)?$/.exec(url)![1]), new Uint8Array(body)); // fin partielle : depuis le morceau 0
       return s.upload(url, h, body, onBytes, signal);
     };
     const prog: [number, number][] = [];
@@ -1239,7 +1243,7 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
         expect(v).toHaveLength(3);
         expect(new Set(v).size).toBe(1);
       }
-      // Morceaux de l'élément : 192 chiffrements (3 segments), 192 nonces distincts sous sa
+      // Morceaux de l'élément : 144 chiffrements (9 Mio, aucun bourrage), 144 nonces distincts sous sa
       // clé ; plus le manifeste (K_contenu) et E (K_env).
       const byKey = new Map<CryptoKey, string[]>();
       for (const c of spy.mock.calls) {
@@ -1247,7 +1251,7 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
         (byKey.get(c[1]) ?? byKey.set(c[1], []).get(c[1])!).push(iv);
       }
       const sizes = [...byKey.values()].map((v) => v.length).sort((a, b) => a - b);
-      expect(sizes).toEqual([1, 1, 192]);
+      expect(sizes).toEqual([1, 1, 144]);
       for (const v of byKey.values()) expect(new Set(v).size).toBe(v.length);
     } finally {
       spy.mockRestore();

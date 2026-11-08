@@ -453,6 +453,27 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     if (req.signal.aborted) throw new DOMException("Aborted", "AbortError");
     const s = live(id); // revérifié après le transfert : détruit pendant l'envoi → 404
     if (s.state !== "uploading" || s.uploadDeadline <= now()) throw notFound();
+    const q = new URL(req.url).searchParams;
+    if (q.has("from")) {
+      // Plage de morceaux (audit H-2, comme PutChunks du vrai serveur) : morceaux jamais reçus
+      // déjà en aléa ici, comme après finalize.
+      const from = segNum(q.get("from")!);
+      const size = n < s.segments.length ? segmentSize(s.bucket, n) : 0;
+      const chunks = Math.min(SEG_CHUNKS, s.bucket - n * SEG_CHUNKS);
+      const pre = n === 0 && from === 0 ? HEADER : 0;
+      const k = (body.length - pre) / CHUNK_CT;
+      if (n >= s.segments.length || from >= SEG_CHUNKS || body.length - pre <= 0 || !Number.isInteger(k) || from + k > chunks) throw badRequest();
+      let seg = s.segments[n];
+      if (!seg) {
+        const fresh = new Uint8Array(size);
+        for (let o = 0; o < size; o += 65536) crypto.getRandomValues(fresh.subarray(o, Math.min(size, o + 65536)));
+        s.segments[n] = seg = fresh;
+      }
+      seg.set(body, (n === 0 ? HEADER : 0) + from * CHUNK_CT - pre);
+      opts.onSegment?.(id, n, seg);
+      s.progressAt = minute(now());
+      return empty(204);
+    }
     if (n >= s.segments.length || body.length !== segmentSize(s.bucket, n)) throw badRequest();
     s.segments[n] = body;
     opts.onSegment?.(id, n, body);
@@ -460,7 +481,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     return empty(204);
   }
 
-  const FINALIZE_KEYS = ["salt", "kdf_ops", "kdf_mem", "proof_v", "envelope", "ttl_hours", "max_opens", "fill_from", "fill_to", "bucket", "header", "tail"];
+  const FINALIZE_KEYS = ["salt", "kdf_ops", "kdf_mem", "proof_v", "envelope", "ttl_hours", "max_opens", "fill_from", "fill_to", "bucket", "header", "tail", "void"];
 
   function uploading(req: Request): [string, Share] {
     const { id } = checkToken(req, "upload");
@@ -511,6 +532,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     const draft = b.bucket !== undefined;
     if (draft !== (b.header !== undefined) || draft !== (b.tail !== undefined)) throw badRequest();
     if (draft && (b.fill_from !== undefined || b.fill_to !== undefined)) throw badRequest();
+    if (!draft && b.void !== undefined) throw badRequest();
     const ttl = int(b.ttl_hours), maxOpens = int(b.max_opens), ops = int(b.kdf_ops), mem = int(b.kdf_mem);
     // fill_from et fill_to ensemble, ou aucun des deux (spec §36 S4 : tout le bourrage envoyé).
     const noFill = b.fill_from === undefined && b.fill_to === undefined;
@@ -541,6 +563,16 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
         if (got) seg.set(got.subarray(0, size));
         else for (let o = 0; o < size; o += 65536) crypto.getRandomValues(seg.subarray(o, Math.min(size, o + 65536)));
         out.push(seg);
+      }
+      // Morceaux de petits éléments retirés (audit H-2) : remplacés par de l'aléa.
+      const voids = b.void === undefined ? [] : b.void;
+      if (!Array.isArray(voids) || voids.length > 512) throw badRequest();
+      for (const v of voids as unknown[]) {
+        if (!Array.isArray(v) || v.length !== 2 || !Number.isInteger(v[0]) || !Number.isInteger(v[1]) || !(v[0] >= 0 && v[0] < v[1] && v[1] <= fb - 1)) throw badRequest();
+        for (let c = v[0] as number; c < (v[1] as number); c++) {
+          const n = Math.floor(c / SEG_CHUNKS), at = (n === 0 ? HEADER : 0) + (c % SEG_CHUNKS) * CHUNK_CT;
+          for (let o = at; o < at + CHUNK_CT; o += 65536) crypto.getRandomValues(out[n]!.subarray(o, Math.min(at + CHUNK_CT, o + 65536)) as Uint8Array<ArrayBuffer>);
+        }
       }
       out[0]!.set(hdr, 0);
       const L = Math.floor((fb - 1) / SEG_CHUNKS);

@@ -1,6 +1,6 @@
 // Envoi dès l'ajout (spec §41.14, D41-19) : chaque fichier est chiffré sous sa propre clé
-// K_élément = HKDF(k, « shhdrop/v2/element ») et occupe des segments entiers à partir d'une
-// frontière de segment ; au clic, le manifeste (clés des seuls éléments gardés) est chiffré
+// K_élément = HKDF(k, « shhdrop/v2/element ») ; un élément d'un segment ou plus part d'une
+// frontière de segment, les petits sont empaquetés par morceaux dans des segments partagés (H-2) ; au clic, le manifeste (clés des seuls éléments gardés) est chiffré
 // sous K_contenu = HKDF(R) dans le dernier morceau du palier final, et l'en-tête « SHH2 » est
 // produit. Mêmes morceaux, nonces et segments que le paquet v2 (§29.3) ; aucune construction
 // nouvelle (HKDF-SHA-256, AES-256-GCM de WebCrypto).
@@ -47,54 +47,99 @@ export function reservationFor(used: number): number {
   throw new Error("trop_gros");
 }
 
+/** Morceaux de données au plus (2 Gio). */
+export const DATA_CHUNKS = DATA_SEGMENTS * SEG_CHUNKS;
+
+/** Morceaux occupés par un fichier de `size` octets (0 pour un fichier vide). */
+export function chunksFor(size: number): number {
+  if (!Number.isSafeInteger(size) || size < 0) throw new Error("taille_invalide");
+  return Math.ceil(size / CHUNK);
+}
+
+/**
+ * Petit élément (audit H-2) : moins d'un segment ; empaqueté avec d'autres dans un segment
+ * partagé, n'importe où sur une frontière de morceau, sans déborder de son segment. Un élément
+ * d'un segment ou plus commence sur une frontière de segment et occupe ses segments seul.
+ */
+export function isSmall(size: number): boolean {
+  return size > 0 && size < SEG_PLAIN;
+}
+
+/**
+ * Segments d'une liste de fichiers, empaquetage compris (estimation de la place : les petits
+ * éléments, à 64 Kio près, se partagent des segments) ; borne « trop gros » de l'interface.
+ */
+export function segmentsNeeded(sizes: readonly number[]): number {
+  let big = 0, small = 0;
+  for (const n of sizes) {
+    if (isSmall(n)) small += chunksFor(n);
+    else big += segmentsFor(n);
+  }
+  return big + Math.ceil(small / SEG_CHUNKS);
+}
+
+/** Plage de morceaux d'un même segment, envoyée en une requête. */
+export type Piece = { seg: number; from: number; chunks: number };
+
 export type ElementSealer = {
   /** Graine de la clé (32 octets) : n'entre que dans le manifeste chiffré, si l'élément est gardé. */
   k: Uint8Array<ArrayBuffer>;
-  segments: number;
+  /** Plages à envoyer, dans l'ordre (une par segment touché). */
+  pieces: Piece[];
   /**
-   * Chiffre le j-ième segment de l'élément (segment first + j du paquet), une seule fois :
-   * un nouvel essai d'envoi renvoie les octets gardés par l'appelant. 64 morceaux pleins
-   * (zéros chiffrés après la fin du fichier) ; au segment 0, 48 octets nuls d'abord (en-tête
-   * écrit par le serveur à la finalisation).
+   * Chiffre la j-ième plage, une seule fois : un nouvel essai d'envoi renvoie les octets
+   * gardés par l'appelant. Seuls les morceaux de l'élément (zéros chiffrés après la fin du
+   * fichier, dans son dernier morceau) : aucun bourrage. Plage qui commence au morceau 0 du
+   * paquet : 48 octets nuls d'abord (en-tête écrit par le serveur à la finalisation).
    */
-  segment(j: number): Promise<Uint8Array<ArrayBuffer>>;
+  piece(j: number): Promise<Uint8Array<ArrayBuffer>>;
 };
 
 /**
- * Prépare l'élément `blob` placé au segment `first`. Clé neuve à chaque appel : un nouvel
- * essai (« Réessayer ») ou une nouvelle place ne réutilise jamais un nonce sous une clé.
- * Le Blob est lu par tranches (un morceau à la fois) ; un File modifié depuis l'ajout fait
- * échouer la lecture (NotReadableError).
+ * Prépare l'élément `blob` placé au morceau `first` du paquet (frontière de segment pour un
+ * élément d'un segment ou plus ; dans un seul segment pour un petit). Clé neuve à chaque
+ * appel : un nouvel essai (« Réessayer ») ou une nouvelle place ne réutilise jamais un nonce
+ * sous une clé. Le Blob est lu par tranches (un morceau à la fois) ; un File modifié depuis
+ * l'ajout fait échouer la lecture (NotReadableError).
  */
 export async function elementSealer(blob: Blob, first: number): Promise<ElementSealer> {
-  const segments = segmentsFor(blob.size);
-  if (!Number.isSafeInteger(first) || first < 0 || first + segments > DATA_SEGMENTS) throw new Error("trop_gros");
+  const n = chunksFor(blob.size);
+  if (!Number.isSafeInteger(first) || first < 0 || first + n > DATA_CHUNKS) throw new Error("trop_gros");
+  if (isSmall(blob.size) ? Math.floor(first / SEG_CHUNKS) !== Math.floor((first + n - 1) / SEG_CHUNKS) : first % SEG_CHUNKS !== 0) {
+    throw new Error("place_invalide");
+  }
+  const pieces: Piece[] = [];
+  for (let a = first; a < first + n; ) {
+    const seg = Math.floor(a / SEG_CHUNKS);
+    const z = Math.min(first + n, (seg + 1) * SEG_CHUNKS);
+    pieces.push({ seg, from: a - seg * SEG_CHUNKS, chunks: z - a });
+    a = z;
+  }
   const k = randomBytes(32);
   const key = await elementKey(k);
   const produced = new Set<number>();
   return {
     k,
-    segments,
-    async segment(j: number): Promise<Uint8Array<ArrayBuffer>> {
-      if (!Number.isInteger(j) || j < 0 || j >= segments) throw new Error("segment_invalide");
+    pieces,
+    async piece(j: number): Promise<Uint8Array<ArrayBuffer>> {
+      const p = pieces[j];
+      if (!Number.isInteger(j) || p === undefined) throw new Error("segment_invalide");
       if (produced.has(j)) throw new Error("segment_deja_produit");
       produced.add(j);
-      const n = first + j;
-      const pre = n === 0 ? HEADER : 0;
-      const out = new Uint8Array(pre + SEG_CHUNKS * CHUNK_CT);
+      const g0 = p.seg * SEG_CHUNKS + p.from; // premier morceau, numéro dans le paquet
+      const pre = g0 === 0 ? HEADER : 0;
+      const out = new Uint8Array(pre + p.chunks * CHUNK_CT);
       const chunk = new Uint8Array(CHUNK);
       try {
-        for (let c = 0; c < SEG_CHUNKS; c++) {
+        for (let c = 0; c < p.chunks; c++) {
           chunk.fill(0);
-          const lo = (j * SEG_CHUNKS + c) * CHUNK;
-          if (lo < blob.size) {
-            const part = new Uint8Array(await blob.slice(lo, Math.min(blob.size, lo + CHUNK)).arrayBuffer());
-            if (part.length !== Math.min(CHUNK, blob.size - lo)) throw new Error("lecture_incomplete");
-            chunk.set(part);
-            part.fill(0);
-          }
+          const lo = (g0 + c - first) * CHUNK;
+          const part = new Uint8Array(await blob.slice(lo, Math.min(blob.size, lo + CHUNK)).arrayBuffer());
+          if (part.length !== Math.min(CHUNK, blob.size - lo)) throw new Error("lecture_incomplete");
+          chunk.set(part);
+          part.fill(0);
           const ct = await crypto.subtle.encrypt(
-            { name: "AES-GCM", iv: nonce(n * SEG_CHUNKS + c, false), additionalData: ELEMENT_AD, tagLength: 128 },
+            { name: "AES-GCM", iv: nonce(g0 + c, false), additionalData: ELEMENT_AD, tagLength: 128 },
             key,
             chunk,
           );
@@ -110,7 +155,7 @@ export async function elementSealer(blob: Blob, first: number): Promise<ElementS
 
 export type FinalEntry =
   | { kind: "text"; name: string; mime: string; text: string }
-  | { kind: "file"; name: string; mime: string; size: number; firstSeg: number; k: Uint8Array<ArrayBuffer> };
+  | { kind: "file"; name: string; mime: string; size: number; /** premier morceau */ first: number; k: Uint8Array<ArrayBuffer> };
 
 // Une K_contenu ne chiffre qu'un manifeste : une nouvelle finalisation tire une R neuve.
 const usedKeys = new WeakSet<CryptoKey>();
@@ -138,13 +183,13 @@ export async function sealFinal(
       items.push({ kind: "text", name: e.name, mime: e.mime, size: 0, offset: 0, text: e.text });
       continue;
     }
-    const segs = Math.ceil(e.size / (SEG_CHUNKS * CHUNK));
-    if (!Number.isSafeInteger(e.firstSeg) || e.firstSeg < 0 || e.firstSeg + segs > DATA_SEGMENTS) throw new Error("trop_gros");
-    for (let n = e.firstSeg; n < e.firstSeg + segs; n++) {
-      if (taken.has(n)) throw new Error("chevauchement");
-      taken.add(n);
+    const n = chunksFor(e.size);
+    if (!Number.isSafeInteger(e.first) || e.first < 0 || e.first + n > DATA_CHUNKS) throw new Error("trop_gros");
+    for (let c = e.first; c < e.first + n; c++) {
+      if (taken.has(c)) throw new Error("chevauchement");
+      taken.add(c);
     }
-    const offset = e.firstSeg * SEG_CHUNKS * CHUNK;
+    const offset = e.first * CHUNK;
     items.push({ kind: "file", name: e.name, mime: e.mime, size: e.size, offset: e.size === 0 ? 0 : offset, k: b64u(e.k) });
     if (e.size > 0) dataEnd = Math.max(dataEnd, offset + e.size);
   }

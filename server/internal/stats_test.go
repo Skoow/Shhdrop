@@ -39,6 +39,7 @@ var allowedMaps = map[string]string{
 	"share/budget.go:m":                 "§9.5 budget de lecture par ouverture",
 	"share/service.go:up":               "§9.5 colonnes d'un partage vivant (échéance d'envoi, dernier segment), en mémoire (§36 S5, S12)",
 	"share/service.go:purge":            "§9.5 colonnes d'un partage vivant (purge d'un « draining »), en mémoire (§36 S12)",
+	"share/service.go:part":             "§9.5 colonnes d'un partage vivant (morceaux reçus d'un segment partagé, audit H-2), en mémoire",
 	"share/service.go:ids":              "verrou de finalisation (aucun compte : présence seulement, le temps d'un finalize)",
 	"share/detached.go:active":          "§9.5 ouvertures actives (§41.8)",
 	"share/detached.go:dead":            "§9.5 ouvertures actives : descripteurs détachés (§41.8)",

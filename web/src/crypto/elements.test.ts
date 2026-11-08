@@ -2,7 +2,7 @@
 // de segment, manifeste et en-tête produits au clic, palier final canonique.
 import { describe, expect, it, vi } from "vitest";
 import { CHUNK, CHUNK_CT, HEADER, SEG_CHUNKS, bucketFor, openStream, segmentCount, segmentSize } from "./container";
-import { DATA_SEGMENTS, SEG_PLAIN, elementSealer, reservationFor, sealFinal, segmentsFor } from "./elements";
+import { DATA_SEGMENTS, SEG_PLAIN, chunksFor, elementSealer, isSmall, reservationFor, sealFinal, segmentsFor, segmentsNeeded } from "./elements";
 import { utf8 } from "./encoding";
 import { contentKeys, newSeed } from "./envelope";
 
@@ -38,9 +38,20 @@ function assemble(bucket: number, uploaded: Map<number, Uint8Array>, header: Uin
   return segs;
 }
 
+/** Envoie les plages de l'élément placé au morceau `first` dans des segments complets (aléa ailleurs). */
 async function upload(blob: Blob, first: number, out: Map<number, Uint8Array>) {
   const el = await elementSealer(blob, first);
-  for (let j = 0; j < el.segments; j++) out.set(first + j, await el.segment(j));
+  for (const [j, p] of el.pieces.entries()) {
+    const pre = p.seg === 0 ? HEADER : 0;
+    let s = out.get(p.seg);
+    if (!s) {
+      const fresh = new Uint8Array(pre + SEG_CHUNKS * CHUNK_CT);
+      for (let o = 0; o < fresh.length; o += 65536) crypto.getRandomValues(fresh.subarray(o, Math.min(fresh.length, o + 65536)));
+      out.set(p.seg, (s = fresh));
+    }
+    const b = await el.piece(j);
+    s.set(b, pre + p.from * CHUNK_CT - (p.seg === 0 && p.from === 0 ? HEADER : 0));
+  }
   return el;
 }
 
@@ -62,15 +73,15 @@ describe("éléments (spec §41.14)", () => {
     const b = pseudo(100_000, 3); // segment 3
     const up = new Map<number, Uint8Array>();
     const ea = await upload(new Blob([a]), 0, up);
-    await upload(new Blob([removed]), 2, up);
-    const eb = await upload(new Blob([b]), 3, up);
+    await upload(new Blob([removed]), 128, up);
+    const eb = await upload(new Blob([b]), 192, up);
     up.delete(2); // effacé par le serveur
     const keys = await contentKeys(newSeed());
     const fin = await sealFinal(
       [
         { kind: "text", name: "note", mime: "text/plain", text: "bonjour" },
-        { kind: "file", name: "b.bin", mime: "application/octet-stream", size: b.length, firstSeg: 3, k: eb.k },
-        { kind: "file", name: "a.bin", mime: "application/octet-stream", size: a.length, firstSeg: 0, k: ea.k },
+        { kind: "file", name: "b.bin", mime: "application/octet-stream", size: b.length, first: 192, k: eb.k },
+        { kind: "file", name: "a.bin", mime: "application/octet-stream", size: a.length, first: 0, k: ea.k },
       ],
       keys,
       { rights: "enregistrer" },
@@ -89,32 +100,37 @@ describe("éléments (spec §41.14)", () => {
 
   it("segment 0 : zone d'en-tête vide (écrite par le serveur) ; chaque segment produit une seule fois", async () => {
     const el = await elementSealer(new Blob([pseudo(10, 4)]), 0);
-    const s = await el.segment(0);
-    expect(s.length).toBe(HEADER + SEG_CHUNKS * CHUNK_CT);
+    const s = await el.piece(0);
+    expect(s.length).toBe(HEADER + CHUNK_CT); // un morceau, aucun bourrage
     expect(s.subarray(0, HEADER).every((x) => x === 0)).toBe(true);
-    await expect(el.segment(0)).rejects.toThrow("segment_deja_produit");
-    await expect(el.segment(1)).rejects.toThrow("segment_invalide");
-    const el5 = await elementSealer(new Blob([pseudo(10, 4)]), 5);
-    expect((await el5.segment(0)).length).toBe(SEG_CHUNKS * CHUNK_CT);
+    await expect(el.piece(0)).rejects.toThrow("segment_deja_produit");
+    await expect(el.piece(1)).rejects.toThrow("segment_invalide");
+    const el5 = await elementSealer(new Blob([pseudo(10, 4)]), 320);
+    expect((await el5.piece(0)).length).toBe(CHUNK_CT);
   });
 
   it("clé neuve par élément : même contenu, même place → chiffrés différents ; jamais de clé en clair", async () => {
     const data = pseudo(70_000, 5);
-    const e1 = await elementSealer(new Blob([data]), 1);
-    const e2 = await elementSealer(new Blob([data]), 1);
+    const e1 = await elementSealer(new Blob([data]), 64);
+    const e2 = await elementSealer(new Blob([data]), 64);
     expect(same(e1.k, e2.k)).toBe(false);
-    const s1 = await e1.segment(0), s2 = await e2.segment(0);
+    const s1 = await e1.piece(0), s2 = await e2.piece(0);
     expect(same(s1.subarray(0, 100), s2.subarray(0, 100))).toBe(false);
   });
 
   it("aucun nonce répété sous une même clé d'élément", async () => {
     const spy = vi.spyOn(crypto.subtle, "encrypt");
     try {
-      const el = await elementSealer(new Blob([pseudo(9 * MIB, 6)]), 7);
-      for (let j = 0; j < el.segments; j++) await el.segment(j);
+      const el = await elementSealer(new Blob([pseudo(9 * MIB, 6)]), 448);
+      for (let j = 0; j < el.pieces.length; j++) await el.piece(j);
       const ivs = spy.mock.calls.map((c) => Array.from((c[0] as AesGcmParams).iv as Uint8Array).join(","));
       expect(new Set(ivs).size).toBe(ivs.length);
-      expect(ivs.length).toBe(3 * SEG_CHUNKS);
+      expect(ivs.length).toBe(144); // 9 Mio : 144 morceaux, pas 3 segments pleins
+      expect(el.pieces).toEqual([
+        { seg: 7, from: 0, chunks: 64 },
+        { seg: 8, from: 0, chunks: 64 },
+        { seg: 9, from: 0, chunks: 16 },
+      ]);
     } finally {
       spy.mockRestore();
     }
@@ -124,12 +140,12 @@ describe("éléments (spec §41.14)", () => {
     const a = pseudo(CHUNK * 2, 7), b = pseudo(CHUNK * 2, 8);
     const up = new Map<number, Uint8Array>();
     const ea = await upload(new Blob([a]), 0, up);
-    const eb = await upload(new Blob([b]), 1, up);
+    const eb = await upload(new Blob([b]), 64, up);
     const keys = await contentKeys(newSeed());
     const fin = await sealFinal(
       [
-        { kind: "file", name: "a", mime: "x/y", size: a.length, firstSeg: 0, k: ea.k },
-        { kind: "file", name: "b", mime: "x/y", size: b.length, firstSeg: 1, k: eb.k },
+        { kind: "file", name: "a", mime: "x/y", size: a.length, first: 0, k: ea.k },
+        { kind: "file", name: "b", mime: "x/y", size: b.length, first: 64, k: eb.k },
       ],
       keys,
       {},
@@ -146,12 +162,12 @@ describe("éléments (spec §41.14)", () => {
     const keys = await contentKeys(newSeed());
     const k = new Uint8Array(32);
     await expect(sealFinal([{ kind: "text", name: "t", mime: "text/plain", text: "x".repeat(70_000) }], keys, {})).rejects.toThrow();
-    await expect(sealFinal([{ kind: "file", name: "f", mime: "x/y", size: 10, firstSeg: 512, k }], await contentKeys(newSeed()), {})).rejects.toThrow("trop_gros");
+    await expect(sealFinal([{ kind: "file", name: "f", mime: "x/y", size: 10, first: 32768, k }], await contentKeys(newSeed()), {})).rejects.toThrow("trop_gros");
     await expect(
       sealFinal(
         [
-          { kind: "file", name: "f", mime: "x/y", size: 5 * MIB, firstSeg: 0, k },
-          { kind: "file", name: "g", mime: "x/y", size: 10, firstSeg: 1, k },
+          { kind: "file", name: "f", mime: "x/y", size: 5 * MIB, first: 0, k },
+          { kind: "file", name: "g", mime: "x/y", size: 10, first: 64, k },
         ],
         await contentKeys(newSeed()),
         {},
@@ -164,8 +180,58 @@ describe("éléments (spec §41.14)", () => {
     const up = new Map<number, Uint8Array>();
     const el = await upload(new Blob([pseudo(10, 9)]), 0, up);
     const keys = await contentKeys(newSeed());
-    const fin = await sealFinal([{ kind: "file", name: "a", mime: "x/y", size: 10, firstSeg: 0, k: el.k.slice(0, 31) }], keys, {});
+    const fin = await sealFinal([{ kind: "file", name: "a", mime: "x/y", size: 10, first: 0, k: el.k.slice(0, 31) }], keys, {});
     const segs = assemble(fin.bucket, up, fin.header, fin.tail);
     await expect(openStream(async (n) => new Uint8Array(segs[n]!), fin.bucket, keys)).rejects.toThrow("paquet_corrompu");
+  });
+
+  // Audit H-2 : petits éléments empaquetés dans un segment partagé, sans bourrage.
+  it("empaquetage : petits éléments par morceaux dans un segment partagé, grand élément sur sa frontière ; lecture", async () => {
+    expect([0, 1, CHUNK, CHUNK + 1, SEG_PLAIN - 1, SEG_PLAIN].map(chunksFor)).toEqual([0, 1, 1, 2, 64, 64]);
+    expect([0, 1, SEG_PLAIN - 1, SEG_PLAIN].map(isSmall)).toEqual([false, true, true, false]);
+    // 20 photos de 1 Mo : 16 morceaux chacune, 320 morceaux, 5 segments (et non 20).
+    expect(segmentsNeeded(Array(20).fill(1_000_000))).toBe(5);
+    expect(segmentsNeeded([SEG_PLAIN + 1, 10, 10])).toBe(3);
+    await expect(elementSealer(new Blob([pseudo(2 * CHUNK, 1)]), 63)).rejects.toThrow("place_invalide"); // déborde du segment
+    await expect(elementSealer(new Blob([pseudo(SEG_PLAIN, 1)]), 1)).rejects.toThrow("place_invalide"); // grand hors frontière
+    const a = pseudo(100_000, 11); // morceaux 0-1
+    const gone = pseudo(150_000, 12); // morceaux 2-4, retiré
+    const c = pseudo(10, 13); // morceau 5
+    const big = pseudo(SEG_PLAIN + 5, 14); // segments 1-2 (1 morceau au segment 2)
+    const up = new Map<number, Uint8Array>();
+    const ea = await upload(new Blob([a]), 0, up);
+    const eg = await elementSealer(new Blob([gone]), 2);
+    expect(eg.pieces).toEqual([{ seg: 0, from: 2, chunks: 3 }]);
+    expect((await eg.piece(0)).length).toBe(3 * CHUNK_CT);
+    const ec = await upload(new Blob([c]), 5, up);
+    const eb = await upload(new Blob([big]), 64, up);
+    expect(eb.pieces.map((p) => p.chunks)).toEqual([64, 1]);
+    const keys = await contentKeys(newSeed());
+    const fin = await sealFinal(
+      [
+        { kind: "file", name: "c", mime: "x/y", size: c.length, first: 5, k: ec.k },
+        { kind: "file", name: "big", mime: "x/y", size: big.length, first: 64, k: eb.k },
+        { kind: "file", name: "a", mime: "x/y", size: a.length, first: 0, k: ea.k },
+      ],
+      keys,
+      {},
+    );
+    expect(fin.bucket).toBe(bucketFor(64 * CHUNK + big.length));
+    const segs = assemble(fin.bucket, up, fin.header, fin.tail);
+    const rd = await openStream(async (n) => new Uint8Array(segs[n]!), fin.bucket, keys);
+    expect(rd.manifest.items.map((e) => e.offset)).toEqual([5 * CHUNK, SEG_PLAIN, 0]);
+    expect(same(await rd.item(0), c)).toBe(true);
+    expect(same(await rd.item(1), big)).toBe(true);
+    expect(same(await rd.item(2), a)).toBe(true);
+    await expect(
+      sealFinal(
+        [
+          { kind: "file", name: "a", mime: "x/y", size: a.length, first: 0, k: ea.k },
+          { kind: "file", name: "b", mime: "x/y", size: 10, first: 1, k: ec.k },
+        ],
+        await contentKeys(newSeed()),
+        {},
+      ),
+    ).rejects.toThrow("chevauchement");
   });
 });

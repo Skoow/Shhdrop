@@ -188,6 +188,20 @@ func (s *server) putSegment(w http.ResponseWriter, r *http.Request) {
 		writeLimit(w, retry)
 		return
 	}
+	// ?from=c : plage de morceaux d'un segment de brouillon (audit H-2, petits éléments
+	// empaquetés) ; sans : segment entier.
+	if f := r.URL.Query(); f.Has("from") {
+		c, err := segNum(f.Get("from"))
+		if err == nil {
+			err = s.svc.PutChunks(id, n, c, body)
+		}
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err := s.svc.PutSegment(id, n, body); err != nil {
 		fail(w, err)
 		return
@@ -215,6 +229,8 @@ func (s *server) finalize(w http.ResponseWriter, r *http.Request) {
 		Bucket *int    `json:"bucket"`
 		Header *string `json:"header"`
 		Tail   *string `json:"tail"`
+		// Plages de morceaux de petits éléments retirés (audit H-2), remplies d'aléa.
+		Void [][2]int `json:"void"`
 	}
 	if err := readJSONMax(w, r, &b, maxFinalizeJSON); err != nil {
 		fail(w, err)
@@ -235,13 +251,14 @@ func (s *server) finalize(w http.ResponseWriter, r *http.Request) {
 		req.FillFrom, req.FillTo = *b.FillFrom, *b.FillTo
 	}
 	draft := b.Bucket != nil
-	if draft != (b.Header != nil) || draft != (b.Tail != nil) || draft && b.FillFrom != nil {
+	if draft != (b.Header != nil) || draft != (b.Tail != nil) || draft && b.FillFrom != nil || !draft && b.Void != nil {
 		fail(w, errBadRequest)
 		return
 	}
 	if draft {
 		var e1, e2 error
 		req.Bucket = *b.Bucket
+		req.Void = b.Void
 		req.Header, e1 = secret(*b.Header, share.Header)
 		req.Tail, e2 = secret(*b.Tail, share.ChunkCT)
 		if e1 != nil || e2 != nil || req.Bucket == 0 {

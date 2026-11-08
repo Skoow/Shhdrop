@@ -21,16 +21,122 @@ func (s *Service) draftRow(id string) (int, []byte, error) {
 	return bucket, mask, notFound(err)
 }
 
+// chunksIn : morceaux du segment n au palier bucket (64, sauf le dernier segment du palier).
+func chunksIn(bucket, n int) int { return min(SegChunks, bucket-n*SegChunks) }
+
+// chunkOffset : position du morceau c du segment n (après l'en-tête au segment 0).
+func chunkOffset(bucket, n, c int) int64 {
+	off := segOffset(bucket, n) + int64(c)*ChunkCT
+	if n == 0 {
+		off += Header
+	}
+	return off
+}
+
+// PutChunks écrit les morceaux [from, from+k) du segment n d'un brouillon (audit H-2) :
+// petits éléments empaquetés dans un segment partagé, et fin d'un grand élément, envoyés sans
+// bourrage. Au segment 0, une plage qui part du morceau 0 commence par les 48 octets de
+// l'en-tête (zéros, réécrits à finalize). Les morceaux reçus sont notés en mémoire ; un
+// segment complet compte comme reçu (masque), le reste est rempli d'aléa à finalize.
+func (s *Service) PutChunks(id string, n, from int, body []byte) error {
+	if !validID(id) {
+		return ErrNotFound
+	}
+	s.uploadMu.RLock()
+	defer s.uploadMu.RUnlock()
+	bucket, _, err := s.draftRow(id)
+	if err != nil {
+		return err
+	}
+	if n < 0 || n >= SegmentCount(bucket) || from < 0 || from >= SegChunks {
+		return ErrBadSegment
+	}
+	pre := 0
+	if n == 0 && from == 0 {
+		pre = Header
+	}
+	k := (len(body) - pre) / ChunkCT
+	chunks := chunksIn(bucket, n)
+	if len(body)-pre <= 0 || (len(body)-pre)%ChunkCT != 0 || from+k > chunks {
+		return ErrBadSegment
+	}
+	start := chunkOffset(bucket, n, from) - int64(pre)
+	if err := s.Blobs.WriteAt(id, start, body); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return ErrNotFound // détruit pendant l'envoi
+		}
+		return err
+	}
+	all := ^uint64(0) >> (SegChunks - chunks)
+	bits := (^uint64(0) >> (SegChunks - k)) << from
+	s.mem.mu.Lock()
+	if s.mem.part == nil {
+		s.mem.part = map[string]map[int]uint64{}
+	}
+	p := s.mem.part[id]
+	if p == nil {
+		p = map[int]uint64{}
+		s.mem.part[id] = p
+	}
+	p[n] |= bits
+	full := p[n]&all == all
+	if full {
+		delete(p, n)
+	}
+	s.mem.mu.Unlock()
+	if full {
+		return s.markReceived(id, n)
+	}
+	s.touchUpload(id, s.now())
+	return nil
+}
+
+// clearPart oublie les morceaux reçus en partie des segments [from, to).
+func (s *Service) clearPart(id string, from, to int) {
+	s.mem.mu.Lock()
+	defer s.mem.mu.Unlock()
+	if p := s.mem.part[id]; p != nil {
+		for n := from; n < to; n++ {
+			delete(p, n)
+		}
+	}
+}
+
+// partOf : copie des morceaux reçus en partie (segment → bits).
+func (s *Service) partOf(id string) map[int]uint64 {
+	s.mem.mu.Lock()
+	defer s.mem.mu.Unlock()
+	out := make(map[int]uint64, len(s.mem.part[id]))
+	for n, b := range s.mem.part[id] {
+		out[n] = b
+	}
+	return out
+}
+
+// validVoid : au plus maxVoid plages non vides de morceaux de données du palier final
+// (jamais le morceau du manifeste).
+func validVoid(v [][2]int, bucket int) bool {
+	if len(v) > maxVoid {
+		return false
+	}
+	for _, r := range v {
+		if r[0] < 0 || r[0] >= r[1] || r[1] > bucket-1 {
+			return false
+		}
+	}
+	return true
+}
+
 // growMargin : segments réservables au-delà du dernier segment reçu (audit H1) : le client
 // agrandit au fil de l'envoi, jamais d'avance pour tout un fichier.
 const growMargin = 2
 
 // growLimit : plus grand palier permis par Grow, le plus petit qui contient les segments
 // jusqu'au dernier reçu, plus growMargin segments pleins, plus le morceau du manifeste.
-func growLimit(mask []byte, segs int) int {
+func growLimit(mask []byte, segs int, part map[int]uint64) int {
 	hi := -1
 	for n := 0; n < segs; n++ {
-		if mask[n/8]&(1<<(n%8)) != 0 {
+		if mask[n/8]&(1<<(n%8)) != 0 || part[n] != 0 {
 			hi = n
 		}
 	}
@@ -60,7 +166,7 @@ func (s *Service) Grow(id string, bucket int) error {
 	if err != nil {
 		return err
 	}
-	if !validBucket(bucket) || bucket <= old || bucket > growLimit(mask, SegmentCount(old)) {
+	if !validBucket(bucket) || bucket <= old || bucket > growLimit(mask, SegmentCount(old), s.partOf(id)) {
 		return ErrBadRequest
 	}
 	s.createMu.Lock()
@@ -130,6 +236,7 @@ func (s *Service) Erase(id string, from, to int) error {
 	for n := from; n < to; n++ {
 		next[n/8] &^= 1 << (n % 8)
 	}
+	s.clearPart(id, from, to)
 	if _, err := s.DB.Exec(`UPDATE shares SET segments_mask=? WHERE id=? AND state='uploading'`, next, id); err != nil {
 		return err
 	}
@@ -160,17 +267,45 @@ func (s *Service) finalizeDraft(id string, reserved int, r FinalizeReq) (time.Du
 		return 0, err
 	}
 	segs := SegmentCount(b)
-	for n := 0; n < segs; n++ {
-		// Un segment reçu au palier de réservation (≥ b) couvre au moins ses morceaux au palier b.
+	// Morceaux présents par segment : segment reçu en entier (masque ; reçu au palier de
+	// réservation ≥ b, il couvre ses morceaux au palier b), ou en partie (part) ; moins les
+	// morceaux des petits éléments retirés (Void, audit H-2).
+	part := s.partOf(id)
+	have := make([]uint64, segs)
+	for n := range have {
 		if mask[n/8]&(1<<(n%8)) != 0 {
-			continue
+			have[n] = ^uint64(0)
+		} else {
+			have[n] = part[n]
 		}
-		off := segOffset(b, n)
-		if err := s.fillRange(id, off, off+int64(SegmentSize(b, n))); err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				return 0, ErrNotFound
+	}
+	for _, v := range r.Void {
+		for c := v[0]; c < v[1]; c++ {
+			have[c/SegChunks] &^= 1 << (c % SegChunks)
+		}
+	}
+	for n := 0; n < segs; n++ {
+		chunks := chunksIn(b, n)
+		for c := 0; c < chunks; {
+			if have[n]&(1<<c) != 0 {
+				c++
+				continue
 			}
-			return 0, err
+			e := c
+			for e < chunks && have[n]&(1<<e) == 0 {
+				e++
+			}
+			from := chunkOffset(b, n, c)
+			if n == 0 && c == 0 {
+				from = 0
+			}
+			if err := s.fillRange(id, from, chunkOffset(b, n, e)); err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					return 0, ErrNotFound
+				}
+				return 0, err
+			}
+			c = e
 		}
 	}
 

@@ -27,7 +27,7 @@ import { type PreparedCaptcha } from "./prepare";
 import { isRiskyName, previewKindOf, safeName, type PreviewKind } from "./safety";
 import { abortError } from "./upload";
 import { createDraft } from "./draft";
-import { DATA_SEGMENTS, segmentsFor } from "../crypto/elements";
+import { DATA_SEGMENTS, segmentsNeeded } from "../crypto/elements";
 
 export type { Net } from "./api";
 export type { PreparedCaptcha } from "./prepare";
@@ -360,10 +360,9 @@ export async function createShare(
   o.prepared?.proof.catch(() => undefined);
   throwIfAborted(o.signal);
   if (items.length === 0) throw new Error("vide");
-  // Refus locaux avant toute requête : place (segments entiers, spec §41.14).
-  let segs = 0;
-  for (const it of items) if (it.kind === "file") segs += segmentsFor(it.data instanceof Uint8Array ? it.data.byteLength : it.data.size);
-  if (segs > DATA_SEGMENTS) throw new Error("trop_gros");
+  // Refus locaux avant toute requête : place (spec §41.14, petits éléments empaquetés, H-2).
+  const sizes = items.flatMap((it) => (it.kind === "file" ? [it.data instanceof Uint8Array ? it.data.byteLength : it.data.size] : []));
+  if (segmentsNeeded(sizes) > DATA_SEGMENTS) throw new Error("trop_gros");
   const list = items.map((item, i) => {
     // Copie d'un Uint8Array dans un Blob : l'appelant ne peut plus le modifier ensuite.
     const data = item.kind === "file" && item.data instanceof Uint8Array ? new Blob([item.data]) : item.data;

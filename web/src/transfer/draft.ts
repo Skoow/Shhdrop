@@ -6,7 +6,7 @@
 // Le serveur ne reçoit que K_accès et S_gestion (création), des segments chiffrés, des numéros
 // de segments, et à la fin le sel, Argon2id, V_preuve, E, l'en-tête et le manifeste chiffré.
 import { SEG_CHUNKS, CHUNK_CT, HEADER, type Item, type KeepTtl, type Rights } from "../crypto/container";
-import { DATA_SEGMENTS, elementSealer, reservationFor, sealFinal, segmentsFor, type FinalEntry } from "../crypto/elements";
+import { DATA_CHUNKS, DATA_SEGMENTS, chunksFor, elementSealer, isSmall, reservationFor, sealFinal, segmentsNeeded, type FinalEntry } from "../crypto/elements";
 import { b64u } from "../crypto/encoding";
 import { accessKeys, contentKeys, newSeed, seal, shareId } from "../crypto/envelope";
 import { KDF_CREATE, deriveAccess, newKLien, newSGestion, passwordKeyForCreate, randomBytes } from "../crypto/kdf";
@@ -35,8 +35,6 @@ import { SERVER_STALL_MS, abortError } from "./upload";
 /** Signe de vie du brouillon (le serveur efface un envoi sans nouvelle depuis 15 min). */
 export const KEEP_MS = 240_000;
 
-const SEG_CT = SEG_CHUNKS * CHUNK_CT;
-
 /** État d'une ligne du composeur. */
 export type ElementPhase = "attente" | "chiffrement" | "envoi" | "pret" | "erreur";
 export type ElementStatus = { phase: ElementPhase; sent: number; total: number; error?: unknown };
@@ -63,19 +61,23 @@ type El = {
   id: string;
   src: Blob;
   data?: Blob;
-  first: number; // -1 : pas encore placé
-  segs: number;
+  first: number; // premier morceau ; -1 : pas encore placé
+  chunks: number; // morceaux occupés (audit H-2 : rien au-delà, aucun bourrage envoyé)
+  parts: number; // requêtes d'envoi (une par segment touché)
+  partsDone: number;
   phase: ElementPhase;
   acked: number;
   inflight: number;
   error?: unknown;
   k?: Uint8Array<ArrayBuffer>;
   ac: AbortController;
-  /** Au moins un PUT parti : les segments [first, first + segs) peuvent exister sur le serveur. */
+  /** Au moins un PUT parti : ses morceaux peuvent exister sur le serveur. */
   touched: boolean;
   /** Fin du traitement en cours (envoi interrompu compris). */
   done?: Promise<void>;
 };
+
+type Hold = { from: number; to: number; bytes: number }; // segments [from, to)
 
 type Created = { kLien: KLien; sGestion: SGestion; token: string; bucket: number };
 
@@ -87,10 +89,16 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
   checkOrigin(origin);
   const c = api.ctx(origin, o);
   const els = new Map<string, El>();
-  /** Places d'éléments retirés, gardées jusqu'à la fin de leur effacement sur le serveur. */
-  const holds = new Set<{ first: number; segs: number; bytes: number }>();
+  /** Places (segments) de grands éléments retirés, gardées jusqu'à la fin de leur effacement sur le serveur. */
+  const holds = new Set<Hold>();
   /** Effacements qui ont échoué : réessayés avant la finalisation, qui échoue sinon. */
-  const stuck = new Set<{ first: number; segs: number; bytes: number }>();
+  const stuck = new Set<Hold>();
+  /**
+   * Morceaux [début, fin) de petits éléments retirés après un envoi (audit H-2) : jamais
+   * effacés sur le disque tout de suite (clé oubliée, indéchiffrables), jamais réutilisés,
+   * remplacés par de l'aléa par le serveur à finalize (`void`).
+   */
+  const voids: [number, number][] = [];
   let created: Created | null = null;
   let creating: Promise<Created> | null = null;
   let backgroundFailed = false;
@@ -113,7 +121,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
   const nextChange = () => new Promise<void>((r) => waiters.push(r));
 
   function totalOf(e: El): number {
-    return e.segs * SEG_CT + (e.first === 0 && e.segs > 0 ? HEADER : 0);
+    return e.chunks * CHUNK_CT + (e.first === 0 && e.chunks > 0 ? HEADER : 0);
   }
 
   // --- création -------------------------------------------------------------------------
@@ -139,8 +147,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       if (wait > 0) await sleep(wait, signal);
       throwIfAborted(signal);
       // Réservation : fichiers déjà placés et en attente (la place exacte suit, par grow).
-      let pending = usedSegments();
-      for (const e of els.values()) if (e.first < 0) pending += e.segs;
+      const pending = usedSegments() + segmentsNeeded([...els.values()].filter((e) => e.first < 0).map((e) => e.src.size));
       const bucket = reservationFor(Math.min(DATA_SEGMENTS, pending));
       // Jamais interrompue : un brouillon créé resterait inconnu.
       const r = await api.create(c, acc.kAcces, sGestion, { bucket, hp: "", shown_at: cap.shownAt, ...fields });
@@ -204,11 +211,14 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       e.first = -1;
       e.k?.fill(0);
       e.k = undefined;
-      e.acked = e.inflight = 0;
+      e.acked = e.inflight = e.partsDone = 0;
       e.touched = false;
       e.phase = "attente";
       e.error = undefined;
     }
+    voids.length = 0;
+    holds.clear();
+    stuck.clear();
     // Pas de nouvelle création en arrière-plan (un serveur qui répond 404 en boucle ferait
     // créer brouillon sur brouillon) : elle attend le clic ; une finalisation en cours échoue.
     backgroundFailed = true;
@@ -217,22 +227,47 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
   }
 
   // --- place --------------------------------------------------------------------------
+  // Audit H-2 : un élément d'un segment ou plus occupe seul des segments entiers à partir d'une
+  // frontière (la fin de son dernier segment n'est pas envoyée : le serveur la remplit) ; un
+  // petit élément prend ses morceaux dans un segment partagé (premier ajustement, sans
+  // déborder de son segment) ; places de grands éléments en cours d'effacement et morceaux
+  // retirés exclus.
 
-  function usedSegments(): number {
-    let hi = 0;
-    for (const e of els.values()) if (e.first >= 0) hi = Math.max(hi, e.first + e.segs);
-    for (const h of holds) hi = Math.max(hi, h.first + h.segs);
-    return hi;
+  function takenChunks(): Uint8Array {
+    const t = new Uint8Array(DATA_CHUNKS);
+    for (const e of els.values()) {
+      if (e.first < 0 || e.chunks === 0) continue;
+      if (e.data && isSmall(e.data.size)) t.fill(1, e.first, e.first + e.chunks);
+      else t.fill(2, e.first, Math.ceil((e.first + e.chunks) / SEG_CHUNKS) * SEG_CHUNKS);
+    }
+    for (const h of holds) t.fill(2, h.from * SEG_CHUNKS, h.to * SEG_CHUNKS);
+    for (const [a, z] of voids) t.fill(1, a, z);
+    return t;
   }
 
-  function place(segs: number): number {
-    if (segs === 0) return 0;
-    const taken = new Uint8Array(DATA_SEGMENTS);
-    for (const e of els.values()) if (e.first >= 0) taken.fill(1, e.first, e.first + e.segs);
-    for (const h of holds) taken.fill(1, h.first, h.first + h.segs);
-    for (let a = 0, run = 0; a < DATA_SEGMENTS; a++) {
-      run = taken[a] ? 0 : run + 1;
-      if (run === segs) return a - segs + 1;
+  function usedSegments(): number {
+    const t = takenChunks();
+    let hi = t.length;
+    while (hi > 0 && t[hi - 1] === 0) hi--;
+    return Math.ceil(hi / SEG_CHUNKS);
+  }
+
+  function place(size: number): number {
+    const n = chunksFor(size);
+    if (n === 0) return 0;
+    const t = takenChunks();
+    if (isSmall(size)) {
+      for (let a = 0, run = 0; a < DATA_CHUNKS; a++) {
+        if (a % SEG_CHUNKS === 0) run = 0;
+        run = t[a] ? 0 : run + 1;
+        if (run === n) return a - n + 1;
+      }
+    } else {
+      const segs = Math.ceil(n / SEG_CHUNKS);
+      for (let g = 0, run = 0; g < DATA_SEGMENTS; g++) {
+        run = t.subarray(g * SEG_CHUNKS, (g + 1) * SEG_CHUNKS).some((x) => x !== 0) ? 0 : run + 1;
+        if (run === segs) return (g - segs + 1) * SEG_CHUNKS;
+      }
     }
     throw new Error("trop_gros");
   }
@@ -265,32 +300,36 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       changed();
       e.data ??= o.prepare ? await o.prepare(e.src) : e.src;
       throwIfAborted(signal);
-      e.segs = segmentsFor(e.data.size);
-      e.first = place(e.segs);
+      e.chunks = chunksFor(e.data.size);
+      e.first = place(e.data.size);
       const sealer = await elementSealer(e.data, e.first);
       e.k = sealer.k;
-      for (let j = 0; j < sealer.segments; j++) {
+      e.parts = sealer.pieces.length;
+      for (const [j, p] of sealer.pieces.entries()) {
         await abortable(Promise.resolve().then(() => hooks.pause?.()), signal);
         throwIfAborted(signal);
         // Réservation agrandie au fil de l'envoi (le serveur n'accepte que 2 segments
         // au-delà du dernier reçu, audit H1).
-        const n = e.first + j;
+        const n = p.seg;
         if ((n + 1) * SEG_CHUNKS + 1 > cr.bucket) {
           const need = reservationFor(n + 1);
           await withBudget(Date.now() + SERVER_STALL_MS, { signal }, (s) => api.grow(c, cr.token, need, s));
           cr.bucket = need;
         }
-        const data = await sealer.segment(j);
+        const data = await sealer.piece(j);
         e.phase = "envoi";
         changed();
         e.touched = true;
+        // Segment entier : envoi simple ; sinon, plage de morceaux (?from).
+        const from = p.from === 0 && p.chunks === SEG_CHUNKS ? undefined : p.from;
         await withBudget(deadline, { signal, onRetry: (r) => hooks.onRetry?.(r) }, (s) =>
-          api.putSegment(c, cr.token, e.first + j, data, (b) => {
+          api.putSegment(c, cr.token, n, data, (b) => {
             e.inflight = Math.min(b, data.length);
             changed();
-          }, s),
+          }, s, from),
         );
         e.acked += data.length;
+        e.partsDone++;
         e.inflight = 0;
         deadline = Date.now() + SERVER_STALL_MS;
         changed();
@@ -314,10 +353,10 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
    * faux si l'effacement n'a pas pu se faire.
    */
   let eraseChain: Promise<unknown> = Promise.resolve();
-  function eraseOnServer(cr: Created, h: { first: number; segs: number }): Promise<boolean> {
+  function eraseOnServer(cr: Created, h: Hold): Promise<boolean> {
     const run = eraseChain.then(async () => {
       try {
-        await withBudget(Date.now() + SERVER_STALL_MS, {}, (s) => api.erase(c, cr.token, h.first, h.first + h.segs, s));
+        await withBudget(Date.now() + SERVER_STALL_MS, {}, (s) => api.erase(c, cr.token, h.from, h.to, s));
         return true;
       } catch (e) {
         return e instanceof api.HttpError && e.status === 404;
@@ -334,13 +373,21 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
   async function drop(e: El) {
     e.ac.abort();
     els.delete(e.id);
-    const hold = e.first >= 0 && e.segs > 0 ? { first: e.first, segs: e.segs, bytes: e.data?.size ?? e.src.size } : null;
+    // Petit élément (audit H-2) : place rendue tout de suite ; si un envoi est parti, ses
+    // morceaux restent exclus et sont remplacés par le serveur à finalize (void).
+    const small = e.first >= 0 && e.chunks > 0 && e.data !== undefined && isSmall(e.data.size);
+    const big = e.first >= 0 && e.chunks > 0 && !small;
+    const hold: Hold | null = big ? { from: e.first / SEG_CHUNKS, to: Math.ceil((e.first + e.chunks) / SEG_CHUNKS), bytes: e.data?.size ?? e.src.size } : null;
     if (hold) holds.add(hold);
+    const voided: [number, number] | null = small ? [e.first, e.first + e.chunks] : null;
+    if (voided) voids.push(voided); // exclu jusqu'à la fin de l'envoi interrompu
     changed();
     let ok = true;
     try {
       await e.done;
       e.k?.fill(0);
+      // Rien n'est parti : la place est libre.
+      if (voided && !e.touched && voids.includes(voided)) voids.splice(voids.indexOf(voided), 1);
       const cr = created;
       if (cr && hold && e.touched) ok = await eraseOnServer(cr, hold);
     } finally {
@@ -349,6 +396,11 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       changed();
       void pump();
     }
+  }
+
+  function fresh(id: string, src: Blob): El {
+    const chunks = chunksFor(src.size);
+    return { id, src, first: -1, chunks, parts: Math.ceil(chunks / SEG_CHUNKS), partsDone: 0, phase: "attente", acked: 0, inflight: 0, ac: new AbortController(), touched: false };
   }
 
   // --- interface ------------------------------------------------------------------------
@@ -382,7 +434,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       }
       for (const [id, data] of want)
         if (!els.has(id))
-          els.set(id, { id, src: data, first: -1, segs: segmentsFor(data.size), phase: "attente", acked: 0, inflight: 0, ac: new AbortController(), touched: false });
+          els.set(id, fresh(id, data));
       changed();
       background();
       void pump();
@@ -405,7 +457,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       const e = els.get(id);
       if (!e || e.phase !== "erreur") return;
       const p = drop(e).then(() => {
-        els.set(id, { id, src: e.src, first: -1, segs: segmentsFor(e.src.size), phase: "attente", acked: 0, inflight: 0, ac: new AbortController(), touched: false });
+        els.set(id, fresh(id, e.src));
         backgroundFailed = false;
         changed();
         background();
@@ -471,8 +523,8 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
           if (!created || files.some((e) => !els.has(e!.id))) return;
           const total = files.reduce((n, e) => n + totalOf(e!), 0);
           const sent = files.reduce((n, e) => n + e!.acked + e!.inflight, 0);
-          const segsDone = files.reduce((n, e) => n + Math.round(e!.acked / SEG_CT), 0);
-          const segsTotal = files.reduce((n, e) => n + e!.segs, 0);
+          const segsDone = files.reduce((n, e) => n + e!.partsDone, 0);
+          const segsTotal = files.reduce((n, e) => n + e!.parts, 0);
           // Émis seulement quand la valeur change ; octets : maximum atteint (monotone).
           // Premier signal toujours (0, n) : « partage créé » pour l'écran d'envoi.
           if (lastProg === undefined && segsDone > 0) {
@@ -503,6 +555,23 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
     }
   }
 
+  /**
+   * Morceaux de petits éléments retirés à remplacer (audit H-2), dans le palier final hors
+   * morceau du manifeste, triés et fusionnés ; au plus MAX_VOID plages (au-delà, ils restent
+   * chiffrés sous une clé oubliée, indéchiffrables).
+   */
+  function voidRanges(bucket: number): [number, number][] {
+    const out: [number, number][] = [];
+    for (const [a, z0] of [...voids].sort((x, y) => x[0] - y[0])) {
+      const z = Math.min(z0, bucket - 1);
+      if (a >= z) continue;
+      const last = out[out.length - 1];
+      if (last && a <= last[1]) last[1] = Math.max(last[1], z);
+      else out.push([a, z]);
+    }
+    return out.slice(0, MAX_VOID);
+  }
+
   async function finish(cr: Created, list: { id: string; item: Item }[], f: CreateOpts) {
     const r = newSeed();
     const salt = randomBytes(16);
@@ -522,7 +591,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
           entries.push({ kind: "text", name: item.name, mime: item.mime, text });
         } else {
           const e = els.get(id)!;
-          entries.push({ kind: "file", name: item.name, mime: item.mime, size: e.data!.size, firstSeg: e.first, k: e.k! });
+          entries.push({ kind: "file", name: item.name, mime: item.mime, size: e.data!.size, first: e.first, k: e.k! });
         }
       }
       const fin = await sealFinal(entries, keys, { rights: f.rights as Rights | undefined, keepTtlH: f.keepTtlH as KeepTtl | undefined });
@@ -547,6 +616,8 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
         header: b64u(fin.header),
         tail: b64u(fin.tail),
       };
+      const v = voidRanges(fin.bucket);
+      if (v.length > 0) body.void = v;
       const expiresInS = await withBudget(deadline, f, async (s, attempt) => {
         try {
           return await api.finalize(c, cr.token, body, s);
@@ -576,6 +647,9 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
 }
 
 export type Draft = ReturnType<typeof createDraft>;
+
+/** Plages de void envoyées au plus (limite du serveur) ; au-delà, restent indéchiffrables. */
+export const MAX_VOID = 512;
 
 /** Annulation avant tout effet : rejet AbortError. */
 export { abortError };

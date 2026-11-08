@@ -179,7 +179,7 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
   const stored = d.grants.load();
   if (secret !== null && stored !== null && stored.link !== keyOf(secret)) d.grants.clear(); // autre partage
   else if (stored !== null && d.now() - stored.last >= INACTIVITY_MS) d.grants.clear();
-  // Audit M2 : le navigateur écrit sessionStorage sur le disque et le rend avec un onglet
+  // Audit M2 : le navigateur écrit le stockage de l'onglet sur le disque et le rend avec un onglet
   // restauré (Ctrl+Maj+T, reprise après panne ; Chromium : navigation « back_forward »).
   // Hors rechargement, l'entrée ne vaut que RESTORE_MS après la dernière sortie de page.
   else if (stored !== null && d.navType() !== "reload" && d.now() - stored.last >= RESTORE_MS) d.grants.clear();

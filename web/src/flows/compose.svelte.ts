@@ -2,7 +2,7 @@
 // Toute addition passe par `add` (sélecteur, dépôt, collage, photo, vidéo) ou `addText` /
 // `addVoice` : lecture d'essai → limite de nombre → nettoyage des images → doublons →
 // insertion à la fin de sa catégorie. L'ordre de `items` est l'ordre du manifeste.
-import { CONTENT_MAX, DATA_SEGMENTS, MANIFEST_MAX, MAX_ITEMS, NAME_MAX, STRIP_MAX, TEXT_MAX, cleanName, isRiskyName, segmentsFor, type Item } from "../index";
+import { CONTENT_MAX, DATA_SEGMENTS, MANIFEST_MAX, MAX_ITEMS, NAME_MAX, STRIP_MAX, TEXT_MAX, cleanName, isRiskyName, segmentsNeeded, type Item } from "../index";
 import { CATEGORY_ORDER, categoryOf, extOf, type Category } from "./kinds";
 import { HEAD_BYTES, isExecutableSniff, sniff, type Sniffed } from "./sniff";
 
@@ -433,8 +433,9 @@ export function createComposer(deps: ComposeDeps = {}) {
   }
 
   const totalBytes = $derived(items.reduce((s, i) => s + i.size, 0));
-  // Envoi dès l'ajout (spec §41.14) : chaque fichier occupe des segments entiers de 4 Mio.
-  const segments = $derived(items.reduce((s, i) => s + (i.kind === "file" ? segmentsFor(i.size) : 0), 0));
+  // Envoi dès l'ajout (spec §41.14) : un fichier d'au moins 4 Mio occupe des segments entiers,
+  // les petits se partagent des segments (audit H-2).
+  const segments = $derived(segmentsNeeded(items.flatMap((i) => (i.kind === "file" ? [i.size] : []))));
   // Taille du manifeste, majorée (D41-17) : mêmes noms et textes que toApiItems, tailles et
   // positions à leur plus grand nombre de chiffres, droit le plus long. Au-delà de
   // MANIFEST_MAX, sealFinal refuserait (« manifeste_trop_gros ») : on bloque avant. Chaque

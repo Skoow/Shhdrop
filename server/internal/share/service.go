@@ -76,7 +76,14 @@ type FinalizeReq struct {
 	Salt, ProofV, Envelope             []byte
 	Bucket                             int
 	Header, Tail                       []byte
+	// Void : plages [début, fin) de morceaux (numéros dans le paquet) de petits éléments
+	// retirés, remplies d'aléa comme les morceaux jamais reçus (audit H-2, brouillon seulement).
+	Void [][2]int
 }
+
+// maxVoid : plages de morceaux retirés au plus dans une finalisation (le corps JSON, manifeste
+// chiffré compris, tient sous maxFinalizeJSON).
+const maxVoid = 512
 
 // EnvelopeLen : taille de E (nonce 12 ‖ R chiffrée 32 ‖ tag 16).
 const EnvelopeLen = 60
@@ -157,6 +164,8 @@ type Service struct {
 		mu    sync.Mutex
 		up    map[string]upload
 		purge map[string]int64
+		// part : segments d'un brouillon reçus en partie (audit H-2), un bit par morceau.
+		part map[string]map[int]uint64
 	}
 	streams Streams   // flux de segments annulables (spec §41.8)
 	gone    goneState // ouvertures actives, descripteurs détachés, surveillances, octrois (spec §41.4, §41.8)
@@ -223,6 +232,7 @@ func (s *Service) forget(id string) {
 	defer s.mem.mu.Unlock()
 	delete(s.mem.up, id)
 	delete(s.mem.purge, id)
+	delete(s.mem.part, id)
 }
 
 // uploadDue : l'envoi est échu (6 h), vide depuis 5 à 20 min, bloqué depuis 15 min, ou
@@ -369,8 +379,8 @@ func ValidateFinalize(r FinalizeReq) error {
 		return ErrBadRequest
 	}
 	draft := r.Bucket != 0
-	if draft && (!validBucket(r.Bucket) || len(r.Header) != Header || len(r.Tail) != ChunkCT || r.FillFrom != 0 || r.FillTo != 0) ||
-		!draft && (r.Header != nil || r.Tail != nil) {
+	if draft && (!validBucket(r.Bucket) || len(r.Header) != Header || len(r.Tail) != ChunkCT || r.FillFrom != 0 || r.FillTo != 0 || !validVoid(r.Void, r.Bucket)) ||
+		!draft && (r.Header != nil || r.Tail != nil || r.Void != nil) {
 		return ErrBadRequest
 	}
 	return nil
@@ -463,6 +473,12 @@ func (s *Service) PutSegment(id string, n int, body []byte) error {
 		}
 		return err
 	}
+	s.clearPart(id, n, n+1)
+	return s.markReceived(id, n)
+}
+
+// markReceived pose le bit du segment n (reçu en entier).
+func (s *Service) markReceived(id string, n int) error {
 	// Comparaison-échange : deux segments envoyés en parallèle ne s'écrasent pas.
 	for {
 		var mask []byte
