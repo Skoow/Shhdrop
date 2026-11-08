@@ -28,7 +28,8 @@
   import AddIcon from "./AddIcon.svelte";
   import { Mic, RefreshCw, X } from "./Icon";
 
-  export type Captured = { mode: CaptureMode; blob: Blob; mime: string; ext: string };
+  /** `stripped` : métadonnées de l'enregistrement effacées (faux : « Garder tel quel » choisi). */
+  export type Captured = { mode: CaptureMode; blob: Blob; mime: string; ext: string; stripped: boolean };
   type Props = {
     open: boolean;
     /** « camera » : photo d'abord, bascule vers la vidéo si `canVideo` ; « voice » : micro seul. */
@@ -144,7 +145,7 @@
       const blob = await snapshot(live);
       stopStream(stream); // l'aperçu suffit : la caméra s'éteint pendant la relecture
       stream = null;
-      result = { mode: "photo", blob, mime: "image/jpeg", ext: "jpg" };
+      result = { mode: "photo", blob, mime: "image/jpeg", ext: "jpg", stripped: true };
       url = URL.createObjectURL(blob);
       phase = "review";
     } catch {
@@ -195,7 +196,7 @@
     const { blob, stripped } = await stripCaptureMeta(raw);
     if (my !== gen) return; // fermé entre-temps
     unclean = !stripped;
-    result = { mode: kind, blob, mime: pickedNow.mime.split(";")[0]!, ext: pickedNow.ext };
+    result = { mode: kind, blob, mime: pickedNow.mime.split(";")[0]!, ext: pickedNow.ext, stripped };
     url = URL.createObjectURL(blob);
     phase = "review";
   }

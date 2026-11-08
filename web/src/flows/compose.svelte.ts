@@ -1,15 +1,22 @@
 // Composeur (UI §9.2) : liste des éléments à envoyer, en mémoire seulement (aucun stockage).
 // Toute addition passe par `add` (sélecteur, dépôt, collage, photo, vidéo) ou `addText` /
-// `addVoice` : lecture d'essai → limite de nombre → nettoyage des images → doublons →
+// `addVoice` : lecture d'essai → limite de nombre → nettoyage des métadonnées → doublons →
 // insertion à la fin de sa catégorie. L'ordre de `items` est l'ordre du manifeste.
-import { CONTENT_MAX, DATA_SEGMENTS, MANIFEST_MAX, MAX_ITEMS, NAME_MAX, STRIP_MAX, TEXT_MAX, cleanName, isRiskyName, segmentsNeeded, type Item } from "../index";
+//
+// Nettoyage (spec §35.2 ; décision du propriétaire du 8 novembre) : automatique, à l'ajout,
+// avant tout chiffrement ; l'élément n'entre dans la liste qu'une fois nettoyé (il n'est donc
+// jamais confié à l'envoi anticipé avant). Échec, format non pris en charge : l'élément est
+// ajouté mais n'est ni envoyé ni chiffré tant que la personne n'a pas choisi « Envoyer tel
+// quel » (`acceptUncleaned`) ou « Retirer ». Réglage désactivé : rien n'est modifié (« Original »).
+import { CONTENT_MAX, DATA_SEGMENTS, MANIFEST_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, cleanName, isRiskyName, segmentsNeeded, type Item } from "../index";
+import { needsChoice, type ItemCleanState } from "../media/clean-label";
+import { stripMetadata, type CleanFamily, type StripResult } from "../media/strip";
+import { approve } from "./clean-gate";
 import { CATEGORY_ORDER, categoryOf, extOf, type Category } from "./kinds";
 import { HEAD_BYTES, isExecutableSniff, sniff, type Sniffed } from "./sniff";
 
 /** `photo-ici`, `video-ici` : pris dans l'interface (caméra maison, media/capture.ts), jamais dans la galerie. */
 export type Source = "fichiers" | "photo" | "video" | "depot" | "collage" | "photo-ici" | "video-ici";
-/** nettoye : métadonnées retirées (Task 9) ; non_nettoye : le fichier peut en contenir ; sans_objet : texte, vocal. */
-export type CleanState = "nettoye" | "non_nettoye" | "sans_objet";
 
 export type ComposeItem = {
   readonly id: string;
@@ -25,7 +32,13 @@ export type ComposeItem = {
   readonly data: Blob | Uint8Array<ArrayBuffer>;
   /** Contenu d'un élément texte. */
   readonly text?: string;
-  readonly clean: CleanState;
+  /** État du nettoyage (media/clean-label.ts) ; « sans » pour un texte. */
+  readonly clean: ItemCleanState;
+  /** Non pris en charge pour l'instant, prévu (Tasks 9b, 9c) : « bientôt pris en charge ». */
+  readonly cleanSoon?: boolean;
+  readonly cleanFamily?: CleanFamily;
+  /** « Envoyer tel quel » choisi pour un élément non nettoyé. */
+  readonly accepted?: boolean;
   readonly duplicate: boolean;
   /** Type reconnu par le contenu (octets de tête), ou null. */
   readonly sniffed?: Sniffed;
@@ -35,19 +48,15 @@ export type ComposeItem = {
   readonly mismatch?: boolean;
 };
 
-/** Nettoyage d'un fichier (Task 9a, media/strip) : rend le fichier nettoyé ou l'original. */
-export type CleanFile = (file: File) => Promise<{ file: Blob; cleaned: boolean; removed: string[] }>;
-
 export type AddReport = {
   added: string[];
   refusedCount: string[];
   unreadable: string[];
   folders: string[];
-  failedClean: string[];
   duplicates: string[];
 };
 
-export const BLOCK_REASONS = ["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "nettoyage", "hors_ligne"] as const;
+export const BLOCK_REASONS = ["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "non_nettoye", "nettoyage", "hors_ligne"] as const;
 export type BlockReason = (typeof BLOCK_REASONS)[number];
 export function blockKey(r: BlockReason) {
   return `compose.block.${r}` as const;
@@ -69,8 +78,10 @@ const FR_NAMES: Names = {
 };
 
 export type ComposeDeps = {
-  /** Nettoyage automatique à l'ajout (Task 9a, media/strip). Absent : rien n'est marqué « nettoyé ». */
-  clean?: CleanFile;
+  /** Porte du nettoyage (media/strip.ts) ; par défaut `stripMetadata`. */
+  strip?: (file: Blob, mime: string, name: string, opts?: { recorded?: boolean }) => Promise<StripResult>;
+  /** Réglage « Nettoyer automatiquement les fichiers » (vrai par défaut). */
+  autoClean?: () => boolean;
   /** Lecture d'essai (UI §9.2.8) ; par défaut le premier octet. Rejet → « illisible ». */
   probe?: (f: Blob) => Promise<Uint8Array | void>;
   /** La liste passe de 0 à 1 élément (déclencheur du pré-calcul anti-robot, Task 14). */
@@ -111,17 +122,6 @@ function extFor(f: { name: string; type: string }, fallback: string): string {
   return extOf(f.name) || MIME_EXT[f.type.split(";")[0]!.toLowerCase()] || fallback;
 }
 
-/** Clé de la mention « peut contenir… » d'un élément non nettoyé (UI §9.2.6) ; null sinon. */
-export function metaNoteKey(i: Pick<ComposeItem, "clean" | "category" | "ext" | "mime">) {
-  if (i.clean !== "non_nettoye") return null;
-  if (i.category === "photos") return "compose.meta.photo" as const;
-  if (i.category === "videos") return "compose.meta.video" as const;
-  if (i.category === "documents") return i.ext.toLowerCase() === ".pdf" || i.mime === "application/pdf" ? ("compose.meta.pdf" as const) : ("compose.meta.doc" as const);
-  return null;
-}
-
-const PLAIN_TEXT = new Set(["txt", "md", "csv"]);
-/** Fichiers qui peuvent porter des métadonnées non retirées (un texte brut n'en a pas). */
 function takeCodePoints(s: string, n: number): string {
   const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
   let out = "";
@@ -132,9 +132,11 @@ function takeCodePoints(s: string, n: number): string {
   return out;
 }
 
-function cleanStateOf(category: Category, name: string, mime: string): CleanState {
-  if (category === "documents" && (PLAIN_TEXT.has(extOf(name)) || mime.toLowerCase().startsWith("text/plain"))) return "sans_objet";
-  return category === "photos" || category === "videos" || category === "documents" ? "non_nettoye" : "sans_objet";
+type CleanFields = Pick<ComposeItem, "clean" | "cleanSoon" | "cleanFamily" | "accepted">;
+/** Un élément prêt à partir (rien à choisir) : seul celui-là peut être chiffré (clean-gate.ts). */
+function cleared<T extends { data: Blob | Uint8Array<ArrayBuffer> } & CleanFields>(it: T): T {
+  if (!needsChoice(it) && it.data instanceof Blob) approve(it.data);
+  return it;
 }
 
 function catRank(c: Category): number {
@@ -173,6 +175,22 @@ export function createComposer(deps: ComposeDeps = {}) {
   const probe = deps.probe ?? (async (f: Blob) => new Uint8Array(await f.slice(0, HEAD_BYTES).arrayBuffer()));
   const commit = deps.commit ?? ((apply: () => void) => apply());
   const online = deps.online ?? (() => typeof navigator === "undefined" || navigator.onLine !== false);
+  const strip = deps.strip ?? stripMetadata;
+  const autoClean = deps.autoClean ?? (() => true);
+
+  /** Nettoyage d'un fichier à l'ajout : données à envoyer et état. */
+  async function cleanOf(f: File, source: Source, name: string, category: Category, captureStripped: boolean | undefined): Promise<{ data: Blob; c: CleanFields }> {
+    // Photo prise ici : JPEG tiré d'un <canvas>, sans EXIF ni position par construction.
+    if (source === "photo-ici" && category === "photos") return { data: f, c: { clean: "nettoye", cleanFamily: "image" } };
+    // Vidéo prise ici : déjà passée par strip-capture.ts (CaptureScreen) ; un échec y a déjà été
+    // accepté par la personne (« Garder tel quel »).
+    if (source === "video-ici" && captureStripped !== undefined) return { data: f, c: captureStripped ? { clean: "nettoye", cleanFamily: "video" } : { clean: "echec", accepted: true } };
+    if (!autoClean()) return { data: f, c: { clean: "original" } };
+    const r = await strip(f, f.type, name, { recorded: source === "video-ici" });
+    if (r.state === "nettoye") return { data: r.data, c: { clean: "nettoye", cleanFamily: r.family } };
+    if (r.state === "non_pris_en_charge") return { data: f, c: { clean: r.state, cleanSoon: r.soon } };
+    return { data: f, c: { clean: r.state } };
+  }
 
   let items = $state.raw<ComposeItem[]>([]);
   let pending = $state(0);
@@ -196,8 +214,9 @@ export function createComposer(deps: ComposeDeps = {}) {
     return splitName(cleanName(f.name));
   }
 
-  async function add(files: File[], source: Source): Promise<AddReport> {
-    const report: AddReport = { added: [], refusedCount: [], unreadable: [], folders: [], failedClean: [], duplicates: [] };
+  /** `captureStripped` : vidéo prise ici, résultat du nettoyage de strip-capture.ts. */
+  async function add(files: File[], source: Source, captureStripped?: boolean): Promise<AddReport> {
+    const report: AddReport = { added: [], refusedCount: [], unreadable: [], folders: [], duplicates: [] };
     if (files.length === 0) return report;
     pending++;
     let held = 0;
@@ -228,24 +247,8 @@ export function createComposer(deps: ComposeDeps = {}) {
         const exec = isExecutableSniff(sniffed) || sniffed === "iso";
         const risky = exec || isRiskyName(base + ext);
         const mismatch = exec && !isRiskyName(base + ext);
-        let data: Blob | Uint8Array<ArrayBuffer> = f;
-        let size = f.size;
-        // Photo prise ici : JPEG tiré d'un <canvas>, sans EXIF ni position par construction.
-        let clean = source === "photo-ici" && category === "photos" ? "nettoye" : cleanStateOf(category, base + ext, mime);
-        if (deps.clean && clean === "non_nettoye" && (category !== "photos" || f.size <= STRIP_MAX)) {
-          try {
-            const r = await deps.clean(f);
-            if (r.cleaned) {
-              data = r.file;
-              size = r.file.size;
-              clean = "nettoye";
-            }
-          } catch {
-            report.failedClean.push(base + ext);
-            continue;
-          }
-        }
-        ready.push({ id: nextId(), kind: "file", category, base, ext, mime, size, data, clean, duplicate: false, sniffed, risky, mismatch });
+        const { data, c } = await cleanOf(f, source, base + ext, category, captureStripped);
+        ready.push(cleared({ id: nextId(), kind: "file", category, base, ext, mime, size: data.size, data, ...c, duplicate: false, sniffed, risky, mismatch }));
       }
       if (ready.length > 0) {
         const all = [...items, ...ready];
@@ -284,7 +287,7 @@ export function createComposer(deps: ComposeDeps = {}) {
       size: utf8.encode(text).byteLength,
       data: new Uint8Array(0),
       text,
-      clean: "sans_objet",
+      clean: "sans",
       duplicate: false,
     };
     commit(() => set(insertSorted(items, it)));
@@ -301,37 +304,8 @@ export function createComposer(deps: ComposeDeps = {}) {
     );
   }
 
-  /**
-   * « Nettoyer tous les fichiers » : nettoie chaque élément « non nettoyé » ; ceux que la
-   * bibliothèque ne sait pas (encore) nettoyer, ou qui échouent, restent tels quels.
-   */
-  async function cleanAll(clean: CleanFile): Promise<{ cleaned: string[]; failed: string[] }> {
-    const out = { cleaned: [] as string[], failed: [] as string[] };
-    const todo = items.filter((i) => i.kind === "file" && i.clean === "non_nettoye");
-    pending++;
-    try {
-      for (const it of todo) {
-        const name = it.base + it.ext;
-        try {
-          const src = it.data instanceof File ? it.data : new File([it.data as BlobPart], name, { type: it.mime });
-          const r = await clean(src);
-          if (!r.cleaned) {
-            out.failed.push(name);
-            continue;
-          }
-          set(items.map((x) => (x.id === it.id ? { ...x, data: r.file, size: r.file.size, clean: "nettoye" as const } : x)));
-          out.cleaned.push(name);
-        } catch {
-          out.failed.push(name);
-        }
-      }
-    } finally {
-      pending--;
-    }
-    return out;
-  }
-
-  function addVoice(blob: Blob, mime: string): string | null {
+  /** Vocal pris ici : `stripped` faux si strip-capture.ts a échoué et que la personne a gardé l'enregistrement tel quel. */
+  function addVoice(blob: Blob, mime: string, stripped = true): string | null {
     if (items.length + reserved >= MAX_ITEMS) return null;
     const ext = mime.startsWith("audio/mp4") ? ".m4a" : ".webm";
     const it: ComposeItem = {
@@ -343,11 +317,17 @@ export function createComposer(deps: ComposeDeps = {}) {
       mime,
       size: blob.size,
       data: blob,
-      clean: "sans_objet",
+      ...(stripped ? { clean: "nettoye" as const, cleanFamily: "vocal" as const } : { clean: "echec" as const, accepted: true }),
       duplicate: false,
     };
+    cleared(it);
     commit(() => set(insertSorted(items, it)));
     return it.id;
+  }
+
+  /** « Envoyer tel quel » : l'élément non nettoyé part avec ses métadonnées (choix explicite, Q-MD1). */
+  function acceptUncleaned(id: string): void {
+    set(items.map((i) => (i.id === id && needsChoice(i) ? cleared({ ...i, accepted: true }) : i)));
   }
 
   /** Retire ; `undo()` (une seule fois) remet l'élément à sa place. */
@@ -461,6 +441,7 @@ export function createComposer(deps: ComposeDeps = {}) {
     if (segments > DATA_SEGMENTS) return "segments";
     if (items.some((i) => i.kind === "text" && codePoints(i.text ?? "") > TEXT_MAX)) return "texte_trop_long";
     if (manifestBytes > MANIFEST_MAX) return "manifeste";
+    if (items.some(needsChoice)) return "non_nettoye";
     if (pending > 0) return "nettoyage";
     if (!online()) return "hors_ligne";
     return null;
@@ -520,7 +501,7 @@ export function createComposer(deps: ComposeDeps = {}) {
     add,
     addText,
     updateText,
-    cleanAll,
+    acceptUncleaned,
     addVoice,
     remove,
     clear,

@@ -7,8 +7,7 @@
   import { midSplit } from "./midname";
   import { tick } from "svelte";
   import type { ComposeItem } from "../flows/compose.svelte";
-  import { metaNoteKey } from "../flows/compose.svelte";
-  import { NAME_MAX, STRIP_MAX } from "../index";
+  import { NAME_MAX } from "../index";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { formatClock, mediaDuration } from "../media/duration";
   import { ArrowDown, ArrowUp, Ellipsis, Pencil, X } from "./Icon";
@@ -45,8 +44,10 @@
     /** Envoi dès l'ajout (spec §41.14) : état de la ligne ; absent pour un texte. */
     upload?: RowStatus | null;
     onretry?: () => void;
+    /** « Envoyer tel quel » d'un élément non nettoyé. */
+    onaccept?: () => void;
   };
-  let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, danger = false, el = $bindable(), upload = null, onretry }: Props = $props();
+  let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, danger = false, el = $bindable(), upload = null, onretry, onaccept }: Props = $props();
 
   const name = $derived(item.base + item.ext);
   const mid = $derived(midSplit(item.base));
@@ -202,7 +203,7 @@
         {/if}
         <ItemNotes {item} {cannotOpen} badgesOnly />
       </span>
-      <ItemNotes {item} {cannotOpen} lines />
+      <ItemNotes {item} {cannotOpen} lines {onaccept} {onremove} />
     {/if}
   </div>
 

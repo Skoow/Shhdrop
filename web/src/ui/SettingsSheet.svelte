@@ -6,6 +6,8 @@
   import { getLang, setLang, t } from "../i18n/i18n.svelte";
   import { ArrowRight } from "./Icon";
   import Sheet from "./Sheet.svelte";
+  import Switch from "./Switch.svelte";
+  import { fileSettings } from "../flows/settings.svelte";
 
   /** `locked` : pendant un envoi, la langue ne change pas (UI §10). */
   let { open = $bindable(false), locked = false }: { open: boolean; locked?: boolean } = $props();
@@ -29,6 +31,10 @@
         <button type="button" class="row" lang="en" aria-pressed={getLang() === "en"} aria-disabled={locked} aria-describedby={locked ? "set-lang-locked" : undefined} onclick={() => pick("en")}>English</button>
       </div>
       {#if locked}<p id="set-lang-locked" class="about">{t("shell.lang.locked")}</p>{/if}
+    </section>
+    <section aria-labelledby="set-files">
+      <h3 id="set-files">{t("settings.files")}</h3>
+      <Switch label={t("settings.clean")} hint={t("settings.clean.hint")} checked={fileSettings.autoClean} onchange={(v) => (fileSettings.autoClean = v)} />
     </section>
     <section aria-labelledby="set-info">
       <h3 id="set-info">{t("settings.info")}</h3>

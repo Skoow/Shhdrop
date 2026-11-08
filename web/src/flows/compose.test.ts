@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { en } from "../i18n/en";
 import { fr } from "../i18n/fr";
-import { BLOCK_REASONS, blockKey, createComposer, metaNoteKey, splitName, type ComposeDeps } from "./compose.svelte";
+import { readFileSync } from "node:fs";
+import { BLOCK_REASONS, blockKey, createComposer, splitName, type ComposeDeps } from "./compose.svelte";
+import { gate } from "./clean-gate";
+import { cleanLabelKey } from "../media/clean-label";
+import type { StripResult } from "../media/strip";
 import { CATEGORY_ORDER, categoryOf } from "./kinds";
 import { HEAD_BYTES } from "./sniff";
 import { CONTENT_MAX, MAX_ITEMS } from "../index";
@@ -15,9 +19,11 @@ const big = (name: string, size: number, type = "application/octet-stream") => {
 };
 const jpeg = (name = "IMG_20261104.jpg") => new File([new Uint8Array([0xff, 0xd8, 1, 2, 3])], name, { type: "image/jpeg" });
 
+/** Par défaut, un nettoyage neutre (« sans ») : chaque test qui en parle donne le sien. */
 function make(deps: Partial<ComposeDeps> = {}) {
-  return createComposer({ probe: async () => undefined, online: () => true, ...deps });
+  return createComposer({ probe: async () => undefined, online: () => true, strip: async () => ({ state: "sans" }), ...deps });
 }
+const nettoye = (data: Blob): StripResult => ({ state: "nettoye", data, notes: [], family: "image" });
 
 describe("catégories (UI §9.2.4)", () => {
   it("ordre fixe et attribution", () => {
@@ -42,29 +48,74 @@ describe("catégories (UI §9.2.4)", () => {
 });
 
 describe("createComposer : ajout", () => {
-  it("JPEG nettoyé → donnée nettoyée, clean = nettoye", async () => {
-    const clean = vi.fn(async () => ({ file: new Blob([new Uint8Array([0xff, 0xd8, 9])]), cleaned: true, removed: ["lieu"] }));
-    const c = make({ clean });
-    const r = await c.add([jpeg()], "fichiers");
+  it("JPEG nettoyé → donnée nettoyée, clean = nettoye, seule elle peut être chiffrée", async () => {
+    const out = new Blob([new Uint8Array([0xff, 0xd8, 9])]);
+    const strip = vi.fn(async () => nettoye(out));
+    const c = make({ strip });
+    const f = jpeg();
+    const r = await c.add([f], "fichiers");
     expect(r.added).toEqual(["IMG_20261104.jpg"]);
-    expect(c.items[0]!.clean).toBe("nettoye");
-    expect(new Uint8Array(await (c.items[0]!.data as Blob).arrayBuffer())).toEqual(new Uint8Array([0xff, 0xd8, 9]));
-    expect(c.items[0]!.size).toBe(3);
+    expect(strip).toHaveBeenCalledWith(f, "image/jpeg", "IMG_20261104.jpg", { recorded: false });
+    expect(c.items[0]).toMatchObject({ clean: "nettoye", cleanFamily: "image", size: 3 });
+    expect(c.items[0]!.data).toBe(out);
+    await expect(gate(out)).resolves.toBe(out);
+    await expect(gate(f)).rejects.toThrow("non_nettoye");
   });
 
-  it("JPEG malformé → failedClean, rien d'ajouté", async () => {
-    const c = make({ clean: async () => Promise.reject(new Error("malforme")) });
-    const r = await c.add([jpeg("x.jpg")], "fichiers");
-    expect(r.failedClean).toEqual(["x.jpg"]);
-    expect(c.count).toBe(0);
+  it("échec du nettoyage → ajouté en echec, envoi bloqué jusqu'au choix : Envoyer tel quel ou Retirer", async () => {
+    const c = make({ strip: async () => ({ state: "echec", reason: "malformed:jpeg_sos" }) });
+    const f = jpeg("x.jpg");
+    await c.add([f, jpeg("y.jpg")], "fichiers");
+    expect(c.items.map((i) => i.clean)).toEqual(["echec", "echec"]);
+    expect(c.items[0]!.data).toBe(f);
+    expect(c.blockReason()).toBe("non_nettoye");
+    await expect(gate(f)).rejects.toThrow("non_nettoye");
+    c.acceptUncleaned(c.items[0]!.id);
+    expect(c.items[0]!.accepted).toBe(true);
+    await expect(gate(f)).resolves.toBe(f);
+    expect(c.blockReason()).toBe("non_nettoye");
+    c.remove(c.items[1]!.id);
+    expect(c.blockReason()).toBeNull();
   });
 
-  it("sans nettoyeur (avant Task 9) : image ajoutée telle quelle, jamais marquée « nettoyé »", async () => {
-    const c = make();
+  it("non pris en charge (et bientôt pris en charge) : même choix, jamais d'envoi silencieux", async () => {
+    const c = make({ strip: async (_f, mime) => ({ state: "non_pris_en_charge", soon: mime === "application/pdf" }) });
+    await c.add([file("a.pdf", 3, "application/pdf"), file("b.svg", 3, "image/svg+xml")], "fichiers");
+    expect(c.items.map((i) => [i.clean, i.cleanSoon, cleanLabelKey(i)])).toEqual([
+      ["non_pris_en_charge", false, "clean.unsupported"],
+      ["non_pris_en_charge", true, "clean.soon"],
+    ]);
+    expect(c.blockReason()).toBe("non_nettoye");
+    for (const i of c.items) c.acceptUncleaned(i.id);
+    expect(c.blockReason()).toBeNull();
+  });
+
+  it("réglage désactivé : rien n'est modifié ni analysé, marque « Original », envoi libre", async () => {
+    let on = false;
+    const strip = vi.fn(async () => nettoye(new Blob(["x"])));
+    const c = make({ strip, autoClean: () => on });
     const f = jpeg();
     await c.add([f], "fichiers");
-    expect(c.items[0]!.clean).toBe("non_nettoye");
+    expect(strip).not.toHaveBeenCalled();
+    expect(c.items[0]).toMatchObject({ clean: "original" });
     expect(c.items[0]!.data).toBe(f);
+    expect(c.blockReason()).toBeNull();
+    await expect(gate(f)).resolves.toBe(f);
+    on = true;
+    await c.add([jpeg("b.jpg")], "fichiers");
+    expect(c.items[1]!.clean).toBe("nettoye");
+  });
+
+  it("vrai nettoyage par défaut (stripMetadata) : photo avec GPS nettoyée, texte brut sans objet", async () => {
+    const c = createComposer({ probe: async () => undefined, online: () => true });
+    const src = new Uint8Array(readFileSync(new URL("../media/fixtures/iphone-like.jpg", import.meta.url)));
+    await c.add([new File([src], "IMG_1.jpg", { type: "image/jpeg" }), file("n.txt", 3, "text/plain")], "fichiers");
+    const [img, txt] = [c.items.find((i) => i.ext === ".jpg")!, c.items.find((i) => i.ext === ".txt")!];
+    expect(img).toMatchObject({ clean: "nettoye" });
+    expect(img.size).toBeLessThan(src.length);
+    expect(new TextDecoder("latin1").decode(await (img.data as Blob).arrayBuffer())).not.toMatch(/Reper|2001:02:03/);
+    expect(txt.clean).toBe("sans");
+    expect(c.blockReason()).toBeNull();
   });
 
   it("MAX_ITEMS + 2 fichiers → MAX_ITEMS ajoutés, 2 refusés (noms rendus) ; 200 acceptés, le 201ᵉ refusé (fichiers minuscules)", async () => {
@@ -333,7 +384,7 @@ describe("blocages et textes de raison", () => {
   it("vide, hors ligne, nettoyage en cours", async () => {
     let online = true;
     let release!: () => void;
-    const c = make({ online: () => online, clean: () => new Promise((r) => (release = () => r({ file: new Blob(["x"]), cleaned: true, removed: [] }))) });
+    const c = make({ online: () => online, strip: () => new Promise((r) => (release = () => r(nettoye(new Blob(["x"]))))) });
     expect(c.blockReason()).toBe("vide");
     const p = c.add([jpeg()], "fichiers");
     await Promise.resolve();
@@ -362,7 +413,7 @@ describe("blocages et textes de raison", () => {
   });
 
   it("chaque raison a son texte en français et en anglais", () => {
-    expect(BLOCK_REASONS).toEqual(["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "nettoyage", "hors_ligne"]);
+    expect(BLOCK_REASONS).toEqual(["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "non_nettoye", "nettoyage", "hors_ligne"]);
     for (const r of BLOCK_REASONS) {
       const k = blockKey(r);
       expect(fr[k as keyof typeof fr], r).toBeTruthy();
@@ -370,19 +421,15 @@ describe("blocages et textes de raison", () => {
     }
   });
 
-  it("mention des métadonnées : seulement pour ce qui n'est pas nettoyé, jamais pour un texte", async () => {
-    const c = make({ clean: async (f) => ({ file: f, cleaned: f.type === "image/jpeg", removed: [] }) });
-    await c.add([jpeg("a.jpg"), file("v.mp4", 3, "video/mp4"), file("d.pdf", 3, "application/pdf"), file("w.docx"), file("z.zip"), file("n.txt", 3, "text/plain"), file("m.md")], "fichiers");
+  it("textes d'état du nettoyage : chaque clé existe en français et en anglais ; un texte n'a rien", async () => {
+    const c = make();
     c.addText("t");
-    const notes = Object.fromEntries(c.items.map((i) => [i.base, metaNoteKey(i)]));
-    expect(notes).toEqual({ "Note": null, a: null, v: "compose.meta.video", d: "compose.meta.pdf", w: "compose.meta.doc", z: null, n: null, m: null });
-    const d = make();
-    await d.add([jpeg("b.jpg"), new File([new Uint8Array(1)], "h.heic", { type: "image/heic" })], "fichiers");
-    expect(d.items.map(metaNoteKey)).toEqual(["compose.meta.photo", "compose.meta.photo"]);
-    for (const k of ["compose.meta.video", "compose.meta.pdf", "compose.meta.doc", "compose.meta.photo"]) {
+    expect(cleanLabelKey(c.items[0]!)).toBeNull();
+    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.pdf", "clean.done.office", "clean.echec", "clean.protege", "clean.soon", "clean.unsupported", "clean.original", "clean.original.hint", "clean.mark", "clean.mark.not", "clean.accepted", "clean.sendAsIs", "clean.sendAsIs.label", "clean.remove", "clean.remove.label"]) {
       expect(fr[k as keyof typeof fr], k).toBeTruthy();
       expect(en[k as keyof typeof en], k).toBeTruthy();
     }
+    expect(fr["clean.done.image"]).toBe("Nettoyé · lieu, appareil et date retirés");
   });
 });
 
@@ -399,7 +446,7 @@ describe("type par le contenu, archives, exécutables (sniff)", () => {
       "a.tar.gz": "archives",
       "x.7z": "archives",
     });
-    expect(c.items.find((i) => i.ext === ".zip")!.clean).toBe("sans_objet");
+    expect(c.items.find((i) => i.ext === ".zip")!.clean).toBe("sans");
   });
   it("exécutable déguisé en photo : classé Autres, à risque, contenu ≠ extension", async () => {
     const c = make({ probe: async (f) => new Uint8Array(await f.slice(0, HEAD_BYTES).arrayBuffer()) });
@@ -420,7 +467,7 @@ describe("type par le contenu, archives, exécutables (sniff)", () => {
   });
 });
 
-describe("notes (titre et contenu) et nettoyage de tous les fichiers", () => {
+describe("notes (titre et contenu)", () => {
   it("titre facultatif (« Note » par défaut), nettoyé ; updateText change le titre et le contenu", () => {
     const c = make();
     const a = c.addText("corps")!;
@@ -431,16 +478,6 @@ describe("notes (titre et contenu) et nettoyage de tous les fichiers", () => {
     c.updateText(b, "y", "");
     expect(c.items[1]!.base).toBe("Courses");
     expect(c.toApiItems()[0]!.name).toBe("Code de la porte");
-  });
-  it("cleanAll : nettoie ce qui peut l'être, garde le reste et le dit", async () => {
-    const c = make();
-    await c.add([jpeg("a.jpg"), file("d.pdf", 3, "application/pdf")], "fichiers");
-    const r = await c.cleanAll(async (f) => ({ file: new Blob(["ok"]), cleaned: f.type === "image/jpeg", removed: ["lieu"] }));
-    expect(r).toEqual({ cleaned: ["a.jpg"], failed: ["d.pdf"] });
-    expect(c.items.map((i) => i.clean)).toEqual(["nettoye", "non_nettoye"]);
-    expect(c.items[0]!.size).toBe(2);
-    const r2 = await c.cleanAll(async () => Promise.reject(new Error("x")));
-    expect(r2).toEqual({ cleaned: [], failed: ["d.pdf"] });
   });
 });
 
@@ -464,10 +501,15 @@ describe("pris dans l'interface (caméra maison, Q-REC1)", () => {
     expect(r.added).toEqual(["Photo 1.jpg"]);
     expect(c.items[0]).toMatchObject({ category: "photos", clean: "nettoye" });
   });
-  it("video-ici : nommée « Vidéo n », honnête : le conteneur peut porter nom du navigateur et date → non nettoyée", async () => {
+  it("video-ici : nommée « Vidéo n » ; nettoyée par strip-capture (CaptureScreen) ou gardée telle quelle par choix", async () => {
     const c = make();
-    const r = await c.add([new File([new Uint8Array(4)], "capture.webm", { type: "video/webm" })], "video-ici");
+    const r = await c.add([new File([new Uint8Array(4)], "capture.webm", { type: "video/webm" })], "video-ici", true);
     expect(r.added).toEqual(["Vidéo 1.webm"]);
-    expect(c.items[0]).toMatchObject({ category: "videos", clean: "non_nettoye" });
+    expect(c.items[0]).toMatchObject({ category: "videos", clean: "nettoye", cleanFamily: "video" });
+    await c.add([new File([new Uint8Array(4)], "capture.webm", { type: "video/webm" })], "video-ici", false);
+    expect(c.items[1]).toMatchObject({ clean: "echec", accepted: true });
+    expect(c.blockReason()).toBeNull();
+    expect(c.addVoice(new Blob(["v"]), "audio/webm")).not.toBeNull();
+    expect(c.items.find((i) => i.category === "audio")).toMatchObject({ clean: "nettoye", cleanFamily: "vocal" });
   });
 });

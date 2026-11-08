@@ -536,6 +536,8 @@ Le composeur (déjà livré, `flows/compose.svelte.ts`) passe de `strip?: (Blob,
 
 ### Task 9a : Images (JPEG avec MPF, PNG, WebP, GIF, HEIC/HEIF/AVIF) et porte commune
 
+> **Livrée le 8 novembre (D41-22, nettoyage automatique).** Écarts avec ce plan : nettoyage à l'ajout dans le composeur, `prepare` en dernier verrou (`flows/clean-gate.ts`) ; `non_pris_en_charge` bloque l'envoi jusqu'au choix ; `cleanLabelKey(item)` lit l'état de l'élément (pas `StripResult`, catégorie inutile) ; `meta.heic` est une structure synthétique (aucun encodeur HEVC libre ici), `meta.avif` réel (Pillow, `gen-media-fixtures.sh`) ; pièges construits dans les tests (troncatures, CRC, bloc critique, iloc) plutôt qu'en fichiers ; `moov` dans un HEIF → `echec` (suites d'images, Task 9c). Pas fait ici : `categoryOfReceived` (reste de l'ancienne Task 9), à reprendre.
+
 **Files:**
 - Create: `web/src/media/strip.ts`, `format.ts`, `patch.ts`, `bytes.ts` (lecteur borné : `u8`, `u16be/le`, `u32be/le`, `u64be`, erreur typée `Malformed` au premier dépassement), `exif.ts` (EXIF minimal à une entrée 0x0112), `jpeg.ts`, `png.ts`, `webp.ts`, `gif.ts`, `heif.ts`, `isobmff.ts` (boîtes : lecture, liste blanche, neutralisation `free`, partagé avec 9c), `crc32.ts`, `clean-label.ts`, tests `*.test.ts` de chacun, `web/scripts/gen-fixtures.mjs` (images), `web/scripts/gen-media-fixtures.sh` (HEIC, AVIF : `heif-enc`, `avifenc`, `exiftool`, versions en tête), `web/src/media/fixtures/*`
 - Modify: `web/src/flows/compose.svelte.ts`, `compose.test.ts`, `web/src/flows/kinds.ts` (reste de l'ancienne Task 9 : `categoryOfReceived(previewKind, safeName)`, qui lit la même table par extension que `categoryOf`, déjà livré), `web/src/i18n/fr.ts`, `en.ts` (textes de spec §35.2), `web/ui-e2e/compose.spec.ts`

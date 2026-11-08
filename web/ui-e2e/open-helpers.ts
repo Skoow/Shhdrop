@@ -5,7 +5,7 @@ import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { expect } from "./fixtures";
-import { addText, openFilePicker, readyHeading, sendButton } from "./send-helpers";
+import { addText, openFilePicker, readyHeading, sendAsIs, sendButton } from "./send-helpers";
 
 const FILES = fileURLToPath(new URL("./files/", import.meta.url));
 export const file = (name: string) => join(FILES, name);
@@ -44,6 +44,7 @@ export async function sendShare(
     const chooser = openFilePicker(page);
     await (await chooser).setFiles(o.files.map(upload));
     await expect(page.locator("[data-row]")).toHaveCount(o.files.length + (o.text !== undefined ? 1 : 0));
+    await sendAsIs(page);
   }
   if (o.opens !== undefined || o.download === false) {
     let opts = page.locator(".side");

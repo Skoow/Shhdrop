@@ -8,7 +8,7 @@ import { shareId } from "../src/crypto/envelope";
 import type { KLien } from "../src/crypto/types";
 import { findIn, needle, scanDir, type Needle } from "../e2e/scan";
 import { expect, test } from "./fixtures";
-import { addText, openFilePicker, readyHeading, sendButton } from "./send-helpers";
+import { addText, openFilePicker, readyHeading, sendButton, sendAsIs } from "./send-helpers";
 
 const TEXT = "MOT-REPERE-NAVIGATEUR-5d1e : le code de la porte est 4471";
 const NAME = "nom-repere-navigateur-a83f.pdf";
@@ -39,6 +39,7 @@ test.describe("fr-FR", () => {
     const chooser = openFilePicker(page);
     await (await chooser).setFiles({ name: NAME, mimeType: "application/octet-stream", buffer: Buffer.from(CONTENT) });
     await expect(page.locator("[data-row]")).toHaveCount(2);
+    await sendAsIs(page); // nettoyage automatique : .bin non pris en charge, envoyé tel quel
     await sendButton(page).click();
     await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
 

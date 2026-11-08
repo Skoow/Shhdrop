@@ -11,12 +11,19 @@ import { join } from "node:path";
 import type { Browser, Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
 import { file, freshPage, sendShare, settle, unlock, type Sent } from "./open-helpers";
+import { stripMetadata } from "../src/media/strip";
 
 test.use({ locale: "fr-FR" });
 
 const TEXT = "Bonjour,\nvoici les documents de la réunion.";
 const NAMES = ["foret-brume.jpg", "lac-gele.jpg", "schema.png", "vocal.ogg", "anniversaire-lou.webm", "contrat.pdf", "budget-2026.xlsx", "archive.zip", "installer.exe", "trap.svg"];
 const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+/** Octets partis : les photos sont nettoyées à l'ajout (Task 9a), le reste part tel quel. */
+async function sentBytes(n: string): Promise<Buffer> {
+  const raw = readFileSync(file(n));
+  const r = await stripMetadata(new Blob([raw]), "", n);
+  return r.state === "nettoye" ? Buffer.from(await r.data.arrayBuffer()) : raw;
+}
 
 async function share(browser: Browser, origin: string, o: { download?: boolean } = {}): Promise<Sent> {
   const s = await freshPage(browser);
@@ -270,7 +277,7 @@ test("archive .zip sans sélecteur : confirmation des fichiers à risque, archiv
   const out = JSON.parse(
     execFileSync("python3", ["-I", "-c", "import sys,zipfile,hashlib,json;z=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None;print(json.dumps({i.filename:hashlib.sha256(z.read(i)).hexdigest() for i in z.infolist()}))", p]).toString(),
   ) as Record<string, string>;
-  for (const n of NAMES) expect(out[n], n).toBe(sha(readFileSync(file(n))));
+  for (const n of NAMES) expect(out[n], n).toBe(sha(await sentBytes(n)));
   expect(Object.keys(out)).toHaveLength(NAMES.length + 1); // + la note en .txt
   expect(out["Note.txt"] ?? Object.entries(out).find(([k]) => k.endsWith(".txt"))?.[1]).toBe(createHash("sha256").update(TEXT).digest("hex"));
 });

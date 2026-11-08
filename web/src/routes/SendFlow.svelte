@@ -6,6 +6,7 @@
   // de Ready, oubliés à Terminé ou Supprimer.
   import { flushSync, tick } from "svelte";
   import { getDemo } from "../app/demo-hooks";
+  import { gate } from "../flows/clean-gate";
   import { setScreenTitle } from "../app/title";
   import { createWakeLock } from "../app/wakelock";
   import { solvePow } from "../captcha/pow";
@@ -53,6 +54,9 @@
     const d = createDraft(typeof location === "undefined" ? "http://localhost" : location.origin, {
       solveCaptcha,
       auto: true,
+      // Dernier verrou avant le chiffrement : seul un contenu déclaré prêt par le composeur
+      // (nettoyé, ou « Envoyer tel quel » choisi) est chiffré (flows/clean-gate.ts, spec §35.2).
+      prepare: gate,
       onChange: () => {
         if (d !== draft) return;
         uploadVersion++;

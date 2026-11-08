@@ -10,7 +10,8 @@
   import type { PaidTier } from "../limits";
   import { blockKey, createComposer, type AddReport, type Source } from "../flows/compose.svelte";
   import { rowStatus, toDraftList } from "../flows/preupload";
-  import { CLEANER_READY, cleanFile } from "../flows/clean";
+  import { fileSettings } from "../flows/settings.svelte";
+  import { needsChoice } from "../media/clean-label";
   import { addActions, desktopActions, type AddId } from "../flows/add-actions";
   import { captureSupport } from "../media/capture";
   import { fromPasteEvent } from "../flows/intake";
@@ -21,7 +22,7 @@
   import Button from "../ui/Button.svelte";
   import CapacityGauge from "../ui/CapacityGauge.svelte";
   import CategoryGroup from "../ui/CategoryGroup.svelte";
-  import { ArrowDown, ArrowUp, BrushCleaning, ChevronDown, Lock, Pencil, Plus, ShieldAlert, SlidersHorizontal, Trash2, Upload, X } from "../ui/Icon";
+  import { ArrowDown, ArrowUp, ChevronDown, Lock, Pencil, Plus, ShieldAlert, SlidersHorizontal, Trash2, Upload, X } from "../ui/Icon";
   import AddIcon from "../ui/AddIcon.svelte";
   import AddSheet from "../ui/AddSheet.svelte";
   import CaptureScreen, { type Captured } from "../ui/CaptureScreen.svelte";
@@ -69,8 +70,8 @@
       voice: (n) => t("compose.name.voice", { n }),
     },
     online: () => online,
-    // Nettoyage automatique à l'ajout dès que la bibliothèque (Task 9a) est là.
-    clean: CLEANER_READY ? cleanFile : undefined,
+    // Nettoyage automatique à l'ajout (spec §35.2), sauf si le réglage est désactivé.
+    autoClean: () => fileSettings.autoClean,
   });
   // Téléphone (< 760 px) : une vraie app (lignes compactes, menu « … », barre collée, options
   // en feuille). Ordinateur : deux colonnes. Le coffre (spec §27) : téléphone ou app installée.
@@ -135,13 +136,12 @@
     for (const name of r.duplicates) announce(t("compose.duplicate.say", { name }));
     if (r.refusedCount.length > 0) say(t("compose.tooMany", { n: r.refusedCount.length, max: MAX_ITEMS }), r.refusedCount.join(", "));
     for (const name of r.unreadable) say(t("compose.unreadable", { name }));
-    for (const name of r.failedClean) say(t("compose.failedClean", { name }));
   }
 
-  async function addFiles(files: File[], source: Source, folders: string[] = []) {
+  async function addFiles(files: File[], source: Source, folders: string[] = [], captureStripped?: boolean) {
     if (folders.length > 0) say(t("compose.folder"), folders.join(", "));
     if (files.length === 0) return;
-    const r = await composer.add(files, source);
+    const r = await composer.add(files, source, captureStripped);
     await changing; // les avis vont dans le composeur s'il vient de s'ouvrir
     report(r);
   }
@@ -182,9 +182,9 @@
   function captured(c: Captured) {
     const name = `capture.${c.ext}`;
     if (c.mode === "voice") {
-      if (composer.addVoice(c.blob, c.mime) === null) say(t("compose.tooMany", { n: 1, max: MAX_ITEMS }));
+      if (composer.addVoice(c.blob, c.mime, c.stripped) === null) say(t("compose.tooMany", { n: 1, max: MAX_ITEMS }));
       else announce(t("compose.added", { n: 1 }));
-    } else void addFiles([new File([c.blob], name, { type: c.mime })], c.mode === "photo" ? "photo-ici" : "video-ici");
+    } else void addFiles([new File([c.blob], name, { type: c.mime })], c.mode === "photo" ? "photo-ici" : "video-ici", [], c.mode === "photo" ? undefined : c.stripped);
   }
 
   // ---------- Texte ----------
@@ -285,19 +285,6 @@
   // ---------- Nettoyer tous les fichiers ----------
   // Le bouton n'apparaît que si le nettoyage est réel (Tasks 9a à 9c) : jamais un bouton qui ne
   // fait rien (scan UX B3). Les pastilles « Non nettoyé », honnêtes, restent.
-  const anyNotCleanedFiles = $derived(CLEANER_READY && composer.items.some((i) => i.kind === "file" && i.clean === "non_nettoye"));
-  let cleaning = $state(false);
-  async function cleanAll() {
-    cleaning = true;
-    try {
-      const r = await composer.cleanAll(cleanFile);
-      if (r.cleaned.length > 0) say(t("compose.clean.done", { n: r.cleaned.length }));
-      if (r.failed.length > 0) say(t("compose.clean.failed", { names: r.failed.join(", ") }));
-    } finally {
-      cleaning = false;
-    }
-  }
-
   // ---------- Retrait, annulation ----------
   type Toast = { id: number; message: string; undo: () => void; focusId?: string };
   let toast = $state<Toast | null>(null);
@@ -381,7 +368,8 @@
   // Chaque fichier part dès son ajout ; un retrait interrompt son envoi et l'efface du serveur.
   // untrack : le brouillon met à jour l'état des lignes pendant l'appel (pas une dépendance).
   $effect(() => {
-    const list = toDraftList(composer.items);
+    // Un élément non nettoyé n'est confié à l'envoi (donc chiffré) qu'après « Envoyer tel quel ».
+    const list = toDraftList(composer.items.filter((i) => !needsChoice(i)));
     untrack(() => onitems?.(list));
   });
   const upload = (i: (typeof composer.items)[number]) => (void uploadVersion, rowStatus(uploadOf?.(i.id)));
@@ -489,13 +477,6 @@
     <div class="list-col">
       <div class="top">
         <h2 id="compose-title" class="title" tabindex="-1" data-large-title bind:this={title}>{t("compose.title")}</h2>
-        {#if anyNotCleanedFiles && !narrow}
-          <!-- Ordinateur : dans l'en-tête, pour laisser la place à la liste ; la légende en description. -->
-          <button type="button" class="cleanbtn small" aria-busy={cleaning} disabled={cleaning} title={t("compose.meta.legend")} aria-describedby="clean-legend" onclick={cleanAll}>
-            <BrushCleaning size={16} strokeWidth={1.8} aria-hidden="true" />{t("compose.clean.all")}
-          </button>
-          <span id="clean-legend" class="sr-only">{t("compose.meta.legend")}</span>
-        {/if}
         <div class="clear">
           <Button variant="secondary" dense onpress={clearAll}>
             {#snippet icon()}<Trash2 size={18} strokeWidth={1.8} />{/snippet}
@@ -508,12 +489,6 @@
       </div>
 
 
-      {#if anyNotCleanedFiles && narrow}
-        <button type="button" class="cleanbtn wide" aria-busy={cleaning} disabled={cleaning} aria-describedby="clean-legend-m" onclick={cleanAll}>
-          <BrushCleaning size={18} strokeWidth={1.8} aria-hidden="true" />{t("compose.clean.all")}
-        </button>
-        <span id="clean-legend-m" class="sr-only">{t("compose.meta.legend")}</span>
-      {/if}
 
       <!-- Seule la liste défile (ordinateur) : la page, jamais. -->
       <div class="lc-scroll">
@@ -548,6 +523,7 @@
             danger={(i) => culprits.has(i.id)}
             {upload}
             {onretry}
+            onaccept={(id) => composer.acceptUncleaned(id)}
           />
         {/each}
       </div>
@@ -875,27 +851,6 @@
       color: var(--accent);
     }
   }
-  /* Action secondaire (contour), jamais un aplat ambre qui crie « problème » (scan UX D4). */
-  .cleanbtn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 44px;
-    padding: 0 14px;
-    border: 1px solid var(--line-strong);
-    border-radius: 10px;
-    background: transparent;
-    color: var(--text);
-    font: inherit;
-    font-size: var(--fs-small);
-    font-weight: 620;
-    cursor: pointer;
-    transition: transform var(--dur-press) var(--ease-out);
-  }
-  .cleanbtn.wide {
-    justify-content: center;
-    width: 100%;
-  }
   /* Téléphone : pastilles « Créer » plus serrées (deux rangées au plus). */
   .narrow .make {
     gap: 6px;
@@ -904,18 +859,6 @@
     min-height: 44px;
     padding: 0 12px 0 10px;
     font-size: var(--fs-micro);
-  }
-  .cleanbtn.small {
-    min-height: 40px;
-    padding: 0 12px;
-    font-size: var(--fs-micro);
-  }
-  .cleanbtn:active {
-    transform: scale(0.97);
-  }
-  .cleanbtn:disabled {
-    cursor: progress;
-    opacity: 0.7;
   }
   .title {
     font-size: var(--fs-h3);

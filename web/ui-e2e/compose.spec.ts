@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
 import { axe, capture, expect, readClipboard, test } from "./fixtures";
-import { openFilePicker, pickInAddSheet } from "./send-helpers";
+import { openFilePicker, pickInAddSheet, sendAsIs } from "./send-helpers";
 
 const FILES = fileURLToPath(new URL("./files/", import.meta.url));
 const f = (name: string) => join(FILES, name);
@@ -23,8 +23,13 @@ async function open(page: Page, origin: string) {
   await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
 }
 /** Choisit des fichiers par « Parcourir les fichiers » (accueil) ou la zone de dépôt (composeur). */
-async function browse(page: Page, files: string[] | { name: string; mimeType: string; buffer: Buffer }[]) {
+async function browse(page: Page, files: string[] | { name: string; mimeType: string; buffer: Buffer }[], asIs = true) {
+  const before = await rows(page).count();
   await (await openFilePicker(page)).setFiles(files as never);
+  if (!asIs) return;
+  // Nettoyage automatique (Task 9a) : ce qui n'est pas nettoyé attend « Envoyer tel quel ».
+  await expect.poll(() => rows(page).count()).not.toBe(before);
+  await sendAsIs(page);
 }
 async function addNote(page: Page, body: string, title = "") {
   if (!(await pickInAddSheet(page, "Note"))) {
@@ -114,11 +119,11 @@ test.describe("fr-FR", () => {
     await expect(note.locator(".sub")).toHaveText("Le code de la porte est 4512B.");
     // Archive : catégorie, note honnête.
     await expect(page.getByText("Archive : son contenu n'est ni vérifié ni nettoyé.")).toBeVisible();
-    await expect(page.getByText("Nettoyé", { exact: true })).toHaveCount(0);
-    // Nettoyage pas encore réel (CLEANER_READY faux) : aucun bouton qui ne fait rien ; les
-    // pastilles « Non nettoyé », honnêtes, restent (scan UX B3).
+    // Nettoyage automatique (Task 9a) : photos « Nettoyé » ; vidéo, PDF, archive envoyés tels
+    // quels par choix (« Non nettoyé »). Plus aucun bouton « Nettoyer tous les fichiers ».
+    await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator('[data-clean="nettoye"]')).toHaveText(/^Nettoyé/);
     await expect(page.getByRole("button", { name: "Nettoyer tous les fichiers" })).toHaveCount(0);
-    await expect(page.locator(".badge.warn").filter({ hasText: "Non nettoyé" }).first()).toBeVisible();
+    await expect(page.locator('[data-clean="tel-quel"]').first()).toHaveText(/^Non nettoyé/);
     // Listes compactes (décision du 7 novembre) : aucune vignette, une icône de format par ligne,
     // type, taille, durée ; plus d'estimation par fichier ni par catégorie (décision du 8 novembre).
     await expect(page.locator("[data-row] img")).toHaveCount(0);
@@ -455,7 +460,7 @@ test.describe("fr-FR", () => {
     await expect(page.locator(".top .ht")).toHaveText(/^200\s\/\s200\séléments · /);
     await expect(page.locator(".cnote")).toHaveCount(0);
     await expect(send(page)).toBeEnabled();
-    await browse(page, [note(200)]);
+    await browse(page, [note(200)], false);
     await expect(rows(page)).toHaveCount(200);
     await expect(page.locator(".cnote")).toContainText("1 élément n'a pas été ajouté : 200 maximum.");
     await expect(page.locator(".cnote")).toContainText("n201.txt");
