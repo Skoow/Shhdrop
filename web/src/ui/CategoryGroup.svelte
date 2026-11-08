@@ -34,9 +34,8 @@
     upload?: (item: ComposeItem) => RowStatus | null;
     onretry?: (id: string) => void;
     /** « Envoyer tel quel » d'un élément non nettoyé (« Retirer » : `onremove`). */
-    onaccept?: (id: string) => void;
   };
-  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, cannotOpen, danger, upload, onretry, onaccept }: Props = $props();
+  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, cannotOpen, danger, upload, onretry }: Props = $props();
   // Une seule présentation partout (décision du propriétaire du 7 novembre) : lignes compactes,
   // icône de format, nom, type, taille, temps d'envoi estimé, actions.
 
@@ -155,7 +154,6 @@
           danger={danger?.(item) ?? false}
           upload={upload?.(item) ?? null}
           onretry={() => onretry?.(item.id)}
-          onaccept={() => onaccept?.(item.id)}
         />
       </li>
     {/each}

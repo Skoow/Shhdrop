@@ -12,6 +12,8 @@
   import { formatClock, mediaDuration } from "../media/duration";
   import { ArrowDown, ArrowUp, Ellipsis, Pencil, X } from "./Icon";
   import ItemNotes from "./ItemNotes.svelte";
+  import LockMark from "./LockMark.svelte";
+  import { sendLock } from "./lock";
   import { formatBytes } from "../i18n/format";
   import type { RowStatus } from "../flows/preupload";
   import FormatIcon from "./FormatIcon.svelte";
@@ -45,9 +47,8 @@
     upload?: RowStatus | null;
     onretry?: () => void;
     /** « Envoyer tel quel » d'un élément non nettoyé. */
-    onaccept?: () => void;
   };
-  let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, danger = false, el = $bindable(), upload = null, onretry, onaccept }: Props = $props();
+  let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, danger = false, el = $bindable(), upload = null, onretry }: Props = $props();
 
   const name = $derived(item.base + item.ext);
   const mid = $derived(midSplit(item.base));
@@ -143,6 +144,7 @@
   $effect(() => {
     if (!movable && moving) moving = false;
   });
+  const lock = $derived(sendLock(upload));
 </script>
 
 <!-- Alt + ↑/↓ depuis la poignée ou un bouton de la ligne (l'événement remonte). -->
@@ -186,24 +188,29 @@
         {#if error}<p id="{uid}-err" class="err" role="alert">{t(`compose.rename.${error}`, { max: NAME_MAX })}</p>{/if}
       </div>
     {:else}
-      <bdi class="nm" title={name} translate="no">
-        <span class="b">{mid.head}</span><span class="e">{mid.tail}{#if item.kind !== "text"}{item.ext}{/if}</span>
-      </bdi>
+      <span class="head">
+        <bdi class="nm" title={name} translate="no">
+          <span class="b">{mid.head}</span><span class="e">{mid.tail}{#if item.kind !== "text"}{item.ext}{/if}</span>
+        </bdi>
+        <!-- Ordinateur : la marque « Non nettoyé » sur la ligne du nom (liste compacte, une ligne de détails). -->
+        {#if !compact}<ItemNotes {item} unclean="only" />{/if}
+      </span>
       <span class="meta">
         {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi><span class="sep" aria-hidden="true">·</span>{:else if item.kind === "file"}<span>{t(typeKey(format))}</span><span class="sep" aria-hidden="true">·</span>{/if}
         <span class="num">{formatBytes(item.size, getLang())}</span>
         {#if duration !== null}<span class="sep" aria-hidden="true">·</span><span class="num">{formatClock(duration)}</span>{/if}
         {#if upload}
           <span class="sep" aria-hidden="true">·</span>
-          <span class={["up", upload.key.slice(11)]} data-up={upload.key.slice(11)} role={upload.key === "compose.up.erreur" ? "alert" : undefined}>
-            {#if upload.key !== "compose.up.pret"}<span class="bar" aria-hidden="true"><span style:width="{upload.percent}%"></span></span>{/if}
-            <span class="num">{t(upload.key, { n: upload.percent })}</span>
-            {#if upload.key === "compose.up.erreur" && onretry}<button type="button" class="retry" onclick={onretry} aria-label={t("compose.up.retry", { name })}>{t("common.retry")}</button>{/if}
+          <span class={["up", upload.key.slice(11)]} data-up={upload.key.slice(11)}>
+            <LockMark tone={lock!.tone} text={t(upload.key, { n: upload.percent })} role={lock!.tone === "error" ? "alert" : undefined}>
+              {#if upload.key === "compose.up.envoi" || upload.key === "compose.up.chiffrement"}<span class="bar" aria-hidden="true"><span style:width="{upload.percent}%"></span></span>{/if}
+              {#if upload.key === "compose.up.erreur" && onretry}<button type="button" class="retry" onclick={onretry} aria-label={t("compose.up.retry", { name })}>{t("common.retry")}</button>{/if}
+            </LockMark>
           </span>
         {/if}
-        <ItemNotes {item} {cannotOpen} badgesOnly />
+        <ItemNotes {item} {cannotOpen} badgesOnly unclean={compact ? undefined : "skip"} />
       </span>
-      <ItemNotes {item} {cannotOpen} lines {onaccept} {onremove} />
+      <ItemNotes {item} {cannotOpen} lines />
     {/if}
   </div>
 
@@ -285,6 +292,15 @@
     display: grid;
     gap: 2px;
     min-width: 0;
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 4px 10px;
+    min-width: 0;
+  }
+  .head :global(.unclean) {
+    flex: none;
   }
   .nm {
     display: flex;

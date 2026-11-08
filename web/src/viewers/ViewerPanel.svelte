@@ -138,7 +138,8 @@
 <dialog bind:this={dlg} class="vp" aria-labelledby="{uid}-t" aria-roledescription="carousel" onclose={closed} onclick={backdrop} onkeydown={key}>
   {#if cur}
     <div class="head">
-      <h2 id="{uid}-t" class="nm" title={cur.name}><span class="sr-only">{cur.name}</span><bdi translate="no" aria-hidden="true"><span class="h">{midSplitName(cur.name).head}</span><span class="tl">{midSplitName(cur.name).tail}</span></bdi></h2>
+      <!-- Nom lu d'un seul tenant (aria-label) ; texte affiché une seule fois (pas de copie masquée). -->
+      <h2 id="{uid}-t" class="nm" title={cur.name} aria-label={cur.name}><bdi translate="no"><span class="h">{midSplitName(cur.name).head}</span><span class="tl">{midSplitName(cur.name).tail}</span></bdi></h2>
       <span class="count num" aria-hidden="true">{t("viewer.count", { k: (at ?? 0) + 1, n: items.length })}</span>
       <IconButton label={t("common.close")} onpress={() => dlg?.close()}><X size={20} strokeWidth={1.75} /></IconButton>
     </div>

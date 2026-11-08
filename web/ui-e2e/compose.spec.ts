@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
 import { axe, capture, expect, readClipboard, test } from "./fixtures";
-import { openFilePicker, pickInAddSheet, sendAsIs } from "./send-helpers";
+import { openFilePicker, pickInAddSheet } from "./send-helpers";
 
 const FILES = fileURLToPath(new URL("./files/", import.meta.url));
 const f = (name: string) => join(FILES, name);
@@ -23,13 +23,11 @@ async function open(page: Page, origin: string) {
   await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
 }
 /** Choisit des fichiers par « Parcourir les fichiers » (accueil) ou la zone de dépôt (composeur). */
-async function browse(page: Page, files: string[] | { name: string; mimeType: string; buffer: Buffer }[], asIs = true) {
+async function browse(page: Page, files: string[] | { name: string; mimeType: string; buffer: Buffer }[], wait = true) {
   const before = await rows(page).count();
   await (await openFilePicker(page)).setFiles(files as never);
-  if (!asIs) return;
-  // Nettoyage automatique (Task 9a) : ce qui n'est pas nettoyé attend « Envoyer tel quel ».
+  if (!wait) return;
   await expect.poll(() => rows(page).count()).not.toBe(before);
-  await sendAsIs(page);
 }
 async function addNote(page: Page, body: string, title = "") {
   if (!(await pickInAddSheet(page, "Note"))) {
@@ -117,13 +115,13 @@ test.describe("fr-FR", () => {
     // Note : titre, puis la première ligne du contenu.
     const note = rows(page).filter({ hasText: "Code de la porte" });
     await expect(note.locator(".sub")).toHaveText("Le code de la porte est 4512B.");
-    // Archive : catégorie, note honnête.
-    await expect(page.getByText("Archive : son contenu n'est ni vérifié ni nettoyé.")).toBeVisible();
-    // Nettoyage automatique (Task 9a) : photos « Nettoyé » ; vidéo, PDF, archive envoyés tels
-    // quels par choix (« Non nettoyé »). Plus aucun bouton « Nettoyer tous les fichiers ».
+    // Archive : catégorie, marque honnête.
+    await expect(rows(page).filter({ hasText: "archive.zip" }).locator('[data-clean="non-nettoye"]')).toHaveText(/^Non nettoyé · Archive\s:\scontenu non inspecté/);
+    // Nettoyage automatique (Task 9a, D41-23) : photos « Nettoyé » ; vidéo, PDF, archive partent
+    // sans clic, marqués « Non nettoyé ». Plus aucun bouton « Nettoyer tous les fichiers ».
     await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator('[data-clean="nettoye"]')).toHaveText(/^Nettoyé/);
     await expect(page.getByRole("button", { name: "Nettoyer tous les fichiers" })).toHaveCount(0);
-    await expect(page.locator('[data-clean="tel-quel"]').first()).toHaveText(/^Non nettoyé/);
+    await expect(page.locator('[data-clean="non-nettoye"]').first()).toHaveText(/^Non nettoyé/);
     // Listes compactes (décision du 7 novembre) : aucune vignette, une icône de format par ligne,
     // type, taille, durée ; plus d'estimation par fichier ni par catégorie (décision du 8 novembre).
     await expect(page.locator("[data-row] img")).toHaveCount(0);
@@ -216,7 +214,7 @@ test.describe("fr-FR", () => {
     await expect(page.locator("[data-row].danger, [data-row] .row.danger").filter({ hasText: "installer.exe" })).toHaveCount(1);
     await expect(exe.getByText("Programme ou script : il peut agir sur l'appareil du destinataire.")).toBeVisible();
     await expect(rows(page).filter({ hasText: "vacances.jpg" }).getByText("Attention : c'est un programme, malgré son extension.")).toBeVisible();
-    await expect(rows(page).filter({ hasText: "sauvegarde" }).getByText("Archive : son contenu n'est ni vérifié ni nettoyé.")).toBeVisible();
+    await expect(rows(page).filter({ hasText: "sauvegarde" }).getByText(/Archive\s:\scontenu non inspecté/)).toBeVisible();
     await expect(exe.locator("svg.fi")).toHaveAttribute("data-format", "EXE");
     await expect(rows(page).filter({ hasText: "vacances.jpg" }).locator("svg.fi")).toHaveAttribute("data-format", "EXE");
     await expect(rows(page).filter({ hasText: "budget-2026.xlsx" }).locator("svg.fi")).toHaveAttribute("data-format", "XLS");
@@ -505,6 +503,32 @@ test.describe("fr-FR", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test("note sur machine lente : le focus différé de l'éditeur ne vole pas le champ déjà choisi (saisie gardée dans Contenu)", async ({ page, shh }) => {
+    await open(page, shh.origin);
+    // Sous charge, l'image suivante tombe entre la prise du focus par la personne (ou l'outil)
+    // et sa saisie : on rejoue exactement cet ordre (rappels d'image différés au focus d'un champ).
+    await page.evaluate(() => {
+      const raf = window.requestAnimationFrame.bind(window);
+      let held: FrameRequestCallback[] = [];
+      let armed = false;
+      window.requestAnimationFrame = (cb) => {
+        if (!armed) return raf(cb);
+        held.push(cb);
+        return 0;
+      };
+      document.addEventListener("click", () => void (armed = true), { capture: true, once: true });
+      document.addEventListener("focusin", (e) => {
+        if (!(e.target instanceof HTMLTextAreaElement) || held.length === 0) return;
+        const run = held;
+        held = [];
+        armed = false;
+        for (const cb of run) cb(performance.now());
+      }, { capture: true });
+    });
+    await addNote(page, "Saisie rapide");
+    await expect(rows(page)).toHaveCount(1);
   });
 
   test("note : titre et contenu, compteur, Modifier ; Ctrl + V de texte hors champ ouvre l'éditeur ; image collée", async ({ page, shh, isMobile }) => {

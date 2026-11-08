@@ -1,4 +1,6 @@
 <script lang="ts">
+  import LockMark from "./LockMark.svelte";
+  import { receiveLock } from "./lock";
   // Ligne compacte d'un élément reçu (UI §9.8, décisions du 7 novembre) : icône de format, nom
   // nettoyé (extension toujours visible), type, taille, temps estimé ; pendant un
   // téléchargement : barre, pourcentage, débit, temps restant ; actions selon l'état et les
@@ -12,7 +14,7 @@
   import Button from "./Button.svelte";
   import IconButton from "./IconButton.svelte";
   import InlineConfirm from "./InlineConfirm.svelte";
-  import { Check, Copy, Download, Eye, Pause, Play, RefreshCw, Square } from "./Icon";
+  import { Copy, Download, Eye, Pause, Play, RefreshCw, Square } from "./Icon";
 
   type Props = {
     i: number;
@@ -47,6 +49,7 @@
   const left = $derived(row.rate > 0 ? (row.total - row.done) / row.rate : null);
   const FAIL = { network: "dl.fail.network", budget: "dl.fail.budget", limit: "dl.fail.limit", disk_full: "dl.fail.disk", write: "dl.fail.write", gone: "dl.fail.gone" } as const;
   let viewBtn: HTMLButtonElement | undefined = $state();
+  const lock = $derived(receiveLock(kind, row.state));
 </script>
 
 <li class="row" data-item={i} data-kind={format.family} data-state={row.state}>
@@ -63,8 +66,11 @@
       {:else}
         {#if excerpt}<bdi class="ex" translate="no">{excerpt}</bdi>{/if}
         {#if kind === "file"}<span>{t(typeKey(format))}</span><span aria-hidden="true">·</span><span>{formatBytes(row.total, lang)}</span>{:else if !excerpt}<span>{t(typeKey(format))}</span>{/if}
+        {#if lock}
+          <span aria-hidden="true">·</span><LockMark tone={lock.tone} text={t(lock.key)} />
+        {/if}
         {#if row.state === "done"}
-          <span aria-hidden="true">·</span><span class="ok"><Check size={14} strokeWidth={2.2} aria-hidden="true" />{t("dl.done")}</span>
+          <span aria-hidden="true">·</span><span class="ok">{t("dl.done")}</span>
         {:else if estimate !== null && !viewOnly}
           <span aria-hidden="true">·</span><span class="eta" title={t("dl.estimate.title")}>{t("dl.estimate", { time: formatDuration(estimate, lang) })}<span class="sr-only"> ({t("dl.estimate.title")})</span></span>
         {/if}

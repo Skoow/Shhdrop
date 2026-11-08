@@ -11,7 +11,6 @@
   import { blockKey, createComposer, type AddReport, type Source } from "../flows/compose.svelte";
   import { rowStatus, toDraftList } from "../flows/preupload";
   import { fileSettings } from "../flows/settings.svelte";
-  import { needsChoice } from "../media/clean-label";
   import { addActions, desktopActions, type AddId } from "../flows/add-actions";
   import { captureSupport } from "../media/capture";
   import { fromPasteEvent } from "../flows/intake";
@@ -204,6 +203,10 @@
     // Focus dans la zone de texte (showModal le mettrait sur « Fermer »), curseur à la fin.
     void tick().then(() =>
       requestAnimationFrame(() => {
+        // Déjà dans un champ (appui ou saisie rapide, machine lente) : ne pas lui voler le focus,
+        // la saisie partirait dans l'autre champ.
+        const at = document.activeElement;
+        if (at && (at === titleEl || at === editorEl)) return;
         // Nouvelle note vide : le titre d'abord ; sinon le contenu, curseur à la fin.
         if (!id && text === "") return void titleEl?.focus();
         editorEl?.focus();
@@ -362,14 +365,15 @@
 
   // ---------- Envoi ----------
   const composerBlock = $derived(composer.blockReason());
+  // Résumé discret près d'Envoyer (D41-23) : les lignes portent chacune leur marque et leur raison.
+  const uncleaned = $derived(composer.uncleanedCount);
   const reasonText = $derived(composerBlock ? t(blockKey(composerBlock), { max: composerBlock === "trop_gros" ? formatBytes(CONTENT_MAX, lang) : num(TEXT_MAX) }) : "");
   const freeText = $derived(t("compose.free", { size: formatBytes(CONTENT_MAX, lang), ttl: formatDuration(TTL_MAX_HOURS * 3600, lang) }));
   const estimate = $derived(estimateUpload(composer.totalBytes));
   // Chaque fichier part dès son ajout ; un retrait interrompt son envoi et l'efface du serveur.
   // untrack : le brouillon met à jour l'état des lignes pendant l'appel (pas une dépendance).
   $effect(() => {
-    // Un élément non nettoyé n'est confié à l'envoi (donc chiffré) qu'après « Envoyer tel quel ».
-    const list = toDraftList(composer.items.filter((i) => !needsChoice(i)));
+    const list = toDraftList(composer.items);
     untrack(() => onitems?.(list));
   });
   const upload = (i: (typeof composer.items)[number]) => (void uploadVersion, rowStatus(uploadOf?.(i.id)));
@@ -523,7 +527,6 @@
             danger={(i) => culprits.has(i.id)}
             {upload}
             {onretry}
-            onaccept={(id) => composer.acceptUncleaned(id)}
           />
         {/each}
       </div>
@@ -550,7 +553,7 @@
           </button>
           <Button variant="primary" lock disabled={reasonText !== ""} aria-describedby={reasonText ? "send-reason" : undefined} onpress={send}>{t("options.submit")}</Button>
         </div>
-        {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{/if}
+        {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{:else if uncleaned > 0}<p class="unclean-sum" data-unclean-sum>{t("compose.uncleaned", { n: uncleaned })}</p>{/if}
       </div>
     {:else}
       <!-- Ordinateur : colonne collée, défilement propre, pied collé : le bouton reste visible. -->
@@ -561,7 +564,7 @@
         <div class="sendbar foot">
           <Options {options} {unviewable} {vaultShown} {estimate} part="summary" />
           <Button variant="primary" lock disabled={reasonText !== ""} aria-describedby={reasonText ? "send-reason" : undefined} onpress={send}>{t("options.submit")}</Button>
-          {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{/if}
+          {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{:else if uncleaned > 0}<p class="unclean-sum" data-unclean-sum>{t("compose.uncleaned", { n: uncleaned })}</p>{/if}
         </div>
       </div>
     {/if}
@@ -1145,6 +1148,12 @@
     margin: -4px 0 0;
     color: var(--warn);
     font-size: var(--fs-small);
+    text-align: center;
+  }
+  .unclean-sum {
+    margin: -4px 0 0;
+    color: var(--text-2);
+    font-size: var(--fs-micro);
     text-align: center;
   }
   :global(html.kbd-open) .sendbar {

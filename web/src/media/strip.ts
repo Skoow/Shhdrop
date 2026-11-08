@@ -20,8 +20,8 @@ export type CleanFamily = "image" | "video" | "audio" | "pdf" | "bureautique" | 
 export type StripResult =
   | { state: "nettoye"; data: Blob; notes: CleanNote[]; family: CleanFamily }
   | { state: "echec" | "protege"; reason: string } // reason : code interne, jamais affiché tel quel
-  /** `soon` : nettoyage prévu (PDF, bureautique, vidéo, audio : Tasks 9b et 9c). */
-  | { state: "non_pris_en_charge"; soon: boolean }
+  /** `soon` : nettoyage prévu (PDF, bureautique, vidéo, audio : Tasks 9b et 9c) ; `format` reconnu. */
+  | { state: "non_pris_en_charge"; soon: boolean; format: Format }
   | { state: "sans" };
 
 export type StripOpts = { recorded?: boolean; signal?: AbortSignal };
@@ -52,7 +52,7 @@ async function run(file: Blob, mime: string, fmt: Format, opts: StripOpts): Prom
     return { state: "nettoye", data: r.blob, notes: [], family: type.startsWith("audio/") ? "vocal" : "video" };
   }
   if (fmt === "texte") return { state: "sans" };
-  return { state: "non_pris_en_charge", soon: (SOON_FORMATS as readonly string[]).includes(fmt) };
+  return { state: "non_pris_en_charge", soon: (SOON_FORMATS as readonly string[]).includes(fmt), format: fmt };
 }
 
 export async function stripMetadata(file: Blob, mime: string, name: string, opts: StripOpts = {}): Promise<StripResult> {

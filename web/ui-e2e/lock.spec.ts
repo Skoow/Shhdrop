@@ -1,0 +1,70 @@
+// Cadenas d'état par élément (D41-25) : jamais vert avant l'événement réel. Envoi : gris tant
+// que le serveur n'a pas confirmé le segment, vert « Chiffré et envoyé » après. Réception : vert
+// « Déchiffré et vérifié » pour un texte (manifeste authentifié) et pour un fichier seulement
+// une fois lu en entier ; rien avant. Captures fr-FR 390 et 1440.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { expect, test } from "./fixtures";
+import { file, freshPage, sendShare, settle, unlock } from "./open-helpers";
+import { openFilePicker } from "./send-helpers";
+
+test.use({ locale: "fr-FR" });
+
+const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-LOCK/", import.meta.url));
+
+test("envoi : cadenas gris tant que le segment n'est pas confirmé, vert après ; marques « Non nettoyé »", async ({ page, shh, isMobile }) => {
+  test.setTimeout(90_000);
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  let seen = 0;
+  await page.route(/\/api\/shares\/segments\//, async (route) => {
+    if (route.request().method() === "PUT" && seen++ === 0) await held;
+    await route.continue();
+  });
+  await page.goto(shh.origin + "/");
+  await (await openFilePicker(page)).setFiles({ name: "notes.bin", mimeType: "application/octet-stream", buffer: Buffer.alloc(3000, 7) });
+  const r = page.locator("[data-row]").filter({ hasText: "notes" });
+  // Segment parti, réponse retenue : l'élément n'est pas confirmé, le cadenas n'est pas vert.
+  await expect.poll(() => seen).toBe(1);
+  await expect(r.locator("[data-lock]")).toHaveAttribute("data-lock", "wait");
+  await page.waitForTimeout(300); // la retenue dure : toujours pas vert
+  await expect(r.locator('[data-lock="ok"]')).toHaveCount(0);
+  release();
+  await expect(r.locator('[data-lock="ok"]')).toHaveText("Chiffré et envoyé", { timeout: 30_000 });
+  // Capture : cadenas et marques « Non nettoyé ».
+  await (await openFilePicker(page)).setFiles([
+    { name: "plage-nuit.jpg", mimeType: "image/jpeg", buffer: readFileSync(file("plage-nuit.jpg")) },
+    { name: "contrat.pdf", mimeType: "application/pdf", buffer: readFileSync(file("contrat.pdf")) },
+    { name: "archive.zip", mimeType: "application/zip", buffer: readFileSync(file("archive.zip")) },
+  ]);
+  await expect(page.locator('[data-lock="ok"]')).toHaveCount(4, { timeout: 30_000 });
+  await settle(page);
+  await page.screenshot({ path: `${SHOTS}compose-locks-${isMobile ? 390 : 1440}.png` });
+});
+
+test("réception : vert pour le texte (manifeste vérifié) ; fichier sans cadenas avant lecture, vert seulement une fois lu en entier", async ({ page, shh, browser, isMobile }) => {
+  test.setTimeout(120_000);
+  const s = await freshPage(browser);
+  const sent = await sendShare(s.page, shh.origin + "/", { text: "Code de la porte : 4512B", files: [file("foret-brume.jpg"), file("contrat.pdf")] });
+  await s.ctx.close();
+  await page.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.showSaveFilePicker = async () => ({ createWritable: async () => ({ write: async () => undefined, close: async () => undefined, abort: async () => undefined }) });
+  });
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(sent.link);
+  await unlock(page, sent.password);
+  const note = page.locator("li.row").filter({ hasText: "Code de la porte" });
+  await expect(note.locator('[data-lock="ok"]')).toHaveText("Déchiffré et vérifié");
+  const photo = page.locator("li.row").filter({ hasText: "foret-brume" });
+  await expect(photo.locator("[data-lock]")).toHaveCount(0);
+  for (const n of ["foret-brume.jpg", "contrat.pdf"]) {
+    await page.getByRole("button", { name: `Télécharger ${n}` }).click();
+    await expect(page.locator("li.row").filter({ hasText: n.split(".")[0]! })).toHaveAttribute("data-state", "done", { timeout: 30_000 });
+  }
+  await expect(photo.locator('[data-lock="ok"]')).toHaveText("Déchiffré et vérifié");
+  await expect(page.locator('li.row [data-lock="ok"]')).toHaveCount(3);
+  await settle(page);
+  await page.screenshot({ path: `${SHOTS}content-locks-${isMobile ? 390 : 1440}.png` });
+});

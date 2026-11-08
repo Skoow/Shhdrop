@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { openShare } from "../src/index";
 import { expect, test } from "./fixtures";
-import { openFilePicker, readyHeading, sendButton, sleep, sendAsIs } from "./send-helpers";
+import { openFilePicker, readyHeading, sendButton, sleep } from "./send-helpers";
 
 const MIB = 1048576;
 const SEG = 48 + 64 * 65552; // segment 0 (avec l'en-tête) ; les suivants : 64 × 65 552 octets
@@ -53,7 +53,6 @@ test.describe("fr-FR", () => {
       { name: "retire.bin", mimeType: "application/octet-stream", buffer: fill(9 * MIB, 7) },
     ]);
     await expect(page.locator("[data-row]")).toHaveCount(2);
-    await sendAsIs(page); // nettoyage automatique : .bin non pris en charge, envoyé tel quel
 
     // Avant tout clic : brouillon créé, premier fichier envoyé, second en cours.
     const kept = page.locator("[data-row]").filter({ hasText: "garde.bin" });
@@ -111,7 +110,6 @@ test.describe("fr-FR", () => {
     const files = Array.from({ length: 20 }, (_, i) => ({ name: `photo-${String(i + 1).padStart(2, "0")}.bin`, mimeType: "application/octet-stream", buffer: fill(1_000_000, i + 2) }));
     await (await openFilePicker(page)).setFiles(files);
     await expect(page.locator("[data-row]")).toHaveCount(20);
-    await sendAsIs(page); // nettoyage automatique : .bin non pris en charge, envoyé tel quel
     await expect(page.locator("[data-up]:not([data-up=pret])")).toHaveCount(0, { timeout: 60_000 });
     const sum = 20 * 1_000_000;
     expect(putBytes).toBeGreaterThanOrEqual(sum);

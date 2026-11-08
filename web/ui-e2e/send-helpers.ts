@@ -8,7 +8,17 @@ import { expect } from "./fixtures";
  * Téléphone (< 760 px) : une seule action « Ajouter » (accueil : grand bouton ; composeur : « + »
  * de la barre du bas) ouvre la feuille ; on y choisit la ligne. Rend faux sur ordinateur.
  */
+/**
+ * Aucune transition de vue en cours (accueil → composeur) : pendant l'échange, l'ancien écran
+ * est encore visible un instant ; le choisir sous charge faisait cliquer un bouton aussitôt
+ * détaché (le sélecteur ne s'ouvrait jamais). On attend la fin de l'échange, pas un délai fixe.
+ */
+export async function noViewTransition(page: Page) {
+  await page.waitForFunction(() => !document.getAnimations().some((a) => String((a.effect as KeyframeEffect | null)?.pseudoElement ?? "").startsWith("::view-transition")));
+}
+
 export async function pickInAddSheet(page: Page, row: string): Promise<boolean> {
+  await noViewTransition(page);
   // L'écran doit être monté avant de choisir le geste (accueil ou composeur, téléphone ou ordinateur).
   const any = page.getByRole("button", { name: /^(Ajouter|Parcourir les fichiers)/ }).or(page.locator(".dropzone")).filter({ visible: true }).first();
   await expect(any).toBeVisible();
@@ -45,26 +55,12 @@ export async function addText(page: Page, text: string) {
   await expect(page.locator("[data-row]").first()).toBeVisible();
 }
 
-/**
- * Fichiers que le nettoyage automatique ne sait pas (encore) nettoyer (spec §35.2, décision du
- * 8 novembre) : « Envoyer tel quel » sur chacun, comme une personne qui accepte. Les tests qui
- * ne portent pas sur le nettoyage passent par ici.
- */
-export async function sendAsIs(page: Page) {
-  const btn = page.getByRole("button", { name: /^Envoyer tel quel\s?: / });
-  for (let n = await btn.count(); n > 0; n = await btn.count()) {
-    await btn.first().click();
-    await expect(btn).toHaveCount(n - 1);
-  }
-}
-
 export async function addFile(page: Page, name: string, bytes: number, mimeType = "application/octet-stream") {
   const chooser = openFilePicker(page);
   const buffer = Buffer.alloc(bytes);
   for (let i = 0; i < bytes; i += 4096) buffer[i] = (i / 4096) & 255;
   await (await chooser).setFiles({ name, mimeType, buffer });
   await expect(page.locator("[data-row]").filter({ hasText: name.replace(/\.[^.]+$/, "") }).first()).toBeVisible();
-  await sendAsIs(page);
 }
 
 const FILES = fileURLToPath(new URL("./files/", import.meta.url));
@@ -74,7 +70,6 @@ export async function addRealFile(page: Page, name: string) {
   const chooser = openFilePicker(page);
   await (await chooser).setFiles(join(FILES, name));
   await expect(page.locator("[data-row]").filter({ hasText: name.replace(/\.[^.]+$/, "") }).first()).toBeVisible();
-  await sendAsIs(page);
 }
 
 export const sendButton = (page: Page) => page.getByRole("button", { name: "Chiffrer et envoyer" });

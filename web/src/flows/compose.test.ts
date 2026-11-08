@@ -4,7 +4,7 @@ import { fr } from "../i18n/fr";
 import { readFileSync } from "node:fs";
 import { BLOCK_REASONS, blockKey, createComposer, splitName, type ComposeDeps } from "./compose.svelte";
 import { gate } from "./clean-gate";
-import { cleanLabelKey } from "../media/clean-label";
+import { cleanLabelKey, uncleanedReasonKey } from "../media/clean-label";
 import type { StripResult } from "../media/strip";
 import { CATEGORY_ORDER, categoryOf } from "./kinds";
 import { HEAD_BYTES } from "./sniff";
@@ -62,32 +62,34 @@ describe("createComposer : ajout", () => {
     await expect(gate(f)).rejects.toThrow("non_nettoye");
   });
 
-  it("échec du nettoyage → ajouté en echec, envoi bloqué jusqu'au choix : Envoyer tel quel ou Retirer", async () => {
+  it("échec du nettoyage → part sans clic (D41-23), marque « Non nettoyé » et raison ; le verrou le laisse passer", async () => {
     const c = make({ strip: async () => ({ state: "echec", reason: "malformed:jpeg_sos" }) });
     const f = jpeg("x.jpg");
     await c.add([f, jpeg("y.jpg")], "fichiers");
     expect(c.items.map((i) => i.clean)).toEqual(["echec", "echec"]);
     expect(c.items[0]!.data).toBe(f);
-    expect(c.blockReason()).toBe("non_nettoye");
-    await expect(gate(f)).rejects.toThrow("non_nettoye");
-    c.acceptUncleaned(c.items[0]!.id);
-    expect(c.items[0]!.accepted).toBe(true);
-    await expect(gate(f)).resolves.toBe(f);
-    expect(c.blockReason()).toBe("non_nettoye");
-    c.remove(c.items[1]!.id);
+    expect(c.items.map((i) => uncleanedReasonKey(i))).toEqual(["clean.why.echec", "clean.why.echec"]);
     expect(c.blockReason()).toBeNull();
+    expect(c.uncleanedCount).toBe(2);
+    await expect(gate(f)).resolves.toBe(f);
+    c.remove(c.items[1]!.id);
+    expect(c.uncleanedCount).toBe(1);
   });
 
-  it("non pris en charge (et bientôt pris en charge) : même choix, jamais d'envoi silencieux", async () => {
-    const c = make({ strip: async (_f, mime) => ({ state: "non_pris_en_charge", soon: mime === "application/pdf" }) });
-    await c.add([file("a.pdf", 3, "application/pdf"), file("b.svg", 3, "image/svg+xml")], "fichiers");
-    expect(c.items.map((i) => [i.clean, i.cleanSoon, cleanLabelKey(i)])).toEqual([
-      ["non_pris_en_charge", false, "clean.unsupported"],
-      ["non_pris_en_charge", true, "clean.soon"],
-    ]);
-    expect(c.blockReason()).toBe("non_nettoye");
-    for (const i of c.items) c.acceptUncleaned(i.id);
+  it("non pris en charge : raison courte par format (PDF, bureautique, vidéo, audio, archive, inconnu), envoi libre", async () => {
+    const fmt: Record<string, "pdf" | "ooxml" | "mp4" | "mp3" | "inconnu"> = { "application/pdf": "pdf", "application/zip": "inconnu", "image/svg+xml": "inconnu", "video/mp4": "mp4", "audio/mpeg": "mp3", "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "ooxml" };
+    const c = make({ strip: async (_f, mime) => ({ state: "non_pris_en_charge", soon: fmt[mime] !== "inconnu", format: fmt[mime]! }) });
+    const files = Object.keys(fmt).map((m, k) => file(["a.pdf", "b.zip", "c.svg", "d.mp4", "e.mp3", "f.docx"][k]!, 3, m));
+    await c.add(files, "fichiers");
+    const by = (n: string) => uncleanedReasonKey(c.items.find((i) => i.base === n)!);
+    expect([by("a"), by("b"), by("c"), by("d"), by("e"), by("f")]).toEqual(["clean.why.pdf", "clean.why.archive", "clean.why.unknown", "clean.why.video", "clean.why.audio", "clean.why.office"]);
     expect(c.blockReason()).toBeNull();
+    expect(c.uncleanedCount).toBe(6);
+    for (const i of c.items) await expect(gate(i.data as Blob)).resolves.toBe(i.data);
+  });
+
+  it("verrou : un contenu qui n'est passé ni par le nettoyage ni par la décision « non nettoyable » est refusé", async () => {
+    await expect(gate(new Blob(["jamais vu"]))).rejects.toThrow("non_nettoye");
   });
 
   it("réglage désactivé : rien n'est modifié ni analysé, marque « Original », envoi libre", async () => {
@@ -413,7 +415,7 @@ describe("blocages et textes de raison", () => {
   });
 
   it("chaque raison a son texte en français et en anglais", () => {
-    expect(BLOCK_REASONS).toEqual(["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "non_nettoye", "nettoyage", "hors_ligne"]);
+    expect(BLOCK_REASONS).toEqual(["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "nettoyage", "hors_ligne"]);
     for (const r of BLOCK_REASONS) {
       const k = blockKey(r);
       expect(fr[k as keyof typeof fr], r).toBeTruthy();
@@ -425,7 +427,7 @@ describe("blocages et textes de raison", () => {
     const c = make();
     c.addText("t");
     expect(cleanLabelKey(c.items[0]!)).toBeNull();
-    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.pdf", "clean.done.office", "clean.echec", "clean.protege", "clean.soon", "clean.unsupported", "clean.original", "clean.original.hint", "clean.mark", "clean.mark.not", "clean.accepted", "clean.sendAsIs", "clean.sendAsIs.label", "clean.remove", "clean.remove.label"]) {
+    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.pdf", "clean.done.office", "clean.why.echec", "clean.why.protege", "clean.why.pdf", "clean.why.office", "clean.why.video", "clean.why.audio", "clean.why.archive", "clean.why.unknown", "clean.uncleaned.hint", "compose.uncleaned.one", "compose.uncleaned.other", "clean.original", "clean.original.hint", "clean.mark", "clean.mark.not"]) {
       expect(fr[k as keyof typeof fr], k).toBeTruthy();
       expect(en[k as keyof typeof en], k).toBeTruthy();
     }
@@ -507,7 +509,7 @@ describe("pris dans l'interface (caméra maison, Q-REC1)", () => {
     expect(r.added).toEqual(["Vidéo 1.webm"]);
     expect(c.items[0]).toMatchObject({ category: "videos", clean: "nettoye", cleanFamily: "video" });
     await c.add([new File([new Uint8Array(4)], "capture.webm", { type: "video/webm" })], "video-ici", false);
-    expect(c.items[1]).toMatchObject({ clean: "echec", accepted: true });
+    expect(c.items[1]).toMatchObject({ clean: "echec" });
     expect(c.blockReason()).toBeNull();
     expect(c.addVoice(new Blob(["v"]), "audio/webm")).not.toBeNull();
     expect(c.items.find((i) => i.category === "audio")).toMatchObject({ clean: "nettoye", cleanFamily: "vocal" });

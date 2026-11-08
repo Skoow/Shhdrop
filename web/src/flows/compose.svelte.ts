@@ -3,13 +3,13 @@
 // `addVoice` : lecture d'essai → limite de nombre → nettoyage des métadonnées → doublons →
 // insertion à la fin de sa catégorie. L'ordre de `items` est l'ordre du manifeste.
 //
-// Nettoyage (spec §35.2 ; décision du propriétaire du 8 novembre) : automatique, à l'ajout,
-// avant tout chiffrement ; l'élément n'entre dans la liste qu'une fois nettoyé (il n'est donc
-// jamais confié à l'envoi anticipé avant). Échec, format non pris en charge : l'élément est
-// ajouté mais n'est ni envoyé ni chiffré tant que la personne n'a pas choisi « Envoyer tel
-// quel » (`acceptUncleaned`) ou « Retirer ». Réglage désactivé : rien n'est modifié (« Original »).
+// Nettoyage (spec §35.2 ; D41-23) : automatique, à l'ajout, avant tout chiffrement ; l'élément
+// n'entre dans la liste qu'une fois la décision prise (il n'est donc jamais confié à l'envoi
+// anticipé avant). Échec, format non pris en charge : l'élément part sans clic, marqué « Non
+// nettoyé » avec sa raison. Réglage désactivé : rien n'est modifié (« Original »).
 import { CONTENT_MAX, DATA_SEGMENTS, MANIFEST_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, cleanName, isRiskyName, segmentsNeeded, type Item } from "../index";
-import { needsChoice, type ItemCleanState } from "../media/clean-label";
+import { isUncleaned, type ItemCleanState } from "../media/clean-label";
+import type { Format } from "../media/format";
 import { stripMetadata, type CleanFamily, type StripResult } from "../media/strip";
 import { approve } from "./clean-gate";
 import { CATEGORY_ORDER, categoryOf, extOf, type Category } from "./kinds";
@@ -34,11 +34,9 @@ export type ComposeItem = {
   readonly text?: string;
   /** État du nettoyage (media/clean-label.ts) ; « sans » pour un texte. */
   readonly clean: ItemCleanState;
-  /** Non pris en charge pour l'instant, prévu (Tasks 9b, 9c) : « bientôt pris en charge ». */
-  readonly cleanSoon?: boolean;
   readonly cleanFamily?: CleanFamily;
-  /** « Envoyer tel quel » choisi pour un élément non nettoyé. */
-  readonly accepted?: boolean;
+  /** Format reconnu d'un fichier non pris en charge (raison de la marque « Non nettoyé »). */
+  readonly cleanFormat?: Format;
   readonly duplicate: boolean;
   /** Type reconnu par le contenu (octets de tête), ou null. */
   readonly sniffed?: Sniffed;
@@ -56,7 +54,7 @@ export type AddReport = {
   duplicates: string[];
 };
 
-export const BLOCK_REASONS = ["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "non_nettoye", "nettoyage", "hors_ligne"] as const;
+export const BLOCK_REASONS = ["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "nettoyage", "hors_ligne"] as const;
 export type BlockReason = (typeof BLOCK_REASONS)[number];
 export function blockKey(r: BlockReason) {
   return `compose.block.${r}` as const;
@@ -132,10 +130,13 @@ function takeCodePoints(s: string, n: number): string {
   return out;
 }
 
-type CleanFields = Pick<ComposeItem, "clean" | "cleanSoon" | "cleanFamily" | "accepted">;
-/** Un élément prêt à partir (rien à choisir) : seul celui-là peut être chiffré (clean-gate.ts). */
+type CleanFields = Pick<ComposeItem, "clean" | "cleanFamily" | "cleanFormat">;
+/**
+ * Contenu passé par la décision de nettoyage (nettoyé, sans objet, original, ou « non
+ * nettoyable » marqué) : seul celui-là peut être chiffré (clean-gate.ts).
+ */
 function cleared<T extends { data: Blob | Uint8Array<ArrayBuffer> } & CleanFields>(it: T): T {
-  if (!needsChoice(it) && it.data instanceof Blob) approve(it.data);
+  if (it.data instanceof Blob) approve(it.data);
   return it;
 }
 
@@ -183,12 +184,12 @@ export function createComposer(deps: ComposeDeps = {}) {
     // Photo prise ici : JPEG tiré d'un <canvas>, sans EXIF ni position par construction.
     if (source === "photo-ici" && category === "photos") return { data: f, c: { clean: "nettoye", cleanFamily: "image" } };
     // Vidéo prise ici : déjà passée par strip-capture.ts (CaptureScreen) ; un échec y a déjà été
-    // accepté par la personne (« Garder tel quel »).
-    if (source === "video-ici" && captureStripped !== undefined) return { data: f, c: captureStripped ? { clean: "nettoye", cleanFamily: "video" } : { clean: "echec", accepted: true } };
+    // montré à la personne (« Garder tel quel »).
+    if (source === "video-ici" && captureStripped !== undefined) return { data: f, c: captureStripped ? { clean: "nettoye", cleanFamily: "video" } : { clean: "echec" } };
     if (!autoClean()) return { data: f, c: { clean: "original" } };
     const r = await strip(f, f.type, name, { recorded: source === "video-ici" });
     if (r.state === "nettoye") return { data: r.data, c: { clean: "nettoye", cleanFamily: r.family } };
-    if (r.state === "non_pris_en_charge") return { data: f, c: { clean: r.state, cleanSoon: r.soon } };
+    if (r.state === "non_pris_en_charge") return { data: f, c: { clean: r.state, cleanFormat: r.format } };
     return { data: f, c: { clean: r.state } };
   }
 
@@ -317,17 +318,12 @@ export function createComposer(deps: ComposeDeps = {}) {
       mime,
       size: blob.size,
       data: blob,
-      ...(stripped ? { clean: "nettoye" as const, cleanFamily: "vocal" as const } : { clean: "echec" as const, accepted: true }),
+      ...(stripped ? { clean: "nettoye" as const, cleanFamily: "vocal" as const } : { clean: "echec" as const }),
       duplicate: false,
     };
     cleared(it);
     commit(() => set(insertSorted(items, it)));
     return it.id;
-  }
-
-  /** « Envoyer tel quel » : l'élément non nettoyé part avec ses métadonnées (choix explicite, Q-MD1). */
-  function acceptUncleaned(id: string): void {
-    set(items.map((i) => (i.id === id && needsChoice(i) ? cleared({ ...i, accepted: true }) : i)));
   }
 
   /** Retire ; `undo()` (une seule fois) remet l'élément à sa place. */
@@ -441,7 +437,6 @@ export function createComposer(deps: ComposeDeps = {}) {
     if (segments > DATA_SEGMENTS) return "segments";
     if (items.some((i) => i.kind === "text" && codePoints(i.text ?? "") > TEXT_MAX)) return "texte_trop_long";
     if (manifestBytes > MANIFEST_MAX) return "manifeste";
-    if (items.some(needsChoice)) return "non_nettoye";
     if (pending > 0) return "nettoyage";
     if (!online()) return "hors_ligne";
     return null;
@@ -501,7 +496,10 @@ export function createComposer(deps: ComposeDeps = {}) {
     add,
     addText,
     updateText,
-    acceptUncleaned,
+    /** Fichiers marqués « Non nettoyé » (résumé près d'Envoyer). */
+    get uncleanedCount() {
+      return items.filter(isUncleaned).length;
+    },
     addVoice,
     remove,
     clear,

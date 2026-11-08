@@ -1,6 +1,6 @@
 // Nettoyage automatique des métadonnées (spec §35.2, Task 9a ; décision du propriétaire du
-// 8 novembre) : marque « Nettoyé » dès l'ajout, états « Non nettoyé » avec le choix Envoyer
-// tel quel / Retirer, rien d'envoyé avant ce choix, réglage « Original », photo reçue sans GPS
+// 8 novembre, D41-23) : marque « Nettoyé » dès l'ajout, marque « Non nettoyé » et sa raison,
+// envoi sans clic, résumé près d'Envoyer, réglage « Original », photo reçue sans GPS
 // (octet par octet), images nettoyées toujours décodables (createImageBitmap).
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -65,7 +65,7 @@ test("photo avec GPS : « Nettoyé » à l'ajout, le destinataire reçoit la pho
   expect(got.length).toBeLessThan(photo.buffer.length);
 });
 
-test("états à l'écran : Nettoyé, Non nettoyé (échec, non pris en charge, bientôt) ; rien n'est envoyé avant « Envoyer tel quel » ; capture", async ({ page, shh, isMobile }) => {
+test("états à l'écran : Nettoyé, Non nettoyé avec raison (échec, PDF, archive, inconnu) ; tout part sans clic (D41-23) ; résumé près d'Envoyer", async ({ page, shh, isMobile }) => {
   test.setTimeout(90_000);
   if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   const puts: string[] = [];
@@ -79,28 +79,25 @@ test("états à l'écran : Nettoyé, Non nettoyé (échec, non pris en charge, b
     { name: "abime.jpg", mimeType: "image/jpeg", buffer: jpg.subarray(0, jpg.length >> 2) },
     { name: "contrat.pdf", mimeType: "application/pdf", buffer: readFileSync(file("contrat.pdf")) },
     { name: "archive.zip", mimeType: "application/zip", buffer: readFileSync(file("archive.zip")) },
+    { name: "dessin.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>") },
   ]);
-  await expect(page.locator("[data-row]")).toHaveCount(4);
+  await expect(page.locator("[data-row]")).toHaveCount(5);
   await expect(row(page, "IMG_GPS").locator('[data-clean="nettoye"]')).toBeVisible();
-  await expect(row(page, "abime").getByText("Non nettoyé : échec.", { exact: false })).toBeVisible();
-  await expect(row(page, "contrat").getByText("Non nettoyé : bientôt pris en charge.", { exact: false })).toBeVisible();
-  await expect(row(page, "archive").getByText("Non nettoyé : format non pris en charge.", { exact: false })).toBeVisible();
-  const reason = page.locator("#send-reason").filter({ visible: true });
-  await expect(reason).toHaveText("Un fichier n'a pas pu être nettoyé : choisissez « Envoyer tel quel » ou « Retirer ».");
-  await expect(sendButton(page).filter({ visible: true })).toBeDisabled();
-  // Seule la photo nettoyée part : une requête d'envoi (petit élément), aucune pour les autres.
-  await expect(row(page, "IMG_GPS").locator('[data-up="pret"]')).toBeVisible({ timeout: 30_000 });
-  await page.waitForTimeout(500);
-  expect(puts).toHaveLength(1);
+  await expect(row(page, "IMG_GPS").locator('[data-clean="non-nettoye"]')).toHaveCount(0);
+  const mark = (n: string) => row(page, n).locator('[data-clean="non-nettoye"]');
+  await expect(mark("abime")).toHaveText(/^Non nettoyé · Échec du nettoyage/);
+  await expect(mark("contrat")).toHaveText(/^Non nettoyé · PDF\s:\sbientôt pris en charge/);
+  await expect(mark("archive")).toHaveText(/^Non nettoyé · Archive\s:\scontenu non inspecté/);
+  await expect(mark("dessin")).toHaveText(/^Non nettoyé · Format non reconnu/);
+  // Aucun choix à faire : plus de bouton, envoi permis, résumé discret près d'Envoyer.
+  await expect(page.getByRole("button", { name: /^Envoyer tel quel/ })).toHaveCount(0);
+  await expect(page.locator("#send-reason").filter({ visible: true })).toHaveCount(0);
+  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("4 fichiers ne sont pas nettoyés");
+  await expect(sendButton(page).filter({ visible: true })).toBeEnabled();
+  // Chacun part dès l'ajout, nettoyé ou non (une requête d'envoi par petit élément).
+  await expect.poll(() => puts.length, { timeout: 30_000 }).toBe(5);
+  await expect(page.locator('[data-up]:not([data-up="pret"])')).toHaveCount(0, { timeout: 30_000 });
   if (isMobile) await page.screenshot({ path: `${SHOTS}compose-clean-states-390.png` });
-  await page.getByRole("button", { name: "Retirer : abime.jpg" }).click();
-  await expect(page.locator("[data-row]")).toHaveCount(3);
-  await page.getByRole("button", { name: "Envoyer tel quel : contrat.pdf" }).click();
-  await page.getByRole("button", { name: "Envoyer tel quel : archive.zip" }).click();
-  await expect(row(page, "contrat").locator('[data-clean="tel-quel"]')).toHaveText(/^Non nettoyé/);
-  await expect(reason).toHaveCount(0);
-  await expect.poll(() => puts.length, { timeout: 30_000 }).toBe(3);
-  if (isMobile) await page.screenshot({ path: `${SHOTS}compose-clean-accepted-390.png` });
 });
 
 test("réglage « Nettoyer automatiquement les fichiers » désactivé : marque « Original », rien de modifié", async ({ page, shh }) => {
