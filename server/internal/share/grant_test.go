@@ -57,12 +57,12 @@ func TestReopenKeepsOpening(t *testing.T) {
 	k := newKeys()
 	id := ready(t, s, k, 1, 24, 3)
 	o, err := s.UnlockGrant(id, k.acces, k.preuve, "")
-	if err != nil || o.N != 1 || len(o.Grant) != 54 {
+	if err != nil || o.N != 1 || len(o.Grant) != 54 || o.OpensLeft != 2 {
 		t.Fatal(o, err)
 	}
 	c.Add(5 * time.Minute)
 	r, err := s.UnlockGrant(id, k.acces, k.preuve, o.Grant)
-	if err != nil || r.N != 1 || r.Grant == o.Grant || len(r.Envelope) != EnvelopeLen {
+	if err != nil || r.N != 1 || r.Grant == o.Grant || len(r.Envelope) != EnvelopeLen || r.OpensLeft != 2 {
 		t.Fatal(r, err)
 	}
 	if left, issued, _ := opensOf(t, s, id); left != 2 || issued != 1 {
@@ -86,8 +86,8 @@ func TestReopenDraining(t *testing.T) {
 	k := newKeys()
 	id := ready(t, s, k, 1, 24, 1)
 	o, err := s.UnlockGrant(id, k.acces, k.preuve, "")
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || o.OpensLeft != 0 {
+		t.Fatal(o, err)
 	}
 	if _, err := s.Meta(k.acces); !errors.Is(err, ErrNotFound) {
 		t.Fatal("meta sans octroi", err)
@@ -95,7 +95,7 @@ func TestReopenDraining(t *testing.T) {
 	if _, err := s.MetaGrant(k.acces, o.Grant); err != nil {
 		t.Fatal("meta avec octroi", err)
 	}
-	if r, err := s.UnlockGrant(id, k.acces, k.preuve, o.Grant); err != nil || r.N != 1 {
+	if r, err := s.UnlockGrant(id, k.acces, k.preuve, o.Grant); err != nil || r.N != 1 || r.OpensLeft != 0 {
 		t.Fatal(r, err)
 	}
 	if rowCount(t, s, id) != 1 {

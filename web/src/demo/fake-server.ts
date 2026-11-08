@@ -674,6 +674,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
         segments: segmentCount(s.bucket),
         envelope: b64(s.envelope!),
         grant: grant(id, openN, s.expiresAt),
+        opens_left: s.opensLeft,
       });
     }
     const left = await countFailure(id, s);

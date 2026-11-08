@@ -205,7 +205,7 @@ describe("API v2 (spec §29.8)", () => {
   it("unlock : envelope de 80 caractères base64url exigée (60 octets) ; sinon BadResponse", async () => {
     const env = Buffer.alloc(60, 7).toString("base64url");
     const reply = (envelope: unknown) =>
-      vi.fn(async () => new Response(JSON.stringify({ download_token: "d", segments: 1, envelope, grant: "g".repeat(54) })));
+      vi.fn(async () => new Response(JSON.stringify({ download_token: "d", segments: 1, envelope, grant: "g".repeat(54), opens_left: 2 })));
     const k = new Uint8Array(32) as KAcces, p = new Uint8Array(32) as KPreuve;
     const r = await unlock(ctx("http://x", { fetch: reply(env) as unknown as typeof fetch }), k, p);
     expect(r.envelope).toEqual(new Uint8Array(60).fill(7));
@@ -215,7 +215,7 @@ describe("API v2 (spec §29.8)", () => {
   });
   it("unlock : octroi de 54 caractères exigé ; X-Shh-Grant envoyé seulement s'il est donné (spec §41.4)", async () => {
     const env = Buffer.alloc(60, 7).toString("base64url");
-    const reply = (grant: unknown) => vi.fn(async (_u: string, _i: RequestInit) => new Response(JSON.stringify({ download_token: "d", segments: 1, envelope: env, grant })));
+    const reply = (grant: unknown) => vi.fn(async (_u: string, _i: RequestInit) => new Response(JSON.stringify({ download_token: "d", segments: 1, envelope: env, grant, opens_left: 0 })));
     const k = new Uint8Array(32) as KAcces, p = new Uint8Array(32) as KPreuve;
     const f = reply("g".repeat(54));
     expect((await unlock(ctx("http://x", { fetch: f as unknown as typeof fetch }), k, p)).grant).toBe("g".repeat(54));

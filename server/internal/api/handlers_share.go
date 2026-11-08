@@ -349,11 +349,12 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 	// active après l'échéance ; le partage reste revérifié à chaque requête (spec §41.8).
 	exp := s.svc.Now().Add(s.dlTTL).Unix()
 	writeJSON(w, http.StatusOK, struct {
-		Token    string `json:"download_token"`
-		Segments int    `json:"segments"`
-		Envelope string `json:"envelope"`
-		Grant    string `json:"grant"`
-	}{s.sig.Issue(token.Download, id, openN, time.Unix(exp, 0)), m.Segments, b64.EncodeToString(envelope), o.Grant})
+		Token     string `json:"download_token"`
+		Segments  int    `json:"segments"`
+		Envelope  string `json:"envelope"`
+		Grant     string `json:"grant"`
+		OpensLeft int    `json:"opens_left"`
+	}{s.sig.Issue(token.Download, id, openN, time.Unix(exp, 0)), m.Segments, b64.EncodeToString(envelope), o.Grant, o.OpensLeft})
 }
 
 func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {

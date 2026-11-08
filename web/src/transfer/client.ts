@@ -467,6 +467,11 @@ export type Opened = {
    * qu'un rechargement rouvre la même ouverture. Ni clé ni mot de passe.
    */
   readonly grant: string;
+  /**
+   * Ouvertures encore possibles après celle-ci, rendues par unlock (0 : c'était la dernière
+   * permise ; le lecteur n'offre « Détruire ce partage » qu'alors, retours UI4).
+   */
+  readonly opensLeft: number;
   /** Octroi renouvelé pour 30 min (POST /api/shares/regrant) ; erreurs : voir readerError. */
   regrant(): Promise<string>;
   /**
@@ -614,6 +619,7 @@ export async function openShare(
         saveItem: (i, sink) => wrap(() => rd.streamItem(i, sink)),
         done,
         grant: u.grant,
+        opensLeft: u.opensLeft,
         regrant: () => guarded(() => api.regrant(c, u.downloadToken), readerError),
         // Une destruction ou une fin (done) faite ici prévient aussi la surveillance (410) :
         // ce « gone » est le nôtre, l'écran de fin vient de destroy() ou de done() ; la

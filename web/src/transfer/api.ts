@@ -394,7 +394,7 @@ export async function unlock(
   kAcces: KAcces,
   kPreuve: KPreuve,
   grant?: string,
-): Promise<{ downloadToken: string; segments: number; envelope: Uint8Array<ArrayBuffer>; grant: string }> {
+): Promise<{ downloadToken: string; segments: number; envelope: Uint8Array<ArrayBuffer>; grant: string; opensLeft: number }> {
   const o = await send(
     c,
     {
@@ -405,7 +405,8 @@ export async function unlock(
     },
     readJSON,
   );
-  return { downloadToken: str(o, "download_token"), segments: num(o, "segments"), envelope: envelopeOf(o), grant: grantOf(o) };
+  // opens_left : ouvertures encore possibles après celle-ci (0 : c'était la dernière).
+  return { downloadToken: str(o, "download_token"), segments: num(o, "segments"), envelope: envelopeOf(o), grant: grantOf(o), opensLeft: opensLeft(num(o, "opens_left"), true) };
 }
 
 /** Octroi renouvelé pour 30 min (jamais au-delà du jeton) ; rejouable. */

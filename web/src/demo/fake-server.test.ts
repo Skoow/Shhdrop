@@ -170,13 +170,18 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     await expect(shareStatus(r.manage, ORIGIN, net)).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it("fetchMeta : ouvertures restantes, une de moins après chaque ouverture (ruling 5)", async ({ expect }) => {
+  it("fetchMeta et unlock : ouvertures restantes, une de moins après chaque ouverture (ruling 5)", async ({ expect }) => {
     const { net } = setup();
     const r = await share(net, 3);
     expect((await fetchMeta(r.link, ORIGIN, net)).opensLeft).toBe(3);
     const o = await openShare(r.link, PW, ORIGIN, undefined, net);
+    expect(o.opensLeft).toBe(2); // rendu par unlock : ouvertures encore possibles après celle-ci
     await o.done();
     expect((await fetchMeta(r.link, ORIGIN, net)).opensLeft).toBe(2);
+    expect((await openShare(r.link, PW, ORIGIN, undefined, net)).opensLeft).toBe(1);
+    const last = await openShare(r.link, PW, ORIGIN, undefined, net);
+    expect(last.opensLeft).toBe(0); // dernière ouverture permise : « Détruire » proposé
+    expect((await openShare(r.link, PW, ORIGIN, { grant: last.grant }, net)).opensLeft).toBe(0); // rechargement
   });
 
   it("destroyShare par le lien de gestion, puis par lien + mot de passe", async ({ expect }) => {

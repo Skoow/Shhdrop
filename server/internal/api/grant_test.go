@@ -29,7 +29,7 @@ func TestGrantHTTP(t *testing.T) {
 	}
 	r := unlock("", k.preuve)
 	g, _ := r["grant"].(string)
-	if r["code"] != 200.0 || len(g) != 54 {
+	if r["code"] != 200.0 || len(g) != 54 || r["opens_left"] != 0.0 {
 		t.Fatal(r)
 	}
 	// « draining » : meta sans octroi → 404 ; avec octroi → 200.
@@ -45,7 +45,7 @@ func TestGrantHTTP(t *testing.T) {
 	}
 	for i := 1; i <= 10; i++ {
 		r := unlock(g, k.preuve)
-		if r["code"] != 200.0 {
+		if r["code"] != 200.0 || r["opens_left"] != 0.0 {
 			t.Fatal(i, r)
 		}
 		g = r["grant"].(string)

@@ -88,6 +88,9 @@ type Opened struct {
 	N        int
 	Envelope []byte
 	Grant    string
+	// OpensLeft : ouvertures encore possibles après celle-ci (0 : c'était la dernière permise,
+	// le partage est « draining »). Le lecteur ne montre « Détruire » qu'à 0 (retours UI4).
+	OpensLeft int
 }
 
 // grantLocked pose (ou renouvelle) l'échéance en mémoire de l'ouverture k, plafonnée à cap,
@@ -126,12 +129,12 @@ func (s *Service) reopen(id string, kAcces, kPreuve []byte, grant string) (Opene
 	}
 	var accessV, proofV, envelope []byte
 	var state string
-	var issued int
+	var issued, left int
 	var doneMask, exp int64
-	err := s.DB.QueryRow(`SELECT access_v, proof_v, envelope, state, opens_issued, done_mask, expires_at FROM shares
+	err := s.DB.QueryRow(`SELECT access_v, proof_v, envelope, state, opens_issued, opens_left, done_mask, expires_at FROM shares
 		WHERE id=? AND state IN ('ready','draining') AND expires_at>? AND failed_attempts<?
 		AND proof_v IS NOT NULL AND envelope IS NOT NULL`, id, now, maxAttempts).
-		Scan(&accessV, &proofV, &envelope, &state, &issued, &doneMask, &exp)
+		Scan(&accessV, &proofV, &envelope, &state, &issued, &left, &doneMask, &exp)
 	if err != nil {
 		return Opened{}, notFound(err)
 	}
@@ -170,7 +173,7 @@ func (s *Service) reopen(id string, kAcces, kPreuve []byte, grant string) (Opene
 		s.setPurge(id, max(p, min(ceil15(now+purgeWindow), exp)))
 	}
 	s.budget.extend(k, now+purgeWindow)
-	return Opened{N: int(n), Envelope: envelope, Grant: s.grantLocked(k, exp, now)}, nil
+	return Opened{N: int(n), Envelope: envelope, Grant: s.grantLocked(k, exp, now), OpensLeft: left}, nil
 }
 
 // Regrant renouvelle l'octroi de l'ouverture openN (jeton de téléchargement valable jusqu'à

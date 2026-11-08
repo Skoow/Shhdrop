@@ -704,13 +704,13 @@ func (s *Service) UnlockGrant(id string, kAcces, kPreuve []byte, grant string) (
 		return Opened{}, ErrNotFound // ne compte pas comme essai
 	}
 	if match(kPreuve, proofV) {
-		var openN int
+		var openN, left int
 		var state string
 		var exp int64
 		err := s.DB.QueryRow(`UPDATE shares SET opens_left=opens_left-1, opens_issued=opens_issued+1,
 			state=CASE WHEN opens_left-1=0 THEN 'draining' ELSE state END
 			WHERE id=? AND state='ready' AND opens_left>0 AND expires_at>? AND failed_attempts<?
-			RETURNING opens_issued, state, expires_at`, id, now, maxAttempts).Scan(&openN, &state, &exp)
+			RETURNING opens_issued, opens_left, state, expires_at`, id, now, maxAttempts).Scan(&openN, &left, &state, &exp)
 		if err != nil {
 			return Opened{}, notFound(err)
 		}
@@ -722,7 +722,7 @@ func (s *Service) UnlockGrant(id string, kAcces, kPreuve []byte, grant string) (
 		s.gone.mu.Lock()
 		g := s.grantLocked(openKey{id, openN}, exp, now)
 		s.gone.mu.Unlock()
-		return Opened{N: openN, Envelope: envelope, Grant: g}, nil
+		return Opened{N: openN, Envelope: envelope, Grant: g, OpensLeft: left}, nil
 	}
 	left, err := s.countFailure(id)
 	if err != nil {
