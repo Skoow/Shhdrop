@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"hash/fnv"
 	"io/fs"
 	"math/bits"
 	"os"
@@ -142,9 +143,13 @@ type Service struct {
 	OnAbandon  func(id string, bucket int)
 	KillWait   time.Duration
 
-	createMu sync.Mutex   // rend atomiques « place libre ? » et la réservation
-	uploadMu sync.RWMutex // Finalize attend la fin des écritures de segments en cours
-	budget   readBudget   // octets lus par ouverture, en mémoire seulement
+	createMu sync.Mutex // rend atomiques « place libre ? » et la réservation
+	// attemptMu : rend atomiques, par partage, la lecture du compteur, la vérification de
+	// K_preuve et son décompte (audit F1) : jamais plus de 5 essais évalués, même en parallèle.
+	// Verrous rayés (id haché) : mémoire bornée, aucune donnée retenue.
+	attemptMu [64]sync.Mutex
+	uploadMu  sync.RWMutex // Finalize attend la fin des écritures de segments en cours
+	budget    readBudget   // octets lus par ouverture, en mémoire seulement
 	// mem : échéances d'envoi, minute du dernier segment reçu et purge des « draining », en
 	// mémoire seulement (spec §36 S5, S12) : un redémarrage efface de toute façon ces partages
 	// (PurgeAtStart), aucun jeton n'y survivant.
@@ -166,6 +171,13 @@ type Service struct {
 }
 
 func (s *Service) now() int64 { return s.Now().Unix() }
+
+// attemptLock : verrou des essais de mot de passe du partage id (audit F1).
+func (s *Service) attemptLock(id string) *sync.Mutex {
+	h := fnv.New32a()
+	h.Write([]byte(id))
+	return &s.attemptMu[h.Sum32()%uint32(len(s.attemptMu))]
+}
 
 // upload : échéance d'un envoi (ceil15(création + 6 h)) et minute du dernier segment reçu
 // (0 : aucun), en mémoire seulement.
@@ -654,13 +666,17 @@ func (s *Service) UnlockGrant(id string, kAcces, kPreuve []byte, grant string) (
 	if !validID(id) {
 		return Opened{}, ErrNotFound
 	}
+	mu := s.attemptLock(id)
+	mu.Lock()
+	defer mu.Unlock()
 	if grant != "" {
 		return s.reopen(id, kAcces, kPreuve, grant)
 	}
 	now := s.now()
 	var accessV, proofV, envelope []byte
 	err := s.DB.QueryRow(`SELECT access_v, proof_v, envelope FROM shares WHERE id=? AND state='ready' AND expires_at>?
-		AND proof_v IS NOT NULL AND envelope IS NOT NULL`, id, now).Scan(&accessV, &proofV, &envelope)
+		AND failed_attempts<? AND proof_v IS NOT NULL AND envelope IS NOT NULL`, id, now, maxAttempts).
+		Scan(&accessV, &proofV, &envelope)
 	if err != nil {
 		return Opened{}, notFound(err)
 	}
@@ -815,6 +831,17 @@ func (s *Service) DestroyWithProof(kAcces, kPreuve []byte, report bool) error {
 		return notFound(err)
 	}
 	if !s.aliveUpload(id, state, now) {
+		return ErrNotFound
+	}
+	mu := s.attemptLock(id)
+	mu.Lock()
+	defer mu.Unlock()
+	// Relu sous le verrou : un essai concurrent a pu épuiser le compteur (audit F1).
+	var failed int
+	if err := s.DB.QueryRow(`SELECT failed_attempts FROM shares WHERE id=?`, id).Scan(&failed); err != nil {
+		return notFound(err)
+	}
+	if failed >= maxAttempts {
 		return ErrNotFound
 	}
 	if match(kPreuve, proofV) { // proof_v NULL (envoi en cours) : jamais juste

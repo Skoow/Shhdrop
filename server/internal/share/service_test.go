@@ -1184,3 +1184,47 @@ func readSegment(s *Service, id string, n, openN int) ([]byte, error) {
 	defer sec.Close()
 	return io.ReadAll(sec)
 }
+
+// F1 (audit du 8 novembre) : vérification et décompte atomiques. 19 faux et 1 juste en
+// parallèle : au plus 5 essais évalués en tout (faux comptés + juste accepté), jamais un
+// 6ᵉ, et 5 faux comptés ⇒ partage détruit sans ouverture.
+func TestParallelUnlockAtomicAttempts(t *testing.T) {
+	for round := 0; round < 40; round++ {
+		s, _ := newSvc(t)
+		k := newKeys()
+		id := ready(t, s, k, 1, 1, 1)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		bad, ok := 0, 0
+		start := make(chan struct{})
+		for i := 0; i < 20; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				p := rnd(32)
+				if i == 13 {
+					p = k.preuve
+				}
+				<-start
+				_, _, err := s.Unlock(id, k.acces, p)
+				var bp *BadPassword
+				mu.Lock()
+				defer mu.Unlock()
+				switch {
+				case err == nil:
+					ok++
+				case errors.As(err, &bp):
+					bad++
+				case errors.Is(err, ErrNotFound):
+				default:
+					t.Error(err)
+				}
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+		if bad+ok > 5 || (ok == 0 && bad != 5) {
+			t.Fatalf("tour %d : %d faux comptés, %d juste accepté", round, bad, ok)
+		}
+	}
+}
