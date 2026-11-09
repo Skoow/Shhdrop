@@ -20,9 +20,10 @@ export async function noViewTransition(page: Page) {
 export async function pickInAddSheet(page: Page, row: string): Promise<boolean> {
   await noViewTransition(page);
   // L'écran doit être monté avant de choisir le geste (accueil ou composeur, téléphone ou ordinateur).
-  const any = page.getByRole("button", { name: /^(Ajouter|Parcourir les fichiers)/ }).or(page.locator(".dropzone")).filter({ visible: true }).first();
+  const any = page.getByRole("button", { name: /^(Ajouter|Commencer)/ }).or(page.locator(".dropzone")).filter({ visible: true }).first();
   await expect(any).toBeVisible();
-  const add = page.getByRole("button", { name: /^Ajouter/ }).filter({ visible: true }).first();
+  // Accueil : « Commencer » (ordinateur) ou « Ajouter » (téléphone) ; composeur : « Ajouter » (téléphone).
+  const add = page.getByRole("button", { name: /^(Ajouter|Commencer)/ }).filter({ visible: true }).first();
   if (!(await add.isVisible().catch(() => false))) return false;
   await add.click();
   const sheet = page.getByRole("dialog", { name: "Ajouter" });
@@ -30,13 +31,11 @@ export async function pickInAddSheet(page: Page, row: string): Promise<boolean> 
   return true;
 }
 
-/** Ouvre le sélecteur de fichiers par le geste visible (feuille, « Parcourir » ou zone de dépôt). */
+/** Ouvre le sélecteur de fichiers par le geste visible (feuille d'ajout ou zone de dépôt). */
 export async function openFilePicker(page: Page) {
   const chooser = page.waitForEvent("filechooser");
   if (!(await pickInAddSheet(page, "Fichiers"))) {
-    const home = page.getByRole("button", { name: "Parcourir les fichiers" });
-    if (await home.isVisible()) await home.click();
-    else await page.locator(".dropzone").click();
+    await page.locator(".dropzone").click();
   }
   return chooser;
 }

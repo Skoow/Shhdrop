@@ -87,7 +87,6 @@ export const en = {
   "compose.add.voice": "Voice",
   "compose.add.text": "Note",
   "compose.drop.titleTouch": "What do you want to send?",
-  "compose.add.browse": "Browse files",
   "compose.add.make": "Or create one here",
   "compose.drop.limit": "{n}\u00a0items and {size} max",
   "compose.added.one": "{n}\u00a0item added",

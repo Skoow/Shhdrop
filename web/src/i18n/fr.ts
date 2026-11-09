@@ -87,7 +87,6 @@ export const fr = {
   "compose.add.voice": "Vocal",
   "compose.add.text": "Note",
   "compose.drop.titleTouch": "Que voulez-vous envoyer\u202f?",
-  "compose.add.browse": "Parcourir les fichiers",
   "compose.add.make": "Ou créez sur place",
   "compose.drop.limit": "{n}\u202féléments et {size} maximum",
   "compose.added.one": "{n}\u202félément ajouté",

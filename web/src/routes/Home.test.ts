@@ -130,34 +130,29 @@ describe("Home (UI §9.1)", () => {
     }
   });
 
-  it("fenêtre de dépôt : Parcourir ouvre le sélecteur ; « Photo ou vidéo » passe par onaction (caméra maison ou galerie) ; un clic sur le verre n'ouvre rien", () => {
+  it("fenêtre de dépôt : « Commencer » (et l'appel final) ouvrent la feuille d'ajout ; « Photo ou vidéo » passe par onaction ; un clic sur le verre n'ouvre rien", () => {
     const onfiles = vi.fn();
     const onaction = vi.fn();
     const onadd = vi.fn();
     show({ onfiles, onaction, onadd });
-    const inputs = [...document.querySelectorAll<HTMLInputElement>('input[type="file"]')];
-    expect(inputs).toHaveLength(1);
-    const files = inputs[0]!;
-    expect(files.multiple).toBe(true);
-    expect(files.accept).toBe("");
-    const click = vi.spyOn(files, "click").mockImplementation(() => undefined);
-    const button = (name: string) => [...document.querySelectorAll("button")].find((b) => b.textContent!.trim() === name)!;
-    button("Parcourir les fichiers").click();
-    button("Photo ou vidéo").click();
-    expect(click).toHaveBeenCalledTimes(1);
+    // Plus de sélecteur propre à l'accueil : le composeur tient le seul champ fichier.
+    expect(document.querySelectorAll('input[type="file"]')).toHaveLength(0);
+    const buttons = (name: string) => [...document.querySelectorAll("button")].filter((b) => b.textContent!.trim() === name);
+    const starts = buttons("Commencer");
+    expect(starts).toHaveLength(2); // fenêtre de dépôt et appel final
+    for (const b of starts) expect(b.getAttribute("aria-haspopup")).toBe("dialog");
+    for (const b of starts) b.click();
+    expect(onadd).toHaveBeenCalledTimes(2);
+    buttons("Photo ou vidéo")[0]!.click();
     expect(onaction.mock.calls).toEqual([["media"]]);
-    // Téléphone : un seul bouton « Ajouter » (feuille d'ajout, tenue par le composeur).
+    // Téléphone : le grand bouton « Ajouter » ouvre la même feuille.
     (document.querySelector(".add-big") as HTMLButtonElement).click();
-    expect(onadd).toHaveBeenCalledOnce();
-    // Le verre n'est qu'une cible de dépôt : aucun sélecteur sans contexte (décision du propriétaire).
+    expect(onadd).toHaveBeenCalledTimes(3);
+    // Le verre n'est qu'une cible de dépôt (décision du propriétaire).
     (document.querySelector(".empty") as HTMLElement).click();
     (document.querySelector(".drop-title") as HTMLElement).click();
-    expect(click).toHaveBeenCalledTimes(1);
-    // Les fichiers choisis sont remis avec leur source ; le champ est vidé.
-    const f = new File(["x"], "a.txt");
-    Object.defineProperty(files, "files", { configurable: true, value: [f] });
-    files.dispatchEvent(new Event("change", { bubbles: true }));
-    expect(onfiles).toHaveBeenCalledWith([f], "fichiers", []);
+    expect(onadd).toHaveBeenCalledTimes(3);
+    expect(onfiles).not.toHaveBeenCalled();
   });
 
   it("actions : groupe nommé ; Vocal masqué sans MediaRecorder ; jamais de bouton Coller (Ctrl/Cmd + V suffit)", () => {

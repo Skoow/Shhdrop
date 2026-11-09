@@ -102,7 +102,7 @@ test.describe("fr-FR", () => {
     await page.getByRole("button", { name: "Terminé" }).click();
     await expect(page.getByText("Vous ne pourrez plus les afficher. Terminer ?")).toBeVisible();
     await page.getByRole("button", { name: "Terminer" }).click();
-    await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
     await expect(page.locator("[data-row]")).toHaveCount(0);
     const body = await page.evaluate(() => document.body.innerText);
     expect(body).not.toContain(link);
@@ -128,7 +128,7 @@ test.describe("fr-FR", () => {
     await page.waitForTimeout(2600); // gomme du logo
     await capture(page, "ready-deleted");
     await page.getByRole("button", { name: "Nouvel envoi" }).click();
-    await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
     expect(await armed(page)).toBe(false);
   });
 

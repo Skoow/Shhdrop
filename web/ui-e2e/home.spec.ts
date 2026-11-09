@@ -1,5 +1,5 @@
 // Accueil v3 (UI §9.1, §20.4) : titre mot par mot, sceaux de confiance, fenêtre de dépôt
-// (Parcourir, Photo, Vidéo, Vocal, Texte, Coller), voile de dépôt pleine page, sections sous le
+// (Commencer, qui ouvre la feuille d'ajout ; Photo ou vidéo, Vocal, Note), voile de dépôt pleine page, sections sous le
 // pli (Comment ça marche, Pourquoi c'est sûr, questions, appel final), révélations au défilement.
 import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
@@ -49,8 +49,9 @@ test.describe("fr-FR", () => {
     await expect(page.getByText(/^Texte, photos, vidéos, vocaux, documents, envoyés en qualité d'origine\./)).toBeVisible();
     const certs = page.getByRole("list", { name: "En bref" }).getByRole("listitem");
     await expect(certs).toHaveCount(3);
-    // Ordinateur : « Parcourir les fichiers » ; téléphone : une seule action, « Ajouter ».
-    await expect(page.getByRole("button", { name: isMobile ? /^Ajouter/ : "Parcourir les fichiers" })).toBeVisible();
+    // Ordinateur : « Commencer » ; téléphone : une seule action, « Ajouter ». Plus de « Parcourir ».
+    await expect(page.getByRole("button", { name: isMobile ? /^Ajouter/ : "Commencer" }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toHaveCount(0);
     // Limites gratuites (spec §41.2), lues des constantes.
     await expect(page.locator("p.proof")).toHaveText("200\u202féléments · 2\u202fGo au total");
     for (const h of ["Comment ça marche", "Pourquoi c'est sûr", "Vos questions", "Quelque chose à transmettre ?"])
@@ -79,9 +80,9 @@ test.describe("fr-FR", () => {
     await page.waitForTimeout(900); // positions finales (entrée finie)
     // Au doigt, le titre ne parle pas de glisser.
     await expect(page.getByRole("heading", { level: 2, name: "Que voulez-vous envoyer ?" })).toBeVisible();
-    // Une seule action (feuille d'ajout), grande, dans le premier écran ; ni « Parcourir » ni tuiles en double.
+    // Une seule action (feuille d'ajout), grande, dans le premier écran ; ni « Commencer » du coffre ni tuiles en double.
     await expect(page.getByRole("group", { name: "Ou créez sur place" })).toBeHidden();
-    await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toBeHidden();
+    await expect(page.locator(".browse")).toBeHidden();
     const add = (await page.getByRole("button", { name: /^Ajouter/ }).boundingBox())!;
     expect(add.height).toBeGreaterThanOrEqual(56);
     expect(add.y + add.height).toBeLessThanOrEqual(844 - 64); // au-dessus de la barre d'onglets
@@ -192,11 +193,11 @@ test.describe("fr-FR", () => {
     await expect(h1.locator(".words .w")).toHaveCount(9);
   });
 
-  test("rien n'attend : à 100 ms, Parcourir ouvre le sélecteur multiple ; un clic sur le verre n'ouvre rien", async ({ page, shh, isMobile }) => {
+  test("rien n'attend : à 100 ms, « Commencer » ouvre la feuille d'ajout, puis le sélecteur multiple ; un clic sur le verre n'ouvre rien", async ({ page, shh, isMobile }) => {
     test.skip(isMobile, "téléphone : une seule action « Ajouter » (feuille, compose.spec.ts)");
     await page.goto(shh.origin + "/", { waitUntil: "domcontentloaded" });
-    const browse = page.getByRole("button", { name: "Parcourir les fichiers" });
-    await expect(browse).toBeAttached();
+    const start = page.getByRole("button", { name: "Commencer" }).first();
+    await expect(start).toBeAttached();
     await page.waitForTimeout(100);
     let opened = 0;
     page.on("filechooser", () => opened++);
@@ -205,8 +206,12 @@ test.describe("fr-FR", () => {
     await page.locator(".band-cap").click({ force: true });
     await page.waitForTimeout(300);
     expect(opened).toBe(0);
+    const sheet = page.getByRole("dialog", { name: "Ajouter" });
+    await expect(sheet).toBeHidden();
+    await start.click({ force: true });
+    await expect(sheet).toBeVisible();
     const chooser = page.waitForEvent("filechooser", { timeout: 2000 });
-    await browse.click({ force: true });
+    await sheet.getByRole("button", { name: /^Fichiers/ }).click();
     expect((await chooser).isMultiple()).toBe(true);
   });
 
@@ -231,7 +236,8 @@ test.describe("fr-FR", () => {
       expect(await fc.element().getAttribute("capture")).toBe("environment");
     }
     const chooser = page.waitForEvent("filechooser");
-    await page.getByRole("button", { name: "Parcourir les fichiers" }).click();
+    await page.getByRole("button", { name: "Commencer" }).first().click();
+    await page.getByRole("dialog", { name: "Ajouter" }).getByRole("button", { name: /^Fichiers/ }).click();
     await (await chooser).setFiles([
       { name: "a.txt", mimeType: "text/plain", buffer: Buffer.from("a") },
       { name: "b.txt", mimeType: "text/plain", buffer: Buffer.from("b") },
@@ -262,18 +268,19 @@ test.describe("fr-FR", () => {
     expect(page.url()).toBe(shh.origin + "/");
   });
 
-  test("« Commencer » ramène au coffre et met le focus sur Parcourir ; « Comment ça marche » descend à sa section", async ({ page, shh, isMobile }) => {
+  test("« Commencer » (appel final) ouvre la feuille d'ajout du composeur ; « Comment ça marche » descend à sa section", async ({ page, shh, isMobile }) => {
     await page.goto(shh.origin + "/");
-    const cta = page.getByRole("button", { name: "Commencer" });
+    const cta = page.locator("section.end").getByRole("button", { name: "Commencer" });
     // Bouton au centre de l'écran, révélation au défilement finie, avant l'appui.
     await cta.evaluate((e) => e.scrollIntoView({ block: "center" }));
     await expect.poll(() => cta.evaluate((e) => Number(getComputedStyle(e.closest(".rv")!).opacity))).toBe(1);
     await cta.click();
-    // Le bouton visible : « Parcourir les fichiers » sur ordinateur, « Ajouter » sur téléphone.
-    const target = page.getByRole("button", { name: isMobile ? /^Ajouter/ : "Parcourir les fichiers" });
-    await expect(target).toBeFocused();
-    await expect(target).toBeInViewport();
+    const sheet = page.getByRole("dialog", { name: "Ajouter" });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByRole("button", { name: /^Fichiers/ })).toBeVisible();
     expect(page.url()).toBe(shh.origin + "/");
+    await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
     if (!isMobile) {
       await page.evaluate(() => scrollTo(0, 0));
       await page.getByRole("button", { name: "Comment ça marche" }).click();
@@ -425,8 +432,8 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
     for (const sel of [".aurora", ".grain", ".guil"])
       expect(await page.locator(sel).first().evaluate((e) => getComputedStyle(e).display), sel).toBe("none");
-    for (const name of isMobile ? ["Ajouter Photo, vidéo, vocal, note ou fichiers"] : ["Parcourir les fichiers", "Photo ou vidéo"]) {
-      const b = page.getByRole("button", { name, exact: true });
+    for (const name of isMobile ? ["Ajouter Photo, vidéo, vocal, note ou fichiers"] : ["Commencer", "Photo ou vidéo"]) {
+      const b = page.getByRole("button", { name, exact: true }).first();
       expect(await b.evaluate((e) => getComputedStyle(e).borderTopStyle)).toBe("solid");
     }
     await page.waitForTimeout(900);
@@ -462,7 +469,7 @@ test.describe("en-US", () => {
     await expect(
       page.getByRole("img", { name: "Encrypted on your device, unreadable to the server, decrypted at the recipient; the key travels separately, never through the server." }),
     ).toHaveCount(1);
-    await expect(page.getByRole("button", { name: isMobile ? /^Add/ : "Browse files" })).toBeVisible();
+    await expect(page.getByRole("button", { name: isMobile ? /^Add/ : "Get started" }).first()).toBeVisible();
     for (const h of ["How it works", "Why it's safe", "Your questions", "Something to pass on?"])
       await expect(page.getByRole("heading", { level: 2, name: h, exact: true })).toHaveCount(1);
     expect(await noHScroll(page)).toBe(true);

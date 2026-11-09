@@ -10,9 +10,10 @@
 
 <script lang="ts">
   // Accueil v3 (UI §9.1) : titre, phrase et sceaux de confiance ; fenêtre de dépôt (le coffre)
-  // avec le volet de scellement, « Parcourir les fichiers » et cinq actions de création ; voile
-  // de dépôt pleine page ; sous le pli, « Comment ça marche », « Pourquoi c'est sûr », questions
-  // et appel final. Un clic sur le verre n'ouvre rien : le sélecteur part de son bouton.
+  // avec le volet de scellement, le bouton principal « Commencer » (ouvre la feuille d'ajout du
+  // composeur, retours HOME5) et les actions de création ; voile de dépôt pleine page (un dépôt
+  // ouvre le composeur avec ses fichiers) ; sous le pli, « Comment ça marche », « Pourquoi c'est
+  // sûr », questions et appel final (même « Commencer »). Un clic sur le verre n'ouvre rien.
   import { untrack, type Snippet } from "svelte";
   import { dragDepth, dragHasFiles, filesFromDrop } from "../flows/intake";
   import { t, getLang } from "../i18n/i18n.svelte";
@@ -20,7 +21,7 @@
   import { magnet, tilt } from "../ui/attach";
   import DropOverlay from "../ui/DropOverlay.svelte";
   import Guilloche from "../ui/Guilloche.svelte";
-  import { Camera, ChevronDown, Lock, Mic, Paperclip, Plus, Timer, Type, UserX } from "../ui/Icon";
+  import { ArrowRight, Camera, ChevronDown, Lock, Mic, Plus, Timer, Type, UserX } from "../ui/Icon";
   import { reducedMotion } from "../ui/motion";
   import SealBand from "../ui/SealBand.svelte";
   import SectionBg from "../ui/SectionBg.svelte";
@@ -41,7 +42,7 @@
     onaction?: (action: Action) => void;
     /** Faux pendant un envoi : le glisser-déposer n'ouvre pas le voile et n'ajoute rien (S9). */
     active?: boolean;
-    /** Téléphone (< 760 px) : le grand bouton « Ajouter » ouvre la feuille d'ajout (Compose). */
+    /** « Commencer » (et « Ajouter » sur téléphone) : ouvre la feuille d'ajout du composeur (Compose). */
     onadd?: () => void;
   };
   let { compact = false, children, onfiles, onaction, active = true, onadd }: Props = $props();
@@ -73,18 +74,9 @@
   // UI §9.2.1 : Vocal masqué sans MediaRecorder. Pas de bouton Coller (décision du propriétaire) : Ctrl/Cmd + V suffit.
   const canVoice = typeof MediaRecorder !== "undefined";
 
-  let files: HTMLInputElement | undefined = $state();
-  let browse: HTMLButtonElement | undefined = $state();
-  let addBig: HTMLButtonElement | undefined = $state();
-  let vessel: HTMLDivElement | undefined = $state();
 
   function give(list: File[], source: Source, folders: string[] = []) {
     if (list.length > 0 || folders.length > 0) onfiles?.(list, source, folders);
-  }
-  function picked(input: HTMLInputElement, source: Source) {
-    const list = [...(input.files ?? [])];
-    input.value = "";
-    give(list, source);
   }
   function act(a: Action) {
     onaction?.(a);
@@ -119,14 +111,9 @@
     void filesFromDrop(e.dataTransfer!).then(({ files, folders }) => give(files, "depot", folders));
   }
 
-  /** « Commencer » et « Comment ça marche » : défilement vers la cible, sans « # » dans l'adresse. */
+  /** « Comment ça marche » : défilement vers la section, sans « # » dans l'adresse. */
   function scrollToEl(el: Element | null | undefined, block: ScrollLogicalPosition) {
     el?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block });
-  }
-  function start() {
-    scrollToEl(vessel, "center");
-    // Le bouton visible : « Ajouter » sur téléphone, « Parcourir les fichiers » ailleurs.
-    (addBig?.offsetParent ? addBig : browse)?.focus({ preventScroll: true });
   }
 </script>
 
@@ -184,7 +171,7 @@
         <span class="sheet-back b2" aria-hidden="true"></span>
         <span class="sheet-back b1" aria-hidden="true"></span>
       {/if}
-      <Vessel empty={!children} drop={over} bind:el={vessel}>
+      <Vessel empty={!children} drop={over} >
         {#if children}
           {@render children()}
         {:else}
@@ -199,9 +186,9 @@
                 <span class="t-fine">{t("compose.drop.title")}</span><span class="t-touch">{t("compose.drop.titleTouch")}</span>
               </h2>
             </div>
-            <button type="button" class="browse" bind:this={browse} onclick={() => files?.click()}>
-              <Paperclip size={20} strokeWidth={1.9} aria-hidden="true" />
-              <span>{t("compose.add.browse")}</span>
+            <button type="button" class="browse" aria-haspopup="dialog" onclick={() => onadd?.()}>
+              <span>{t("home.end.cta")}</span>
+              <ArrowRight size={20} strokeWidth={1.9} aria-hidden="true" />
             </button>
             <div class="make" role="group" aria-labelledby="make-title">
               <p class="make-t" id="make-title">{t("compose.add.make")}</p>
@@ -213,11 +200,10 @@
             </div>
             <p class="proof num">{t("home.proof", limitParams(getLang()))}</p>
             <!-- Téléphone : une seule action, « Ajouter », qui ouvre la feuille (Compose). -->
-            <button type="button" class="add-big" bind:this={addBig} aria-haspopup="dialog" onclick={() => onadd?.()}>
+            <button type="button" class="add-big" aria-haspopup="dialog" onclick={() => onadd?.()}>
               <span class="ab-ic" aria-hidden="true"><Plus size={26} strokeWidth={2.2} /></span>
               <span class="ab-tx"><span class="ab-t">{t("add.open")}</span><span class="ab-s">{t("add.big.sub")}</span></span>
             </button>
-            <input bind:this={files} type="file" multiple hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "fichiers")} />
           </div>
         {/if}
       </Vessel>
@@ -234,7 +220,7 @@
     <HowItWorks />
     <WhySafe />
     <Faq />
-    <Closing onstart={start} />
+    <Closing onstart={() => onadd?.()} />
   {/if}
 </div>
 
@@ -583,7 +569,7 @@
       background: #fff;
     }
     .browse:hover :global(svg) {
-      transform: rotate(-14deg) translateY(-1px);
+      transform: translateX(4px);
     }
   }
   .browse:active {
@@ -595,7 +581,7 @@
     gap: 10px;
   }
 
-  /* Téléphone : « Ajouter » remplace « Parcourir » et la rangée de tuiles (aucun doublon). */
+  /* Téléphone : « Ajouter » remplace « Commencer » et la rangée de tuiles (aucun doublon). */
   .add-big {
     display: none;
   }

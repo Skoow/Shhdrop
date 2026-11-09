@@ -663,10 +663,9 @@ test.describe("en-US", () => {
     if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(shh.origin + "/");
     const chooser = page.waitForEvent("filechooser");
-    if (isMobile) {
-      await page.getByRole("button", { name: /^Add/ }).click();
-      await page.getByRole("dialog", { name: "Add" }).getByRole("button", { name: /^Files/ }).click();
-    } else await page.getByRole("button", { name: "Browse files" }).click();
+    // Téléphone : « Add » ; ordinateur : « Get started » ; les deux ouvrent la feuille d'ajout.
+    await page.getByRole("button", { name: isMobile ? /^Add/ : "Get started" }).first().click();
+    await page.getByRole("dialog", { name: "Add" }).getByRole("button", { name: /^Files/ }).click();
     await (await chooser).setFiles(MIXED.slice(0, 8));
     await expect(page.getByRole("heading", { level: 2, name: "Your share" })).toBeVisible();
     await expect(page.locator(".top .ht")).toHaveText(/^8\s\/\s200\sitems · /);
