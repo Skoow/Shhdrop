@@ -1,6 +1,6 @@
 // Enregistreur vocal (Task 12) : faux MediaRecorder, faux flux, fausse horloge.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MINI_BARS, WAVE_BARS, decodeWave, levelOf, peaks, resample, seekRatio, startVoice, type AudioCtxCtor, type VoiceRecorderCtor } from "./recorder";
+import { MINI_BARS, RATES, WAVE_BARS, decodeWave, levelOf, nextRate, peaks, rateLabel, resample, seekRatio, startVoice, type AudioCtxCtor, type VoiceRecorderCtor } from "./recorder";
 
 class FakeRec {
   static last: FakeRec;
@@ -180,5 +180,20 @@ describe("onde", () => {
     expect(w?.ms).toBe(1250);
     expect(w?.peaks).toHaveLength(12);
     expect(await decodeWave(new Blob(["x"]), 12, Ko)).toBeNull();
+  });
+});
+
+describe("vitesse de lecture", () => {
+  it("alterne 1× → 1,5× → 2× → 1×, et revient à 1× sur une valeur inconnue", () => {
+    expect(RATES).toEqual([1, 1.5, 2]);
+    expect(nextRate(1)).toBe(1.5);
+    expect(nextRate(1.5)).toBe(2);
+    expect(nextRate(2)).toBe(1);
+    expect(nextRate(3)).toBe(1);
+  });
+  it("libellé selon la langue", () => {
+    expect(rateLabel(1.5, "fr")).toBe("1,5×");
+    expect(rateLabel(1.5, "en")).toBe("1.5×");
+    expect(rateLabel(2, "fr")).toBe("2×");
   });
 });

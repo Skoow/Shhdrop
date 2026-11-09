@@ -3,10 +3,11 @@
 </script>
 
 <script lang="ts">
-  // Enregistreur vocal (spec §35.3, Task 12) : onde vivante, minuteur « 0:42 / 30:00 maximum »,
+  // Enregistreur vocal (spec §35.3, Task 12) : onde vivante, minuteur « 0:42 / 30:00 max » sur une ligne,
   // pastille rouge pulsée, Pause / Reprendre (minuteur figé), Arrêter, Annuler (bouton, ou glisser
-  // vers la gauche au doigt ; confirmation au-delà de 5 s). Puis réécoute sur la forme d'onde de
-  // l'enregistrement, « Réenregistrer » ou « Ajouter au partage ». Tout reste en mémoire ; le nom
+  // vers la gauche au doigt ; confirmation au-delà de 5 s). Dès l'arrêt, « Valider » ajoute au
+  // partage ; la réécoute (onde, vitesse) reste possible, sans obligation, et « Réenregistrer »
+  // en secondaire. Tout reste en mémoire ; le nom
   // du navigateur et les dates sont effacés (strip-capture.ts) ; le micro s'éteint dès l'arrêt,
   // à l'annulation, à la fermeture, en arrière-plan et quand la page se ferme.
   import { getLang, t } from "../i18n/i18n.svelte";
@@ -299,7 +300,7 @@
           <button type="button" class="pill solid" onclick={use}>{t("cap.keepAsIs")}</button>
         {:else if phase === "review"}
           <button type="button" class="pill" onclick={rerecord}>{t("voice.rerecord")}</button>
-          <button type="button" class="pill solid" onclick={use}>{t("voice.add")}</button>
+          <button type="button" class="pill solid" onclick={use}>{t("voice.done")}</button>
         {:else if live && !confirming}
           <button type="button" class="side" aria-label={t("voice.cancel")} onclick={askCancel}><Trash2 size={22} strokeWidth={1.9} /></button>
           <button type="button" class="big stop" aria-label={t("cap.rec.stop")} onclick={() => void finish()}><span></span></button>
@@ -462,11 +463,13 @@
     }
   }
   .timer {
-    display: grid;
-    justify-items: center;
-    gap: 2px;
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: var(--sp-2);
     margin: 0;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
   .timer .now {
     font-size: var(--fs-h1);

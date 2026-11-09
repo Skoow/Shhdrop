@@ -2,9 +2,10 @@
   // Réécoute d'un vocal en mémoire (Task 12) : lecture / pause, onde qui se colore avec la
   // progression, toucher ou glisser sur l'onde pour se déplacer, durée. L'URL blob n'existe que
   // pendant la lecture du composant et est révoquée à sa sortie. Rien n'est écrit sur l'appareil.
-  import { t } from "../i18n/i18n.svelte";
+  // Vitesse : 1× → 1,5× → 2× → 1×, hauteur de la voix conservée.
+  import { getLang, t } from "../i18n/i18n.svelte";
   import { clock } from "../media/capture";
-  import { MINI_BARS, resample } from "../media/recorder";
+  import { MINI_BARS, nextRate, rateLabel, resample } from "../media/recorder";
   import { Pause, Play } from "./Icon";
   import Waveform from "./Waveform.svelte";
 
@@ -14,6 +15,7 @@
   const shown = $derived(size === "mini" ? resample(peaks, MINI_BARS) : peaks);
   let playing = $state(false);
   let pos = $state(0); // ms
+  let rate = $state(1);
   let audio: HTMLAudioElement | null = null;
   let url: string | null = null;
   let raf = 0;
@@ -23,6 +25,8 @@
     url = URL.createObjectURL(blob);
     const a = new Audio(url);
     a.preload = "auto";
+    a.preservesPitch = true;
+    a.defaultPlaybackRate = a.playbackRate = rate;
     a.onended = () => {
       playing = false;
       cancelAnimationFrame(raf);
@@ -48,6 +52,10 @@
     const a = ensure();
     if (a.paused) void a.play().catch(() => (playing = false));
     else a.pause();
+  }
+  function speed() {
+    rate = nextRate(rate);
+    if (audio) audio.defaultPlaybackRate = audio.playbackRate = rate;
   }
   function seek(r: number) {
     const a = ensure();
@@ -88,12 +96,13 @@
     onseek={seek}
   />
   <span class="time num">{clock(playing || pos > 0 ? pos : ms)}</span>
+  <button type="button" class="rate num" aria-label={t("voice.rate", { r: rateLabel(rate, getLang()) })} onclick={speed}>{rateLabel(rate, getLang())}</button>
 </div>
 
 <style>
   .clip {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     align-items: center;
     gap: var(--sp-3);
     min-width: 0;
@@ -144,6 +153,36 @@
   }
   .mini .time {
     min-width: 2.6em;
+  }
+  .rate {
+    position: relative;
+    min-width: 3.4em;
+    min-height: 32px;
+    padding: 0 var(--sp-2);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-pill);
+    background: transparent;
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--fs-small);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }
+  .mini .rate {
+    min-width: 2.8em;
+    min-height: 24px;
+    padding: 0 6px;
+  }
+  /* Zone tactile d'au moins 44 px. */
+  .rate::after {
+    content: "";
+    position: absolute;
+    inset: -10px -4px;
+  }
+  .rate:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
   }
   @media (prefers-reduced-motion: reduce) {
     .play {

@@ -1,7 +1,7 @@
 // Enregistreur vocal (Task 12, spec §35.3) avec le faux micro de Chromium : onde vivante,
-// minuteur « 0:02 / 30:00 maximum », pause qui fige le minuteur, reprise, arrêt, réécoute sur la
-// forme d'onde (lecture, déplacement), ajout au partage, ligne du composeur avec mini-onde et
-// durée. Micro éteint après l'arrêt et l'annulation ; refus du micro : message clair ; mouvement
+// minuteur « 0:02 / 30:00 max » sur une ligne, pause qui fige le minuteur, reprise, arrêt, réécoute
+// facultative sur la forme d'onde (lecture, déplacement, vitesse), « Valider », ligne du composeur
+// avec mini-onde, durée et vitesse. Micro éteint après l'arrêt et l'annulation ; refus du micro : message clair ; mouvement
 // réduit : pastille et onde immobiles.
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -17,10 +17,19 @@ test.use({
 });
 test.skip(({ browserName }) => browserName !== "chromium", "faux micro : Chromium seulement");
 
-const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-VOICE/", import.meta.url));
+const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-VOICE2/", import.meta.url));
 
 async function spyStreams(page: Page) {
   await page.addInitScript(() => {
+    // Lecteurs créés par new Audio() (hors DOM) : gardés pour lire leur vitesse.
+    const w = window as unknown as { __audios: HTMLAudioElement[]; Audio: typeof Audio };
+    w.__audios = [];
+    const A = w.Audio;
+    w.Audio = function (src?: string) {
+      const a = new A(src);
+      w.__audios.push(a);
+      return a;
+    } as unknown as typeof Audio;
     const md = navigator.mediaDevices;
     if (!md?.getUserMedia) return;
     const orig = md.getUserMedia.bind(md);
@@ -55,7 +64,15 @@ test("enregistrer 2 s → pause (minuteur figé) → reprendre → arrêter → 
   await page.goto(shh.origin + "/");
   const rec = await openVoice(page);
   await rec.getByRole("button", { name: "Démarrer l'enregistrement" }).click();
-  await expect(rec.locator("[data-timer]")).toContainText("/ 30:00 maximum");
+  await expect(rec.locator("[data-timer]")).toContainText("/ 30:00 max");
+  // Une seule ligne, même à 360 px.
+  await page.setViewportSize({ width: 360, height: 740 });
+  const one = await rec.locator("[data-timer]").evaluate((el) => {
+    const [a, b] = [...el.children].map((c) => c.getBoundingClientRect());
+    return a!.bottom > b!.top && b!.left >= a!.right && el.scrollWidth <= el.clientWidth;
+  });
+  expect(one).toBe(true);
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   await expect(rec.getByRole("status").filter({ hasText: "Enregistrement en cours" })).toBeVisible();
   // Onde vivante : les barres bougent avec le son du faux micro.
   const wave = rec.locator('[data-wave="live"] .b');
@@ -90,9 +107,17 @@ test("enregistrer 2 s → pause (minuteur figé) → reprendre → arrêter → 
   const play = rec.getByRole("button", { name: "Écouter l'enregistrement" });
   await play.click();
   await expect(rec.getByRole("button", { name: "Mettre l'enregistrement en pause" })).toBeVisible();
+  // Vitesse : 1× → 1,5× (hauteur conservée) → 2× → 1×.
+  await rec.getByRole("button", { name: /^Vitesse de lecture\s*: 1×$/ }).click();
+  await expect(rec.getByRole("button", { name: /^Vitesse de lecture\s*: 1,5×$/ })).toHaveText("1,5×");
+  const media = await page.evaluate(() => {
+    const a = (window as unknown as { __audios: HTMLAudioElement[] }).__audios.at(-1)!;
+    return { rate: a.playbackRate, pitch: a.preservesPitch };
+  });
+  expect(media).toEqual({ rate: 1.5, pitch: true });
   if (isMobile) await rec.screenshot({ path: `${SHOTS}voice-review-390.png` });
   await expect(rec.getByRole("button", { name: "Réenregistrer" })).toBeVisible();
-  await rec.getByRole("button", { name: "Ajouter au partage" }).click();
+  await rec.getByRole("button", { name: "Valider" }).click();
   await expect(rec).toBeHidden();
 
   const row = page.locator("[data-row]").filter({ hasText: "Mémo vocal 1" });
@@ -105,10 +130,31 @@ test("enregistrer 2 s → pause (minuteur figé) → reprendre → arrêter → 
     await row.screenshot({ path: `${SHOTS}voice-row-390.png` });
     await page.screenshot({ path: `${SHOTS}voice-compose-390.png` });
   }
+  await row.getByRole("button", { name: /^Vitesse de lecture\s*: 1×$/ }).click();
+  await expect(row.getByRole("button", { name: /^Vitesse de lecture\s*: 1,5×$/ })).toBeVisible();
   await row.getByRole("button", { name: /^Écouter Mémo vocal 1/ }).click();
   await expect(row.getByRole("button", { name: /^Mettre Mémo vocal 1.* en pause$/ })).toBeVisible();
   await row.getByRole("button", { name: /^Mettre Mémo vocal 1.* en pause$/ }).click();
   expect(await liveTracks(page)).toBe(0);
+});
+
+test("arrêter → « Valider » sans réécouter → ligne ajoutée", async ({ page, shh, isMobile }) => {
+  test.setTimeout(60_000);
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  mkdirSync(SHOTS, { recursive: true });
+  await page.goto(shh.origin + "/");
+  const rec = await openVoice(page);
+  await rec.getByRole("button", { name: "Démarrer l'enregistrement" }).click();
+  await expect(timer(rec)).toHaveText("0:02", { timeout: 4000 });
+  await rec.getByRole("button", { name: "Arrêter l'enregistrement" }).click();
+  const ok = rec.getByRole("button", { name: "Valider" });
+  await expect(ok).toBeVisible({ timeout: 10_000 });
+  await expect(rec.getByRole("button", { name: "Réenregistrer" })).toBeVisible();
+  await expect(rec.getByRole("button", { name: "Écouter l'enregistrement" })).toBeVisible();
+  if (isMobile) await rec.screenshot({ path: `${SHOTS}voice-stopped-valider-390.png` });
+  await ok.click();
+  await expect(rec).toBeHidden();
+  await expect(page.locator("[data-row]").filter({ hasText: "Mémo vocal 1" })).toBeVisible();
 });
 
 test("annuler : immédiat sous 5 s, confirmation au-delà ; micro de l'enregistrement éteint", async ({ page, shh }) => {
@@ -170,6 +216,6 @@ test.describe("mouvement réduit", () => {
     await page.waitForTimeout(800);
     expect(await shape()).toBe(s1);
     await rec.getByRole("button", { name: "Arrêter l'enregistrement" }).click();
-    await expect(rec.getByRole("button", { name: "Ajouter au partage" })).toBeVisible({ timeout: 10_000 });
+    await expect(rec.getByRole("button", { name: "Valider" })).toBeVisible({ timeout: 10_000 });
   });
 });

@@ -201,3 +201,14 @@ export function seekRatio(x: number, left: number, width: number): number {
   if (!(width > 0)) return 0;
   return Math.min(1, Math.max(0, (x - left) / width));
 }
+
+/** Vitesses de lecture d'un vocal, dans l'ordre du bouton (1× → 1,5× → 2× → 1×). */
+export const RATES = [1, 1.5, 2] as const;
+export function nextRate(r: number): number {
+  const i = RATES.indexOf(r as (typeof RATES)[number]);
+  return RATES[(i + 1) % RATES.length]!;
+}
+/** « 1,5× » en français, « 1.5× » en anglais. */
+export function rateLabel(r: number, lang: string): string {
+  return `${new Intl.NumberFormat(lang).format(r)}×`;
+}
