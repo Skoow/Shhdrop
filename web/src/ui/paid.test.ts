@@ -49,7 +49,7 @@ describe("options : mot de passe généré seulement, choix payants verrouillés
   it("2, 3 et 7 jours, « Démarrer à la première ouverture » (Plus), « Jusqu'à 50 » (Pro) : verrouillés, texte blanc, aucun effet sur les options", () => {
     const { options, onpaid } = opts();
     const locked = [...document.querySelectorAll<HTMLButtonElement>("[data-locked] button, button[data-locked]")];
-    expect(locked.map((b) => b.textContent!.replace(/\u202f/g, " ").trim())).toEqual(["2 jours", "3 jours", "7 jours", "Démarrer à la première ouverturePlus", "Jusqu'à 50"]);
+    expect(locked.map((b) => b.textContent!.replace(/\u202f/g, " ").trim())).toEqual(["2 jours", "3 jours", "7 jours", "Démarrer à la première ouverture", "Jusqu'à 50"]);
     const desc = locked.map((b) => document.getElementById(b.getAttribute("aria-describedby")!)!.textContent);
     expect(desc).toEqual([...Array(4).fill("Avec Plus, bientôt disponible."), "Avec Pro, bientôt disponible."]);
     expect([...document.querySelectorAll(".badge")].map((b) => b.textContent)).toEqual(["Plus", "Plus", "Pro"]);

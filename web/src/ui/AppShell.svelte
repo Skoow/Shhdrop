@@ -81,7 +81,8 @@
   // des pages d'information seulement (ailleurs, ces liens sont dans Réglages).
   // Page d'un partage ouvert : le pied y est aussi sur téléphone, il porte « Signaler » (retours UI7).
   const footOnPhone = $derived(router.current.name === "home" || router.current.name === "notfound" || INFO.has(router.current.name) || chrome.report !== null);
-  type FootLink = { label: string; path?: string; url?: string; soon?: boolean; report?: boolean };
+  /** `tiers` : « Plus » et « Pro » du libellé au bleu de leur offre, le reste en blanc (retours TABLE). */
+  type FootLink = { label: string; path?: string; url?: string; soon?: boolean; report?: boolean; tiers?: boolean };
   const footCols = $derived<{ id: string; title: string; links: FootLink[] }[]>([
     {
       id: "product",
@@ -89,7 +90,7 @@
       links: [
         { label: t("foot.send"), path: "/" },
         { label: t("foot.room"), soon: true },
-        { label: t("foot.offers"), path: "/offres" },
+        { label: t("foot.offers"), path: "/offres", tiers: true },
       ],
     },
     {
@@ -112,6 +113,8 @@
       ],
     },
   ]);
+  // Libellé découpé : les mots « Plus » et « Pro » (noms d'offre, identiques en français et en anglais).
+  const tierParts = (label: string) => label.split(/\b(Plus|Pro)\b/).map((text, i) => ({ text, tier: i % 2 === 1 ? text.toLowerCase() : null }));
   // « Envoyer » (/) n'est la page courante que sur l'accueil : un partage ouvert a aussi « / » pour chemin.
   const pathHere = (p: string) => (router.current.name !== "notfound" && location.pathname === href(p) && (p !== "/" || router.current.name === "home") ? "page" : undefined);
   const back = $derived(BACK.has(router.current.name));
@@ -194,6 +197,10 @@
                   <span class="off">{l.label} <span class="soon">{t("foot.soon")}</span></span>
                 {:else if l.url}
                   <a class="fl" href={l.url} target="_blank" rel="noopener noreferrer">{l.label}<span class="sr-only"> {t("foot.external")}</span></a>
+                {:else if l.path && l.tiers}
+                  <a class="fl tiers" href={href(l.path)} aria-current={pathHere(l.path)} onclick={(e) => followLink(e, l.path!)} data-foot-offers
+                    ><span>{#each tierParts(l.label) as p, i (i)}{#if p.tier}<span class="tier {p.tier}">{p.text}</span>{:else}{p.text}{/if}{/each}</span></a
+                  >
                 {:else if l.path}
                   <a class="fl" href={href(l.path)} aria-current={pathHere(l.path)} onclick={(e) => followLink(e, l.path!)}>{l.label}</a>
                 {/if}
@@ -499,6 +506,26 @@
   /* Page courante : couleur d'accent, sans trait. */
   .fl[aria-current="page"] {
     color: var(--accent);
+  }
+  /* Ligne des offres (retours TABLE) : texte en blanc, « Plus » et « Pro » au bleu de leur offre ;
+     jamais le vert d'accent, même sur la page des offres. */
+  .fl.tiers,
+  .fl.tiers[aria-current="page"] {
+    color: var(--text);
+  }
+  .tier.plus {
+    color: var(--plus);
+  }
+  .tier.pro {
+    color: var(--pro);
+  }
+  .fl.tiers[aria-current="page"] {
+    font-weight: 600;
+  }
+  @media (forced-colors: active) {
+    .tier {
+      color: LinkText;
+    }
   }
   @media (hover: hover) {
     .fl:hover {

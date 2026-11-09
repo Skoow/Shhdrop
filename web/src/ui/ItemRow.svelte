@@ -314,9 +314,9 @@
   .row {
     position: relative;
     display: grid;
-    grid-template-columns: auto 44px minmax(0, 1fr) auto;
+    grid-template-columns: 44px minmax(0, 1fr) auto auto;
     align-items: center;
-    column-gap: var(--sp-3);
+    column-gap: 10px;
     min-height: 48px;
     padding: 2px 4px 2px 0;
     border-radius: 16px;
@@ -349,23 +349,35 @@
     touch-action: pan-y;
     grid-template-columns: 44px minmax(0, 1fr) auto;
     min-height: 60px;
-    padding: 6px 0 6px 2px;
+    padding: 6px 0;
   }
+  /* Poignée de déplacement à droite, juste avant les actions (retours TABLE) : l'icône et le
+     nom commencent au bord de la ligne. Placement visuel seulement (order) : l'ordre de
+     tabulation suit le DOM (poignée, aperçu, actions). */
   .grip-slot {
+    order: 3;
     display: inline-flex;
     width: 32px;
     justify-content: center;
-    margin-inline-start: -6px;
+  }
+  .acts {
+    order: 4;
+  }
+  .voice {
+    order: 5;
   }
   .grip-slot :global(.grip) {
     margin-inline: -6px;
   }
+  /* Icône recollée au bord gauche (retours TABLE) : le dessin (28 px) centré dans sa cible de
+     44 px laissait 8 px vides ; la cible déborde d'autant sur la marge du tableau. */
   .pic {
     position: relative;
     display: grid;
     place-items: center;
     width: 44px;
     height: 44px;
+    margin-inline-start: -8px;
   }
   .main {
     display: grid;

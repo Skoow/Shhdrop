@@ -559,7 +559,7 @@
               {@const name = t(`paid.badge.${tier}`)}
               <span id="cap-{tier}" class="sr-only">{t("paid.locked", { tier: name })}</span>
               <button type="button" class="cpill num" data-tier={tier} aria-describedby="cap-{tier}" onclick={() => showPaid(tier)}
-                ><span class="pv"><Lock size={13} strokeWidth={2} aria-hidden="true" /><span>{formatBytes(PAID[tier].bytes, lang)}</span>{" "}<span class="ct">· {name}</span></span></button
+                ><span class="pv"><Lock size={13} strokeWidth={2} aria-hidden="true" /><span>{formatBytes(PAID[tier].bytes, lang)}</span></span>{" "}<span class="sr-only">{"· "}</span><span class="ct">{name}</span></button
               >
             {/each}
           </div>
@@ -859,7 +859,7 @@
   .caps {
     display: flex;
     flex: none;
-    gap: 6px;
+    gap: 10px;
   }
   /* Pastilles Plus et Pro : pointillés, cadenas et nom de l'offre au bleu de SON offre (Plus
      ciel, Pro profond), taille en blanc. Cible d'appui de 44 px (bouton), visuel compact de
@@ -906,6 +906,20 @@
   .cpill .ct {
     flex: none;
     color: var(--tc);
+  }
+  /* Nom de l'offre en badge, toujours HORS du cadre pointillé (retours TABLE), comme dans les options. */
+  .cpill {
+    gap: 6px;
+  }
+  .cpill .ct {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border-radius: var(--r-pill);
+    background: var(--tc-tint);
+    font-size: 0.75rem;
+    font-weight: 680;
+    letter-spacing: 0.02em;
   }
   @media (hover: hover) {
     .cpill:hover .pv {
@@ -1121,9 +1135,23 @@
     color: var(--text-2);
     cursor: pointer;
   }
+  /* Tableau unique et sobre de l'envoi (retours TABLE) : un seul contenant fin pour tous les
+     fichiers, une catégorie = un sous-en-tête (CategoryGroup), jamais un cadre par type. */
   .groups {
     display: grid;
-    gap: var(--sp-4);
+    gap: var(--sp-2);
+    padding: 6px var(--sp-2);
+    border: 1px solid var(--hair);
+    border-radius: 16px;
+    background: rgb(255 255 255 / 0.012);
+  }
+  .groups:empty {
+    display: none;
+  }
+  @media (forced-colors: active) {
+    .groups {
+      border-color: CanvasText;
+    }
   }
   .tt {
     display: flex;
@@ -1439,7 +1467,7 @@
     .groups {
       display: flex;
       flex-wrap: wrap;
-      column-gap: var(--sp-5);
+      column-gap: var(--sp-4);
       row-gap: var(--sp-2);
     }
     .groups > :global(section) {

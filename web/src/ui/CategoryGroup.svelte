@@ -170,8 +170,9 @@
 </section>
 
 <style>
-  /* Groupe (retours LIGHT) : aucun contenant ni bandeau ; un en-tête discret, puis les lignes
-     séparées par un seul filet fin. L'espace entre les groupes suffit à les délimiter. */
+  /* Groupe (retours LIGHT puis TABLE) : dans le tableau unique du composeur (Compose.svelte,
+     .groups), chaque catégorie ouvre par un sous-en-tête en bandeau fin, sans cadre à elle ;
+     les lignes sont séparées par un seul filet. */
   .group {
     display: grid;
   }
@@ -179,7 +180,9 @@
     display: flex;
     align-items: baseline;
     gap: var(--sp-2);
-    padding: 0 0 var(--sp-1);
+    padding: 3px 10px;
+    border-radius: 8px;
+    background: rgb(255 255 255 / 0.035);
   }
   h3 {
     font-size: var(--fs-small);
@@ -234,6 +237,9 @@
     box-shadow: var(--e-2), inset 0 0 0 1px var(--hair-2);
   }
   @media (forced-colors: active) {
+    .head {
+      border: 1px solid CanvasText;
+    }
     .li:global(.lifted) {
       outline: 2px solid Highlight;
     }

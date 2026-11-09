@@ -91,9 +91,13 @@
       {/if}
       <p class="hint">{t("options.ttl.hint")}</p>
       {#if onpaid}
-        <button type="button" class="lkrow" data-locked="first-open" aria-describedby="{lockedId}-plus" onclick={() => onpaid("plus")}>
-          <Lock size={16} strokeWidth={2} aria-hidden="true" /><span class="lkt">{t("paid.firstOpen")}</span>{@render badge("plus")}
-        </button>
+        <!-- Badge toujours hors du cadre, comme les autres choix verrouillés (retours TABLE). -->
+        <div class="locks lkline">
+          <button type="button" class="lkrow" data-locked="first-open" aria-describedby="{lockedId}-plus" onclick={() => onpaid("plus")}>
+            <Lock size={16} strokeWidth={2} aria-hidden="true" /><span class="lkt">{t("paid.firstOpen")}</span>
+          </button>
+          {@render badge("plus")}
+        </div>
       {/if}
     </div>
     <div class="ctl">
@@ -291,9 +295,13 @@
     font-weight: 560;
     cursor: pointer;
   }
-  .lkrow {
-    width: 100%;
+  .lkline {
+    flex-wrap: nowrap;
     margin-top: 2px;
+  }
+  .lkrow {
+    flex: 1;
+    min-width: 0;
     text-align: start;
   }
   .lkt {
