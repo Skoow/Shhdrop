@@ -170,32 +170,25 @@
 </section>
 
 <style>
-  /* Groupe (retours UI4) : un seul contenant ; le titre de catégorie sur un bandeau à part,
-     séparé de ses éléments par un filet. */
+  /* Groupe (retours LIGHT) : aucun contenant ni bandeau ; un en-tête discret, puis les lignes
+     séparées par un seul filet fin. L'espace entre les groupes suffit à les délimiter. */
   .group {
     display: grid;
-    border: 1px solid var(--hair-2);
-    border-radius: 18px;
-    background: var(--vessel);
-    box-shadow: var(--edge-hi);
   }
   .head {
     display: flex;
     align-items: baseline;
-    justify-content: space-between;
-    gap: var(--sp-3);
-    padding: 3px var(--sp-4) 2px;
-    border-radius: 17px 17px 0 0;
-    background: var(--surface-2);
-    border-bottom: 1px solid var(--hair-2);
+    gap: var(--sp-2);
+    padding: 0 0 var(--sp-1);
   }
   h3 {
-    font-size: 0.9375rem;
-    font-weight: 640;
-    letter-spacing: -0.005em;
+    font-size: var(--fs-small);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--text-2);
   }
   .meta {
-    color: var(--text-2);
+    color: var(--text-3);
     font-size: var(--fs-small);
   }
   .rows {
@@ -207,7 +200,9 @@
   }
   .li {
     position: relative;
-    border-radius: 16px;
+  }
+  .li + .li {
+    border-top: 1px solid var(--hair);
   }
   /* Glisser pour retirer (téléphone) : le fond rouge apparaît sous la ligne qui part à gauche. */
   .swipeable {
@@ -233,6 +228,8 @@
   }
   .li:global(.lifted) {
     z-index: 2;
+    border-radius: 16px;
+    border-top-color: transparent;
     background: var(--surface-3);
     box-shadow: var(--e-2), inset 0 0 0 1px var(--hair-2);
   }

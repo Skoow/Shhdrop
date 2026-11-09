@@ -122,7 +122,7 @@ export const fr = {
   "options.submit": "Chiffrer et envoyer",
   "compose.capacity.count": "{n} / {max}\u00a0éléments",
   "compose.dropzone.title": "Déposez des fichiers n'importe où sur la page",
-  "compose.dropzone.sub": "ou cliquez ici pour les choisir · collez avec {keys}\u00a0+\u00a0V",
+  "compose.dropzone.sub": "ou cliquez ici pour les choisir",
   "compose.dropzone.touch": "Choisir des fichiers",
   "compose.create.label": "Créer sur place",
   "compose.create.note": "Note texte",

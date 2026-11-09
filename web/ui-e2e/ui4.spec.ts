@@ -26,9 +26,9 @@ test("destinataire, dernière ouverture : bulle du cadenas, groupes, « Détruir
   await expect(cap.locator("[data-deadline] .left")).toHaveText(/^\d+\sh(\s\d{2}\smin)?$/);
   await expect(cap).not.toContainText("Disponible encore");
   await expect(cap).not.toContainText(/quittez la page|Recharger/);
-  // Groupe : bandeau du titre séparé de ses éléments par un filet.
+  // Groupe allégé (retours LIGHT, remplace le bandeau d'UI4) : en-tête discret, sans bandeau ni filet.
   const head = page.locator('[data-group="texte"] .gh');
-  expect(await head.evaluate((e) => getComputedStyle(e).borderBottomStyle)).toBe("solid");
+  expect(await head.evaluate((e) => getComputedStyle(e).borderBottomStyle)).toBe("none");
   // Dernière ouverture : « Détruire ce partage » et sa phrase ; Signaler dans le pied de page seulement (UI7).
   await expect(page.getByText(/^Vous êtes la dernière personne à ouvrir ce partage\./)).toBeVisible();
   await expect(page.getByRole("button", { name: "Détruire ce partage", exact: true })).toBeVisible();

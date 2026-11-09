@@ -121,7 +121,7 @@ export const en = {
   "options.submit": "Encrypt and send",
   "compose.capacity.count": "{n} / {max}\u00a0items",
   "compose.dropzone.title": "Drop files anywhere on the page",
-  "compose.dropzone.sub": "or click here to choose them · paste with {keys}\u00a0+\u00a0V",
+  "compose.dropzone.sub": "or click here to choose them",
   "compose.dropzone.touch": "Choose files",
   "compose.create.label": "Create here",
   "compose.create.note": "Text note",

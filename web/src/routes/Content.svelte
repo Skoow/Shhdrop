@@ -517,34 +517,28 @@
     font-size: var(--fs-small);
     max-width: 65ch;
   }
-  /* Groupe (retours UI4) : un seul contenant ; le titre de catégorie sur un bandeau à part,
-     séparé de ses éléments par un filet. */
+  /* Groupe (retours LIGHT) : aucun contenant ni bandeau ; un en-tête discret, puis les lignes
+     séparées par un seul filet fin. L'espace entre les groupes suffit à les délimiter. */
   .group {
     display: grid;
     min-width: 0;
-    border: 1px solid var(--hair-2);
-    border-radius: var(--r-lg);
-    background: var(--vessel);
-    box-shadow: var(--edge-hi);
-    overflow: clip;
   }
   .gh {
     display: flex;
     align-items: center;
     gap: var(--sp-2);
-    min-height: 44px;
+    min-height: 40px;
     padding-inline: var(--sp-3) var(--sp-1);
-    background: var(--surface-2);
-    border-bottom: 1px solid var(--hair-2);
   }
   .gt {
     margin: 0;
     font-size: var(--fs-small);
-    font-weight: 640;
+    font-weight: 600;
     letter-spacing: 0.01em;
+    color: var(--text-2);
   }
   .gm {
-    color: var(--text-2);
+    color: var(--text-3);
     font-size: var(--fs-micro);
     min-width: 0;
   }

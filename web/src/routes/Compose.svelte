@@ -514,7 +514,6 @@
     return () => window.removeEventListener("beforeunload", warn);
   });
 
-  const pasteKeys = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "Cmd" : "Ctrl";
 </script>
 
 <svelte:window ononline={() => (online = true)} onoffline={() => (online = false)} />
@@ -627,7 +626,7 @@
           <span class="dz-ic" aria-hidden="true"><Upload size={18} strokeWidth={1.8} /></span>
           <span class="dz-tx">
             <span class="dz-t">{t("compose.dropzone.title")}</span>
-            <span class="dz-s">{t("compose.dropzone.sub", { keys: pasteKeys })}</span>
+            <span class="dz-s">{t("compose.dropzone.sub")}</span>
           </span>
         </button>
       {/if}
@@ -990,6 +989,10 @@
     gap: var(--sp-3);
     min-height: max(280px, 46vh);
     padding: var(--sp-6) var(--sp-5);
+    /* Retours LIGHT : cadre en pointillés bien visible, arrondi doux, sans fond. */
+    border: 1.5px dashed rgb(233 236 242 / 0.34);
+    border-radius: var(--r-xl);
+    background: none;
     text-align: center;
     color: var(--text);
   }
@@ -1120,7 +1123,7 @@
   }
   .groups {
     display: grid;
-    gap: 6px;
+    gap: var(--sp-4);
   }
   .tt {
     display: flex;
@@ -1437,7 +1440,7 @@
       display: flex;
       flex-wrap: wrap;
       column-gap: var(--sp-5);
-      row-gap: 6px;
+      row-gap: var(--sp-2);
     }
     .groups > :global(section) {
       flex: 1 1 100%;
