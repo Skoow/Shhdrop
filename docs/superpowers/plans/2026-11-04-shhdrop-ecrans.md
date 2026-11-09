@@ -2086,3 +2086,17 @@ Source : `docs/superpowers/design/benchmark-2026-11.md`. Chaque ligne renvoie à
 | B4 | Pause de l'ambiance, contrôle et clé `localStorage` | 28 (décision du propriétaire) |
 | B5 | La fiche du serveur seulement après scellement, valeurs réelles | 19 |
 | B6 | Information (partages de test de l'étude) | Sans objet, rien à faire |
+
+## Ajouts du 9 novembre (décision du propriétaire)
+
+À planifier en tâches détaillées le moment venu (brief, tests d'abord) :
+
+- [ ] **N1 — Clés post-quantiques hybrides** (ML-KEM + X25519) pour les partages et le salon ; libsodium/WebCrypto uniquement, revue cryptographique externe avant mise en ligne.
+- [ ] **N2 — Demander des fichiers** (avancé ; offre payante, spec §38.9).
+- [ ] **N3 — Accusé d'ouverture anonyme** (avancé) : l'expéditeur sait que le partage a été ouvert, jamais par qui.
+- [ ] **N4 — « Partager vers Shhdrop » sur Android** (Web Share Target de la PWA).
+- [ ] **N5 — Chiffrement dans un Worker** : interface fluide avec des fichiers de 2 Go.
+- [ ] **N6 — Reprise après coupure côté expéditeur** (envoi anticipé §41.14 compris).
+- [ ] **N7 — Page d'état publique** (sans traceur, sans service tiers).
+- [ ] **N8 — Sauvegarde et plan de reprise du serveur**, disque chiffré (Plan 3).
+- [ ] **Plus tard — liens dans les notes** : détection, aperçu personnalisé par l'expéditeur (chiffré), icônes des sites courants déduites de l'adresse seule ; jamais de visite automatique du lien (fuite, liens à usage unique consommés).
