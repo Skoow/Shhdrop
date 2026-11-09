@@ -18,6 +18,7 @@ import {
   header,
   nonce,
   type KeepTtl,
+  type ManifestClean,
   type ManifestEntry,
   type ManifestV2,
   type Rights,
@@ -177,7 +178,7 @@ export async function elementSealer(blob: Blob, first: number): Promise<ElementS
 
 export type FinalEntry =
   | { kind: "text"; name: string; mime: string; text: string }
-  | { kind: "file"; name: string; mime: string; size: number; /** premier morceau */ first: number; k: Uint8Array<ArrayBuffer> };
+  | { kind: "file"; name: string; mime: string; size: number; /** premier morceau */ first: number; k: Uint8Array<ArrayBuffer>; clean?: ManifestClean };
 
 // Une K_contenu ne chiffre qu'un manifeste : une nouvelle finalisation tire une R neuve.
 const usedKeys = new WeakSet<CryptoKey>();
@@ -212,7 +213,7 @@ export async function sealFinal(
       taken.add(c);
     }
     const offset = e.first * CHUNK;
-    items.push({ kind: "file", name: e.name, mime: e.mime, size: e.size, offset: e.size === 0 ? 0 : offset, k: b64u(e.k) });
+    items.push({ kind: "file", name: e.name, mime: e.mime, size: e.size, offset: e.size === 0 ? 0 : offset, k: b64u(e.k), ...(e.clean ? { clean: e.clean } : {}) });
     if (e.size > 0) dataEnd = Math.max(dataEnd, offset + e.size);
   }
   const m: ManifestV2 =

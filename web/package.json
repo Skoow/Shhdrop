@@ -16,7 +16,6 @@
     "build:demo": "vite build --mode demo"
   },
   "dependencies": {
-    "@lucide/svelte": "1.68.0",
     "libsodium-wrappers-sumo": "0.8.4",
     "svelte": "5.57.3"
   },

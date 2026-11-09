@@ -397,45 +397,42 @@ describe("grain (UI §7.4)", () => {
   });
 });
 
-describe("Icon.ts (UI §6)", () => {
+describe("Icon.ts (UI §6, jeu maison UI8)", () => {
   const ICONS = [
-    "paperclip", "camera", "mic", "square", "type", "clipboard-paste", "x", "undo-2", "pencil",
-    "grip-vertical", "arrow-up", "arrow-down", "lock", "lock-open", "shield-check",
-    "shield-alert", "triangle-alert", "copy", "check", "share-2", "qr-code", "refresh-cw", "eye",
-    "eye-off", "clock", "timer", "pause", "play", "download", "file", "file-text", "image",
-    "music", "audio-lines", "film", "folder-x", "trash-2", "flag", "external-link",
-    "chevron-left", "languages", "wifi-off", "clipboard-x", "circle-help", "minus", "plus", "info",
-    // Accueil v3 : vidéo, sceaux de confiance, FAQ, appel final.
-    "video", "link-2", "key-round", "server", "user-x", "hard-drive", "code-xml", "chevron-down", "arrow-right", "shield-x",
-    // Composeur v2 : menu d'un élément, Options.
-    "ellipsis", "sliders-horizontal",
-    // Composeur v3 : archives, dépôt, notes, programmes, nettoyage.
-    "file-archive", "upload", "notebook-pen", "file-terminal", "brush-cleaning",
-    // Composeur v3.1 : « Conversation ».
-    "messages-square",
-    // Pages d'erreur (tâche UP).
-    "compass", "server-crash", "hourglass", "wrench", "monitor-x",
-    // Téléphone façon app : onglet « Envoyer ».
-    "send",
+    "paperclip", "camera", "mic", "square", "type", "x", "pencil", "grip-vertical", "arrow-up",
+    "arrow-down", "lock", "lock-open", "shield-check", "shield-alert", "triangle-alert", "copy",
+    "check", "share-2", "qr-code", "refresh-cw", "eye", "eye-off", "clock", "timer", "pause", "play",
+    "download", "file", "file-text", "image", "music", "film", "trash-2", "flag", "chevron-left",
+    "wifi-off", "clipboard-x", "circle-help", "minus", "plus", "info", "link-2", "key-round",
+    "server", "user-x", "hard-drive", "code-xml", "chevron-down", "arrow-right", "shield-x",
+    "ellipsis", "sliders-horizontal", "file-archive", "upload", "compass", "server-crash",
+    "hourglass", "wrench", "monitor-x", "send",
   ];
   const pascal = (s: string) =>
     s.split("-").map((p) => p[0]!.toUpperCase() + p.slice(1)).join("");
   const src = read("Icon.ts");
   const exports = [...src.matchAll(/export\s*\{\s*default as (\w+)\s*\}\s*from\s*"([^"]+)"/g)];
-  it("exporte exactement la liste fermée, un import par icône", () => {
+  it("exporte exactement la liste fermée, un fichier maison par icône", () => {
     expect(exports.map((m) => m[1]).sort()).toEqual(ICONS.map(pascal).sort());
-    for (const m of exports) {
-      const slug = m[2]!.replace("@lucide/svelte/icons/", "");
-      expect(m[2]).toBe(`@lucide/svelte/icons/${slug}`);
-      expect(pascal(slug)).toBe(m[1]);
-    }
+    for (const m of exports) expect(m[2]).toBe(`./icons/${m[1]}.svelte`);
     expect(src.match(/\bexport\b/g)?.length).toBe(ICONS.length);
   });
-  it("chaque icône se résout dans le paquet installé", () => {
-    for (const m of exports) {
-      const slug = m[2]!.replace("@lucide/svelte/icons/", "");
-      const f = join(webDir, "node_modules/@lucide/svelte/dist/icons", `${slug}.js`);
-      expect(() => readFileSync(f), slug).not.toThrow();
+  it("chaque icône dessine son glyphe, sur la grille 24, sans rien d'extérieur", () => {
+    const glyphs = read("icons/glyphs.ts");
+    for (const slug of ICONS) {
+      const f = read(`icons/${pascal(slug)}.svelte`);
+      expect(f).toContain(`<Glyph {...props} name="${slug}" />`);
+      expect(glyphs).toContain(`"${slug}": [`);
     }
+    const glyph = read("icons/Glyph.svelte");
+    expect(glyph).toContain('viewBox="0 0 24 24"');
+    expect(glyph).toContain("strokeWidth = 1.75");
+    expect(glyph).toContain('stroke-linecap="round"');
+    expect(glyph).toContain('stroke-linejoin="round"');
+    expect(glyph + glyphs).not.toMatch(/https?:|lucide|@html/i);
+  });
+  it("aucune dépendance d'icônes tierce", () => {
+    const pkg = readFileSync(join(webDir, "package.json"), "utf8");
+    expect(pkg).not.toContain("lucide");
   });
 });

@@ -253,7 +253,7 @@ Le verre ne sert qu'aux éléments **sous lesquels le contenu défile** : la bar
 
 ## 6. Icônes
 
-- **Lucide**, via `@lucide/svelte@1.68.0` (ISC), un composant par icône importé nommément. Aucun chargement extérieur, aucun `{@html}`.
+- **Jeu maison** (retours UI8, D41-35) : `web/src/ui/icons/` (dessins dans `glyphs.ts`, grille 24, trait 1,75, extrémités et angles arrondis), un composant par icône importé nommément depuis `web/src/ui/Icon.ts`. Aucun paquet d'icônes, aucun chargement extérieur, aucun `{@html}`.
 - Trait 1,75 px, taille 20 px (24 px dans les boutons principaux), `currentColor`, `aria-hidden="true"` ; le libellé est porté par le texte du bouton ou `aria-label`.
 - Jeu fermé (toute icône ajoutée passe en revue) : `paperclip` (fichiers), `camera` (photo), `mic` / `square` (vocal / arrêt), `type` (texte), `clipboard-paste` (coller), `x` (retirer), `undo-2` (annuler un retrait), `pencil` (renommer, modifier un texte), `grip-vertical` (poignée de déplacement), `arrow-up` / `arrow-down` (monter / descendre en mode déplacement), `lock` / `lock-open`, `shield-check` (nettoyé), `shield-alert` (vérification anti-robot de repli), `triangle-alert` (avertissement), `copy` / `check` (copié), `share-2`, `qr-code`, `refresh-cw` (régénérer, actualiser), `eye` / `eye-off`, `clock`, `timer` (reprise automatique), `pause` / `play`, `download`, `file`, `file-text`, `image`, `music`, `audio-lines` (vocal), `film`, `folder-x` (dossier refusé), `trash-2` (détruire, supprimer), `flag` (signaler), `external-link` (navigateur intégré), `chevron-left`, `languages`, `wifi-off`, `clipboard-x` (vider le presse-papier), `circle-help`, `minus` / `plus` (Stepper), `info` (bandeau d'information). Révision 5 (accueil v3) : `video` (vidéo), `link-2` (lien), `key-round` (mot de passe), `server` (serveur), `user-x` (sans compte), `hard-drive` (aucune IP sur disque), `code-xml` (code ouvert), `shield-x` (essais épuisés), `chevron-down` (question, défilement), `arrow-right` (lien vers une page).
 - Aucun emoji ni caractère Unicode (« ✕ », « ✓ », « ⋯ ») à la place d'une icône.
@@ -1139,7 +1139,6 @@ v2 case à cocher plutôt que v3 invisible :
 | `svelte` | 5.57.3 | MIT | Écrans | Choisi par la spec (§6) |
 | `@sveltejs/vite-plugin-svelte` | 7.3.1 (dev) | MIT | Build | Compatible Vite 8 |
 | `pdfjs-dist` | 6.5.438 | Apache-2.0 | PDF isolé | Spec §6 |
-| `@lucide/svelte` | 1.68.0 | ISC | Icônes | §6 |
 | `uqr` (recopié) | 0.1.3 | MIT | Matrice du QR code | recopié dans `web/src/qr/vendor/` sans modification, empreintes vérifiées par test (audit F3) ; importé statiquement (spec §28.3) ; rendu SVG par notre code |
 | `@fontsource-variable/mona-sans`, `@fontsource-variable/jetbrains-mono` | 5.3.0 (dev) | OFL-1.1 | Source des polices copiées | §4.1 |
 | `@playwright/test` | 1.64.1 (dev) | Apache-2.0 | Parcours e2e | Spec §14 |

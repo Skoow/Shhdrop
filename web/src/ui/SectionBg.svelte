@@ -54,22 +54,28 @@
     mask-image: radial-gradient(60% 70% at 72% 45%, #000, transparent 75%);
   }
 
-  /* Comment ça marche : marée, coupée en biais, réglure horizontale. */
+  /* Comment ça marche (retours UI8) : fond sobre, sans motif ni biais. Une encre à peine plus
+     claire que la page, un filet de lumière au bord haut (comme le pied de page) et un halo très
+     large et très bas, centré : la section se lit comme une page posée, rien ne bouge derrière. */
   .tide {
     -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 160px), transparent 100%);
     mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 160px), transparent 100%);
-    clip-path: polygon(0 72px, 100% 0, 100% 100%, 0 100%);
   }
   .tide .field {
-    background:
-      radial-gradient(70% 60% at 15% 20%, rgb(40 128 154 / 0.16), transparent 70%),
-      linear-gradient(180deg, #0d171c, #0a1014 70%, transparent);
+    inset: 0;
+    animation: none;
+    background: linear-gradient(180deg, #0d1016, #0b0e13 60%, #0b0d12);
   }
   .tide .tex {
-    background-image: repeating-linear-gradient(180deg, transparent 0 31px, rgb(233 236 242 / 0.03) 31px 32px);
+    inset: 0 0 auto;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgb(233 236 242 / 0.12) 30%, rgb(95 227 181 / 0.22) 50%, rgb(233 236 242 / 0.12) 70%, transparent);
+    animation: none;
   }
   .tide .light {
-    background: linear-gradient(170deg, rgb(201 251 232 / 0.06), transparent 30%);
+    inset: 0;
+    background: radial-gradient(60% 50% at 50% 0%, rgb(201 251 232 / 0.035), transparent 70%);
+    animation: none;
   }
 
   /* Pourquoi c'est sûr : le coffre, encre profonde, guilloché, lumière qui tombe d'en haut. */

@@ -189,13 +189,13 @@
               <li>
                 {#if l.report && chrome.report}
                   <!-- Partage ouvert : la confirmation de signalement de CE partage (même action qu'avant). -->
-                  <button type="button" class="fl" aria-haspopup="dialog" onclick={() => chrome.report?.()} data-report-share><span class="u">{t("content.report")}</span></button>
+                  <button type="button" class="fl" aria-haspopup="dialog" onclick={() => chrome.report?.()} data-report-share>{t("content.report")}</button>
                 {:else if l.soon}
                   <span class="off">{l.label} <span class="soon">{t("foot.soon")}</span></span>
                 {:else if l.url}
-                  <a class="fl" href={l.url} target="_blank" rel="noopener noreferrer"><span class="u">{l.label}</span><span class="sr-only"> {t("foot.external")}</span></a>
+                  <a class="fl" href={l.url} target="_blank" rel="noopener noreferrer">{l.label}<span class="sr-only"> {t("foot.external")}</span></a>
                 {:else if l.path}
-                  <a class="fl" href={href(l.path)} aria-current={pathHere(l.path)} onclick={(e) => followLink(e, l.path!)}><span class="u">{l.label}</span></a>
+                  <a class="fl" href={href(l.path)} aria-current={pathHere(l.path)} onclick={(e) => followLink(e, l.path!)}>{l.label}</a>
                 {/if}
               </li>
             {/each}
@@ -384,7 +384,8 @@
 
   /* Pied de page (retours UI7) : lueur discrète de la DA sous un filet supérieur lumineux (le
      grain de l'aurore passe dessous), marque à gauche au même bord intérieur que l'en-tête,
-     colonnes hiérarchisées, liens sans soulignement (un trait se trace au survol et au focus). */
+     colonnes hiérarchisées, liens JAMAIS soulignés (retours UI8) : survol et focus par la couleur,
+     anneau de focus au clavier. */
   .foot {
     position: relative;
     isolation: isolate;
@@ -491,12 +492,6 @@
       color var(--dur-fast) var(--ease-out),
       translate var(--dur-base) var(--ease-out);
   }
-  /* Trait qui se trace de gauche à droite au survol et au focus (aucun soulignement au repos). */
-  .u {
-    background: linear-gradient(currentColor, currentColor) no-repeat 0 100% / 0 1px;
-    padding-block-end: 2px;
-    transition: background-size var(--dur-base) var(--ease-out);
-  }
   .fl:hover,
   .fl:focus-visible {
     color: var(--text);
@@ -505,19 +500,18 @@
   .fl[aria-current="page"] {
     color: var(--accent);
   }
-  .fl:hover .u,
-  .fl:focus-visible .u {
-    background-size: 100% 1px;
-  }
   @media (hover: hover) {
     .fl:hover {
       translate: 2px 0;
     }
   }
+  /* Clavier : anneau net autour du lien (jamais de soulignement, retours UI8). */
   .fl:focus-visible {
     outline: 2px solid var(--accent);
-    outline-offset: 3px;
-    border-radius: 4px;
+    outline-offset: 2px;
+    border-radius: 6px;
+    padding-inline: 4px;
+    margin-inline: -4px;
   }
   .off {
     color: var(--text-3);
@@ -589,8 +583,7 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .fl,
-    .u {
+    .fl {
       transition: none;
     }
     .fl:hover {
@@ -605,10 +598,6 @@
     .foot::before,
     .foot::after {
       display: none;
-    }
-    .fl .u {
-      text-decoration: underline;
-      background: none;
     }
   }
 

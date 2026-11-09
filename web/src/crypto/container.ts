@@ -45,7 +45,15 @@ export type KeepTtl = 1 | 6 | 12 | 24;
 const KEEP_TTLS: readonly number[] = [1, 6, 12, 24];
 
 /** Élément à chiffrer. Un fichier (File est un Blob) n'est jamais lu en entier en mémoire. */
-export type Item = { kind: "text" | "file"; name: string; mime: string; data: Uint8Array<ArrayBuffer> | Blob };
+export type Item = { kind: "text" | "file"; name: string; mime: string; data: Uint8Array<ArrayBuffer> | Blob; clean?: ManifestClean };
+
+/**
+ * Nettoyage d'un fichier avant l'envoi (D41-35), dit au destinataire dans le manifeste CHIFFRÉ
+ * (le serveur n'en voit rien ; le morceau du manifeste a une taille fixe) : famille nettoyée,
+ * échec (`echec`, `protege`) ou fichier tel quel. Absent (ancien partage, texte) : rien n'est dit.
+ */
+export const MANIFEST_CLEAN = ["image", "video", "audio", "pdf", "bureautique", "vocal", "echec", "protege", "tel_quel"] as const;
+export type ManifestClean = (typeof MANIFEST_CLEAN)[number];
 export type ManifestEntry = {
   kind: "text" | "file";
   name: string;
@@ -55,6 +63,8 @@ export type ManifestEntry = {
   text?: string;
   /** Graine de la clé de l'élément (spec §41.14), base64url de 32 octets ; absente : ancien format (K_contenu). */
   k?: string;
+  /** Fichier seulement : nettoyage avant l'envoi (D41-35) ; absent ou inconnu : rien n'est dit. */
+  clean?: ManifestClean;
 };
 
 /** Données authentifiées des morceaux d'un élément (spec §41.14) ; distinctes de l'info HKDF de sa clé. */
@@ -302,15 +312,17 @@ function parseManifest(raw: Uint8Array<ArrayBuffer>, dataLen: number): Manifest 
   const out: ManifestEntry[] = [];
   for (const e of items as unknown[]) {
     if (typeof e !== "object" || e === null) throw corrupt();
-    const { kind, name, mime, size, offset, text, k } = e as Record<string, unknown>;
+    const { kind, name, mime, size, offset, text, k, clean } = e as Record<string, unknown>;
     if (typeof name !== "string" || typeof mime !== "string" || !isNat(size) || !isNat(offset)) throw corrupt();
     if (kind === "text") {
       if (typeof text !== "string" || size !== 0 || offset !== 0 || k !== undefined || codePoints(text) > TEXT_MAX) throw corrupt();
       out.push({ kind, name, mime, size, offset, text });
     } else if (kind === "file") {
       if (text !== undefined || offset > dataLen || size > dataLen - offset) throw corrupt();
-      if (k === undefined) out.push({ kind, name, mime, size, offset });
-      else if (typeof k === "string" && k.length === 43) out.push({ kind, name, mime, size, offset, k });
+      // Nettoyage : valeur inconnue (version plus récente) ignorée, jamais une erreur.
+      const cl = (MANIFEST_CLEAN as readonly unknown[]).includes(clean) ? { clean: clean as ManifestClean } : {};
+      if (k === undefined) out.push({ kind, name, mime, size, offset, ...cl });
+      else if (typeof k === "string" && k.length === 43) out.push({ kind, name, mime, size, offset, k, ...cl });
       else throw corrupt();
     } else {
       throw corrupt();

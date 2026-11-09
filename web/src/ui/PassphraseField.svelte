@@ -139,7 +139,7 @@
       color: var(--text);
       background: rgb(255 255 255 / 0.07);
     }
-    .ib:hover :global(.lucide-refresh-cw) {
+    .ib:hover :global(.ic-refresh-cw) {
       transform: rotate(90deg);
       transition: transform 420ms var(--ease-out);
     }

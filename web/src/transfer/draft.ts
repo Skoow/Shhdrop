@@ -591,7 +591,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
           entries.push({ kind: "text", name: item.name, mime: item.mime, text });
         } else {
           const e = els.get(id)!;
-          entries.push({ kind: "file", name: item.name, mime: item.mime, size: e.data!.size, first: e.first, k: e.k! });
+          entries.push({ kind: "file", name: item.name, mime: item.mime, size: e.data!.size, first: e.first, k: e.k!, ...(item.clean ? { clean: item.clean } : {}) });
         }
       }
       const fin = await sealFinal(entries, keys, { rights: f.rights as Rights | undefined, keepTtlH: f.keepTtlH as KeepTtl | undefined });

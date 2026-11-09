@@ -16,12 +16,16 @@
   import InlineConfirm from "./InlineConfirm.svelte";
   import { Copy, Download, Eye, Pause, Play, RefreshCw, Square } from "./Icon";
   import Tip from "./Tip.svelte";
+  import CleanMark from "./CleanMark.svelte";
+  import { receivedClean, type ManifestClean } from "../media/clean-label";
 
   type Props = {
     i: number;
     name: string;
     format: Format;
     kind: "file" | "text";
+    /** Nettoyage dit par le manifeste chiffré (D41-35) ; absent : rien n'est affiché. */
+    clean?: ManifestClean;
     row: Row;
     /** Secondes estimées pour le télécharger (null : rien à dire, un texte). */
     estimate: number | null;
@@ -39,7 +43,7 @@
     onretry: () => void;
     oncopy: () => void;
   };
-  let { i, name, format, kind, row, estimate, canView, risky, viewOnly, disabled, excerpt, onview, ondownload, onpause, onresume, onstop, onretry, oncopy }: Props = $props();
+  let { i, name, format, kind, clean, row, estimate, canView, risky, viewOnly, disabled, excerpt, onview, ondownload, onpause, onresume, onstop, onretry, oncopy }: Props = $props();
   const lang = $derived(getLang());
 
   const dot = $derived(name.lastIndexOf("."));
@@ -53,12 +57,13 @@
   const FAIL = { network: "dl.fail.network", budget: "dl.fail.budget", limit: "dl.fail.limit", disk_full: "dl.fail.disk", write: "dl.fail.write", gone: "dl.fail.gone" } as const;
   let viewBtn: HTMLButtonElement | undefined = $state();
   const lock = $derived(receiveLock(kind, row.state));
+  const cl = $derived(kind === "file" ? receivedClean(clean) : null);
 </script>
 
 <li class="row" data-item={i} data-kind={format.family} data-state={row.state}>
   <span class="pic">
     <FormatIcon {format} />
-    <LockMark badge tone={lock.tone} text={t(lock.key)} />
+    <LockMark badge tone={lock.tone} text={t(lock.key)} detail={cl ? t(cl.key) : undefined} />
     <!-- Téléchargé (retours UI6) : pastille verte au coin haut-gauche de l'icône, bulle au survol
          ou à l'appui ; rien dans la ligne (le bouton « Voir » ne bouge pas). -->
     {#if row.state === "done"}
@@ -80,7 +85,7 @@
         <span class="st">{t("dl.queued")}</span>
       {:else}
         {#if excerpt}<bdi class="ex" translate="no">{excerpt}</bdi>{/if}
-        {#if kind === "file"}<span>{t(typeKey(format))}</span><span aria-hidden="true">·</span><span>{formatBytes(row.total, lang)}</span>{:else if !excerpt}<span>{t(typeKey(format))}</span>{/if}
+        {#if kind === "file"}<span>{t(typeKey(format))}</span><span aria-hidden="true">·</span><span>{formatBytes(row.total, lang)}</span>{#if cl?.mark}<CleanMark kind={cl.mark} text={t(cl.key)} />{/if}{:else if !excerpt}<span>{t(typeKey(format))}</span>{/if}
         <!-- Téléchargé : dit par la pastille de l'icône (retours UI6). -->
         {#if row.state !== "done" && estimate !== null && !viewOnly}
           <span aria-hidden="true">·</span><span class="eta" title={t("dl.estimate.title")}>{t("dl.estimate", { time: formatDuration(estimate, lang) })}<span class="sr-only"> ({t("dl.estimate.title")})</span></span>
@@ -211,13 +216,13 @@
   .st {
     color: var(--text);
   }
-  /* Téléchargé (UI6) : pastille au coin haut-gauche, en face du cadenas ; elle déborde de
-     l'icône comme lui, pour laisser le libellé du format lisible. */
+  /* Téléchargé (UI6, UI8) : pastille au coin haut-gauche, en face du cadenas ; comme lui, elle
+     rentre dans le coin de la feuille, détachée par la découpe --cut, sans toucher au libellé. */
   .got {
     position: absolute;
     z-index: 1;
-    inset-inline-start: -6px;
-    inset-block-start: -6px;
+    inset-inline-start: -1px;
+    inset-block-start: -4px;
     width: 24px;
     height: 24px;
   }
@@ -239,7 +244,7 @@
     border-radius: 50%;
     background: var(--accent);
     color: var(--on-accent);
-    box-shadow: 0 0 0 2px var(--surface-1);
+    box-shadow: 0 0 0 2px var(--cut, rgb(15 17 24));
   }
   .got-pill path {
     fill: none;

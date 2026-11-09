@@ -140,7 +140,7 @@ describe("createComposer : ajout", () => {
     const doc = c.items.find((i) => i.ext === ".docx")!;
     expect(doc).toMatchObject({ clean: "nettoye", cleanFamily: "bureautique" });
     expect(cleanLineKey(doc)).toBe("clean.done.office");
-    expect(cleanMark(doc)).toBe("spark");
+    expect(cleanMark(doc)).toBe("done");
     expect(new TextDecoder("latin1").decode(await (doc.data as Blob).arrayBuffer())).not.toMatch(/ReperSociete|ReperTitre|ReperMiniature/);
     const pdf = c.items.find((i) => i.base === "devis")!;
     expect(pdf).toMatchObject({ clean: "nettoye", cleanFamily: "pdf" });

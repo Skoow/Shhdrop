@@ -2,6 +2,9 @@
 // présentation D41-34, retours UI7) : un seul endroit d'état par fichier, la bulle du cadenas,
 // dont la 2ᵉ ligne dit le nettoyage. Sur la ligne : une étincelle discrète si le fichier est
 // nettoyé, rien s'il part tel quel, une pastille ambre seulement si le nettoyage a échoué.
+import type { ManifestClean } from "../index";
+export type { ManifestClean };
+import type { Key } from "../i18n/i18n.svelte";
 import type { CleanFamily, CleanState } from "./strip";
 
 /** `original` : nettoyage automatique désactivé dans les Réglages (rien n'est modifié). */
@@ -40,8 +43,33 @@ export function cleanLineKey(i: ItemClean) {
   }
 }
 
-/** Marque de la ligne : étincelle (nettoyé), pastille ambre (échec), rien sinon. */
-export function cleanMark(i: ItemClean): "spark" | "fail" | null {
-  if (i.clean === "nettoye") return "spark";
+/** Marque de la ligne (retours UI8) : bouclier coché (nettoyé), bouclier ambre « ! » (échec), rien sinon. */
+export function cleanMark(i: ItemClean): "done" | "fail" | null {
+  if (i.clean === "nettoye") return "done";
   return isCleanFailure(i) ? "fail" : null;
+}
+
+/** Ce que le manifeste chiffré dit au destinataire (D41-35) ; null pour un texte. */
+export function manifestClean(i: ItemClean & { kind: "text" | "file" }): ManifestClean | null {
+  if (i.kind === "text") return null;
+  if (i.clean === "nettoye") return i.cleanFamily ?? "image";
+  if (i.clean === "echec" || i.clean === "protege") return i.clean;
+  return "tel_quel";
+}
+
+const RECV_DONE = {
+  image: "clean.recv.done.image",
+  video: "clean.recv.done.video",
+  audio: "clean.recv.done.audio",
+  pdf: "clean.recv.done.pdf",
+  bureautique: "clean.recv.done.office",
+  vocal: "clean.recv.done.vocal",
+} as const satisfies Record<CleanFamily, string>;
+
+/** Côté destinataire : texte (2ᵉ ligne du cadenas, bulle du bouclier) et marque ; absent → rien. */
+export function receivedClean(c: ManifestClean | undefined): { key: Key; mark: "done" | "fail" | null } | null {
+  if (c === undefined) return null;
+  if (c === "tel_quel") return { key: "clean.recv.asis", mark: null };
+  if (c === "echec" || c === "protege") return { key: c === "echec" ? "clean.recv.fail.echec" : "clean.recv.fail.protege", mark: "fail" };
+  return { key: RECV_DONE[c], mark: "done" };
 }

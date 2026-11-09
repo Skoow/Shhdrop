@@ -428,6 +428,7 @@
             name={names[i]!}
             format={formats[i]!}
             kind={entries[i]!.kind}
+            clean={entries[i]!.clean}
             row={dl.rows[i]!}
             estimate={est(i)}
             canView={viewKind(i) !== null}

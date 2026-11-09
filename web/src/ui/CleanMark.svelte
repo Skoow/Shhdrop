@@ -1,53 +1,67 @@
 <script lang="ts">
-  // Marque de nettoyage à côté du type d'un fichier (D41-34, retours UI7), SVG maison 12 × 12 :
-  // étincelle discrète (nettoyé) ou pastille ambre avec « ! » (nettoyage impossible). Décorative :
-  // le détail est dans la bulle et le nom du cadenas de l'icône, le résumé sous la liste.
-  let { kind }: { kind: "spark" | "fail" } = $props();
+  // Marque de nettoyage d'un fichier (retours UI8, remplace l'étincelle de D41-34) : petit
+  // bouclier maison juste après « Type · taille », centré sur le texte, avec sa propre bulle
+  // (survol, focus clavier, appui). Nettoyé : bouclier coché, couleur d'accent. Échec : même
+  // bouclier, ambre, « ! » à l'intérieur. Tel quel : aucune marque (l'appelant n'en pose pas).
+  // Le texte de la bulle est aussi le nom du bouton ; la forme change avec l'état, pas que la couleur.
+  import Tip from "./Tip.svelte";
+
+  let { kind, text }: { kind: "done" | "fail"; text: string } = $props();
 </script>
 
-<svg class={["cm", kind]} viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false" data-clean={kind === "spark" ? "nettoye" : "echec"}>
-  {#if kind === "spark"}
-    <path d="M5.5 1.5Q6 5 9.5 5.5 6 6 5.5 9.5 5 6 1.5 5.5 5 5 5.5 1.5Z" />
-    <circle cx="9.6" cy="2.4" r="0.9" />
-  {:else}
-    <circle class="dot" cx="6" cy="6" r="5.5" />
-    <path class="bang" d="M6 3.3v3.2" />
-    <circle class="bdot" cx="6" cy="8.6" r="0.8" />
-  {/if}
-</svg>
+<span class={["cm", kind]} data-clean={kind === "done" ? "nettoye" : "echec"}>
+  <Tip label={text} tip={text}>
+    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false">
+      <path class="sh" d="M8 1.6l5.2 1.9v3.9c0 3.2-2.1 5.6-5.2 6.9-3.1-1.3-5.2-3.7-5.2-6.9V3.5z" />
+      {#if kind === "done"}
+        <path class="mk" d="M5.6 7.9l1.7 1.7 3.1-3.3" />
+      {:else}
+        <path class="mk" d="M8 5v3.4" /><circle class="dt" cx="8" cy="10.7" r="0.95" />
+      {/if}
+    </svg>
+  </Tip>
+</span>
 
 <style>
   .cm {
     flex: none;
-    display: inline-block;
-    margin-inline-start: 5px;
-    vertical-align: -1px;
+    display: inline-flex;
+    align-items: center;
+    margin-inline-start: 4px;
+    line-height: 0;
   }
-  .spark {
+  svg {
+    display: block;
+  }
+  /* Bouclier plein : visible d'un coup d'œil ; la marque se détache en creux. */
+  .sh {
+    stroke-linejoin: round;
+  }
+  .done .sh {
     fill: var(--accent);
-    opacity: 0.85;
   }
-  .fail .dot {
+  .fail .sh {
     fill: var(--warn);
   }
-  .fail .bang {
+  .mk {
     fill: none;
     stroke: var(--bg);
-    stroke-width: 1.5;
+    stroke-width: 1.7;
     stroke-linecap: round;
+    stroke-linejoin: round;
   }
-  .fail .bdot {
+  .dt {
     fill: var(--bg);
   }
   @media (forced-colors: active) {
-    .spark,
-    .fail .dot {
+    .done .sh,
+    .fail .sh {
       fill: CanvasText;
     }
-    .fail .bang {
+    .mk {
       stroke: Canvas;
     }
-    .fail .bdot {
+    .dt {
       fill: Canvas;
     }
   }

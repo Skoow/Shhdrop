@@ -146,10 +146,10 @@ test("vocal enregistré → ajouté (Audio et vocaux) ; micro seul, jamais la ca
   await expect(rec.getByRole("group", { name: "Photo ou vidéo" })).toHaveCount(0);
   expect(await page.evaluate(() => (window as unknown as { __streams: MediaStream[] }).__streams.every((s) => s.getVideoTracks().length === 0))).toBe(true);
   await start.click();
-  await expect(rec.locator("[data-timer]")).toContainText("/ 30:00\u202fmaximum");
+  await expect(rec.locator("[data-timer]")).toContainText("/ 30:00\u202fmax");
   await page.waitForTimeout(1200);
   await rec.getByRole("button", { name: "Arrêter l'enregistrement" }).click();
-  await rec.getByRole("button", { name: "Ajouter au partage" }).click();
+  await rec.getByRole("button", { name: "Valider" }).click();
   await expect(page.locator("[data-row]").filter({ hasText: "Vocal 1" })).toBeVisible();
   expect(await liveTracks(page)).toBe(0);
 });

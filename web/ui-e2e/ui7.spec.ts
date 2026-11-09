@@ -123,7 +123,6 @@ test("pied de page : logo au bord intérieur de l'en-tête, liens sans soulignem
   expect(Math.abs(fl!.x - hl!.x)).toBeLessThanOrEqual(1);
   const link = foot.getByRole("link", { name: /^Signaler un abus/ });
   expect(await link.evaluate((e) => getComputedStyle(e).textDecorationLine)).toBe("none");
-  expect(await link.locator(".u").evaluate((e) => getComputedStyle(e).backgroundSize)).toMatch(/^0px 1px/);
   // Papier peint maison : un SVG statique (aucun data:), très discret, retiré en contraste renforcé.
   const bg = await foot.evaluate((e) => { const c = getComputedStyle(e, "::after"); return { img: c.backgroundImage, o: parseFloat(c.opacity) }; });
   expect(bg.img).toMatch(/assets\/motif\.svg/);
@@ -134,10 +133,6 @@ test("pied de page : logo au bord intérieur de l'en-tête, liens sans soulignem
   expect((await res.body()).length).toBeLessThan(4096);
   await settle(page);
   await foot.screenshot({ path: `${SHOTS}pied-${w(isMobile)}.png` });
-  if (!isMobile) {
-    await link.hover();
-    await expect.poll(() => link.locator(".u").evaluate((e) => getComputedStyle(e).backgroundSize)).not.toMatch(/^0px/);
-  }
   // Audit en haut de page : l'accueil estompe le composeur au défilement (animation liée au défilement).
   await page.evaluate(() => scrollTo(0, 0));
   expect(await axe(page)).toEqual([]);

@@ -185,6 +185,36 @@ describe("éléments (spec §41.14)", () => {
     await expect(openStream(async (n) => new Uint8Array(segs[n]!), fin.bucket, keys)).rejects.toThrow("paquet_corrompu");
   });
 
+  it("nettoyage dans le manifeste chiffré (D41-35) : relu ; absent → absent ; valeur inconnue ignorée", async () => {
+    const up = new Map<number, Uint8Array>();
+    const a = await upload(new Blob([pseudo(10, 3)]), 0, up);
+    const b = await upload(new Blob([pseudo(10, 4)]), 1, up);
+    const c = await upload(new Blob([pseudo(10, 5)]), 2, up);
+    const keys = await contentKeys(newSeed());
+    const fin = await sealFinal(
+      [
+        { kind: "file", name: "a.jpg", mime: "image/jpeg", size: 10, first: 0, k: a.k, clean: "image" },
+        { kind: "file", name: "b.zip", mime: "application/zip", size: 10, first: 1, k: b.k, clean: "tel_quel" },
+        { kind: "file", name: "c.bin", mime: "x/y", size: 10, first: 2, k: c.k },
+        { kind: "text", name: "t", mime: "text/plain", text: "x" },
+      ],
+      keys,
+      {},
+    );
+    const segs = assemble(fin.bucket, up, fin.header, fin.tail);
+    const rd = await openStream(async (n) => new Uint8Array(segs[n]!), fin.bucket, keys);
+    expect(rd.manifest.items.map((e) => e.clean)).toEqual(["image", "tel_quel", undefined, undefined]);
+    // Le clair du serveur ne contient rien du nettoyage : seul le morceau chiffré le porte.
+    const plain = new TextDecoder().decode(fin.header);
+    expect(plain).not.toMatch(/image|tel_quel|clean/);
+    // Version plus récente : valeur inconnue → ignorée (pas une erreur).
+    const keys2 = await contentKeys(newSeed());
+    const odd = await sealFinal([{ kind: "file", name: "a", mime: "x/y", size: 10, first: 0, k: a.k, clean: "plus_tard" as never }], keys2, {});
+    const rd2 = await openStream(async (n) => new Uint8Array(assemble(odd.bucket, up, odd.header, odd.tail)[n]!), odd.bucket, keys2);
+    expect(rd2.manifest.items[0]!.clean).toBeUndefined();
+    expect("clean" in rd2.manifest.items[0]!).toBe(false);
+  });
+
   // Audit H-2 : petits éléments empaquetés dans un segment partagé, sans bourrage.
   it("empaquetage : petits éléments par morceaux dans un segment partagé, grand élément sur sa frontière ; lecture", async () => {
     expect([0, 1, CHUNK, CHUNK + 1, SEG_PLAIN - 1, SEG_PLAIN].map(chunksFor)).toEqual([0, 1, 1, 2, 64, 64]);

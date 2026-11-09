@@ -220,9 +220,10 @@
         </bdi>
       </span>
       <span class="meta">
-        {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi><span class="sep" aria-hidden="true">·</span>{:else if item.kind === "file"}<span class="ty">{t(typeKey(format))}{#if mark}<CleanMark kind={mark} />{/if}</span><span class="sep" aria-hidden="true">·</span>{/if}
+        {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi><span class="sep" aria-hidden="true">·</span>{:else if item.kind === "file"}<span class="ty">{t(typeKey(format))}</span><span class="sep" aria-hidden="true">·</span>{/if}
         <span class="num">{formatBytes(item.size, getLang())}</span>
         {#if duration !== null}<span class="sep" aria-hidden="true">·</span><span class="num">{formatClock(duration)}</span>{/if}
+        {#if mark && cleanLine}<CleanMark kind={mark} text={t(cleanLine)} />{/if}
         {#if upload}
           <!-- État de l'envoi : barre et Réessayer seulement ; le libellé est dans la bulle du cadenas. -->
           {@const busy = upload.key === "compose.up.envoi" || upload.key === "compose.up.chiffrement"}

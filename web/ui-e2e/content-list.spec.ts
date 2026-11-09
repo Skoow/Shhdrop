@@ -74,8 +74,8 @@ test("listes compactes : groupes, icônes par format, types, tailles, temps esti
   await page.setViewportSize({ width: 390, height: 844 });
   await settle(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  // Zones tactiles : 44 px au moins.
-  const small = await page.locator("ul.items button, [data-download-bar] button").evaluateAll((bs) =>
+  // Zones tactiles : 44 px au moins, sauf les pastilles au coin de l'icône (24 px, WCAG 2.5.8, UI6).
+  const small = await page.locator("ul.items button:not([data-corner]), [data-download-bar] button").evaluateAll((bs) =>
     bs.filter((b) => b.getBoundingClientRect().height < 44 || b.getBoundingClientRect().width < 44).map((b) => b.getAttribute("aria-label") ?? b.textContent),
   );
   expect(small).toEqual([]);
@@ -320,8 +320,8 @@ test("destruction ici : illustration du document qui se défait, aucun cadenas ;
   await settle(page);
   await capture(page, "destroyed-art-end");
   expect(await art.locator("rect.dot").count()).toBe(48);
-  expect(await page.locator(".lucide-lock-open, [data-state='destroyed'] .lucide-lock-open").count()).toBe(0);
-  expect(await page.locator("svg.lucide-lock-open").count()).toBe(0);
+  expect(await page.locator(".ic-lock-open, [data-state='destroyed'] .ic-lock-open").count()).toBe(0);
+  expect(await page.locator("svg.ic-lock-open").count()).toBe(0);
   expect(await axe(page)).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
   await capture(page, "destroyed-art-390");

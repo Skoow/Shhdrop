@@ -62,5 +62,5 @@ export {
   splitPassword,
   type ParsedLink,
 } from "./transfer/link";
-export type { Item, Manifest, ManifestEntry, ManifestV2 } from "./crypto/container";
+export type { Item, Manifest, ManifestClean, ManifestEntry, ManifestV2 } from "./crypto/container";
 export type { KAcces, KLien, KPreuve, SGestion } from "./crypto/types";

@@ -8,7 +8,7 @@
 // anticipé avant). Échec, format non pris en charge : l'élément part sans clic, marqué « Non
 // nettoyé » avec sa raison. Réglage désactivé : rien n'est modifié (« Original »).
 import { CONTENT_MAX, DATA_SEGMENTS, MANIFEST_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, cleanName, isRiskyName, segmentsNeeded, type Item } from "../index";
-import { isCleanFailure, type ItemCleanState } from "../media/clean-label";
+import { isCleanFailure, manifestClean, type ItemCleanState } from "../media/clean-label";
 import { DOC_FORMATS, IMAGE_FORMATS, detectFormat, type Format } from "../media/format";
 import { stripMetadata, type CleanFamily, type StripResult } from "../media/strip";
 import { approve } from "./clean-gate";
@@ -489,7 +489,8 @@ export function createComposer(deps: ComposeDeps = {}) {
   // Taille du manifeste, majorée (D41-17) : mêmes noms et textes que toApiItems, tailles et
   // positions à leur plus grand nombre de chiffres, droit le plus long. Au-delà de
   // MANIFEST_MAX, sealFinal refuserait (« manifeste_trop_gros ») : on bloque avant. Chaque
-  // fichier porte sa graine `k` (43 caractères, spec §41.14).
+  // fichier porte sa graine `k` (43 caractères, spec §41.14) et son nettoyage (valeur la plus
+  // longue, D41-35).
   const manifestBytes = $derived(
     new TextEncoder().encode(
       JSON.stringify({
@@ -499,7 +500,7 @@ export function createComposer(deps: ComposeDeps = {}) {
         items: items.map((i) =>
           i.kind === "text"
             ? { kind: "text", name: cleanName(i.base), mime: i.mime, size: 0, offset: 0, text: i.text ?? "" }
-            : { kind: "file", name: cleanName(i.base + i.ext), mime: i.mime || "application/octet-stream", size: CONTENT_MAX, offset: CONTENT_MAX, k: "k".repeat(43) },
+            : { kind: "file", name: cleanName(i.base + i.ext), mime: i.mime || "application/octet-stream", size: CONTENT_MAX, offset: CONTENT_MAX, k: "k".repeat(43), clean: "bureautique" },
         ),
       }),
     ).length,
@@ -548,7 +549,7 @@ export function createComposer(deps: ComposeDeps = {}) {
     return items.map((i) =>
       i.kind === "text"
         ? { kind: "text", name: cleanName(i.base), mime: i.mime, data: utf8.encode(i.text ?? "") as Uint8Array<ArrayBuffer> }
-        : { kind: "file", name: cleanName(i.base + i.ext), mime: i.mime || "application/octet-stream", data: i.data },
+        : { kind: "file", name: cleanName(i.base + i.ext), mime: i.mime || "application/octet-stream", data: i.data, clean: manifestClean(i) ?? undefined },
     );
   }
 

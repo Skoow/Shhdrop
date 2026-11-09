@@ -86,13 +86,16 @@
   }
   /* Pastille (UI5) : disque de la surface sous le cadenas, posé sur le coin bas-droit de
      l'icône ; le bouton entier (icône comprise) fait 44 px. */
-  /* Bouton de 24 px centré sur la pastille (18 px), qui déborde du coin bas-droit : le libellé
-     de l'icône et son centre (bouton d'aperçu) restent libres. */
+  /* Bouton de 24 px centré sur la pastille (18 px), qui RENTRE dans le coin bas-droit de la
+     feuille (retours UI8) : elle en mord le coin et s'en détache par une découpe de la couleur
+     du fond (--cut) ; le libellé et le pictogramme de l'icône restent libres. */
   .lock.badge {
     position: absolute;
     z-index: 1;
-    inset-inline-end: -5px;
-    inset-block-end: -5px;
+    /* Bouton décalé vers l'extérieur, pastille ramenée vers l'intérieur (translate) : le centre de
+       l'icône (bouton d'aperçu) reste libre. */
+    inset-inline-end: -3px;
+    inset-block-end: -4px;
     display: grid;
     place-items: center;
     width: 24px;
@@ -118,8 +121,11 @@
     width: 18px;
     height: 18px;
     border-radius: 50%;
-    background: var(--surface-1);
-    box-shadow: inset 0 0 0 1px var(--hair);
+    translate: -3px -2px;
+    background: var(--surface-2);
+    box-shadow:
+      0 0 0 2px var(--cut, rgb(15 17 24)),
+      inset 0 0 0 1px var(--hair-2);
   }
   .badge.wait .pill {
     color: var(--text-2);
@@ -179,6 +185,10 @@
   @media (forced-colors: active) {
     .lock {
       color: CanvasText;
+    }
+    .pill {
+      background: Canvas;
+      box-shadow: 0 0 0 2px Canvas, inset 0 0 0 1px CanvasText;
     }
     .ok .mark,
     .open .mark,
