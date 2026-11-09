@@ -51,7 +51,9 @@
   };
   let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, danger = false, el = $bindable(), upload = null, onretry }: Props = $props();
 
-  const name = $derived(item.base + item.ext);
+  // Vocal pris ici : l'extension (.webm, .m4a) reste interne, jamais affichée ni modifiable.
+  const shownExt = $derived(item.kind === "text" || item.voice ? "" : item.ext);
+  const name = $derived(item.base + shownExt);
   const mid = $derived(midSplit(item.base));
   const format = $derived(formatOf({ kind: item.kind, ext: item.ext.slice(1).toLowerCase(), sniffed: item.sniffed ?? null }));
 
@@ -189,15 +191,17 @@
             onkeydown={renameKey}
             onblur={renameBlur}
           />
-          {#if item.ext}<span class="ext" translate="no">{item.ext}</span>{/if}
+          {#if shownExt}<span class="ext" translate="no">{shownExt}</span>{/if}
         </span>
         {#if error}<p id="{uid}-err" class="err" role="alert">{t(`compose.rename.${error}`, { max: NAME_MAX })}</p>{/if}
       </div>
     {:else}
       <span class="head">
         <bdi class="nm" title={name} translate="no">
-          <span class="b">{mid.head}</span><span class="e">{mid.tail}{#if item.kind !== "text"}{item.ext}{/if}</span>
+          <span class="b">{mid.head}</span><span class="e">{mid.tail}{shownExt}</span>
         </bdi>
+        <!-- Téléphone : un vocal se renomme aussi d'ici (crayon à côté du nom), sans passer par « … ». -->
+        {#if compact && item.voice}<span class="pen"><IconButton bind:el={renameBtn} label={t("compose.rename", { name })} onpress={startRename}><Pencil size={16} strokeWidth={1.8} /></IconButton></span>{/if}
         <!-- Ordinateur : la marque « Non nettoyé » sur la ligne du nom (liste compacte, une ligne de détails). -->
         {#if !compact}<ItemNotes {item} unclean="only" />{/if}
       </span>
@@ -217,9 +221,6 @@
         {/if}
         <ItemNotes {item} {cannotOpen} badgesOnly unclean={compact ? undefined : "skip"} />
       </span>
-      {#if item.voice && item.data instanceof Blob}
-        <span class="voice"><VoiceClip blob={item.data} peaks={item.voice.peaks} ms={item.voice.ms} {name} size="mini" /></span>
-      {/if}
       <ItemNotes {item} {cannotOpen} lines />
     {/if}
   </div>
@@ -240,12 +241,40 @@
       <IconButton label={t("compose.remove", { name })} onpress={onremove} data-remove><X size={18} strokeWidth={1.75} /></IconButton>
     {/if}
   </div>
+
+  {#if item.voice && item.data instanceof Blob}
+    <!-- Rangée dédiée, centrée dans la ligne entière ; hors du bloc de renommage : la lecture continue. -->
+    <div class="voice"><VoiceClip blob={item.data} peaks={item.voice.peaks} ms={item.voice.ms} {name} size="mini" /></div>
+  {/if}
 </div>
 
 <style>
   .voice {
-    display: block;
-    margin-block-start: var(--sp-2);
+    grid-column: 1 / -1;
+    justify-self: center;
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    max-width: 16rem;
+    margin-block: var(--sp-2) 4px;
+  }
+  /* Centrée sur le rectangle de la ligne, pas sur sa zone de contenu (rembourrages inégaux :
+     4 px à droite sur ordinateur, 2 px à gauche sur téléphone). */
+  .voice {
+    translate: 2px 0;
+  }
+  .compact .voice {
+    translate: -1px 0;
+  }
+  .voice :global(.clip) {
+    flex: 1;
+  }
+  /* Crayon à côté du nom : zone tactile de 44 px sans grandir la ligne du nom. */
+  .pen {
+    flex: none;
+    display: inline-flex;
+    margin-block: -11px;
+    margin-inline-start: -8px;
   }
   .row {
     position: relative;

@@ -549,4 +549,22 @@ describe("pris dans l'interface (caméra maison, Q-REC1)", () => {
     expect(v).toMatchObject({ ext: ".m4a", voice: { peaks: [0.2, 1], ms: 4200 } });
     expect(JSON.stringify(c.toApiItems().find((i) => i.name === v.base + v.ext))).not.toContain("peaks");
   });
+  it("vocal : nom générique, renommage assaini envoyé dans le manifeste, nom vide → générique", () => {
+    const c = make();
+    const id = c.addVoice(new Blob(["v"]), "audio/webm", true, { peaks: [0.5], ms: 1000 })!;
+    const v = () => c.items.find((i) => i.id === id)!;
+    expect(v()).toMatchObject({ base: "Mémo vocal 1", ext: ".webm" });
+    expect(c.rename(id, "a/b")).toBe("interdit");
+    expect(c.rename(id, "x".repeat(116))).toBe("trop_long"); // 116 + « .webm » = 121
+    expect(c.rename(id, "Réunion\u200b du lundi")).toBeNull();
+    expect(v().base).toBe("Réunion du lundi");
+    const api = c.toApiItems().find((i) => i.data === v().data)!;
+    expect(api.name).toBe("Réunion du lundi.webm");
+    for (const empty of ["", "   ", "\u200b", "..."]) {
+      c.rename(id, "Autre");
+      expect(c.rename(id, empty)).toBeNull();
+      expect(v().base).toBe("Mémo vocal 1");
+    }
+    expect(c.toApiItems().find((i) => i.data === v().data)!.name).toBe("Mémo vocal 1.webm");
+  });
 });

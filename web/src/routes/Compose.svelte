@@ -394,7 +394,9 @@
   let menuDraft = $state("");
   let menuError = $state<null | "vide" | "trop_long" | "interdit">(null);
   const menuItem = $derived(composer.items.find((i) => i.id === menuId) ?? null);
-  const menuName = $derived(menuItem ? (menuItem.kind === "text" ? menuItem.base : menuItem.base + menuItem.ext) : "");
+  // Vocal pris ici : extension interne, jamais affichée (comme sur sa ligne).
+  const menuExt = $derived(menuItem && menuItem.kind !== "text" && !menuItem.voice ? menuItem.ext : "");
+  const menuName = $derived(menuItem ? menuItem.base + menuExt : "");
   const menuMovable = $derived(menuItem ? composer.items.filter((i) => i.category === menuItem.category).length > 1 : false);
   $effect(() => {
     if (menuId !== null && !menuItem) menuId = null;
@@ -644,7 +646,7 @@
             onkeydown={(e) => e.key === "Enter" && (e.preventDefault(), menuRenameSave())}
             {@attach (el) => { el.focus(); el.select(); }}
           />
-          {#if menuItem.ext}<span class="ext" translate="no">{menuItem.ext}</span>{/if}
+          {#if menuExt}<span class="ext" translate="no">{menuExt}</span>{/if}
         </span>
         {#if menuError}<p id="menu-rename-err" class="err" role="alert">{t(`compose.rename.${menuError}`, { max: NAME_MAX })}</p>{/if}
         <div class="ed-acts">

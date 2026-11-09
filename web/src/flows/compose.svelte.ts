@@ -43,6 +43,8 @@ export type ComposeItem = {
   readonly sniffed?: Sniffed;
   /** Vocal pris ici : forme d'onde (0 à 1) et durée, pour la réécoute dans la liste. */
   readonly voice?: { readonly peaks: readonly number[]; readonly ms: number };
+  /** Vocal pris ici : nom générique (« Mémo vocal 1 ») repris si on efface le nom. */
+  readonly generic?: string;
   /** Exécutable ou script (extension à risque, ou contenu exécutable) : prévenir. */
   readonly risky?: boolean;
   /** Le contenu ne correspond pas à l'extension (exécutable déguisé, par exemple). */
@@ -314,11 +316,13 @@ export function createComposer(deps: ComposeDeps = {}) {
   function addVoice(blob: Blob, mime: string, stripped = true, voice?: ComposeItem["voice"]): string | null {
     if (items.length + reserved >= MAX_ITEMS) return null;
     const ext = mime.startsWith("audio/mp4") ? ".m4a" : ".webm";
+    const generic = names.voice(++counters.voice);
     const it: ComposeItem = {
       id: nextId(),
       kind: "file",
       category: "audio",
-      base: names.voice(++counters.voice),
+      base: generic,
+      generic,
       ext,
       mime,
       size: blob.size,
@@ -368,6 +372,15 @@ export function createComposer(deps: ComposeDeps = {}) {
   function rename(id: string, base: string): null | "vide" | "trop_long" | "interdit" {
     const it = items.find((i) => i.id === id);
     if (!it || it.kind !== "file") return "interdit";
+    const r = renameTo(it, base);
+    if (r !== "vide" || it.generic === undefined) return r;
+    // Vocal : nom vide (ou invisible) → retour au nom générique.
+    set(items.map((i) => (i.id === id ? { ...i, base: it.generic! } : i)));
+    return null;
+  }
+
+  function renameTo(it: ComposeItem, base: string): null | "vide" | "trop_long" | "interdit" {
+    const id = it.id;
     if (FORBIDDEN.test(base)) return "interdit";
     if (base.trim() === "") return "vide";
     if (codePoints((base + it.ext).normalize("NFC")) > NAME_MAX) return "trop_long";

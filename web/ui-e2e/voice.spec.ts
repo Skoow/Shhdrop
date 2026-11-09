@@ -7,6 +7,7 @@ import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { openFilePicker } from "./send-helpers";
 
 const local = process.env.PW_LOCAL_CHROMIUM === "1" ? { executablePath: "/opt/pw-browsers/chromium" } : {};
 test.use({
@@ -155,6 +156,73 @@ test("arrêter → « Valider » sans réécouter → ligne ajoutée", async ({ 
   await ok.click();
   await expect(rec).toBeHidden();
   await expect(page.locator("[data-row]").filter({ hasText: "Mémo vocal 1" })).toBeVisible();
+});
+
+test("ligne vocale : nom générique renommable (Entrée, Échap, vide → générique) ; bulle centrée sous le nom ; alignée sur les autres lignes", async ({ page, shh, isMobile }) => {
+  test.setTimeout(60_000);
+  const SHOTS4 = SHOTS.replace("task-VOICE3", "task-VOICE4");
+  mkdirSync(SHOTS4, { recursive: true });
+  if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(shh.origin + "/");
+  const rec = await openVoice(page);
+  await rec.getByRole("button", { name: "Démarrer l'enregistrement" }).click();
+  await expect(timer(rec)).toHaveText("0:01", { timeout: 4000 });
+  await rec.getByRole("button", { name: "Arrêter l'enregistrement" }).click();
+  await rec.getByRole("button", { name: "Valider" }).click();
+  await expect(rec).toBeHidden();
+  await (await openFilePicker(page)).setFiles(fileURLToPath(new URL("./files/contrat.pdf", import.meta.url)));
+  const voice = page.locator("[data-row]").filter({ has: page.locator("[data-voice-clip]") });
+  const pdf = page.locator("[data-row]").filter({ hasText: "contrat.pdf" });
+  await expect(pdf).toBeVisible();
+  // Extension interne : jamais affichée.
+  await expect(voice.locator(".nm")).toHaveText("Mémo vocal 1");
+  await expect(voice).not.toContainText(/\.(webm|m4a)/);
+  await page.waitForTimeout(800); // fin des animations d'arrivée
+
+  const box = async (l: ReturnType<Page["locator"]>) => (await l.boundingBox())!;
+  const act = isMobile ? "[data-menu]" : "[data-remove]";
+  for (const w of isMobile ? [360, 390] : [0]) {
+    if (w) await page.setViewportSize({ width: w, height: 844 });
+    await page.waitForTimeout(150);
+    const [vr, pr] = [await box(voice.locator(".row")), await box(pdf.locator(".row"))];
+    expect(vr.x).toBeCloseTo(pr.x, 0);
+    expect(vr.width).toBeCloseTo(pr.width, 0);
+    for (const sel of [".pic", ".main", act]) {
+      const [a, b] = [await box(voice.locator(sel).first()), await box(pdf.locator(sel).first())];
+      expect(a.x, `${sel} à ${w}`).toBeCloseTo(b.x, 0);
+    }
+    // Icône, nom et « … » sur la même rangée ; la bulle dessous, centrée dans la ligne.
+    const [pic, meta, menu, clip] = [await box(voice.locator(".pic")), await box(voice.locator(".meta")), await box(voice.locator(act)), await box(voice.locator("[data-voice-clip]"))];
+    expect(Math.abs(pic.y + pic.height / 2 - (menu.y + menu.height / 2))).toBeLessThan(2);
+    expect(clip.y).toBeGreaterThanOrEqual(meta.y + meta.height);
+    expect(clip.y).toBeGreaterThanOrEqual(pic.y + pic.height);
+    expect(Math.abs(clip.x + clip.width / 2 - (vr.x + vr.width / 2))).toBeLessThan(0.75);
+  }
+  if (isMobile) await voice.screenshot({ path: `${SHOTS4}voice-row-390.png` });
+
+  const pencil = voice.getByRole("button", { name: "Renommer Mémo vocal 1", exact: true });
+  const field = voice.getByRole("textbox", { name: "Nouveau nom de Mémo vocal 1" });
+  // Échap annule.
+  await pencil.click();
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue("Mémo vocal 1");
+  await field.fill("Brouillon");
+  await field.press("Escape");
+  await expect(voice.locator(".nm")).toHaveText("Mémo vocal 1");
+  await expect(pencil).toBeFocused();
+  // Entrée valide, même assainissement que les autres noms.
+  await pencil.click();
+  await field.fill("Réunion\u200b du lundi");
+  if (isMobile) await voice.screenshot({ path: `${SHOTS4}voice-row-rename-390.png` });
+  await field.press("Enter");
+  await expect(voice.locator(".nm")).toHaveText("Réunion du lundi");
+  await expect(voice.getByRole("button", { name: /^Écouter Réunion du lundi$/ })).toBeVisible();
+  // Nom vide → nom générique.
+  await voice.getByRole("button", { name: "Renommer Réunion du lundi", exact: true }).click();
+  await voice.getByRole("textbox").fill("   ");
+  await voice.getByRole("textbox").press("Enter");
+  await expect(voice.locator(".nm")).toHaveText("Mémo vocal 1");
+  await expect(voice.locator('[role="alert"]')).toHaveCount(0);
 });
 
 test("annuler : immédiat sous 5 s, confirmation au-delà ; micro de l'enregistrement éteint", async ({ page, shh }) => {
