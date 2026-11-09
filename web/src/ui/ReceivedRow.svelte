@@ -55,7 +55,10 @@
 </script>
 
 <li class="row" data-item={i} data-kind={format.family} data-state={row.state}>
-  <FormatIcon {format} />
+  <span class="pic">
+    <FormatIcon {format} />
+    <LockMark badge tone={lock.tone} text={t(lock.key)} />
+  </span>
   <div class="main">
     <bdi class="name" title={name} translate="no"><span class="b">{mid.head}</span><span class="e">{mid.tail}{ext}</span></bdi>
     <span class="meta num">
@@ -68,9 +71,6 @@
       {:else}
         {#if excerpt}<bdi class="ex" translate="no">{excerpt}</bdi>{/if}
         {#if kind === "file"}<span>{t(typeKey(format))}</span><span aria-hidden="true">·</span><span>{formatBytes(row.total, lang)}</span>{:else if !excerpt}<span>{t(typeKey(format))}</span>{/if}
-        {#if lock}
-          <span aria-hidden="true">·</span><LockMark tone={lock.tone} text={t(lock.key)} />
-        {/if}
         <!-- Téléchargé : dit par l'icône verte de la ligne (retours UI4) ; le texte reste pour les lecteurs d'écran. -->
         {#if row.state === "done"}
           <span class="sr-only">{t("dl.done")}</span>
@@ -137,6 +137,14 @@
 </li>
 
 <style>
+  /* Icône de format et sa pastille cadenas (UI5). */
+  .pic {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+  }
   .row {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;

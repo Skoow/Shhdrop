@@ -300,7 +300,7 @@ test.describe("fr-FR : envoi (Tasks 17–18)", () => {
     await expect(page.locator("#open-err").getByText("Mot de passe incorrect · 4\u202fessais restants")).toBeVisible({ timeout: 20_000 });
     await page.getByLabel("Mot de passe", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Déverrouiller" }).click();
-    await expect(page.getByRole("heading", { name: "Contenu du partage" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "Contenu", exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator("li.row").filter({ hasText: "Le code de la porte est 4471." })).toBeVisible();
     await expect(page.getByRole("button", { name: "Télécharger releve.bin" })).toBeVisible();
     await capture(page, "demo-content");
@@ -311,7 +311,7 @@ test.describe("fr-FR : envoi (Tasks 17–18)", () => {
     await expect(page.getByRole("heading", { name: "Rouvrir ce partage" })).toBeVisible({ timeout: 20_000 });
     await page.getByLabel("Mot de passe", { exact: true }).fill(password);
     await page.getByRole("button", { name: /^(Rouvrir|Déchiffrement)/ }).click();
-    await expect(page.getByRole("heading", { name: "Contenu du partage" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "Contenu", exact: true })).toBeVisible({ timeout: 20_000 });
     await expect(page.locator("li.row").filter({ hasText: "Le code de la porte est 4471." })).toBeVisible();
     await page.getByRole("button", { name: "Détruire ce partage", exact: true }).click();
     await page.getByRole("button", { name: "Détruire", exact: true }).click();

@@ -174,6 +174,7 @@ func TestServeStaticDir(t *testing.T) {
 		p    string
 		want int
 	}{{"/", 200}, {"/index.html", 200}, {"/securite", 200}, {"/confidentialite", 200}, {"/securite/", 404},
+		{"/conditions", 200}, {"/mentions-legales", 200}, {"/signaler", 200}, {"/offres", 200}, {"/mentions", 404},
 		{"/s/AAAAAAAAAAAAAAAAAAAAAA", 404}, {"/m/x/y", 404}, {"/nope", 404}, {"/Securite", 404}} {
 		p := c.p
 		for _, m := range []string{"GET", "HEAD"} {
@@ -277,6 +278,10 @@ func TestAppRoutesMatchClientRouter(t *testing.T) {
 	}
 	got := map[string]bool{"/": true}
 	for _, m := range regexp.MustCompile(`if \(p === "(/[a-z-]+)"\) return \{ name: "[a-z]+" \}`).FindAllStringSubmatch(string(src), -1) {
+		got[m[1]] = true
+	}
+	// Pages d'information : table INFO_PATHS ("/chemin": "route").
+	for _, m := range regexp.MustCompile(`(?m)^  "(/[a-z-]+)": "[a-z]+",$`).FindAllStringSubmatch(string(src), -1) {
 		got[m[1]] = true
 	}
 	if len(got) < 3 || !maps.Equal(got, appRoutes) {

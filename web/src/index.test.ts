@@ -47,6 +47,7 @@ describe("interface publique", () => {
         "createShare",
         "destroyShare",
         "fetchMeta",
+        "isGeneratedPassword",
         "MANAGE_FRAGMENT",
         "SHARE_FRAGMENT",
         "SHARE_LINK_SHAPE",

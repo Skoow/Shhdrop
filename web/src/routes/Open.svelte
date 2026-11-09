@@ -11,8 +11,7 @@
   import { createReceiver } from "../flows/receive.svelte";
   import { formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
-  import { isGeneratedPassword } from "../crypto/password";
-  import { PW_TRIES } from "../index";
+  import { PW_TRIES, isGeneratedPassword } from "../index";
   import { announce } from "../ui/announce";
   import Button from "../ui/Button.svelte";
   import { copyText } from "../ui/clipboard";
@@ -218,10 +217,9 @@
         {#if r.state === "open"}
           {#if end === null && !gone.closed}
             <p class="banner num">
-              <!-- Retours UI4 : seulement l'échéance (date et heure de fin, puis « Disponible encore … »). -->
+              <!-- Retours UI5 : seulement l'échéance, date et heure de fin puis décompte (sans « Disponible encore »). -->
               {#if expired}{t("content.expired")}{:else}<Deadline
                   expiresInS={r.remainingS()}
-                  lead={t("open.available")}
                   onexpire={() => {
                     expired = true;
                     gone.closeToGone("countdown"); // aucune requête : l'horloge locale suffit
@@ -234,7 +232,7 @@
             {r.state === "destroyed_by_password" ? t("open.destroyedByPw") : r.reopening ? t("open.reopen.title") : t("open.title")}
           </h1>
           {#if r.state === "locked" || r.state === "reopen" || r.state === "unlocking"}
-            <p class="avail"><Deadline expiresInS={r.remainingS()} lead={t("open.available")} onexpire={() => r.expire()} /></p>
+            <p class="avail"><Deadline expiresInS={r.remainingS()} onexpire={() => r.expire()} /></p>
           {:else if r.state === "meta"}
             <p class="avail">{t("open.loading")}</p>
           {/if}

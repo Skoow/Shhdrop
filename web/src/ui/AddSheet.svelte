@@ -7,6 +7,7 @@
   import { getLang, t } from "../i18n/i18n.svelte";
   import { formatDuration } from "../i18n/format";
   import { CAPTURE_MAX_S, CAPTURE_TIER } from "../limits";
+  import { limitParams } from "../i18n/limit-params";
   import AddIcon from "./AddIcon.svelte";
   import { ChevronDown } from "./Icon";
   import Sheet from "./Sheet.svelte";
@@ -43,9 +44,17 @@
       </li>
     {/each}
   </ul>
+  <!-- Limites gratuites, aussi sur téléphone (retours UI5) : la zone de dépôt ne s'y affiche pas. -->
+  <p class="lim num" data-limits>{t("compose.drop.limit", limitParams(getLang()))}</p>
 </Sheet>
 
 <style>
+  .lim {
+    margin: var(--sp-3) 0 0;
+    color: var(--text-2);
+    font-size: var(--fs-small);
+    text-align: center;
+  }
   ul {
     list-style: none;
     margin: 0;

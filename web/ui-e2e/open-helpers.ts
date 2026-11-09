@@ -89,7 +89,7 @@ export const pwField = (page: Page) => page.getByLabel("Mot de passe", { exact: 
 export async function unlock(page: Page, password: string): Promise<void> {
   await pwField(page).fill(password);
   await unlockButton(page).click();
-  await expect(page.getByRole("heading", { name: "Contenu du partage" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Contenu", exact: true })).toBeVisible({ timeout: 30_000 });
 }
 
 /** Animations finies (entrées, dissolution) : contraste et captures stables. */
@@ -105,3 +105,13 @@ export const settle = (page: Page) =>
 
 /** Ligne d'une note dans la liste du contenu (sa première ligne y est montrée en extrait). */
 export const noteRow = (page: Page, text: string) => page.locator("li.row").filter({ hasText: text.split("\n")[0]!.trim().slice(0, 80) });
+
+/** Aller à la page Sécurité : lien du pied de page s'il est visible, sinon Réglages (onglet ou en-tête). */
+export async function goSecurity(page: Page) {
+  const foot = page.locator("footer.foot").getByRole("link", { name: "Sécurité", exact: true });
+  if (await foot.isVisible()) return foot.click();
+  const tab = page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Réglages" });
+  if (await tab.isVisible()) await tab.click();
+  else await page.getByRole("banner").getByRole("button", { name: "Réglages" }).click();
+  await page.getByRole("dialog", { name: "Réglages" }).getByRole("link", { name: "Sécurité", exact: true }).click();
+}

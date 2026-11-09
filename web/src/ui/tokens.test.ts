@@ -54,11 +54,11 @@ const PAIRS: [string, string, number, number][] = [
   ["--warn", "--surface-2", 10.34, 4.5],
   ["--accent", "--accent-tint", 9.54, 4.5],
   ["--info", "--surface-2", 7.98, 4.5],
-  ["--plus", "--surface-2", 7.98, 4.5],
-  ["--plus", "--plus-tint", 8.04, 4.5],
-  ["--plus", "--bg", 9.2, 4.5],
-  ["--plus-line", "--surface-2", 5.27, 3],
-  ["--plus-line", "--bg", 6.08, 3],
+  ["--plus", "--surface-2", 5.7, 4.5],
+  ["--plus", "--plus-tint", 5.8, 4.5],
+  ["--plus", "--bg", 6.57, 4.5],
+  ["--plus-line", "--surface-2", 4.58, 3],
+  ["--plus-line", "--bg", 5.28, 3],
   ["--line-strong", "--surface-2", 3.5, 3],
 ];
 

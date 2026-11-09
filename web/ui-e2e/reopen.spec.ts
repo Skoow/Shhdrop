@@ -14,7 +14,7 @@ async function reopen(page: Page, password: string): Promise<void> {
   await expect(reopenTitle(page)).toBeVisible();
   await pwField(page).fill(password);
   await reopenButton(page).click();
-  await expect(page.getByRole("heading", { name: "Contenu du partage" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Contenu", exact: true })).toBeVisible({ timeout: 30_000 });
 }
 
 const acceptUnload = (page: Page) => page.on("dialog", (d) => void (d.type() === "beforeunload" ? d.accept() : d.dismiss()));

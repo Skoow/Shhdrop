@@ -8,11 +8,19 @@
   import Sheet from "./Sheet.svelte";
   import Switch from "./Switch.svelte";
   import { fileSettings } from "../flows/settings.svelte";
+  import { BUILD_ID } from "../app/build";
+  import { SOURCE_URL } from "../routes/pages/content";
 
   /** `locked` : pendant un envoi, la langue ne change pas (UI §10). */
   let { open = $bindable(false), locked = false }: { open: boolean; locked?: boolean } = $props();
 
-  const CODE_URL = "https://github.com/Skoow/Shhdrop";
+  const CODE_URL = SOURCE_URL;
+  const INFO_LINKS = [
+    { path: "/offres", key: "foot.offers" },
+    { path: "/signaler", key: "foot.report" },
+    { path: "/conditions", key: "foot.terms" },
+    { path: "/mentions-legales", key: "foot.notice" },
+  ] as const;
   function pick(l: Lang) {
     if (!locked) setLang(l);
   }
@@ -40,10 +48,15 @@
       <h3 id="set-info">{t("settings.info")}</h3>
       <a class="row link" href={href("/securite")} onclick={(e) => go(e, "/securite")}>{t("shell.security")}<ArrowRight size={18} strokeWidth={1.8} aria-hidden="true" /></a>
       <a class="row link" href={href("/confidentialite")} onclick={(e) => go(e, "/confidentialite")}>{t("shell.privacy")}<ArrowRight size={18} strokeWidth={1.8} aria-hidden="true" /></a>
+      <!-- Retours UI5 : sur téléphone, le pied de page n'est qu'en bas de l'accueil ; ses liens sont aussi ici. -->
+      {#each INFO_LINKS as l (l.path)}
+        <a class="row link" href={href(l.path)} onclick={(e) => go(e, l.path)}>{t(l.key)}<ArrowRight size={18} strokeWidth={1.8} aria-hidden="true" /></a>
+      {/each}
     </section>
     <section aria-labelledby="set-about">
       <h3 id="set-about">{t("settings.about")}</h3>
       <p class="about">{t("settings.about.body")}</p>
+      <p class="about num" data-build>{t("foot.version", { v: BUILD_ID })}</p>
       <a class="row link" href={CODE_URL} rel="noopener noreferrer" target="_blank">{t("settings.code")}<ArrowRight size={18} strokeWidth={1.8} aria-hidden="true" /></a>
     </section>
   </div>

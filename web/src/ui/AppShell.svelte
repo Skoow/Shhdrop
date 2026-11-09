@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { BUILD_ID } from "../app/build";
   import { followLink, href, navigate, router } from "../app/router.svelte";
+  import { LICENSE_URL, SOURCE_URL } from "../routes/pages/content";
   import { t } from "../i18n/i18n.svelte";
   import Aurora from "./Aurora.svelte";
   import GearIcon from "./GearIcon.svelte";
@@ -18,8 +20,10 @@
     langLocked?: boolean;
     /** Barre d'onglets du téléphone (app/tabbar.ts) ; rendue sous 900 px seulement (CSS). */
     tabs?: boolean;
+    /** Pied de page (faux pendant la composition et l'envoi : l'écran de travail tient sans défilement). */
+    foot?: boolean;
   };
-  let { children, banner, langLocked = false, tabs = false }: Props = $props();
+  let { children, banner, langLocked = false, tabs = false, foot = true }: Props = $props();
 
   // Téléphone : la page réserve la hauteur de la barre d'onglets (base.css, html.has-tabbar).
   $effect(() => {
@@ -70,7 +74,43 @@
   // Téléphone (< 900 px), en-tête d'écran natif : retour en haut à gauche sur les pages
   // secondaires de l'expéditeur, et le grand titre de l'écran qui se réduit dans la barre une
   // fois défilé (titre marqué data-large-title, sinon le h1 de l'écran). Sur ordinateur, rien ne change.
-  const BACK: ReadonlySet<string> = new Set(["securite", "confidentialite", "notfound", "manage"]);
+  const INFO: ReadonlySet<string> = new Set(["securite", "confidentialite", "conditions", "mentions", "signaler", "offres"]);
+  const BACK: ReadonlySet<string> = new Set([...INFO, "notfound", "manage"]);
+  // Pied de page (retours UI5) : partout sur ordinateur ; sur téléphone, en bas de l'accueil et
+  // des pages d'information seulement (ailleurs, ces liens sont dans Réglages).
+  const footOnPhone = $derived(router.current.name === "home" || router.current.name === "notfound" || INFO.has(router.current.name));
+  type FootLink = { label: string; path?: string; url?: string; soon?: boolean };
+  const footCols = $derived<{ id: string; title: string; links: FootLink[] }[]>([
+    {
+      id: "product",
+      title: t("foot.product"),
+      links: [
+        { label: t("foot.send"), path: "/" },
+        { label: t("foot.room"), soon: true },
+        { label: t("foot.offers"), path: "/offres" },
+      ],
+    },
+    {
+      id: "trust",
+      title: t("foot.trust"),
+      links: [
+        { label: t("shell.security"), path: "/securite" },
+        { label: t("shell.privacy"), path: "/confidentialite" },
+        { label: t("foot.source"), url: SOURCE_URL },
+        { label: t("foot.report"), path: "/signaler" },
+      ],
+    },
+    {
+      id: "legal",
+      title: t("foot.legal"),
+      links: [
+        { label: t("foot.terms"), path: "/conditions" },
+        { label: t("foot.notice"), path: "/mentions-legales" },
+        { label: t("foot.license"), url: LICENSE_URL },
+      ],
+    },
+  ]);
+  const pathHere = (p: string) => (router.current.name !== "notfound" && location.pathname === href(p) ? "page" : undefined);
   const back = $derived(BACK.has(router.current.name));
   let small = $state("");
   let raf = 0;
@@ -121,7 +161,7 @@
       <Logo />
     </a>
     <button type="button" class={["gear", { phone: gearOnPhone }]} aria-label={t("settings.title")} title={t("settings.title")} aria-haspopup="dialog" aria-expanded={settingsOpen} onclick={() => (settingsOpen = true)}>
-      <GearIcon size={22} />
+      <GearIcon size={26} />
     </button>
   </div>
 </header>
@@ -130,14 +170,37 @@
   {@render children()}
 </main>
 
-<footer class="foot">
+{#if foot}
+<footer class={["foot", { phone: footOnPhone }]} data-foot>
   <div class="wrap foot-in">
-    <nav aria-label={t("shell.nav")}>
-      <a href={href("/securite")} aria-current={here("securite")} onclick={(e) => followLink(e, "/securite")}>{t("shell.security")}</a>
-      <a href={href("/confidentialite")} aria-current={here("confidentialite")} onclick={(e) => followLink(e, "/confidentialite")}>{t("shell.privacy")}</a>
+    <nav class="cols" aria-label={t("shell.nav")}>
+      {#each footCols as col (col.id)}
+        <div class="col">
+          <p class="ch" id="foot-{col.id}">{col.title}</p>
+          <ul aria-labelledby="foot-{col.id}">
+            {#each col.links as l (l.label)}
+              <li>
+                {#if l.soon}
+                  <span class="off">{l.label} <span class="soon">{t("foot.soon")}</span></span>
+                {:else if l.url}
+                  <a href={l.url} target="_blank" rel="noopener noreferrer">{l.label}<span class="sr-only"> {t("foot.external")}</span></a>
+                {:else if l.path}
+                  <a href={href(l.path)} aria-current={pathHere(l.path)} onclick={(e) => followLink(e, l.path!)}>{l.label}</a>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        </div>
+      {/each}
     </nav>
+    <div class="base">
+      <p>{t("foot.notrack")}</p>
+      <p>{t("foot.copy")}</p>
+      <p class="num" data-build>{t("foot.version", { v: BUILD_ID })}</p>
+    </div>
   </div>
 </footer>
+{/if}
 
 {#if tabs}<TabBar />{/if}
 
@@ -213,6 +276,17 @@
   .banner-slot ~ .top {
     padding-top: 0;
   }
+  /* Retours UI5 : sur téléphone, un peu d'air au-dessus du logo et de Réglages, en plus de la
+     zone sûre (sur ordinateur, la barre de 64 px les centre déjà). */
+  @media (max-width: 899px) {
+    .top,
+    .banner-slot ~ .top {
+      padding-top: calc(env(safe-area-inset-top, 0px) + var(--sp-2));
+    }
+    .banner-slot ~ .top {
+      padding-top: var(--sp-2);
+    }
+  }
   /* Verre mobile (§5.4) : le contenu défile dessous, le flou est donc justifié (K6). */
   .top.scrolled {
     background: var(--glass);
@@ -257,12 +331,14 @@
     border-radius: var(--r-sm);
   }
   /* Réglages : discret, une icône seule (nom accessible « Réglages »), sans cadre. */
+  /* Réglages (retours UI5) : icône de 26 px, cible de 48 px, sur ordinateur aussi. */
   .gear {
     display: grid;
     place-items: center;
-    width: 44px;
-    height: 44px;
+    width: 48px;
+    height: 48px;
     margin-inline-start: auto;
+    margin-inline-end: -8px;
     padding: 0;
     border: 0;
     border-radius: 12px;
@@ -299,42 +375,83 @@
   .foot {
     border-block-start: 1px solid var(--hair);
     margin-block-start: var(--sp-8);
-    padding-block: var(--sp-5) calc(var(--sp-5) + env(safe-area-inset-bottom));
+    padding-block: var(--sp-6) calc(var(--sp-6) + env(safe-area-inset-bottom));
   }
-  /* Téléphone avec onglets : Sécurité et Confidentialité sont dans « Réglages ». */
+  /* Téléphone : seulement sur l'accueil et les pages d'information (ailleurs : Réglages). */
   @media (max-width: 899px) {
-    :global(html.has-tabbar) .foot {
+    .foot:not(.phone) {
       display: none;
     }
   }
   .foot-in {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--sp-3) var(--sp-5);
+    display: grid;
+    gap: var(--sp-6);
   }
-  nav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--sp-2) var(--sp-5);
+  .cols {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    gap: var(--sp-5) var(--sp-6);
   }
-  nav a {
+  .ch {
+    margin: 0 0 var(--sp-2);
+    color: var(--text);
+    font-size: var(--fs-small);
+    font-weight: 640;
+  }
+  .col ul {
+    display: grid;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .col a,
+  .off {
     display: inline-flex;
     align-items: center;
+    gap: var(--sp-2);
     min-height: 44px;
     color: var(--text-2);
+    font-size: var(--fs-small);
     text-underline-offset: 0.2em;
   }
-  nav a[aria-current="page"] {
+  .col a[aria-current="page"] {
     color: var(--text);
   }
+  .off {
+    color: var(--text-3);
+  }
+  .soon {
+    padding: 1px 8px;
+    border-radius: var(--r-pill);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: var(--fs-micro);
+  }
   @media (hover: hover) {
-    nav a:hover {
+    .col a:hover {
       color: var(--text);
     }
   }
-
+  .base {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2) var(--sp-5);
+    padding-block-start: var(--sp-4);
+    border-block-start: 1px solid var(--hair);
+    color: var(--text-3);
+    font-size: var(--fs-small);
+  }
+  .base p {
+    margin: 0;
+  }
+  @media (max-width: 599px) {
+    .cols {
+      grid-template-columns: 1fr 1fr;
+    }
+    .cols .col:last-child {
+      grid-column: 1 / -1;
+    }
+  }
 
   .back,
   .small {

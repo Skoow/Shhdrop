@@ -1,4 +1,6 @@
 <script lang="ts">
+  import InfoPage from "./routes/InfoPage.svelte";
+  import Offres from "./routes/Offres.svelte";
   import { untrack } from "svelte";
   import { getDemo } from "./app/demo-hooks";
   import { inAppBrowser, isStandalone, isSupported } from "./app/env";
@@ -102,7 +104,8 @@
   {#if demo}<demo.Banner />{/if}
 {/snippet}
 
-<AppShell banner={demo ? demoBanner : undefined} langLocked={sending} {tabs}>
+<!-- Pied de page masqué pendant la composition et l'envoi : l'écran de travail tient sans défilement (UI §22). -->
+<AppShell banner={demo ? demoBanner : undefined} langLocked={sending} {tabs} foot={!chrome.composing && !sending}>
   {#if !supported}
     <Unsupported />
   {:else if router.current.name === "notfound"}
@@ -114,8 +117,10 @@
     {#key linkGen}<Open take={takeShare} />{/key}
   {:else if router.current.name === "manage"}
     {#key linkGen}<Manage take={takeManage} />{/key}
+  {:else if router.current.name === "offres"}
+    <Offres />
   {:else}
-    <!-- Écrans des tâches suivantes : sécurité, confidentialité. -->
-    <h1 tabindex="-1">Shhdrop</h1>
+    <!-- Pages d'information (pied de page, retours UI5). -->
+    <InfoPage name={router.current.name} />
   {/if}
 </AppShell>

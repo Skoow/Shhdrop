@@ -144,7 +144,8 @@
   $effect(() => {
     if (!movable && moving) moving = false;
   });
-  const lock = $derived(sendLock(upload));
+  // Chaque ligne a son cadenas (UI5) : un texte reste gris, il part dans le manifeste au clic.
+  const lock = $derived(sendLock(upload, item.kind === "text" ? "text" : "file"));
 </script>
 
 <!-- Alt + ↑/↓ depuis la poignée ou un bouton de la ligne (l'événement remonte). -->
@@ -160,7 +161,10 @@
     <span class="grip-slot" aria-hidden="true"></span>
   {/if}
 
-  <span class="pic"><FormatIcon {format} /></span>
+  <span class="pic">
+    <FormatIcon {format} />
+    <LockMark badge tone={lock.tone} text={t(lock.key, { n: lock.n })} role={lock.tone === "error" ? "alert" : undefined} />
+  </span>
 
   <div class="main">
     {#if editing}
@@ -200,12 +204,13 @@
         <span class="num">{formatBytes(item.size, getLang())}</span>
         {#if duration !== null}<span class="sep" aria-hidden="true">·</span><span class="num">{formatClock(duration)}</span>{/if}
         {#if upload}
-          <span class="sep" aria-hidden="true">·</span>
+          <!-- État de l'envoi : barre et Réessayer seulement ; le libellé est dans la bulle du cadenas. -->
+          {@const busy = upload.key === "compose.up.envoi" || upload.key === "compose.up.chiffrement"}
+          {@const retry = upload.key === "compose.up.erreur" && !!onretry}
+          {#if busy || retry}<span class="sep" aria-hidden="true">·</span>{/if}
           <span class={["up", upload.key.slice(11)]} data-up={upload.key.slice(11)}>
-            <LockMark tone={lock!.tone} text={t(upload.key, { n: upload.percent })} role={lock!.tone === "error" ? "alert" : undefined}>
-              {#if upload.key === "compose.up.envoi" || upload.key === "compose.up.chiffrement"}<span class="bar" aria-hidden="true"><span style:width="{upload.percent}%"></span></span>{/if}
-              {#if upload.key === "compose.up.erreur" && onretry}<button type="button" class="retry" onclick={onretry} aria-label={t("compose.up.retry", { name })}>{t("common.retry")}</button>{/if}
-            </LockMark>
+            {#if busy}<span class="bar" aria-hidden="true"><span style:width="{upload.percent}%"></span></span>{/if}
+            {#if retry}<button type="button" class="retry" onclick={onretry} aria-label={t("compose.up.retry", { name })}>{t("common.retry")}</button>{/if}
           </span>
         {/if}
         <ItemNotes {item} {cannotOpen} badgesOnly unclean={compact ? undefined : "skip"} />
@@ -283,6 +288,7 @@
     margin-inline: -6px;
   }
   .pic {
+    position: relative;
     display: grid;
     place-items: center;
     width: 44px;

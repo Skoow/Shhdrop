@@ -85,7 +85,11 @@ test.describe("téléphone façon app", () => {
     expect(await smallTargets(page, "body")).toEqual([]);
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).overscrollBehaviorY)).toBe("none");
     expect(await noHScroll(page)).toBe(true);
-    await expect(page.locator("footer.foot")).toBeHidden(); // liens dans Réglages
+    // UI5 : pied de page visible en bas de l'accueil, téléphone compris.
+    await expect(page.locator("footer.foot")).toBeAttached();
+    await page.locator("footer.foot").scrollIntoViewIfNeeded();
+    await expect(page.locator("footer.foot")).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, 0));
     // Plus de sélecteur de langue en haut à droite : la langue se change dans Réglages.
     const banner = page.getByRole("banner");
     await expect(banner.getByRole("button", { name: /English|Français/ })).toHaveCount(0);

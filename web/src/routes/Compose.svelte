@@ -256,7 +256,8 @@
       // Ce qui est sous l'app (bas du cadre, pied de page), mesuré jusqu'au bas du pied de page :
       // la hauteur du document (et du corps) vaut au moins celle de l'écran, elle fausserait la mesure.
       const r = node.getBoundingClientRect();
-      const end = document.querySelector("body > footer, footer.foot") ?? document.body;
+      // Sans pied de page (masqué pendant la composition, UI §22) : le bas de <main>.
+      const end = document.querySelector("body > footer, footer.foot") ?? document.querySelector("main") ?? document.body;
       const tail = end.getBoundingClientRect().bottom - r.bottom;
       node.style.setProperty("--app-h", `${Math.max(520, Math.floor(innerHeight - (r.top + scrollY) - tail))}px`);
     };

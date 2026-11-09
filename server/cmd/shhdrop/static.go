@@ -86,9 +86,13 @@ func staticHandler(dir string) (http.Handler, error) {
 // appRoutes : chemins de l'application qui répondent 200 (voir match() dans
 // web/src/app/router.svelte.ts ; un test compare les deux listes).
 var appRoutes = map[string]bool{
-	"/":                true,
-	"/securite":        true,
-	"/confidentialite": true,
+	"/":                 true,
+	"/securite":         true,
+	"/confidentialite":  true,
+	"/conditions":       true,
+	"/mentions-legales": true,
+	"/signaler":         true,
+	"/offres":           true,
 }
 
 // staticName : chemin de l'URL → nom dans le dossier ; refuse les segments cachés.

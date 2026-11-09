@@ -21,8 +21,18 @@ export function markReopen(h: History): void {
 const reopenHere = () =>
   typeof history !== "undefined" && (history.state as Record<string, unknown> | null)?.[REOPEN_MARK] === true;
 
+/** Pages d'information (pied de page, retours UI5) : chemin → route. */
+export type InfoRoute = "securite" | "confidentialite" | "conditions" | "mentions" | "signaler";
+export const INFO_PATHS: Readonly<Record<string, InfoRoute>> = {
+  "/securite": "securite",
+  "/confidentialite": "confidentialite",
+  "/conditions": "conditions",
+  "/mentions-legales": "mentions",
+  "/signaler": "signaler",
+};
+
 export type Route = {
-  name: "home" | "open" | "manage" | "securite" | "confidentialite" | "notfound";
+  name: "home" | "open" | "manage" | InfoRoute | "offres" | "notfound";
 };
 
 /**
@@ -47,8 +57,9 @@ export function match(pathname: string, hash = "", base: string = import.meta.en
     if (hash === "" && reopen) return { name: "open" };
     return { name: "home" };
   }
-  if (p === "/securite") return { name: "securite" };
-  if (p === "/confidentialite") return { name: "confidentialite" };
+  const info = INFO_PATHS[p];
+  if (info !== undefined) return { name: info };
+  if (p === "/offres") return { name: "offres" };
   // « /s/ » reste réservé aux futurs liens universels (spec §16) : aucune route aujourd'hui.
   return { name: "notfound" };
 }

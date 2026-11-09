@@ -49,7 +49,7 @@ export {
   TTL_MAX_HOURS,
   type TtlHours,
 } from "./limits";
-export { PASSWORD_ALPHABET, PASSWORD_LEN, generatePassword, type GeneratedPassword } from "./crypto/password";
+export { PASSWORD_ALPHABET, PASSWORD_LEN, generatePassword, isGeneratedPassword, type GeneratedPassword } from "./crypto/password";
 export {
   MANAGE_FRAGMENT,
   SHARE_FRAGMENT,

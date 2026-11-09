@@ -11,6 +11,7 @@ import { openFilePicker } from "./send-helpers";
 test.use({ locale: "fr-FR" });
 
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-LOCK/", import.meta.url));
+const SHOTS5 = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-UI5/", import.meta.url));
 
 test("envoi : cadenas gris tant que le segment n'est pas confirmé, vert après ; marques « Non nettoyé »", async ({ page, shh, isMobile }) => {
   test.setTimeout(90_000);
@@ -42,11 +43,14 @@ test("envoi : cadenas gris tant que le segment n'est pas confirmé, vert après 
     { name: "archive.zip", mimeType: "application/zip", buffer: readFileSync(file("archive.zip")) },
   ]);
   await expect(page.locator('[data-lock="ok"]')).toHaveCount(4, { timeout: 30_000 });
+  // UI5 : une pastille cadenas sur l'icône de format de CHAQUE ligne.
+  await expect(page.locator("[data-row] .pic [data-lock]")).toHaveCount(await page.locator("[data-row]").count());
   await settle(page);
   await page.screenshot({ path: `${SHOTS}compose-locks-${isMobile ? 390 : 1440}.png` });
+  await page.screenshot({ path: `${SHOTS5}composeur-cadenas-${isMobile ? 390 : 1440}.png` });
 });
 
-test("réception : vert pour le texte (manifeste vérifié) ; fichier sans cadenas avant lecture, vert seulement une fois lu en entier", async ({ page, shh, browser, isMobile }) => {
+test("réception : ouvert vert pour le texte (manifeste vérifié) ; fichier fermé gris avant lecture, ouvert vert seulement une fois lu en entier", async ({ page, shh, browser, isMobile }) => {
   test.setTimeout(120_000);
   const s = await freshPage(browser);
   const sent = await sendShare(s.page, shh.origin + "/", { text: "Code de la porte : 4512B", files: [file("foret-brume.jpg"), file("contrat.pdf")] });
@@ -59,7 +63,7 @@ test("réception : vert pour le texte (manifeste vérifié) ; fichier sans caden
   await page.goto(sent.link);
   await unlock(page, sent.password);
   const note = page.locator("li.row").filter({ hasText: "Code de la porte" });
-  const noteLock = note.locator('[data-lock="ok"] button');
+  const noteLock = note.locator('[data-lock="open"] button');
   await expect(noteLock).toHaveAccessibleName("Déchiffré et vérifié");
   // Bulle : au survol (souris) ou à l'appui (tactile, bascule) ; Échap la ferme.
   const tip = page.getByRole("tooltip", { name: "Déchiffré et vérifié" });
@@ -76,13 +80,15 @@ test("réception : vert pour le texte (manifeste vérifié) ; fichier sans caden
     await expect(tip).toBeHidden();
   }
   const photo = page.locator("li.row").filter({ hasText: "foret-brume" });
-  await expect(photo.locator("[data-lock]")).toHaveCount(0);
+  await expect(photo.locator('.pic [data-lock="wait"] button')).toHaveAccessibleName("Chiffré, pas encore ouvert");
+  await expect(page.locator("li.row .pic [data-lock]")).toHaveCount(3); // chaque ligne a sa pastille
   for (const n of ["foret-brume.jpg", "contrat.pdf"]) {
     await page.getByRole("button", { name: `Télécharger ${n}` }).click();
     await expect(page.locator("li.row").filter({ hasText: n.split(".")[0]! })).toHaveAttribute("data-state", "done", { timeout: 30_000 });
   }
-  await expect(photo.locator('[data-lock="ok"] button')).toHaveAccessibleName("Déchiffré et vérifié");
-  await expect(page.locator('li.row [data-lock="ok"]')).toHaveCount(3);
+  await expect(photo.locator('[data-lock="open"] button')).toHaveAccessibleName("Déchiffré et vérifié");
+  await expect(page.locator('li.row [data-lock="open"]')).toHaveCount(3);
   await settle(page);
   await page.screenshot({ path: `${SHOTS}content-locks-${isMobile ? 390 : 1440}.png` });
+  await page.screenshot({ path: `${SHOTS5}destinataire-cadenas-${isMobile ? 390 : 1440}.png` });
 });

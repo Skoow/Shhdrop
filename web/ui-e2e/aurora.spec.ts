@@ -126,8 +126,8 @@ const frames = (page: Page) => page.evaluate(() => new Promise((r) => requestAni
 
 async function hideContent(page: Page) {
   await page.evaluate(() => {
-    // Tout ce qui n'est pas l'aurore ni le grain : contenu, en-tête, pied, lien d'évitement.
-    for (const el of document.querySelectorAll<HTMLElement>("main, header, footer, .skip, .banner-slot"))
+    // Tout ce qui n'est pas l'aurore ni le grain : contenu, en-tête, pied, lien d'évitement, onglets.
+    for (const el of document.querySelectorAll<HTMLElement>("main, header, footer, .skip, .banner-slot, [data-tabbar]"))
       el.style.visibility = "hidden";
   });
 }

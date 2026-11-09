@@ -494,7 +494,7 @@ test.describe("fr-FR", () => {
       await expect(page.locator("#send-reason")).toHaveText("Le total dépasse 2 Go. Retirez des éléments.");
       // D41-16 : sous l'erreur, une ligne discrète (ni alerte, ni fenêtre) et « En savoir plus ».
       const up = page.locator(".top [data-upsell]");
-      await expect(up).toHaveText(/^Avec Plus\s:\sjusqu'à 10\sGo et 7\sjours\.\s*En savoir plus$/);
+      await expect(up).toHaveText(/^Avec Plus\s:\sjusqu'à 10\sGo par partage et 7\sjours\.\s*En savoir plus$/);
       await expect(page.getByRole("dialog")).toHaveCount(0);
       await page.waitForTimeout(6500);
       await capture(page, "compose-limit-size");

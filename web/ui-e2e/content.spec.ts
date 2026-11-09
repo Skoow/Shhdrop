@@ -3,7 +3,7 @@
 // fichiers piégés jamais affichés, échec de décodage, expiration, destruction pendant la lecture.
 import { destroyShare } from "../src/index";
 import { axe, capture, expect, test } from "./fixtures";
-import { file, freshPage, sendShare, settle, unlock, type Sent } from "./open-helpers";
+import { file, freshPage, goSecurity, sendShare, settle, unlock, type Sent } from "./open-helpers";
 
 const TEXT = "Le code de la porte est 4471.\nالطابق الثالث — escalier B.";
 const FILES = ["foret-brume.jpg", "anniversaire-lou.webm", "vocal.ogg", "trap.svg", "trap.html", "hevc.mov"].map(file);
@@ -102,7 +102,7 @@ test("expiration pendant la lecture, rien en cours → l'interface se ferme auss
   page.on("request", (r) => void (new URL(r.url()).pathname.startsWith("/api/") && api.push(r.url())));
   await page.clock.fastForward("12:30:00");
   await expect(page.getByRole("heading", { name: "Ce partage a expiré." })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Contenu du partage" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Contenu", exact: true })).toHaveCount(0);
   await expect(page.locator("li.row, pre[dir=auto], video, audio, img[src^=blob]")).toHaveCount(0);
   expect(await page.evaluate(() => document.body.innerText)).not.toMatch(/anniversaire-lou|trap\.svg|4471/);
   await expect(page).toHaveTitle("Partage indisponible · Shhdrop");
@@ -135,11 +135,11 @@ test("destruction par l'expéditeur pendant la lecture → l'interface se ferme 
   expect(prevented).toBe(true);
 
   // Quitter puis revenir : la page ne garde rien du partage.
-  await page.getByRole("link", { name: "Sécurité", exact: true }).click();
+  await goSecurity(page);
   await expect(page).toHaveURL(`${shh.origin}/securite`);
   await page.goBack();
   await expect(page).toHaveURL(`${shh.origin}/`);
-  await expect(page.getByRole("heading", { name: "Contenu du partage" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Contenu", exact: true })).toHaveCount(0);
   expect(await page.content()).not.toContain("الطابق الثالث");
 });
 
@@ -182,7 +182,7 @@ test.describe("en-US", () => {
     await capture(page, "open-en");
     await page.getByLabel("Password", { exact: true }).fill(sent.password);
     await page.getByRole("button", { name: "Unlock" }).click();
-    await expect(page.getByRole("heading", { name: "Share contents" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Contents", exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("button", { name: "Destroy this share", exact: true })).toBeVisible();
     await settle(page);
     await capture(page, "content-en");

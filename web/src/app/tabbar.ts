@@ -15,7 +15,7 @@ export const TABS: readonly { id: TabId; soon: boolean }[] = [
   { id: "settings", soon: false },
 ];
 
-const ROOTS: ReadonlySet<Route["name"]> = new Set(["home", "securite", "confidentialite", "notfound"]);
+const ROOTS: ReadonlySet<Route["name"]> = new Set(["home", "securite", "confidentialite", "conditions", "mentions", "signaler", "offres", "notfound"]);
 
 export function tabBarVisible(o: { supported: boolean; route: Route["name"]; sending: boolean; composing: boolean }): boolean {
   return o.supported && !o.sending && !o.composing && ROOTS.has(o.route);
@@ -24,6 +24,6 @@ export function tabBarVisible(o: { supported: boolean; route: Route["name"]; sen
 /** Onglet courant : Envoyer sur l'accueil ; Réglages sur les pages d'information. */
 export function currentTab(route: Route["name"]): TabId | null {
   if (route === "home") return "send";
-  if (route === "securite" || route === "confidentialite") return "settings";
+  if (route === "securite" || route === "confidentialite" || route === "conditions" || route === "mentions" || route === "signaler" || route === "offres") return "settings";
   return null;
 }

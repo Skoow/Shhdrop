@@ -2,6 +2,7 @@
 // dépôt de fichier neutralisé hors du composeur (UI §9.2.2).
 import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
+import { goSecurity } from "./open-helpers";
 
 const KEY = Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => 255 - i * 3)).toString("base64url");
 const KEY2 = Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => i * 5)).toString("base64url");
@@ -115,7 +116,7 @@ for (const [kind, frag] of [
 
     // Retour / Avant : aucune entrée d'historique ne réaffiche le #, et le retrait n'a pas
     // ajouté d'entrée (replaceState) : une seule entrée « / » de l'origine avant « /securite ».
-    await page.getByRole("link", { name: "Sécurité", exact: true }).click();
+    await goSecurity(page);
     await expect(page).toHaveURL(`${shh.origin}/securite`);
     expectOnlyOwnEntries(await walkHistory(page, [KEY]), shh.origin, ["/", "/securite"]);
     // Rechargement : rien ne revient.
@@ -211,14 +212,6 @@ test("fichier déposé sur /s/x : défaut empêché, l'adresse ne change pas", a
 
 // Sécurité : lien du pied de page ; téléphone avec onglets (pied masqué) : onglet Réglages ;
 // écrans sans onglets (destinataire, gestion) : Réglages de l'en-tête. Même feuille Réglages.
-async function goSecurity(page: Page) {
-  const foot = page.locator("footer.foot").getByRole("link", { name: "Sécurité", exact: true });
-  if (await foot.isVisible()) return foot.click();
-  const tab = page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Réglages" });
-  if (await tab.isVisible()) await tab.click();
-  else await page.getByRole("banner").getByRole("button", { name: "Réglages" }).click();
-  await page.getByRole("dialog", { name: "Réglages" }).getByRole("link", { name: "Sécurité", exact: true }).click();
-}
 
 // I1 : liens abîmés (ponctuation ajoutée par une messagerie, autre chemin, ancien format
 // /s/{id}, majuscule) : le routeur les classe en accueil ou en 404, le « # » est retiré quand même.

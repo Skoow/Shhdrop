@@ -22,11 +22,28 @@ for (const p of ["/s/x", "/m/x"]) {
   });
 }
 
-test("pied de page : seulement les liens Sécurité et Confidentialité", async ({ page, shh }) => {
+test.describe("fr-FR", () => {
+  test.use({ locale: "fr-FR" });
+test("pied de page (UI5) : Produit, Confiance, Légal ; sans traceur ; © ; version du build ; visible en bas de l'accueil, téléphone compris", async ({ page, shh }) => {
   await page.goto(shh.origin + "/");
-  const foot = page.locator("footer");
-  await expect(foot.getByRole("link")).toHaveCount(2);
-  await expect(foot.locator("p")).toHaveCount(0);
+  const foot = page.locator("footer[data-foot]");
+  await foot.scrollIntoViewIfNeeded();
+  await expect(foot).toBeVisible();
+  for (const c of ["Produit", "Confiance", "Légal"]) await expect(foot.getByText(c, { exact: true })).toBeVisible();
+  for (const l of ["Envoyer", "Offres Plus et Pro", "Sécurité", "Confidentialité", "Code source sur GitHub", "Signaler un abus", "Conditions d'utilisation", "Mentions légales", "Licence AGPL-3.0"])
+    await expect(foot.getByRole("link", { name: new RegExp(`^${l}`) })).toBeVisible();
+  await expect(foot.getByRole("link")).toHaveCount(9);
+  await expect(foot.getByText(/^Salon\s+bientôt$/)).toBeVisible(); // pas un lien
+  await expect(foot.getByRole("link", { name: /^Code source/ })).toHaveAttribute("href", "https://github.com/Skoow/Shhdrop");
+  await expect(foot.getByRole("link", { name: /^Code source/ })).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(foot.getByText("Aucun traceur, aucune publicité")).toBeVisible();
+  await expect(foot.getByText(/^©\s2026\sShhdrop$/)).toBeVisible();
+  await expect(foot.locator("[data-build]")).toHaveText(/^Version ([0-9a-f]{7}|dev)$/);
+  await expect(foot.getByRole("combobox")).toHaveCount(0); // la langue est dans Réglages
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(600); // fin des apparitions au défilement
+  expect(await axe(page)).toEqual([]);
+});
 });
 
 test("robots.txt interdit /s/ et /m/", async ({ request, shh }) => {

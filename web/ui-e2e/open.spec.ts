@@ -48,7 +48,8 @@ test("mauvais mot de passe deux fois → « 3 essais restants », bon → conten
   await expect(unlockButton(page)).toHaveAccessibleDescription(cost);
   await expect(page.getByText("Le serveur ne reçoit que des données chiffrées, jamais la clé.")).toBeVisible();
   await expect(page.getByText(`${PW_TRIES} essais ratés, et le partage est détruit.`)).toBeVisible();
-  await expect(page.getByText(/^Disponible encore \d+\sh/)).toBeVisible();
+  await expect(page.locator("[data-deadline] .left")).toHaveText(/^\d+\sh/);
+  await expect(page.getByText("Disponible encore")).toHaveCount(0);
   // Mot de passe vide : bouton désactivé.
   await expect(unlockButton(page)).toBeDisabled();
   // Attributs de saisie (UI §12.3), hors de tout <form>.

@@ -24,11 +24,12 @@
   --warn: #F2C46D;
   --warn-tint: #2A2312;
   --info: #8DB2FF;
-  /* Formules payantes Plus et Pro (retours UI4) : bleu, jamais le vert de l'action. Texte
-     ≥ 4,5:1 sur tous les fonds ; --plus-line (pointillés, bordures) ≥ 3:1. */
-  --plus: #8DB2FF;
-  --plus-tint: #131C30;
-  --plus-line: #6A8FDB;
+  /* Formules payantes Plus et Pro (retours UI4, bleu franc depuis UI5 : plus de violet) :
+     jamais le vert de l'action. Texte ≥ 4,5:1 sur tous les fonds ; --plus-line (pointillés,
+     bordures, #3B82F6) ≥ 3:1. */
+  --plus: #5596F8;
+  --plus-tint: #0F1B33;
+  --plus-line: #3B82F6;
   --selection: rgb(95 227 181 / 0.28);
   --scrim: rgb(5 7 10 / 0.72);
 

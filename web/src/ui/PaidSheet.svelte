@@ -3,11 +3,12 @@
   // ajoute, son prix prévu et « Bientôt disponible ». Rien n'est en vente : aucun bouton
   // d'achat, aucun formulaire, aucune urgence ; « Compris » ferme. Chiffres lus dans PAID et
   // dans les constantes du gratuit, jamais écrits dans les textes.
-  import { CONTENT_MAX, MAX_OPENS, PAID, TTL_MAX_HOURS, type PaidTier } from "../limits";
-  import { formatBytes, formatDuration } from "../i18n/format";
+  import { MAX_OPENS, PAID, TTL_MAX_HOURS, type PaidTier } from "../limits";
+  import { formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import Button from "./Button.svelte";
   import { Check, Clock } from "./Icon";
+  import OffersTable from "./OffersTable.svelte";
   import Sheet from "./Sheet.svelte";
 
   type Props = { open: boolean; tier: PaidTier };
@@ -26,9 +27,9 @@
 
 <Sheet bind:open title={t("paid.title", { tier: name })}>
   <div class="paid" data-paid={tier}>
-    <!-- Le stockage maximal de l'offre, en grand (retours UI4). -->
-    <p class="hero num"><b>{formatBytes(p.bytes, lang)}</b><span>{t("paid.hero", { free: formatBytes(CONTENT_MAX, lang) })}</span></p>
     <p class="lead">{t("paid.lead")}</p>
+    <!-- Retours UI5 : la taille dite « par partage », dans la comparaison des offres (plus de chiffre seul en grand). -->
+    <OffersTable highlight={tier} />
     <h3 class="h">{t("paid.unlocks", { tier: name })}</h3>
     <ul class="list">
       {#each lines as l, i (i)}<li><Check size={16} strokeWidth={2.2} aria-hidden="true" /><span class="num">{l}</span></li>{/each}
@@ -71,27 +72,6 @@
     flex: none;
     margin-top: 3px;
     color: var(--plus);
-  }
-  .hero {
-    display: grid;
-    gap: 2px;
-    margin: 0;
-    padding: var(--sp-4);
-    border: 1px solid var(--plus-line);
-    border-radius: 14px;
-    background: var(--plus-tint);
-  }
-  .hero b {
-    color: var(--plus);
-    font-size: var(--fs-h1);
-    font-weight: 680;
-    font-stretch: 108%;
-    line-height: 1.05;
-    letter-spacing: -0.02em;
-  }
-  .hero span {
-    color: var(--text-2);
-    font-size: var(--fs-small);
   }
   .soon {
     display: flex;

@@ -20,10 +20,11 @@ test("destinataire, dernière ouverture : bulle du cadenas, groupes, « Détruir
   await page.goto(sent.link);
   await unlock(page, sent.password);
   await expect(noteRow(page, TEXT)).toBeVisible();
-  // En-tête : seulement l'échéance (date et heure, puis « Disponible encore … »).
+  // En-tête : seulement l'échéance (date et heure, puis le décompte ; plus « Disponible encore », UI5).
   const cap = page.locator("[data-capsule]");
   await expect(cap.locator("[data-deadline] .ends")).toHaveText(/^Se termine le \d+\s\S+ à \d+\sh\s\d{2}$/);
-  await expect(cap.locator("[data-deadline] .left")).toHaveText(/^Disponible encore \d+\sh(\s\d{2}\smin)?$/);
+  await expect(cap.locator("[data-deadline] .left")).toHaveText(/^\d+\sh(\s\d{2}\smin)?$/);
+  await expect(cap).not.toContainText("Disponible encore");
   await expect(cap).not.toContainText(/quittez la page|Recharger/);
   // Groupe : bandeau du titre séparé de ses éléments par un filet.
   const head = page.locator('[data-group="texte"] .gh');
@@ -38,7 +39,7 @@ test("destinataire, dernière ouverture : bulle du cadenas, groupes, « Détruir
   expect(await axe(page)).toEqual([]);
   await page.screenshot({ path: `${SHOTS}content-last-${w(isMobile)}.png`, fullPage: true });
   // Bulle du cadenas ouverte (appui sur téléphone, survol à la souris).
-  const lock = noteRow(page, TEXT).locator('[data-lock="ok"] button');
+  const lock = noteRow(page, TEXT).locator('[data-lock="open"] button');
   await lock.scrollIntoViewIfNeeded();
   if (isMobile) await lock.tap();
   else await lock.hover();
@@ -70,7 +71,7 @@ test("Lien prêt : échéance en deux lignes ; options : Plus et Pro en bleu", a
   if (isMobile) await page.getByRole("button", { name: /^Options · / }).click();
   const lk = page.locator("[data-locked] button, button[data-locked]").filter({ visible: true }).first();
   await expect(lk).toBeVisible();
-  expect(await lk.evaluate((e) => [getComputedStyle(e).color, getComputedStyle(e).borderTopStyle, getComputedStyle(e).borderTopColor])).toEqual(["rgb(141, 178, 255)", "dashed", "rgb(106, 143, 219)"]);
+  expect(await lk.evaluate((e) => [getComputedStyle(e).color, getComputedStyle(e).borderTopStyle, getComputedStyle(e).borderTopColor])).toEqual(["rgb(85, 150, 248)", "dashed", "rgb(59, 130, 246)"]);
   await settle(page);
   await page.screenshot({ path: `${SHOTS}options-plus-${w(isMobile)}.png`, fullPage: !isMobile });
   if (isMobile) await page.keyboard.press("Escape");

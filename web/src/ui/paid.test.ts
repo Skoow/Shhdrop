@@ -69,7 +69,7 @@ describe("feuille Plus : honnête, rien à acheter", () => {
   it("ce que Plus ajoute, prix prévu de §38.8, « Bientôt disponible » ; ni formulaire, ni champ, ni achat", () => {
     show(PaidSheet, { open: true, tier: "plus" });
     const s = text();
-    for (const x of ["Shhdrop Plus", "10 Go", "par lien, au lieu de 2 Go en gratuit", "Durée jusqu'à 7 jours (gratuit : 24 h maximum)", "Jusqu'à 50 ouvertures (gratuit : 10)", "7 €", "70 €", "Bientôt disponible."])
+    for (const x of ["Shhdrop Plus", "10 Go par partage", "2 Go par partage", "50 Go par partage", "Durée jusqu'à 7 jours (gratuit : 24 h maximum)", "Jusqu'à 50 ouvertures (gratuit : 10)", "7 €", "70 €", "Bientôt disponible."])
       expect(s, x).toContain(x);
     expect(s).not.toMatch(/élément/); // D41-17 : le nombre d'éléments n'est pas vendu
     expect(s).not.toMatch(/Acheter|Payer|S'abonner|offre limitée|plus que/i);
@@ -78,7 +78,7 @@ describe("feuille Plus : honnête, rien à acheter", () => {
   it("Pro : 50 Go, 100 ouvertures, 20 € et 220 €", () => {
     show(PaidSheet, { open: true, tier: "pro" });
     const s = text();
-    for (const x of ["Shhdrop Pro", "50 Go", "Jusqu'à 100 ouvertures", "20 €", "220 €"]) expect(s, x).toContain(x);
+    for (const x of ["Shhdrop Pro", "50 Go par partage", "Jusqu'à 100 ouvertures", "20 €", "220 €"]) expect(s, x).toContain(x);
   });
 });
 
@@ -88,7 +88,7 @@ describe("ligne « Avec Plus » au dépassement de 2 Go", () => {
     show(CapacityGauge, { bytes: CONTENT_MAX + 1, count: 2, head: true, onpaid });
     expect(document.querySelector('[role="alert"]')!.textContent).toContain("Trop gros");
     const up = document.querySelector("[data-upsell]")!;
-    expect(up.textContent!.replace(/ /g, " ")).toContain("Avec Plus : jusqu'à 10 Go et 7 jours.");
+    expect(up.textContent!.replace(/ /g, " ")).toContain("Avec Plus : jusqu'à 10 Go par partage et 7 jours.");
     expect(up.closest('[role="alert"], dialog')).toBeNull(); // ni alerte, ni fenêtre imposée
     (up.querySelector("button") as HTMLButtonElement).click();
     expect(onpaid).toHaveBeenCalledWith("plus");

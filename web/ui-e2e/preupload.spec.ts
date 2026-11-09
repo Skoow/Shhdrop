@@ -59,7 +59,7 @@ test.describe("fr-FR", () => {
     const gone = page.locator("[data-row]").filter({ hasText: "retire.bin" });
     await expect(kept.locator("[data-up]")).toHaveAttribute("data-up", "pret", { timeout: 30_000 });
     await expect(gone.locator("[data-up]")).toHaveAttribute("data-up", "envoi", { timeout: 30_000 });
-    await expect(gone.locator("[data-up]")).toContainText(/Envoi \d+ %/);
+    await expect(gone.locator("[data-lock] button")).toHaveAccessibleName(/Envoi \d+ %/);
     expect(puts[0]).toBe(0); // garde.bin (3 Mio, petit) : 48 morceaux du segment 0 partagé
 
     const blobs = join(shh.server.dataDir, "blobs");
