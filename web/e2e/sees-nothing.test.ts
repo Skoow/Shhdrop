@@ -248,7 +248,7 @@ describe("le serveur ne voit rien", () => {
       // serveur remplit les trous d'aléa, l'en-tête et le manifeste chiffré viennent avec finalize).
       "PUT /api/shares/segments/0",
       "PUT /api/shares/segments/1",
-      "PUT /api/shares/segments/2", // fin du fichier arrondie à une puissance de deux de morceaux (D41-21) : ici le segment entier
+      "PUT /api/shares/segments/2?from=0", // fin du fichier : ses seuls morceaux, sans arrondi (D41-38)
       "PUT /api/shares/segments/3?from=0", // note (D41-37) : un élément chiffré comme un fichier, remise au clic
       "POST /api/shares/finalize",
       "GET /api/shares/meta",

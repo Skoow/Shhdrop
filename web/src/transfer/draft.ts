@@ -62,7 +62,7 @@ type El = {
   src: Blob;
   data?: Blob;
   first: number; // premier morceau ; -1 : pas encore placé
-  chunks: number; // emprise en morceaux (audit H-2 ; petit élément : puissance de deux, Q-H2-1)
+  chunks: number; // emprise en morceaux : les seuls nécessaires (audit H-2, D41-38)
   parts: number; // requêtes d'envoi (une par segment touché)
   partsDone: number;
   phase: ElementPhase;

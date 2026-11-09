@@ -67,22 +67,13 @@ export function isSmall(size: number): boolean {
 }
 
 /**
- * Emprise d'un élément, en morceaux (Q-H2-1, D41-20) : un petit élément est arrondi à une
- * puissance de deux de morceaux (1, 2, 4… 64), pour que la longueur de sa requête d'envoi ne
- * dise au serveur que sa classe de taille ; les morceaux en plus sont des zéros chiffrés sous
- * la clé de l'élément (comme la fin de son dernier morceau), indiscernables de l'aléa. Un
- * élément d'un segment ou plus : ses segments pleins, puis le reste arrondi de même.
+ * Emprise d'un élément, en morceaux : ses seuls morceaux nécessaires, ⌈taille / 64 Kio⌉
+ * (D41-38, remplace l'arrondi en puissance de deux de D41-20 et D41-21) ; seule la fin de son
+ * dernier morceau est faite de zéros chiffrés. Le serveur voit donc, pendant l'envoi, la taille
+ * de chaque élément à 64 Kio près (fuite acceptée par le propriétaire).
  */
 export function footprintFor(size: number): number {
-  const n = chunksFor(size);
-  // Q-H2-2 (D41-21) : le dernier segment d'un grand élément suit la même règle, pour que la
-  // longueur de sa dernière requête ne donne que la classe de taille de sa fin.
-  const full = isSmall(size) ? 0 : Math.floor(n / SEG_CHUNKS) * SEG_CHUNKS;
-  const rest = n - full;
-  if (rest === 0) return n;
-  let p = 1;
-  while (p < rest) p *= 2;
-  return full + Math.min(p, SEG_CHUNKS);
+  return chunksFor(size);
 }
 
 /**
@@ -109,7 +100,7 @@ export type ElementSealer = {
   /**
    * Chiffre la j-ième plage, une seule fois : un nouvel essai d'envoi renvoie les octets
    * gardés par l'appelant. Les morceaux de l'emprise (`footprintFor`) : zéros chiffrés après la
-   * fin du fichier, jusqu'à la puissance de deux d'un petit élément. Plage qui commence au morceau 0 du
+   * fin du fichier, jusqu'à la fin de son dernier morceau. Plage qui commence au morceau 0 du
    * paquet : 48 octets nuls d'abord (en-tête écrit par le serveur à la finalisation).
    */
   piece(j: number): Promise<Uint8Array<ArrayBuffer>>;
