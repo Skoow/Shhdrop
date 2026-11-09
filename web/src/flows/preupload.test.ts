@@ -12,18 +12,18 @@ describe("état d'envoi d'une ligne (spec §41.14)", () => {
     expect(rowStatus({ phase: "erreur", sent: 0, total: 10 })).toEqual({ key: "compose.up.erreur", percent: 0 });
   });
 
-  it("toDraftList : fichiers seulement, même Blob pour un même Uint8Array (pas de renvoi)", () => {
+  it("toDraftList : fichiers et notes (D41-36), même Blob pour un même Uint8Array (pas de renvoi)", () => {
     const u = new Uint8Array([1, 2]);
     const blob = new Blob(["x"]);
     const items = [
-      { id: "t", kind: "text" as const, data: new Uint8Array(0) },
+      { id: "t", kind: "text" as const, data: new Blob(["note"]) },
       { id: "a", kind: "file" as const, data: blob },
       { id: "b", kind: "file" as const, data: u },
     ];
     const l1 = toDraftList(items), l2 = toDraftList(items);
-    expect(l1.map((x) => x.id)).toEqual(["a", "b"]);
-    expect(l1[0]!.data).toBe(blob);
-    expect(l1[1]!.data).toBe(l2[1]!.data);
-    expect(l1[1]!.data.size).toBe(2);
+    expect(l1.map((x) => x.id)).toEqual(["t", "a", "b"]);
+    expect(l1[1]!.data).toBe(blob);
+    expect(l1[2]!.data).toBe(l2[2]!.data);
+    expect(l1[2]!.data.size).toBe(2);
   });
 });

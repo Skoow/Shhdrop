@@ -28,7 +28,7 @@ export type ComposeItem = {
   readonly ext: string;
   readonly mime: string;
   readonly size: number;
-  /** Fichier d'origine (jamais lu en entier), image nettoyée, ou vocal. Vide pour un texte. */
+  /** Fichier d'origine (jamais lu en entier), image nettoyée, vocal, ou texte UTF-8 d'une note (Blob neuf à chaque modification : renvoyé, D41-36). */
   readonly data: Blob | Uint8Array<ArrayBuffer>;
   /** Contenu d'un élément texte. */
   readonly text?: string;
@@ -304,6 +304,13 @@ export function createComposer(deps: ComposeDeps = {}) {
     return takeCodePoints(cleanName(tt), NAME_MAX);
   }
 
+  /** Donnée d'une note (D41-36) : son texte UTF-8, élément envoyé comme un fichier. */
+  function noteData(text: string): { size: number; data: Blob } {
+    const data = new Blob([utf8.encode(text)]);
+    approve(data); // un texte tapé ici n'a aucune métadonnée (verrou clean-gate, spec §35.2)
+    return { size: data.size, data };
+  }
+
   function addText(text: string, title?: string): string | null {
     if (items.length + reserved >= MAX_ITEMS) return null;
     const it: ComposeItem = {
@@ -313,8 +320,7 @@ export function createComposer(deps: ComposeDeps = {}) {
       base: noteTitle(title),
       ext: "",
       mime: "text/plain;charset=utf-8",
-      size: utf8.encode(text).byteLength,
-      data: new Uint8Array(0),
+      ...noteData(text),
       text,
       clean: "sans",
       duplicate: false,
@@ -328,7 +334,8 @@ export function createComposer(deps: ComposeDeps = {}) {
       items.map((i) => {
         if (i.id !== id || i.kind !== "text") return i;
         const base = title === undefined ? i.base : title.trim() === "" ? i.base : noteTitle(title);
-        return { ...i, base, text, size: utf8.encode(text).byteLength };
+        // Texte inchangé : même Blob, pas de renvoi ; modifié : l'ancienne version est effacée du serveur et la nouvelle envoyée.
+        return text === i.text ? { ...i, base } : { ...i, base, text, ...noteData(text) };
       }),
     );
   }
@@ -485,7 +492,7 @@ export function createComposer(deps: ComposeDeps = {}) {
   const totalBytes = $derived(items.reduce((s, i) => s + i.size, 0));
   // Envoi dès l'ajout (spec §41.14) : un fichier d'au moins 4 Mio occupe des segments entiers,
   // les petits se partagent des segments (audit H-2).
-  const segments = $derived(segmentsNeeded(items.flatMap((i) => (i.kind === "file" ? [i.size] : []))));
+  const segments = $derived(segmentsNeeded(items.map((i) => i.size)));
   // Taille du manifeste, majorée (D41-17) : mêmes noms et textes que toApiItems, tailles et
   // positions à leur plus grand nombre de chiffres, droit le plus long. Au-delà de
   // MANIFEST_MAX, sealFinal refuserait (« manifeste_trop_gros ») : on bloque avant. Chaque
@@ -499,7 +506,7 @@ export function createComposer(deps: ComposeDeps = {}) {
         keep_ttl_h: 24,
         items: items.map((i) =>
           i.kind === "text"
-            ? { kind: "text", name: cleanName(i.base), mime: i.mime, size: 0, offset: 0, text: i.text ?? "" }
+            ? { kind: "text", name: cleanName(i.base), mime: i.mime, size: CONTENT_MAX, offset: CONTENT_MAX, k: "k".repeat(43) }
             : { kind: "file", name: cleanName(i.base + i.ext), mime: i.mime || "application/octet-stream", size: CONTENT_MAX, offset: CONTENT_MAX, k: "k".repeat(43), clean: "bureautique" },
         ),
       }),
@@ -548,7 +555,7 @@ export function createComposer(deps: ComposeDeps = {}) {
   function toApiItems(): Item[] {
     return items.map((i) =>
       i.kind === "text"
-        ? { kind: "text", name: cleanName(i.base), mime: i.mime, data: utf8.encode(i.text ?? "") as Uint8Array<ArrayBuffer> }
+        ? { kind: "text", name: cleanName(i.base), mime: i.mime, data: i.data }
         : { kind: "file", name: cleanName(i.base + i.ext), mime: i.mime || "application/octet-stream", data: i.data, clean: manifestClean(i) ?? undefined },
     );
   }

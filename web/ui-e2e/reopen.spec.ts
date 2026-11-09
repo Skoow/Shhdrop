@@ -50,7 +50,7 @@ test("recharger rouvre sans consommer (1 / 3 avant et après), dix fois ; le onz
   await expect(page.locator("#open-err").getByText("Mot de passe incorrect · 4 essais restants")).toBeVisible({ timeout: 20_000 });
   await pwField(page).fill(sent.password);
   await reopenButton(page).click();
-  await expect(noteRow(page, TEXT)).toBeVisible({ timeout: 30_000 });
+  await expect(noteRow(page)).toBeVisible({ timeout: 30_000 });
   expect((await shareStatus(sent.manage, shh.origin)).opensUsed).toBe(1);
 
   // Neuf autres rechargements : toujours une seule ouverture.
@@ -73,7 +73,7 @@ test("recharger rouvre sans consommer (1 / 3 avant et après), dix fois ; le onz
   // Nouvelle ouverture (comptée) : le pied dit combien d'ouvertures restent (plus de bouton
   // « Terminer et effacer », retours UI4).
   await page.getByRole("button", { name: /^(Déverrouiller|Déchiffrement)/ }).click();
-  await expect(noteRow(page, TEXT)).toBeVisible({ timeout: 30_000 });
+  await expect(noteRow(page)).toBeVisible({ timeout: 30_000 });
   expect((await shareStatus(sent.manage, shh.origin)).opensUsed).toBe(2);
   await expect(page.locator("[data-eol]")).toHaveText("Ce lien peut encore être ouvert 1\u202ffois.");
 });

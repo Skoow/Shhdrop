@@ -8,6 +8,7 @@ import {
   HEADER,
   MANIFEST_MAX,
   PREVIEW_MAX,
+  TEXT_MAX,
   bucketFor,
   openStream,
   parseRights,
@@ -465,16 +466,16 @@ describe("sealStream : refus", () => {
     await expect(sealStream([], keys)).rejects.toThrow("vide");
     await expect(sealStream(Array.from({ length: MAX_ITEMS + 1 }, () => f()), keys)).rejects.toThrow("trop_d_elements");
   });
-  it("texte trop long (10 000 caractères acceptés)", async () => {
+  it("texte trop long : ancien format (10 000 caractères dans le manifeste) toujours lu ; au-delà de TEXT_MAX refusé", async () => {
     const ok = "é".repeat(10_000);
     const k2 = await freshKeys();
     const r = await seal([{ kind: "text", name: "", mime: "text/plain", data: utf8(ok) }], k2);
     expect((await open(r.segments, r.bucket, k2)).manifest.items[0]!.text).toBe(ok);
-    await expect(sealStream([{ kind: "text", name: "", mime: "text/plain", data: utf8(ok + "x") }], keys)).rejects.toThrow(
+    await expect(sealStream([{ kind: "text", name: "", mime: "text/plain", data: utf8("a".repeat(TEXT_MAX + 1)) }], keys)).rejects.toThrow(
       "texte_trop_long",
     );
     await expect(
-      sealStream([{ kind: "text", name: "", mime: "text/plain", data: new Blob([new Uint8Array(40_001).fill(97)]) }], keys),
+      sealStream([{ kind: "text", name: "", mime: "text/plain", data: new Blob([new Uint8Array(4 * TEXT_MAX + 1).fill(97)]) }], keys),
     ).rejects.toThrow("texte_trop_long");
   });
   it("texte invalide", async () => {
@@ -568,6 +569,9 @@ describe("openStream : manifeste invalide (paquet bien chiffré)", () => {
     ["texte sans text", tail({ v: 2, items: [{ kind: "text", name: "", mime: "text/plain", size: 0, offset: 0 }] })],
     ["texte avec taille", tail({ v: 2, items: [{ kind: "text", name: "", mime: "text/plain", size: 1, offset: 0, text: "a" }] })],
     ["fichier avec text", tail({ v: 2, items: [{ ...good.items[0], text: "a" }] })],
+    ["note élément avec text", tail({ v: 2, items: [{ kind: "text", name: "", mime: "text/plain", size: 1, offset: 0, k: "k".repeat(43), text: "a" }] })],
+    ["note élément k mal formé", tail({ v: 2, items: [{ kind: "text", name: "", mime: "text/plain", size: 1, offset: 0, k: "k" }] })],
+    ["note élément trop grande", tail({ v: 2, items: [{ kind: "text", name: "", mime: "text/plain", size: 400_001, offset: 0, k: "k".repeat(43) }] })],
   ];
   it("le forgeur produit un paquet valide", async () => {
     const r = await open(await forge(d3, tail(good), 16, keys), 16);

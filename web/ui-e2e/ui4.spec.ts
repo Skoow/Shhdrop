@@ -19,7 +19,7 @@ test("destinataire, dernière ouverture : bulle du cadenas, groupes, « Détruir
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(sent.link);
   await unlock(page, sent.password);
-  await expect(noteRow(page, TEXT)).toBeVisible();
+  await expect(noteRow(page)).toBeVisible();
   // En-tête : seulement l'échéance (date et heure, puis le décompte ; plus « Disponible encore », UI5).
   const cap = page.locator("[data-capsule]");
   await expect(cap.locator("[data-deadline] .ends")).toHaveText(/^Se termine le \d+\s\S+ à \d+\sh\s\d{2}$/);
@@ -40,7 +40,7 @@ test("destinataire, dernière ouverture : bulle du cadenas, groupes, « Détruir
   expect(await axe(page)).toEqual([]);
   await page.screenshot({ path: `${SHOTS}content-last-${w(isMobile)}.png`, fullPage: true });
   // Bulle du cadenas ouverte (appui sur téléphone, survol à la souris).
-  const lock = noteRow(page, TEXT).locator('[data-lock="open"] button');
+  const lock = noteRow(page).locator('[data-lock="open"] button');
   await lock.scrollIntoViewIfNeeded();
   if (isMobile) await lock.tap();
   else await lock.hover();

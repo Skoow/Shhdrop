@@ -351,7 +351,6 @@
     if (viewOnly || entries[i]!.kind !== "text") return;
     if ((await copyText(entries[i]!.text ?? "")) === "copied") announce(t("content.copied"));
   }
-  const excerpt = (i: number) => (entries[i]!.kind === "text" ? (entries[i]!.text ?? "").split("\n").find((l) => l.trim() !== "")?.trim().slice(0, 80) : undefined);
 </script>
 
 <svelte:window onpagehide={leave} />
@@ -435,7 +434,6 @@
             risky={o.isRiskyFile(i)}
             {viewOnly}
             {disabled}
-            excerpt={excerpt(i)}
             onview={() => openViewer(i)}
             ondownload={() => !disabled && dl.start([i], single)}
             onpause={() => dl.pause([i])}

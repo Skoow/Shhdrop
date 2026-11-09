@@ -1,13 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composePreview, firstLine } from "./itemView";
-
-describe("firstLine", () => {
-  it("première ligne non vide, bornée", () => {
-    expect(firstLine("\n  \nBonjour\nsuite")).toBe("Bonjour");
-    expect(firstLine(undefined)).toBe("");
-    expect(firstLine("x".repeat(200), 10)).toBe("x".repeat(10));
-  });
-});
+import { composePreview } from "./itemView";
 
 describe("composePreview", () => {
   it("photo, vidéo, son, vocal et note : aperçu ; PDF, SVG, HTML, programme à risque : aucun", () => {

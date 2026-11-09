@@ -13,7 +13,7 @@ test("lien + mot de passe du QR : ouvert sans saisie, aucun « # » ni mot de pa
   const sent = await sendShare(s.page, shh.origin + "/", { text: TEXT, opens: 2 });
   await s.ctx.close();
   await page.goto(`${sent.link}.${b64(sent.password)}`);
-  await expect(noteRow(page, TEXT)).toBeVisible({ timeout: 30_000 });
+  await expect(noteRow(page)).toBeVisible({ timeout: 30_000 });
   expect(page.url()).not.toContain("#");
   expect(await page.evaluate(() => history.length)).toBeGreaterThan(0);
   expect(await page.content()).not.toContain(sent.password);

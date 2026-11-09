@@ -104,7 +104,8 @@ export const settle = (page: Page) =>
   );
 
 /** Ligne d'une note dans la liste du contenu (sa première ligne y est montrée en extrait). */
-export const noteRow = (page: Page, text: string) => page.locator("li.row").filter({ hasText: text.split("\n")[0]!.trim().slice(0, 80) });
+/** Ligne d'une note chez le destinataire, par son titre (la ligne ne montre jamais le contenu). */
+export const noteRow = (page: Page, title = "Note") => page.locator('li.row[data-kind="note"]').filter({ has: page.locator(`.name[title="${title}"]`) });
 
 /** Aller à la page Sécurité : lien du pied de page s'il est visible, sinon Réglages (onglet ou en-tête). */
 export async function goSecurity(page: Page) {

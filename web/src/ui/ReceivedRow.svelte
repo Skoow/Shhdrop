@@ -33,8 +33,6 @@
     risky: boolean;
     viewOnly: boolean;
     disabled: boolean;
-    /** Ligne de texte : première ligne du message, sous le nom. */
-    excerpt?: string;
     onview: (el: HTMLElement | null) => void;
     ondownload: () => void;
     onpause: () => void;
@@ -43,7 +41,7 @@
     onretry: () => void;
     oncopy: () => void;
   };
-  let { i, name, format, kind, clean, row, estimate, canView, risky, viewOnly, disabled, excerpt, onview, ondownload, onpause, onresume, onstop, onretry, oncopy }: Props = $props();
+  let { i, name, format, kind, clean, row, estimate, canView, risky, viewOnly, disabled, onview, ondownload, onpause, onresume, onstop, onretry, oncopy }: Props = $props();
   const lang = $derived(getLang());
 
   const dot = $derived(name.lastIndexOf("."));
@@ -87,8 +85,8 @@
       {:else if row.state === "queued"}
         <span class="st">{t("dl.queued")}</span>
       {:else}
-        {#if excerpt}<bdi class="ex" translate="no">{excerpt}</bdi>{/if}
-        {#if kind === "file"}<span>{t(typeKey(format))}</span><span aria-hidden="true">·</span><span>{formatBytes(row.total, lang)}</span>{:else if !excerpt}<span>{t(typeKey(format))}</span>{/if}
+        <!-- Une note ne montre que son titre : le contenu se lit avec « Voir ». -->
+        <span>{t(kind === "text" ? "compose.cat.text" : typeKey(format))}</span><span aria-hidden="true">·</span><span>{formatBytes(row.total, lang)}</span>
         <!-- Téléchargé : dit par la pastille de l'icône (retours UI6). -->
         {#if row.state !== "done" && estimate !== null && !viewOnly}
           <span aria-hidden="true">·</span><span class="eta" title={t("dl.estimate.title")}>{t("dl.estimate", { time: formatDuration(estimate, lang) })}<span class="sr-only"> ({t("dl.estimate.title")})</span></span>
@@ -214,12 +212,6 @@
   }
   .num {
     font-variant-numeric: tabular-nums;
-  }
-  .ex {
-    max-width: 24ch;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .st {
     color: var(--text);

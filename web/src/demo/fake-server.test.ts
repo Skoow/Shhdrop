@@ -342,7 +342,7 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     const { fake, net, statuses } = setup({ outage: { atFraction: 0.5, ms: 300 } });
     const retries: number[] = [];
     // 3 Mio (48 morceaux, envoyés sans bourrage, audit H-2) : plus de la moitié du palier 80.
-    const r = await createShare(ORIGIN, [text("x"), { kind: "file", name: "f", mime: "text/plain", data: new Uint8Array(3 * 1048576) }], {
+    const r = await createShare(ORIGIN, [{ kind: "file", name: "f", mime: "text/plain", data: new Uint8Array(3 * 1048576) }], {
       ttlHours: 1,
       maxOpens: 1,
       password: PW,
@@ -354,7 +354,7 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     expect(statuses.filter((s) => s.startsWith("PUT"))).toEqual(["PUT /api/shares/segments/0 204"]); // le premier essai a échoué sans réponse
     expect(fake.shares()).toBe(1);
     const o = await openShare(r.link, PW, ORIGIN, undefined, net);
-    expect(o.manifest.items[0]!.text).toBe("x");
+    expect(o.manifest.items[0]!.size).toBe(3 * 1048576); // un seul élément : la coupure tombe dans son envoi
   });
 });
 

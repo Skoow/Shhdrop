@@ -3,7 +3,7 @@
 import { NotFoundError, fetchMeta } from "../src/index";
 import { BINARY_E2ETIME } from "../e2e/server";
 import { expect, test } from "./fixtures";
-import { freshPage, pwField, sendShare, unlock } from "./open-helpers";
+import { freshPage, noteRow, pwField, sendShare, unlock } from "./open-helpers";
 import { sleep } from "./send-helpers";
 
 test.use({ locale: "fr-FR", shhServer: { binary: BINARY_E2ETIME, env: { SHH_E2E_LEAVE_DELAY: "3" } } });
@@ -26,9 +26,9 @@ test("dernière ouverture : recharger garde le partage ; fermer la page le suppr
   await sleep(6_000); // l'écran « Rouvrir » (meta avec l'octroi) suffit à annuler
   await pwField(page).fill(sent.password);
   await page.getByRole("button", { name: "Rouvrir" }).click();
-  await expect(page.getByText(TEXT)).toBeVisible({ timeout: 30_000 });
+  await expect(noteRow(page)).toBeVisible({ timeout: 30_000 });
   await sleep(6_000); // deux fois l'attente
-  await expect(page.getByText(TEXT)).toBeVisible();
+  await expect(noteRow(page)).toBeVisible();
 
   // Fermer la page : supprimé du serveur après l'attente.
   const ctx = page.context();

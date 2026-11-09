@@ -61,13 +61,16 @@ describe("création puis ouverture (texte, image 300 Kio, fichier 5 Mio)", () =>
     expect(r.expiresInS).toBeLessThanOrEqual(3600 + 900);
     expect(parseLink(r.link).kind).toBe("s");
     expect(parseLink(r.manage).kind).toBe("m");
-    // Spec §41.14 : image au segment 0, fichier aux segments 1 et 2 (9 Mio) → palier 160.
-    expect(prog.at(-1)).toEqual([3, 3]);
+    // Spec §41.14 : image au segment 0, fichier aux segments 1 et 2 (9 Mio), note (D41-37,
+    // élément remis au clic) dans le segment suivant.
+    expect(prog.at(-1)).toEqual([4, 4]);
 
     expect((await fetchMeta(r.link, srv().origin)).expiresInS).toBeGreaterThan(3500);
     const dl: [number, number][] = [];
     const o = await openShare(r.link, PW, srv().origin, (d, t) => dl.push([d, t]));
-    expect(dl).toEqual([[1, 3], [3, 3]]); // à l'ouverture : segment 0 (en-tête) et dernier segment (manifeste)
+    // À l'ouverture : en-tête, manifeste, puis la note, déchiffrée dès l'ouverture (D41-37).
+    expect(dl.length).toBe(3);
+    expect(dl.slice(0, 2)).toEqual([[1, 3], [3, 3]]);
     expect(o.manifest.items.map((e) => [e.kind, e.name, e.mime])).toEqual([
       ["text", "", "text/plain"],
       ["file", "photo.jpg", "image/jpeg"],
@@ -76,7 +79,7 @@ describe("création puis ouverture (texte, image 300 Kio, fichier 5 Mio)", () =>
     expect(o.manifest.items[0]!.text).toBe("Bonjour é😀");
     expect(Buffer.from(await o.item(1)).equals(Buffer.from(image))).toBe(true);
     expect(Buffer.from(await o.item(2)).equals(Buffer.from(fichier))).toBe(true);
-    expect(dl.at(-1)).toEqual([3, 3]); // le segment 2 porte la fin du fichier et le manifeste
+    expect(dl.at(-1)).toEqual([3, 3]); // le segment 2 porte la fin du fichier
     await o.done();
     // maxOpens = 1 et téléchargement terminé : partage effacé.
     await expect(fetchMeta(r.link, srv().origin)).rejects.toBeInstanceOf(NotFoundError);

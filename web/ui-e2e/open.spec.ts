@@ -93,7 +93,7 @@ test("mauvais mot de passe deux fois → « 3 essais restants », bon → conten
   await capture(page, "open-badpw");
 
   await unlock(page, sent.password);
-  await expect(noteRow(page, TEXT)).toBeVisible();
+  await expect(noteRow(page)).toBeVisible();
   // M6 : même élément, de « locked » à « open », sans remontage.
   await expect(capsule).toHaveAttribute("data-state", "open");
   expect(await capsule.evaluate((el) => el === (window as unknown as { __cap: Element }).__cap)).toBe(true);

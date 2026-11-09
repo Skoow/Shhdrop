@@ -22,7 +22,6 @@
   import type { RowStatus } from "../flows/preupload";
   import FormatIcon from "./FormatIcon.svelte";
   import { formatOf, typeKey } from "./formats";
-  import { firstLine } from "./itemView";
   import IconButton from "./IconButton.svelte";
   import ReorderHandle from "./ReorderHandle.svelte";
   import VoiceClip from "./VoiceClip.svelte";
@@ -158,7 +157,7 @@
     if (!movable && moving) moving = false;
   });
   // Chaque ligne a son cadenas (UI5) : un texte reste gris, il part dans le manifeste au clic.
-  const lock = $derived(sendLock(upload, item.kind === "text" ? "text" : "file"));
+  const lock = $derived(sendLock(upload));
   // Nettoyage (D41-34) : 2ᵉ ligne de la bulle du cadenas ; sur la ligne, une étincelle si nettoyé,
   // une pastille ambre si le nettoyage a échoué, rien si le fichier part tel quel.
   const cleanLine = $derived(cleanLineKey(item));
@@ -221,7 +220,8 @@
         {#if mark && cleanLine}<CleanMark kind={mark} text={t(cleanLine)} />{/if}
       </span>
       <span class="meta">
-        {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi><span class="sep" aria-hidden="true">·</span>{:else if item.kind === "file"}<span class="ty">{t(typeKey(format))}</span><span class="sep" aria-hidden="true">·</span>{/if}
+        <!-- Une note ne montre que son titre, jamais son contenu (retour propriétaire). -->
+        <span class="ty">{t(item.kind === "text" ? "compose.cat.text" : typeKey(format))}</span><span class="sep" aria-hidden="true">·</span>
         <span class="num">{formatBytes(item.size, getLang())}</span>
         {#if duration !== null}<span class="sep" aria-hidden="true">·</span><span class="num">{formatClock(duration)}</span>{/if}
         {#if upload}
@@ -429,15 +429,6 @@
     border: 0;
     padding: 0;
     cursor: pointer;
-  }
-  .sub {
-    min-width: 0;
-    max-width: 60%;
-    overflow: hidden;
-    color: var(--text-2);
-    font-size: var(--fs-small);
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .meta {
     display: flex;

@@ -41,7 +41,7 @@ test("Détruire (dernière ouverture permise) : pied séparé par un filet, conf
   await page.getByRole("button", { name: "Détruire", exact: true }).click();
   await page.waitForTimeout(800);
   await expect(page.locator("[data-receipt]")).toHaveCount(0); // rien avant la réponse
-  await expect(noteRow(page, TEXT)).toBeVisible();
+  await expect(noteRow(page)).toBeVisible();
   release();
 
   await expect(page.getByRole("heading", { name: "Détruit" })).toBeVisible({ timeout: 20_000 });
@@ -72,7 +72,7 @@ test("429 pendant Détruire : « Trop de demandes, réessayez dans un instant »
   await page.getByRole("button", { name: "Détruire ce partage", exact: true }).click();
   await page.getByRole("button", { name: "Détruire", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Trop de demandes, réessayez dans un instant." })).toBeVisible({ timeout: 20_000 });
-  await expect(noteRow(page, TEXT)).toBeVisible();
+  await expect(noteRow(page)).toBeVisible();
   await expect(page.locator("[data-receipt]")).toHaveCount(0);
   limited = false;
   await page.getByRole("button", { name: "Détruire ce partage", exact: true }).click();

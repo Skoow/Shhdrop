@@ -75,27 +75,50 @@ describe("éléments (spec §41.14)", () => {
     const ea = await upload(new Blob([a]), 0, up);
     await upload(new Blob([removed]), 128, up);
     const eb = await upload(new Blob([b]), 192, up);
+    const note = utf8("bonjour é"); // note élément (D41-36), juste après b dans le segment 3
+    const en = await upload(new Blob([note]), 194, up);
     up.delete(2); // effacé par le serveur
     const keys = await contentKeys(newSeed());
     const fin = await sealFinal(
       [
-        { kind: "text", name: "note", mime: "text/plain", text: "bonjour" },
+        { kind: "text", name: "note", mime: "text/plain", size: note.length, first: 194, k: en.k },
         { kind: "file", name: "b.bin", mime: "application/octet-stream", size: b.length, first: 192, k: eb.k },
         { kind: "file", name: "a.bin", mime: "application/octet-stream", size: a.length, first: 0, k: ea.k },
       ],
       keys,
       { rights: "enregistrer" },
     );
-    expect(fin.bucket).toBe(bucketFor(3 * SEG_PLAIN + b.length));
+    expect(fin.bucket).toBe(bucketFor(194 * CHUNK + note.length));
     expect(fin.header.length).toBe(HEADER);
     expect(fin.tail.length).toBe(CHUNK_CT);
     const segs = assemble(fin.bucket, up, fin.header, fin.tail);
     const rd = await openStream(async (n) => new Uint8Array(segs[n]!), fin.bucket, keys);
     expect(rd.manifest.items.map((e) => e.name)).toEqual(["note", "b.bin", "a.bin"]);
-    expect(rd.manifest.items.map((e) => e.offset)).toEqual([0, 3 * SEG_PLAIN, 0]);
+    expect(rd.manifest.items.map((e) => e.offset)).toEqual([194 * CHUNK, 3 * SEG_PLAIN, 0]);
+    // Texte déchiffré à l'ouverture ; le manifeste chiffré ne le porte pas.
+    expect(rd.manifest.items[0]!.text).toBe("bonjour é");
     expect(same(await rd.item(1), b)).toBe(true);
     expect(same(await rd.item(2), a)).toBe(true);
-    expect(new TextDecoder().decode(await rd.item(0))).toBe("bonjour");
+    expect(new TextDecoder().decode(await rd.item(0))).toBe("bonjour é");
+  });
+
+  it("note de 100 000 caractères (D41-36) : élément chiffré, relue à l'ouverture ; UTF-8 invalide → paquet_corrompu", async () => {
+    const long = "é".repeat(99_999) + "€"; // 100 000 points de code, 200 001 octets : bien plus que MANIFEST_MAX
+    const raw = utf8(long);
+    const up = new Map<number, Uint8Array>();
+    const el = await upload(new Blob([raw]), 0, up);
+    const keys = await contentKeys(newSeed());
+    const fin = await sealFinal([{ kind: "text", name: "n", mime: "text/plain", size: raw.length, first: 0, k: el.k }], keys, {});
+    const segs = assemble(fin.bucket, up, fin.header, fin.tail);
+    const rd = await openStream(async (n) => new Uint8Array(segs[n]!), fin.bucket, keys);
+    expect(rd.manifest.items[0]!.text).toBe(long);
+    expect(rd.manifest.items[0]!.size).toBe(raw.length);
+    const up2 = new Map<number, Uint8Array>();
+    const bad = await upload(new Blob([new Uint8Array([0xff, 0xfe])]), 0, up2);
+    const keys2 = await contentKeys(newSeed());
+    const fin2 = await sealFinal([{ kind: "text", name: "n", mime: "text/plain", size: 2, first: 0, k: bad.k }], keys2, {});
+    const segs2 = assemble(fin2.bucket, up2, fin2.header, fin2.tail);
+    await expect(openStream(async (n) => new Uint8Array(segs2[n]!), fin2.bucket, keys2)).rejects.toThrow("paquet_corrompu");
   });
 
   it("segment 0 : zone d'en-tête vide (écrite par le serveur) ; chaque segment produit une seule fois", async () => {
@@ -161,7 +184,8 @@ describe("éléments (spec §41.14)", () => {
   it("sealFinal : manifeste trop gros, place au-delà de 2 Gio, ou éléments qui se chevauchent refusés", async () => {
     const keys = await contentKeys(newSeed());
     const k = new Uint8Array(32);
-    await expect(sealFinal([{ kind: "text", name: "t", mime: "text/plain", text: "x".repeat(70_000) }], keys, {})).rejects.toThrow();
+    await expect(sealFinal([{ kind: "text", name: "t", mime: "text/plain", size: 400_001, first: 0, k }], keys, {})).rejects.toThrow("texte_trop_long");
+    await expect(sealFinal([{ kind: "file", name: "x".repeat(70_000), mime: "x/y", size: 1, first: 0, k }], await contentKeys(newSeed()), {})).rejects.toThrow("manifeste_trop_gros");
     await expect(sealFinal([{ kind: "file", name: "f", mime: "x/y", size: 10, first: 32768, k }], await contentKeys(newSeed()), {})).rejects.toThrow("trop_gros");
     await expect(
       sealFinal(
@@ -190,13 +214,14 @@ describe("éléments (spec §41.14)", () => {
     const a = await upload(new Blob([pseudo(10, 3)]), 0, up);
     const b = await upload(new Blob([pseudo(10, 4)]), 1, up);
     const c = await upload(new Blob([pseudo(10, 5)]), 2, up);
+    const t = await upload(new Blob([utf8("x")]), 3, up);
     const keys = await contentKeys(newSeed());
     const fin = await sealFinal(
       [
         { kind: "file", name: "a.jpg", mime: "image/jpeg", size: 10, first: 0, k: a.k, clean: "image" },
         { kind: "file", name: "b.zip", mime: "application/zip", size: 10, first: 1, k: b.k, clean: "tel_quel" },
         { kind: "file", name: "c.bin", mime: "x/y", size: 10, first: 2, k: c.k },
-        { kind: "text", name: "t", mime: "text/plain", text: "x" },
+        { kind: "text", name: "t", mime: "text/plain", size: 1, first: 3, k: t.k },
       ],
       keys,
       {},

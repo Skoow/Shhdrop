@@ -113,9 +113,10 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("meter", { name: "Nombre d'éléments" })).toHaveAttribute("aria-valuenow", "10");
     expect(await page.locator(".top .gh").evaluate((e) => getComputedStyle(e).fontVariantNumeric)).toContain("tabular-nums");
     expect(await page.locator(".group h3").allTextContents()).toEqual(["Texte", "Photos", "Vidéos", "Documents", "Archives"]);
-    // Note : titre, puis la première ligne du contenu.
-    const note = rows(page).filter({ hasText: "Code de la porte" });
-    await expect(note.locator(".sub")).toHaveText("Le code de la porte est 4512B.");
+    // Note : son titre et « Texte · taille » seulement, jamais le contenu (D41-37).
+    const note = rows(page).filter({ has: page.locator('.nm[title="Code de la porte"]') });
+    await expect(note.locator(".meta")).toContainText("Texte");
+    await expect(note).not.toContainText("4512B");
     // Archive : catégorie, laissée intacte (D41-27) : rien sur la ligne, « Fichier tel quel » dans la bulle (D41-34).
     await expect(rows(page).filter({ hasText: "archive.zip" }).locator("[data-clean]")).toHaveCount(0);
     await expect(rows(page).filter({ hasText: "archive.zip" }).locator("[data-lock] button")).toHaveAccessibleName(/\. Fichier tel quel \(non modifié\)$/);
@@ -546,14 +547,14 @@ test.describe("fr-FR", () => {
     await expect(dlg.getByLabel("Contenu")).toHaveValue("Premier");
     for (const [k, v] of [["autocomplete", "off"], ["autocorrect", "off"], ["autocapitalize", "off"], ["spellcheck", "false"]])
       await expect(dlg.getByLabel("Contenu")).toHaveAttribute(k, v);
-    await dlg.getByLabel("Contenu").fill("x".repeat(10_001));
+    await dlg.getByLabel("Contenu").fill("x".repeat(100_001));
     await expect(dlg.getByRole("button", { name: "Enregistrer" })).toBeDisabled();
-    await expect(dlg.getByText("10 000 caractères maximum.")).toBeVisible();
+    await expect(dlg.getByText("100\u202f000\u202fcaractères maximum.")).toBeVisible();
     await dlg.getByLabel("Titre").fill("Courses");
     await dlg.getByLabel("Contenu").fill("Pain\nLait");
     await dlg.getByRole("button", { name: "Enregistrer" }).click();
     await expect(rows(page).first().locator(".nm")).toHaveText("Courses");
-    await expect(rows(page).first().locator(".sub")).toHaveText("Pain");
+    await expect(rows(page).first()).not.toContainText("Pain"); // titre seul (D41-37)
     // Collage seulement une fois l'éditeur fermé : pendant sa fermeture, editorOpen est encore
     // vrai et le texte collé est ignoré (cause de l'instabilité en suite).
     await expect(dlg).toBeHidden();

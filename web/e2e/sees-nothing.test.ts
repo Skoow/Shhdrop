@@ -249,11 +249,13 @@ describe("le serveur ne voit rien", () => {
       "PUT /api/shares/segments/0",
       "PUT /api/shares/segments/1",
       "PUT /api/shares/segments/2", // fin du fichier arrondie à une puissance de deux de morceaux (D41-21) : ici le segment entier
+      "PUT /api/shares/segments/3?from=0", // note (D41-37) : un élément chiffré comme un fichier, remise au clic
       "POST /api/shares/finalize",
       "GET /api/shares/meta",
       "POST /api/shares/unlock",
       "GET /api/shares/segments/0",
       "GET /api/shares/segments/6",
+      "GET /api/shares/segments/3", // note lue (déchiffrée, authentifiée) à l'ouverture
       "GET /api/shares/segments/0",
       "GET /api/shares/segments/1",
       "GET /api/shares/segments/2",
@@ -262,7 +264,8 @@ describe("le serveur ne voit rien", () => {
       // Second partage : Opened.destroy("report") puis done (404 toléré).
       "GET /api/captcha",
       "POST /api/shares",
-      // Texte seul : aucun PUT (il est dans le manifeste).
+      // Note seule (D41-37) : un élément, un PUT d'un morceau ; lue dans le segment 0 à l'ouverture.
+      "PUT /api/shares/segments/0?from=0",
       "POST /api/shares/finalize",
       "GET /api/shares/meta",
       "POST /api/shares/unlock",

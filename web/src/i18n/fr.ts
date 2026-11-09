@@ -550,7 +550,6 @@ export const fr = {
   "dl.progress.start": "{pct} % · {rate}",
   "dl.paused": "En pause · {pct} %",
   "lock.recv.wait": "Chiffré, pas encore ouvert",
-  "lock.send.text": "Chiffré à l'envoi",
   "lock.recv.ok": "Déchiffré et vérifié",
   "lock.recv.error": "Non vérifié",
   "dl.done": "Téléchargé",

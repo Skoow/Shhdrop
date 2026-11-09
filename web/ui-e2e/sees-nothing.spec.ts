@@ -80,7 +80,7 @@ test.describe("fr-FR", () => {
     await expect(page.locator("#open-err").getByText(/^Mot de passe incorrect/)).toBeVisible({ timeout: 20_000 });
     await page.getByLabel("Mot de passe", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Déverrouiller" }).click();
-    await expect(page.locator("li.row").filter({ hasText: TEXT })).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('li.row[data-kind="note"]')).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: `Télécharger ${NAME}` }).click();
     await expect.poll(() => page.evaluate(() => (window as unknown as Record<string, unknown>).__closed)).toBe(true);
     for (const route of ["GET /api/shares/meta", "POST /api/shares/unlock", "GET /api/shares/segments/0"])

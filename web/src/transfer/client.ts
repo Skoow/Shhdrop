@@ -361,7 +361,7 @@ export async function createShare(
   throwIfAborted(o.signal);
   if (items.length === 0) throw new Error("vide");
   // Refus locaux avant toute requête : place (spec §41.14, petits éléments empaquetés, H-2).
-  const sizes = items.flatMap((it) => (it.kind === "file" ? [it.data instanceof Uint8Array ? it.data.byteLength : it.data.size] : []));
+  const sizes = items.map((it) => (it.data instanceof Uint8Array ? it.data.byteLength : it.data.size));
   if (segmentsNeeded(sizes) > DATA_SEGMENTS) throw new Error("trop_gros");
   const list = items.map((item, i) => {
     // Copie d'un Uint8Array dans un Blob : l'appelant ne peut plus le modifier ensuite.

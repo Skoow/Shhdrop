@@ -72,7 +72,7 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     expect(fake.inspect()[0]).toMatchObject({ bucket: 160 });
   });
 
-  it("ordre et éléments du manifeste = ceux du clic ; textes au clic ; le serveur ne voit rien", async () => {
+  it("ordre et éléments du manifeste = ceux du clic ; note non remise : envoyée au clic ; le serveur ne voit rien", async () => {
     const { seen, net } = setup();
     const MARK = "MOT-REPERE-brouillon";
     const a = new Uint8Array(300_000).map((_, i) => i & 255);
@@ -96,9 +96,11 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     expect(o.manifest.items.map((e) => e.name)).toEqual(["note-repere", "b-repere.bin", "a-repere.bin"]);
     // Petits éléments empaquetés (audit H-2) ; emprise en puissance de deux (Q-H2-1) :
     // a (300 000 octets, 5 morceaux) occupe 8 morceaux, b commence au morceau 8.
-    expect(o.manifest.items.map((e) => e.offset)).toEqual([0, 8 * 65536, 0]);
+    // La note (D41-36), jamais remise au brouillon, part au clic : morceau 9, après b.
+    expect(o.manifest.items.map((e) => e.offset)).toEqual([9 * 65536, 8 * 65536, 0]);
+    expect(o.manifest.items[0]!.text).toBe(`texte ${MARK}`);
     const smallPuts = seen.filter((x) => x.method === "PUT").map((x) => (x.body.length % CHUNK_CT === 0 ? x.body.length : x.body.length - HEADER) / CHUNK_CT);
-    expect(smallPuts).toEqual([8, 1]);
+    expect(smallPuts).toEqual([8, 1, 1]);
     const kLien = r.link.split("#")[1]!;
     const hay = Buffer.concat(seen.filter((x) => !x.path.includes("/unlock") && !x.path.includes("/meta")).map((x) => Buffer.concat([x.body, Buffer.from(x.path + x.headers)])));
     expect(findIn(hay, [needle("contenu", MARK), needle("nom", "a-repere"), needle("mdp", PW), needle("lien", kLien)])).toEqual([]);
@@ -129,6 +131,25 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     d.abandon();
     await until(() => seen.some((r) => r.path === "/api/manage/destroy"));
     await until(() => fake.shares() === 0);
+  });
+
+  it("note (D41-36) : envoyée dès sa validation (prête avant le clic) ; modifiée : renvoyée, le destinataire lit la nouvelle version", async () => {
+    const { seen, net } = setup();
+    const d = createDraft(ORIGIN, { ...net, solveCaptcha, auto: true });
+    const v1 = new Blob([utf8("première version")]), v2 = new Blob([utf8("seconde version")]);
+    d.sync([{ id: "n", data: v1 }]);
+    await until(() => d.status("n")?.phase === "pret");
+    const puts = seen.filter((x) => x.method === "PUT").length;
+    expect(puts).toBe(1);
+    d.sync([{ id: "n", data: v2 }]);
+    await until(() => d.status("n")?.phase === "pret" && seen.filter((x) => x.method === "PUT").length === 2);
+    const r = await d.finalize([{ id: "n", item: { kind: "text", name: "n", mime: "text/plain", data: v2 } }], { ttlHours: 1, maxOpens: 1, password: PW, solveCaptcha });
+    expect(seen.filter((x) => x.method === "PUT").length).toBe(2); // rien de plus au clic
+    const o = await openShare(r.link, PW, ORIGIN, undefined, net);
+    expect(o.manifest.items[0]!.text).toBe("seconde version");
+    // L'ancienne version, remplacée, est recouverte d'aléa à finalize (void) : jamais lisible.
+    const fin = JSON.parse(seen.find((x) => x.path === "/api/shares/finalize")!.body.toString());
+    expect(fin.void).toEqual([[0, 1]]);
   });
 
   it("le fichier change de contenu (nettoyage) : l'ancien est effacé, le nouveau renvoyé sous une clé neuve", async () => {

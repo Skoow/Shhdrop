@@ -1189,25 +1189,31 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
     expect(rd.calls.filter((c) => /segments\/[345]$/.test(c))).toEqual([]); // bourrage jamais lu
   }, 60_000);
 
-  it("droit par défaut « enregistrer » ; rights et keepTtlH écrits dans le manifeste chiffré ; texte seul : aucun PUT", async () => {
+  it("droit par défaut « enregistrer » ; rights et keepTtlH écrits dans le manifeste chiffré ; note seule : un élément (D41-36), relue", async () => {
     const t = [{ kind: "text" as const, name: "", mime: "text/plain", data: utf8("x") }];
     const open1 = async (o: Partial<{ rights: "voir" | "enregistrer" | "coffre"; keepTtlH: 12 }>) => {
       const s = sender({ segments: 1 });
-      const r = await drive(createShare(ORIGIN, t, { ...base(s), ...o }));
+      const sent = new Map<number, Uint8Array<ArrayBuffer>>();
+      const upload: typeof s.upload = async (url, h, body, onBytes, signal) => {
+        sent.set(Number(/\/segments\/(\d+)/.exec(url)![1]), new Uint8Array(body));
+        return s.upload(url, h, body, onBytes, signal);
+      };
+      const r = await drive(createShare(ORIGIN, t, { ...base(s), upload, ...o }));
       vi.useRealTimers();
-      expect(s.calls.some((c) => c.startsWith("PUT"))).toBe(false);
+      expect(s.calls.filter((c) => c.startsWith("PUT"))).toEqual(["PUT 0"]);
       const fin = s.finals[0]!;
-      expect(fin.bucket).toBe(1);
-      const segs = serverFile(1, new Map(), fin);
+      expect(fin.bucket).toBe(16);
+      const segs = serverFile(16, sent, fin);
       const f = (async (input: RequestInfo | URL) => {
         const path = String(input).slice(ORIGIN.length);
-        if (path.endsWith("/meta")) return j(200, { expires_in_s: 60, salt: fin.salt, kdf: { ops: 3, mem: 67108864 }, bucket: 1, segments: 1, opens_left: 1 });
+        if (path.endsWith("/meta")) return j(200, { expires_in_s: 60, salt: fin.salt, kdf: { ops: 3, mem: 67108864 }, bucket: 16, segments: 1, opens_left: 1 });
         if (path.endsWith("/unlock")) return j(200, { download_token: "t", segments: 1, envelope: fin.envelope, grant: GRANT0, opens_left: 0 });
         if (path.endsWith("/segments/0")) return new Response(new Uint8Array(segs[0]!), { status: 200 });
         return new Response(null, { status: 204 });
       }) as typeof fetch;
       const opened = await openShare(r.link, PW, ORIGIN, undefined, { fetch: f, retryDelayMs: 1 });
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+      expect(opened.manifest.items[0]!.text).toBe("x");
       return opened.manifest;
     };
     expect((await open1({})).rights).toBe("enregistrer");

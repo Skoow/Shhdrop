@@ -301,7 +301,7 @@ test.describe("fr-FR : envoi (Tasks 17–18)", () => {
     await page.getByLabel("Mot de passe", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Déverrouiller" }).click();
     await expect(page.getByRole("heading", { name: "Contenu", exact: true })).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator("li.row").filter({ hasText: "Le code de la porte est 4471." })).toBeVisible();
+    await expect(page.locator('li.row[data-kind="note"]')).toBeVisible();
     await expect(page.getByRole("button", { name: "Télécharger releve.bin" })).toBeVisible();
     await capture(page, "demo-content");
     // Rechargement : le faux serveur de l'onglet survit (demo/persist.ts, exception démo) :
@@ -312,7 +312,7 @@ test.describe("fr-FR : envoi (Tasks 17–18)", () => {
     await page.getByLabel("Mot de passe", { exact: true }).fill(password);
     await page.getByRole("button", { name: /^(Rouvrir|Déchiffrement)/ }).click();
     await expect(page.getByRole("heading", { name: "Contenu", exact: true })).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator("li.row").filter({ hasText: "Le code de la porte est 4471." })).toBeVisible();
+    await expect(page.locator('li.row[data-kind="note"]')).toBeVisible();
     await page.getByRole("button", { name: "Détruire ce partage", exact: true }).click();
     await page.getByRole("button", { name: "Détruire", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Détruit" })).toBeVisible({ timeout: 20_000 });

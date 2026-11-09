@@ -545,7 +545,6 @@ export const en = {
   "dl.progress.start": "{pct} % · {rate}",
   "dl.paused": "Paused · {pct} %",
   "lock.recv.wait": "Encrypted, not opened yet",
-  "lock.send.text": "Encrypted when sent",
   "lock.recv.ok": "Decrypted and verified",
   "lock.recv.error": "Not verified",
   "dl.done": "Downloaded",

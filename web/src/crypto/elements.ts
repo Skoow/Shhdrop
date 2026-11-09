@@ -12,7 +12,7 @@ import {
   HEADER,
   MANIFEST_MAX,
   SEG_CHUNKS,
-  TEXT_MAX,
+  TEXT_BYTES_MAX,
   bucketFor,
   elementKey,
   header,
@@ -176,8 +176,13 @@ export async function elementSealer(blob: Blob, first: number): Promise<ElementS
   };
 }
 
+/**
+ * Élément gardé, déjà envoyé sous sa clé (spec §41.14). Une note est, depuis D41-36, un élément
+ * comme un fichier (son texte UTF-8 est la donnée de l'élément, envoyé dès sa validation) : le
+ * manifeste n'en porte que le titre, la taille, la place et la graine, jamais le texte.
+ */
 export type FinalEntry =
-  | { kind: "text"; name: string; mime: string; text: string }
+  | { kind: "text"; name: string; mime: string; size: number; /** premier morceau */ first: number; k: Uint8Array<ArrayBuffer> }
   | { kind: "file"; name: string; mime: string; size: number; /** premier morceau */ first: number; k: Uint8Array<ArrayBuffer>; clean?: ManifestClean };
 
 // Une K_contenu ne chiffre qu'un manifeste : une nouvelle finalisation tire une R neuve.
@@ -201,11 +206,7 @@ export async function sealFinal(
   const taken = new Set<number>();
   let dataEnd = 0;
   for (const e of entries) {
-    if (e.kind === "text") {
-      if ([...e.text].length > TEXT_MAX) throw new Error("texte_trop_long");
-      items.push({ kind: "text", name: e.name, mime: e.mime, size: 0, offset: 0, text: e.text });
-      continue;
-    }
+    if (e.kind === "text" && !(Number.isSafeInteger(e.size) && e.size >= 0 && e.size <= TEXT_BYTES_MAX)) throw new Error("texte_trop_long");
     const n = chunksFor(e.size);
     if (!Number.isSafeInteger(e.first) || e.first < 0 || e.first + n > DATA_CHUNKS) throw new Error("trop_gros");
     for (let c = e.first; c < e.first + n; c++) {
@@ -213,7 +214,8 @@ export async function sealFinal(
       taken.add(c);
     }
     const offset = e.first * CHUNK;
-    items.push({ kind: "file", name: e.name, mime: e.mime, size: e.size, offset: e.size === 0 ? 0 : offset, k: b64u(e.k), ...(e.clean ? { clean: e.clean } : {}) });
+    const at = { name: e.name, mime: e.mime, size: e.size, offset: e.size === 0 ? 0 : offset, k: b64u(e.k) };
+    items.push(e.kind === "text" ? { kind: "text", ...at } : { kind: "file", ...at, ...(e.clean ? { clean: e.clean } : {}) });
     if (e.size > 0) dataEnd = Math.max(dataEnd, offset + e.size);
   }
   const m: ManifestV2 =

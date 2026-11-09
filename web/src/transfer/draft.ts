@@ -5,7 +5,7 @@
 // des seuls éléments gardés (dans l'ordre affiché) et finalise. Le lien n'existe qu'après.
 // Le serveur ne reçoit que K_accès et S_gestion (création), des segments chiffrés, des numéros
 // de segments, et à la fin le sel, Argon2id, V_preuve, E, l'en-tête et le manifeste chiffré.
-import { SEG_CHUNKS, CHUNK_CT, HEADER, type Item, type KeepTtl, type Rights } from "../crypto/container";
+import { SEG_CHUNKS, CHUNK_CT, HEADER, TEXT_BYTES_MAX, TEXT_MAX, type Item, type KeepTtl, type Rights } from "../crypto/container";
 import { DATA_CHUNKS, DATA_SEGMENTS, elementSealer, footprintFor, isSmall, reservationFor, sealFinal, segmentsNeeded, type FinalEntry } from "../crypto/elements";
 import { b64u } from "../crypto/encoding";
 import { accessKeys, contentKeys, newSeed, seal, shareId } from "../crypto/envelope";
@@ -498,6 +498,16 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       hooks = { pause: f.pause, onRetry: f.onRetry };
       let lastProg: [number, number] | undefined;
       let lastBytes: [number, number] | undefined;
+      // Note jamais remise au brouillon (appel direct, createShare) : envoyée maintenant. Son
+      // texte est vérifié (UTF-8, au plus TEXT_MAX points de code) avant tout envoi.
+      for (const { id, item } of list) {
+        if (item.kind !== "text" || els.has(id)) continue;
+        const data = await textBlob(item.data);
+        els.set(id, fresh(id, data));
+        changed();
+        background();
+        void pump();
+      }
       await Promise.all([...erasing]);
       const lossesAtStart = losses;
       for (const h of [...stuck]) {
@@ -515,7 +525,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
           if (!created) adopt(cr);
         }
         throwIfAborted(f.signal);
-        const files = list.filter((x) => x.item.kind === "file").map((x) => els.get(x.id));
+        const files = list.map((x) => els.get(x.id));
         if (files.some((e) => e === undefined)) throw new Error("element_inconnu");
         const failed = files.find((e) => e!.phase === "erreur");
         if (failed) throw failed.error;
@@ -580,19 +590,10 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       const keys = await contentKeys(r);
       const entries: FinalEntry[] = [];
       for (const { id, item } of list) {
-        if (item.kind === "text") {
-          const raw = item.data instanceof Uint8Array ? item.data : new Uint8Array(await item.data.arrayBuffer());
-          let text: string;
-          try {
-            text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw);
-          } catch {
-            throw new Error("texte_invalide");
-          }
-          entries.push({ kind: "text", name: item.name, mime: item.mime, text });
-        } else {
-          const e = els.get(id)!;
-          entries.push({ kind: "file", name: item.name, mime: item.mime, size: e.data!.size, first: e.first, k: e.k!, ...(item.clean ? { clean: item.clean } : {}) });
-        }
+        const e = els.get(id)!;
+        // Note (D41-36) : un élément comme un fichier, envoyé dès sa validation.
+        if (item.kind === "text") entries.push({ kind: "text", name: item.name, mime: item.mime, size: e.data!.size, first: e.first, k: e.k! });
+        else entries.push({ kind: "file", name: item.name, mime: item.mime, size: e.data!.size, first: e.first, k: e.k!, ...(item.clean ? { clean: item.clean } : {}) });
       }
       const fin = await sealFinal(entries, keys, { rights: f.rights as Rights | undefined, keepTtlH: f.keepTtlH as KeepTtl | undefined });
       throwIfAborted(f.signal);
@@ -644,6 +645,20 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       for (const b of wipe) b.fill(0);
     }
   }
+}
+
+/** Texte d'une note en Blob, vérifié : UTF-8 valide (« texte_invalide »), au plus TEXT_MAX points de code (« texte_trop_long »). */
+export async function textBlob(data: Uint8Array<ArrayBuffer> | Blob): Promise<Blob> {
+  if ((data instanceof Blob ? data.size : data.byteLength) > TEXT_BYTES_MAX) throw new Error("texte_trop_long");
+  const raw = data instanceof Uint8Array ? data : new Uint8Array(await data.arrayBuffer());
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw);
+  } catch {
+    throw new Error("texte_invalide");
+  }
+  if ([...text].length > TEXT_MAX) throw new Error("texte_trop_long");
+  return new Blob([raw]);
 }
 
 export type Draft = ReturnType<typeof createDraft>;

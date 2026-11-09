@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "./fixtures";
-import { file, freshPage, sendShare, settle, unlock } from "./open-helpers";
+import { file, freshPage, noteRow, sendShare, settle, unlock } from "./open-helpers";
 import { openFilePicker } from "./send-helpers";
 
 test.use({ locale: "fr-FR" });
@@ -63,7 +63,7 @@ test("réception : ouvert vert pour le texte (manifeste vérifié) ; fichier fer
   if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(sent.link);
   await unlock(page, sent.password);
-  const note = page.locator("li.row").filter({ hasText: "Code de la porte" });
+  const note = noteRow(page); // la ligne ne montre que le titre (D41-37)
   const noteLock = note.locator('[data-lock="open"] button');
   await expect(noteLock).toHaveAccessibleName("Déchiffré et vérifié");
   // Bulle : au survol (souris) ou à l'appui (tactile, bascule) ; Échap la ferme.

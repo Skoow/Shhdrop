@@ -6,9 +6,6 @@ import { receiveLock, sendLock } from "./lock";
 describe("cadenas d'état (D41-25, UI5) : jamais vert avant l'événement réel, présent sur chaque ligne", () => {
   it("envoi : gris pendant l'attente, le chiffrement et l'envoi ; vert seulement à « pret » (tous les segments confirmés) ; rouge en erreur", () => {
     expect(sendLock(null)).toEqual({ tone: "wait", key: "compose.up.attente", n: 0 });
-    // Texte : gris, il part dans le manifeste au clic (jamais vert avant).
-    expect(sendLock(null, "text")).toEqual({ tone: "wait", key: "lock.send.text", n: 0 });
-    expect(sendLock({ key: "compose.up.pret", percent: 100 }, "text").tone).toBe("wait");
     expect(sendLock({ key: "compose.up.attente", percent: 0 })).toEqual({ tone: "wait", key: "compose.up.attente", n: 0 });
     expect(sendLock({ key: "compose.up.chiffrement", percent: 0 })).toEqual({ tone: "wait", key: "compose.up.chiffrement", n: 0 });
     // 99 % : un segment n'est pas encore acquitté par le serveur → pas vert.
@@ -28,6 +25,6 @@ describe("cadenas d'état (D41-25, UI5) : jamais vert avant l'événement réel,
   it("textes en français et en anglais", () => {
     expect(fr["compose.up.pret"]).toBe("Chiffré et envoyé");
     expect(fr["lock.recv.ok"]).toBe("Déchiffré et vérifié");
-    for (const k of ["lock.recv.ok", "lock.recv.error", "lock.recv.wait", "lock.send.text"] as const) expect(en[k]).toBeTruthy();
+    for (const k of ["lock.recv.ok", "lock.recv.error", "lock.recv.wait"] as const) expect(en[k]).toBeTruthy();
   });
 });

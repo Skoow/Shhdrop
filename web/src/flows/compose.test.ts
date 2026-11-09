@@ -306,7 +306,10 @@ describe("ordre", () => {
     c.move(c.items[2]!.id, -1);
     const api = c.toApiItems();
     expect(api.map((i) => i.name)).toEqual(["Note", "a.jpg", "b.jpg", "z.pdf"]);
-    expect(api[0]).toEqual({ kind: "text", name: "Note", mime: "text/plain;charset=utf-8", data: new TextEncoder().encode("é") });
+    expect(api[0]).toMatchObject({ kind: "text", name: "Note", mime: "text/plain;charset=utf-8" });
+    // Note élément (D41-36) : le Blob de la ligne, celui que le brouillon envoie.
+    expect(api[0]!.data).toBe(c.items[0]!.data);
+    expect(new Uint8Array(await (api[0]!.data as Blob).arrayBuffer())).toEqual(new TextEncoder().encode("é"));
     expect(api[3]!.data).toBe(pdf);
     expect(arrayBuffer).not.toHaveBeenCalled();
     expect(slice.mock.calls.every((a) => a[0] === 0 && a[1] === HEAD_BYTES)).toBe(true);
@@ -397,15 +400,21 @@ describe("renommage", () => {
 });
 
 describe("textes", () => {
-  it("addText, updateText, taille en octets UTF-8, trop long bloque", () => {
+  it("addText, updateText, taille en octets UTF-8, trop long bloque ; note approuvée pour l'envoi anticipé", async () => {
     const c = make();
     const id = c.addText("é")!;
+    await expect(gate(c.items[0]!.data as Blob)).resolves.toBe(c.items[0]!.data);
     expect(c.items[0]!.size).toBe(2);
     expect(c.items[0]!.base).toBe("Note");
-    c.updateText(id, "a".repeat(10_001));
+    const d0 = c.items[0]!.data;
+    c.updateText(id, "é", "Titre");
+    expect(c.items[0]!.data).toBe(d0); // texte inchangé : même Blob, pas de renvoi
+    c.updateText(id, "a".repeat(100_001));
+    expect(c.items[0]!.data).not.toBe(d0); // modifié : nouveau Blob, renvoyé
     expect(c.blockReason()).toBe("texte_trop_long");
-    c.updateText(id, "😀".repeat(10_000)); // points de code, pas unités UTF-16
+    c.updateText(id, "😀".repeat(100_000)); // points de code, pas unités UTF-16
     expect(c.blockReason()).toBeNull();
+    expect(c.items[0]!.size).toBe(400_000);
     expect(c.addText("b")).not.toBe(id);
     expect(c.items[1]!.base).toBe("Note 2");
   });
@@ -436,7 +445,7 @@ describe("blocages et textes de raison", () => {
     expect(c.blockReason()).toBe("hors_ligne");
   });
 
-  it("200 éléments aux noms courts : envoi permis ; manifeste plein (noms longs non latins, longs textes) : bloqué avant le scellement (D41-17)", async () => {
+  it("200 éléments aux noms courts : envoi permis ; manifeste plein (noms longs non latins) : bloqué avant le scellement (D41-17)", async () => {
     const short = make();
     await short.add(Array.from({ length: MAX_ITEMS }, (_, i) => file(`photo-${i}.jpg`, 1, "image/jpeg")), "fichiers");
     expect(short.count).toBe(200);
@@ -445,9 +454,10 @@ describe("blocages et textes de raison", () => {
     const wide = make();
     await wide.add(Array.from({ length: MAX_ITEMS }, (_, i) => file(`${"😀".repeat(110)}${String(i).padStart(3, "0")}.bin`)), "fichiers");
     expect(wide.blockReason()).toBe("manifeste");
+    // Notes éléments (D41-36) : leur texte n'est plus dans le manifeste, il ne le remplit pas.
     const texts = make();
-    for (let i = 0; i < 7; i++) texts.addText("é".repeat(10_000)); // 7 × 20 000 octets > 65 532
-    expect(texts.blockReason()).toBe("manifeste");
+    for (let i = 0; i < 7; i++) texts.addText("é".repeat(100_000));
+    expect(texts.blockReason()).toBeNull();
   });
 
   it("chaque raison a son texte en français et en anglais", () => {
@@ -528,7 +538,7 @@ describe("éléments en cause (S6)", () => {
     await c.add([big("a.bin", CONTENT_MAX - 10), big("b.bin", 100), new File([new Uint8Array([0x4d, 0x5a])], "x.exe")], "fichiers");
     const id = (n: string) => c.items.find((i) => i.base + i.ext === n)!.id;
     expect([...c.culprits()].sort()).toEqual([id("a.bin"), id("x.exe")].sort());
-    const t = c.addText("a".repeat(10_001))!;
+    const t = c.addText("a".repeat(100_001))!;
     expect(c.culprits().has(t)).toBe(true);
     c.remove(id("a.bin"));
     expect([...c.culprits()].sort()).toEqual([t, id("x.exe")].sort());

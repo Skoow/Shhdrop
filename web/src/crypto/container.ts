@@ -21,7 +21,7 @@ export const PREVIEW_MAX = 200 * 1048576;
  */
 export const MANIFEST_MAX = 65532;
 const TAIL = 4 + MANIFEST_MAX;
-/** Octets de données au plus (fichiers ; les textes vont dans le manifeste) : exactement 2 Gio (2 147 483 648). */
+/** Octets de données au plus (fichiers et notes, D41-36) : exactement 2 Gio (2 147 483 648). */
 export const CONTENT_MAX = BUCKETS[BUCKETS.length - 1] * CHUNK - TAIL;
 /**
  * Éléments par partage au plus, pour toutes les formules (décision du 7 novembre, D41-17 :
@@ -29,13 +29,18 @@ export const CONTENT_MAX = BUCKETS[BUCKETS.length - 1] * CHUNK - TAIL;
  * Borne technique d'un manifeste d'un morceau (MANIFEST_MAX = 65 532 octets) : une entrée de
  * fichier au nom ASCII de 120 caractères et au type de 40 caractères fait environ 220 octets,
  * soit environ 290 entrées ; 200 laisse de la marge. Des noms en écriture non latine (jusqu'à
- * 4 octets par caractère) ou de longs textes peuvent remplir le manifeste avant : le composeur
+ * 4 octets par caractère) peuvent remplir le manifeste avant : le composeur
  * le mesure et bloque l'envoi avec sa raison (« manifeste »), jamais un échec au scellement.
  */
 export const MAX_ITEMS = 200;
-/** Points de code d'un texte au plus. */
-export const TEXT_MAX = 10_000;
-const TEXT_BYTES_MAX = 4 * TEXT_MAX; // un point de code UTF-8 fait au plus 4 octets
+/**
+ * Points de code d'une note au plus (D41-36 : 100 000, contre 10 000 quand le texte était dans
+ * le manifeste). Le texte est la donnée d'un élément (segments chiffrés sous sa clé, §41.14),
+ * plus dans le manifeste ; les anciens partages (texte dans le manifeste) restent lisibles.
+ */
+export const TEXT_MAX = 100_000;
+/** Octets UTF-8 d'une note au plus : un point de code fait au plus 4 octets. */
+export const TEXT_BYTES_MAX = 4 * TEXT_MAX;
 const MAGIC = utf8("SHH2");
 const VERSION = 2;
 
@@ -314,9 +319,14 @@ function parseManifest(raw: Uint8Array<ArrayBuffer>, dataLen: number): Manifest 
     if (typeof e !== "object" || e === null) throw corrupt();
     const { kind, name, mime, size, offset, text, k, clean } = e as Record<string, unknown>;
     if (typeof name !== "string" || typeof mime !== "string" || !isNat(size) || !isNat(offset)) throw corrupt();
-    if (kind === "text") {
-      if (typeof text !== "string" || size !== 0 || offset !== 0 || k !== undefined || codePoints(text) > TEXT_MAX) throw corrupt();
+    if (kind === "text" && k === undefined) {
+      // Ancien format : texte dans le manifeste.
+      if (typeof text !== "string" || size !== 0 || offset !== 0 || codePoints(text) > TEXT_MAX) throw corrupt();
       out.push({ kind, name, mime, size, offset, text });
+    } else if (kind === "text") {
+      // Note élément (D41-36) : texte lu dans ses morceaux à l'ouverture (openStream).
+      if (text !== undefined || typeof k !== "string" || k.length !== 43 || size > TEXT_BYTES_MAX || offset > dataLen || size > dataLen - offset) throw corrupt();
+      out.push({ kind, name, mime, size, offset, k });
     } else if (kind === "file") {
       if (text !== undefined || offset > dataLen || size > dataLen - offset) throw corrupt();
       // Nettoyage : valeur inconnue (version plus récente) ignorée, jamais une erreur.
@@ -480,6 +490,29 @@ export async function openStream(
         elKeys.set(i, { k: await elementKey(seed), ad: ELEMENT_AD });
       } finally {
         seed.fill(0);
+      }
+    }
+
+    // Notes éléments (D41-36) : texte déchiffré (et authentifié) dès l'ouverture, pour que la
+    // liste, la visionneuse et la copie le trouvent comme un texte d'ancien format.
+    for (const [i, e] of manifest.items.entries()) {
+      if (e.kind !== "text" || e.text !== undefined) continue;
+      const raw = new Uint8Array(e.size);
+      try {
+        await range(e.offset, e.size, (part, pos) => {
+          raw.set(part, pos);
+          part.fill(0);
+        }, elKeys.get(i));
+        let text: string;
+        try {
+          text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw);
+        } catch {
+          throw corrupt();
+        }
+        if (codePoints(text) > TEXT_MAX) throw corrupt();
+        e.text = text;
+      } finally {
+        raw.fill(0);
       }
     }
 
