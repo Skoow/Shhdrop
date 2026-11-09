@@ -1,6 +1,8 @@
 <script lang="ts">
-  // Accueil v3, « Comment ça marche » (UI §9.1) : trois gestes, chacun avec une petite scène
-  // animée en boucle (ambiance : pause hors écran et onglet caché ; image fixe en mouvement réduit).
+  // Accueil, « Comment ça marche » (UI §9.1 ; retours HOME5) : un panneau de verre posé sur la
+  // lueur de la section, trois gestes numérotés reliés par une ligne qui se trace au défilement
+  // (animation-timeline: view(), ligne pleine en repli), chacun avec sa petite scène animée en
+  // boucle (ambiance : pause hors écran et onglet caché ; image fixe en mouvement réduit).
   import { t, getLang } from "../../i18n/i18n.svelte";
   import { limitParams } from "../../i18n/limit-params";
   import { ambient, magnet, reveal } from "../../ui/attach";
@@ -17,10 +19,10 @@
     <h2 id="how-title">{t("home.how.title")}</h2>
     <p>{t("home.how.lede")}</p>
   </div>
-  <div class="story">
-  <div class="rail" aria-hidden="true"><span></span></div>
+  <div class="panel rv" {@attach reveal}>
   <ol class="steps">
-    <li class="step rv" {@attach reveal} {@attach magnet}>
+    <li class="step" {@attach magnet}>
+      <span class="node" aria-hidden="true"><span class="num">1</span></span><span class="seg" aria-hidden="true"><i></i></span>
       <div class="ill add" aria-hidden="true" data-ambient {@attach ambient}>
         <svg viewBox="0 0 240 160" focusable="false"><path class="cap" d={CAP} pathLength="100" /></svg>
         <span class="floor"></span>
@@ -31,7 +33,8 @@
       <h3>{t("home.how.add.t")}</h3>
       <p>{t("home.how.add.p", limitParams(getLang()))}</p>
     </li>
-    <li class="step rv" {@attach reveal} {@attach magnet}>
+    <li class="step" {@attach magnet}>
+      <span class="node" aria-hidden="true"><span class="num">2</span></span><span class="seg" aria-hidden="true"><i></i></span>
       <div class="ill seal" aria-hidden="true" data-ambient {@attach ambient}>
         <svg viewBox="0 0 240 160" focusable="false">
           <path class="cap" d={CAP} pathLength="100" />
@@ -45,7 +48,8 @@
       <h3>{t("home.how.seal.t")}</h3>
       <p>{t("home.how.seal.p")}</p>
     </li>
-    <li class="step rv" {@attach reveal} {@attach magnet}>
+    <li class="step" {@attach magnet}>
+      <span class="node" aria-hidden="true"><span class="num">3</span></span><span class="seg" aria-hidden="true"><i></i></span>
       <div class="ill go" aria-hidden="true" data-ambient {@attach ambient}>
         <svg viewBox="0 0 240 160" focusable="false"><path class="cap dots" d={CAP} pathLength="100" /></svg>
         <span class="floor"></span>
@@ -74,86 +78,143 @@
   .head {
     display: grid;
     gap: var(--sp-3);
+  }
+  .head p {
     max-width: 40rem;
   }
   h2 {
     min-width: 0;
     overflow-wrap: break-word;
     font-size: var(--fs-section);
-    line-height: 1.04;
-    font-weight: 620;
-    font-stretch: 110%;
-    letter-spacing: -0.03em;
+    line-height: 1;
+    font-weight: 680;
+    font-stretch: 116%;
+    letter-spacing: -0.04em;
+    text-wrap: balance;
   }
   .head p,
   .step p {
     margin: 0;
     color: var(--text-2);
   }
+  .step p {
+    font-size: 0.9375rem;
+    line-height: 1.55;
+  }
   .head p {
     font-size: 1.125rem;
+  }
+  /* Panneau de verre dépoli sur la lueur de la section ; contour lumineux par masque. */
+  .panel {
+    position: relative;
+    isolation: isolate;
+    min-width: 0;
+    padding: 18px 14px 24px;
+    border-radius: 28px;
+    background: rgb(15 19 26 / 0.55);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    backdrop-filter: blur(18px) saturate(150%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.07),
+      0 50px 100px -60px rgb(0 0 0 / 0.95);
+  }
+  .panel::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    border-radius: inherit;
+    background: linear-gradient(170deg, rgb(201 251 232 / 0.3), rgb(233 236 242 / 0.07) 35%, rgb(233 236 242 / 0.03) 70%, rgb(95 227 181 / 0.18));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
   }
   .steps {
     list-style: none;
     margin: 0;
     padding: 0;
     display: grid;
-    gap: var(--sp-7);
+    gap: var(--sp-6);
   }
-  .story {
-    position: relative;
-    min-width: 0;
-  }
-  /* Carte en relief : bord dégradé qui accroche la lumière, lumière intérieure, reflet au pointeur. */
+  /* Téléphone : numéro à gauche, la ligne descend vers le geste suivant. */
   .step {
+    --node: 44px;
     position: relative;
-    isolation: isolate;
-    overflow: hidden;
     display: grid;
-    gap: var(--sp-3);
+    grid-template-columns: var(--node) minmax(0, 1fr);
+    column-gap: var(--sp-3);
+    row-gap: var(--sp-3);
     align-content: start;
     min-width: 0;
-    padding: 12px 12px 24px;
-    border: 1px solid transparent;
-    border-radius: 28px;
-    background:
-      linear-gradient(180deg, rgb(19 24 31 / 0.94), rgb(12 15 20 / 0.94)) padding-box,
-      linear-gradient(180deg, rgb(233 236 242 / 0.18), rgb(233 236 242 / 0.03) 55%) border-box;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.06),
-      0 30px 60px -36px rgb(0 0 0 / 0.95);
-    transition: translate 520ms var(--ease-settle);
   }
-  .step::before {
-    content: "";
-    position: absolute;
-    z-index: -1;
-    left: 0;
-    top: 0;
-    width: 360px;
-    height: 360px;
-    margin: -180px 0 0 -180px;
+  .step > .ill,
+  .step > h3,
+  .step > p {
+    grid-column: 2;
+  }
+  .step > .ill {
+    grid-row: 1;
+  }
+  .node {
+    grid-column: 1;
+    grid-row: 1;
+    position: relative;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: var(--node);
+    height: var(--node);
     border-radius: 50%;
-    background: radial-gradient(closest-side, rgb(95 227 181 / 0.09), transparent);
-    opacity: 0;
-    transform: translate(var(--lx, 50%), var(--ly, 50%));
-    transition: opacity var(--dur-base) var(--ease-out);
+    background: radial-gradient(closest-side, rgb(95 227 181 / 0.2), rgb(12 16 22 / 0.95));
+    box-shadow:
+      inset 0 0 0 1px rgb(95 227 181 / 0.45),
+      0 0 0 6px rgb(95 227 181 / 0.05),
+      0 0 30px -4px var(--seal-halo);
+    transition: transform 520ms var(--ease-settle);
+  }
+  .num {
+    font-size: 1.25rem;
+    line-height: 1;
+    font-weight: 720;
+    font-stretch: 118%;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+    color: var(--seal-light);
+  }
+  /* Segment vers le geste suivant : rail sombre, tracé menthe dessus. */
+  .seg {
+    position: absolute;
+    left: calc(var(--node) / 2 - 1px);
+    top: var(--node);
+    bottom: calc(-1 * var(--sp-6));
+    width: 2px;
+    border-radius: 2px;
+    background: var(--hair-2);
+    overflow: hidden;
+  }
+  .step:last-child .seg {
+    display: none;
+  }
+  .seg i {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, var(--accent), var(--seal-light));
+    transform-origin: top;
   }
   @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-    .step:hover {
-      translate: 0 -4px;
+    .step:hover .node {
+      transform: scale(1.08);
     }
-    .step:hover::before {
-      opacity: 1;
+    .step:hover .ill {
+      translate: 0 -3px;
     }
   }
   .step h3,
   .step p {
-    padding-inline: 12px;
-  }
-  /* Fil qui relie les trois gestes, tracé au défilement (scaleX, composé). */
-  .rail {
-    display: none;
+    min-width: 0;
+    overflow-wrap: break-word;
   }
   .floor {
     left: 50%;
@@ -175,11 +236,12 @@
     box-shadow: 0 -6px 0 rgb(233 236 242 / 0.1);
   }
   h3 {
-    margin-top: var(--sp-2);
+    margin-top: var(--sp-1);
     font-size: 1.375rem;
-    font-weight: 620;
-    font-stretch: 106%;
-    letter-spacing: -0.01em;
+    line-height: 1.2;
+    font-weight: 660;
+    font-stretch: 108%;
+    letter-spacing: -0.015em;
   }
 
   /* Scène : verre statique, réglure fine, capsule du logo. */
@@ -367,7 +429,7 @@
     .ill:global(.still) * {
       animation-play-state: paused;
     }
-    .step {
+    .ill {
       transition: translate 520ms var(--ease-settle);
     }
   }
@@ -413,56 +475,102 @@
     80%, 100% { opacity: 0; transform: translateY(-26px); }
   }
 
+  /* La ligne se trace au défilement (scale, composé) ; sans view(), elle reste pleine. */
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      .seg i {
+        animation: seg-y linear both;
+        animation-timeline: view();
+        animation-range: entry 80% cover 60%;
+      }
+      .node {
+        animation: node-on linear both;
+        animation-timeline: view();
+        animation-range: entry 40% entry 100%;
+      }
+    }
+  }
+  @keyframes seg-y {
+    from {
+      transform: scaleY(0);
+    }
+  }
+  @keyframes seg-x {
+    from {
+      transform: scaleX(0);
+    }
+  }
+  @keyframes node-on {
+    from {
+      opacity: 0.35;
+      transform: scale(0.8);
+    }
+  }
+
+  /* Tablette et ordinateur : trois colonnes ; numéros en haut, la ligne court de l'un à l'autre. */
   @media (min-width: 720px) {
+    .panel {
+      padding: 32px 28px 36px;
+    }
+    .step {
+      --node: 52px;
+    }
+    .num {
+      font-size: 1.5rem;
+    }
     .steps {
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: var(--sp-5);
     }
-    .rail {
-      display: block;
-      position: absolute;
-      z-index: -1;
-      left: 16%;
-      right: 16%;
-      top: 34%;
-      height: 2px;
-      border-radius: 2px;
-      background: var(--hair-2);
+    .step {
+      grid-template-columns: minmax(0, 1fr);
     }
-    .rail span {
-      position: absolute;
-      inset: 0;
-      border-radius: inherit;
+    .step > .ill,
+    .step > h3,
+    .step > p {
+      grid-column: 1;
+    }
+    .step > .ill {
+      grid-row: auto;
+    }
+    .node {
+      grid-row: auto;
+      margin-bottom: var(--sp-2);
+    }
+    .seg {
+      left: calc(var(--node) + 12px);
+      right: calc(-1 * var(--sp-5) + 12px);
+      top: calc(var(--node) / 2 - 1px);
+      bottom: auto;
+      width: auto;
+      height: 2px;
+    }
+    .seg i {
       background: linear-gradient(90deg, var(--accent), var(--seal-light));
-      box-shadow: 0 0 12px var(--seal-halo);
       transform-origin: left;
-      transform: scaleX(1);
     }
     @media (prefers-reduced-motion: no-preference) {
       @supports (animation-timeline: view()) {
-        .rail span {
-          animation: rail linear both;
-          animation-timeline: view();
-          animation-range: entry 60% cover 55%;
-        }
-        /* Les trois gestes entrent l'un après l'autre au fil du défilement. */
-        .step:nth-child(2) {
-          animation-range: entry 10% entry 90%;
-        }
-        .step:nth-child(3) {
-          animation-range: entry 20% entry 100%;
+        .seg i {
+          animation-name: seg-x;
+          animation-range: entry 90% cover 55%;
         }
       }
-    }
-  }
-  @keyframes rail {
-    from {
-      transform: scaleX(0);
     }
   }
   @media (min-width: 1024px) {
     .how {
       padding-block: 168px 150px;
+    }
+    .panel {
+      padding: 44px 44px 48px;
+      border-radius: 40px;
+    }
+    .steps {
+      gap: var(--sp-6);
+    }
+    .seg {
+      right: calc(-1 * var(--sp-6) + 12px);
     }
   }
   @media (forced-colors: active) {
@@ -476,9 +584,20 @@
       stroke: CanvasText;
     }
     .sheet,
-    .chip {
+    .chip,
+    .node {
       border: 1px solid CanvasText;
       box-shadow: none;
+    }
+    .panel {
+      border: 1px solid CanvasText;
+      background: Canvas;
+    }
+    .panel::after {
+      display: none;
+    }
+    .seg i {
+      background: CanvasText;
     }
     .pad {
       background: Highlight;

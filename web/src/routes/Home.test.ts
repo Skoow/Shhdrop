@@ -31,7 +31,7 @@ describe("Home (UI §9.1)", () => {
     expect(h1.getAttribute("tabindex")).toBe("-1");
     expect(h1.classList.contains("compact")).toBe(false);
     expect(document.body.textContent).toContain(
-      "Chiffrés sur votre appareil avant l'envoi\u202f: le serveur ne reçoit que des données chiffrées, jamais la clé.",
+      "Texte, photos, vidéos, vocaux, documents, envoyés en qualité d'origine.",
     );
     // Libellés visibles en HTML (taille de texte relative), cachés aux lecteurs d'écran : le nom est l'aria-label.
     const labels = [...document.querySelectorAll("[data-label]")].map((e) => e.textContent);
@@ -61,13 +61,11 @@ describe("Home (UI §9.1)", () => {
       "Glissez vos fichiers iciQue voulez-vous envoyer\u202f?",
       "Comment ça marche",
       "Pourquoi c'est sûr",
-      "Pourquoi Shhdrop",
-      "Ce que Shhdrop ne peut pas faire",
       "Vos questions",
       "Quelque chose à transmettre\u202f?",
     ]);
-    expect(document.querySelectorAll(".claim")).toHaveLength(9);
-    expect(document.querySelectorAll("details[name=faq]")).toHaveLength(6);
+    expect(document.querySelectorAll(".claim")).toHaveLength(4);
+    expect(document.querySelectorAll("details[name=faq]")).toHaveLength(5);
     expect(document.querySelectorAll(".certs > li")).toHaveLength(3);
     expect(document.querySelector('[data-slot="compose"]')).not.toBeNull();
   });
@@ -78,7 +76,7 @@ describe("Home (UI §9.1)", () => {
     expect(title(h1)).toBe("Un lien, un mot de passe, puis plus rien.");
     expect(h1.classList.contains("compact")).toBe(true);
     expect(document.querySelector('[role="img"]')).toBeNull();
-    expect(document.body.textContent).not.toContain("Chiffrés sur votre appareil");
+    expect(document.body.textContent).not.toContain("en qualité d'origine");
     expect(document.querySelector("a")).toBeNull();
     expect(document.querySelector('[data-slot="compose"]')).not.toBeNull();
   });

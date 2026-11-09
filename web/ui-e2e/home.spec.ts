@@ -46,20 +46,20 @@ test.describe("fr-FR", () => {
     await page.setViewportSize(isMobile ? { width: 390, height: 844 } : { width: 1280, height: 900 });
     await page.goto(shh.origin + "/");
     await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
-    await expect(page.getByText(/^Texte, photos, vidéos, vocaux, documents\./)).toBeVisible();
+    await expect(page.getByText(/^Texte, photos, vidéos, vocaux, documents, envoyés en qualité d'origine\./)).toBeVisible();
     const certs = page.getByRole("list", { name: "En bref" }).getByRole("listitem");
     await expect(certs).toHaveCount(3);
     // Ordinateur : « Parcourir les fichiers » ; téléphone : une seule action, « Ajouter ».
     await expect(page.getByRole("button", { name: isMobile ? /^Ajouter/ : "Parcourir les fichiers" })).toBeVisible();
     // Limites gratuites (spec §41.2), lues des constantes.
-    await expect(page.locator("p.proof")).toHaveText("200\u202féléments · 2\u202fGo · 24\u202fh maximum · 5\u202fessais, puis destruction");
+    await expect(page.locator("p.proof")).toHaveText("200\u202féléments · 2\u202fGo au total");
     for (const h of ["Comment ça marche", "Pourquoi c'est sûr", "Vos questions", "Quelque chose à transmettre ?"])
       await expect(page.getByRole("heading", { level: 2, name: h, exact: true })).toHaveCount(1);
     await expect(page.getByRole("img", { name: SCHEMA_FR })).toHaveCount(1);
     await expect(page.getByRole("link", { name: "Tous les détails de sécurité" })).toHaveAttribute("href", "/securite");
     // Le code public : lien sortant sans référent (aucune ressource chargée, une simple navigation).
     await expect(page.getByRole("link", { name: "Voir le code sur GitHub" })).toHaveAttribute("rel", "noopener noreferrer");
-    await expect(page.getByText("Code ouvert (AGPL-3.0), consultable et vérifiable sur GitHub.")).toBeVisible();
+    await expect(page.getByText("Sous licence AGPL-3.0\u202f: chacun peut le lire et le vérifier.")).toBeVisible();
     await expect(page.getByRole("link", { name: "Voir le code sur GitHub" })).toHaveAttribute("href", "https://github.com/Skoow/shhdrop");
     // Aucun « # » dans un lien de la page (réservé aux clés, UI §12.1).
     expect(await page.locator("main a[href*='#']").count()).toBe(0);
@@ -310,7 +310,7 @@ test.describe("fr-FR", () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(shh.origin + "/");
     const kinds = await page.locator(".sec-bg").evaluateAll((es) => es.map((e) => [...e.classList].find((c) => c !== "sec-bg" && !c.startsWith("svelte-"))));
-    expect(kinds).toEqual(["night", "tide", "vault", "caution", "cipher", "dawn"]);
+    expect(kinds).toEqual(["night", "tide", "vault", "cipher", "dawn"]);
     // Pleine largeur de la fenêtre, sans défilement horizontal.
     for (const w of await page.locator(".sec-bg").evaluateAll((es) => es.map((e) => Math.round(e.getBoundingClientRect().width))))
       expect(w).toBe(await page.evaluate(() => document.documentElement.clientWidth));
@@ -318,7 +318,7 @@ test.describe("fr-FR", () => {
     test.skip(browserName !== "chromium", "luminance mesurée sur la capture Chromium");
     // K5 étendu aux fonds de section : contenu caché (CSSOM), fonds seuls, aurore retirée.
     const max: number[] = [];
-    for (const sel of ["section.how", "section.why", "section.limits", "section.faq", "section.end"]) {
+    for (const sel of ["section.how", "section.why", "section.faq", "section.end"]) {
       await page.locator(sel).evaluate((e) => e.scrollIntoView({ block: "center" }));
       await page.waitForTimeout(300);
       const hide = ".aurora, main, header, footer, .skip, .banner-slot";
@@ -442,7 +442,7 @@ test.describe("fr-FR", () => {
     await page.waitForTimeout(1000);
     const tag = isMobile ? "390" : "1440";
     await capture(page, `home-v3-${tag}`);
-    for (const s of ["how", "why", "limits", "faq", "end"]) {
+    for (const s of ["how", "why", "faq", "end"]) {
       await page.locator(`section.${s}`).evaluate((e) => e.scrollIntoView({ block: "start" }));
       await page.evaluate(() => scrollBy(0, -72));
       await page.waitForTimeout(900);

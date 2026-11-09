@@ -6,7 +6,7 @@
   import { cipherText } from "./decor";
   import Guilloche from "./Guilloche.svelte";
 
-  type Kind = "night" | "tide" | "vault" | "caution" | "cipher" | "dawn";
+  type Kind = "night" | "tide" | "vault" | "cipher" | "dawn";
   let { kind }: { kind: Kind } = $props();
   const glyphs = $derived(kind === "cipher" ? cipherText(4099, 160, 40) : "");
 </script>
@@ -54,28 +54,24 @@
     mask-image: radial-gradient(60% 70% at 72% 45%, #000, transparent 75%);
   }
 
-  /* Comment ça marche (retours UI8) : fond sobre, sans motif ni biais. Une encre à peine plus
-     claire que la page, un filet de lumière au bord haut (comme le pied de page) et un halo très
-     large et très bas, centré : la section se lit comme une page posée, rien ne bouge derrière. */
-  .tide {
-    -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 160px), transparent 100%);
-    mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 160px), transparent 100%);
-  }
+  /* Comment ça marche (retours HOME5) : lueur de la DA derrière le panneau de verre — menthe au
+     centre, bleu profond qui monte du bas, filet de lumière au bord haut. Sous le plafond K5. */
   .tide .field {
-    inset: 0;
-    animation: none;
-    background: linear-gradient(180deg, #0d1016, #0b0e13 60%, #0b0d12);
+    background:
+      radial-gradient(46% 42% at 50% 62%, rgb(95 227 181 / 0.17), transparent 72%),
+      radial-gradient(55% 50% at 18% 85%, rgb(52 86 170 / 0.2), transparent 70%),
+      radial-gradient(40% 40% at 86% 30%, rgb(40 128 154 / 0.16), transparent 70%),
+      linear-gradient(180deg, #0b0e13, #0a0d12);
   }
   .tide .tex {
-    inset: 0 0 auto;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgb(233 236 242 / 0.12) 30%, rgb(95 227 181 / 0.22) 50%, rgb(233 236 242 / 0.12) 70%, transparent);
-    animation: none;
+    inset: 0;
+    background-image: radial-gradient(circle at 1px 1px, rgb(233 236 242 / 0.07) 1px, transparent 1.5px);
+    background-size: 26px 26px;
+    -webkit-mask-image: radial-gradient(60% 55% at 50% 55%, #000, transparent 80%);
+    mask-image: radial-gradient(60% 55% at 50% 55%, #000, transparent 80%);
   }
   .tide .light {
-    inset: 0;
-    background: radial-gradient(60% 50% at 50% 0%, rgb(201 251 232 / 0.035), transparent 70%);
-    animation: none;
+    background: radial-gradient(30% 30% at 50% 50%, rgb(201 251 232 / 0.06), transparent 70%);
   }
 
   /* Pourquoi c'est sûr : le coffre, encre profonde, guilloché, lumière qui tombe d'en haut. */
@@ -89,18 +85,6 @@
   }
   .vault .light {
     background: radial-gradient(40% 30% at 80% 100%, rgb(52 86 170 / 0.14), transparent 70%);
-  }
-
-  /* Limites : ambre retenu, hachures fines (une mise en garde, pas une alarme). */
-  .caution {
-    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 90px, #000 calc(100% - 90px), transparent 100%);
-    mask-image: linear-gradient(180deg, transparent 0, #000 90px, #000 calc(100% - 90px), transparent 100%);
-  }
-  .caution .field {
-    background: radial-gradient(60% 80% at 20% 50%, rgb(242 196 109 / 0.07), transparent 70%), #0c0c0d;
-  }
-  .caution .tex {
-    background-image: repeating-linear-gradient(135deg, transparent 0 14px, rgb(242 196 109 / 0.035) 14px 15px);
   }
 
   /* Questions : texte chiffré décoratif en filigrane (S1 : générateur à graine fixe). */

@@ -1,73 +1,59 @@
 <script lang="ts">
-  // Accueil v3/v4, « Pourquoi c'est sûr » (UI §9.1 ; spec §2, §9, §18, §26) : neuf affirmations
-  // vraies, chacune avec sa phrase ; un lien d'exemple dont la partie secrète est surlignée ;
-  // médaillon dont l'anse se ferme au défilement. Fond « coffre » (SectionBg). Aucun nom
-  // d'algorithme (UI §20.8), jamais « 100 % ». Les limites sont dans Limits.svelte.
+  // Accueil, « Pourquoi c'est sûr » (UI §9.1 ; spec §2, §9, §18) : quatre points forts en
+  // « bento » (retours HOME5) — une grande carte (chiffrement : le trajet et un lien d'exemple
+  // dont la partie secrète est surlignée), trois petites (autodestruction, rien sur vous, code
+  // ouvert). Aucun nom d'algorithme (UI §20.8), jamais « 100 % ». Les limites, dont l'historique
+  // du navigateur, sont dans la page Sécurité, vers laquelle pointe le lien final.
   import { followLink, href } from "../../app/router.svelte";
-  import { t, type Key } from "../../i18n/i18n.svelte";
+  import { t } from "../../i18n/i18n.svelte";
   import { magnet, reveal } from "../../ui/attach";
-  import { rosette } from "../../ui/decor";
   import SectionBg from "../../ui/SectionBg.svelte";
-  import { ArrowRight, CodeXml, EyeOff, HardDrive, Link2, Lock, Server, ShieldX, Timer, UserX } from "../../ui/Icon";
+  import { ArrowRight, CodeXml, Hourglass, Lock, UserX } from "../../ui/Icon";
   import Schema from "../../ui/Schema.svelte";
 
   const CODE_URL = "https://github.com/Skoow/shhdrop";
-  const claims = [
-    { k: "e2e", icon: Lock },
-    { k: "link", icon: Link2 },
-    { k: "ttl", icon: Timer },
-    { k: "tries", icon: ShieldX },
-    { k: "key", icon: Server },
-    { k: "account", icon: UserX },
-    { k: "ip", icon: HardDrive },
-    { k: "track", icon: EyeOff },
-    { k: "code", icon: CodeXml },
-  ] as const;
-  const outer = rosette(40, 2, 7, 64);
-  const inner = rosette(44, 2, 5, 64, 1.03);
 </script>
 
 <section class="why" aria-labelledby="why-title">
   <SectionBg kind="vault" />
-  <div class="intro">
-    <div class="head rv" {@attach reveal}>
-      <div class="medal" aria-hidden="true" {@attach reveal}>
-        <svg viewBox="0 0 128 128" focusable="false">
-          <path class="r1" d={outer} />
-          <path class="r2" d={inner} />
-          <circle class="disc" cx="64" cy="64" r="30" />
-          <g class="lock">
-            <path class="shackle" d="M55 60v-7a9 9 0 0 1 18 0v7" />
-            <rect x="50" y="60" width="28" height="20" rx="4" />
-            <path class="hole" d="M64 67v6" />
-          </g>
-        </svg>
-      </div>
-      <h2 id="why-title">{t("home.why.title")}</h2>
-      <p class="lede">{t("home.why.lede")}</p>
-    </div>
-    <figure class="example rv" {@attach reveal}>
-      <figcaption>{t("home.why.example")}</figcaption>
-      <p class="url" translate="no"><span>https://shhdrop.app/</span><mark>#q3V9-kT0aZx7Lw2…</mark></p>
-      <p class="note"><Lock size={15} strokeWidth={2} aria-hidden="true" />{t("home.why.example.note")}</p>
-    </figure>
+  <div class="head rv" {@attach reveal}>
+    <h2 id="why-title">{t("home.why.title")}</h2>
+    <p class="lede">{t("home.why.lede")}</p>
   </div>
 
-  <div class="journey rv" {@attach reveal}><Schema /></div>
-
-  <ul class="claims">
-    {#each claims as { k, icon: Icon } (k)}
-      <li class="claim rv" {@attach reveal} {@attach magnet}>
-        <span class="ic"><Icon size={24} strokeWidth={1.6} aria-hidden="true" /></span>
-        <div>
-          <h3>{t(`home.why.${k}.t` as Key)}</h3>
-          <p>
-            {t(`home.why.${k}.p` as Key)}
-            {#if k === "code"}<a href={CODE_URL} rel="noopener noreferrer">{t("home.why.code.link")}</a>{/if}
-          </p>
-        </div>
-      </li>
-    {/each}
+  <ul class="bento">
+    <li class="card big claim rv" {@attach reveal} {@attach magnet}>
+      <div class="txt">
+        <span class="ic" aria-hidden="true"><Lock size={22} strokeWidth={1.8} /></span>
+        <h3>{t("home.why.e2e.t")}</h3>
+        <p>{t("home.why.e2e.p")}</p>
+      </div>
+      <div class="journey"><Schema /></div>
+      <figure class="example">
+        <figcaption>{t("home.why.example")}</figcaption>
+        <p class="url" translate="no"><span>https://shhdrop.app/</span><mark>#q3V9-kT0aZx7Lw2…</mark></p>
+        <p class="note"><Lock size={15} strokeWidth={2} aria-hidden="true" />{t("home.why.example.note")}</p>
+      </figure>
+    </li>
+    <li class="card claim ttl rv" {@attach reveal} {@attach magnet}>
+      <span class="vis dial" aria-hidden="true">
+        <svg viewBox="0 0 64 64" focusable="false"><circle class="trk" cx="32" cy="32" r="27" /><circle class="arc" cx="32" cy="32" r="27" pathLength="100" /></svg>
+        <Hourglass size={22} strokeWidth={1.8} />
+      </span>
+      <h3>{t("home.why.ttl.t")}</h3>
+      <p>{t("home.why.ttl.p")}</p>
+      <span class="pips" aria-hidden="true"><b></b><b></b><b></b><b></b><b></b></span>
+    </li>
+    <li class="card claim you rv" {@attach reveal} {@attach magnet}>
+      <span class="vis rings" aria-hidden="true"><UserX size={22} strokeWidth={1.8} /></span>
+      <h3>{t("home.why.you.t")}</h3>
+      <p>{t("home.why.you.p")}</p>
+    </li>
+    <li class="card claim code rv" {@attach reveal} {@attach magnet}>
+      <span class="vis rings" aria-hidden="true"><CodeXml size={22} strokeWidth={1.8} /></span>
+      <h3>{t("home.why.code.t")}</h3>
+      <p>{t("home.why.code.p")} <a href={CODE_URL} rel="noopener noreferrer">{t("home.why.code.link")}</a></p>
+    </li>
   </ul>
   <a class="more" href={href("/securite")} onclick={(e) => followLink(e, "/securite")}>
     {t("home.why.more")}<ArrowRight size={18} strokeWidth={1.75} aria-hidden="true" />
@@ -80,43 +66,26 @@
     isolation: isolate;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: var(--sp-7);
-    padding-block: 120px;
-  }
-  .intro {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
     gap: var(--sp-6);
-    align-items: end;
+    padding-block: 120px;
   }
   .head {
     display: grid;
-    gap: var(--sp-4);
-    align-content: start;
+    gap: var(--sp-3);
     min-width: 0;
   }
-  /* Le trajet : une scène à part entière, dans un cadre en relief. */
-  .journey {
-    min-width: 0;
-    padding: clamp(16px, 3vw, 40px) clamp(12px, 3vw, 48px) clamp(16px, 2.5vw, 32px);
-    border: 1px solid transparent;
-    border-radius: 28px;
-    background:
-      radial-gradient(60% 80% at 50% 40%, rgb(40 128 154 / 0.12), transparent 70%) padding-box,
-      linear-gradient(180deg, rgb(14 17 23 / 0.94), rgb(9 11 15 / 0.94)) padding-box,
-      linear-gradient(180deg, rgb(233 236 242 / 0.16), rgb(233 236 242 / 0.03) 60%) border-box;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.05),
-      0 40px 80px -48px rgb(0 0 0 / 0.95);
+  .lede {
+    max-width: 40rem;
   }
   h2 {
     min-width: 0;
     overflow-wrap: break-word;
     font-size: var(--fs-section);
-    line-height: 1.04;
-    font-weight: 620;
-    font-stretch: 110%;
-    letter-spacing: -0.03em;
+    line-height: 1;
+    font-weight: 680;
+    font-stretch: 116%;
+    letter-spacing: -0.04em;
+    text-wrap: balance;
   }
   .lede {
     margin: 0;
@@ -124,85 +93,197 @@
     font-size: 1.125rem;
   }
 
-  /* Médaillon : rosace guillochée, anse qui se ferme quand la section entre dans l'écran. */
-  .medal {
-    width: 112px;
-    height: 112px;
-    margin-bottom: var(--sp-2);
-    color: var(--accent);
+  /* Bento : verre sombre, contour qui accroche la lumière (masque), reflet sous le pointeur. */
+  .bento {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-3);
   }
-  .medal svg {
+  .card {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    display: grid;
+    align-content: start;
+    gap: var(--sp-3);
+    min-width: 0;
+    padding: 24px;
+    border-radius: 24px;
+    background: rgb(16 20 27 / 0.62);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    backdrop-filter: blur(14px) saturate(140%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.06),
+      0 30px 60px -40px rgb(0 0 0 / 0.95);
+    transition: translate 520ms var(--ease-settle);
+  }
+  .card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    border-radius: inherit;
+    background: linear-gradient(160deg, rgb(201 251 232 / 0.28), rgb(233 236 242 / 0.06) 40%, rgb(233 236 242 / 0.03) 70%, rgb(95 227 181 / 0.16));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    left: 0;
+    top: 0;
+    width: 320px;
+    height: 320px;
+    margin: -160px 0 0 -160px;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgb(95 227 181 / 0.11), transparent);
+    opacity: 0;
+    transform: translate(var(--lx, 50%), var(--ly, 50%));
+    transition: opacity var(--dur-base) var(--ease-out);
+  }
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .card:hover {
+      translate: 0 -3px;
+    }
+    .card:hover::before {
+      opacity: 1;
+    }
+    .card:hover .vis,
+    .card:hover .ic {
+      transform: scale(1.06) rotate(-4deg);
+    }
+  }
+  .txt {
+    display: grid;
+    gap: var(--sp-3);
+    min-width: 0;
+  }
+  h3 {
+    min-width: 0;
+    overflow-wrap: break-word;
+    font-size: 1.3125rem;
+    line-height: 1.2;
+    font-weight: 660;
+    font-stretch: 108%;
+    letter-spacing: -0.015em;
+  }
+  .big h3 {
+    font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2.125rem);
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    font-stretch: 112%;
+  }
+  .card p {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: break-word;
+    color: var(--text-2);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+  }
+  .card a {
+    color: var(--text);
+    text-decoration-color: var(--accent);
+    text-underline-offset: 0.25em;
+    /* Cible de 44 px sans gonfler la ligne. */
+    display: inline-block;
+    padding-block: 10px;
+  }
+  .journey {
+    min-width: 0;
+    margin-inline: -8px;
+  }
+
+  /* Visuels maison des petites cartes : médaillon de verre, anneaux, cadran. */
+  .ic,
+  .vis {
+    position: relative;
+    display: grid;
+    place-items: center;
+    color: var(--accent);
+    transition: transform 520ms var(--ease-settle);
+  }
+  .ic {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: rgb(95 227 181 / 0.08);
+    box-shadow:
+      inset 0 0 0 1px rgb(95 227 181 / 0.28),
+      0 0 28px -6px var(--seal-halo);
+  }
+  .vis {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgb(95 227 181 / 0.14), rgb(95 227 181 / 0.03));
+    box-shadow:
+      inset 0 0 0 1px rgb(95 227 181 / 0.3),
+      0 0 0 8px rgb(95 227 181 / 0.04),
+      0 0 0 16px rgb(95 227 181 / 0.02),
+      0 0 32px -4px var(--seal-halo);
+    margin: 8px 0 var(--sp-2) 8px;
+  }
+  .dial svg {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
-    overflow: visible;
     fill: none;
+    transform: rotate(-90deg);
   }
-  .r1 {
-    stroke: rgb(95 227 181 / 0.42);
-    stroke-width: 0.6;
+  .trk {
+    stroke: rgb(95 227 181 / 0.14);
+    stroke-width: 3;
   }
-  .r2 {
-    stroke: rgb(95 227 181 / 0.2);
-    stroke-width: 0.5;
-  }
-  .disc {
-    fill: var(--accent-tint);
-    stroke: rgb(95 227 181 / 0.45);
-    stroke-width: 0.8;
-  }
-  .lock {
+  .arc {
     stroke: var(--accent);
-    stroke-width: 2.4;
+    stroke-width: 3;
     stroke-linecap: round;
-    stroke-linejoin: round;
+    stroke-dasharray: 34 100;
   }
-  .shackle {
-    transform-box: view-box;
-    transform-origin: 73px 60px;
+  .pips {
+    display: flex;
+    gap: 6px;
+    margin-top: var(--sp-1);
+  }
+  .pips b {
+    width: 22px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgb(233 236 242 / 0.16);
+  }
+  .pips b:last-child {
+    background: var(--danger);
   }
   @media (prefers-reduced-motion: no-preference) {
     @supports (animation-timeline: view()) {
-      .medal {
-        view-timeline: --medal;
+      .dial .arc {
+        animation: arc-down linear both;
+        animation-timeline: view();
+        animation-range: entry 20% cover 60%;
       }
-      .medal .shackle {
-        animation: shackle-close linear both;
-        animation-timeline: --medal;
-        animation-range: entry 10% cover 45%;
+      .bento > :nth-child(2) {
+        animation-range: entry 8% entry 78%;
       }
-      .medal .r1,
-      .medal .r2 {
-        transform-box: view-box;
-        transform-origin: 64px 64px;
-        animation: rose-turn linear both;
-        animation-timeline: --medal;
-        animation-range: cover;
+      .bento > :nth-child(3) {
+        animation-range: entry 16% entry 86%;
       }
-      .medal .r2 {
-        animation-direction: reverse;
+      .bento > :nth-child(4) {
+        animation-range: entry 24% entry 94%;
       }
-    }
-    .medal:global(.rv-wait) .shackle {
-      transition: transform 600ms var(--ease-settle) 300ms;
-    }
-    .medal:global(.rv-wait:not(.in)) .shackle {
-      transform: translateY(-5px) rotate(-22deg);
     }
   }
-  @keyframes shackle-close {
+  @keyframes arc-down {
     from {
-      transform: translateY(-5px) rotate(-22deg);
-    }
-    to {
-      transform: none;
-    }
-  }
-  @keyframes rose-turn {
-    from {
-      transform: rotate(-25deg);
-    }
-    to {
-      transform: rotate(25deg);
+      stroke-dasharray: 100 100;
     }
   }
 
@@ -275,97 +356,12 @@
     }
   }
 
-  /* Affirmations : cartes en relief, bord qui accroche la lumière, reflet sous le pointeur. */
-  .claims {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--sp-3);
-  }
-  .claim {
-    position: relative;
-    isolation: isolate;
-    overflow: hidden;
-    display: grid;
-    grid-template-columns: 44px minmax(0, 1fr);
-    gap: var(--sp-4);
-    padding: 22px 22px 24px;
-    border: 1px solid transparent;
-    border-radius: 20px;
-    background:
-      linear-gradient(180deg, rgb(20 24 32 / 0.92), rgb(13 16 22 / 0.92)) padding-box,
-      linear-gradient(180deg, rgb(233 236 242 / 0.16), rgb(233 236 242 / 0.03) 60%) border-box;
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.05),
-      0 18px 40px -24px rgb(0 0 0 / 0.9);
-    transition: translate 520ms var(--ease-settle);
-  }
-  .claim::before {
-    content: "";
-    position: absolute;
-    z-index: -1;
-    left: 0;
-    top: 0;
-    width: 280px;
-    height: 280px;
-    margin: -140px 0 0 -140px;
-    border-radius: 50%;
-    background: radial-gradient(closest-side, rgb(95 227 181 / 0.10), transparent);
-    opacity: 0;
-    transform: translate(var(--lx, 50%), var(--ly, 50%));
-    transition: opacity var(--dur-base) var(--ease-out);
-  }
-  .claim > div {
-    min-width: 0;
-    overflow-wrap: break-word;
-  }
-  .ic {
-    display: grid;
-    place-items: center;
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
-    color: var(--accent);
-    background: rgb(95 227 181 / 0.06);
-    box-shadow: inset 0 0 0 1px rgb(95 227 181 / 0.22);
-    transition: transform 520ms var(--ease-settle);
-  }
-  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-    .claim:hover {
-      translate: 0 -3px;
-    }
-    .claim:hover::before {
-      opacity: 1;
-    }
-    .claim:hover .ic {
-      transform: scale(1.08) rotate(-4deg);
-    }
-  }
-  .claim h3 {
-    font-size: 1.125rem;
-    line-height: 1.3;
-    font-weight: 620;
-    font-stretch: 104%;
-  }
-  .claim p {
-    margin: 6px 0 0;
-    color: var(--text-2);
-    font-size: 0.9375rem;
-  }
-  .claim a {
-    display: inline-block;
-    min-height: 44px;
-    padding-block: 10px;
-    color: var(--text);
-    text-decoration-color: var(--accent);
-    text-underline-offset: 0.25em;
-  }
-
   @media (min-width: 720px) {
-    .claims {
+    .bento {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .big {
+      grid-column: 1 / -1;
     }
   }
   @media (min-width: 1024px) {
@@ -373,17 +369,22 @@
       gap: var(--sp-7);
       padding-block: 180px 160px;
     }
-    .intro {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
-      column-gap: 72px;
+    .bento {
+      grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+      grid-template-rows: repeat(3, auto);
+      gap: var(--sp-4);
     }
-    .claims {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+    .big {
+      grid-column: 1;
+      grid-row: 1 / span 3;
+      padding: 36px;
+      gap: var(--sp-5);
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .claim,
+    .card,
     .ic,
+    .vis,
     .more :global(svg) {
       transition: none;
     }
@@ -391,23 +392,26 @@
   @media (forced-colors: active) {
     .example,
     .ic,
-    .claim {
+    .vis,
+    .card {
       border: 1px solid CanvasText;
       box-shadow: none;
       background: Canvas;
     }
-    .claim::before {
+    .card::before,
+    .card::after {
       display: none;
     }
     mark {
       background: Highlight;
       color: HighlightText;
     }
-    .r1,
-    .r2,
-    .disc,
-    .lock {
+    .trk,
+    .arc {
       stroke: CanvasText;
+    }
+    .pips b {
+      background: CanvasText;
     }
   }
 </style>

@@ -164,7 +164,7 @@
 
   /* Accueil v3 (UI §9.1, §20.4) : titres de section ; courbe « qui se pose » (ressort très
      amorti, sans dépassement ni rebond : la règle v1 tient), échantillonnée en linear(). */
-  --fs-section: clamp(2rem, 1.35rem + 2.4vw, 3.25rem);
+  --fs-section: clamp(2.25rem, 1.3rem + 3.2vw, 4rem);
   --ease-settle: linear(0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.281 6.7%, 0.723 15.4%, 0.856 19.4%, 0.938 23.6%, 0.977 28%, 0.994 33.4%, 1);
 }
 

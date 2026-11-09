@@ -52,8 +52,7 @@ test("audit : tous les écrans", async ({ page, shh, browser }) => {
   await page.goto(shh.origin + "/");
   await shot(page, "01-accueil");
   await shot(page, "01b-accueil-page", true);
-  const cmp = page.locator("[data-compare]");
-  await cmp.scrollIntoViewIfNeeded();
+  await page.locator("section.why").scrollIntoViewIfNeeded();
   await shot(page, "02-pourquoi");
   if (PHONE) await page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Réglages" }).click();
   else await page.getByRole("banner").getByRole("button", { name: "Réglages" }).click();

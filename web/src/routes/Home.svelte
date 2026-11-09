@@ -23,14 +23,11 @@
   import { Camera, ChevronDown, Lock, Mic, Paperclip, Plus, Timer, Type, UserX } from "../ui/Icon";
   import { reducedMotion } from "../ui/motion";
   import SealBand from "../ui/SealBand.svelte";
-  import SealMark from "../ui/SealMark.svelte";
   import SectionBg from "../ui/SectionBg.svelte";
   import Vessel from "../ui/Vessel.svelte";
   import Closing from "./home/Closing.svelte";
   import Faq from "./home/Faq.svelte";
   import HowItWorks from "./home/HowItWorks.svelte";
-  import Limits from "./home/Limits.svelte";
-  import Compare from "./home/Compare.svelte";
   import WhySafe from "./home/WhySafe.svelte";
 
   type Props = {
@@ -153,6 +150,13 @@
   </button>
 {/snippet}
 
+{#snippet cert(Icon: typeof Lock, title: string)}
+  <li class="cert" {@attach magnet}>
+    <span class="cm" aria-hidden="true"><Icon size={18} strokeWidth={1.9} /></span>
+    <span class="cert-t">{title}</span>
+  </li>
+{/snippet}
+
 <div class={["home", { compact, reveal }]}>
   <section class="hero" aria-labelledby="hero-title">
     {#if !compact}<SectionBg kind="night" />{/if}
@@ -168,9 +172,9 @@
       {#if !compact}
         <p class="lede">{t("hero.lede")}</p>
         <ul class="certs" aria-label={t("home.facts.label")}>
-          <li class="cert" {@attach magnet}><SealMark icon={Lock} /><span class="cert-t">{t("home.fact.e2e")}</span><span class="cert-p">{t("home.fact.e2e.p")}</span></li>
-          <li class="cert" {@attach magnet}><SealMark icon={Timer} /><span class="cert-t">{t("home.fact.erase")}</span><span class="cert-p">{t("home.fact.erase.p")}</span></li>
-          <li class="cert" {@attach magnet}><SealMark icon={UserX} /><span class="cert-t">{t("home.fact.account")}</span><span class="cert-p">{t("home.fact.account.p")}</span></li>
+          {@render cert(Lock, t("home.fact.e2e"))}
+          {@render cert(Timer, t("home.fact.erase"))}
+          {@render cert(UserX, t("home.fact.account"))}
         </ul>
       {/if}
     </div>
@@ -194,7 +198,6 @@
               <h2 class="drop-title">
                 <span class="t-fine">{t("compose.drop.title")}</span><span class="t-touch">{t("compose.drop.titleTouch")}</span>
               </h2>
-              <p class="drop-sub">{t("compose.drop.or")}</p>
             </div>
             <button type="button" class="browse" bind:this={browse} onclick={() => files?.click()}>
               <Paperclip size={20} strokeWidth={1.9} aria-hidden="true" />
@@ -230,8 +233,6 @@
   {#if !compact}
     <HowItWorks />
     <WhySafe />
-    <Compare />
-    <Limits />
     <Faq />
     <Closing onstart={start} />
   {/if}
@@ -308,35 +309,55 @@
     line-height: 1.55;
   }
 
-  /* Sceaux de confiance : cartes à double cadre, comme un certificat. */
+  /* Arguments (retours HOME5) : pastilles de verre, contour lumineux par masque qui s'éclaire
+     sous le pointeur (magnet : --lx, --ly), médaillon d'icône qui se soulève au survol. */
   .certs {
     order: 4;
     list-style: none;
     margin: 0;
     padding: 0;
-    display: grid;
+    display: flex;
+    flex-wrap: wrap;
     gap: var(--sp-2);
   }
   .cert {
     position: relative;
     isolation: isolate;
     overflow: hidden;
-    display: grid;
-    grid-template-columns: 44px minmax(0, 1fr);
-    column-gap: var(--sp-3);
+    display: inline-flex;
+    gap: 10px;
     align-items: center;
-    padding: 10px 14px 10px 10px;
-    border: 1px solid transparent;
-    border-radius: 14px;
-    background:
-      linear-gradient(180deg, rgb(19 23 30 / 0.9), rgb(13 16 21 / 0.9)) padding-box,
-      linear-gradient(180deg, rgb(233 236 242 / 0.15), rgb(233 236 242 / 0.03)) border-box;
+    min-width: 0;
+    padding: 6px 16px 6px 6px;
+    border-radius: 999px;
+    background: rgb(20 25 33 / 0.5);
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
+    backdrop-filter: blur(12px) saturate(150%);
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.04),
-      0 14px 30px -22px rgb(0 0 0 / 0.9);
-    transition: translate 520ms var(--ease-settle);
+      inset 0 1px 0 rgb(255 255 255 / 0.07),
+      0 18px 36px -26px rgb(0 0 0 / 0.95);
+    transition:
+      translate 520ms var(--ease-settle),
+      background-color var(--dur-base) var(--ease-out);
   }
-  /* Reflet menthe sous le pointeur (magnet : --lx, --ly). */
+  /* Contour : un filet de verre, plus clair en haut, et un reflet menthe qui suit le pointeur. */
+  .cert::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    border-radius: inherit;
+    background:
+      radial-gradient(120px 120px at var(--lx, 30%) var(--ly, 0%), rgb(95 227 181 / 0.55), transparent 70%),
+      linear-gradient(170deg, rgb(233 236 242 / 0.22), rgb(233 236 242 / 0.05) 45%, rgb(95 227 181 / 0.14));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    opacity: 0.75;
+    pointer-events: none;
+    transition: opacity var(--dur-base) var(--ease-out);
+  }
   .cert::before {
     content: "";
     position: absolute;
@@ -347,39 +368,59 @@
     height: 240px;
     margin: -120px 0 0 -120px;
     border-radius: 50%;
-    background: radial-gradient(closest-side, rgb(95 227 181 / 0.11), transparent);
+    background: radial-gradient(closest-side, rgb(95 227 181 / 0.12), transparent);
     opacity: 0;
     transform: translate(var(--lx, 50%), var(--ly, 50%));
     transition: opacity var(--dur-base) var(--ease-out);
   }
+  .cm {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    color: var(--accent);
+    background: radial-gradient(closest-side, rgb(95 227 181 / 0.18), rgb(95 227 181 / 0.05));
+    box-shadow:
+      inset 0 0 0 1px rgb(95 227 181 / 0.32),
+      inset 0 1px 0 rgb(255 255 255 / 0.08),
+      0 0 22px -6px var(--seal-halo);
+    transition:
+      transform 520ms var(--ease-settle),
+      box-shadow var(--dur-base) var(--ease-out);
+  }
+  @media (hover: hover) {
+    .cert:hover {
+      background-color: rgb(24 30 40 / 0.62);
+    }
+    .cert:hover::after {
+      opacity: 1;
+    }
+    .cert:hover .cm {
+      box-shadow:
+        inset 0 0 0 1px rgb(95 227 181 / 0.5),
+        inset 0 1px 0 rgb(255 255 255 / 0.1),
+        0 0 30px -4px var(--seal-halo);
+    }
+  }
   @media (hover: hover) and (prefers-reduced-motion: no-preference) {
     .cert:hover {
-      translate: 3px 0;
+      translate: 0 -2px;
     }
     .cert:hover::before {
       opacity: 1;
     }
-  }
-  .cert::after {
-    content: "";
-    position: absolute;
-    inset: 4px;
-    border: 1px dashed rgb(233 236 242 / 0.07);
-    border-radius: 10px;
-    pointer-events: none;
-  }
-  .cert :global(.seal) {
-    grid-row: span 2;
+    .cert:hover .cm {
+      transform: translateY(-2px) rotate(-6deg) scale(1.06);
+    }
   }
   .cert-t {
+    min-width: 0;
     font-size: 0.9375rem;
     line-height: 1.3;
-    font-weight: 620;
-  }
-  .cert-p {
-    font-size: 0.8125rem;
-    line-height: 1.45;
-    color: var(--text-2);
+    font-weight: 640;
+    letter-spacing: -0.005em;
   }
 
   /* ---------- Le coffre : fenêtre de dépôt ---------- */
@@ -507,11 +548,6 @@
     .t-touch {
       display: inline;
     }
-  }
-  .drop-sub {
-    margin: 0;
-    color: var(--text-2);
-    font-size: var(--fs-small);
   }
 
   /* Action principale : papier sur encre, la menthe reste le signe « scellé ». */
@@ -921,9 +957,6 @@
     .empty {
       padding: var(--sp-5) var(--sp-5) var(--sp-5);
     }
-    .certs {
-      grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
-    }
   }
 
   /* Ordinateur : texte et sceaux à gauche, coffre à droite, sur le premier écran. */
@@ -944,8 +977,6 @@
       font-size: 1.125rem;
     }
     .certs {
-      grid-template-columns: minmax(0, 1fr);
-      max-width: 30rem;
       margin-top: var(--sp-2);
     }
     .compose {
@@ -994,6 +1025,7 @@
     .compose :global(.vessel),
     .tile,
     .ic,
+    .cm,
     .browse,
     .browse :global(svg) {
       transition: none;
@@ -1021,8 +1053,13 @@
       border: 1px solid ButtonText;
       box-shadow: none;
     }
-    .cert::after {
+    .cert::after,
+    .cert::before {
       display: none;
+    }
+    .cm {
+      box-shadow: none;
+      background: Canvas;
     }
   }
   @media (forced-colors: active) {

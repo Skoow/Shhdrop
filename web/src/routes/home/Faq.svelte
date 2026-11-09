@@ -7,7 +7,7 @@
   import { ChevronDown } from "../../ui/Icon";
   import SectionBg from "../../ui/SectionBg.svelte";
 
-  const qs = ["server", "lost", "back", "scan", "copy", "app"] as const;
+  const qs = ["server", "lost", "back", "scan", "copy"] as const;
 </script>
 
 <section class="faq" aria-labelledby="faq-title">
@@ -40,10 +40,10 @@
     min-width: 0;
     overflow-wrap: break-word;
     font-size: var(--fs-section);
-    line-height: 1.04;
-    font-weight: 620;
-    font-stretch: 110%;
-    letter-spacing: -0.03em;
+    line-height: 1;
+    font-weight: 680;
+    font-stretch: 116%;
+    letter-spacing: -0.04em;
   }
   .qa {
     display: grid;

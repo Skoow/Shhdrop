@@ -99,25 +99,6 @@ test.describe("téléphone façon app", () => {
     await expect(banner.getByRole("button", { name: "Réglages" })).toBeHidden(); // l'onglet suffit
     await shot(page, "accueil");
 
-    // Comparatif : cartes (pas de tableau large), aucun nom de marque.
-    const cmp = page.locator("[data-compare]");
-    await cmp.scrollIntoViewIfNeeded();
-    await expect(cmp.getByRole("heading", { name: "Pourquoi Shhdrop" })).toBeVisible();
-    await expect(cmp.locator("table")).toBeHidden();
-    await expect(cmp.locator(".card")).toHaveCount(7);
-    // Tourné vers le positif : Shhdrop d'abord, puis les services de transfert habituels (aucune marque).
-    const e2e = cmp.locator(".card").filter({ hasText: "Chiffré de bout en bout" });
-    await expect(e2e.locator(".line").first()).toContainText("Shhdrop");
-    await expect(e2e.locator(".line").nth(1)).toContainText("Transfert habituel");
-    await expect(e2e.locator(".line").nth(1)).toContainText("Rarement");
-    await expect(e2e.locator(".line").first()).toContainText("Oui, Oui, sur votre appareil");
-    await expect(cmp.getByText(/Messageries|E-mail|Stockage/)).toHaveCount(0);
-    await expect(cmp.getByText("Comparaison générale par catégorie, vérifiée en novembre 2026", { exact: false })).toBeVisible();
-    expect(await noHScroll(page)).toBe(true);
-    await cmp.locator(".card").first().scrollIntoViewIfNeeded();
-    await page.evaluate(() => window.scrollBy(0, -80));
-    await shot(page, "tableau-comparatif");
-
     // Réglages : langue, Sécurité, Confidentialité.
     await nav.getByRole("button", { name: "Réglages" }).click();
     const sheet = page.getByRole("dialog", { name: "Réglages" });
@@ -264,7 +245,7 @@ test.describe("ordinateur : rien ne change", () => {
   test.use({ locale: "fr-FR" });
   test.beforeEach(({}, info) => test.skip(!info.project.name.endsWith("-desktop"), "ordinateur seulement"));
 
-  test("pas de barre d'onglets ; comparatif en vrai tableau (th scope)", async ({ page, shh }) => {
+  test("pas de barre d'onglets ; Réglages par l'engrenage", async ({ page, shh }) => {
     await page.goto(shh.origin + "/");
     await expect(tabbar(page)).toBeHidden();
     await expect(page.locator("footer.foot")).toBeVisible();
@@ -283,15 +264,5 @@ test.describe("ordinateur : rien ne change", () => {
     await page.getByRole("dialog", { name: "Settings" }).getByRole("button", { name: "Français" }).click();
     await page.keyboard.press("Escape");
     await expect(sheet).toBeHidden();
-    const table = page.locator("[data-compare] table");
-    await table.scrollIntoViewIfNeeded();
-    await expect(table).toBeVisible();
-    await expect(table.locator('thead th[scope="col"]')).toHaveCount(3);
-    await expect(table.locator('thead th[scope="col"]').nth(1)).toHaveText("Shhdrop");
-    await expect(table.getByRole("columnheader", { name: "Services de transfert de fichiers habituels" })).toBeVisible();
-    await expect(table.locator('tbody th[scope="row"]')).toHaveCount(7);
-    await expect(table.getByRole("columnheader", { name: "Shhdrop" })).toBeVisible();
-    await expect(table.getByRole("cell", { name: "Oui, Toujours" })).toBeVisible();
-    await expect(page.locator("[data-compare] .cards")).toBeHidden();
   });
 });

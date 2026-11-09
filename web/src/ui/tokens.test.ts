@@ -251,7 +251,7 @@ describe("direction artistique v2 (UI §20.3)", () => {
     expect(values.at(-1)).toBe(1);
     for (let i = 1; i < values.length; i++) expect(values[i]!).toBeGreaterThanOrEqual(values[i - 1]!);
     for (const v of values) expect(v).toBeLessThanOrEqual(1);
-    expect(T.get("--fs-section")).toBe("clamp(2rem, 1.35rem + 2.4vw, 3.25rem)");
+    expect(T.get("--fs-section")).toBe("clamp(2.25rem, 1.3rem + 3.2vw, 4rem)");
     const expected: Record<string, string> = {};
     for (const [k, v] of Object.entries(expected)) expect(T.get(k), k).toBe(v);
   });

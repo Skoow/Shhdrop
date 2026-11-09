@@ -1,10 +1,9 @@
 <script lang="ts">
   // Accueil v4, appel final (UI §9.1, §20.11) : la capsule du logo, en grand, remplie de texte
   // chiffré décoratif (S1) ; quand elle entre dans l'écran, un sceau guilloché vient fermer son
-  // ouverture et le contour se referme. Titre, phrase, bouton « Commencer » (anse du cadenas qui se
-  // ferme au survol et au focus) et preuves en chiffres, au centre de la capsule.
-  import { t, getLang } from "../../i18n/i18n.svelte";
-  import { limitParams } from "../../i18n/limit-params";
+  // ouverture et le contour se referme. Titre et bouton « Commencer » (anse du cadenas qui se ferme
+  // au survol et au focus), au centre de la capsule ; rien n'y redit ce que la page a déjà dit.
+  import { t } from "../../i18n/i18n.svelte";
   import { ambient, reveal } from "../../ui/attach";
   import { cipherText, rosette } from "../../ui/decor";
   import { capPath } from "../../ui/motion";
@@ -46,7 +45,6 @@
 
     <div class="say">
       <h2 id="end-title">{t("home.end.title")}</h2>
-      <p class="lede">{t("home.end.lede")}</p>
       <button type="button" class="cta" onclick={onstart}>
         <span class="seal" aria-hidden="true">
           <svg viewBox="0 0 24 24" focusable="false">
@@ -57,9 +55,6 @@
         </span>
         <span>{t("home.end.cta")}</span>
       </button>
-      <ul class="proof num" aria-label={t("home.end.proof.label")}>
-        {#each t("home.end.proof", limitParams(getLang())).split(" · ") as item (item)}<li>{item}</li>{/each}
-      </ul>
     </div>
   </div>
 </section>
@@ -185,17 +180,10 @@
     min-width: 0;
     overflow-wrap: break-word;
     font-size: var(--fs-section);
-    line-height: 1.04;
-    font-weight: 620;
-    font-stretch: 110%;
-    letter-spacing: -0.03em;
-  }
-  .lede {
-    width: 100%;
-    max-width: 34ch;
-    margin: 0;
-    color: var(--text-2);
-    font-size: 1.125rem;
+    line-height: 1;
+    font-weight: 680;
+    font-stretch: 116%;
+    letter-spacing: -0.04em;
   }
 
   /* Bouton-sceau : papier sur encre, pastille menthe dont l'anse se ferme. */
@@ -280,24 +268,6 @@
   }
   .cta:active {
     transform: scale(0.97);
-  }
-
-  /* Preuves en chiffres, sur une ligne, séparées par des points. */
-  .proof {
-    list-style: none;
-    margin: var(--sp-2) 0 0;
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 6px 0;
-    color: var(--text-2);
-    font-size: var(--fs-small);
-  }
-  .proof li + li::before {
-    content: "·";
-    margin-inline: 10px;
-    color: var(--accent);
   }
 
   /* Au défilement : le sceau descend sur l'ouverture, le contour se referme, la lumière tourne. */
