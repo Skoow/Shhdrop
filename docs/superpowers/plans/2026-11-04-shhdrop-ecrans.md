@@ -1829,6 +1829,15 @@ VAULT_MAX_ATTEMPTS = 5; VAULT_ENTRY_MAX = 2 ** 30; VAULT_TOTAL_MAX = 2 * 2 ** 30
 
 **Bloquées** tant que le propriétaire n'a pas tranché Q-P1 (moyen de paiement), Q-P2 (exception crypto pour Privacy Pass), Q-P5 (statut juridique), et que le juriste et le comptable n'ont pas validé spec §38.5. La fonction « Demander des fichiers » (Q-P6) est spécifiée en spec §38.9.3 (v2.10) : Task F1. Ces tâches ne font pas partie du Plan 2 livrable ; elles sont écrites ici pour que le reste du code ne les rende pas impossibles (aucune dépendance de V1 sur elles). Revues : `golang-backend`, `constant-time-analysis`, `supply-chain-risk-auditor` (circl, blindrsa-ts), `privacy-review`, `sharp-edges`.
 
+### Task P0 : Étude de prix et de marché avant l'ouverture des ventes (spec §38.8, D41-32)
+
+**Bloque P1 à P3.** Ajoutée le 9 novembre (retours UI6, décision du propriétaire). Rien n'est codé.
+
+- [ ] **Step 1 : Concurrents** : relever, sur leurs pages publiques et à date, les prix mensuels et annuels, la taille par partage, la durée, le nombre d'ouvertures et les façons de payer (unique ou abonnement, résiliation) des services de partage chiffré comparables ; sources et dates notées.
+- [ ] **Step 2 : Coûts réels** : refaire le modèle de spec §38.8.3 avec l'hébergeur et le vendeur officiel choisis (sortie par To, stockage, frais par paiement, TVA), y compris le renouvellement automatique (frais récurrents, échecs de paiement).
+- [ ] **Step 3 : Décision** : présenter au propriétaire les prix proposés (dont le Pro annuel à 200 €, marge 57,7 %, sous la cible de 60 %), les marges et les risques ; il tranche Q-P8 ; spec §38.8.2 et `web/src/limits.ts` (`PAID`) mis à jour en conséquence, tests compris.
+- [ ] **Step 4 : Commit** « docs(offre): étude de prix et de marché » et push.
+
 ### Task P1 : Droit d'usage — pass, webhook du vendeur, jetons Privacy Pass (spec §38.4)
 
 **Files:**
