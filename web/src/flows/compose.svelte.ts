@@ -41,6 +41,8 @@ export type ComposeItem = {
   readonly duplicate: boolean;
   /** Type reconnu par le contenu (octets de tête), ou null. */
   readonly sniffed?: Sniffed;
+  /** Vocal pris ici : forme d'onde (0 à 1) et durée, pour la réécoute dans la liste. */
+  readonly voice?: { readonly peaks: readonly number[]; readonly ms: number };
   /** Exécutable ou script (extension à risque, ou contenu exécutable) : prévenir. */
   readonly risky?: boolean;
   /** Le contenu ne correspond pas à l'extension (exécutable déguisé, par exemple). */
@@ -309,7 +311,7 @@ export function createComposer(deps: ComposeDeps = {}) {
   }
 
   /** Vocal pris ici : `stripped` faux si strip-capture.ts a échoué et que la personne a gardé l'enregistrement tel quel. */
-  function addVoice(blob: Blob, mime: string, stripped = true): string | null {
+  function addVoice(blob: Blob, mime: string, stripped = true, voice?: ComposeItem["voice"]): string | null {
     if (items.length + reserved >= MAX_ITEMS) return null;
     const ext = mime.startsWith("audio/mp4") ? ".m4a" : ".webm";
     const it: ComposeItem = {
@@ -322,6 +324,7 @@ export function createComposer(deps: ComposeDeps = {}) {
       size: blob.size,
       data: blob,
       ...(stripped ? { clean: "nettoye" as const, cleanFamily: "vocal" as const } : { clean: "echec" as const }),
+      ...(voice ? { voice } : {}),
       duplicate: false,
     };
     cleared(it);

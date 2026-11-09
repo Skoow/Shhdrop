@@ -1,12 +1,13 @@
 <script lang="ts">
-  // Caméra et micro dans NOTRE interface (spec §35.3, Q-REC1 acceptée), comme une app photo :
+  // Caméra dans NOTRE interface (spec §35.3, Q-REC1 acceptée), comme une app photo :
   // bascule Photo / Vidéo, déclencheur, caméra avant / arrière, et en bas à gauche la vignette
   // « Galerie » (sélecteur du système, géré par le parent). Plein écran sur téléphone. Photo :
-  // <canvas> → JPEG (aucune métadonnée par construction) ; vidéo et vocal : MediaRecorder,
+  // <canvas> → JPEG (aucune métadonnée par construction) ; vidéo : MediaRecorder,
   // minuteur « 4:12 / 5:00 maximum », arrêt propre à la limite (limits.ts), puis nom du navigateur
   // et dates effacés de l'en-tête (media/strip-capture.ts). Tout reste en mémoire ; les pistes sont
   // arrêtées à la sortie, au passage en arrière-plan et quand la page se ferme. Refus ou API
   // absente : message clair et repli sur l'appareil photo du système (<input capture>, parent).
+  // Le vocal a son propre écran (VoiceRecorder.svelte, Task 12).
   import { getLang, t } from "../i18n/i18n.svelte";
   import { formatDuration } from "../i18n/format";
   import { CAPTURE_MAX_S, CAPTURE_TIER } from "../limits";
@@ -20,20 +21,17 @@
     startRecorder,
     stopStream,
     type CaptureError,
-    type CaptureMode,
     type Facing,
     type Recording,
   } from "../media/capture";
   import { stripCaptureMeta } from "../media/strip-capture";
   import AddIcon from "./AddIcon.svelte";
-  import { Mic, RefreshCw, X } from "./Icon";
+  import { RefreshCw, X } from "./Icon";
 
   /** `stripped` : métadonnées de l'enregistrement effacées (faux : « Garder tel quel » choisi). */
-  export type Captured = { mode: CaptureMode; blob: Blob; mime: string; ext: string; stripped: boolean };
+  export type Captured = { mode: "photo" | "video"; blob: Blob; mime: string; ext: string; stripped: boolean };
   type Props = {
     open: boolean;
-    /** « camera » : photo d'abord, bascule vers la vidéo si `canVideo` ; « voice » : micro seul. */
-    mode: "camera" | "voice";
     canVideo?: boolean;
     ondone: (c: Captured) => void;
     /** Photo, vidéo : repli sur l'appareil photo du système (appel synchrone, même geste). */
@@ -41,11 +39,11 @@
     /** Vignette « Galerie » : ouvre le sélecteur photos et vidéos du système (même geste). */
     ongallery?: () => void;
   };
-  let { open = $bindable(false), mode, canVideo = false, ondone, onfallback, ongallery }: Props = $props();
+  let { open = $bindable(false), canVideo = false, ondone, onfallback, ongallery }: Props = $props();
 
   type Phase = "starting" | "live" | "recording" | "review" | "error";
   let phase = $state<Phase>("starting");
-  let kind = $state<CaptureMode>("photo");
+  let kind = $state<"photo" | "video">("photo");
   let error = $state<CaptureError | null>(null);
   let facing = $state<Facing>("environment");
   let elapsed = $state(0);
@@ -65,11 +63,10 @@
   let tick: ReturnType<typeof setInterval> | undefined;
   let gen = 0; // une ouverture de flux plus récente annule les précédentes
 
-  const cam = $derived(kind !== "voice");
   // Repli : « l'appareil photo du téléphone » au doigt ; sinon le sélecteur de fichiers.
   const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   const title = $derived(t(`cap.title.${kind}`));
-  const maxMs = $derived(kind === "voice" ? limitMs("voice") : limitMs("video"));
+  const maxMs = limitMs("video");
   const lang = $derived(getLang());
 
   async function start() {
@@ -119,7 +116,7 @@
     if (open && !dlg.open) {
       dlg.showModal();
       facing = "environment";
-      kind = mode === "voice" ? "voice" : "photo";
+      kind = "photo";
       void start();
     } else if (!open && dlg.open) dlg.close();
   });
@@ -157,15 +154,14 @@
   function record() {
     if (!stream || phase !== "live") return;
     const sup = (m: string) => typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m);
-    const what = kind === "voice" ? "voice" : "video";
-    const picked = pickMime(what, sup);
+    const picked = pickMime("video", sup);
     if (!picked) {
       error = "inconnu";
       phase = "error";
       return;
     }
     limitHit = false;
-    rec = startRecorder(stream, picked, what, {
+    rec = startRecorder(stream, picked, "video", {
       maxMs,
       onlimit: () => {
         limitHit = true;
@@ -220,7 +216,6 @@
     void start(); // start() coupe l'ancienne piste avant d'ouvrir la nouvelle
   }
   function fallback() {
-    if (kind === "voice") return;
     const m = kind;
     dlg?.close();
     onfallback?.(m);
@@ -246,51 +241,45 @@
   }
 
   const errText = $derived(
-    error === "refuse" ? t(cam ? "cap.err.refuse.cam" : "cap.err.refuse.mic") : error === "absent" ? t("cap.err.absent") : error === "occupe" ? t("cap.err.occupe") : t("cap.err.misc"),
+    error === "refuse" ? t("cap.err.refuse.cam") : error === "absent" ? t("cap.err.absent") : error === "occupe" ? t("cap.err.occupe") : t("cap.err.misc"),
   );
   const ready = $derived(phase === "live" || phase === "starting");
-  const canFlip = $derived(cam && ready);
-  const showModes = $derived(mode === "camera" && canVideo && (ready || phase === "error"));
+  const canFlip = $derived(ready);
+  const showModes = $derived(canVideo && (ready || phase === "error"));
   const upsell = $derived(
-    CAPTURE_TIER === "free" && kind !== "photo" ? t("cap.upsell", { max: formatDuration(CAPTURE_MAX_S.plus[kind === "voice" ? "voice" : "video"], lang) }) : "",
+    CAPTURE_TIER === "free" && kind === "video" ? t("cap.upsell", { max: formatDuration(CAPTURE_MAX_S.plus.video, lang) }) : "",
   );
 </script>
 
 <svelte:document onvisibilitychange={onvisibility} />
 <svelte:window onpagehide={teardown} />
 
-<dialog bind:this={dlg} class={["cam", { voice: !cam }]} aria-labelledby="cap-title" onclose={closed} data-capture={kind}>
+<dialog bind:this={dlg} class="cam" aria-labelledby="cap-title" onclose={closed} data-capture={kind}>
   {#if open}
     <div class="stage">
-      {#if cam}
-        <!-- svelte-ignore a11y_media_has_caption -->
-        <video
-          bind:this={live}
-          class={["live", { mirror: facing === "user", gone: phase === "review" }]}
-          autoplay
-          muted
-          playsinline
-          aria-label={t("cap.preview.live")}
-        ></video>
-      {/if}
+      <!-- svelte-ignore a11y_media_has_caption -->
+      <video
+        bind:this={live}
+        class={["live", { mirror: facing === "user", gone: phase === "review" }]}
+        autoplay
+        muted
+        playsinline
+        aria-label={t("cap.preview.live")}
+      ></video>
       {#if phase === "review" && url}
         {#if kind === "photo"}
           <img class="still" src={url} alt={t("cap.preview.photo")} />
-        {:else if kind === "video"}
+        {:else}
           <!-- svelte-ignore a11y_media_has_caption -->
           <video class="still" src={url} controls playsinline></video>
         {/if}
       {/if}
-      {#if !cam}
-        <div class={["mic", { on: phase === "recording" }]} aria-hidden="true"><Mic size={44} strokeWidth={1.5} /></div>
-        {#if phase === "review" && url}<audio class="clip" src={url} controls></audio>{/if}
-      {/if}
-      {#if phase === "starting"}<p class="msg" role="status">{t(cam ? "cap.starting.cam" : "cap.starting.mic")}</p>{/if}
+      {#if phase === "starting"}<p class="msg" role="status">{t("cap.starting.cam")}</p>{/if}
       {#if phase === "error"}
         <div class="err" role="alert">
           <p>{errText}</p>
           <div class="err-act">
-            {#if kind !== "voice" && onfallback}<button type="button" class="pill solid" onclick={fallback}>{t(kind === "photo" ? (touch ? "cap.fallback.photo" : "cap.fallback.photo.pick") : touch ? "cap.fallback.video" : "cap.fallback.video.pick")}</button>{/if}
+            {#if onfallback}<button type="button" class="pill solid" onclick={fallback}>{t(kind === "photo" ? (touch ? "cap.fallback.photo" : "cap.fallback.photo.pick") : touch ? "cap.fallback.video" : "cap.fallback.video.pick")}</button>{/if}
             <button type="button" class="pill" onclick={() => void start()}>{t("cap.retry")}</button>
           </div>
         </div>
@@ -300,7 +289,7 @@
 
     <div class="top">
       <button type="button" class="round" aria-label={t("common.close")} onclick={() => dlg?.close()}><X size={22} strokeWidth={2} /></button>
-      <h2 id="cap-title" class={{ hide: phase === "recording" || (phase === "review" && kind !== "photo"), "sr-only": cam }}>{title}</h2>
+      <h2 id="cap-title" class={{ hide: phase === "recording" || (phase === "review" && kind !== "photo"), "sr-only": true }}>{title}</h2>
       {#if phase === "recording"}
         <p class="timer num rec"><span class="dot" aria-hidden="true"></span><span class="sr-only">{t("cap.recording")} </span>{t("cap.timer", { elapsed: clock(elapsed), max: clock(maxMs) })}</p>
       {:else if phase === "review" && kind !== "photo"}
@@ -316,14 +305,14 @@
       {#if limitHit}
         <p class="note warn" role="status">{t("cap.limit")}{#if upsell}<span class="up">{upsell}</span>{/if}</p>
       {/if}
-      <p class="note">{t(cam ? "cap.note.camera" : "cap.note.voice")}</p>
+      <p class="note">{t("cap.note.camera")}</p>
       {#if showModes}
         <div class="modes" role="group" aria-label={t("cap.mode")}>
           <button type="button" class="mode" aria-pressed={kind === "photo"} onclick={() => setKind("photo")}>{t("cap.mode.photo")}</button>
           <button type="button" class="mode" aria-pressed={kind === "video"} onclick={() => setKind("video")}>{t("cap.mode.video")}</button>
         </div>
       {/if}
-      <div class={["ctl", { three: cam && phase !== "review" }]}>
+      <div class={["ctl", { three: phase !== "review" }]}>
         {#if phase === "review" && unclean}
           <button type="button" class="pill" onclick={() => dlg?.close()}>{t("common.cancel")}</button>
           <button type="button" class="pill solid" onclick={use}>{t("cap.keepAsIs")}</button>
@@ -331,12 +320,10 @@
           <button type="button" class="pill" onclick={retake}>{t("cap.retake")}</button>
           <button type="button" class="pill solid" onclick={use}>{t(`cap.use.${kind}`)}</button>
         {:else}
-          {#if cam}
-            {#if ongallery && phase !== "recording"}
-              <button type="button" class="side gal" aria-label={t("cap.gallery")} onclick={gallery}><AddIcon id="gallery" size={24} /></button>
-            {:else}
-              <span class="side ghost" aria-hidden="true"></span>
-            {/if}
+          {#if ongallery && phase !== "recording"}
+            <button type="button" class="side gal" aria-label={t("cap.gallery")} onclick={gallery}><AddIcon id="gallery" size={24} /></button>
+          {:else}
+            <span class="side ghost" aria-hidden="true"></span>
           {/if}
           {#if phase === "recording"}
             <button type="button" class="shutter stop" aria-label={t("cap.rec.stop")} onclick={() => void finish()}><span></span></button>
@@ -345,12 +332,10 @@
           {:else}
             <button type="button" class="shutter recb" aria-label={t("cap.rec.start")} disabled={phase !== "live"} onclick={record}><span></span></button>
           {/if}
-          {#if cam}
-            {#if canFlip}
-              <button type="button" class="side flip" aria-label={t("cap.flip")} onclick={flip}><RefreshCw size={22} strokeWidth={2} /></button>
-            {:else}
-              <span class="side ghost" aria-hidden="true"></span>
-            {/if}
+          {#if canFlip}
+            <button type="button" class="side flip" aria-label={t("cap.flip")} onclick={flip}><RefreshCw size={22} strokeWidth={2} /></button>
+          {:else}
+            <span class="side ghost" aria-hidden="true"></span>
           {/if}
         {/if}
       </div>
@@ -421,34 +406,6 @@
   }
   .live.gone {
     visibility: hidden;
-  }
-  .voice .stage {
-    background: radial-gradient(circle at 50% 40%, var(--accent-tint), #000 70%);
-    align-content: center;
-    gap: var(--sp-6);
-  }
-  .mic {
-    display: grid;
-    place-items: center;
-    width: 120px;
-    height: 120px;
-    border-radius: 50%;
-    background: rgb(255 255 255 / 0.06);
-    color: var(--accent);
-    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.12);
-  }
-  .mic.on {
-    color: var(--on-danger);
-    background: var(--danger);
-    animation: breathe 1.6s ease-in-out infinite;
-  }
-  @keyframes breathe {
-    50% {
-      box-shadow: 0 0 0 18px rgb(255 138 128 / 0.12);
-    }
-  }
-  .clip {
-    width: min(340px, 86vw);
   }
   .msg {
     grid-area: 1 / 1;
@@ -724,7 +681,6 @@
     .side {
       transition: none;
     }
-    .mic.on,
     .flash {
       animation: none;
     }

@@ -127,23 +127,27 @@ describe("createComposer : ajout", () => {
     expect(c.blockReason()).toBeNull();
   });
 
-  it("vrai nettoyage d'un .docx (Task 9b) : « Nettoyé » bureautique, aucune remarque ; PDF laissé intact octet pour octet (D41-27)", async () => {
+  it("vrai nettoyage d'un .docx et d'un PDF (Task 9b, D41-31) : « Nettoyé » bureautique et PDF, même longueur ; PDF signé → protégé", async () => {
     const c = createComposer({ probe: async () => undefined, online: () => true });
     const fx = (n: string) => new Uint8Array(readFileSync(new URL(`../media/fixtures/${n}`, import.meta.url)));
     const pdfFile = new File([fx("meta.pdf")], "devis.pdf", { type: "application/pdf" });
-    await c.add([new File([fx("meta.docx")], "rapport.docx"), pdfFile], "fichiers");
+    await c.add([new File([fx("meta.docx")], "rapport.docx"), pdfFile, new File([fx("signed.pdf")], "signe.pdf", { type: "application/pdf" })], "fichiers");
     const doc = c.items.find((i) => i.ext === ".docx")!;
     expect(doc).toMatchObject({ clean: "nettoye", cleanFamily: "bureautique" });
     expect(cleanLabelKey(doc)).toBe("clean.done.office");
     expect(new TextDecoder("latin1").decode(await (doc.data as Blob).arrayBuffer())).not.toMatch(/ReperSociete|ReperTitre|ReperMiniature/);
-    const pdf = c.items.find((i) => i.ext === ".pdf")!;
-    expect(pdf.clean).toBe("intact");
-    expect(pdf.data).toBe(pdfFile);
-    expect(uncleanedReasonKey(pdf)).toBeNull();
-    expect(isUncleaned(pdf)).toBe(false);
-    expect(intactKey(pdf)).toBe("clean.intact");
-    expect(cleanLabelKey(pdf)).toBe("clean.intact.hint");
-    expect(c.uncleanedCount).toBe(0);
+    const pdf = c.items.find((i) => i.base === "devis")!;
+    expect(pdf).toMatchObject({ clean: "nettoye", cleanFamily: "pdf" });
+    expect(cleanLabelKey(pdf)).toBe("clean.done.pdf");
+    expect((pdf.data as Blob).size).toBe(pdfFile.size);
+    const out = new TextDecoder("latin1").decode(await (pdf.data as Blob).arrayBuffer());
+    expect(out).not.toMatch(/ReperAuteur|ReperXMP|ReperThumb/);
+    expect(out).toContain("(Bonjour Shhdrop) Tj");
+    const signed = c.items.find((i) => i.base === "signe")!;
+    expect(signed.clean).toBe("protege");
+    expect(uncleanedReasonKey(signed)).toBe("clean.why.protege");
+    expect(intactKey(signed)).toBeNull();
+    expect(c.uncleanedCount).toBe(1);
   });
 
   it("MAX_ITEMS + 2 fichiers → MAX_ITEMS ajoutés, 2 refusés (noms rendus) ; 200 acceptés, le 201ᵉ refusé (fichiers minuscules)", async () => {
@@ -453,7 +457,7 @@ describe("blocages et textes de raison", () => {
     const c = make();
     c.addText("t");
     expect(cleanLabelKey(c.items[0]!)).toBeNull();
-    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.office", "clean.why.echec", "clean.why.protege", "clean.why.video", "clean.why.audio", "clean.intact", "clean.intact.hint", "clean.intact.archive", "clean.intact.archive.hint", "clean.why.unknown", "clean.uncleaned.hint", "compose.uncleaned.one", "compose.uncleaned.other", "clean.original", "clean.original.hint", "clean.mark", "clean.mark.not"]) {
+    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.pdf", "clean.done.office", "clean.why.echec", "clean.why.protege", "clean.why.video", "clean.why.audio", "clean.intact.archive", "clean.intact.archive.hint", "clean.why.unknown", "clean.uncleaned.hint", "compose.uncleaned.one", "compose.uncleaned.other", "clean.original", "clean.original.hint", "clean.mark", "clean.mark.not"]) {
       expect(fr[k as keyof typeof fr], k).toBeTruthy();
       expect(en[k as keyof typeof en], k).toBeTruthy();
     }
@@ -539,5 +543,10 @@ describe("pris dans l'interface (caméra maison, Q-REC1)", () => {
     expect(c.blockReason()).toBeNull();
     expect(c.addVoice(new Blob(["v"]), "audio/webm")).not.toBeNull();
     expect(c.items.find((i) => i.category === "audio")).toMatchObject({ clean: "nettoye", cleanFamily: "vocal" });
+    // Task 12 : forme d'onde et durée gardées pour la réécoute dans la liste, jamais dans le manifeste.
+    const id = c.addVoice(new Blob(["w"]), "audio/mp4", true, { peaks: [0.2, 1], ms: 4200 })!;
+    const v = c.items.find((i) => i.id === id)!;
+    expect(v).toMatchObject({ ext: ".m4a", voice: { peaks: [0.2, 1], ms: 4200 } });
+    expect(JSON.stringify(c.toApiItems().find((i) => i.name === v.base + v.ext))).not.toContain("peaks");
   });
 });

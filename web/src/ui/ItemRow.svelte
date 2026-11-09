@@ -21,6 +21,7 @@
   import { firstLine } from "./itemView";
   import IconButton from "./IconButton.svelte";
   import ReorderHandle from "./ReorderHandle.svelte";
+  import VoiceClip from "./VoiceClip.svelte";
 
   type Props = {
     item: ComposeItem;
@@ -56,7 +57,8 @@
 
   let duration = $state<number | null>(null);
   $effect(() => {
-    if (item.kind !== "file" || (item.category !== "videos" && item.category !== "audio") || !(item.data instanceof Blob)) return;
+    // Vocal pris ici : sa durée vient de l'enregistrement (VoiceClip l'affiche).
+    if (item.kind !== "file" || item.voice || (item.category !== "videos" && item.category !== "audio") || !(item.data instanceof Blob)) return;
     let live = true;
     void mediaDuration(item.data, item.category === "videos" ? "video" : "audio").then((d) => {
       if (live) duration = d;
@@ -215,6 +217,9 @@
         {/if}
         <ItemNotes {item} {cannotOpen} badgesOnly unclean={compact ? undefined : "skip"} />
       </span>
+      {#if item.voice && item.data instanceof Blob}
+        <span class="voice"><VoiceClip blob={item.data} peaks={item.voice.peaks} ms={item.voice.ms} {name} size="mini" /></span>
+      {/if}
       <ItemNotes {item} {cannotOpen} lines />
     {/if}
   </div>
@@ -238,6 +243,10 @@
 </div>
 
 <style>
+  .voice {
+    display: block;
+    margin-block-start: var(--sp-2);
+  }
   .row {
     position: relative;
     display: grid;

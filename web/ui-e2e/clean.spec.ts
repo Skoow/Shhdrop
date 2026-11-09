@@ -66,7 +66,7 @@ test("photo avec GPS : « Nettoyé » à l'ajout, le destinataire reçoit la pho
   expect(got.length).toBeLessThan(photo.buffer.length);
 });
 
-test("états à l'écran : Nettoyé, Non nettoyé avec raison (échec, inconnu), PDF et archive laissés intacts (D41-27) ; tout part sans clic (D41-23) ; résumé près d'Envoyer", async ({ page, shh, isMobile }) => {
+test("états à l'écran : Nettoyé (photo, PDF), Non nettoyé avec raison (échec, PDF protégé, inconnu), archive laissée intacte (D41-27, D41-31) ; tout part sans clic (D41-23) ; résumé près d'Envoyer", async ({ page, shh, isMobile }) => {
   test.setTimeout(90_000);
   if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   const puts: string[] = [];
@@ -78,11 +78,12 @@ test("états à l'écran : Nettoyé, Non nettoyé avec raison (échec, inconnu),
   await (await openFilePicker(page)).setFiles([
     { name: "IMG_GPS.jpg", mimeType: "image/jpeg", buffer: jpg },
     { name: "abime.jpg", mimeType: "image/jpeg", buffer: jpg.subarray(0, jpg.length >> 2) },
-    { name: "contrat.pdf", mimeType: "application/pdf", buffer: readFileSync(file("contrat.pdf")) },
+    { name: "devis.pdf", mimeType: "application/pdf", buffer: FX("meta.pdf") },
+    { name: "signe.pdf", mimeType: "application/pdf", buffer: FX("signed.pdf") },
     { name: "archive.zip", mimeType: "application/zip", buffer: readFileSync(file("archive.zip")) },
     { name: "dessin.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>") },
   ]);
-  await expect(page.locator("[data-row]")).toHaveCount(5);
+  await expect(page.locator("[data-row]")).toHaveCount(6);
   await expect(row(page, "IMG_GPS").locator('[data-clean="nettoye"]')).toBeVisible();
   await expect(row(page, "IMG_GPS").locator('[data-clean="non-nettoye"]')).toHaveCount(0);
   const mark = (n: string) => row(page, n).locator('[data-clean="non-nettoye"]');
@@ -90,19 +91,20 @@ test("états à l'écran : Nettoyé, Non nettoyé avec raison (échec, inconnu),
   await expect(mark("abime")).toHaveText("Non nettoyé");
   await expect(mark("abime")).toHaveAccessibleName(/^Non nettoyé · Échec du nettoyage/);
   await expect(mark("dessin")).toHaveAccessibleName(/^Non nettoyé · Format non reconnu/);
-  // PDF et archive : jamais ouverts, pastille neutre (D41-27).
+  // PDF (D41-31) : informations cachées retirées ; signé → « Non nettoyé », laissé intact.
+  await expect(row(page, "devis").locator('[data-clean="nettoye"]')).toHaveAccessibleDescription("Nettoyé · auteur, logiciel, dates et miniatures retirés");
+  await expect(mark("signe")).toHaveAccessibleName(/^Non nettoyé · Fichier signé ou protégé/);
+  // Archive : jamais ouverte, pastille neutre (D41-27).
   const intact = (n: string) => row(page, n).locator('[data-clean="intact"]');
-  await expect(intact("contrat")).toHaveText("PDF laissé intact");
   await expect(intact("archive")).toHaveText("Archive laissée intacte");
-  await expect(mark("contrat")).toHaveCount(0);
   await expect(mark("archive")).toHaveCount(0);
   // Aucun choix à faire : plus de bouton, envoi permis, résumé discret près d'Envoyer.
   await expect(page.getByRole("button", { name: /^Envoyer tel quel/ })).toHaveCount(0);
   await expect(page.locator("#send-reason").filter({ visible: true })).toHaveCount(0);
-  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("2 fichiers ne sont pas nettoyés");
+  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("3 fichiers ne sont pas nettoyés");
   await expect(sendButton(page).filter({ visible: true })).toBeEnabled();
   // Chacun part dès l'ajout, nettoyé ou non (une requête d'envoi par petit élément).
-  await expect.poll(() => puts.length, { timeout: 30_000 }).toBe(5);
+  await expect.poll(() => puts.length, { timeout: 30_000 }).toBe(6);
   await expect(page.locator('[data-up]:not([data-up="pret"])')).toHaveCount(0, { timeout: 30_000 });
   if (isMobile) await page.screenshot({ path: `${SHOTS}compose-clean-states-390.png` });
 });

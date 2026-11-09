@@ -25,6 +25,7 @@
   import AddIcon from "../ui/AddIcon.svelte";
   import AddSheet from "../ui/AddSheet.svelte";
   import CaptureScreen, { type Captured } from "../ui/CaptureScreen.svelte";
+  import VoiceRecorder, { type Voice } from "../ui/VoiceRecorder.svelte";
   import TextField from "../ui/TextField.svelte";
   import PaidSheet from "../ui/PaidSheet.svelte";
   import Sheet from "../ui/Sheet.svelte";
@@ -155,7 +156,7 @@
   const rowActions = desktopActions(support);
   let addOpen = $state(false);
   let capOpen = $state(false);
-  let capMode = $state<"camera" | "voice">("camera");
+  let voiceOpen = $state(false);
   let filesIn: HTMLInputElement | undefined = $state();
   let galleryIn: HTMLInputElement | undefined = $state();
   let photoIn: HTMLInputElement | undefined = $state();
@@ -170,20 +171,19 @@
   function addAct(id: AddId, live = sheetActions.find((a) => a.id === id)?.live ?? false) {
     if (id === "note") openEditor(null, "");
     else if (id === "files") filesIn?.click();
-    else if (id === "voice" || live) {
-      capMode = id === "voice" ? "voice" : "camera";
-      capOpen = true;
-    } else galleryIn?.click();
+    else if (id === "voice") voiceOpen = true;
+    else if (live) capOpen = true;
+    else galleryIn?.click();
   }
   function act(a: Action) {
     addAct(a === "texte" ? "note" : a === "vocal" ? "voice" : "media");
   }
   function captured(c: Captured) {
-    const name = `capture.${c.ext}`;
-    if (c.mode === "voice") {
-      if (composer.addVoice(c.blob, c.mime, c.stripped) === null) say(t("compose.tooMany", { n: 1, max: MAX_ITEMS }));
-      else announce(t("compose.added", { n: 1 }));
-    } else void addFiles([new File([c.blob], name, { type: c.mime })], c.mode === "photo" ? "photo-ici" : "video-ici", [], c.mode === "photo" ? undefined : c.stripped);
+    void addFiles([new File([c.blob], `capture.${c.ext}`, { type: c.mime })], c.mode === "photo" ? "photo-ici" : "video-ici", [], c.mode === "photo" ? undefined : c.stripped);
+  }
+  function recorded(v: Voice) {
+    if (composer.addVoice(v.blob, v.mime, v.stripped, { peaks: v.peaks, ms: v.ms }) === null) say(t("compose.tooMany", { n: 1, max: MAX_ITEMS }));
+    else announce(t("compose.added", { n: 1 }));
   }
 
   // ---------- Texte ----------
@@ -674,12 +674,13 @@
 
 <CaptureScreen
   bind:open={capOpen}
-  mode={capMode}
   canVideo={support.video}
   ondone={captured}
   onfallback={(m) => (m === "photo" ? photoIn : videoIn)?.click()}
   ongallery={() => galleryIn?.click()}
 />
+
+<VoiceRecorder bind:open={voiceOpen} ondone={recorded} />
 
 {#if toast}
   <div class="toast-slot" style:--lift="{filled ? barH : 0}px">

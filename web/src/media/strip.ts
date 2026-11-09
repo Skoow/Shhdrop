@@ -11,13 +11,14 @@ import { cleanHeif } from "./heif";
 import { cleanJpeg } from "./jpeg";
 import { cleanOffice } from "./office";
 import { patchedBlob } from "./patch";
+import { cleanPdf } from "./pdf";
 import { cleanPng } from "./png";
 import { stripCaptureMeta } from "./strip-capture";
 import { cleanWebp } from "./webp";
 
-/** `intact` : laissé tel quel par décision (PDF, D41-27 : on n'ouvre pas un PDF pour le nettoyer). */
+/** `intact` : laissé tel quel par décision (archives, D41-27 ; posé par le composeur). */
 export type CleanState = "nettoye" | "echec" | "protege" | "non_pris_en_charge" | "sans" | "intact";
-export type CleanFamily = "image" | "video" | "audio" | "bureautique" | "vocal";
+export type CleanFamily = "image" | "video" | "audio" | "pdf" | "bureautique" | "vocal";
 export type StripResult =
   | { state: "nettoye"; data: Blob; family: CleanFamily }
   | { state: "echec" | "protege"; reason: string } // reason : code interne, jamais affiché tel quel
@@ -47,8 +48,17 @@ async function run(file: Blob, mime: string, fmt: Format, opts: StripOpts): Prom
     if ((await cleanHeif(data)).length > 0) return { state: "echec", reason: "verification" };
     return { state: "nettoye", data, family: "image" };
   }
-  // PDF : jamais ouvert ni modifié (décision du propriétaire, D41-27) ; il part octet pour octet.
-  if (fmt === "pdf") return { state: "intact" };
+  // PDF (D41-31) : seules les informations cachées (/Info, XMP /Metadata, miniatures /Thumb)
+  // deviennent « null » à longueur constante ; pages et texte intacts ; résultat relu.
+  if (fmt === "pdf") {
+    const r = await cleanPdf(file);
+    if (r.state === "protege") return { state: "protege", reason: "pdf" };
+    const data = patchedBlob(file, r.patches, [], type);
+    opts.signal?.throwIfAborted();
+    const again = await cleanPdf(data);
+    if (again.state !== "ok" || again.patches.length > 0 || data.size !== file.size) return { state: "echec", reason: "verification" };
+    return { state: "nettoye", data, family: "pdf" };
+  }
   if (fmt === "ooxml" || fmt === "odf") {
     const r = await cleanOffice(file, fmt, type);
     opts.signal?.throwIfAborted();

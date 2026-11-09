@@ -12,12 +12,13 @@ const DONE = {
   image: "clean.done.image",
   video: "clean.done.video",
   audio: "clean.done.audio",
+  pdf: "clean.done.pdf",
   bureautique: "clean.done.office",
   vocal: "clean.done.vocal",
 } as const satisfies Record<CleanFamily, string>;
 
 /** Le fichier part avec ses métadonnées éventuelles (échec, protégé, format non pris en charge).
- *  PDF et archives laissés intacts par décision (D41-27) : marque neutre, pas comptés ici. */
+ *  Archives laissées intactes par décision (D41-27) : marque neutre, pas comptées ici. */
 export function isUncleaned(i: ItemClean): boolean {
   return i.clean === "echec" || i.clean === "protege" || i.clean === "non_pris_en_charge";
 }
@@ -51,14 +52,13 @@ export function cleanLabelKey(i: ItemClean) {
     case "sans":
       return null;
     case "intact":
-      return i.category === "archives" ? ("clean.intact.archive.hint" as const) : ("clean.intact.hint" as const);
+      return "clean.intact.archive.hint" as const;
     default:
       return "clean.uncleaned.hint" as const;
   }
 }
 
-/** Marque neutre d'un fichier laissé intact par décision (PDF, archive, D41-27) ; null sinon. */
+/** Marque neutre d'une archive laissée intacte par décision (D41-27) ; null sinon. */
 export function intactKey(i: ItemClean) {
-  if (i.clean !== "intact") return null;
-  return i.category === "archives" ? ("clean.intact.archive" as const) : ("clean.intact" as const);
+  return i.clean === "intact" ? ("clean.intact.archive" as const) : null;
 }
