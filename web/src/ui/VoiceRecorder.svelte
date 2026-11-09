@@ -14,7 +14,7 @@
   import { formatDuration } from "../i18n/format";
   import { CAPTURE_MAX_S, CAPTURE_TIER } from "../limits";
   import { CaptureFailure, clock, limitMs, openStream, pickMime, stopStream, type CaptureError } from "../media/capture";
-  import { LIVE_BARS, WAVE_BARS, decodeWave, startVoice, type VoiceRecording } from "../media/recorder";
+  import { LIVE_BARS, WAVE_BARS, startVoice, type VoiceRecording } from "../media/recorder";
   import { stripCaptureMeta } from "../media/strip-capture";
   import { ChevronLeft, Mic, Pause, X } from "./Icon";
   import { reducedMotion } from "./motion";
@@ -151,7 +151,6 @@
     phase = "finishing";
     const raw = await r.stop(); // micro éteint ici
     const { blob, stripped } = await stripCaptureMeta(raw);
-    const wave = await decodeWave(blob, WAVE_BARS);
     if (my !== gen) return; // fermé entre-temps
     unclean = !stripped;
     result = {
@@ -159,8 +158,9 @@
       mime: pickedNow.mime.split(";")[0]!,
       ext: pickedNow.ext,
       stripped,
-      peaks: wave?.peaks ?? new Array<number>(WAVE_BARS).fill(0.06),
-      ms: wave && wave.ms > 0 ? wave.ms : elapsed,
+      // Onde mesurée pendant la prise (jamais de décodage de tout l'audio) ; neutre sans analyseur.
+      peaks: r.wave(WAVE_BARS) ?? new Array<number>(WAVE_BARS).fill(0.06),
+      ms: elapsed,
     };
     phase = "review";
   }

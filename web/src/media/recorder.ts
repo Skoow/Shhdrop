@@ -1,7 +1,7 @@
 // Vocal enregistré dans l'interface (spec §35.3, Task 12) : MediaRecorder avec pause et reprise,
 // minuteur qui exclut les pauses, arrêt propre à la durée maximale (limits.ts), niveau du micro
-// lu par un AnalyserNode (onde vivante) et forme d'onde calculée depuis l'audio décodé pour la
-// réécoute. Tout reste en mémoire ; à l'arrêt ou à l'annulation, chaque piste du micro est
+// lu par un AnalyserNode (onde vivante) et forme d'onde de la réécoute calculée EN CONTINU depuis
+// ce même analyseur (WaveAccumulator, mémoire bornée) : l'audio n'est jamais décodé en entier. Tout reste en mémoire ; à l'arrêt ou à l'annulation, chaque piste du micro est
 // arrêtée (`track.stop()`) et le contexte audio fermé. Aucun appel réseau.
 import { VOICE_BPS, stopStream, type Picked } from "./capture";
 
@@ -38,13 +38,72 @@ export type VoiceRecording = {
   elapsedMs(): number;
   /** Niveau du micro, de 0 à 1 (0 en pause, ou sans analyseur). */
   level(): number;
+  /** Forme d'onde de ce qui a été enregistré (pauses exclues) ; null sans analyseur ou sans mesure. */
+  wave(bars?: number): number[] | null;
 };
+
+/** Cases gardées au plus : au-delà, deux cases voisines fusionnent et chaque case couvre deux fois plus de temps. */
+export const WAVE_CAP = 512;
+/** Durée initiale d'une case. */
+const SLOT_MS = 100;
+
+/**
+ * Onde accumulée pendant la prise : somme des carrés et nombre de mesures par case de temps
+ * enregistré. Mémoire bornée (2 × WAVE_CAP nombres), quelle que soit la durée.
+ */
+export class WaveAccumulator {
+  #sum: number[] = [];
+  #n: number[] = [];
+  #slot = SLOT_MS;
+  /** `rms` : niveau linéaire mesuré à `atMs` de temps enregistré (pauses exclues). */
+  add(atMs: number, rms: number): void {
+    let i = Math.floor(Math.max(0, atMs) / this.#slot);
+    while (i >= WAVE_CAP) {
+      for (let k = 0; k < WAVE_CAP / 2; k++) {
+        this.#sum[k] = (this.#sum[2 * k] ?? 0) + (this.#sum[2 * k + 1] ?? 0);
+        this.#n[k] = (this.#n[2 * k] ?? 0) + (this.#n[2 * k + 1] ?? 0);
+      }
+      this.#sum.length = this.#n.length = WAVE_CAP / 2;
+      this.#slot *= 2;
+      i = Math.floor(Math.max(0, atMs) / this.#slot);
+    }
+    while (this.#sum.length <= i) (this.#sum.push(0), this.#n.push(0));
+    this.#sum[i]! += rms * rms;
+    this.#n[i]! += 1;
+  }
+  /** Cases tenues en mémoire (pour les tests). */
+  get size(): number {
+    return this.#sum.length;
+  }
+  /** Réduite à `bars` barres, normalisée sur la plus forte, plancher 0,06 ; null sans mesure. */
+  bars(bars = WAVE_BARS): number[] | null {
+    const len = this.#sum.length;
+    if (len === 0) return null;
+    const out = Array.from({ length: bars }, (_, b) => {
+      const a = Math.floor((b * len) / bars);
+      const z = Math.max(a + 1, Math.floor(((b + 1) * len) / bars));
+      let s = 0;
+      let n = 0;
+      for (let i = a; i < z && i < len; i++) (s += this.#sum[i]!, n += this.#n[i]!);
+      return n > 0 ? Math.sqrt(s / n) : 0;
+    });
+    const max = Math.max(...out);
+    return out.map((v) => (max > 0 ? Math.max(FLOOR, Math.round((v / max) * 1000) / 1000) : FLOOR));
+  }
+}
+
+/** RMS linéaire d'un échantillon. */
+function rmsOf(samples: ArrayLike<number>): number {
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) sum += samples[i]! * samples[i]!;
+  return Math.sqrt(sum / Math.max(1, samples.length));
+}
 
 /** RMS d'un échantillon → 0..1 sur une échelle en décibels (−60 dB → 0, −10 dB → 1). */
 export function levelOf(samples: ArrayLike<number>): number {
-  let sum = 0;
-  for (let i = 0; i < samples.length; i++) sum += samples[i]! * samples[i]!;
-  const rms = Math.sqrt(sum / Math.max(1, samples.length));
+  return dbLevel(rmsOf(samples));
+}
+function dbLevel(rms: number): number {
   if (rms <= 0) return 0;
   return Math.min(1, Math.max(0, (20 * Math.log10(rms) + 60) / 50));
 }
@@ -89,12 +148,23 @@ export function startVoice(
   let since = now();
   let limit: ReturnType<typeof setTimeout> | undefined;
   const elapsed = () => (state === "recording" ? acc + now() - since : acc);
+  // Onde de la réécoute : mesurée en continu, indépendamment de l'affichage (et du mouvement réduit).
+  const wave = new WaveAccumulator();
+  let last = 0; // dernier niveau linéaire mesuré
+  const measure = () => {
+    if (state !== "recording" || !analyser || !buf) return;
+    analyser.getFloatTimeDomainData(buf);
+    last = rmsOf(buf);
+    wave.add(Math.min(elapsed(), o.maxMs), last);
+  };
+  const sampler = setInterval(measure, SAMPLE_EVERY_MS);
   const arm = () => {
     clearTimeout(limit);
     limit = setTimeout(() => o.onlimit?.(), Math.max(0, o.maxMs - elapsed()));
   };
   const halt = () => {
     clearTimeout(limit);
+    clearInterval(sampler);
     if (state === "recording") acc += now() - since;
     state = "stopped";
     if (rec.state !== "inactive") rec.stop();
@@ -133,12 +203,15 @@ export function startVoice(
     },
     elapsedMs: () => Math.min(elapsed(), o.maxMs),
     level() {
-      if (state !== "recording" || !analyser || !buf) return 0;
-      analyser.getFloatTimeDomainData(buf);
-      return levelOf(buf);
+      if (state !== "recording" || !analyser) return 0;
+      return dbLevel(last);
     },
+    wave: (bars = WAVE_BARS) => (cancelled ? null : wave.bars(bars)),
   };
 }
+
+/** Intervalle des mesures du niveau (onde vivante et onde de la réécoute). */
+const SAMPLE_EVERY_MS = 50;
 
 /** Barres de la forme d'onde affichée à la réécoute. */
 export const WAVE_BARS = 60;
@@ -180,13 +253,18 @@ export function resample(p: readonly number[], bars: number): number[] {
 }
 
 type OfflineCtor = new (channels: number, length: number, rate: number) => { decodeAudioData(b: ArrayBuffer): Promise<AudioBuffer> };
-/** Fréquence de décodage basse : 30 min de vocal ≈ 58 Mo par canal, le temps du calcul. */
+/** Fréquence de décodage basse : peu de mémoire le temps du calcul. */
 const DECODE_RATE = 8000;
+/** Au-delà, pas de décodage (mémoire bornée) : null, l'appelant affiche une onde neutre. */
+export const DECODE_MAX = 20 * 1024 * 1024;
 
-/** Décode le vocal en mémoire pour sa forme d'onde et sa durée ; null si le navigateur ne sait pas. */
+/**
+ * Audio importé seulement (un vocal enregistré ici a déjà son onde, WaveAccumulator) : décode
+ * pour la forme d'onde et la durée ; null si trop gros (> DECODE_MAX) ou si le navigateur ne sait pas.
+ */
 export async function decodeWave(blob: Blob, bars = WAVE_BARS, Offline?: OfflineCtor): Promise<{ peaks: number[]; ms: number } | null> {
   const Ctor = Offline ?? (globalThis.OfflineAudioContext as unknown as OfflineCtor | undefined);
-  if (!Ctor) return null;
+  if (!Ctor || blob.size > DECODE_MAX) return null;
   try {
     const audio = await new Ctor(1, 1, DECODE_RATE).decodeAudioData(await blob.arrayBuffer());
     const chans = Array.from({ length: audio.numberOfChannels }, (_, i) => audio.getChannelData(i));

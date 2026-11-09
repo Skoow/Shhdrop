@@ -1,6 +1,6 @@
 // Enregistreur vocal (Task 12) : faux MediaRecorder, faux flux, fausse horloge.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MINI_BARS, RATES, WAVE_BARS, decodeWave, levelOf, nextRate, peaks, rateLabel, resample, seekRatio, startVoice, type AudioCtxCtor, type VoiceRecorderCtor } from "./recorder";
+import { DECODE_MAX, MINI_BARS, RATES, WAVE_BARS, WAVE_CAP, WaveAccumulator, decodeWave, levelOf, nextRate, peaks, rateLabel, resample, seekRatio, startVoice, type AudioCtxCtor, type VoiceRecorderCtor } from "./recorder";
 
 class FakeRec {
   static last: FakeRec;
@@ -75,6 +75,7 @@ describe("startVoice", () => {
     expect(r.state()).toBe("recording");
     expect(FakeRec.last.opts.audioBitsPerSecond).toBe(128_000);
     t = 2000;
+    vi.advanceTimersByTime(50); // une mesure du niveau
     expect(r.elapsedMs()).toBe(2000);
     expect(r.level()).toBeGreaterThan(0.5);
     r.pause();
@@ -165,6 +166,53 @@ describe("onde", () => {
     expect(seekRatio(5, 0, 0)).toBe(0);
   });
 
+  it("onde de la réécoute mesurée en continu (sans decodeAudioData), pauses exclues", async () => {
+    const { stream } = fakeStream();
+    const level = [0.5]; // niveau piloté par le test
+    const { Audio } = fakeAudio(level);
+    const Offline = vi.fn();
+    vi.stubGlobal("OfflineAudioContext", Offline);
+    const r = startVoice(stream, PICK, { Recorder: FakeRec as unknown as VoiceRecorderCtor, Audio, now, maxMs: 60_000 });
+    for (let k = 0; k < 20; k++) (t += 50, vi.advanceTimersByTime(50));
+    r.pause();
+    level[0] = 0;
+    for (let k = 0; k < 20; k++) (t += 50, vi.advanceTimersByTime(50));
+    r.resume();
+    level[0] = 0.1;
+    for (let k = 0; k < 20; k++) (t += 50, vi.advanceTimersByTime(50));
+    const p = r.stop();
+    await p;
+    const w = r.wave(4)!;
+    expect(w).toHaveLength(4);
+    expect(w[0]).toBe(1); // première moitié : fort
+    expect(w[3]).toBeCloseTo(0.2, 1); // seconde moitié : faible ; la pause n'a laissé aucune case
+    expect(Offline).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+  it("WaveAccumulator : mémoire bornée quelle que soit la durée (2 h)", () => {
+    const acc = new WaveAccumulator();
+    for (let ms = 0; ms < 2 * 3600_000; ms += 50) acc.add(ms, ms < 3600_000 ? 0.8 : 0.2);
+    expect(acc.size).toBeLessThanOrEqual(WAVE_CAP);
+    const w = acc.bars(60)!;
+    expect(w).toHaveLength(60);
+    expect(w[0]).toBe(1);
+    expect(w[59]).toBeCloseTo(0.25, 2);
+    expect(new WaveAccumulator().bars()).toBeNull();
+  });
+  it("decodeWave : au-delà de DECODE_MAX, pas de décodage (onde neutre chez l'appelant)", async () => {
+    let made = 0;
+    class Spy {
+      constructor() {
+        made++;
+      }
+      async decodeAudioData(): Promise<AudioBuffer> {
+        throw new Error("jamais");
+      }
+    }
+    const big = { size: DECODE_MAX + 1, arrayBuffer: async () => new ArrayBuffer(0) } as unknown as Blob;
+    expect(await decodeWave(big, 12, Spy)).toBeNull();
+    expect(made).toBe(0);
+  });
   it("decodeWave : forme d'onde et durée depuis l'audio décodé ; échec de décodage → null", async () => {
     const data = Float32Array.from({ length: 8000 }, (_, i) => Math.sin(i / 3));
     class Ok {
