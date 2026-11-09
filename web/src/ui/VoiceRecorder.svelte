@@ -16,7 +16,7 @@
   import { CaptureFailure, clock, limitMs, openStream, pickMime, stopStream, type CaptureError } from "../media/capture";
   import { LIVE_BARS, WAVE_BARS, decodeWave, startVoice, type VoiceRecording } from "../media/recorder";
   import { stripCaptureMeta } from "../media/strip-capture";
-  import { Mic, Pause, Play, Trash2, X } from "./Icon";
+  import { ChevronLeft, Mic, Pause, Trash2, X } from "./Icon";
   import { reducedMotion } from "./motion";
   import { swipeToRemove } from "./swipe";
   import VoiceClip from "./VoiceClip.svelte";
@@ -263,18 +263,21 @@
         </div>
       {:else if live || phase === "finishing"}
         <div class="meter" bind:this={meterEl} {@attach touch && live && !confirming ? swipeToRemove(askCancel, { reduced: true }) : null}>
-          <p class={["state", { paused: phase === "paused" }]} role="status">
-            <span class="dot" aria-hidden="true"></span>{t(phase === "paused" ? "voice.paused" : "cap.recording")}
-          </p>
-          <p class="timer num" data-timer>
-            <span class="now">{clock(elapsed)}</span><span class="max">{t("voice.max", { max: clock(maxMs) })}</span>
-          </p>
-          <Waveform peaks={levels} size="live" />
-          {#if touch && live}<p class="swipe-hint" aria-hidden="true">{t("voice.swipe")}</p>{/if}
+          <div class={["state", { paused: phase === "paused" }]}>
+            <span class="dot" aria-hidden="true"></span>
+            <p class="timer num" data-timer>
+              <span class="now">{clock(elapsed)}</span><span class="max">{t("voice.max", { max: clock(maxMs) })}</span>
+            </p>
+          </div>
+          <div class={["bubble", "rec", { still: phase !== "recording" }]}>
+            <Waveform peaks={levels} size="live" />
+          </div>
+          <p class="status" role="status">{t(phase === "paused" ? "voice.paused" : "cap.recording")}</p>
+          {#if touch && live}<p class="swipe-hint" aria-hidden="true"><ChevronLeft size={14} strokeWidth={2} />{t("voice.swipe")}</p>{/if}
         </div>
       {:else if phase === "review" && result}
         <div class="review">
-          <p class="state done">{t("voice.review")}</p>
+          <p class="status done">{t("voice.review")}</p>
           <VoiceClip blob={result.blob} peaks={result.peaks} ms={result.ms} name={t("voice.this")} />
         </div>
       {/if}
@@ -294,13 +297,13 @@
       {#if phase === "review" && unclean}<p class="note warn" role="alert">{t("cap.unclean")}</p>{/if}
       {#if limitHit}<p class="note warn" role="status">{t("cap.limit")}{#if upsell}<span class="up">{upsell}</span>{/if}</p>{/if}
       <p class="note">{t("voice.note")}</p>
-      <div class="ctl">
+      <div class={["ctl", { stack: phase === "review" }]}>
         {#if phase === "review" && unclean}
-          <button type="button" class="pill" onclick={() => dlg?.close()}>{t("common.cancel")}</button>
           <button type="button" class="pill solid" onclick={use}>{t("cap.keepAsIs")}</button>
+          <button type="button" class="pill" onclick={() => dlg?.close()}>{t("common.cancel")}</button>
         {:else if phase === "review"}
-          <button type="button" class="pill" onclick={rerecord}>{t("voice.rerecord")}</button>
           <button type="button" class="pill solid" onclick={use}>{t("voice.done")}</button>
+          <button type="button" class="pill" onclick={rerecord}>{t("voice.rerecord")}</button>
         {:else if live && !confirming}
           <button type="button" class="side" aria-label={t("voice.cancel")} onclick={askCancel}><Trash2 size={22} strokeWidth={1.9} /></button>
           <button type="button" class="big stop" aria-label={t("cap.rec.stop")} onclick={() => void finish()}><span></span></button>
@@ -417,10 +420,6 @@
     justify-items: center;
     gap: var(--sp-4);
     width: min(100%, 26rem);
-    padding: var(--sp-6) var(--sp-5);
-    border: 1px solid var(--line);
-    border-radius: var(--r-2xl);
-    background: var(--surface-1);
     touch-action: pan-y;
   }
   .meter:global(.swipe-back) {
@@ -432,22 +431,17 @@
   .review {
     justify-items: stretch;
   }
+  /* Point pulsé et minuteur, sur une ligne. */
   .state {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: var(--sp-2);
-    margin: 0;
-    color: var(--text-2);
-    font-size: var(--fs-small);
-    font-weight: 600;
-    letter-spacing: 0.02em;
-  }
-  .state.done {
-    justify-self: center;
+    justify-content: center;
+    gap: var(--sp-3);
   }
   .dot {
-    width: 10px;
-    height: 10px;
+    flex: none;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background: var(--danger);
     animation: pulse 1.4s var(--ease-in-out) infinite;
@@ -459,13 +453,12 @@
   @keyframes pulse {
     50% {
       opacity: 0.35;
-      transform: scale(0.8);
+      transform: scale(0.75);
     }
   }
   .timer {
     display: flex;
     align-items: baseline;
-    justify-content: center;
     gap: var(--sp-2);
     margin: 0;
     font-variant-numeric: tabular-nums;
@@ -481,7 +474,49 @@
     color: var(--text-3);
     font-size: var(--fs-small);
   }
+  /* Même bulle que le lecteur (VoiceClip) : pilule au contour fin, qui respire pendant la prise. */
+  .bubble {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    padding: var(--sp-2) var(--sp-5);
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r-pill);
+    background: var(--surface-2);
+    box-shadow: var(--edge-hi);
+  }
+  .bubble::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border: 1px solid var(--danger);
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0.25;
+    animation: breathe 2.8s var(--ease-in-out) infinite;
+  }
+  .bubble.still::after {
+    animation: none;
+    opacity: 0;
+  }
+  @keyframes breathe {
+    50% {
+      opacity: 0.7;
+      transform: scale(1.012, 1.04);
+    }
+  }
+  .status {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--fs-small);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-align: center;
+  }
   .swipe-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1, 4px);
     margin: 0;
     color: var(--text-3);
     font-size: var(--fs-small);
@@ -581,6 +616,13 @@
     display: flex;
     justify-content: center;
   }
+  /* Après l'arrêt : « Valider » en principal pleine largeur, « Réenregistrer » dessous. */
+  .ctl.stack {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-2);
+    max-width: 26rem;
+  }
   .side {
     display: grid;
     place-items: center;
@@ -646,8 +688,14 @@
     padding-inline: var(--sp-4);
     white-space: nowrap;
   }
-  .review {
-    padding-inline: var(--sp-4);
+  .ctl.stack .pill {
+    flex: none;
+    max-width: none;
+    min-height: 52px;
+  }
+  .ctl.stack .pill:not(.solid) {
+    border-color: transparent;
+    color: var(--text-2);
   }
   .pill.solid {
     border-color: transparent;
@@ -668,6 +716,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .dot,
+    .bubble::after,
     .confirm {
       animation: none;
     }

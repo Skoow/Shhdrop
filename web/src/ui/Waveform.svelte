@@ -77,6 +77,7 @@
     onkeydown={key}
   >
     {@render bars()}
+    <span class="track" style:--p={progress} aria-hidden="true"><span class="knob"></span></span>
   </div>
 {:else}
   <div class={["wave", size]} aria-hidden="true" data-wave={size}>{@render bars()}</div>
@@ -94,11 +95,14 @@
     min-width: 0;
     overflow: hidden;
   }
+  /* Vivante : les nouvelles barres entrent à droite et glissent vers la gauche, qui s'efface. */
   .wave.live {
     --bar: 4px;
     --gap: 3px;
-    height: 72px;
-    justify-content: center;
+    width: 100%;
+    height: 64px;
+    justify-content: space-between;
+    mask-image: linear-gradient(to right, transparent, #000 22%);
   }
   .wave.mini {
     --bar: 2px;
@@ -106,6 +110,8 @@
     height: 22px;
   }
   .seek {
+    position: relative;
+    overflow: visible;
     cursor: pointer;
     touch-action: pan-y;
     border-radius: var(--r-sm);
@@ -127,6 +133,30 @@
       transform 90ms var(--ease-out),
       background-color 120ms var(--ease-out);
   }
+  /* Curseur rond sur la position de lecture : la piste couvre l'onde, son décalage suit --p. */
+  .track {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    transform: translateX(calc(var(--p, 0) * 100%));
+  }
+  .knob {
+    position: absolute;
+    top: 50%;
+    left: -6px;
+    width: 12px;
+    height: 12px;
+    margin-top: -6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
+  }
+  .mini .knob {
+    left: -5px;
+    width: 10px;
+    height: 10px;
+    margin-top: -5px;
+  }
   .live .b {
     background: var(--text);
     opacity: 0.86;
@@ -143,7 +173,8 @@
     .b {
       background: CanvasText;
     }
-    .b.on {
+    .b.on,
+    .knob {
       background: Highlight;
     }
   }

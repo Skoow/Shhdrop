@@ -17,7 +17,7 @@ test.use({
 });
 test.skip(({ browserName }) => browserName !== "chromium", "faux micro : Chromium seulement");
 
-const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-VOICE2/", import.meta.url));
+const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-VOICE3/", import.meta.url));
 
 async function spyStreams(page: Page) {
   await page.addInitScript(() => {
