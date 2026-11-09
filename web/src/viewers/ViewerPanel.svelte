@@ -338,6 +338,7 @@
     }
     .head {
       padding-top: max(var(--sp-2), env(safe-area-inset-top));
+      padding-right: max(var(--sp-2), env(safe-area-inset-right));
     }
     .stage {
       padding: var(--sp-2);

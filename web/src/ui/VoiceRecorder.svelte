@@ -248,9 +248,9 @@
 <dialog bind:this={dlg} class="vr" aria-labelledby="vr-title" onclose={closed} data-recorder="voice" data-phase={phase}>
   {#if open}
     <header class="top">
-      <button type="button" class="round" aria-label={t("common.close")} onclick={() => dlg?.close()}><X size={22} strokeWidth={2} /></button>
-      <h2 id="vr-title">{t("cap.title.voice")}</h2>
       <span class="round ghost" aria-hidden="true"></span>
+      <h2 id="vr-title">{t("cap.title.voice")}</h2>
+      <button type="button" class="round" aria-label={t("common.close")} onclick={() => dlg?.close()}><X size={22} strokeWidth={2} /></button>
     </header>
 
     <div class="stage">
@@ -383,7 +383,7 @@
     grid-template-columns: 44px minmax(0, 1fr) 44px;
     align-items: center;
     gap: var(--sp-3);
-    padding: max(var(--sp-3), env(safe-area-inset-top)) var(--sp-4) var(--sp-3);
+    padding: max(var(--sp-3), env(safe-area-inset-top)) max(var(--sp-4), env(safe-area-inset-right)) var(--sp-3) max(var(--sp-4), env(safe-area-inset-left));
   }
   .top h2 {
     margin: 0;

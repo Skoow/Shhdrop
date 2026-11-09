@@ -288,14 +288,14 @@
     </div>
 
     <div class="top">
-      <button type="button" class="round" aria-label={t("common.close")} onclick={() => dlg?.close()}><X size={22} strokeWidth={2} /></button>
+      <span class="round ghost" aria-hidden="true"></span>
       <h2 id="cap-title" class={{ hide: phase === "recording" || (phase === "review" && kind !== "photo"), "sr-only": true }}>{title}</h2>
       {#if phase === "recording"}
         <p class="timer num rec"><span class="dot" aria-hidden="true"></span><span class="sr-only">{t("cap.recording")} </span>{t("cap.timer", { elapsed: clock(elapsed), max: clock(maxMs) })}</p>
       {:else if phase === "review" && kind !== "photo"}
         <p class="timer num"><span class="dot" aria-hidden="true"></span>{clock(elapsed)}</p>
       {/if}
-      <span class="round ghost" aria-hidden="true"></span>
+      <button type="button" class="round" aria-label={t("common.close")} onclick={() => dlg?.close()}><X size={22} strokeWidth={2} /></button>
     </div>
 
     <div class="bottom">
@@ -462,6 +462,11 @@
     gap: var(--sp-3);
     padding-block: max(var(--sp-3), env(safe-area-inset-top)) var(--sp-5);
     background: linear-gradient(rgb(0 0 0 / 0.55), transparent);
+  }
+  /* Fermer : toujours en haut à droite (colonne fixe, l'intitulé masqué ne prend pas de case). */
+  .top > button.round {
+    grid-column: 3;
+    grid-row: 1;
   }
   .top h2 {
     grid-column: 2;

@@ -110,6 +110,7 @@
       border-inline: 0;
       border-bottom: 0;
       padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+      padding-inline: max(var(--sp-5), env(safe-area-inset-left, 0px)) max(var(--sp-5), env(safe-area-inset-right, 0px));
     }
     /* Poignée : repère visuel d'une feuille, comme une app. */
     .sheet::before {
@@ -133,6 +134,15 @@
     justify-content: space-between;
     gap: var(--sp-3);
     margin-bottom: var(--sp-4);
+  }
+  .head h2 {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  /* Fermer : toujours en haut à droite, 44 × 44 px même sous un titre long. */
+  .head > :global(button) {
+    flex-shrink: 0;
+    align-self: flex-start;
   }
   @keyframes sheet-in {
     from {
