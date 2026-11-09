@@ -102,7 +102,8 @@ test.describe("fr-FR", () => {
     await page.getByRole("button", { name: "Terminé" }).click();
     await expect(page.getByText("Vous ne pourrez plus les afficher. Terminer ?")).toBeVisible();
     await page.getByRole("button", { name: "Terminer" }).click();
-    await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
+    // Composeur vide (page /envoyer, D41-37) : « Ajouter » sur téléphone, zone de dépôt sur ordinateur.
+    await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).or(page.locator(".dropzone")).filter({ visible: true }).first()).toBeVisible();
     await expect(page.locator("[data-row]")).toHaveCount(0);
     const body = await page.evaluate(() => document.body.innerText);
     expect(body).not.toContain(link);
@@ -128,7 +129,8 @@ test.describe("fr-FR", () => {
     await page.waitForTimeout(2600); // gomme du logo
     await capture(page, "ready-deleted");
     await page.getByRole("button", { name: "Nouvel envoi" }).click();
-    await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
+    // Composeur vide (page /envoyer, D41-37) : « Ajouter » sur téléphone, zone de dépôt sur ordinateur.
+    await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).or(page.locator(".dropzone")).filter({ visible: true }).first()).toBeVisible();
     expect(await armed(page)).toBe(false);
   });
 
@@ -262,11 +264,14 @@ test.describe("en-US", () => {
 
   test("Link ready in English ; capture", async ({ page, shh }) => {
     test.setTimeout(120_000);
-    await page.goto(shh.origin + "/");
+    // « Start » mène à la page d'envoi (D41-37) ; puis « Add » (téléphone) ou « Create here » (ordinateur).
+    await page.goto(shh.origin + "/envoyer");
+    const add = page.getByRole("button", { name: /^Add/ }).or(page.locator(".dropzone")).filter({ visible: true }).first();
+    await expect(add).toBeVisible();
     if (await page.getByRole("button", { name: /^Add/ }).filter({ visible: true }).first().isVisible()) {
       await page.getByRole("button", { name: /^Add/ }).filter({ visible: true }).first().click();
       await page.getByRole("dialog", { name: "Add" }).getByRole("button", { name: /^Note/ }).click();
-    } else await page.getByRole("group", { name: "Or create one here" }).getByRole("button", { name: "Note", exact: true }).click();
+    } else await page.getByRole("group", { name: "Create here" }).getByRole("button", { name: "Note", exact: true }).click();
     const dlg = page.getByRole("dialog");
     await dlg.locator("textarea").fill("The door code is 4471.");
     await dlg.getByRole("button", { name: "Add", exact: true }).click();

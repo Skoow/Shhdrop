@@ -278,12 +278,12 @@
     margin-block: var(--sp-2) 4px;
   }
   /* Centrée sur le rectangle de la ligne, pas sur sa zone de contenu (rembourrages inégaux :
-     4 px à droite sur ordinateur, 2 px à gauche sur téléphone). */
+     4 px à droite sur ordinateur ; aucun sur téléphone). */
   .voice {
     translate: 2px 0;
   }
   .compact .voice {
-    translate: -1px 0;
+    translate: none;
   }
   .voice :global(.clip) {
     flex: 1;
