@@ -101,3 +101,44 @@ export function parseLink(url: string, base = "/"): ParsedLink {
   if (MANAGE_FRAGMENT.test(u.hash)) return { kind: "m", origin: u.origin, sGestion: strict(u.hash.slice(2)) as SGestion };
   throw invalid();
 }
+
+/**
+ * Fragment « lien + mot de passe » du QR code (D41-29) : « # » + K_lien (43) + « . » +
+ * base64url de l'UTF-8 du mot de passe. Le « . » n'est pas dans l'alphabet base64url :
+ * aucune ambiguïté avec un lien simple. Le routeur l'envoie à l'ouverture ; le client lit le
+ * mot de passe, puis retire tout le fragment de l'adresse (comme pour un lien simple).
+ */
+export const SHARE_PW_FRAGMENT = /^#[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{2,64}$/;
+
+/** Lien de partage suivi du mot de passe (QR code, D41-29). Lève si `link` n'est pas un lien de partage. */
+export function shareLinkWithPassword(link: string, password: string): string {
+  const u = new URL(link);
+  if (!SHARE_FRAGMENT.test(u.hash) || password === "") throw invalid();
+  const pw = b64u(new TextEncoder().encode(password));
+  if (pw.length > 64) throw invalid();
+  return `${link}.${pw}`;
+}
+
+/**
+ * Sépare le mot de passe d'un lien de QR code (D41-29). Toujours sans lever : un fragment
+ * « #<K_lien>.<…> » rend le lien simple et le mot de passe s'il est un base64url canonique
+ * d'UTF-8 valide (sinon null : écran de saisie normal) ; tout autre lien est rendu tel quel.
+ */
+export function splitPassword(href: string): { href: string; password: string | null } {
+  let u: URL;
+  try {
+    u = new URL(href);
+  } catch {
+    return { href, password: null };
+  }
+  const m = /^#([A-Za-z0-9_-]{43})\.(.*)$/s.exec(u.hash);
+  if (m === null) return { href, password: null };
+  u.hash = "#" + m[1]!;
+  let password: string | null = null;
+  try {
+    if (/^[A-Za-z0-9_-]{2,64}$/.test(m[2]!)) password = new TextDecoder("utf-8", { fatal: true }).decode(unb64u(m[2]!));
+  } catch {
+    password = null;
+  }
+  return { href: u.href, password: password === "" ? null : password };
+}

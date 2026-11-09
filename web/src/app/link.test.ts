@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
-import { readLink, scrubAddressBar } from "./link";
+import { readShare, readLink, scrubAddressBar } from "./link";
 
 const KEY = Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => 255 - i * 3)).toString("base64url");
 const O = "https://shhdrop.example";
@@ -80,5 +80,16 @@ describe("scrubAddressBar", () => {
     for (const p of [location.href, `/#${KEY}`, "/?q", "//evil.example/x", "/\\evil.example/x", "/a\\b", "s/x", "", "https://x/s"])
       expect(scrubAddressBar(history, p), p).toBe(false);
     expect(location.hash).toBe(`#${KEY}`); // rien n'a été écrit
+  });
+});
+
+describe("readShare : lien + mot de passe du QR code (D41-29)", () => {
+  it("sépare le mot de passe, rend le lien simple ; mal formé ou absent → null ; autre type → incomplet", () => {
+    const pw = "aC3!cD5?#Fg";
+    const enc = btoa(pw).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+    expect(readShare(`${O}/#${KEY}.${enc}`, "/")).toEqual({ state: { kind: "s", link: `${O}/#${KEY}` }, password: pw });
+    expect(readShare(`${O}/#${KEY}`, "/")).toEqual({ state: { kind: "s", link: `${O}/#${KEY}` }, password: null });
+    expect(readShare(`${O}/#${KEY}.%%`, "/")).toEqual({ state: { kind: "s", link: `${O}/#${KEY}` }, password: null });
+    expect(readShare(`${O}/#m${KEY}.${enc}`, "/")).toEqual({ state: { kind: "incomplete" }, password: null });
   });
 });

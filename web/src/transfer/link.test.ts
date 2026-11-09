@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { b64u } from "../crypto/encoding";
 import { newKLien, newSGestion, randomBytes } from "../crypto/kdf";
 import type { KLien, SGestion } from "../crypto/types";
-import { MANAGE_FRAGMENT, SHARE_FRAGMENT, SHARE_LINK_SHAPE, checkOrigin, manageLink, parseLink, shareLink } from "./link";
+import { MANAGE_FRAGMENT, SHARE_FRAGMENT, SHARE_LINK_SHAPE, SHARE_PW_FRAGMENT, checkOrigin, manageLink, parseLink, shareLink, shareLinkWithPassword, splitPassword } from "./link";
 
 const K = b64u(new Uint8Array(32).fill(1)); // 43 caractères
 
@@ -148,5 +148,29 @@ describe("origine (audit F1)", () => {
   it("shareLink et manageLink valident l'origine", () => {
     expect(() => shareLink("http://srv.test/", randomBytes(32) as KLien)).toThrow("origine_invalide");
     expect(() => manageLink("https://srv.test/x", randomBytes(32) as SGestion)).toThrow("origine_invalide");
+  });
+});
+
+describe("lien + mot de passe du QR code (D41-29)", () => {
+  const k = new Uint8Array(32).fill(7) as unknown as Parameters<typeof shareLink>[1];
+  const link = shareLink("https://shhdrop.test", k);
+  const PW = "aC3!cD5?#Fg";
+  it("format : #<K_lien>.<base64url de l'UTF-8 du mot de passe>, aller-retour exact", () => {
+    const q = shareLinkWithPassword(link, PW);
+    expect(q).toBe(`${link}.YUMzIWNENT8jRmc`);
+    expect(new URL(q).hash).toMatch(SHARE_PW_FRAGMENT);
+    expect(new URL(q).hash).not.toMatch(SHARE_FRAGMENT);
+    expect(splitPassword(q)).toEqual({ href: link, password: PW });
+    expect(parseLink(splitPassword(q).href)).toMatchObject({ kind: "s" });
+    expect(() => shareLinkWithPassword(link, "")).toThrow();
+    expect(() => shareLinkWithPassword(manageLink("https://shhdrop.test", k as never), PW)).toThrow();
+  });
+  it("analyse robuste : mot de passe absent, mal formé, non canonique ou UTF-8 invalide → null, le lien simple reste", () => {
+    expect(splitPassword(link)).toEqual({ href: link, password: null });
+    for (const bad of [".", ".a", ".!!", ".YUMzIWNENT8jRmc=", ".gA", ".YUMzIWNENT8jRmd", "." + "a".repeat(65), ".YUMz.IWNE"]) {
+      expect(splitPassword(link + bad), bad).toEqual({ href: link, password: null });
+    }
+    expect(splitPassword("pas une url")).toEqual({ href: "pas une url", password: null });
+    expect(splitPassword("https://shhdrop.test/#m" + "A".repeat(43))).toEqual({ href: "https://shhdrop.test/#m" + "A".repeat(43), password: null });
   });
 });

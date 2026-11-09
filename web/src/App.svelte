@@ -3,7 +3,7 @@
   import { getDemo } from "./app/demo-hooks";
   import { inAppBrowser, isStandalone, isSupported } from "./app/env";
   import { guardFileDrop, reloadIfRestored } from "./app/lifecycle";
-  import { readLink, scrubAddressBar, type LinkState } from "./app/link";
+  import { readLink, readShare, scrubAddressBar, type LinkState, type ShareTake } from "./app/link";
   import { href, router } from "./app/router.svelte";
   import { setScreenTitle } from "./app/title";
   import { getLang } from "./i18n/i18n.svelte";
@@ -49,7 +49,7 @@
     // Chemin non nu (« //x », « \ ») : repli sur l'accueil plutôt que garder le « # ».
     if (!scrubAddressBar(history, location.pathname)) scrubAddressBar(history, href("/"));
   }
-  const takeShare = (): LinkState => readLink(location.href, "s");
+  const takeShare = (): ShareTake => readShare(location.href);
   function takeManage(): LinkState {
     const l = readLink(location.href, "m");
     if (!inApp()) scrubHere();

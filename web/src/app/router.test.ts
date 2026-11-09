@@ -22,6 +22,11 @@ describe("match", () => {
     expect(match("/", `#m${KEY}`)).toEqual({ name: "manage" });
     expect(JSON.stringify(match("/", `#${KEY}`))).not.toContain(KEY);
   });
+  it("D41-29 : lien du QR code (« #<K_lien>.<mot de passe> », même mal formé) → ouverture", () => {
+    expect(match("/", `#${KEY}.YUMzIWNENT8jRmc`)).toEqual({ name: "open" });
+    expect(match("/", `#${KEY}.%%`)).toEqual({ name: "open" });
+    expect(match("/", `#${KEY}.`)).toEqual({ name: "open" });
+  });
 
   it("fragment sans rapport avec une clé → accueil (App retire ensuite le « # »)", () => {
     for (const h of ["", "#", "#contenu", `#${KEY.slice(0, 19)}`, `#m${KEY}A`, `#${KEY.slice(1)}+`, `#${KEY.slice(0, 30)}é`])

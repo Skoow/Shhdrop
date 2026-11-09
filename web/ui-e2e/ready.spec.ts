@@ -25,7 +25,7 @@ const valueOf = (page: Page, card: ReturnType<typeof linkCard>) => card.locator(
 test.describe("fr-FR", () => {
   test.use({ locale: "fr-FR", timezoneId: "Europe/Paris" });
 
-  test("deux cartes, copie depuis l'état, partage natif sans mot de passe, QR du lien seul, Terminé", async ({ page, shh, context, isMobile }) => {
+  test("deux cartes, copie depuis l'état, Partager (app, copie, QR du lien et du mot de passe, D41-29), Terminé", async ({ page, shh, context, isMobile }) => {
     test.setTimeout(120_000);
     await page.addInitScript(() => {
       const shared: unknown[] = [];
@@ -70,28 +70,32 @@ test.describe("fr-FR", () => {
     await pwCard(page).getByRole("button", { name: /^Copier/ }).click();
     expect(await clip(page)).toBe(password);
 
-    // Partager : { url } seulement.
-    await linkCard(page).getByRole("button", { name: "Partager le lien" }).click();
-    expect(await page.evaluate(() => (window as unknown as { __shared: unknown[] }).__shared)).toEqual([{ url: link }]);
-    // Mot de passe : un second partage, distinct, le texte seul (jamais avec le lien).
-    await pwCard(page).getByRole("button", { name: "Partager le mot de passe" }).click();
-    expect(await page.evaluate(() => (window as unknown as { __shared: unknown[] }).__shared)).toEqual([{ url: link }, { text: password }]);
-
-    // QR : le lien, rien d'autre (même chemin que qrPath(link)).
-    await linkCard(page).getByRole("button", { name: "QR code" }).click();
-    const qr = page.getByRole("img", { name: "QR code du lien de partage" });
+    // Copier le lien et le mot de passe (D41-29) : une seule copie, deux lignes.
+    await page.getByRole("button", { name: "Copier le lien et le mot de passe" }).first().click();
+    expect(await clip(page)).toBe(`Lien\u202f: ${link}\nMot de passe\u202f: ${password}`);
+    // Partager : feuille à trois choix ; « Envoyer vers une app » → { text } avec les deux lignes.
+    await page.getByRole("button", { name: "Partager", exact: true }).click();
+    const sheet = page.getByRole("dialog", { name: "Partager le lien et le mot de passe" });
+    await sheet.getByRole("button", { name: "Envoyer vers une app" }).click();
+    expect(await page.evaluate(() => (window as unknown as { __shared: unknown[] }).__shared)).toEqual([
+      { text: `Lien\u202f: ${link}\nMot de passe\u202f: ${password}` },
+    ]);
+    // QR : le lien suivi du mot de passe (#<K_lien>.<base64url>), même chemin que qrPath.
+    await sheet.getByRole("button", { name: "Afficher le QR code" }).click();
+    const qr = sheet.getByRole("img", { name: "QR code du lien et du mot de passe" });
     await expect(qr).toBeVisible();
-    expect(await qr.locator("path").getAttribute("d")).toBe(qrPath(link).d);
-    expect(await qr.locator("path").getAttribute("d")).not.toBe(qrPath(password).d);
-    await expect(page.getByText("Le QR contient la clé : ne le montrez qu'au destinataire.")).toBeVisible();
+    const both = `${link}.${Buffer.from(password, "utf8").toString("base64url")}`;
+    expect(await qr.locator("path").getAttribute("d")).toBe(qrPath(both).d);
+    await expect(sheet.getByText("À montrer seulement à la personne en face de vous.")).toBeVisible();
+    await sheet.getByRole("button", { name: "Copier le lien et le mot de passe" }).click();
     await expect(page.locator("input[type=email]")).toHaveCount(0);
     expect(await axe(page)).toEqual([]);
     await capture(page, "ready-qr");
-    if (isMobile) await page.keyboard.press("Escape"); // téléphone : QR en feuille
+    await page.keyboard.press("Escape");
 
     // Aucun « Vider le presse-papier » (clipboard-read=() : rien à vérifier) ; la copie reste.
     await expect(page.getByRole("button", { name: "Vider le presse-papier" })).toHaveCount(0);
-    expect(await clip(page)).toBe(password);
+    expect(await clip(page)).toBe(`Lien\u202f: ${link}\nMot de passe\u202f: ${password}`);
 
     // Garde de sortie jusqu'à Terminé ; puis composeur vide, plus aucun secret à l'écran.
     expect(await armed(page)).toBe(true);
@@ -244,9 +248,10 @@ test.describe("390 × 844", () => {
     const [d, b] = [await del.boundingBox(), await page.locator(".done").boundingBox()];
     expect(d!.y + d!.height).toBeLessThan(b!.y - 40);
     await capture(page, "ready-390-bottom");
-    await linkCard(page).getByRole("button", { name: "QR code" }).click();
-    const sheet = page.getByRole("dialog", { name: "QR code" });
-    await expect(sheet.getByRole("img", { name: "QR code du lien de partage" })).toBeVisible();
+    await page.getByRole("button", { name: "Partager", exact: true }).click();
+    const sheet = page.getByRole("dialog", { name: "Partager le lien et le mot de passe" });
+    await sheet.getByRole("button", { name: "Afficher le QR code" }).click();
+    await expect(sheet.getByRole("img", { name: "QR code du lien et du mot de passe" })).toBeVisible();
     await page.waitForTimeout(500);
     await capture(page, "ready-qr-390");
   });

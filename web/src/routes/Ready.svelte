@@ -1,26 +1,27 @@
 <script lang="ts">
   // « Lien prêt » (UI §9.5) : affiché seulement après la résolution de createShare. L'avertissement
-  // « plus jamais affichés » en tête ; deux cartes pour deux secrets (M18, S2) : le lien (Copier,
-  // Partager, QR) et le mot de passe (Copier, Partager), chacun partagé à part ; lien de gestion
-  // replié ; Supprimer ce partage (secondaire) ; Terminé (principal,
+  // « plus jamais affichés » en tête ; deux cartes (M18) : le lien et le mot de passe, chacun
+  // avec sa copie ; puis « Partager » (feuille : envoyer vers une app, copier le lien et le mot
+  // de passe, QR code du lien et du mot de passe, D41-29) et « Copier le lien et le mot de
+  // passe » ; lien de gestion replié ; Supprimer ce partage (secondaire) ; Terminé (principal,
   // collé en bas sur téléphone). Les valeurs ne viennent que des props (Copier lit l'état, jamais le
   // DOM) ; rien n'est écrit dans la console, le titre, l'URL ou un stockage.
   import { tick } from "svelte";
-  import { MediaQuery } from "svelte/reactivity";
   import { getDemo } from "../app/demo-hooks";
   import { formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
-  import { NotFoundError, destroyShare } from "../index";
+  import { NotFoundError, destroyShare, shareLinkWithPassword } from "../index";
   import { announce } from "../ui/announce";
   import Button from "../ui/Button.svelte";
+  import { copyText } from "../ui/clipboard";
   import CopyField from "../ui/CopyField.svelte";
   import Deadline from "../ui/Deadline.svelte";
-  import { ChevronDown, ClipboardX, Eye, Lock, QrCode as QrIcon, Share2, Trash2 } from "../ui/Icon";
+  import { ChevronDown, ClipboardX, Copy, Eye, Lock, QrCode as QrIcon, Send, Share2, Trash2 } from "../ui/Icon";
   import InlineConfirm from "../ui/InlineConfirm.svelte";
   import Logo from "../ui/Logo.svelte";
   import QrCode from "../ui/QrCode.svelte";
   import { reducedMotion } from "../ui/motion";
-  import { canShareLink, haptic, shareLink, sharePassword } from "../ui/native";
+  import { canShareLink, haptic, shareText } from "../ui/native";
   import Sheet from "../ui/Sheet.svelte";
   import "../ui/seal.css";
 
@@ -41,7 +42,6 @@
   let { result, summary, ttlHours, maxOpens, ondone, onforget, onnew }: Props = $props();
   const lang = $derived(getLang());
   const demo = getDemo();
-  const narrow = new MediaQuery("max-width: 759px");
 
   const selfDestruct = $derived(
     t("ready.selfdestruct", { opens: t("ready.opens", { n: maxOpens }), ttl: formatDuration(ttlHours * 3600, lang) }),
@@ -81,21 +81,27 @@
     );
   });
 
-  // ---------- Partager, QR ----------
+  // ---------- Partager (D41-29) : lien et mot de passe ensemble ----------
+  // Une seule ouverture par défaut : même envoyés au même endroit, personne d'autre ne pourra
+  // voir le contenu ensuite, et le destinataire verrait qu'il a déjà été ouvert (spec D41-29).
   const canShare = canShareLink();
-  async function share() {
-    if (result) await shareLink(result.link); // le lien seul, jamais le mot de passe
-  }
+  const both = (r: ReadyResult) => t("ready.share.text", { link: r.link, password: r.password });
+  let sheet = $state(false);
   let qrShown = $state(false);
-  let qrSheet = $state(false);
-  function toggleQr() {
-    if (narrow.current) qrSheet = true;
-    else qrShown = !qrShown;
+  let copyNote = $state("");
+  async function shareApp() {
+    if (result) await shareText(both(result));
   }
-
-  // ---------- Mot de passe : partagé seul, jamais avec le lien ----------
-  async function sharePw() {
-    if (result) await sharePassword(result.password); // le mot de passe seul, jamais avec le lien
+  async function copyBoth() {
+    if (!result) return;
+    const r = await copyText(both(result));
+    copyNote = r === "copied" ? t("ready.share.copied") : t("ready.share.manual");
+    announce(copyNote);
+  }
+  function openSheet() {
+    qrShown = false;
+    copyNote = "";
+    sheet = true;
   }
 
   // ---------- Terminé, Supprimer ----------
@@ -169,42 +175,30 @@
 
       <div class="card" role="group" aria-label={t("ready.link.title")} data-fan>
         <CopyField label={t("ready.link.label")} value={result.link} />
-        <div class="row">
-          {#if canShare}
-            <Button variant="secondary" dense onpress={share}>
-              {#snippet icon()}<Share2 size={20} strokeWidth={1.75} />{/snippet}
-              {t("ready.share")}
-            </Button>
-          {/if}
-          <Button variant="secondary" dense aria-expanded={narrow.current ? undefined : qrShown} onpress={toggleQr}>
-            {#snippet icon()}<QrIcon size={20} strokeWidth={1.75} />{/snippet}
-            {qrShown ? t("ready.qr.hide") : t("ready.qr")}
-          </Button>
-          {#if demo}
+        {#if demo}
+          <div class="row">
             <Button variant="ghost" dense onpress={() => demo.openAsRecipient(result!.link)}>
               {#snippet icon()}<Eye size={20} strokeWidth={1.75} />{/snippet}
               {t("ready.demo.open")}
             </Button>
-          {/if}
-        </div>
-        {#if qrShown && !narrow.current}
-          <figure class="qr">
-            <QrCode text={result.link} label={t("ready.qr.alt")} />
-            <figcaption>{t("ready.qr.caption")}</figcaption>
-          </figure>
+          </div>
         {/if}
       </div>
 
       <div class="card" role="group" aria-label={t("ready.pw.title")} data-fan>
         <CopyField label={t("ready.pw.title")} value={result.password} whole />
-        {#if canShare}
-          <div class="row">
-            <Button variant="secondary" dense onpress={sharePw}>
-              {#snippet icon()}<Share2 size={20} strokeWidth={1.75} />{/snippet}
-              {t("ready.share.pw")}
-            </Button>
-          </div>
-        {/if}
+      </div>
+
+      <div class="send" data-fan>
+        <Button variant="primary" onpress={openSheet} aria-haspopup="dialog">
+          {#snippet icon()}<Share2 size={20} strokeWidth={1.75} />{/snippet}
+          {t("ready.share")}
+        </Button>
+        <Button variant="secondary" onpress={copyBoth}>
+          {#snippet icon()}<Copy size={20} strokeWidth={1.75} />{/snippet}
+          {t("ready.share.both")}
+        </Button>
+        {#if copyNote && !sheet}<p class="note" role="status">{copyNote}</p>{/if}
       </div>
 
       <details class="card manage">
@@ -244,11 +238,30 @@
     </div>
   </section>
 
-  <Sheet bind:open={qrSheet} title={t("ready.qr")}>
-    <figure class="qr">
-      <QrCode text={result.link} label={t("ready.qr.alt")} />
-      <figcaption>{t("ready.qr.caption")}</figcaption>
-    </figure>
+  <Sheet bind:open={sheet} title={t("ready.share.title")}>
+    <div class="choices">
+      {#if canShare}
+        <Button variant="secondary" onpress={shareApp}>
+          {#snippet icon()}<Send size={20} strokeWidth={1.75} />{/snippet}
+          {t("ready.share.app")}
+        </Button>
+      {/if}
+      <Button variant="secondary" onpress={copyBoth}>
+        {#snippet icon()}<Copy size={20} strokeWidth={1.75} />{/snippet}
+        {t("ready.share.both")}
+      </Button>
+      <Button variant="secondary" aria-expanded={qrShown} onpress={() => void (qrShown = !qrShown)}>
+        {#snippet icon()}<QrIcon size={20} strokeWidth={1.75} />{/snippet}
+        {qrShown ? t("ready.qr.hide") : t("ready.qr")}
+      </Button>
+      {#if copyNote}<p class="note" role="status">{copyNote}</p>{/if}
+    </div>
+    {#if qrShown}
+      <figure class="qr">
+        <QrCode text={shareLinkWithPassword(result.link, result.password)} label={t("ready.qr.alt")} />
+        <figcaption>{t("ready.qr.caption")}</figcaption>
+      </figure>
+    {/if}
   </Sheet>
 
 {/if}
@@ -355,8 +368,28 @@
     font-size: var(--fs-small);
     color: var(--text-2);
   }
-  .qr {
+  .send {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    align-items: center;
+  }
+  .choices {
+    display: grid;
+    gap: var(--sp-2);
+  }
+  .choices :global(.btn) {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .note {
     margin: 0;
+    flex-basis: 100%;
+    font-size: var(--fs-small);
+    color: var(--text-2);
+  }
+  .qr {
+    margin: var(--sp-4) 0 0;
     display: grid;
     justify-items: start;
     gap: var(--sp-2);
@@ -461,6 +494,13 @@
       grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
     }
     .card .row :global(.btn) {
+      width: 100%;
+      justify-content: center;
+    }
+    .send {
+      display: grid;
+    }
+    .send :global(.btn) {
       width: 100%;
       justify-content: center;
     }

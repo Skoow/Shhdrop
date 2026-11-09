@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { canShareLink, haptic, shareLink, sharePassword } from "./native";
+import { canShareLink, haptic, shareText } from "./native";
 
 describe("gestes natifs avec repli", () => {
   it("haptic : 10 ms si vibrate existe ; rien sans ; jamais d'erreur", () => {
@@ -10,22 +10,15 @@ describe("gestes natifs avec repli", () => {
     expect(() => haptic(undefined)).not.toThrow();
     expect(() => haptic({ vibrate: () => { throw new Error("x"); } })).not.toThrow();
   });
-  it("shareLink : le lien seul ; repli « unavailable » ; annulation tolérée", async () => {
+  it("shareText : un texte seul ({ text }) ; repli « unavailable » ; annulation tolérée", async () => {
     const share = vi.fn(async () => undefined);
     expect(canShareLink({ share })).toBe(true);
-    expect(await shareLink("https://x.test/#k", { share })).toBe("shared");
-    expect(share).toHaveBeenCalledWith({ url: "https://x.test/#k" });
-    expect(Object.keys((share.mock.calls[0] as unknown as [object])[0])).toEqual(["url"]);
-    expect(canShareLink({})).toBe(false);
-    expect(await shareLink("u", {})).toBe("unavailable");
-    expect(await shareLink("u", undefined)).toBe("unavailable");
-    expect(await shareLink("u", { share: async () => { throw new DOMException("AbortError"); } })).toBe("cancelled");
-  });
-  it("sharePassword : le mot de passe seul (texte), jamais avec le lien ; deux partages distincts", async () => {
-    const share = vi.fn(async () => undefined);
-    expect(await sharePassword("K7m4Xq2p9r", { share })).toBe("shared");
-    expect(share).toHaveBeenCalledWith({ text: "K7m4Xq2p9r" });
+    expect(await shareText("Lien : https://x.test/#k\nMot de passe : aC3!cD5?#Fg", { share })).toBe("shared");
+    expect(share).toHaveBeenCalledWith({ text: "Lien : https://x.test/#k\nMot de passe : aC3!cD5?#Fg" });
     expect(Object.keys((share.mock.calls[0] as unknown as [object])[0])).toEqual(["text"]);
-    expect(await sharePassword("x", {})).toBe("unavailable");
+    expect(canShareLink({})).toBe(false);
+    expect(await shareText("u", {})).toBe("unavailable");
+    expect(await shareText("u", undefined)).toBe("unavailable");
+    expect(await shareText("u", { share: async () => { throw new DOMException("AbortError"); } })).toBe("cancelled");
   });
 });

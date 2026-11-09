@@ -3,6 +3,9 @@
 // clé est lue une fois par readLink (app/link.ts), puis retirée de l'adresse.
 import { flushSync } from "svelte";
 import { MANAGE_FRAGMENT, SHARE_FRAGMENT } from "../index";
+
+// Lien du QR code (D41-29) : « #<K_lien>. » suivi du mot de passe, même mal formé (écran de saisie).
+const SHARE_PW_PREFIX = /^#[A-Za-z0-9_-]{43}\./;
 import { runTransition } from "../ui/viewTransition";
 
 /**
@@ -38,7 +41,7 @@ export function match(pathname: string, hash = "", base: string = import.meta.en
     else return { name: "notfound" };
   }
   if (p === "/") {
-    if (SHARE_FRAGMENT.test(hash)) return { name: "open" };
+    if (SHARE_FRAGMENT.test(hash) || SHARE_PW_PREFIX.test(hash)) return { name: "open" };
     if (MANAGE_FRAGMENT.test(hash)) return { name: "manage" };
     if (TRUNCATED_FRAGMENT.test(hash)) return { name: "open" };
     if (hash === "" && reopen) return { name: "open" };

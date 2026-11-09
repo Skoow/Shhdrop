@@ -5,12 +5,13 @@
   // est un seul élément du verrouillage à la fin : data-state « locked », « open », « destroyed ».
   import { untrack } from "svelte";
   import { inAppBrowser, isStandalone } from "../app/env";
-  import type { LinkState } from "../app/link";
+  import type { ShareTake } from "../app/link";
   import { scrubAddressBar } from "../app/link";
   import { followLink, href, markReopen } from "../app/router.svelte";
   import { createReceiver } from "../flows/receive.svelte";
   import { formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
+  import { isGeneratedPassword } from "../crypto/password";
   import { PW_TRIES } from "../index";
   import { announce } from "../ui/announce";
   import Button from "../ui/Button.svelte";
@@ -30,12 +31,17 @@
 
   type Props = {
     /** Lit le lien de l'adresse, une fois, au montage (le secret n'est jamais une prop réactive). */
-    take: () => LinkState | null;
+    take: () => ShareTake | null;
   };
   let { take }: Props = $props();
   const lang = $derived(getLang());
 
-  const r = createReceiver(untrack(() => take()) ?? { kind: "incomplete" }, {
+  const taken = untrack(() => take());
+  // D41-29 : mot de passe lu du QR code (fragment déjà retiré de l'adresse par scrub) ; une
+  // seule tentative automatique, et seulement s'il a la forme d'un mot de passe généré (un
+  // fragment fabriqué ne consomme pas d'essai). Échec : écran de saisie normal, champ vide.
+  let linkPw: string | null = taken?.password ?? null;
+  const r = createReceiver(taken?.state ?? { kind: "incomplete" }, {
     inAppBrowser: () => inAppBrowser(navigator.userAgent, isStandalone(window)),
     // Chemin non nu (« //x », « \ ») : repli sur l'accueil plutôt que garder le « # ».
     scrub: () => {
@@ -109,6 +115,18 @@
       input.select();
     }
   }
+  $effect(() => {
+    if (linkPw === null || r.state !== "locked") return;
+    const v = linkPw;
+    linkPw = null;
+    if (!isGeneratedPassword(v)) return;
+    untrack(() => {
+      pw = v;
+      void unlock().then(() => {
+        if (r.state !== "open") pw = "";
+      });
+    });
+  });
   function onkey(e: KeyboardEvent) {
     if (e.key === "Enter" && !e.isComposing) {
       e.preventDefault();
