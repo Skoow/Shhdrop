@@ -3,14 +3,14 @@
 // les ambigus ni les sosies (ni 0 O o 1 l I i j, ni les sosies S s Z z B ;
 // 5, 2 et 8 n'ont donc plus de sosie), 14 caractères spéciaux courants sur un clavier de téléphone, aucun espace.
 // Le mot de passe entier est recommencé tant que la contrainte n'est pas tenue (au moins une
-// minuscule, une majuscule, un chiffre et AU MOINS TROIS caractères spéciaux, décision du
-// propriétaire du 8 novembre) : chaque mot de passe valide a la même probabilité.
-// 19 417 033 820 665 958 400 possibilités, soit 2^64,07 (exigence : au moins 60 bits). Environ
-// 31 % des tirages bruts passent : un peu plus de trois tirages en moyenne. Ce contrôle de forme ne sert qu'à la création ; à l'ouverture, tout mot de passe non
+// minuscule, une majuscule, un chiffre et EXACTEMENT TROIS caractères spéciaux, décision du
+// propriétaire du 9 novembre) : chaque mot de passe valide a la même probabilité.
+// 11 062 464 629 113 497 600 possibilités, soit 2^63,26 (exigence : au moins 60 bits). Environ
+// 17,8 % des tirages bruts passent : un peu moins de six tirages en moyenne. Ce contrôle de forme ne sert qu'à la création ; à l'ouverture, tout mot de passe non
 // vide est accepté (anciens alphabets et longueurs compris).
 
-/** Nombre minimal de caractères spéciaux (famille 4) dans un mot de passe généré. */
-export const PASSWORD_MIN_SPECIALS = 3;
+/** Nombre exact de caractères spéciaux (famille 4) dans un mot de passe généré (ni plus ni moins). */
+export const PASSWORD_SPECIALS = 3;
 
 /** Mot de passe produit par generatePassword (11 caractères), seul accepté à la création (D41-15). */
 export type GeneratedPassword = string & { readonly __gen: unique symbol };
@@ -22,7 +22,7 @@ export const PASSWORD_LEN = 11;
 
 /**
  * Vrai si `pw` a la forme d'un mot de passe généré : exactement 11 caractères de l'alphabet,
- * les quatre familles présentes dont au moins 3 spéciaux (D41-15 : le mot de passe d'un partage est toujours généré,
+ * les quatre familles présentes dont exactement 3 spéciaux (D41-15 : le mot de passe d'un partage est toujours généré,
  * plus aucune saisie). La forme ne prouve pas le tirage ; elle refuse toute autre chaîne qui
  * arriverait jusqu'à la création (erreur de programmation), sans liste ni copie gardée.
  */
@@ -30,7 +30,7 @@ export function isGeneratedPassword(pw: string): pw is GeneratedPassword {
   const chars = [...pw];
   return (
     chars.length === PASSWORD_LEN && chars.every((c) => PASSWORD_ALPHABET.includes(c)) && PASSWORD_FAMILIES.every((f) => chars.some((c) => f.includes(c))) &&
-    chars.filter((c) => PASSWORD_FAMILIES[3].includes(c)).length >= PASSWORD_MIN_SPECIALS
+    chars.filter((c) => PASSWORD_FAMILIES[3].includes(c)).length === PASSWORD_SPECIALS
   );
 }
 
