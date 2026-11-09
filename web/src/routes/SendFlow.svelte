@@ -26,8 +26,10 @@
     vaultAllowed?: boolean;
     /** Vrai de l'appui sur « Chiffrer et envoyer » jusqu'à « Lien prêt » (langue figée, dépôt ignoré). */
     onbusy?: (busy: boolean) => void;
+    /** Page d'envoi « /envoyer » : composeur affiché même vide (retours DROP). */
+    sendPage?: boolean;
   };
-  let { vaultAllowed = false, onbusy }: Props = $props();
+  let { vaultAllowed = false, onbusy, sendPage = false }: Props = $props();
 
   type View = "compose" | "sealing" | "ready";
   let view = $state<View>("compose");
@@ -209,6 +211,7 @@
   {#key composeKey}
     <Compose
       {vaultAllowed}
+      {sendPage}
       active={view === "compose"}
       onsend={start}
       {onitems}

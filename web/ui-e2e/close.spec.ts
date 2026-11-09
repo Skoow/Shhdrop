@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { file, freshPage, sendShare, settle, unlock } from "./open-helpers";
-import { addText, readyHeading, sendButton } from "./send-helpers";
+import { addText, readyHeading, sendButton, enterComposer } from "./send-helpers";
 
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-CLOSE/", import.meta.url));
 const local = process.env.PW_LOCAL_CHROMIUM === "1" ? { executablePath: "/opt/pw-browsers/chromium" } : {};
@@ -68,6 +68,7 @@ async function checkAndClose(page: Page, dlg: Locator, shotName?: string) {
 }
 
 async function openAdd(page: Page) {
+  await enterComposer(page); // accueil : « Commencer » mène à la page d'envoi (D41-37)
   await page.getByRole("button", { name: /^Ajouter/ }).filter({ visible: true }).first().click();
   return page.getByRole("dialog", { name: "Ajouter" });
 }

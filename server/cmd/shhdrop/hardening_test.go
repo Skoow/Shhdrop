@@ -174,7 +174,7 @@ func TestServeStaticDir(t *testing.T) {
 		p    string
 		want int
 	}{{"/", 200}, {"/index.html", 200}, {"/securite", 200}, {"/confidentialite", 200}, {"/securite/", 404},
-		{"/conditions", 200}, {"/mentions-legales", 200}, {"/signaler", 200}, {"/offres", 200}, {"/mentions", 404},
+		{"/conditions", 200}, {"/mentions-legales", 200}, {"/signaler", 200}, {"/offres", 200}, {"/envoyer", 200}, {"/envoyer/", 404}, {"/mentions", 404},
 		{"/s/AAAAAAAAAAAAAAAAAAAAAA", 404}, {"/m/x/y", 404}, {"/nope", 404}, {"/Securite", 404}} {
 		p := c.p
 		for _, m := range []string{"GET", "HEAD"} {

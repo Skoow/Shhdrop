@@ -23,7 +23,7 @@ export function tabBarVisible(o: { supported: boolean; route: Route["name"]; sen
 
 /** Onglet courant : Envoyer sur l'accueil ; Réglages sur les pages d'information. */
 export function currentTab(route: Route["name"]): TabId | null {
-  if (route === "home") return "send";
+  if (route === "home" || route === "envoyer") return "send";
   if (route === "securite" || route === "confidentialite" || route === "conditions" || route === "mentions" || route === "signaler" || route === "offres") return "settings";
   return null;
 }

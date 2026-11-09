@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
 import { axe, capture, expect, readClipboard, test } from "./fixtures";
-import { openFilePicker, pickInAddSheet } from "./send-helpers";
+import { openFilePicker, pickInAddSheet, enterComposer } from "./send-helpers";
 
 const FILES = fileURLToPath(new URL("./files/", import.meta.url));
 const f = (name: string) => join(FILES, name);
@@ -19,8 +19,8 @@ const MIXED = [...PHOTOS, f("anniversaire-lou.webm"), f("contrat.pdf"), f("archi
 
 async function open(page: Page, origin: string) {
   await page.goto(origin + "/");
-  // Ordinateur : « Commencer » ; téléphone : une seule action, « Ajouter ».
-  await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
+  // Accueil : « Commencer » (mène à la page d'envoi, D41-37).
+  await expect(page.getByRole("button", { name: /^Commencer/ }).filter({ visible: true }).first()).toBeVisible();
 }
 /** Choisit des fichiers par la feuille d'ajout (« Commencer » ou « Ajouter ») ou la zone de dépôt (composeur). */
 async function browse(page: Page, files: string[] | { name: string; mimeType: string; buffer: Buffer }[], wait = true) {
@@ -103,7 +103,8 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("button", { name: "Coller" })).toHaveCount(0);
 
     await browse(page, [PHOTOS[0]!]);
-    await expect(page.getByRole("heading", { level: 2, name: "Votre envoi" })).toBeFocused();
+    // Page d'envoi « /envoyer » (D41-37) : le composeur était déjà là, le focus reste où il est.
+    await expect(page.getByRole("heading", { level: 2, name: "Votre envoi" })).toBeVisible();
     await browse(page, MIXED.slice(1));
     await addNote(page, "Le code de la porte est 4512B.\nÀ ce soir !", "Code de la porte");
     await expect(rows(page)).toHaveCount(10);
@@ -347,7 +348,7 @@ test.describe("fr-FR", () => {
     await expect(page.getByText("Ne pourra pas être ouvert sans téléchargement")).toHaveCount(0);
   });
 
-  test("retrait et Annuler ; Tout supprimer revient à l'accueil, Annuler rouvre le composeur", async ({ page, shh }) => {
+  test("retrait et Annuler ; Tout supprimer laisse la page d'envoi vide (D41-37), Annuler remet la liste", async ({ page, shh }) => {
     await open(page, shh.origin);
     await browse(page, [...PHOTOS.slice(0, 2), f("contrat.pdf")]);
     await removeItem(page, "plage-nuit.jpg");
@@ -359,7 +360,7 @@ test.describe("fr-FR", () => {
     await page.getByRole("group", { name: "contrat.pdf supprimé" }).getByRole("button", { name: "Annuler" }).click();
     await expect(rows(page)).toHaveCount(3);
     await page.getByRole("button", { name: "Tout supprimer" }).click();
-    await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
+    await expect(page.locator(".dropzone.empty")).toBeVisible(); // page d'envoi vide (D41-37)
     await page.getByRole("button", { name: "Annuler" }).click();
     await expect(rows(page)).toHaveCount(3);
   });
@@ -471,7 +472,7 @@ test.describe("fr-FR", () => {
 
     test.skip(browserName !== "chromium", "fichier creux de 2 Go : Chromium (chemin local)");
     await page.getByRole("button", { name: "Tout supprimer" }).click();
-    await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
+    await expect(page.locator(".dropzone.empty")).toBeVisible(); // page d'envoi vide (D41-37)
     const dir = mkdtempSync(join(tmpdir(), "shh-2go-"));
     try {
       // Fichiers creux (aucun octet écrit sur le disque) : 2 Gio exactement, puis 2 Gio + 1 octet.
@@ -484,7 +485,7 @@ test.describe("fr-FR", () => {
       await expect(page.getByRole("alert").filter({ hasText: /^Trop gros/ })).toHaveCount(0);
       await expect(page.locator("#send-reason")).toHaveCount(0);
       await page.getByRole("button", { name: "Tout supprimer" }).click();
-      await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
+      await expect(page.locator(".dropzone.empty")).toBeVisible(); // page d'envoi vide (D41-37)
       const p = join(dir, "film-2go-plus-1.bin");
       const fd = openSync(p, "w");
       ftruncateSync(fd, 2147483648 + 1);
@@ -510,6 +511,7 @@ test.describe("fr-FR", () => {
 
   test("note sur machine lente : le focus différé de l'éditeur ne vole pas le champ déjà choisi (saisie gardée dans Contenu)", async ({ page, shh }) => {
     await open(page, shh.origin);
+    await enterComposer(page); // « Commencer » d'abord : le piège ci-dessous vise le seul clic qui ouvre l'éditeur
     // Sous charge, l'image suivante tombe entre la prise du focus par la personne (ou l'outil)
     // et sa saisie : on rejoue exactement cet ordre (rappels d'image différés au focus d'un champ).
     await page.evaluate(() => {
@@ -663,10 +665,14 @@ test.describe("en-US", () => {
   test("composer in English ; capture", async ({ page, shh, isMobile }) => {
     if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(shh.origin + "/");
+    // « Get started » mène à la page d'envoi (D41-37) ; puis « Add » (téléphone) ou la zone de dépôt.
+    await page.getByRole("button", { name: /^Get started/ }).filter({ visible: true }).first().click();
+    await expect(page).toHaveURL(/\/envoyer$/);
     const chooser = page.waitForEvent("filechooser");
-    // Téléphone : « Add » ; ordinateur : « Get started » ; les deux ouvrent la feuille d'ajout.
-    await page.getByRole("button", { name: isMobile ? /^Add/ : "Get started" }).first().click();
-    await page.getByRole("dialog", { name: "Add" }).getByRole("button", { name: /^Files/ }).click();
+    if (isMobile) {
+      await page.getByRole("button", { name: "Add", exact: true }).click();
+      await page.getByRole("dialog", { name: "Add" }).getByRole("button", { name: /^Files/ }).click();
+    } else await page.locator(".dropzone.empty").click();
     await (await chooser).setFiles(MIXED.slice(0, 8));
     await expect(page.getByRole("heading", { level: 2, name: "Your share" })).toBeVisible();
     await expect(page.locator(".top .ht")).toHaveText(/^8\s\/\s200\sitems · /);

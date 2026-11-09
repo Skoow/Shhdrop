@@ -10,7 +10,7 @@ import type { Page } from "@playwright/test";
 import { openShare } from "../src/index";
 import { expect, test } from "./fixtures";
 import { file, freshPage, unlock } from "./open-helpers";
-import { addText, openFilePicker, readyHeading, sendButton } from "./send-helpers";
+import { addText, noViewTransition, openFilePicker, readyHeading, sendButton } from "./send-helpers";
 
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-DROP/", import.meta.url));
 test.use({ locale: "fr-FR", timezoneId: "Europe/Paris", deviceScaleFactor: 2 });
@@ -65,8 +65,7 @@ test("ordinateur : filigrane de dépôt dans la liste (texte entier, clic → ch
   test.skip(isMobile, "mobile inchangé (bouton Ajouter)");
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(shh.origin + "/");
-  await page.screenshot({ path: SHOTS + "vide-accueil-1440.png" });
+  await page.goto(shh.origin + "/envoyer");
   await (await openFilePicker(page)).setFiles([{ name: "plage-nuit.jpg", mimeType: "image/jpeg", buffer: readFileSync(file("plage-nuit.jpg")) }]);
   await expect(page.locator("[data-row]")).toHaveCount(1);
   await expect(page.getByRole("group", { name: "Créer sur place" })).toBeVisible();
@@ -109,4 +108,38 @@ test("ordinateur : filigrane de dépôt dans la liste (texte entier, clic → ch
   await expect(recv).toContainText("Texte");
   await rp.screenshot({ path: SHOTS + "destinataire-ligne-note-1440.png" });
   await ctx.close();
+});
+
+test("page d'envoi vide « /envoyer » : atteinte par « Commencer » ou directement ; grand cadre au centre (ordinateur), « Ajouter » (téléphone) ; captures", async ({ page, shh, isMobile }) => {
+  await page.setViewportSize(isMobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+  await page.goto(shh.origin + "/");
+  await page.getByRole("button", { name: /^Commencer/ }).filter({ visible: true }).first().click();
+  await expect(page).toHaveURL(shh.origin + "/envoyer");
+  await noViewTransition(page);
+  await expect(page.getByRole("heading", { name: "Votre envoi" })).toBeVisible();
+  await expect(page.locator("[data-row]")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Tout supprimer" })).toHaveCount(0);
+  const zone = page.locator(".dropzone.empty");
+  await expect(zone).toBeVisible();
+  if (isMobile) {
+    await expect(zone).toContainText("Ajouter");
+    await zone.click();
+    await expect(page.getByRole("dialog", { name: "Ajouter" })).toBeVisible();
+    await page.keyboard.press("Escape");
+  } else {
+    // Au centre de la liste, texte blanc entier, jamais tronqué.
+    const [list, z] = [await page.locator(".lc-scroll").boundingBox(), await zone.boundingBox()];
+    expect(Math.abs(z!.x + z!.width / 2 - (list!.x + list!.width / 2))).toBeLessThan(12);
+    expect(z!.height).toBeGreaterThan(280);
+    const color = await zone.locator(".dz-t").evaluate((n) => getComputedStyle(n).color);
+    expect(color).toBe(await page.locator("#compose-title").evaluate((n) => getComputedStyle(n).color));
+    for (const el of await zone.locator(".dz-t, .dz-s").all()) expect(await el.evaluate((n) => n.scrollWidth <= n.clientWidth)).toBe(true);
+    await expect(zone).toContainText("Déposez des fichiers n'importe où sur la page");
+  }
+  await page.screenshot({ path: SHOTS + `composeur-vide-${isMobile ? 390 : 1440}.png` });
+  // Directement (rechargement, lien), y compris pour le serveur (route connue : 200).
+  const r = await page.request.get(shh.origin + "/envoyer");
+  expect(r.status()).toBe(200);
+  await page.reload();
+  await expect(page.locator(".dropzone.empty")).toBeVisible();
 });

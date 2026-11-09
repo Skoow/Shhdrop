@@ -10,8 +10,8 @@
 
 <script lang="ts">
   // Accueil v3 (UI §9.1) : titre, phrase et sceaux de confiance ; fenêtre de dépôt (le coffre)
-  // avec le volet de scellement, le bouton principal « Commencer » (ouvre la feuille d'ajout du
-  // composeur, retours HOME5) et les actions de création ; voile de dépôt pleine page (un dépôt
+  // avec le volet de scellement, le bouton principal « Commencer » (mène à la page d'envoi
+  // « /envoyer », retours DROP) et les actions de création ; voile de dépôt pleine page (un dépôt
   // ouvre le composeur avec ses fichiers) ; sous le pli, « Comment ça marche », « Pourquoi c'est
   // sûr », questions et appel final (même « Commencer »). Un clic sur le verre n'ouvre rien.
   import { untrack, type Snippet } from "svelte";
@@ -21,7 +21,7 @@
   import { magnet, tilt } from "../ui/attach";
   import DropOverlay from "../ui/DropOverlay.svelte";
   import Guilloche from "../ui/Guilloche.svelte";
-  import { ArrowRight, Camera, ChevronDown, Lock, Mic, Plus, Timer, Type, UserX } from "../ui/Icon";
+  import { ArrowRight, Camera, ChevronDown, Lock, Mic, Timer, Type, UserX } from "../ui/Icon";
   import { reducedMotion } from "../ui/motion";
   import SealBand from "../ui/SealBand.svelte";
   import SectionBg from "../ui/SectionBg.svelte";
@@ -42,7 +42,7 @@
     onaction?: (action: Action) => void;
     /** Faux pendant un envoi : le glisser-déposer n'ouvre pas le voile et n'ajoute rien (S9). */
     active?: boolean;
-    /** « Commencer » (et « Ajouter » sur téléphone) : ouvre la feuille d'ajout du composeur (Compose). */
+    /** « Commencer » (ordinateur, téléphone, appel final) : mène à la page d'envoi « /envoyer » (Compose, retours DROP). */
     onadd?: () => void;
   };
   let { compact = false, children, onfiles, onaction, active = true, onadd }: Props = $props();
@@ -186,7 +186,7 @@
                 <span class="t-fine">{t("compose.drop.title")}</span><span class="t-touch">{t("compose.drop.titleTouch")}</span>
               </h2>
             </div>
-            <button type="button" class="browse" aria-haspopup="dialog" onclick={() => onadd?.()}>
+            <button type="button" class="browse" onclick={() => onadd?.()}>
               <span>{t("home.end.cta")}</span>
               <ArrowRight size={20} strokeWidth={1.9} aria-hidden="true" />
             </button>
@@ -199,10 +199,10 @@
               </div>
             </div>
             <p class="proof num">{t("home.proof", limitParams(getLang()))}</p>
-            <!-- Téléphone : une seule action, « Ajouter », qui ouvre la feuille (Compose). -->
-            <button type="button" class="add-big" aria-haspopup="dialog" onclick={() => onadd?.()}>
-              <span class="ab-ic" aria-hidden="true"><Plus size={26} strokeWidth={2.2} /></span>
-              <span class="ab-tx"><span class="ab-t">{t("add.open")}</span><span class="ab-s">{t("add.big.sub")}</span></span>
+            <!-- Téléphone : une seule action, « Commencer », vers la page d'envoi (retours DROP). -->
+            <button type="button" class="add-big" onclick={() => onadd?.()}>
+              <span class="ab-ic" aria-hidden="true"><ArrowRight size={26} strokeWidth={2.2} /></span>
+              <span class="ab-tx"><span class="ab-t">{t("home.end.cta")}</span><span class="ab-s">{t("add.big.sub")}</span></span>
             </button>
           </div>
         {/if}
@@ -633,6 +633,9 @@
       font-size: 1.25rem;
       font-weight: 650;
       font-stretch: 108%;
+      /* « Commencer » à 200 % sur 320 px : coupé (avec trait d'union) plutôt que débordé. */
+      hyphens: auto;
+      overflow-wrap: anywhere;
     }
     .ab-s {
       color: rgb(11 13 18 / 0.68);

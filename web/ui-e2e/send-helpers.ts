@@ -17,13 +17,26 @@ export async function noViewTransition(page: Page) {
   await page.waitForFunction(() => !document.getAnimations().some((a) => String((a.effect as KeyframeEffect | null)?.pseudoElement ?? "").startsWith("::view-transition")));
 }
 
-export async function pickInAddSheet(page: Page, row: string): Promise<boolean> {
+/**
+ * Accueil : « Commencer » mène à la page d'envoi « /envoyer » (retours DROP) ; ailleurs (déjà
+ * dans le composeur), rien à faire.
+ */
+export async function enterComposer(page: Page) {
   await noViewTransition(page);
   // L'écran doit être monté avant de choisir le geste (accueil ou composeur, téléphone ou ordinateur).
   const any = page.getByRole("button", { name: /^(Ajouter|Commencer)/ }).or(page.locator(".dropzone")).filter({ visible: true }).first();
   await expect(any).toBeVisible();
-  // Accueil : « Commencer » (ordinateur) ou « Ajouter » (téléphone) ; composeur : « Ajouter » (téléphone).
-  const add = page.getByRole("button", { name: /^(Ajouter|Commencer)/ }).filter({ visible: true }).first();
+  const start = page.getByRole("button", { name: /^Commencer/ }).filter({ visible: true }).first();
+  if (!(await start.isVisible().catch(() => false))) return;
+  await start.click();
+  await expect(page).toHaveURL(/\/envoyer$/);
+  await noViewTransition(page);
+}
+
+export async function pickInAddSheet(page: Page, row: string): Promise<boolean> {
+  await enterComposer(page);
+  // Composeur sur téléphone : « Ajouter » ouvre la feuille ; sur ordinateur : zone de dépôt et « Créer sur place ».
+  const add = page.getByRole("button", { name: /^Ajouter/ }).filter({ visible: true }).first();
   if (!(await add.isVisible().catch(() => false))) return false;
   await add.click();
   const sheet = page.getByRole("dialog", { name: "Ajouter" });
@@ -42,9 +55,7 @@ export async function openFilePicker(page: Page) {
 
 export async function addText(page: Page, text: string) {
   if (!(await pickInAddSheet(page, "Note"))) {
-    const inComposer = page.getByRole("group", { name: "Créer sur place" });
-    if (await inComposer.isVisible()) await inComposer.getByRole("button", { name: "Note", exact: true }).click();
-    else await page.getByRole("group", { name: "Ou créez sur place" }).getByRole("button", { name: "Note", exact: true }).click();
+    await page.getByRole("group", { name: "Créer sur place" }).getByRole("button", { name: "Note", exact: true }).click();
   }
   const dlg = page.getByRole("dialog", { name: "Nouveau texte" });
   await dlg.getByLabel("Contenu").fill(text);

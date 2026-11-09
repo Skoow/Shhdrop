@@ -6,6 +6,7 @@
 // sélecteur du système. En-têtes : camera=(self) sur la page seulement.
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { enterComposer } from "./send-helpers";
 
 const local = process.env.PW_LOCAL_CHROMIUM === "1" ? { executablePath: "/opt/pw-browsers/chromium" } : {};
 test.use({
@@ -35,8 +36,9 @@ const liveTracks = (page: Page) =>
   );
 const opened = (page: Page) => page.evaluate(() => (window as unknown as { __streams: MediaStream[] }).__streams.length);
 
-/** Téléphone : feuille « Ajouter » ; ordinateur : tuile de l'accueil. */
+/** Téléphone : « Commencer » (page d'envoi, D41-37) puis feuille « Ajouter » ; ordinateur : tuile de l'accueil. */
 async function pick(page: Page, name: "Photo ou vidéo" | "Vocal") {
+  if (!(await page.getByRole("group", { name: "Ou créez sur place" }).isVisible().catch(() => false))) await enterComposer(page);
   const add = page.getByRole("button", { name: /^Ajouter/ }).filter({ visible: true }).first();
   if (await add.isVisible().catch(() => false)) {
     await add.click();

@@ -130,7 +130,7 @@ describe("Home (UI §9.1)", () => {
     }
   });
 
-  it("fenêtre de dépôt : « Commencer » (et l'appel final) ouvrent la feuille d'ajout ; « Photo ou vidéo » passe par onaction ; un clic sur le verre n'ouvre rien", () => {
+  it("fenêtre de dépôt : « Commencer » (fenêtre, téléphone, appel final) mène à la page d'envoi (onadd, retours DROP) ; « Photo ou vidéo » passe par onaction ; un clic sur le verre n'ouvre rien", () => {
     const onfiles = vi.fn();
     const onaction = vi.fn();
     const onadd = vi.fn();
@@ -139,14 +139,16 @@ describe("Home (UI §9.1)", () => {
     expect(document.querySelectorAll('input[type="file"]')).toHaveLength(0);
     const buttons = (name: string) => [...document.querySelectorAll("button")].filter((b) => b.textContent!.trim() === name);
     const starts = buttons("Commencer");
-    expect(starts).toHaveLength(2); // fenêtre de dépôt et appel final
-    for (const b of starts) expect(b.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(starts).toHaveLength(2); // fenêtre de dépôt et appel final ; le grand bouton du téléphone a aussi un sous-titre
+    for (const b of starts) expect(b.hasAttribute("aria-haspopup")).toBe(false); // une navigation, pas une feuille
     for (const b of starts) b.click();
     expect(onadd).toHaveBeenCalledTimes(2);
     buttons("Photo ou vidéo")[0]!.click();
     expect(onaction.mock.calls).toEqual([["media"]]);
-    // Téléphone : le grand bouton « Ajouter » ouvre la même feuille.
-    (document.querySelector(".add-big") as HTMLButtonElement).click();
+    // Téléphone : le grand bouton « Commencer » mène au même endroit.
+    const big = document.querySelector(".add-big") as HTMLButtonElement;
+    expect(big.querySelector(".ab-t")!.textContent).toBe("Commencer");
+    big.click();
     expect(onadd).toHaveBeenCalledTimes(3);
     // Le verre n'est qu'une cible de dépôt (décision du propriétaire).
     (document.querySelector(".empty") as HTMLElement).click();

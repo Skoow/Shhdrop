@@ -45,7 +45,7 @@
 
     <div class="say">
       <h2 id="end-title">{t("home.end.title")}</h2>
-      <button type="button" class="cta" aria-haspopup="dialog" onclick={onstart}>
+      <button type="button" class="cta" onclick={onstart}>
         <span class="seal" aria-hidden="true">
           <svg viewBox="0 0 24 24" focusable="false">
             <path class="shackle" d="M8 11V8a4 4 0 0 1 8 0v3" />

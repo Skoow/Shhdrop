@@ -9,6 +9,9 @@ describe("match", () => {
     expect(match("/")).toEqual({ name: "home" });
     expect(match("/securite")).toEqual({ name: "securite" });
     expect(match("/confidentialite")).toEqual({ name: "confidentialite" });
+    // Page d'envoi vide (retours DROP) : « Commencer » y mène ; un « # » n'y ouvre rien.
+    expect(match("/envoyer")).toEqual({ name: "envoyer" });
+    expect(match("/envoyer", `#${KEY}`)).toEqual({ name: "envoyer" });
   });
 
   it("spec §41.4 : rechargement d'une ouverture déverrouillée (marque + octroi gardé) → ouverture ; sinon accueil", () => {
@@ -58,6 +61,7 @@ describe("match", () => {
     expect(match("/shhdrop/", "", base)).toEqual({ name: "home" });
     expect(match("/shhdrop", "", base)).toEqual({ name: "home" });
     expect(match("/shhdrop/securite", "", base)).toEqual({ name: "securite" });
+    expect(match("/shhdrop/envoyer", "", base)).toEqual({ name: "envoyer" });
     expect(match("/", `#${KEY}`, base)).toEqual({ name: "notfound" });
     expect(match("/shhdropx/", `#${KEY}`, base)).toEqual({ name: "notfound" });
   });

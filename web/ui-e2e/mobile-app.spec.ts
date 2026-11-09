@@ -124,8 +124,10 @@ test.describe("téléphone façon app", () => {
     test.setTimeout(90_000);
     await page.goto(shh.origin + "/");
     await shot(page, "accueil-ajouter");
-    // Une seule action « Ajouter » → feuille du bas en liste groupée, avec poignée.
-    await page.getByRole("button", { name: /^Ajouter/ }).click();
+    // Une seule action « Commencer » → page d'envoi (D41-37) ; « Ajouter » → feuille du bas en liste groupée, avec poignée.
+    await page.locator(".add-big").click();
+    await expect(page).toHaveURL(/\/envoyer$/);
+    await page.getByRole("button", { name: "Ajouter", exact: true }).click();
     const add = page.getByRole("dialog", { name: "Ajouter" });
     await expect(add).toBeVisible();
     expect(await smallTargets(page, "dialog[open]")).toEqual([]);

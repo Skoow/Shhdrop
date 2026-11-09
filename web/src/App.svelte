@@ -84,14 +84,14 @@
 
   // UI §9.2.2 : hors de l'accueil, un fichier déposé ne fait jamais naviguer l'onglet. Sur
   // l'accueil, Home reçoit le dépôt (voile pleine page), sauf pendant un envoi.
-  $effect(() => guardFileDrop(window, () => supported && router.current.name === "home" && !sending));
+  $effect(() => guardFileDrop(window, () => supported && (router.current.name === "home" || router.current.name === "envoyer") && !sending));
 
   // Titre de l'onglet par route et par langue (scan UX B9) ; l'accueil (SendFlow) tient le sien.
   $effect(() => {
     void getLang();
     const name = router.current.name;
     if (!supported) setScreenTitle("unsupported");
-    else if (name !== "home") setScreenTitle(name);
+    else if (name !== "home" && name !== "envoyer") setScreenTitle(name);
   });
 
   // UI §9 : clavier virtuel ouvert → classe kbd-open sur <html> (barres collées dans le flux).
@@ -110,9 +110,11 @@
     <Unsupported />
   {:else if router.current.name === "notfound"}
     <NotFound />
-  {:else if router.current.name === "home"}
-    <!-- Accueil, puis composeur dès le premier élément (UI §9.1, §9.2). Coffre : jamais en démo (spec §27.6). -->
-    <SendFlow vaultAllowed={demo === null} onbusy={(b) => (sending = b)} />
+  {:else if router.current.name === "home" || router.current.name === "envoyer"}
+    <!-- Accueil, puis composeur dès le premier élément (UI §9.1, §9.2) ; « /envoyer » : composeur
+         même vide (retours DROP). Un seul SendFlow pour les deux : passer de l'un à l'autre garde
+         la liste. Coffre : jamais en démo (spec §27.6). -->
+    <SendFlow vaultAllowed={demo === null} sendPage={router.current.name === "envoyer"} onbusy={(b) => (sending = b)} />
   {:else if router.current.name === "open"}
     {#key linkGen}<Open take={takeShare} />{/key}
   {:else if router.current.name === "manage"}

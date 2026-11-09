@@ -7,7 +7,7 @@ import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
-import { openFilePicker } from "./send-helpers";
+import { openFilePicker, enterComposer } from "./send-helpers";
 
 const local = process.env.PW_LOCAL_CHROMIUM === "1" ? { executablePath: "/opt/pw-browsers/chromium" } : {};
 test.use({
@@ -46,6 +46,8 @@ const liveTracks = (page: Page) =>
   page.evaluate(() => (window as unknown as { __streams: MediaStream[] }).__streams.flatMap((s) => s.getTracks()).filter((t) => t.readyState !== "ended").length);
 
 async function openVoice(page: Page) {
+  // Téléphone : « Commencer » mène d'abord à la page d'envoi (D41-37).
+  if (!(await page.getByRole("group", { name: "Ou créez sur place" }).isVisible().catch(() => false))) await enterComposer(page);
   const add = page.getByRole("button", { name: /^Ajouter/ }).filter({ visible: true }).first();
   if (await add.isVisible().catch(() => false)) {
     await add.click();
@@ -299,6 +301,8 @@ test("micro refusé : message clair et marche à suivre", async ({ page, shh }) 
     navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("non", "NotAllowedError"));
   });
   await page.goto(shh.origin + "/");
+  // Téléphone : « Commencer » mène d'abord à la page d'envoi (D41-37).
+  if (!(await page.getByRole("group", { name: "Ou créez sur place" }).isVisible().catch(() => false))) await enterComposer(page);
   const add = page.getByRole("button", { name: /^Ajouter/ }).filter({ visible: true }).first();
   if (await add.isVisible().catch(() => false)) {
     await add.click();

@@ -289,6 +289,7 @@ export const fr = {
   "verif.more": "En savoir plus",
 
   "title.home": "Envoyer",
+  "title.envoyer": "Envoyer",
   "title.sealing": "Envoi en cours",
   "title.ready": "Lien prêt",
   "title.open": "Ouvrir un partage",

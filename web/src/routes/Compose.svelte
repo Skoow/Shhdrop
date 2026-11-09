@@ -21,6 +21,7 @@
   import Button from "../ui/Button.svelte";
   import CapacityGauge from "../ui/CapacityGauge.svelte";
   import CategoryGroup from "../ui/CategoryGroup.svelte";
+  import { navigate } from "../app/router.svelte";
   import { ChevronDown, Eye, Lock, Pencil, Plus, RefreshCw, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from "../ui/Icon";
   import NamesTip from "../ui/NamesTip.svelte";
   import { composePreview } from "../ui/itemView";
@@ -58,8 +59,10 @@
     uploadVersion?: number;
     onretry?: (id: string) => void;
     removing?: number;
+    /** Page d'envoi « /envoyer » (retours DROP) : composeur affiché même vide, grand cadre de dépôt au centre. */
+    sendPage?: boolean;
   };
-  let { onsend, vaultAllowed = false, active = true, onitems, uploadOf, uploadVersion = 0, onretry, removing = 0 }: Props = $props();
+  let { onsend, vaultAllowed = false, active = true, onitems, uploadOf, uploadVersion = 0, onretry, removing = 0, sendPage = false }: Props = $props();
 
   let online = $state(typeof navigator === "undefined" || navigator.onLine !== false);
 
@@ -94,6 +97,8 @@
   }
 
   const filled = $derived(composer.count > 0);
+  // Composeur à l'écran : dès le premier élément, ou d'emblée sur la page d'envoi (même vide).
+  const shown = $derived(filled || sendPage);
   const lang = $derived(getLang());
   const num = (n: number) => new Intl.NumberFormat(lang).format(n);
 
@@ -282,8 +287,8 @@
   }
   // Ordinateur, composeur ouvert : pied de page resserré (règle globale plus bas).
   $effect(() => {
-    document.documentElement.classList.toggle("composing", filled && !narrow);
-    chrome.composing = filled; // téléphone : la barre d'onglets cède la place à la barre d'envoi
+    document.documentElement.classList.toggle("composing", shown && !narrow);
+    chrome.composing = shown; // téléphone : la barre d'onglets cède la place à la barre d'envoi
     return () => {
       document.documentElement.classList.remove("composing");
       chrome.composing = false;
@@ -538,12 +543,14 @@
           <h2 id="compose-title" class="title" tabindex="-1" data-large-title bind:this={title}>{t("compose.title")}</h2>
           <NamesTip />
         </div>
-        <div class="clear">
-          <Button variant="secondary" dense onpress={clearAll}>
-            {#snippet icon()}<Trash2 size={18} strokeWidth={1.8} />{/snippet}
-            {t("compose.clear")}
-          </Button>
-        </div>
+        {#if filled}
+          <div class="clear">
+            <Button variant="secondary" dense onpress={clearAll}>
+              {#snippet icon()}<Trash2 size={18} strokeWidth={1.8} />{/snippet}
+              {t("compose.clear")}
+            </Button>
+          </div>
+        {/if}
         <p class="free num" data-free>{freeText}</p>
         <div class="cap">
           <div class="capg"><CapacityGauge bytes={composer.totalBytes + removing} count={composer.count} head /></div>
@@ -603,10 +610,20 @@
           />
         {/each}
       </div>
-      {#if !narrow}
+      {#if narrow && !filled}
+        <!-- Page d'envoi vide, téléphone : « Ajouter » au centre (ouvre la feuille d'ajout). -->
+        <button type="button" class="dropzone empty" aria-haspopup="dialog" onclick={() => (addOpen = true)}>
+          <span class="dz-ic" aria-hidden="true"><Plus size={22} strokeWidth={2.2} /></span>
+          <span class="dz-tx">
+            <span class="dz-t">{t("add.open")}</span>
+            <span class="dz-s">{t("add.big.sub")}</span>
+          </span>
+        </button>
+      {:else if !narrow}
         <!-- Filigrane (retours DROP) : l'espace vide sous la liste est la zone de dépôt ; un clic y
-             ouvre le choix de fichiers ; on dépose aussi n'importe où sur la page. Texte entier, jamais tronqué. -->
-        <button type="button" class="dropzone ghost" onclick={() => filesIn?.click()}>
+             ouvre le choix de fichiers ; on dépose aussi n'importe où sur la page. Texte entier,
+             jamais tronqué. Liste vide (page d'envoi) : grand cadre au centre, texte blanc. -->
+        <button type="button" class={["dropzone", filled ? "ghost" : "empty"]} onclick={() => filesIn?.click()}>
           <span class="dz-ic" aria-hidden="true"><Upload size={18} strokeWidth={1.8} /></span>
           <span class="dz-tx">
             <span class="dz-t">{t("compose.dropzone.title")}</span>
@@ -657,7 +674,8 @@
 <input bind:this={photoIn} type="file" accept="image/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "photo")} />
 <input bind:this={videoIn} type="file" accept="video/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "video")} />
 
-<Home {active} compact={filled} onadd={() => (addOpen = true)} children={filled ? app : undefined} onfiles={(f, s, folders) => void addFiles(f, s, folders)} onaction={act} />
+<!-- « Commencer » (accueil) mène à la page d'envoi « /envoyer » (retours DROP). -->
+<Home {active} compact={shown} onadd={() => navigate("/envoyer")} children={shown ? app : undefined} onfiles={(f, s, folders) => void addFiles(f, s, folders)} onaction={act} />
 
 <Sheet bind:open={editorOpen} title={editorId ? t("text.title.edit") : t("text.title.new")}>
   <div class="editor">
@@ -771,7 +789,7 @@
 <VoiceRecorder bind:open={voiceOpen} ondone={recorded} />
 
 {#if toast}
-  <div class="toast-slot" style:--lift="{filled ? barH : 0}px">
+  <div class="toast-slot" style:--lift="{shown ? barH : 0}px">
     {#key toast.id}
       <UndoToast message={toast.message} durationMs={narrow ? 5000 : 6000} onundo={undo} ondismiss={() => (toast = null)} onclose={() => undefined} />
     {/key}
@@ -936,6 +954,26 @@
     transition:
       color var(--dur-fast) var(--ease-out),
       transform 400ms var(--ease-settle);
+  }
+  /* Page d'envoi vide (retours DROP) : grand cadre au centre de la liste, texte blanc entier. */
+  .dropzone.empty {
+    flex: 1 0 auto;
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--sp-3);
+    min-height: max(280px, 46vh);
+    padding: var(--sp-6) var(--sp-5);
+    text-align: center;
+    color: var(--text);
+  }
+  .dropzone.empty .dz-tx {
+    justify-items: center;
+  }
+  .dropzone.empty .dz-t {
+    font-size: var(--fs-body);
+  }
+  .dropzone.empty:active {
+    transform: none;
   }
   .dz-tx {
     display: grid;

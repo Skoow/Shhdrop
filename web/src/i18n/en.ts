@@ -288,6 +288,7 @@ export const en = {
   "verif.more": "Learn more",
 
   "title.home": "Send",
+  "title.envoyer": "Send",
   "title.sealing": "Sending",
   "title.ready": "Link ready",
   "title.open": "Open a share",

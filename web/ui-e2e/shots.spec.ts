@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { file, settle, unlock } from "./open-helpers";
-import { addText, openFilePicker, readyHeading, sendButton } from "./send-helpers";
+import { addText, openFilePicker, readyHeading, sendButton, enterComposer } from "./send-helpers";
 
 const DIR = process.env.SHOTS_DIR ?? "";
 const [W, H] = (process.env.SHOTS_VP ?? "390x844").split("x").map(Number) as [number, number];
@@ -60,7 +60,8 @@ test("audit : tous les écrans", async ({ page, shh, browser }) => {
   await page.keyboard.press("Escape");
   await page.evaluate(() => scrollTo(0, 0));
   if (PHONE) {
-    await page.getByRole("button", { name: /^Ajouter/ }).click();
+    await enterComposer(page); // « Commencer » mène à la page d'envoi (D41-37)
+    await page.getByRole("button", { name: "Ajouter", exact: true }).click();
     await shot(page, "03b-feuille-ajouter");
     await page.getByRole("dialog", { name: "Ajouter" }).getByRole("button", { name: /^Photo ou vidéo/ }).click();
   } else await page.getByRole("group", { name: "Ou créez sur place" }).getByRole("button", { name: "Photo ou vidéo", exact: true }).click();
