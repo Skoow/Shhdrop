@@ -16,10 +16,14 @@ test("haut du composeur : pastilles 10 Go · Plus et 50 Go · Pro à côté de l
   await addText(page, "Le code de la porte est 4471.");
   const pills = page.locator("[data-paid-space] button");
   await expect(pills).toHaveText([/^10\sGo · Plus$/, /^50\sGo · Pro$/]);
-  for (const p of await pills.all()) {
-    expect(await p.evaluate((e) => [getComputedStyle(e).color, getComputedStyle(e).borderTopStyle])).toEqual(["rgb(233, 236, 242)", "dashed"]);
-    expect(await p.locator(".ct").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(85, 150, 248)");
-    expect((await p.boundingBox())!.height).toBeGreaterThanOrEqual(24);
+  // Chaque pastille au bleu de SON offre (retours BLUE) : Plus ciel, Pro profond ; cible ≥ 44 px, visuel compact.
+  const BLUE = [["rgb(62, 193, 245)", "rgb(31, 168, 230)"], ["rgb(92, 128, 255)", "rgb(52, 97, 255)"]];
+  for (const [i, p] of (await pills.all()).entries()) {
+    expect(await p.evaluate((e) => getComputedStyle(e).color)).toBe("rgb(233, 236, 242)");
+    expect(await p.locator(".pv").evaluate((e) => [getComputedStyle(e).borderTopStyle, getComputedStyle(e).borderTopColor])).toEqual(["dashed", BLUE[i]![1]]);
+    expect(await p.locator(".ct").evaluate((e) => getComputedStyle(e).color)).toBe(BLUE[i]![0]);
+    expect((await p.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await p.locator(".pv").boundingBox())!.height).toBeLessThan(40);
   }
   await expect(pills.nth(1)).toHaveAccessibleDescription("Avec Pro, bientôt disponible.");
   // Rien ne déborde : pas de défilement horizontal, et à 1440 la page tient sans défiler.
@@ -33,6 +37,10 @@ test("haut du composeur : pastilles 10 Go · Plus et 50 Go · Pro à côté de l
   const opens = opts.locator('[data-locked="opens"]');
   await expect(opens.locator("button")).toHaveText(/^Jusqu'à 50$/);
   await expect(opens.locator(".badge")).toHaveText("Pro");
+  // « Jusqu'à 50 » et son badge au bleu Pro, les durées au bleu Plus (retours BLUE).
+  expect(await opens.locator("button").evaluate((e) => getComputedStyle(e).borderTopColor)).toBe("rgb(52, 97, 255)");
+  expect(await opens.locator(".badge").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(92, 128, 255)");
+  expect(await opts.locator('[data-locked="ttl"] .badge').evaluate((e) => getComputedStyle(e).color)).toBe("rgb(62, 193, 245)");
   for (const b of await opts.locator("[data-locked] button, button[data-locked]").all())
     expect(await b.evaluate((e) => getComputedStyle(e).color)).toBe("rgb(233, 236, 242)");
   await settle(page);

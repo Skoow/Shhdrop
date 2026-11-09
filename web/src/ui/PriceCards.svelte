@@ -16,10 +16,10 @@
   const freeMonths = (x: PaidTier) => Math.round((12 * PAID[x].month - PAID[x].year) / PAID[x].month);
 </script>
 
-<div class="prices" data-prices>
+<div class={["prices", { pro: tiers.length === 1 && tiers[0] === "pro" }]} data-prices>
   <ul class={["cards", { one: tiers.length === 1 }]}>
     {#each tiers as x (x)}
-      <li class="card" data-price={x}>
+      <li class="card {x}" data-price={x}>
         <p class="tier">{t(`paid.badge.${x}`)}</p>
         <p class="month num"><span class="big">{eur(PAID[x].month)}</span>{" "}<span class="unit">{t("price.month.unit")}</span></p>
         <p class="year num">{t("price.year", { year: eur(PAID[x].year) })}{#if freeMonths(x) > 0}{" "}<span class="gift">{t("price.freeMonths", { n: freeMonths(x) })}</span>{/if}</p>
@@ -60,6 +60,20 @@
     padding: 0;
     list-style: none;
   }
+  /* Chaque carte au bleu de SON offre (Plus ciel, Pro profond) ; les coches des façons de payer
+     prennent le bleu de l'offre seule présentée (feuille Pro), sinon celui de Plus. */
+  .prices,
+  .card {
+    --tc: var(--plus);
+    --tc-tint: var(--plus-tint);
+    --tc-line: var(--plus-line);
+  }
+  .prices.pro,
+  .card.pro {
+    --tc: var(--pro);
+    --tc-tint: var(--pro-tint);
+    --tc-line: var(--pro-line);
+  }
   .card {
     display: grid;
     gap: var(--sp-1);
@@ -67,13 +81,13 @@
     border: 1px solid var(--hair-2);
     border-radius: var(--r-lg);
     background: var(--surface-1);
-    box-shadow: inset 3px 0 0 var(--plus-line);
+    box-shadow: inset 3px 0 0 var(--tc-line);
   }
   .card p {
     margin: 0;
   }
   .tier {
-    color: var(--plus);
+    color: var(--tc);
     font-weight: 680;
     font-size: var(--fs-small);
     letter-spacing: 0.02em;
@@ -107,8 +121,8 @@
   .gift {
     padding: 1px 8px;
     border-radius: var(--r-pill);
-    background: var(--plus-tint);
-    color: var(--plus);
+    background: var(--tc-tint);
+    color: var(--tc);
     font-size: var(--fs-micro);
     font-weight: 620;
     white-space: nowrap;
@@ -149,7 +163,7 @@
   .modes li :global(svg) {
     flex: none;
     margin-top: 3px;
-    color: var(--plus);
+    color: var(--tc);
   }
   .means svg {
     fill: none;

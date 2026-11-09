@@ -559,8 +559,8 @@
             {#each ["plus", "pro"] as const as tier (tier)}
               {@const name = t(`paid.badge.${tier}`)}
               <span id="cap-{tier}" class="sr-only">{t("paid.locked", { tier: name })}</span>
-              <button type="button" class="cpill num" aria-describedby="cap-{tier}" onclick={() => showPaid(tier)}
-                ><Lock size={13} strokeWidth={2} aria-hidden="true" /><span>{formatBytes(PAID[tier].bytes, lang)}</span>{" "}<span class="ct">· {name}</span></button
+              <button type="button" class="cpill num" data-tier={tier} aria-describedby="cap-{tier}" onclick={() => showPaid(tier)}
+                ><span class="pv"><Lock size={13} strokeWidth={2} aria-hidden="true" /><span>{formatBytes(PAID[tier].bytes, lang)}</span>{" "}<span class="ct">· {name}</span></span></button
               >
             {/each}
           </div>
@@ -862,15 +862,18 @@
     flex: none;
     gap: 6px;
   }
-  /* Pastilles Plus et Pro : pointillés, cadenas et nom de l'offre en bleu, taille en blanc. */
+  /* Pastilles Plus et Pro : pointillés, cadenas et nom de l'offre au bleu de SON offre (Plus
+     ciel, Pro profond), taille en blanc. Cible d'appui de 44 px (bouton), visuel compact de
+     32 px (.pv). */
   .cpill {
+    --tc: var(--plus);
+    --tc-tint: var(--plus-tint);
+    --tc-line: var(--plus-line);
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    min-height: 32px;
-    padding: 0 10px;
-    border: 1px dashed var(--plus-line);
-    border-radius: var(--r-pill);
+    min-height: 44px;
+    padding: 0;
+    border: 0;
     background: transparent;
     color: var(--text);
     font: inherit;
@@ -879,20 +882,44 @@
     white-space: nowrap;
     cursor: pointer;
   }
+  .cpill[data-tier="pro"] {
+    --tc: var(--pro);
+    --tc-tint: var(--pro-tint);
+    --tc-line: var(--pro-line);
+  }
+  .pv {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px dashed var(--tc-line);
+    border-radius: var(--r-pill);
+  }
+  .cpill:focus-visible {
+    outline: none;
+  }
+  .cpill:focus-visible .pv {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
   .cpill :global(svg),
   .cpill .ct {
     flex: none;
-    color: var(--plus);
+    color: var(--tc);
   }
   @media (hover: hover) {
-    .cpill:hover {
-      background: var(--plus-tint);
-      border-color: var(--plus);
+    .cpill:hover .pv {
+      background: var(--tc-tint);
+      border-color: var(--tc);
     }
   }
   @media (forced-colors: active) {
-    .cpill {
+    .pv {
       border: 1px solid CanvasText;
+    }
+    .cpill:focus-visible .pv {
+      outline-color: CanvasText;
     }
   }
   /* Limites gratuites, dites en clair sous le titre (D41-16). */

@@ -54,11 +54,18 @@ const PAIRS: [string, string, number, number][] = [
   ["--warn", "--surface-2", 10.34, 4.5],
   ["--accent", "--accent-tint", 9.54, 4.5],
   ["--info", "--surface-2", 7.98, 4.5],
-  ["--plus", "--surface-2", 5.7, 4.5],
-  ["--plus", "--plus-tint", 5.8, 4.5],
-  ["--plus", "--bg", 6.57, 4.5],
-  ["--plus-line", "--surface-2", 4.58, 3],
-  ["--plus-line", "--bg", 5.28, 3],
+  ["--plus", "--surface-2", 8.14, 4.5],
+  ["--plus", "--plus-tint", 7.72, 4.5],
+  ["--plus", "--bg", 9.39, 4.5],
+  ["--plus-line", "--surface-2", 6.26, 3],
+  ["--plus-line", "--bg", 7.22, 3],
+  ["--text", "--plus-tint", 13.5, 4.5],
+  ["--pro", "--surface-2", 4.8, 4.5],
+  ["--pro", "--pro-tint", 4.76, 4.5],
+  ["--pro", "--bg", 5.54, 4.5],
+  ["--pro-line", "--surface-2", 3.45, 3],
+  ["--pro-line", "--bg", 3.98, 3],
+  ["--text", "--pro-tint", 14.12, 4.5],
   ["--line-strong", "--surface-2", 3.5, 3],
 ];
 
@@ -110,13 +117,34 @@ describe("icônes de format en couleur (retours UI6)", () => {
   it("libellé --on-fmt ≥ 4,5:1 sur chaque pastille", () => {
     for (const k of FMT) expect(contrast(hex("--on-fmt"), hex(k)), k).toBeGreaterThanOrEqual(4.5);
   });
-  it("teintes distinctes entre elles, du vert « vérifié » et du bleu Plus/Pro", () => {
+  it("teintes distinctes entre elles, du vert « vérifié » et des bleus Plus et Pro", () => {
     const hs = FMT.filter((k) => k !== "--fmt-other").map((k) => [k, hue(hex(k))!] as const);
     for (const [k, h] of hs) {
-      expect(gap(h, hue(hex("--accent"))!), `${k} / --accent`).toBeGreaterThanOrEqual(12);
-      expect(gap(h, hue(hex("--plus"))!), `${k} / --plus`).toBeGreaterThanOrEqual(12);
+      for (const o of ["--accent", "--plus", "--pro"]) expect(gap(h, hue(hex(o))!), `${k} / ${o}`).toBeGreaterThanOrEqual(12);
     }
     for (let i = 0; i < hs.length; i++) for (let j = i + 1; j < hs.length; j++) expect(gap(hs[i]![1], hs[j]![1]), `${hs[i]![0]} / ${hs[j]![0]}`).toBeGreaterThanOrEqual(12);
+  });
+});
+
+describe("deux bleus Plus (ciel) et Pro (profond), retours BLUE", () => {
+  const hueOf = (h: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255) as [number, number, number];
+    const mx = Math.max(r, g, b), d = mx - Math.min(r, g, b);
+    const x = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (x * 60 + 360) % 360;
+  };
+  it("bleus (ni vert ni violet) : teinte entre 185° et 235°", () => {
+    for (const k of ["--plus", "--plus-line", "--pro", "--pro-line"]) {
+      expect(hueOf(hex(k)), k).toBeGreaterThanOrEqual(185);
+      expect(hueOf(hex(k)), k).toBeLessThanOrEqual(235);
+    }
+  });
+  it("Plus et Pro distincts : ≥ 20° de teinte, Plus nettement plus clair (texte, pointillés, fond)", () => {
+    expect(hueOf(hex("--pro")) - hueOf(hex("--plus"))).toBeGreaterThanOrEqual(20);
+    expect(hueOf(hex("--pro-line")) - hueOf(hex("--plus-line"))).toBeGreaterThanOrEqual(20);
+    expect(contrast(hex("--plus"), hex("--pro"))).toBeGreaterThanOrEqual(1.6);
+    expect(contrast(hex("--plus-line"), hex("--pro-line"))).toBeGreaterThanOrEqual(1.6);
+    expect(hex("--plus-tint")).not.toBe(hex("--pro-tint"));
   });
 });
 
@@ -130,7 +158,7 @@ describe("autres jetons (UI §4.2, §5, §7.2)", () => {
       "--on-accent", "--accent-tint", "--danger", "--on-danger", "--danger-tint", "--warn",
       "--warn-tint", "--info", "--selection", "--scrim",
       // retours UI4 : formules payantes
-      "--plus", "--plus-tint", "--plus-line",
+      "--plus", "--plus-tint", "--plus-line", "--pro", "--pro-tint", "--pro-line",
       // §20.3 matière et aurore
       "--bg-deep", "--hair", "--hair-2", "--vessel", "--edge-hi", "--seal-light", "--seal-halo",
       "--paper", "--ink", "--aur-mint-o", "--aur-tide-o", "--aur-ink-o",

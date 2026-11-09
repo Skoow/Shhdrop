@@ -24,17 +24,21 @@
   --warn: #F2C46D;
   --warn-tint: #2A2312;
   --info: #8DB2FF;
-  /* Formules payantes Plus et Pro (retours UI4, bleu franc depuis UI5 : plus de violet) :
-     jamais le vert de l'action. Texte ≥ 4,5:1 sur tous les fonds ; --plus-line (pointillés,
-     bordures, #3B82F6) ≥ 3:1. */
-  --plus: #5596F8;
-  --plus-tint: #0F1B33;
-  --plus-line: #3B82F6;
+  /* Formules payantes (retours UI4, deux bleus depuis BLUE) : jamais le vert de l'action ni le
+     violet. Plus = bleu ciel, Pro = bleu profond, plus intense ; chaque élément prend le jeu de
+     SON offre. Texte (--plus, --pro) ≥ 4,5:1 sur tous les fonds ; --*-line (pointillés,
+     bordures) ≥ 3:1 (tokens.test.ts). */
+  --plus: #3EC1F5;
+  --plus-tint: #0B2433;
+  --plus-line: #1FA8E6;
+  --pro: #5C80FF;
+  --pro-tint: #121B40;
+  --pro-line: #3461FF;
   /* Icônes de format (retours UI6) : une pastille de couleur par famille, libellé toujours
      écrit en --on-fmt (≥ 4,5:1 sur chacune). Teintes écartées du vert « vérifié » (--accent)
-     et du bleu Plus/Pro (--plus) : 12° au moins sur la roue, plus clair (tokens.test.ts). */
+     et des bleus Plus et Pro : 12° au moins sur la roue, plus clair (tokens.test.ts). */
   --fmt-pdf: #F87171;
-  --fmt-doc: #66C2FF;
+  --fmt-doc: #6AB0FF;
   --fmt-sheet: #86D36A;
   --fmt-slides: #FB9B50;
   --fmt-archive: #F5B940;

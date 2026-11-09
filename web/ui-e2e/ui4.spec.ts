@@ -72,8 +72,8 @@ test("Lien prêt : échéance en deux lignes ; options : Plus et Pro en bleu, te
   if (isMobile) await page.getByRole("button", { name: /^Options · / }).click();
   const lk = page.locator("[data-locked] button, button[data-locked]").filter({ visible: true }).first();
   await expect(lk).toBeVisible();
-  expect(await lk.evaluate((e) => [getComputedStyle(e).color, getComputedStyle(e).borderTopStyle, getComputedStyle(e).borderTopColor])).toEqual(["rgb(233, 236, 242)", "dashed", "rgb(59, 130, 246)"]); // texte blanc, pointillés bleus (retours OPT)
-  expect(await lk.locator("svg").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(85, 150, 248)");
+  expect(await lk.evaluate((e) => [getComputedStyle(e).color, getComputedStyle(e).borderTopStyle, getComputedStyle(e).borderTopColor])).toEqual(["rgb(233, 236, 242)", "dashed", "rgb(31, 168, 230)"]); // texte blanc, pointillés bleu Plus (retours OPT, BLUE)
+  expect(await lk.locator("svg").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(62, 193, 245)");
   await settle(page);
   await page.screenshot({ path: `${SHOTS}options-plus-${w(isMobile)}.png`, fullPage: !isMobile });
   if (isMobile) await page.keyboard.press("Escape");

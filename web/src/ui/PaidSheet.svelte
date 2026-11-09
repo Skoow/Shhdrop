@@ -42,6 +42,15 @@
 </Sheet>
 
 <style>
+  /* Feuille au bleu de SON offre (Plus ciel, Pro profond). */
+  .paid {
+    --tc: var(--plus);
+    --tc-tint: var(--plus-tint);
+  }
+  .paid[data-paid="pro"] {
+    --tc: var(--pro);
+    --tc-tint: var(--pro-tint);
+  }
   .paid {
     display: grid;
     gap: var(--sp-4);
@@ -71,7 +80,7 @@
   .list :global(svg) {
     flex: none;
     margin-top: 3px;
-    color: var(--plus);
+    color: var(--tc);
   }
   .soon {
     display: flex;
@@ -80,12 +89,12 @@
     margin: 0;
     padding: var(--sp-3);
     border-radius: 12px;
-    background: var(--plus-tint);
+    background: var(--tc-tint);
     font-size: var(--fs-small);
   }
   .soon :global(svg) {
     flex: none;
     margin-top: 2px;
-    color: var(--plus);
+    color: var(--tc);
   }
 </style>

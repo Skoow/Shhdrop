@@ -59,7 +59,7 @@
   <p class="line"><ShieldAlert size={16} strokeWidth={1.9} aria-hidden="true" /><span>{t("options.tries", { n: PW_TRIES })}</span></p>
 {/snippet}
 {#snippet badge(tier: PaidTier)}
-  <span class="badge">{t(`paid.badge.${tier}`)}</span>
+  <span class="badge {tier}">{t(`paid.badge.${tier}`)}</span>
 {/snippet}
 
 {#if part === "summary"}
@@ -102,7 +102,7 @@
       {#if onpaid && PAID.pro.opens > MAX_OPENS}
         {@const label = t("paid.opens", { n: PAID.pro.opens })}
         <div class="locks" data-locked="opens">
-          <button type="button" class="lk num" aria-describedby="{lockedId}-pro" onclick={() => onpaid("pro")}><Lock size={14} strokeWidth={2} aria-hidden="true" />{label}</button>
+          <button type="button" class="lk num pro" aria-describedby="{lockedId}-pro" onclick={() => onpaid("pro")}><Lock size={14} strokeWidth={2} aria-hidden="true" />{label}</button>
           {@render badge("pro")}
         </div>
       {/if}
@@ -260,6 +260,20 @@
     align-items: center;
     gap: var(--sp-1);
   }
+  /* Chaque verrou et badge au bleu de SON offre (Plus ciel, Pro profond). */
+  .lk,
+  .lkrow,
+  .badge {
+    --tc: var(--plus);
+    --tc-tint: var(--plus-tint);
+    --tc-line: var(--plus-line);
+  }
+  .lk.pro,
+  .badge.pro {
+    --tc: var(--pro);
+    --tc-tint: var(--pro-tint);
+    --tc-line: var(--pro-line);
+  }
   .lk,
   .lkrow {
     display: inline-flex;
@@ -267,7 +281,7 @@
     gap: 6px;
     min-height: 44px;
     padding: 0 var(--sp-3);
-    border: 1px dashed var(--plus-line);
+    border: 1px dashed var(--tc-line);
     border-radius: var(--r-sm);
     background: transparent;
     /* Texte en blanc (retours OPT) ; cadenas, pointillés et badge restent bleus. */
@@ -286,17 +300,17 @@
     flex: 1;
     min-width: 0;
   }
-  /* Plus et Pro en bleu (retours UI4), pointillés compris : jamais le vert de l'action. */
+  /* Plus et Pro en bleu (retours UI4, BLUE), pointillés compris : jamais le vert de l'action. */
   .lk :global(svg),
   .lkrow :global(svg) {
     flex: none;
-    color: var(--plus);
+    color: var(--tc);
   }
   @media (hover: hover) {
     .lk:hover,
     .lkrow:hover {
-      background: var(--plus-tint);
-      border-color: var(--plus);
+      background: var(--tc-tint);
+      border-color: var(--tc);
     }
   }
   .badge {
@@ -304,8 +318,8 @@
     align-items: center;
     padding: 1px 8px;
     border-radius: var(--r-pill);
-    background: var(--plus-tint);
-    color: var(--plus);
+    background: var(--tc-tint);
+    color: var(--tc);
     font-size: 0.75rem;
     font-weight: 680;
     letter-spacing: 0.02em;

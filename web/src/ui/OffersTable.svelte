@@ -74,16 +74,25 @@
   td {
     color: var(--text);
   }
+  /* Chaque colonne au bleu de SON offre (Plus ciel, Pro profond). */
+  .plus {
+    --tc: var(--plus);
+    --tc-tint: var(--plus-tint);
+  }
+  .pro {
+    --tc: var(--pro);
+    --tc-tint: var(--pro-tint);
+  }
   .plus,
   .pro {
-    color: var(--plus);
+    color: var(--tc);
   }
   td.plus,
   td.pro {
     color: var(--text);
   }
   .hl {
-    background: var(--plus-tint);
+    background: var(--tc-tint);
   }
   thead .hl {
     border-start-start-radius: 10px;
