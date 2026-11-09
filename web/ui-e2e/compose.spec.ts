@@ -61,20 +61,20 @@ async function options(page: Page, isMobile: boolean): Promise<Locator> {
   await expect(dlg).toBeVisible();
   return dlg;
 }
-/** Retire un élément : bouton « Retirer » de la ligne ou du tableau, sinon menu « … ». */
+/** Supprime un élément : bouton « Supprimer » de la ligne, sinon menu « … ». */
 async function removeItem(page: Page, name: string) {
   await expect(page.locator("[data-row]").filter({ hasText: name })).toBeVisible();
-  const direct = page.getByRole("button", { name: `Retirer ${name}` });
+  const direct = page.getByRole("button", { name: `Supprimer ${name}` });
   if (await direct.isVisible()) return direct.click();
   await page.getByRole("button", { name: `Actions pour ${name}` }).click();
-  await page.getByRole("dialog", { name }).getByRole("button", { name: "Retirer" }).click();
+  await page.getByRole("dialog", { name }).getByRole("button", { name: "Supprimer" }).click();
 }
 /** Aucun paragraphe de plus de deux lignes (demande du propriétaire, téléphone). */
 const longParagraphs = (scope: Locator) =>
   scope.locator("p, .h, .line").evaluateAll((els) =>
     els
-      // .trust : phrase sur les noms imposée mot pour mot par le propriétaire (retours UI4), trois lignes à 390 px.
-      .filter((e) => (e as HTMLElement).offsetParent !== null && !e.closest(".sr-only, .cnote, .trust") && e.textContent!.trim() !== "")
+
+      .filter((e) => (e as HTMLElement).offsetParent !== null && !e.closest(".sr-only, .cnote") && e.textContent!.trim() !== "")
       .filter((e) => {
         const lh = parseFloat(getComputedStyle(e).lineHeight) || 20;
         return e.getBoundingClientRect().height > lh * 2 + 4;
@@ -130,8 +130,8 @@ test.describe("fr-FR", () => {
     await expect(rows(page).filter({ hasText: "archive.zip" }).locator("svg.fi")).toHaveAttribute("data-format", "ZIP");
     await expect(rows(page).filter({ hasText: "contrat.pdf" })).toContainText(/Document PDF.*octets/);
     await expect(page.locator("[data-row], .group .meta").filter({ hasText: /env\.\s/ })).toHaveCount(0);
-    // « Tout retirer » : un vrai bouton secondaire avec icône, dans l'en-tête de la liste, au-dessus des tailles.
-    const clear = page.getByRole("button", { name: "Tout retirer" });
+    // « Tout supprimer » : un vrai bouton secondaire avec icône, dans l'en-tête de la liste, au-dessus des tailles.
+    const clear = page.getByRole("button", { name: "Tout supprimer" });
     await expect(clear).toHaveClass(/secondary/);
     await expect(clear.locator("svg")).toHaveCount(1);
     expect((await clear.boundingBox())!.y).toBeLessThan((await page.locator(".cap").boundingBox())!.y);
@@ -141,7 +141,7 @@ test.describe("fr-FR", () => {
 
     if (isMobile) {
       await expect(page.getByRole("button", { name: /^Actions pour / })).toHaveCount(10);
-      await expect(page.getByRole("button", { name: /^Retirer / })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /^Supprimer / })).toHaveCount(0);
       // Téléphone : une seule action d'ajout, « + » à côté de l'envoi ; ni zone de dépôt ni rangée.
       await expect(page.locator(".dropzone")).toHaveCount(0);
       await expect(page.getByRole("group", { name: "Créer sur place" })).toHaveCount(0);
@@ -287,7 +287,8 @@ test.describe("fr-FR", () => {
     const sheet = page.getByRole("dialog", { name: "Shhdrop Plus" });
     await expect(sheet).toBeVisible();
     await expect(sheet).toContainText("Bientôt disponible.");
-    await expect(sheet).toContainText(/7\s€ pour 30\sjours/);
+    await expect(sheet).toContainText(/7\s€\s?par mois, TTC/);
+    await expect(sheet).toContainText(/ou 70\s€ par an, payé en une fois/);
     await expect(sheet.locator("form, input, a[href]")).toHaveCount(0);
     await settle(page);
     expect(await axe(page)).toEqual([]);
@@ -342,18 +343,18 @@ test.describe("fr-FR", () => {
     await expect(page.getByText("Ne pourra pas être ouvert sans téléchargement")).toHaveCount(0);
   });
 
-  test("retrait et Annuler ; Tout retirer revient à l'accueil, Annuler rouvre le composeur", async ({ page, shh }) => {
+  test("retrait et Annuler ; Tout supprimer revient à l'accueil, Annuler rouvre le composeur", async ({ page, shh }) => {
     await open(page, shh.origin);
     await browse(page, [...PHOTOS.slice(0, 2), f("contrat.pdf")]);
     await removeItem(page, "plage-nuit.jpg");
     await expect(rows(page)).toHaveCount(2);
-    await page.getByRole("group", { name: "plage-nuit.jpg retiré" }).getByRole("button", { name: "Annuler" }).click();
+    await page.getByRole("group", { name: "plage-nuit.jpg supprimé" }).getByRole("button", { name: "Annuler" }).click();
     await expect(rows(page)).toHaveCount(3);
     await removeItem(page, "contrat.pdf");
     await expect(rows(page)).toHaveCount(2);
-    await page.getByRole("group", { name: "contrat.pdf retiré" }).getByRole("button", { name: "Annuler" }).click();
+    await page.getByRole("group", { name: "contrat.pdf supprimé" }).getByRole("button", { name: "Annuler" }).click();
     await expect(rows(page)).toHaveCount(3);
-    await page.getByRole("button", { name: "Tout retirer" }).click();
+    await page.getByRole("button", { name: "Tout supprimer" }).click();
     await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
     await page.getByRole("button", { name: "Annuler" }).click();
     await expect(rows(page)).toHaveCount(3);
@@ -416,22 +417,20 @@ test.describe("fr-FR", () => {
     expect(await long.locator(".b").evaluate((e) => getComputedStyle(e).textOverflow)).toBe("ellipsis");
   });
 
-  test("téléphone : menu « … » (Renommer, Monter, Descendre, Retirer) ; feuille Options : focus piégé, Échap rend le focus", async ({ page, shh, isMobile }) => {
+  test("téléphone : menu « … » (Aperçu, Renommer, Supprimer ; ni Monter ni Descendre) ; feuille Options : focus piégé, Échap rend le focus", async ({ page, shh, isMobile }) => {
     test.skip(!isMobile, "téléphone : app");
     await open(page, shh.origin);
     await browse(page, PHOTOS.slice(0, 2));
     await page.getByRole("button", { name: "Actions pour plage-nuit.jpg" }).click();
     const menu = page.getByRole("dialog", { name: "plage-nuit.jpg" });
-    await expect(menu.locator(".mi")).toHaveText(["Renommer", "Monter", "Descendre", "Retirer"]);
+    await expect(menu.locator(".mi")).toHaveText(["Aperçu", "Renommer", "Supprimer"]);
     await settle(page);
     await capture(page, "compose-item-menu");
-    await menu.getByRole("button", { name: "Descendre" }).click();
-    expect(await names(page)).toEqual(["toits-belleville.jpg", "plage-nuit.jpg"]);
     await menu.getByRole("button", { name: "Renommer" }).click();
     await menu.getByLabel("Nouveau nom de plage-nuit.jpg").fill("Plage");
     await page.keyboard.press("Enter");
     await expect(menu).toBeHidden();
-    expect(await names(page)).toEqual(["toits-belleville.jpg", "Plage.jpg"]);
+    expect(await names(page)).toEqual(["Plage.jpg", "toits-belleville.jpg"]);
     const ob = page.getByRole("button", { name: /^Options · / });
     await ob.click();
     const dlg = page.getByRole("dialog", { name: "Options" });
@@ -467,7 +466,7 @@ test.describe("fr-FR", () => {
     await capture(page, "compose-limit-count");
 
     test.skip(browserName !== "chromium", "fichier creux de 2 Go : Chromium (chemin local)");
-    await page.getByRole("button", { name: "Tout retirer" }).click();
+    await page.getByRole("button", { name: "Tout supprimer" }).click();
     await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
     const dir = mkdtempSync(join(tmpdir(), "shh-2go-"));
     try {
@@ -480,7 +479,7 @@ test.describe("fr-FR", () => {
       await expect(rows(page)).toHaveCount(1);
       await expect(page.getByRole("alert").filter({ hasText: /^Trop gros/ })).toHaveCount(0);
       await expect(page.locator("#send-reason")).toHaveCount(0);
-      await page.getByRole("button", { name: "Tout retirer" }).click();
+      await page.getByRole("button", { name: "Tout supprimer" }).click();
       await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
       const p = join(dir, "film-2go-plus-1.bin");
       const fd = openSync(p, "w");
@@ -491,7 +490,7 @@ test.describe("fr-FR", () => {
       await expect(page.getByRole("alert").filter({ hasText: /^Trop gros\s:\s[\d,]+\s(?:octets?|Ko) de trop \(limite\s:\s2\sGo\)\.$/ }).first()).toBeVisible();
       expect(await page.locator(".top .fill").evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(255, 138, 128)");
       await expect(send(page)).toBeDisabled();
-      await expect(page.locator("#send-reason")).toHaveText("Le total dépasse 2 Go. Retirez des éléments.");
+      await expect(page.locator("#send-reason")).toHaveText("Le total dépasse 2 Go. Supprimez des éléments.");
       // D41-16 : sous l'erreur, une ligne discrète (ni alerte, ni fenêtre) et « En savoir plus ».
       const up = page.locator(".top [data-upsell]");
       await expect(up).toHaveText(/^Avec Plus\s:\sjusqu'à 10\sGo par partage et 7\sjours\.\s*En savoir plus$/);

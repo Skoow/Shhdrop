@@ -31,6 +31,7 @@
   import { reducedMotion } from "../ui/motion";
   import ReceivedRow from "../ui/ReceivedRow.svelte";
   import ReportSheet from "../ui/ReportSheet.svelte";
+  import NamesTip from "../ui/NamesTip.svelte";
   import { collectPreview, previewQueue } from "../viewers/collect";
   import { blobDownloads, clickDownload, inDirectory, pickFile, type DirHandle, type SavePicker } from "../viewers/save";
   import ViewerPanel, { type ViewItem } from "../viewers/ViewerPanel.svelte";
@@ -346,7 +347,10 @@
 
 <div class="content" bind:this={panel}>
   <header class="top">
-    <h1 class="title" tabindex="-1" data-large-title bind:this={heading}>{t("content.title")}</h1>
+    <div class="tt">
+      <h1 class="title" tabindex="-1" data-large-title bind:this={heading}>{t("content.title")}</h1>
+      <NamesTip />
+    </div>
     <p class="sum num">
       {viewOnly || rate === null
         ? t("content.summary.view", { n: entries.length, size: formatBytes(totalBytes, lang) })
@@ -484,6 +488,12 @@
     font-weight: var(--fw-h2);
     font-stretch: var(--wd-h2);
     line-height: var(--lh-h2);
+  }
+  .tt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
   }
   .title:focus {
     outline: none;

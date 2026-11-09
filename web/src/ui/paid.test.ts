@@ -72,13 +72,15 @@ describe("feuille Plus : honnête, rien à acheter", () => {
     for (const x of ["Shhdrop Plus", "10 Go par partage", "2 Go par partage", "50 Go par partage", "Durée jusqu'à 7 jours (gratuit : 24 h maximum)", "Jusqu'à 50 ouvertures (gratuit : 10)", "7 €", "70 €", "Bientôt disponible."])
       expect(s, x).toContain(x);
     expect(s).not.toMatch(/élément/); // D41-17 : le nombre d'éléments n'est pas vendu
-    expect(s).not.toMatch(/Acheter|Payer|S'abonner|offre limitée|plus que/i);
+    expect([...document.querySelectorAll("button")].map((b) => b.textContent).join("|")).not.toMatch(/Acheter|Payer|S'abonner/i);
+    expect(s).not.toMatch(/offre limitée|plus que/i);
     expect(document.querySelectorAll("form, input, a[href]")).toHaveLength(0);
   });
-  it("Pro : 50 Go, 100 ouvertures, 20 € et 220 €", () => {
+  it("Pro : 50 Go, 100 ouvertures, 20 € par mois et 200 € par an (2 mois offerts) ; deux façons de payer ; aucun frais caché", () => {
     show(PaidSheet, { open: true, tier: "pro" });
     const s = text();
-    for (const x of ["Shhdrop Pro", "50 Go par partage", "Jusqu'à 100 ouvertures", "20 €", "220 €"]) expect(s, x).toContain(x);
+    for (const x of ["Shhdrop Pro", "50 Go par partage", "Jusqu'à 100 ouvertures", "20 € par mois, TTC", "ou 200 € par an, payé en une fois", "2 mois offerts", "Paiement unique.", "résiliable à tout moment en un clic, sans frais", "Aucun frais caché."]) expect(s.replace(/[\u202f\u00a0]/g, " "), x).toContain(x);
+    expect(s).not.toContain("220");
   });
 });
 

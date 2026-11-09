@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { en } from "../i18n/en";
 import { fr } from "../i18n/fr";
 import { readFileSync } from "node:fs";
-import { BLOCK_REASONS, blockKey, createComposer, splitName, type ComposeDeps } from "./compose.svelte";
+import { BLOCK_REASONS, blockKey, canClean, createComposer, splitName, type ComposeDeps } from "./compose.svelte";
 import { gate } from "./clean-gate";
 import { cleanLabelKey, intactKey, isUncleaned, uncleanedReasonKey } from "../media/clean-label";
 import type { StripResult } from "../media/strip";
@@ -566,5 +566,63 @@ describe("pris dans l'interface (caméra maison, Q-REC1)", () => {
       expect(v().base).toBe("Mémo vocal 1");
     }
     expect(c.toApiItems().find((i) => i.data === v().data)!.name).toBe("Mémo vocal 1.webm");
+  });
+});
+
+describe("nettoyage à la demande (menu « … » : Nettoyer, Réessayer)", () => {
+  const head = async (f: Blob) => new Uint8Array(await f.slice(0, 64).arrayBuffer());
+  const realJpeg = () => new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2])], "IMG_1.jpg", { type: "image/jpeg" });
+  it("Original (réglage désactivé) → Nettoyer : contenu remplacé, approuvé, « Nettoyé »", async () => {
+    let on = false;
+    const out = new Blob(["clean"]);
+    const strip = vi.fn(async () => nettoye(out));
+    const c = make({ strip, autoClean: () => on, probe: head });
+    await c.add([realJpeg()], "fichiers");
+    const it = c.items[0]!;
+    expect(canClean(it)).toBe("nettoyer");
+    await c.clean(it.id);
+    expect(strip).toHaveBeenCalledTimes(1);
+    expect(c.items[0]).toMatchObject({ id: it.id, clean: "nettoye", size: out.size });
+    expect(c.items[0]!.data).toBe(out);
+    await expect(gate(out)).resolves.toBe(out);
+    expect(canClean(c.items[0]!)).toBeNull();
+    expect(c.isCleaning(it.id)).toBe(false);
+    on = true;
+  });
+  it("échec → Réessayer ; vocal et vidéo pris ici : `recorded` ; archive, texte, nettoyé : rien à proposer", async () => {
+    let n = 0;
+    const strip = vi.fn(async (): Promise<StripResult> => (++n === 1 ? { state: "echec", reason: "x" } : nettoye(new Blob(["ok"]))));
+    const c = make({ strip });
+    await c.add([jpeg()], "fichiers");
+    expect(canClean(c.items[0]!)).toBe("reessayer");
+    await c.clean(c.items[0]!.id);
+    expect(c.items[0]!.clean).toBe("nettoye");
+    const vs = vi.fn(async (_f: Blob, _m: string, _n: string, _o?: { recorded?: boolean }) => nettoye(new Blob(["v"])));
+    const v = make({ strip: vs });
+    const id = v.addVoice(new Blob(["raw"]), "audio/webm", false)!;
+    await v.clean(id);
+    expect(v.items[0]).toMatchObject({ clean: "nettoye", cleanFamily: "vocal" });
+    expect(vs.mock.calls[0]![3]).toEqual({ recorded: true });
+    expect(canClean({ kind: "file", clean: "original", category: "archives", cleanable: false })).toBeNull();
+    // Original d'un format que le nettoyage ne traite pas (vidéo importée, texte brut) : rien à proposer.
+    const o = make({ autoClean: () => false, probe: head });
+    await o.add([new File([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0])], "film.webm", { type: "video/webm" }), realJpeg()], "fichiers");
+    expect(o.items.map((i) => canClean(i))).toEqual(["nettoyer", null]);
+    expect(canClean({ kind: "text", clean: "sans", category: "texte" })).toBeNull();
+    expect(canClean({ kind: "file", clean: "protege", category: "documents" })).toBeNull();
+    expect(canClean({ kind: "file", clean: "non_pris_en_charge", category: "videos" })).toBeNull();
+  });
+  it("retiré pendant le nettoyage : rien n'est réappliqué", async () => {
+    let release!: () => void;
+    const c = make({ autoClean: () => false, probe: head, strip: () => new Promise((r) => (release = () => r(nettoye(new Blob(["x"]))))) });
+    await c.add([realJpeg()], "fichiers");
+    const id = c.items[0]!.id;
+    const p = c.clean(id);
+    expect(c.isCleaning(id)).toBe(true);
+    c.remove(id);
+    release();
+    await p;
+    expect(c.items).toHaveLength(0);
+    expect(c.isCleaning(id)).toBe(false);
   });
 });

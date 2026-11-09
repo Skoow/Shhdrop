@@ -208,11 +208,11 @@ test.describe("fr-FR", () => {
     // Spec §41.14 : le brouillon reste (les éléments sont toujours là) ; vider la liste l'efface.
     expect(await gone(m.link()!, shh.origin)).toBe(false);
     for (const name of ["doc.bin", "Note"]) {
-      const direct = page.getByRole("button", { name: new RegExp(`^Retirer ${name}`) }).first();
+      const direct = page.getByRole("button", { name: new RegExp(`^Supprimer ${name}`) }).first();
       if (await direct.isVisible()) await direct.click();
       else {
         await page.getByRole("button", { name: new RegExp(`^Actions pour ${name}`) }).first().click();
-        await page.getByRole("dialog").getByRole("button", { name: "Retirer" }).click();
+        await page.getByRole("dialog").getByRole("button", { name: "Supprimer" }).click();
       }
     }
     await expect.poll(() => gone(m.link()!, shh.origin), { timeout: 15_000 }).toBe(true);

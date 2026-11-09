@@ -15,6 +15,7 @@
   import IconButton from "./IconButton.svelte";
   import InlineConfirm from "./InlineConfirm.svelte";
   import { Copy, Download, Eye, Pause, Play, RefreshCw, Square } from "./Icon";
+  import Tip from "./Tip.svelte";
 
   type Props = {
     i: number;
@@ -58,6 +59,15 @@
   <span class="pic">
     <FormatIcon {format} />
     <LockMark badge tone={lock.tone} text={t(lock.key)} />
+    <!-- Téléchargé (retours UI6) : pastille verte au coin haut-gauche de l'icône, bulle au survol
+         ou à l'appui ; rien dans la ligne (le bouton « Voir » ne bouge pas). -->
+    {#if row.state === "done"}
+      <span class="got" data-downloaded>
+        <Tip label={t("dl.done")} tip={t("dl.done")} class="got-tip" data-corner="">
+          <span class="got-pill"><svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false"><path d="M3.6 8.4l2.7 2.6 6-6.2" /></svg></span>
+        </Tip>
+      </span>
+    {/if}
   </span>
   <div class="main">
     <bdi class="name" title={name} translate="no"><span class="b">{mid.head}</span><span class="e">{mid.tail}{ext}</span></bdi>
@@ -71,10 +81,8 @@
       {:else}
         {#if excerpt}<bdi class="ex" translate="no">{excerpt}</bdi>{/if}
         {#if kind === "file"}<span>{t(typeKey(format))}</span><span aria-hidden="true">·</span><span>{formatBytes(row.total, lang)}</span>{:else if !excerpt}<span>{t(typeKey(format))}</span>{/if}
-        <!-- Téléchargé : dit par l'icône verte de la ligne (retours UI4) ; le texte reste pour les lecteurs d'écran. -->
-        {#if row.state === "done"}
-          <span class="sr-only">{t("dl.done")}</span>
-        {:else if estimate !== null && !viewOnly}
+        <!-- Téléchargé : dit par la pastille de l'icône (retours UI6). -->
+        {#if row.state !== "done" && estimate !== null && !viewOnly}
           <span aria-hidden="true">·</span><span class="eta" title={t("dl.estimate.title")}>{t("dl.estimate", { time: formatDuration(estimate, lang) })}<span class="sr-only"> ({t("dl.estimate.title")})</span></span>
         {/if}
       {/if}
@@ -203,9 +211,42 @@
   .st {
     color: var(--text);
   }
-  /* Téléchargé : l'icône de téléchargement passe au vert (retours UI4). */
-  [data-state="done"] .actions :global(button.ghost) {
-    color: var(--accent);
+  /* Téléchargé (UI6) : pastille au coin haut-gauche, en face du cadenas ; elle déborde de
+     l'icône comme lui, pour laisser le libellé du format lisible. */
+  .got {
+    position: absolute;
+    z-index: 1;
+    inset-inline-start: -6px;
+    inset-block-start: -6px;
+    width: 24px;
+    height: 24px;
+  }
+  .got :global(.got-tip) {
+    display: grid;
+    place-items: center;
+    margin: 0;
+    width: 24px;
+    height: 24px;
+    min-inline-size: 24px;
+    min-block-size: 24px;
+    border-radius: 50%;
+  }
+  .got-pill {
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--on-accent);
+    box-shadow: 0 0 0 2px var(--surface-1);
+  }
+  .got-pill path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   progress {
     width: 100%;
@@ -264,6 +305,10 @@
     }
   }
   @media (forced-colors: active) {
+    .got-pill {
+      background: CanvasText;
+      color: Canvas;
+    }
     progress {
       border: 1px solid CanvasText;
     }

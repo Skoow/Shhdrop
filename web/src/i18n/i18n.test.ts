@@ -93,14 +93,14 @@ describe("t et langue", () => {
 
   it("remplace les paramètres nommés", () => {
     setLang("fr");
-    expect(t("compose.removed", { name: "a.png" })).toBe("a.png retiré");
+    expect(t("compose.removed", { name: "a.png" })).toBe("a.png supprimé");
     setLang("en");
-    expect(t("compose.removed", { name: "a.png" })).toBe("a.png removed");
+    expect(t("compose.removed", { name: "a.png" })).toBe("a.png deleted");
   });
 
   it("ne réinterprète pas les accolades d'une valeur (nom de fichier)", () => {
     setLang("en");
-    expect(t("compose.removed", { name: "{name}$&.png" })).toBe("{name}$&.png removed");
+    expect(t("compose.removed", { name: "{name}$&.png" })).toBe("{name}$&.png deleted");
   });
 
   it("pluriel : suffixe .one / .other selon n et la langue", () => {
@@ -139,7 +139,7 @@ describe("t et langue", () => {
       expect(t(k as never)).toBe(k);
       expect(t(k as never, { n: 1 })).toBe(k);
     }
-    expect(t("compose.removed", { name: "x", __proto__: "y", constructor: "z" } as never)).toBe("x retiré");
+    expect(t("compose.removed", { name: "x", __proto__: "y", constructor: "z" } as never)).toBe("x supprimé");
   });
 
   it("une clé inconnue se voit (jamais de texte vide)", () => {

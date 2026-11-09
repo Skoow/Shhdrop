@@ -43,6 +43,7 @@ describe("interface publique", () => {
         "SERVER_STALL_MS",
         "cleanName",
         "isRiskyName",
+        "previewKindOf",
         "collectToBlob",
         "createShare",
         "destroyShare",

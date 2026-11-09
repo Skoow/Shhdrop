@@ -1,7 +1,8 @@
 <script lang="ts">
-  // Ligne du composeur (UI §9.2.4) : vignette ou icône, nom (<bdi>, troncature au milieu qui
-  // garde l'extension), taille et durée, badges, actions (renommer ou modifier, retirer),
-  // poignée et mode déplacement. Le nom affiché est déjà passé par cleanName.
+  // Ligne du composeur (UI §9.2.4) : icône de format (toucher ou cliquer : aperçu, si permis),
+  // nom (<bdi>, troncature au milieu qui garde l'extension), taille et durée, badges, actions
+  // (renommer ou modifier, supprimer ; ordinateur : Nettoyer, Réessayer en lien), poignée et
+  // mode déplacement. Téléphone : tout passe par le menu « … ». Nom déjà passé par cleanName.
   import { swipeToRemove } from "./swipe";
   import { reducedMotion } from "./motion";
   import { midSplit } from "./midname";
@@ -11,6 +12,7 @@
   import { getLang, t } from "../i18n/i18n.svelte";
   import { formatClock, mediaDuration } from "../media/duration";
   import { ArrowDown, ArrowUp, Ellipsis, Pencil, X } from "./Icon";
+  import type { canClean } from "../flows/compose.svelte";
   import ItemNotes from "./ItemNotes.svelte";
   import LockMark from "./LockMark.svelte";
   import { sendLock } from "./lock";
@@ -42,14 +44,19 @@
     cannotOpen?: boolean;
     /** En cause d'un blocage ou d'un risque (S6). */
     danger?: boolean;
-    /** Bouton « Retirer » (le parent y remet le focus après un déplacement ou une annulation). */
+    /** Bouton « Supprimer » (le parent y remet le focus après un déplacement ou une annulation). */
     el?: HTMLDivElement | undefined;
     /** Envoi dès l'ajout (spec §41.14) : état de la ligne ; absent pour un texte. */
     upload?: RowStatus | null;
     onretry?: () => void;
-    /** « Envoyer tel quel » d'un élément non nettoyé. */
+    /** Aperçu permis (itemView.composePreview) : l'icône devient un bouton. */
+    onpreview?: () => void;
+    /** « Nettoyer » (Original) ou « Réessayer » (échec du nettoyage), et son action. */
+    fix?: ReturnType<typeof canClean>;
+    onclean?: () => void;
+    cleaning?: boolean;
   };
-  let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, danger = false, el = $bindable(), upload = null, onretry }: Props = $props();
+  let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, danger = false, el = $bindable(), upload = null, onretry, onpreview, fix = null, onclean, cleaning = false }: Props = $props();
 
   // Vocal pris ici : l'extension (.webm, .m4a) reste interne, jamais affichée ni modifiable.
   const shownExt = $derived(item.kind === "text" || item.voice ? "" : item.ext);
@@ -156,7 +163,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div bind:this={el} class={["row", { editing, moving, compact, danger }]} onkeydown={key} {@attach compact && !editing ? swipeToRemove(onremove, { reduced: reducedMotion() }) : null}>
   {#if compact}
-    <!-- Téléphone : l'ordre se change par le menu « … » (Monter, Descendre). -->
+    <!-- Téléphone : ni poignée ni déplacement (décision du propriétaire, retours UI6). -->
   {:else if movable}
     <span class="grip-slot" bind:this={grip}>
       <ReorderHandle {name} describedby={helpId} onactivate={() => (moving ? closeMove() : openMove())} onstart={ondragstart} onmove={ondragmove} onend={ondragend} />
@@ -166,7 +173,12 @@
   {/if}
 
   <span class="pic">
-    <FormatIcon {format} />
+    <!-- Nom du bouton par son contenu (texte masqué) : l'icône, décorative, n'y entre pas. -->
+    {#if onpreview}
+      <button type="button" class="peek" onclick={onpreview} data-preview><FormatIcon {format} /><span class="sr-only">{t("compose.preview", { name })}</span></button>
+    {:else}
+      <FormatIcon {format} />
+    {/if}
     <LockMark badge tone={lock.tone} text={t(lock.key, { n: lock.n })} role={lock.tone === "error" ? "alert" : undefined} />
   </span>
 
@@ -200,8 +212,6 @@
         <bdi class="nm" title={name} translate="no">
           <span class="b">{mid.head}</span><span class="e">{mid.tail}{shownExt}</span>
         </bdi>
-        <!-- Téléphone : un vocal se renomme aussi d'ici (crayon à côté du nom), sans passer par « … ». -->
-        {#if compact && item.voice}<span class="pen"><IconButton bind:el={renameBtn} label={t("compose.rename", { name })} onpress={startRename}><Pencil size={16} strokeWidth={1.8} /></IconButton></span>{/if}
         <!-- Ordinateur : la marque « Non nettoyé » sur la ligne du nom (liste compacte, une ligne de détails). -->
         {#if !compact}<ItemNotes {item} unclean="only" />{/if}
       </span>
@@ -212,12 +222,16 @@
         {#if upload}
           <!-- État de l'envoi : barre et Réessayer seulement ; le libellé est dans la bulle du cadenas. -->
           {@const busy = upload.key === "compose.up.envoi" || upload.key === "compose.up.chiffrement"}
-          {@const retry = upload.key === "compose.up.erreur" && !!onretry}
+          {@const retry = !compact && !fix && upload.key === "compose.up.erreur" && !!onretry}
           {#if busy || retry}<span class="sep" aria-hidden="true">·</span>{/if}
           <span class={["up", upload.key.slice(11)]} data-up={upload.key.slice(11)}>
             {#if busy}<span class="bar" aria-hidden="true"><span style:width="{upload.percent}%"></span></span>{/if}
             {#if retry}<button type="button" class="retry" onclick={onretry} aria-label={t("compose.up.retry", { name })}>{t("common.retry")}</button>{/if}
           </span>
+        {/if}
+        {#if !compact && fix && onclean}
+          <span class="sep" aria-hidden="true">·</span>
+          <button type="button" class="retry" onclick={onclean} disabled={cleaning} aria-label={t(fix === "nettoyer" ? "compose.clean.item" : item.clean === "echec" ? "compose.clean.retry" : "compose.up.retry", { name })} data-fix={fix}>{cleaning ? t("compose.cleaning") : t(fix === "nettoyer" ? "compose.clean.short" : "common.retry")}</button>
         {/if}
         <ItemNotes {item} {cannotOpen} badgesOnly unclean={compact ? undefined : "skip"} />
       </span>
@@ -269,12 +283,28 @@
   .voice :global(.clip) {
     flex: 1;
   }
-  /* Crayon à côté du nom : zone tactile de 44 px sans grandir la ligne du nom. */
-  .pen {
-    flex: none;
-    display: inline-flex;
-    margin-block: -11px;
-    margin-inline-start: -8px;
+  /* Icône = bouton d'aperçu (44 px) ; le cadenas, posé au coin, reste au-dessus. */
+  .peek {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: inherit;
+    cursor: zoom-in;
+    touch-action: manipulation;
+  }
+  .peek:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  @media (hover: hover) {
+    .peek:hover {
+      background: rgb(255 255 255 / 0.05);
+    }
   }
   .row {
     position: relative;
@@ -382,6 +412,11 @@
     display: block;
     block-size: 100%;
     background: var(--accent, currentColor);
+  }
+  .retry:disabled {
+    cursor: progress;
+    text-decoration: none;
+    color: var(--text-3);
   }
   .retry {
     font: inherit;

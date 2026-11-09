@@ -9,11 +9,14 @@ import { formatBytes, type Lang } from "../../i18n/format";
 
 export type InfoName = "securite" | "confidentialite" | "conditions" | "mentions" | "signaler";
 export type Block = { id?: string; h: string; p?: string[]; list?: string[] };
-export type InfoPage = { title: string; lede: string; draft?: boolean; blocks: Block[] };
+/** Section repliée en bas de page (Sécurité : détails techniques pour les experts, liens publics). */
+export type Tech = { h: string; p?: string[]; list?: string[]; links: { label: string; url: string }[] };
+export type InfoPage = { title: string; lede: string; draft?: boolean; blocks: Block[]; tech?: Tech };
 
 /** Dépôt public du code (lien sortant simple : rien n'est chargé depuis GitHub). */
 export const SOURCE_URL = "https://github.com/Skoow/Shhdrop";
 export const LICENSE_URL = "https://github.com/Skoow/Shhdrop/blob/main/LICENSE";
+export const SPEC_URL = "https://github.com/Skoow/Shhdrop/blob/main/docs/superpowers/specs/2026-11-03-shhdrop-design.md";
 
 export function infoPage(name: InfoName, lang: Lang): InfoPage {
   const size = formatBytes(CONTENT_MAX, lang);
@@ -26,51 +29,52 @@ type V = { size: string; n: number; h: number; tries: number; opens: number };
 const FR: Record<InfoName, (v: V) => InfoPage> = {
   securite: (v) => ({
     title: "Sécurité",
-    lede: "Ce que Shhdrop protège, comment, et ce qu'il ne peut pas faire. Rien n'est sûr à tout coup : voici ce qui est vrai.",
+    lede: "Ce que Shhdrop protège, comment, et ce qu'il ne peut pas faire. Aucune protection n'est parfaite : voici ce qui est vrai aujourd'hui.",
     blocks: [
       {
         id: "chiffrement",
-        h: "Chiffré sur votre appareil",
+        h: "Fermé à clé sur votre appareil",
         p: [
-          "Tout est chiffré dans votre navigateur avant l'envoi, avec AES-256-GCM (WebCrypto). Le mot de passe est transformé en clé par Argon2id (64 Mio de mémoire, 3 passes, libsodium) : chaque essai coûte cher à qui voudrait le deviner.",
-          "Les noms de fichiers, les types et les textes sont chiffrés aussi : nous ne pouvons pas les lire.",
+          "Vos fichiers et vos textes sont chiffrés dans votre navigateur, avant de partir. Ce qui arrive sur notre serveur est illisible sans la clé, pour nous comme pour n'importe qui d'autre.",
+          "Le mot de passe est volontairement lent à vérifier : essayer des mots de passe au hasard coûte très cher à qui voudrait le deviner.",
+          "Les noms de fichiers, leurs types et vos textes sont chiffrés aussi : nous ne pouvons pas les lire.",
         ],
       },
       {
         id: "lien",
-        h: "Comment fonctionne le lien",
+        h: "Le lien et le mot de passe",
         p: [
-          "La clé est dans la fin du lien, après le signe #. Les navigateurs n'envoient jamais cette partie au serveur. Il faut le lien ET le mot de passe pour ouvrir un partage : le serveur n'a ni l'un ni l'autre.",
-          `Après ${v.tries} mots de passe faux, le partage est détruit. Il s'efface aussi à l'échéance (${v.h} h au plus en gratuit) ou après le nombre d'ouvertures choisi (${v.opens} au plus).`,
+          "La clé est cachée dans la fin du lien, après le signe #. Les navigateurs n'envoient jamais cette partie à un serveur. Il faut le lien et le mot de passe pour ouvrir un partage : notre serveur n'a ni l'un ni l'autre.",
+          `Après ${v.tries} mots de passe faux, le partage est détruit. Il s'efface aussi à la fin de sa durée (${v.h} h au plus en gratuit) ou après le nombre d'ouvertures choisi (${v.opens} au plus).`,
         ],
       },
       {
         id: "serveur",
-        h: "Ce que voit le serveur",
+        h: "Ce que voit notre serveur",
         list: [
-          "Des données chiffrées, de taille arrondie, et jamais la clé ni le mot de passe.",
-          "L'adresse IP de connexion, le temps de la connexion, comme tout site web. Elle n'est écrite nulle part.",
-          "La taille approximative d'un partage, l'heure des envois et des lectures, et quels morceaux chiffrés sont lus.",
-          "Aucune date de création n'est gardée ; les échéances sont arrondies au quart d'heure.",
+          "Des données chiffrées, dont la taille est arrondie. Jamais la clé ni le mot de passe.",
+          "Votre adresse IP pendant la connexion, comme pour tout site web. Elle n'est écrite nulle part.",
+          "La taille approximative d'un partage, l'heure des envois et des ouvertures, et quels morceaux chiffrés sont lus.",
+          "Aucune date de création n'est gardée ; les heures de fin sont arrondies au quart d'heure.",
         ],
       },
       {
         id: "sortie",
-        h: "Dernière ouverture",
+        h: "Après la dernière ouverture",
         p: [
-          "Quand la dernière personne autorisée quitte la page, le partage est supprimé du serveur environ 3 minutes plus tard (un rechargement ne compte pas). Si l'onglet est tué sans prévenir, il est effacé au plus tard 6 heures après cette ouverture, ou à son échéance.",
+          "Quand la dernière personne autorisée quitte la page, le partage est supprimé du serveur environ 3 minutes plus tard (un rechargement ne compte pas). Si l'onglet se ferme brutalement, il est effacé au plus tard 6 heures après cette ouverture, ou à la fin de sa durée.",
         ],
       },
       {
         id: "limites",
         h: "Ce que Shhdrop ne peut pas faire",
         list: [
-          "Empêcher une capture d'écran, une photo de l'écran ou une copie : ce que le destinataire voit ou télécharge lui appartient.",
+          "Empêcher une capture d'écran, une photo de l'écran ou une copie : ce que le destinataire voit ou télécharge lui appartient.",
           "Effacer l'historique de votre navigateur. Nous retirons la clé de la barre d'adresse, mais le navigateur a déjà noté l'adresse complète dans son historique (parfois synchronisé). Ouvrez le lien en navigation privée pour laisser moins de traces.",
-          "Effacer la mémoire de façon garantie : elle est vidée au mieux. Pour qu'un rechargement ne coûte pas une ouverture, le lien et un jeton d'ouverture restent dans le stockage de cet onglet (jamais le mot de passe ni le contenu), le temps de l'ouverture.",
-          "Nettoyer l'intérieur des PDF et des archives : ils partent intacts, avec leurs informations internes éventuelles (auteur, logiciel, dates, fichiers contenus). Les photos et vidéos perdent leurs métadonnées (position, appareil) ; ce qui se voit dans l'image reste.",
-          "Vérifier l'expéditeur : un lien peut venir de n'importe qui.",
-          "Vous protéger d'un site piégé : si notre serveur ou notre code était compromis, le site servi pourrait voler les clés. C'est pour cela que le code est public et que chaque version peut être vérifiée.",
+          "Garantir que la mémoire de l'appareil est vidée : nous l'effaçons du mieux possible. Pour qu'un rechargement ne coûte pas une ouverture, le lien et un jeton d'ouverture restent dans le stockage de cet onglet le temps de l'ouverture (jamais le mot de passe ni le contenu).",
+          "Tout effacer dans les fichiers. Photos, PDF et documents bureautiques perdent leurs informations cachées (lieu, appareil, auteur, dates), comme les vidéos et les vocaux enregistrés ici. Les vidéos et les sons importés, et les archives, partent tels quels : leur ligne le dit. Ce qui se voit dans l'image ou se lit dans le document reste, les commentaires d'un document gardent leurs auteurs, et un PDF modifié plusieurs fois peut garder d'anciens passages.",
+          "Vérifier l'expéditeur : un lien peut venir de n'importe qui.",
+          "Vous protéger d'un site piégé : si notre serveur ou notre code était compromis, le site servi pourrait voler les clés. C'est pour cela que le code est public et que chaque version peut être vérifiée.",
           "Cacher votre adresse IP au serveur et à l'hébergeur pendant la connexion.",
         ],
       },
@@ -78,7 +82,7 @@ const FR: Record<InfoName, (v: V) => InfoPage> = {
         id: "qr",
         h: "QR code et partage en un geste",
         p: [
-          "« Partager » peut envoyer le lien et le mot de passe ensemble, et le QR code les contient tous les deux. Avec une seule ouverture (le réglage par défaut), personne d'autre ne pourra voir le contenu ensuite, et le destinataire verrait qu'il a déjà été ouvert.",
+          "« Partager » peut envoyer le lien et le mot de passe ensemble, et le QR code les contient tous les deux. Avec une seule ouverture (le réglage par défaut), personne d'autre ne pourra voir le contenu ensuite, et le destinataire verrait qu'il a déjà été ouvert.",
           "Mais quelqu'un qui lit le message avant le destinataire peut l'ouvrir à sa place, et l'adresse du QR (lien et mot de passe) reste dans l'historique du navigateur qui l'ouvre. Pour plus de sûreté, envoyez le lien et le mot de passe par deux moyens différents.",
         ],
       },
@@ -86,10 +90,24 @@ const FR: Record<InfoName, (v: V) => InfoPage> = {
         id: "appareil",
         h: "Caméra et micro",
         p: [
-          "Le site ne peut utiliser la caméra et le micro que pour ses propres enregistrements, après votre accord, et jamais dans un cadre d'un autre site (Permissions-Policy). Toutes les autres fonctions sensibles du navigateur lui sont fermées.",
+          "Le site ne peut utiliser la caméra et le micro que pour ses propres enregistrements, après votre accord, et jamais à l'intérieur d'un autre site. Les autres fonctions sensibles du navigateur lui sont fermées.",
         ],
       },
     ],
+    tech: {
+      h: "Détails techniques (pour les experts)",
+      list: [
+        "Contenu, noms, types et textes : AES-256-GCM (WebCrypto), clés dérivées par HKDF-SHA-256 ; aucune cryptographie maison.",
+        "Mot de passe : Argon2id (libsodium), 64 Mio de mémoire, 3 passes, combiné à la clé du fragment du lien (après #), jamais transmise au serveur.",
+        `Ouverture : le serveur vérifie une preuve dérivée de la clé et du mot de passe, sans recevoir ni l'une ni l'autre ; ${v.tries} preuves fausses détruisent le partage.`,
+        "Taille : le contenu chiffré occupe des paliers fixes ; le serveur ne connaît que le palier.",
+        "Navigateur : en-têtes stricts (Content-Security-Policy, Permissions-Policy) ; aucun script, police ni traceur d'un autre site. Seule exception, la vérification anti-robot de secours (Google reCAPTCHA), chargée après un clic dans un cadre isolé sur un autre site, jamais sur une page qui détient des clés.",
+      ],
+      links: [
+        { label: "Code source public (GitHub)", url: SOURCE_URL },
+        { label: "Spécification publique", url: SPEC_URL },
+      ],
+    },
   }),
   confidentialite: (v) => ({
     title: "Confidentialité",
@@ -181,39 +199,40 @@ const FR: Record<InfoName, (v: V) => InfoPage> = {
 const EN: Record<InfoName, (v: V) => InfoPage> = {
   securite: (v) => ({
     title: "Security",
-    lede: "What Shhdrop protects, how, and what it cannot do. Nothing is safe every time: here is what is true.",
+    lede: "What Shhdrop protects, how, and what it cannot do. No protection is perfect: here is what is true today.",
     blocks: [
       {
         id: "chiffrement",
-        h: "Encrypted on your device",
+        h: "Locked on your device",
         p: [
-          "Everything is encrypted in your browser before sending, with AES-256-GCM (WebCrypto). The password is turned into a key with Argon2id (64 MiB of memory, 3 passes, libsodium): every guess is expensive.",
-          "File names, types and texts are encrypted too: we can't read them.",
+          "Your files and texts are encrypted in your browser before they leave. What reaches our server is unreadable without the key, for us as for anyone else.",
+          "The password is deliberately slow to check: trying passwords at random is very expensive for anyone who wants to guess it.",
+          "File names, their types and your texts are encrypted too: we can't read them.",
         ],
       },
       {
         id: "lien",
-        h: "How the link works",
+        h: "The link and the password",
         p: [
-          "The key is at the end of the link, after the # sign. Browsers never send that part to the server. Opening a share takes the link AND the password: the server has neither.",
-          `After ${v.tries} wrong passwords, the share is destroyed. It is also erased when it expires (${v.h} h at most on the free plan) or after the chosen number of opens (${v.opens} at most).`,
+          "The key is hidden at the end of the link, after the # sign. Browsers never send that part to a server. Opening a share takes the link and the password: our server has neither.",
+          `After ${v.tries} wrong passwords, the share is destroyed. It is also erased when its time runs out (${v.h} h at most on the free plan) or after the chosen number of opens (${v.opens} at most).`,
         ],
       },
       {
         id: "serveur",
-        h: "What the server sees",
+        h: "What our server sees",
         list: [
-          "Encrypted data, with a rounded size, and never the key or the password.",
-          "Your IP address while connected, like any website. It is never written down.",
-          "The approximate size of a share, when it is sent and read, and which encrypted pieces are read.",
-          "No creation date is kept; expiry times are rounded to the quarter hour.",
+          "Encrypted data, with a rounded size. Never the key or the password.",
+          "Your IP address while you are connected, like any website. It is never written down.",
+          "The approximate size of a share, when it is sent and opened, and which encrypted pieces are read.",
+          "No creation date is kept; end times are rounded to the quarter hour.",
         ],
       },
       {
         id: "sortie",
-        h: "Last open",
+        h: "After the last open",
         p: [
-          "When the last person allowed to open a share leaves the page, the share is deleted from the server about 3 minutes later (a reload doesn't count). If the tab is killed without notice, it is erased at most 6 hours after that open, or when it expires.",
+          "When the last person allowed to open a share leaves the page, the share is deleted from the server about 3 minutes later (a reload doesn't count). If the tab closes abruptly, it is erased at most 6 hours after that open, or when its time runs out.",
         ],
       },
       {
@@ -222,8 +241,8 @@ const EN: Record<InfoName, (v: V) => InfoPage> = {
         list: [
           "Prevent a screenshot, a photo of the screen or a copy: what the recipient sees or downloads is theirs.",
           "Erase your browser history. We remove the key from the address bar, but the browser has already recorded the full address in its history (sometimes synced). Open the link in a private window to leave fewer traces.",
-          "Guarantee memory is wiped: it is cleared on a best-effort basis. So that a reload doesn't cost an open, the link and an open token stay in this tab's storage (never the password or the content) while the share is open.",
-          "Clean the inside of PDFs and archives: they are sent untouched, with any internal information (author, software, dates, files inside). Photos and videos lose their metadata (location, device); what is visible in the picture stays.",
+          "Guarantee the device's memory is wiped: we clear it as best we can. So that a reload doesn't cost an open, the link and an open token stay in this tab's storage while the share is open (never the password or the content).",
+          "Remove everything from files. Photos, PDFs and office documents lose their hidden information (location, device, author, dates), as do videos and voice notes recorded here. Imported videos and sounds, and archives, are sent as they are: their row says so. What is visible in the picture or readable in the document stays, comments in a document keep their authors, and a PDF edited several times may keep older passages.",
           "Verify the sender: a link can come from anyone.",
           "Protect you from a tampered site: if our server or code were compromised, the site could steal keys. That is why the code is public and every version can be verified.",
           "Hide your IP address from the server and the host while you are connected.",
@@ -241,10 +260,24 @@ const EN: Record<InfoName, (v: V) => InfoPage> = {
         id: "appareil",
         h: "Camera and microphone",
         p: [
-          "The site can only use the camera and microphone for its own recordings, after you agree, and never inside another site's frame (Permissions-Policy). Every other sensitive browser feature is closed to it.",
+          "The site can only use the camera and microphone for its own recordings, after you agree, and never inside another site. The browser's other sensitive features are closed to it.",
         ],
       },
     ],
+    tech: {
+      h: "Technical details (for experts)",
+      list: [
+        "Content, names, types and texts: AES-256-GCM (WebCrypto), keys derived with HKDF-SHA-256; no home-made cryptography.",
+        "Password: Argon2id (libsodium), 64 MiB of memory, 3 passes, combined with the key in the link fragment (after #), which is never sent to the server.",
+        `Opening: the server checks a proof derived from the key and the password, without receiving either; ${v.tries} wrong proofs destroy the share.`,
+        "Size: encrypted content fills fixed tiers; the server only knows the tier.",
+        "Browser: strict headers (Content-Security-Policy, Permissions-Policy); no script, font or tracker from another site. The one exception is the fallback bot check (Google reCAPTCHA), loaded after a click in an isolated frame on another site, never on a page that holds keys.",
+      ],
+      links: [
+        { label: "Public source code (GitHub)", url: SOURCE_URL },
+        { label: "Public specification", url: SPEC_URL },
+      ],
+    },
   }),
   confidentialite: (v) => ({
     title: "Privacy",

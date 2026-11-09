@@ -25,6 +25,19 @@
       {/if}
     </section>
   {/each}
+  {#if page.tech}
+    <!-- Détails techniques (retours UI6) : repliés, en bas ; le corps reste sans jargon. -->
+    <details class="tech" id="details-techniques" data-tech>
+      <summary>{page.tech.h}</summary>
+      <div class="tech-in">
+        {#each page.tech.p ?? [] as para, j (j)}<p>{para}</p>{/each}
+        {#if page.tech.list}<ul>{#each page.tech.list as li, j (j)}<li>{li}</li>{/each}</ul>{/if}
+        <ul class="links">
+          {#each page.tech.links as l (l.url)}<li><a href={l.url} target="_blank" rel="noopener noreferrer">{l.label}<span class="sr-only"> {t("foot.external")}</span></a></li>{/each}
+        </ul>
+      </div>
+    </details>
+  {/if}
 </article>
 
 <style>
@@ -85,5 +98,44 @@
   }
   li::marker {
     color: var(--text-3);
+  }
+  .tech {
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r-lg);
+    background: var(--surface-1);
+  }
+  .tech summary {
+    display: flex;
+    align-items: center;
+    min-block-size: 44px;
+    padding: var(--sp-2) var(--sp-4);
+    color: var(--text);
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: var(--r-lg);
+  }
+  .tech summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .tech-in {
+    display: grid;
+    gap: var(--sp-3);
+    padding: 0 var(--sp-4) var(--sp-4);
+  }
+  .tech li {
+    font-size: var(--fs-small);
+  }
+  .links {
+    list-style: none;
+    padding: 0;
+  }
+  .links a {
+    display: inline-flex;
+    align-items: center;
+    min-block-size: 44px;
+    color: var(--accent);
+    font-size: var(--fs-small);
+    font-weight: 560;
   }
 </style>

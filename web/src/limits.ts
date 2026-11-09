@@ -30,7 +30,7 @@ export const NAME_MAX = 120;
 export type PaidTier = "plus" | "pro";
 export const PAID: Readonly<Record<PaidTier, { bytes: number; opens: number; ttlDays: readonly number[]; month: number; year: number }>> = {
   plus: { bytes: 10 * 1024 ** 3, opens: 50, ttlDays: [2, 3, 7], month: 7, year: 70 },
-  pro: { bytes: 50 * 1024 ** 3, opens: 100, ttlDays: [2, 3, 7], month: 20, year: 220 },
+  pro: { bytes: 50 * 1024 ** 3, opens: 100, ttlDays: [2, 3, 7], month: 20, year: 200 },
 };
 
 /**

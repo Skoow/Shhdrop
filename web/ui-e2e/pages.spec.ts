@@ -12,12 +12,21 @@ test("Sécurité : chiffrement, ce que voit le serveur, limites (historique, ong
   if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(shh.origin + "/securite");
   await expect(page.getByRole("heading", { level: 1, name: "Sécurité" })).toBeVisible();
-  for (const h of ["Chiffré sur votre appareil", "Comment fonctionne le lien", "Ce que voit le serveur", "Ce que Shhdrop ne peut pas faire", "QR code et partage en un geste", "Caméra et micro"])
+  for (const h of ["Fermé à clé sur votre appareil", "Le lien et le mot de passe", "Ce que voit notre serveur", "Ce que Shhdrop ne peut pas faire", "QR code et partage en un geste", "Caméra et micro"])
     await expect(page.getByRole("heading", { level: 2, name: h })).toBeVisible();
   const main = page.locator("main");
-  for (const x of ["AES-256-GCM", "Argon2id", "historique", "stockage de cet onglet", "PDF et des archives", "Permissions-Policy", "adresse IP", "environ 3 minutes"]) await expect(main).toContainText(x);
+  for (const x of ["historique", "stockage de cet onglet", "les archives, partent tels quels", "anciens passages", "adresse IP", "environ 3 minutes", "Les noms de fichiers, leurs types et vos textes sont chiffrés aussi"]) await expect(main).toContainText(x);
   const text = await main.innerText();
   expect(text).not.toMatch(/100\s?%|sécurisé à|audit|Suisse|Islande/i);
+  // Retours UI6 : corps sans jargon ni noms d'algorithmes ; détails repliés en bas, liens publics.
+  expect(text).not.toMatch(/AES|Argon|HKDF|WebCrypto|libsodium|Permissions-Policy|SHA-/);
+  const tech = page.locator("[data-tech]");
+  await expect(tech).not.toHaveAttribute("open");
+  await tech.locator("summary").click();
+  for (const x of ["AES-256-GCM", "Argon2id", "Permissions-Policy"]) await expect(tech).toContainText(x);
+  await expect(tech.getByRole("link", { name: /Code source public/ })).toHaveAttribute("href", "https://github.com/Skoow/Shhdrop");
+  await expect(tech.getByRole("link", { name: /Spécification publique/ })).toHaveAttribute("href", /docs\/superpowers\/specs\/2026-11-03-shhdrop-design\.md$/);
+  await tech.locator("summary").click();
   expect(await axe(page)).toEqual([]);
   await page.screenshot({ path: `${SHOTS}securite-${w(isMobile)}.png`, fullPage: true });
 });
@@ -45,11 +54,20 @@ test("Confidentialité, Signaler, Conditions, Mentions : contenus, bandeau « En
   }
 });
 
-test("Offres : « 10 Go par partage », « 50 Go par partage » ; rien à acheter ; capture", async ({ page, shh, isMobile }) => {
+test("Offres : « 10 Go par partage », « 50 Go par partage » ; prix mensuel en grand, annuel, deux façons de payer ; rien à acheter ; capture", async ({ page, shh, isMobile }) => {
   if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(shh.origin + "/offres");
   const t = page.locator("[data-offers]");
   for (const x of ["2 Go par partage", "10 Go par partage", "50 Go par partage"]) await expect(t).toContainText(x);
+  const norm = (s: string) => s.replace(/[\u202f\u00a0]/g, " ");
+  const prices = page.locator("[data-prices]");
+  expect(norm(await prices.locator('[data-price="plus"]').innerText())).toMatch(/7 €\s+par mois, TTC[\s\S]*ou 70 € par an, payé en une fois[\s\S]*2 mois offerts/);
+  expect(norm(await prices.locator('[data-price="pro"]').innerText())).toMatch(/20 €\s+par mois, TTC[\s\S]*ou 200 € par an, payé en une fois[\s\S]*2 mois offerts/);
+  for (const x of ["Paiement unique.", "sans renouvellement", "Renouvellement automatique, si vous le souhaitez.", "résiliable à tout moment en un clic, sans frais", "Aucun frais caché."]) expect(norm(await prices.innerText())).toContain(x);
+  await expect(page.locator("main")).toContainText("Bientôt disponible.");
+  await expect(page.locator("main button")).toHaveCount(0);
+  // Le prix mensuel est le plus grand texte de la carte.
+  expect(await prices.locator('[data-price="plus"] .big').evaluate((e) => parseFloat(getComputedStyle(e).fontSize))).toBeGreaterThanOrEqual(32);
   await expect(page.locator("main form, main input")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(await axe(page)).toEqual([]);

@@ -200,27 +200,44 @@ test("ligne vocale : nom générique renommable (Entrée, Échap, vide → gén�
   }
   if (isMobile) await voice.screenshot({ path: `${SHOTS4}voice-row-390.png` });
 
-  const pencil = voice.getByRole("button", { name: "Renommer Mémo vocal 1", exact: true });
-  const field = voice.getByRole("textbox", { name: "Nouveau nom de Mémo vocal 1" });
-  // Échap annule.
-  await pencil.click();
-  await expect(field).toBeFocused();
-  await expect(field).toHaveValue("Mémo vocal 1");
-  await field.fill("Brouillon");
-  await field.press("Escape");
+  // Le vocal se renomme comme les autres (retours UI6) : crayon de la ligne sur ordinateur,
+  // menu « … » sur téléphone (plus de crayon propre au vocal).
+  await expect(voice.locator(".head button")).toHaveCount(0);
+  const rename = async (from: string, to: string, opts: { cancel?: boolean; shot?: boolean } = {}) => {
+    if (isMobile) {
+      await voice.getByRole("button", { name: `Actions pour ${from}` }).click();
+      const menu = page.getByRole("dialog", { name: from });
+      await expect(menu.locator(".mi")).toHaveText(["Aperçu", "Renommer", "Supprimer"]);
+      await menu.getByRole("button", { name: "Renommer" }).click();
+      const field = menu.getByRole("textbox", { name: `Nouveau nom de ${from}` });
+      await expect(field).toBeFocused();
+      await expect(field).toHaveValue(from);
+      await field.fill(to);
+      if (opts.shot) await page.screenshot({ path: `${SHOTS4}voice-row-rename-390.png` });
+      if (opts.cancel) {
+        await menu.getByRole("button", { name: "Annuler" }).click();
+        await expect(menu.locator(".mi").first()).toBeVisible();
+        await page.keyboard.press("Escape");
+      } else await field.press("Enter");
+      await expect(menu).toBeHidden();
+      return;
+    }
+    const pencil = voice.getByRole("button", { name: `Renommer ${from}`, exact: true });
+    await pencil.click();
+    const field = voice.getByRole("textbox", { name: `Nouveau nom de ${from}` });
+    await expect(field).toBeFocused();
+    await expect(field).toHaveValue(from);
+    await field.fill(to);
+    await field.press(opts.cancel ? "Escape" : "Enter");
+    if (opts.cancel) await expect(pencil).toBeFocused();
+  };
+  // Annuler, puis valider (même assainissement que les autres noms), puis nom vide → générique.
+  await rename("Mémo vocal 1", "Brouillon", { cancel: true });
   await expect(voice.locator(".nm")).toHaveText("Mémo vocal 1");
-  await expect(pencil).toBeFocused();
-  // Entrée valide, même assainissement que les autres noms.
-  await pencil.click();
-  await field.fill("Réunion\u200b du lundi");
-  if (isMobile) await voice.screenshot({ path: `${SHOTS4}voice-row-rename-390.png` });
-  await field.press("Enter");
+  await rename("Mémo vocal 1", "Réunion\u200b du lundi", { shot: true });
   await expect(voice.locator(".nm")).toHaveText("Réunion du lundi");
   await expect(voice.getByRole("button", { name: /^Écouter Réunion du lundi$/ })).toBeVisible();
-  // Nom vide → nom générique.
-  await voice.getByRole("button", { name: "Renommer Réunion du lundi", exact: true }).click();
-  await voice.getByRole("textbox").fill("   ");
-  await voice.getByRole("textbox").press("Enter");
+  await rename("Réunion du lundi", "   ");
   await expect(voice.locator(".nm")).toHaveText("Mémo vocal 1");
   await expect(voice.locator('[role="alert"]')).toHaveCount(0);
 });

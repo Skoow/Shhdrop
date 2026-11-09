@@ -243,21 +243,21 @@ test.describe("fr-FR", () => {
       document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
     });
     await expect(rows).toHaveCount(3);
-    // Téléphone : menu « … » de la ligne ; ordinateur (demo-webkit-desktop) : poignée et boutons sur la ligne.
+    // Téléphone : menu « … » de la ligne (plus de déplacement, retours UI6) ; ordinateur
+    // (demo-webkit-desktop) : poignée et boutons sur la ligne.
+    const order = isMobile ? ["a.txt", "b.txt", "c.txt"] : ["b.txt", "a.txt", "c.txt"];
     if (isMobile) {
       await page.getByRole("button", { name: "Actions pour a.txt" }).click();
-      await page.getByRole("dialog", { name: "a.txt" }).getByRole("button", { name: "Descendre" }).click();
-      await expect(page.locator("[data-row] .nm")).toHaveText(["b.txt", "a.txt", "c.txt"]);
-      await page.getByRole("dialog", { name: "a.txt" }).getByRole("button", { name: "Retirer" }).click();
+      await page.getByRole("dialog", { name: "a.txt" }).getByRole("button", { name: "Supprimer" }).click();
     } else {
       await page.getByRole("button", { name: "Déplacer a.txt" }).focus();
       await page.keyboard.press("Alt+ArrowDown");
       await expect(page.locator("[data-row] .nm")).toHaveText(["b.txt", "a.txt", "c.txt"]);
-      await page.getByRole("button", { name: "Retirer a.txt" }).click();
+      await page.getByRole("button", { name: "Supprimer a.txt" }).click();
     }
     await expect(rows).toHaveCount(2);
     await page.getByRole("button", { name: "Annuler" }).click();
-    await expect(page.locator("[data-row] .nm")).toHaveText(["b.txt", "a.txt", "c.txt"]);
+    await expect(page.locator("[data-row] .nm")).toHaveText(order);
     // Pas de coffre en démo (spec §27.6), même au doigt.
     if (isMobile) await page.getByRole("button", { name: /^Options · / }).click();
     const opts = isMobile ? page.getByRole("dialog", { name: "Options" }) : page.locator(".side");

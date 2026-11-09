@@ -4,7 +4,8 @@
   // avec « ! » (échec). Le texte n'est pas écrit sur la ligne (retours UI4) : il est le nom du
   // bouton et le contenu de sa bulle (Tip) ; la couleur n'est jamais la seule information (la
   // forme change aussi). Le vert n'arrive qu'à l'événement réel (lock.ts). `badge` (UI5) :
-  // pastille posée sur le coin bas-droit de l'icône de format.
+  // pastille posée sur le coin bas-droit de l'icône de format ; depuis UI6, son bouton ne couvre
+  // que ce coin (24 px) : le reste de l'icône ouvre l'aperçu, l'autre coin porte « Téléchargé ».
   import type { Snippet } from "svelte";
   import type { LockTone } from "./lock";
   import Tip from "./Tip.svelte";
@@ -33,11 +34,11 @@
 {/snippet}
 
 {#if badge}
-  <!-- Pastille (UI5) : posée sur l'icône de format (parent en position relative) ; le bouton
-       de la bulle couvre l'icône (44 px) et ne contient que le cadenas, au coin bas-droit. -->
+  <!-- Pastille (UI5, UI6) : posée au coin bas-droit de l'icône de format (parent en position
+       relative) ; bouton de 24 px (WCAG 2.5.8), au-dessus du bouton d'aperçu. -->
   <span class={["lock", tone, "badge"]} data-lock={tone}>
-    <Tip label={text} tip={text} class="pic-tip">
-      <span class="pill">{@render glyph(12)}</span>
+    <Tip label={text} tip={text} class="pic-tip" data-corner="">
+      <span class="pill">{@render glyph(11)}</span>
     </Tip>
     {#if role === "alert"}<span class="sr-only" role="alert">{text}</span>{/if}
   </span>
@@ -82,30 +83,37 @@
   }
   /* Pastille (UI5) : disque de la surface sous le cadenas, posé sur le coin bas-droit de
      l'icône ; le bouton entier (icône comprise) fait 44 px. */
+  /* Bouton de 24 px centré sur la pastille (18 px), qui déborde du coin bas-droit : le libellé
+     de l'icône et son centre (bouton d'aperçu) restent libres. */
   .lock.badge {
     position: absolute;
-    inset: 0;
+    z-index: 1;
+    inset-inline-end: -5px;
+    inset-block-end: -5px;
     display: grid;
     place-items: center;
+    width: 24px;
+    height: 24px;
     color: inherit;
   }
   .badge :global(.pic-tip) {
     position: relative;
+    display: grid;
+    place-items: center;
     margin: 0;
-    width: 100%;
-    height: 100%;
-    min-inline-size: 44px;
-    min-block-size: 44px;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    min-inline-size: 24px;
+    min-block-size: 24px;
+    border-radius: 50%;
     color: inherit;
   }
   .pill {
-    position: absolute;
-    inset-inline-end: 1px;
-    inset-block-end: 1px;
     display: grid;
     place-items: center;
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     background: var(--surface-1);
     box-shadow: inset 0 0 0 1px var(--hair);

@@ -19,10 +19,10 @@ const fill = (n: number, seed: number) => {
 };
 
 async function removeItem(page: Page, name: string) {
-  const direct = page.getByRole("button", { name: `Retirer ${name}` });
+  const direct = page.getByRole("button", { name: `Supprimer ${name}` });
   if (await direct.isVisible()) return direct.click();
   await page.getByRole("button", { name: `Actions pour ${name}` }).click();
-  await page.getByRole("dialog", { name }).getByRole("button", { name: "Retirer" }).click();
+  await page.getByRole("dialog", { name }).getByRole("button", { name: "Supprimer" }).click();
 }
 
 test.describe("fr-FR", () => {

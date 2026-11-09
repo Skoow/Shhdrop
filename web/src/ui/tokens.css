@@ -30,6 +30,19 @@
   --plus: #5596F8;
   --plus-tint: #0F1B33;
   --plus-line: #3B82F6;
+  /* Icônes de format (retours UI6) : une pastille de couleur par famille, libellé toujours
+     écrit en --on-fmt (≥ 4,5:1 sur chacune). Teintes écartées du vert « vérifié » (--accent)
+     et du bleu Plus/Pro (--plus) : 12° au moins sur la roue, plus clair (tokens.test.ts). */
+  --fmt-pdf: #F87171;
+  --fmt-doc: #66C2FF;
+  --fmt-sheet: #86D36A;
+  --fmt-slides: #FB9B50;
+  --fmt-archive: #F5B940;
+  --fmt-image: #B89CFF;
+  --fmt-video: #F589C6;
+  --fmt-audio: #3FDCD6;
+  --fmt-other: #A6AEBD;
+  --on-fmt: #0B0D12;
   --selection: rgb(95 227 181 / 0.28);
   --scrim: rgb(5 7 10 / 0.72);
 

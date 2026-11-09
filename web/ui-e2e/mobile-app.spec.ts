@@ -23,7 +23,9 @@ async function shot(page: Page, name: string) {
 
 const tabbar = (page: Page) => page.getByRole("navigation", { name: "Navigation principale" });
 
-/** Boutons et liens-boutons visibles plus petits que 44 × 44 px (liens dans le texte exclus). */
+/** Boutons et liens-boutons visibles plus petits que 44 × 44 px (liens dans le texte exclus).
+ *  Exception (retours UI6) : pastilles de coin d'une icône de format ([data-corner], cadenas et
+ *  « Téléchargé ») : deux bulles sur une icône de 44 px, donc 24 px au moins (WCAG 2.5.8). */
 const smallTargets = (page: Page, scope: string) =>
   page.evaluate((sel) => {
     const out: string[] = [];
@@ -31,7 +33,8 @@ const smallTargets = (page: Page, scope: string) =>
       const r = el.getBoundingClientRect();
       const st = getComputedStyle(el);
       if (r.width === 0 || r.height === 0 || st.visibility === "hidden" || el.closest("[hidden], [inert]")) continue;
-      if (r.height < 43.5 || r.width < 43.5) out.push(`${el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 30)} ${Math.round(r.width)}×${Math.round(r.height)}`);
+      const min = el.matches("[data-corner]") ? 23.5 : 43.5;
+      if (r.height < min || r.width < min) out.push(`${el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 30)} ${Math.round(r.width)}×${Math.round(r.height)}`);
     }
     return out;
   }, scope);

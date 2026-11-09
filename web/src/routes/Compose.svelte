@@ -8,7 +8,7 @@
   import { chrome } from "../app/chrome.svelte";
   import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, TTL_MAX_HOURS, generatePassword, type ElementStatus, type Item, type KeepTtl } from "../index";
   import type { PaidTier } from "../limits";
-  import { blockKey, createComposer, type AddReport, type Source } from "../flows/compose.svelte";
+  import { blockKey, canClean, createComposer, type AddReport, type ComposeItem, type Source } from "../flows/compose.svelte";
   import { rowStatus, toDraftList } from "../flows/preupload";
   import { fileSettings } from "../flows/settings.svelte";
   import { addActions, desktopActions, type AddId } from "../flows/add-actions";
@@ -21,7 +21,11 @@
   import Button from "../ui/Button.svelte";
   import CapacityGauge from "../ui/CapacityGauge.svelte";
   import CategoryGroup from "../ui/CategoryGroup.svelte";
-  import { ArrowDown, ArrowUp, ChevronDown, Lock, Pencil, Plus, ShieldAlert, SlidersHorizontal, Trash2, Upload, X } from "../ui/Icon";
+  import { ChevronDown, Eye, Pencil, Plus, RefreshCw, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from "../ui/Icon";
+  import NamesTip from "../ui/NamesTip.svelte";
+  import { composePreview } from "../ui/itemView";
+  import { safeBlobType } from "../viewers/blobs";
+  import ViewerPanel, { type ViewItem } from "../viewers/ViewerPanel.svelte";
   import AddIcon from "../ui/AddIcon.svelte";
   import AddSheet from "../ui/AddSheet.svelte";
   import CaptureScreen, { type Captured } from "../ui/CaptureScreen.svelte";
@@ -397,7 +401,10 @@
   // Vocal pris ici : extension interne, jamais affichée (comme sur sa ligne).
   const menuExt = $derived(menuItem && menuItem.kind !== "text" && !menuItem.voice ? menuItem.ext : "");
   const menuName = $derived(menuItem ? menuItem.base + menuExt : "");
-  const menuMovable = $derived(menuItem ? composer.items.filter((i) => i.category === menuItem.category).length > 1 : false);
+  // Menu (retours UI6) : Aperçu (si permis), Renommer ou Modifier, Nettoyer ou Réessayer (si
+  // utile), Supprimer. Plus de Monter ni Descendre.
+  const menuPeek = $derived(menuItem ? composePreview(menuItem) !== null : false);
+  const menuFix = $derived(menuItem ? fixOf(menuItem) : null);
   $effect(() => {
     if (menuId !== null && !menuItem) menuId = null;
   });
@@ -426,10 +433,62 @@
     if (r) menuError = r;
     else menuId = null;
   }
+  function menuPreview() {
+    const id = menuId;
+    menuId = null;
+    if (id) void tick().then(() => preview(id));
+  }
+  function menuFixRun() {
+    const id = menuId;
+    menuId = null;
+    if (id) void tick().then(() => fixRun(id));
+  }
   function menuRemove() {
     const id = menuId;
     menuId = null;
     if (id) void tick().then(() => remove(id));
+  }
+
+  // ---------- Aperçu, Nettoyer, Réessayer (retours UI6) ----------
+  // Ordre de la visionneuse : celui de la liste ; seulement les éléments qui ont un aperçu.
+  const viewList = $derived(composer.items.flatMap((i) => {
+    const k = composePreview(i);
+    return k ? [{ item: i, kind: k }] : [];
+  }));
+  const viewItems = $derived<ViewItem[]>(viewList.map((v, n) => ({ i: n, name: v.item.kind === "text" ? v.item.base : v.item.base + (v.item.voice ? "" : v.item.ext), kind: v.kind, size: v.item.size, text: v.item.kind === "text" ? (v.item.text ?? "") : undefined })));
+  let viewAt = $state<number | null>(null);
+  function preview(id: string) {
+    const n = viewList.findIndex((v) => v.item.id === id);
+    if (n >= 0) viewAt = n;
+  }
+  // Type du Blob par la table fixe de la visionneuse (jamais le type annoncé tel quel).
+  async function loadLocal(n: number): Promise<Blob> {
+    const v = viewList[n];
+    const type = v ? safeBlobType(v.kind, v.item.mime) : null;
+    if (!v || !type || !(v.item.data instanceof Blob)) throw new Error("apercu_impossible");
+    return v.item.data.slice(0, v.item.data.size, type);
+  }
+  $effect(() => {
+    if (viewAt !== null && viewAt >= viewList.length) viewAt = null;
+  });
+  /** Nettoyer (Original), Réessayer (échec du nettoyage ou de l'envoi) ; null : rien à proposer. */
+  function fixOf(i: ComposeItem): "nettoyer" | "reessayer" | null {
+    const c = canClean(i);
+    if (c) return c;
+    return upload(i)?.key === "compose.up.erreur" && onretry ? "reessayer" : null;
+  }
+  async function fixRun(id: string) {
+    const it = composer.items.find((i) => i.id === id);
+    if (!it) return;
+    const name = it.kind === "text" ? it.base : it.base + (it.voice ? "" : it.ext);
+    if (canClean(it)) {
+      await composer.clean(id);
+      const now = composer.items.find((i) => i.id === id);
+      if (now) announce(t(now.clean === "nettoye" ? "compose.cleaned" : "compose.clean.failed", { name }));
+      // Le contenu a changé : le brouillon renvoie la version nettoyée (sync) ; sinon, l'envoi
+      // en échec est relancé tel quel.
+      if (now && now.data === it.data && upload(now)?.key === "compose.up.erreur") onretry?.(id);
+    } else onretry?.(id);
   }
 
   function send() {
@@ -482,7 +541,10 @@
   <div class={["app", { narrow }]} {@attach narrow ? null : fitViewport}>
     <div class="list-col">
       <div class="top">
-        <h2 id="compose-title" class="title" tabindex="-1" data-large-title bind:this={title}>{t("compose.title")}</h2>
+        <div class="tt">
+          <h2 id="compose-title" class="title" tabindex="-1" data-large-title bind:this={title}>{t("compose.title")}</h2>
+          <NamesTip />
+        </div>
         <div class="clear">
           <Button variant="secondary" dense onpress={clearAll}>
             {#snippet icon()}<Trash2 size={18} strokeWidth={1.8} />{/snippet}
@@ -529,12 +591,12 @@
             danger={(i) => culprits.has(i.id)}
             {upload}
             {onretry}
+            onpreview={(i) => (composePreview(i) ? () => preview(i.id) : undefined)}
+            fix={fixOf}
+            onclean={(id) => void fixRun(id)}
+            cleaning={(i) => composer.isCleaning(i.id)}
           />
         {/each}
-      </div>
-
-      <div class="trust">
-        <p><Lock size={15} strokeWidth={2} aria-hidden="true" />{t("compose.trust.names")}</p>
       </div>
       </div>
       {#if !narrow}{@render adder()}{/if}
@@ -656,10 +718,14 @@
       </div>
     {:else}
       <div class="mlist">
+        {#if menuPeek}
+          <button type="button" class="mi" onclick={menuPreview}><Eye size={20} strokeWidth={1.8} aria-hidden="true" />{t("compose.preview.short")}</button>
+        {/if}
         <button type="button" class="mi" onclick={menuEdit}><Pencil size={20} strokeWidth={1.8} aria-hidden="true" />{menuItem.kind === "text" ? t("compose.edit.short") : t("compose.rename.short")}</button>
-        {#if menuMovable}
-          <button type="button" class="mi" onclick={() => move(menuItem!.id, -1)}><ArrowUp size={20} strokeWidth={1.8} aria-hidden="true" />{t("compose.move.up")}</button>
-          <button type="button" class="mi" onclick={() => move(menuItem!.id, 1)}><ArrowDown size={20} strokeWidth={1.8} aria-hidden="true" />{t("compose.move.down")}</button>
+        {#if menuFix}
+          <button type="button" class="mi" onclick={menuFixRun} disabled={composer.isCleaning(menuItem.id)} data-fix={menuFix}>
+            {#if menuFix === "nettoyer"}<ShieldCheck size={20} strokeWidth={1.8} aria-hidden="true" />{t("compose.clean.short")}{:else}<RefreshCw size={20} strokeWidth={1.8} aria-hidden="true" />{t("common.retry")}{/if}
+          </button>
         {/if}
         <button type="button" class="mi danger" onclick={menuRemove}><X size={20} strokeWidth={1.8} aria-hidden="true" />{t("compose.remove.short")}</button>
       </div>
@@ -671,6 +737,10 @@
 <Sheet bind:open={() => menuId !== null, (v) => { if (!v) menuId = null; }} title={menuName}>{@render menuBody()}</Sheet>
 
 <PaidSheet bind:open={paidOpen} tier={paidTier} />
+
+<!-- Aperçu d'un élément avant l'envoi (retours UI6) : la visionneuse du destinataire, sans
+     téléchargement ; le contenu ne quitte jamais la mémoire de la page. -->
+<ViewerPanel items={viewItems} bind:at={viewAt} viewOnly={false} load={loadLocal} held={false} onclose={() => undefined} />
 
 <AddSheet bind:open={addOpen} actions={sheetActions} onpick={addAct} />
 
@@ -728,7 +798,7 @@
   .side {
     display: contents;
   }
-  /* En-tête : « Votre envoi », « Tout retirer », et la capacité bien visible (nombre et taille). */
+  /* En-tête : « Votre envoi », « Tout supprimer », et la capacité bien visible (nombre et taille). */
   .top {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
@@ -925,27 +995,11 @@
     display: grid;
     gap: 6px;
   }
-  .trust {
-    display: grid;
-    gap: 6px;
-    padding: 6px 4px 0;
-    border-top: 1px solid var(--hair);
-  }
-  /* Phrase sur les noms : centrée (retours UI4), le cadenas dans la ligne. */
-  .trust p {
-    max-width: 52ch;
-    margin: 0 auto;
-    color: var(--text-2);
-    font-size: var(--fs-small);
-    line-height: 1.45;
-    text-align: center;
-    text-wrap: balance;
-  }
-  .trust p :global(svg) {
-    display: inline-block;
-    vertical-align: -2px;
-    margin-inline-end: 6px;
-    color: var(--accent);
+  .tt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
   }
 
   /* Barre d'actions : jauge, estimation, bouton ; collée en bas sur téléphone (zone du pouce). */

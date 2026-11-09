@@ -16,7 +16,7 @@
   const size = (x: Tier) => t("offers.size", { size: formatBytes(x === "free" ? CONTENT_MAX : PAID[x].bytes, lang) });
   const ttl = (x: Tier) => (x === "free" ? formatDuration(TTL_MAX_HOURS * 3600, lang) : t("paid.days", { n: Math.max(...PAID[x].ttlDays) }));
   const opens = (x: Tier) => String(x === "free" ? MAX_OPENS : PAID[x].opens);
-  const price = (x: Tier) => (x === "free" ? t("offers.price.free") : t("offers.price", { month: eur(PAID[x].month) }));
+  const price = (x: Tier) => (x === "free" ? t("offers.price.free") : t("offers.price", { month: eur(PAID[x].month), year: eur(PAID[x].year) }));
   const rows = $derived([
     { k: t("offers.row.size"), f: size },
     { k: t("offers.row.ttl"), f: ttl },

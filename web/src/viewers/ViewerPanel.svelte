@@ -31,7 +31,8 @@
     load: (i: number, onBytes: (done: number) => void, signal: AbortSignal) => Promise<Blob>;
     /** Une lecture en pause tient le lecteur : l'aperçu attendrait. */
     held: boolean;
-    ondownload: (i: number) => void;
+    /** Absent (aperçu de l'expéditeur, dans le composeur) : aucun bouton « Télécharger ». */
+    ondownload?: (i: number) => void;
     onclose: () => void;
   };
   let { items, at = $bindable(), viewOnly, load, held, ondownload, onclose }: Props = $props();
@@ -177,7 +178,7 @@
       </div>
       {#if viewOnly}
         <p class="vo"><Eye size={16} aria-hidden="true" /> <span>{t("content.viewOnly")}</span></p>
-      {:else if cur.kind !== "text"}
+      {:else if cur.kind !== "text" && ondownload}
         <Button variant="secondary" dense onpress={() => ondownload(cur.i)} aria-label={t("dl.row.download", { name: cur.name })}>
           {#snippet icon()}<Download size={18} />{/snippet}
           {t("dl.download")}

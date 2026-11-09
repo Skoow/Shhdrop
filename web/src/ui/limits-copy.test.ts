@@ -61,9 +61,9 @@ describe("limites : 200 éléments (toutes formules), 2 Go gratuits", () => {
     expect(document.querySelector('[role="alert"]')!.textContent).toBe("Trop gros : 1 octet de trop (limite : 2 Go).");
   });
 
-  it("jauge : 2,2 Go sur 2 Go → « Trop gros : 2,2 Go sur 2 Go. Retirez 200 Mo. »", () => {
+  it("jauge : 2,2 Go sur 2 Go → « Trop gros : 2,2 Go sur 2 Go. Supprimez 200 Mo. »", () => {
     show(CapacityGauge, { bytes: CONTENT_MAX + 200 * MIB, count: 2 });
-    expect(document.querySelector('[role="alert"]')!.textContent).toBe("Trop gros : 2,2 Go sur 2 Go. Retirez 200 Mo.");
+    expect(document.querySelector('[role="alert"]')!.textContent).toBe("Trop gros : 2,2 Go sur 2 Go. Supprimez 200 Mo.");
   });
 
   it("aucune ancienne valeur écrite en dur dans les textes et les écrans", () => {

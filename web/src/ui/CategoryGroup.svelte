@@ -33,9 +33,14 @@
     /** Envoi dès l'ajout (spec §41.14) : état de chaque ligne, et Réessayer. */
     upload?: (item: ComposeItem) => RowStatus | null;
     onretry?: (id: string) => void;
-    /** « Envoyer tel quel » d'un élément non nettoyé (« Retirer » : `onremove`). */
+    /** Aperçu (toucher l'icône) : action, ou undefined sans aperçu permis. */
+    onpreview?: (item: ComposeItem) => (() => void) | undefined;
+    /** « Nettoyer » ou « Réessayer » proposés sur la ligne (ordinateur), et leur action. */
+    fix?: (item: ComposeItem) => "nettoyer" | "reessayer" | null;
+    onclean?: (id: string) => void;
+    cleaning?: (item: ComposeItem) => boolean;
   };
-  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, cannotOpen, danger, upload, onretry }: Props = $props();
+  let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, cannotOpen, danger, upload, onretry, onpreview, fix, onclean, cleaning }: Props = $props();
   // Une seule présentation partout (décision du propriétaire du 7 novembre) : lignes compactes,
   // icône de format, nom, type, taille, temps d'envoi estimé, actions.
 
@@ -154,6 +159,10 @@
           danger={danger?.(item) ?? false}
           upload={upload?.(item) ?? null}
           onretry={() => onretry?.(item.id)}
+          onpreview={onpreview?.(item)}
+          fix={fix?.(item) ?? null}
+          onclean={() => onclean?.(item.id)}
+          cleaning={cleaning?.(item) ?? false}
         />
       </li>
     {/each}

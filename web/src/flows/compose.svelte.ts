@@ -9,7 +9,7 @@
 // nettoyé » avec sa raison. Réglage désactivé : rien n'est modifié (« Original »).
 import { CONTENT_MAX, DATA_SEGMENTS, MANIFEST_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, cleanName, isRiskyName, segmentsNeeded, type Item } from "../index";
 import { isUncleaned, type ItemCleanState } from "../media/clean-label";
-import type { Format } from "../media/format";
+import { DOC_FORMATS, IMAGE_FORMATS, detectFormat, type Format } from "../media/format";
 import { stripMetadata, type CleanFamily, type StripResult } from "../media/strip";
 import { approve } from "./clean-gate";
 import { CATEGORY_ORDER, categoryOf, extOf, type Category } from "./kinds";
@@ -47,6 +47,11 @@ export type ComposeItem = {
   readonly generic?: string;
   /** Exécutable ou script (extension à risque, ou contenu exécutable) : prévenir. */
   readonly risky?: boolean;
+  /** Vidéo ou vocal pris ici : un nouveau nettoyage passe par strip-capture (`recorded`). */
+  readonly recorded?: boolean;
+  /** Format que le nettoyage sait traiter (images, PDF, bureautique, vidéo ou vocal pris ici) :
+   *  « Nettoyer » n'est proposé qu'à ceux-là (un élément « Original » d'un autre format n'y gagnerait rien). */
+  readonly cleanable?: boolean;
   /** Le contenu ne correspond pas à l'extension (exécutable déguisé, par exemple). */
   readonly mismatch?: boolean;
 };
@@ -145,6 +150,17 @@ function cleared<T extends { data: Blob | Uint8Array<ArrayBuffer> } & CleanField
   return it;
 }
 
+/**
+ * « Nettoyer » (élément laissé « Original » par le réglage) ou « Réessayer » (échec) : seulement
+ * un fichier qui pourrait être nettoyé. Archive : jamais ouverte (D41-27), donc jamais proposée.
+ */
+export function canClean(i: Pick<ComposeItem, "kind" | "clean" | "category" | "cleanable">): "nettoyer" | "reessayer" | null {
+  if (i.kind !== "file" || i.category === "archives") return null;
+  if (i.clean === "original") return i.cleanable ? "nettoyer" : null;
+  if (i.clean === "echec") return "reessayer";
+  return null;
+}
+
 function catRank(c: Category): number {
   return CATEGORY_ORDER.indexOf(c);
 }
@@ -231,10 +247,12 @@ export function createComposer(deps: ComposeDeps = {}) {
     try {
       const readable: File[] = [];
       const heads = new Map<File, Sniffed>();
+      const formats = new Map<File, Format>();
       for (const f of files) {
         try {
           const head = await probe(f);
           heads.set(f, head ? sniff(head) : null);
+          formats.set(f, head ? detectFormat(head, f.type, f.name) : "inconnu");
           readable.push(f);
         } catch {
           report.unreadable.push(cleanName(f.name));
@@ -256,7 +274,10 @@ export function createComposer(deps: ComposeDeps = {}) {
         const risky = exec || isRiskyName(base + ext);
         const mismatch = exec && !isRiskyName(base + ext);
         const { data, c } = await cleanOf(f, source, base + ext, category, captureStripped);
-        ready.push(cleared({ id: nextId(), kind: "file", category, base, ext, mime, size: data.size, data, ...c, duplicate: false, sniffed, risky, mismatch }));
+        const fmt = formats.get(f) ?? "inconnu";
+        const recorded = source === "video-ici";
+        const cleanable = (IMAGE_FORMATS as readonly string[]).includes(fmt) || (DOC_FORMATS as readonly string[]).includes(fmt) || (recorded && (fmt === "mp4" || fmt === "webm"));
+        ready.push(cleared({ id: nextId(), kind: "file", category, base, ext, mime, size: data.size, data, ...c, duplicate: false, sniffed, risky, mismatch, cleanable, ...(recorded ? { recorded } : {}) }));
       }
       if (ready.length > 0) {
         const all = [...items, ...ready];
@@ -329,11 +350,45 @@ export function createComposer(deps: ComposeDeps = {}) {
       data: blob,
       ...(stripped ? { clean: "nettoye" as const, cleanFamily: "vocal" as const } : { clean: "echec" as const }),
       ...(voice ? { voice } : {}),
+      recorded: true,
+      cleanable: true,
       duplicate: false,
     };
     cleared(it);
     commit(() => set(insertSorted(items, it)));
     return it.id;
+  }
+
+  /**
+   * Nettoyage à la demande (menu « … ») : « Nettoyer » un élément « Original » (réglage
+   * désactivé), « Réessayer » un échec. Les autres états n'ont rien à refaire (nettoyé, archive
+   * intacte, protégé, format non pris en charge, texte). Le contenu de la ligne change : le
+   * brouillon (transfer/draft.ts, `sync`) interrompt et efface l'envoi déjà fait, puis renvoie
+   * la version nettoyée (rien de l'ancienne ne reste sur le serveur).
+   */
+  let cleaning = $state.raw<ReadonlySet<string>>(new Set());
+  async function clean(id: string): Promise<void> {
+    const it = items.find((i) => i.id === id);
+    if (!it || !canClean(it) || cleaning.has(id) || !(it.data instanceof Blob)) return;
+    cleaning = new Set([...cleaning, id]);
+    try {
+      const r = await strip(it.data, it.mime, it.base + it.ext, { recorded: it.recorded === true });
+      const now = items.find((i) => i.id === id);
+      // Retiré, ou déjà remplacé, pendant le nettoyage : rien à appliquer.
+      if (!now || now.data !== it.data) return;
+      const c: CleanFields =
+        r.state === "nettoye"
+          ? { clean: "nettoye", cleanFamily: it.voice || it.generic !== undefined ? "vocal" : r.family }
+          : r.state === "non_pris_en_charge"
+            ? { clean: r.state, cleanFormat: r.format }
+            : { clean: r.state };
+      const data = r.state === "nettoye" ? r.data : it.data;
+      set(items.map((i) => (i.id === id ? cleared({ ...i, clean: c.clean, cleanFamily: c.cleanFamily, cleanFormat: c.cleanFormat, data, size: data.size }) : i)));
+    } finally {
+      const next = new Set(cleaning);
+      next.delete(id);
+      cleaning = next;
+    }
   }
 
   /** Retire ; `undo()` (une seule fois) remet l'élément à sa place. */
@@ -520,6 +575,9 @@ export function createComposer(deps: ComposeDeps = {}) {
       return items.filter(isUncleaned).length;
     },
     addVoice,
+    clean,
+    /** Nettoyage à la demande en cours pour cet élément. */
+    isCleaning: (id: string) => cleaning.has(id),
     remove,
     clear,
     rename,

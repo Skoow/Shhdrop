@@ -59,9 +59,8 @@ test("sélecteur de fichier : nom nettoyé, octets identiques, progression tabul
   await expect(progress).toBeVisible();
   await expect(progress).toHaveCSS("font-variant-numeric", "tabular-nums");
   await capture(page, "save-progress");
-  // Téléchargé : icône de téléchargement verte sur la ligne (retours UI4).
-  await expect(page.locator('li.row[data-state="done"] button[data-done]')).toBeVisible({ timeout: 30_000 });
-  expect(await page.locator('li.row[data-state="done"] button[data-done]').evaluate((e) => getComputedStyle(e).color)).toBe("rgb(95, 227, 181)");
+  // Téléchargé : pastille verte au coin de l'icône, avec sa bulle (retours UI6).
+  await expect(page.locator('li.row[data-state="done"] [data-downloaded] button')).toHaveAccessibleName("Téléchargé", { timeout: 30_000 });
   expect(await win(page, "__name")).toBe("rapport.bin");
   expect(await win(page, "__closed")).toBe(true);
   expect(await win(page, "__aborted")).toBeUndefined();

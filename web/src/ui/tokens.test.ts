@@ -97,6 +97,29 @@ describe("jetons de couleur (UI §3.1, §3.2)", () => {
   });
 });
 
+describe("icônes de format en couleur (retours UI6)", () => {
+  const FMT = ["pdf", "doc", "sheet", "slides", "archive", "image", "video", "audio", "other"].map((f) => `--fmt-${f}`);
+  const hue = (h: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255) as [number, number, number];
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    if (d === 0) return null;
+    const x = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (x * 60 + 360) % 360;
+  };
+  const gap = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+  it("libellé --on-fmt ≥ 4,5:1 sur chaque pastille", () => {
+    for (const k of FMT) expect(contrast(hex("--on-fmt"), hex(k)), k).toBeGreaterThanOrEqual(4.5);
+  });
+  it("teintes distinctes entre elles, du vert « vérifié » et du bleu Plus/Pro", () => {
+    const hs = FMT.filter((k) => k !== "--fmt-other").map((k) => [k, hue(hex(k))!] as const);
+    for (const [k, h] of hs) {
+      expect(gap(h, hue(hex("--accent"))!), `${k} / --accent`).toBeGreaterThanOrEqual(12);
+      expect(gap(h, hue(hex("--plus"))!), `${k} / --plus`).toBeGreaterThanOrEqual(12);
+    }
+    for (let i = 0; i < hs.length; i++) for (let j = i + 1; j < hs.length; j++) expect(gap(hs[i]![1], hs[j]![1]), `${hs[i]![0]} / ${hs[j]![0]}`).toBeGreaterThanOrEqual(12);
+  });
+});
+
 describe("autres jetons (UI §4.2, §5, §7.2)", () => {
   it("jeu exact de jetons", () => {
     const names = [...T.keys()].sort();
@@ -136,6 +159,8 @@ describe("autres jetons (UI §4.2, §5, §7.2)", () => {
       "--dur-ambient-2", "--dur-ambient-3", "--ease-view", "--rise", "--blur-in",
       // accueil v3
       "--fs-section", "--ease-settle",
+      // icônes de format (UI6)
+      "--fmt-pdf", "--fmt-doc", "--fmt-sheet", "--fmt-slides", "--fmt-archive", "--fmt-image", "--fmt-video", "--fmt-audio", "--fmt-other", "--on-fmt",
     ].sort();
     expect(names).toEqual(expected);
   });

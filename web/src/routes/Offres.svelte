@@ -1,9 +1,11 @@
 <script lang="ts">
   // Offres (pied de page « Offres Plus/Pro », retours UI5) : la comparaison Gratuit / Plus / Pro,
-  // taille « par partage ». Rien n'est en vente : aucun bouton d'achat (D41-16, spec §38).
+  // taille « par partage », prix mensuels en grand et façons de payer (retours UI6, D41-32).
+  // Rien n'est en vente : aucun bouton d'achat (D41-16, spec §38).
   import { t } from "../i18n/i18n.svelte";
   import { Clock } from "../ui/Icon";
   import OffersTable from "../ui/OffersTable.svelte";
+  import PriceCards from "../ui/PriceCards.svelte";
 </script>
 
 <article class="offers" aria-labelledby="offers-title">
@@ -11,8 +13,9 @@
     <h1 id="offers-title" class="title" tabindex="-1" data-large-title>{t("offers.title")}</h1>
     <p class="lede">{t("offers.lede")}</p>
   </header>
-  <OffersTable />
   <p class="soon"><Clock size={16} strokeWidth={2} aria-hidden="true" /><span><b>{t("paid.soon")}</b> {t("paid.soon.body")}</span></p>
+  <PriceCards />
+  <OffersTable />
 </article>
 
 <style>

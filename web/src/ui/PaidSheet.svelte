@@ -9,6 +9,7 @@
   import Button from "./Button.svelte";
   import { Check, Clock } from "./Icon";
   import OffersTable from "./OffersTable.svelte";
+  import PriceCards from "./PriceCards.svelte";
   import Sheet from "./Sheet.svelte";
 
   type Props = { open: boolean; tier: PaidTier };
@@ -17,7 +18,6 @@
   const lang = $derived(getLang());
   const name = $derived(t(`paid.badge.${tier}`));
   const p = $derived(PAID[tier]);
-  const eur = (v: number) => new Intl.NumberFormat(lang, { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v);
   const lines = $derived([
     t("paid.ttl", { max: t("paid.days", { n: Math.max(...p.ttlDays) }), free: formatDuration(TTL_MAX_HOURS * 3600, lang) }),
     t("paid.firstOpen.effect"),
@@ -34,7 +34,7 @@
     <ul class="list">
       {#each lines as l, i (i)}<li><Check size={16} strokeWidth={2.2} aria-hidden="true" /><span class="num">{l}</span></li>{/each}
     </ul>
-    <p class="price num">{t("paid.price", { month: eur(p.month), year: eur(p.year) })}</p>
+    <PriceCards tiers={[tier]} />
     <p class="soon"><Clock size={16} strokeWidth={2} aria-hidden="true" /><span><b>{t("paid.soon")}</b> {t("paid.soon.body")}</span></p>
     <Button variant="secondary" onpress={() => void (open = false)}>{t("common.understood")}</Button>
   </div>
@@ -45,8 +45,7 @@
     display: grid;
     gap: var(--sp-4);
   }
-  .lead,
-  .price {
+  .lead {
     margin: 0;
     color: var(--text-2);
     text-wrap: pretty;
