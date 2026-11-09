@@ -165,6 +165,7 @@ func (s *Service) reopen(id string, kAcces, kPreuve []byte, grant string) (Opene
 		return Opened{}, ErrReopenLimit
 	}
 	e.reopens++
+	s.cancelLeaveLocked(k) // rechargement ou autre onglet : la personne n'est pas partie
 	if state == "draining" {
 		// Le nouveau jeton vit 6 h : la purge le suit (comme à la dernière ouverture émise).
 		s.mem.mu.Lock()
@@ -203,6 +204,7 @@ func (s *Service) Regrant(id string, openN int, tokenExp time.Time) (string, err
 	if cap <= now {
 		return "", ErrGone
 	}
+	s.cancelLeaveLocked(k) // une page de cette ouverture vit encore
 	return s.grantLocked(k, cap, now), nil
 }
 
@@ -270,6 +272,9 @@ func (s *Service) MetaGrant(kAcces []byte, grant string) (Meta, error) {
 	}
 	s.gone.mu.Lock()
 	live := s.liveGrantLocked(openKey{m.ID, int(n)}) != nil
+	if live {
+		s.cancelLeaveLocked(openKey{m.ID, int(n)}) // rechargement : la page revient (D41-28)
+	}
 	s.gone.mu.Unlock()
 	if !live {
 		return Meta{}, ErrNotFound

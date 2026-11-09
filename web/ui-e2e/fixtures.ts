@@ -6,7 +6,7 @@ import { errors, test as base, expect, type Page } from "@playwright/test";
 import { get } from "node:http";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { startServer, type TestServer } from "../e2e/server";
+import { startServer, type StartOpts, type TestServer } from "../e2e/server";
 import { startPagesServer } from "./pages-server";
 
 const DIST = fileURLToPath(new URL("../dist", import.meta.url));
@@ -149,9 +149,11 @@ export type Demo = {
   requests: { url: string; headers: Record<string, string>; postData: string | null }[];
 };
 
-export const test = base.extend<{ shh: Shh; demo: Demo }>({
-  shh: async ({ page }, use) => {
-    const server = await startServer({ env: { SHH_STATIC_DIR: DIST } });
+export const test = base.extend<{ shh: Shh; demo: Demo; shhServer: Pick<StartOpts, "binary" | "env"> }>({
+  /** Binaire et variables du serveur de test (par défaut : le binaire livré, SHH_STATIC_DIR seul). */
+  shhServer: [{}, { option: true }],
+  shh: async ({ page, shhServer }, use) => {
+    const server = await startServer({ binary: shhServer.binary, env: { SHH_STATIC_DIR: DIST, ...shhServer.env } });
     try {
       await probe(server.origin + "/");
       retryFirstGoto(page, server.origin);

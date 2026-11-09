@@ -442,7 +442,7 @@ export const en = {
   "content.memory": "This device may run out of memory for a file this size.",
   "content.copied": "Text copied",
   "content.destroy": "Destroy this share",
-  "content.lastOpen": "You are the last person allowed to open this share. You can destroy it before leaving the page, without waiting for it to run out.",
+  "content.lastOpen": "You are the last person allowed to open this share. It will be deleted when you leave this page. You can also destroy it now.",
   "content.opensLeft.one": "This link can be opened {n}\u00a0more time.",
   "content.opensLeft.other": "This link can be opened {n}\u00a0more times.",
   "content.destroy.confirm": "Destroy this share for everyone? It is immediate and final.",

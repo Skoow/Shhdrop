@@ -475,6 +475,12 @@ export type Opened = {
   /** Octroi renouvelé pour 30 min (POST /api/shares/regrant) ; erreurs : voir readerError. */
   regrant(): Promise<string>;
   /**
+   * Sortie de page (pagehide) : à la dernière ouverture permise seulement (opensLeft = 0),
+   * prévient le serveur (« je pars », D41-28), qui supprime le partage 3 min plus tard sauf
+   * rechargement. Ailleurs : rien. Ne lève jamais, n'attend rien.
+   */
+  leave(): void;
+  /**
    * Surveillance de la disparition (spec §41.8) : un appel = une requête tenue au plus 25 s.
    * "alive" (rien), "gone" (partage disparu : fermer l'interface), "stop" (ne plus surveiller).
    */
@@ -621,6 +627,9 @@ export async function openShare(
         grant: u.grant,
         opensLeft: u.opensLeft,
         regrant: () => guarded(() => api.regrant(c, u.downloadToken), readerError),
+        leave: () => {
+          if (u.opensLeft === 0 && !finished && !destroying) api.leave(c, u.downloadToken).catch(() => undefined);
+        },
         // Une destruction ou une fin (done) faite ici prévient aussi la surveillance (410) :
         // ce « gone » est le nôtre, l'écran de fin vient de destroy() ou de done() ; la
         // surveillance s'arrête simplement.

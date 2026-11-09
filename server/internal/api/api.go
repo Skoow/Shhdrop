@@ -159,6 +159,7 @@ func newHandler(s *server, static http.Handler) http.Handler {
 	api.HandleFunc("GET /api/shares/segments/{n}", s.getSegment)
 	api.HandleFunc("POST /api/shares/done", s.done)
 	api.HandleFunc("POST /api/shares/regrant", s.regrant)
+	api.HandleFunc("POST /api/shares/leave", s.leave)
 	api.HandleFunc("POST /api/shares/destroy", s.destroy)
 	api.HandleFunc("GET /api/shares/watch", s.watch)
 	api.HandleFunc("GET /api/manage/status", s.manageStatus)

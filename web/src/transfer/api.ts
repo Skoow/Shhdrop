@@ -428,6 +428,16 @@ export async function done(c: Ctx, token: string): Promise<void> {
 }
 
 /**
+ * « Je pars » (D41-28) : la personne qui détient la dernière ouverture permise quitte la page
+ * (pagehide). keepalive : la requête survit à la fermeture (même garantie que l'API de balise,
+ * dont le nom est interdit par §35.1). Le serveur détruit le partage 3 min plus tard, sauf
+ * réouverture par octroi (rechargement) ou lecture en cours. Une seule tentative, sans attente.
+ */
+export async function leave(c: Ctx, token: string): Promise<void> {
+  await send(c, { method: "POST", path: "/api/shares/leave", headers: bearer(token), keepalive: true }, none);
+}
+
+/**
  * GET /api/shares/watch (spec §41.8, route de la Task M2, étape 7b) : requête tenue 25 s au
  * plus par le serveur. 204 → "alive" ; 410 {"error":"gone"} → "gone" ; toute autre réponse
  * (404 d'un serveur sans la route, 429, 5xx) → "stop" : la surveillance s'arrête, sans

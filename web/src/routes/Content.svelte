@@ -255,6 +255,9 @@
     }
     if (wiped) return;
     wiped = true;
+    // D41-28 : dernière ouverture permise → « je pars » (le serveur supprime 3 min plus tard,
+    // sauf rechargement, qui rouvre par l'octroi et annule).
+    o.leave();
     dl.dispose();
     previews.clear();
     release(o);

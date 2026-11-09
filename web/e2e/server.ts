@@ -10,6 +10,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const BINARY = fileURLToPath(new URL("../../server/shhdrop", import.meta.url));
+/** Binaire de test seulement (go build -tags e2etime) : SHH_E2E_LEAVE_DELAY lu (D41-28). */
+export const BINARY_E2ETIME = fileURLToPath(new URL("../../server/shhdrop-e2etime", import.meta.url));
 
 export type TestServer = {
   origin: string;
@@ -39,16 +41,19 @@ export type StartOpts = {
   /** Variables ajoutées ou remplacées (une valeur undefined retire la variable). */
   env?: Record<string, string | undefined>;
   timeoutMs?: number;
+  /** Binaire à lancer (BINARY par défaut). */
+  binary?: string;
 };
 
 export async function startServer(opts: StartOpts = {}): Promise<TestServer> {
-  if (!existsSync(BINARY)) throw new Error(`binaire absent : ${BINARY} (lancer make test-e2e)`);
+  const bin = opts.binary ?? BINARY;
+  if (!existsSync(bin)) throw new Error(`binaire absent : ${bin} (lancer make test-e2e)`);
   const dataDir = mkdtempSync(join(tmpdir(), "shh-e2e-"));
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries({ PATH: process.env.PATH ?? "", SHH_DATA_DIR: dataDir, SHH_LISTEN: "127.0.0.1:0", SHH_STORAGE_MAX: "4294967296", ...opts.env })) {
     if (v !== undefined) env[k] = v;
   }
-  const proc = spawn(BINARY, ["serve"], { env, stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(bin, ["serve"], { env, stdio: ["ignore", "pipe", "pipe"] });
   const out: Buffer[] = [];
   const err: Buffer[] = [];
   proc.stdout.on("data", (b: Buffer) => out.push(b));

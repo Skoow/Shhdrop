@@ -1,7 +1,7 @@
 // Fidélité du faux serveur de la démo (UI §14.3, A44) : le VRAI client (createShare,
 // openShare, destroyShare, shareStatus) tourne contre lui, avec les cas d'erreur de la spec §13,
 // et ses requêtes subissent le contrôle du test « le serveur ne voit rien ».
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { findIn, needle } from "../../e2e/scan";
 import { b64u, utf8 } from "../crypto/encoding";
 import { segmentSize } from "../crypto/container";
@@ -159,6 +159,31 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     await expect(openShare(r.link, PW, ORIGIN, { grant: again.grant }, net)).rejects.toBeInstanceOf(GrantInvalidError);
     const bad = await openShare(r.link, "faux", ORIGIN, undefined, net).catch((x: unknown) => x);
     expect((bad as BadPasswordError).attemptsLeft).toBe(4); // l'octroi falsifié n'a compté aucun essai
+  });
+
+  it("D41-28 : « je pars » de la dernière ouverture → effacé après 3 min ; rechargement → annulé ; ouverture non dernière → rien", async ({ expect }) => {
+    let offset = 0;
+    const { fake, net, statuses } = setup({ now: () => Date.now() + offset });
+    const r = await share(net, 2);
+    const first = await openShare(r.link, PW, ORIGIN, undefined, net);
+    first.leave(); // non dernière : aucune requête
+    const last = await openShare(r.link, PW, ORIGIN, undefined, net);
+    expect(last.opensLeft).toBe(0);
+    last.leave();
+    await vi.waitFor(() => expect(statuses).toContain("POST /api/shares/leave 204"));
+    expect(statuses.filter((x) => x.includes("/leave"))).toHaveLength(1);
+    // Rechargement dans les 3 min : annulé.
+    offset += 30_000;
+    const again = await openShare(r.link, PW, ORIGIN, { grant: last.grant }, net);
+    offset += 181_000;
+    expect(fake.shares()).toBe(1);
+    // Départ réel : effacé 3 min plus tard.
+    again.leave();
+    await vi.waitFor(() => expect(statuses.filter((x) => x.includes("/leave"))).toHaveLength(2));
+    offset += 179_000;
+    expect(fake.shares()).toBe(1);
+    offset += 1_000;
+    expect(fake.shares()).toBe(0);
   });
 
   it("dernière ouverture lue (done) : le partage « draining » est effacé", async ({ expect }) => {

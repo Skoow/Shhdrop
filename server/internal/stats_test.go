@@ -46,6 +46,7 @@ var allowedMaps = map[string]string{
 	"share/detached.go:opens":           "§9.5 ouvertures actives : ouvertures d'un descripteur détaché (§41.8)",
 	"share/detached.go:watch":           "§9.5 requêtes watch tenues (§41.8)",
 	"share/detached.go:grants":          "§9.5 octrois d'ouverture (§41.4)",
+	"share/detached.go:leaves":          "§9.5 départ de la dernière ouverture (D41-28)",
 	"share/streams.go:live":             "§9.5 flux de segments annulables (§41.8)",
 	"api/static_paths.go:pdfFrameFiles": "constante (liste de fichiers), aucun compteur",
 }

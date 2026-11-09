@@ -67,6 +67,7 @@ type goneState struct {
 	dead   map[string]*detached
 	watch  map[string]*watcher
 	grants map[openKey]*grantEntry // octrois d'ouverture (grant.go)
+	leaves map[openKey]int64       // départs de la dernière ouverture (leave.go) : heure du « je pars »
 }
 
 func (g *goneState) init() {

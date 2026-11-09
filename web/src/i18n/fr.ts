@@ -447,7 +447,7 @@ export const fr = {
   "content.memory": "Cet appareil risque de manquer de mémoire pour un fichier de cette taille.",
   "content.copied": "Texte copié",
   "content.destroy": "Détruire ce partage",
-  "content.lastOpen": "Vous êtes la dernière personne à ouvrir ce partage. Vous pouvez le détruire avant de quitter la page, sans attendre la fin de sa durée.",
+  "content.lastOpen": "Vous êtes la dernière personne à ouvrir ce partage. Il sera supprimé quand vous quitterez cette page. Vous pouvez aussi le détruire maintenant.",
   "content.opensLeft.one": "Ce lien peut encore être ouvert {n} fois.",
   "content.opensLeft.other": "Ce lien peut encore être ouvert {n} fois.",
   "content.destroy.confirm": "Détruire ce partage pour tout le monde ? C'est immédiat et définitif.",
