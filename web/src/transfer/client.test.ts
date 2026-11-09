@@ -1419,14 +1419,14 @@ describe("budget de lecture par ouverture (audit M1, spec §24)", () => {
 describe("base de l'application (scan de sécurité du 7 novembre, F2)", () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  it("démo (/Shhdrop/) : les liens rendus par createShare, avec la base, sont acceptés ; la racine aussi", async () => {
-    vi.stubEnv("BASE_URL", "/Shhdrop/");
-    const atBase = MANAGE.replace("/#m", "/Shhdrop/#m");
+  it("démo (/shhdrop/) : les liens rendus par createShare, avec la base, sont acceptés ; la racine aussi", async () => {
+    vi.stubEnv("BASE_URL", "/shhdrop/");
+    const atBase = MANAGE.replace("/#m", "/shhdrop/#m");
     expect(atBase).not.toBe(MANAGE);
     const s = server(() => j(404, { error: "not_found" }));
     expect(await reject(destroyShare(atBase, ORIGIN, s.net))).toBeInstanceOf(NotFoundError);
     expect(await reject(shareStatus(atBase, ORIGIN, s.net))).toBeInstanceOf(NotFoundError);
-    expect(await fetchMeta(LINK.replace("/#", "/Shhdrop/#"), ORIGIN, server(() => undefined).net)).toEqual({ expiresInS: 3000, opensLeft: 2 });
+    expect(await fetchMeta(LINK.replace("/#", "/shhdrop/#"), ORIGIN, server(() => undefined).net)).toEqual({ expiresInS: 3000, opensLeft: 2 });
     expect(await fetchMeta(LINK, ORIGIN, server(() => undefined).net)).toEqual({ expiresInS: 3000, opensLeft: 2 });
     // Ouvertures restantes absentes ou hors bornes : réponse refusée (ruling 5).
     for (const bad of [{ ...META, opens_left: undefined }, { ...META, opens_left: 0 }, { ...META, opens_left: 1.5 }])
@@ -1439,9 +1439,9 @@ describe("base de l'application (scan de sécurité du 7 novembre, F2)", () => {
     expect(none.calls).toEqual([]);
   });
 
-  it("production (/) : un lien sous /Shhdrop/ est refusé", async () => {
+  it("production (/) : un lien sous /shhdrop/ est refusé", async () => {
     const s = server(() => undefined);
-    await expect(destroyShare(MANAGE.replace("/#m", "/Shhdrop/#m"), ORIGIN, s.net)).rejects.toThrow("lien_invalide");
+    await expect(destroyShare(MANAGE.replace("/#m", "/shhdrop/#m"), ORIGIN, s.net)).rejects.toThrow("lien_invalide");
     expect(s.calls).toEqual([]);
   });
 });

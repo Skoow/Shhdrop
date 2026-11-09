@@ -32,7 +32,7 @@ describe("readLink (spec §32 : lien à la racine)", () => {
   it("requête ignorée (?fbclid= ajouté par Facebook, Messenger, Instagram) : lien valide, rendu sans la requête", () => {
     expect(readLink(`${O}/?fbclid=x#${KEY}`, "s", "/")).toEqual({ kind: "s", link: `${O}/#${KEY}` });
     expect(readLink(`${O}/?a=1&b=2#m${KEY}`, "m", "/")).toEqual({ kind: "m", link: `${O}/#m${KEY}` });
-    expect(readLink(`${O}/Shhdrop/?fbclid=x#${KEY}`, "s", "/Shhdrop/")).toEqual({ kind: "s", link: `${O}/#${KEY}` });
+    expect(readLink(`${O}/shhdrop/?fbclid=x#${KEY}`, "s", "/shhdrop/")).toEqual({ kind: "s", link: `${O}/#${KEY}` });
     expect(readLink(`${O}/?fbclid=x`, "s", "/")).toEqual({ kind: "incomplete" });
   });
 
@@ -41,13 +41,13 @@ describe("readLink (spec §32 : lien à la racine)", () => {
     expect(readLink(`${O}/#${KEY}`, "m", "/")).toEqual({ kind: "incomplete" });
   });
 
-  it("base de dépôt /Shhdrop/ : exigée ; le lien rendu est à la racine de l'origine", () => {
+  it("base de dépôt /shhdrop/ : exigée ; le lien rendu est à la racine de l'origine", () => {
     const local = "http://127.0.0.1:5173";
-    expect(readLink(`${local}/Shhdrop/#${KEY}`, "s", "/Shhdrop/")).toEqual({ kind: "s", link: `${local}/#${KEY}` });
-    expect(readLink(`${O}/Shhdrop/#m${KEY}`, "m", "/Shhdrop/")).toEqual({ kind: "m", link: `${O}/#m${KEY}` });
-    expect(readLink(`${O}/#${KEY}`, "s", "/Shhdrop/")).toEqual({ kind: "incomplete" });
-    expect(readLink(`${O}/Shhdropx/#${KEY}`, "s", "/Shhdrop/")).toEqual({ kind: "incomplete" });
-    expect(readLink(`${O}/Shhdrop/Shhdrop/#${KEY}`, "s", "/Shhdrop/")).toEqual({ kind: "incomplete" });
+    expect(readLink(`${local}/shhdrop/#${KEY}`, "s", "/shhdrop/")).toEqual({ kind: "s", link: `${local}/#${KEY}` });
+    expect(readLink(`${O}/shhdrop/#m${KEY}`, "m", "/shhdrop/")).toEqual({ kind: "m", link: `${O}/#m${KEY}` });
+    expect(readLink(`${O}/#${KEY}`, "s", "/shhdrop/")).toEqual({ kind: "incomplete" });
+    expect(readLink(`${O}/shhdropx/#${KEY}`, "s", "/shhdrop/")).toEqual({ kind: "incomplete" });
+    expect(readLink(`${O}/shhdrop/shhdrop/#${KEY}`, "s", "/shhdrop/")).toEqual({ kind: "incomplete" });
   });
 
   it("base par défaut : celle de Vite (« / » hors démo)", () => {

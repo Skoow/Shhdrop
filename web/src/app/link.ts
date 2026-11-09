@@ -15,7 +15,7 @@ const INCOMPLETE: LinkState = Object.freeze({ kind: "incomplete" });
 
 /**
  * Lit le lien de l'adresse courante (spec §32 : `${base}#<clé>` ou `${base}#m<clé>`).
- * `parseLink` exige le chemin de la base (« / », ou « /Shhdrop/ » en démo) et ignore la
+ * `parseLink` exige le chemin de la base (« / », ou « /shhdrop/ » en démo) et ignore la
  * requête : nos liens n'en portent jamais, mais les applications ajoutent des paramètres de
  * suivi (`?fbclid=…`) en gardant le fragment. Le lien rendu est remis à la racine de
  * l'origine (`${origin}/#…`), la forme qu'attendent les fonctions du client. Tout échec (pas

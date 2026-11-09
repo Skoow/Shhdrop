@@ -222,9 +222,9 @@ describe("vite.config.ts résolu", () => {
     expect(names).not.toContain("shh-demo-meta");
   });
 
-  it("mode demo : base /Shhdrop/, sortie dist-demo, demoMeta", async () => {
+  it("mode demo : base /shhdrop/, sortie dist-demo, demoMeta", async () => {
     const cfg = await resolveConfig({ configFile: join(webDir, "vite.config.ts"), root: webDir, mode: "demo" }, "build");
-    expect(cfg.base).toBe("/Shhdrop/");
+    expect(cfg.base).toBe("/shhdrop/");
     expect(cfg.build.outDir).toBe("dist-demo");
     const names = cfg.plugins.map((p) => p.name);
     expect(names).toContain("shh-demo-meta");

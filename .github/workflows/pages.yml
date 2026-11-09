@@ -30,7 +30,7 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
-      # Build de démo (UI §14.3) : faux serveur en mémoire, CSP meta, base /Shhdrop/, 404.html.
+      # Build de démo (UI §14.3) : faux serveur en mémoire, CSP meta, base /shhdrop/, 404.html.
       - run: npm ci --ignore-scripts
         working-directory: web
       - run: npm run build:demo

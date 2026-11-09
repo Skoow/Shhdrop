@@ -45,7 +45,7 @@ export function checkOrigin(origin: string): string {
   return origin;
 }
 
-// Base de dépôt : « / » en production, « /Shhdrop/ » pour la démo GitHub Pages.
+// Base de dépôt : « / » en production, « /shhdrop/ » pour la démo GitHub Pages.
 const BASE = /^\/(?:[A-Za-z0-9_-]+\/)*$/;
 
 function checkBase(base: string): string {
@@ -81,7 +81,7 @@ function strict(s: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * Analyse un lien : chemin égal à `base` exactement (« /Shhdrop » sans barre finale toléré
+ * Analyse un lien : chemin égal à `base` exactement (« /shhdrop » sans barre finale toléré
  * pour la démo), sans identifiants dans l'adresse. La requête est ignorée : nos liens n'en
  * portent jamais, mais les messageries ajoutent des paramètres de suivi (`?fbclid=…`) en
  * gardant le fragment. Ne vérifie pas l'origine attendue : les fonctions du client

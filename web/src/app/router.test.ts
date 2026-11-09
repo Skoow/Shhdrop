@@ -36,7 +36,7 @@ describe("match", () => {
   it("fragment de 20 à 44 caractères qui n'est pas une clé valide → ouverture, qui dira « Lien incomplet » (ruling 2)", () => {
     for (const h of [`#${KEY.slice(0, 20)}`, `#${KEY.slice(1)}`, `#${KEY}A`, `#m${KEY.slice(2)}`, `#x${KEY}`])
       expect(match("/", h), h).toEqual({ name: "open" });
-    expect(match("/Shhdrop/", `#${KEY.slice(0, 30)}`, "/Shhdrop/")).toEqual({ name: "open" });
+    expect(match("/shhdrop/", `#${KEY.slice(0, 30)}`, "/shhdrop/")).toEqual({ name: "open" });
   });
 
   it("fragment de bonne forme ailleurs qu'à la racine : pas d'ouverture", () => {
@@ -52,14 +52,14 @@ describe("match", () => {
   });
 
   it("avec une base de dépôt (démo)", () => {
-    const base = "/Shhdrop/";
-    expect(match("/Shhdrop/", `#${KEY}`, base)).toEqual({ name: "open" });
-    expect(match("/Shhdrop", `#m${KEY}`, base)).toEqual({ name: "manage" });
-    expect(match("/Shhdrop/", "", base)).toEqual({ name: "home" });
-    expect(match("/Shhdrop", "", base)).toEqual({ name: "home" });
-    expect(match("/Shhdrop/securite", "", base)).toEqual({ name: "securite" });
+    const base = "/shhdrop/";
+    expect(match("/shhdrop/", `#${KEY}`, base)).toEqual({ name: "open" });
+    expect(match("/shhdrop", `#m${KEY}`, base)).toEqual({ name: "manage" });
+    expect(match("/shhdrop/", "", base)).toEqual({ name: "home" });
+    expect(match("/shhdrop", "", base)).toEqual({ name: "home" });
+    expect(match("/shhdrop/securite", "", base)).toEqual({ name: "securite" });
     expect(match("/", `#${KEY}`, base)).toEqual({ name: "notfound" });
-    expect(match("/Shhdropx/", `#${KEY}`, base)).toEqual({ name: "notfound" });
+    expect(match("/shhdropx/", `#${KEY}`, base)).toEqual({ name: "notfound" });
   });
 });
 

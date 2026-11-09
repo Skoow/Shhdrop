@@ -139,7 +139,7 @@ async function guard(page: Page, origin: string): Promise<{ cspViolations: strin
   return { cspViolations, foreignRequests };
 }
 
-/** Démo servie comme par GitHub Pages (pages-server.ts) : `url` = origine + « /Shhdrop/ ». */
+/** Démo servie comme par GitHub Pages (pages-server.ts) : `url` = origine + « /shhdrop/ ». */
 export type Demo = {
   origin: string;
   url: string;
@@ -168,12 +168,12 @@ export const test = base.extend<{ shh: Shh; demo: Demo; shhServer: Pick<StartOpt
   demo: async ({ page }, use) => {
     const pages = await startPagesServer(DIST_DEMO);
     try {
-      await probe(`${pages.origin}/Shhdrop/`);
+      await probe(`${pages.origin}/shhdrop/`);
       retryFirstGoto(page, pages.origin);
       const g = await guard(page, pages.origin);
       const requests: Demo["requests"] = [];
       page.on("request", (r) => requests.push({ url: r.url(), headers: r.headers(), postData: r.postData() }));
-      await use({ origin: pages.origin, url: `${pages.origin}/Shhdrop/`, requests, ...g });
+      await use({ origin: pages.origin, url: `${pages.origin}/shhdrop/`, requests, ...g });
       expect(g.cspViolations).toEqual([]);
       expect(g.foreignRequests).toEqual([]);
       expect(requests.filter((r) => /^\/api(\/|$)/i.test(new URL(r.url).pathname))).toEqual([]);

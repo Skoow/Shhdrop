@@ -43,7 +43,7 @@ export type Route = {
 const TRUNCATED_FRAGMENT = /^#[A-Za-z0-9_-]{20,44}$/;
 
 export function match(pathname: string, hash = "", base: string = import.meta.env.BASE_URL, reopen = false): Route {
-  const prefix = base.endsWith("/") ? base.slice(0, -1) : base; // "" ou "/Shhdrop"
+  const prefix = base.endsWith("/") ? base.slice(0, -1) : base; // "" ou "/shhdrop"
   let p = pathname;
   if (prefix !== "") {
     if (p === prefix) p = "/";

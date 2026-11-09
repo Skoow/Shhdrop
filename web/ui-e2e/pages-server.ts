@@ -1,4 +1,4 @@
-// Imitation de GitHub Pages pour les tests de la démo : sert web/dist-demo sous /Shhdrop/,
+// Imitation de GitHub Pages pour les tests de la démo : sert web/dist-demo sous /shhdrop/,
 // 404.html avec le code 404 pour tout chemin absent (pas de repli monopage), et AUCUN en-tête
 // de sécurité (la démo ne compte que sur sa CSP meta, UI §14.3).
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -20,7 +20,7 @@ const TYPES: Record<string, string> = {
 
 export type PagesServer = { origin: string; close(): Promise<void> };
 
-export async function startPagesServer(root: string, base = "/Shhdrop/"): Promise<PagesServer> {
+export async function startPagesServer(root: string, base = "/shhdrop/"): Promise<PagesServer> {
   const notFound = readFileSync(join(root, "404.html"));
   const server = createServer((req, res) => {
     const path = new URL(req.url ?? "/", "http://x").pathname;

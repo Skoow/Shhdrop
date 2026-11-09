@@ -15,4 +15,4 @@ export const DEMO_META = [
 ];
 
 /** Base de la démo (dépôt Shhdrop sur skoow.github.io). */
-export const DEMO_BASE = "/Shhdrop/";
+export const DEMO_BASE = "/shhdrop/";

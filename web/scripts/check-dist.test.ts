@@ -21,7 +21,7 @@ const DEMO_INDEX = `<!doctype html><html><head>
     <meta name="referrer" content="no-referrer">
     <meta name="robots" content="noindex">
     <meta charset="utf-8" />
-    <script type="module" crossorigin src="/Shhdrop/assets/index-a.js"></script>
+    <script type="module" crossorigin src="/shhdrop/assets/index-a.js"></script>
 </head><body></body></html>`;
 
 function site(files: Record<string, string>): string {
@@ -59,7 +59,7 @@ describe("check-dist.mjs, production", () => {
   });
 
   it("échoue sur la CSP meta, le texte du bandeau, la base de démo, 404.html", () => {
-    expect(checkDist(site({ "index.html": DEMO_INDEX }), false).join("\n")).toMatch(/Content-Security-Policy[\s\S]*Shhdrop\/assets\//);
+    expect(checkDist(site({ "index.html": DEMO_INDEX }), false).join("\n")).toMatch(/Content-Security-Policy[\s\S]*shhdrop\/assets\//);
     expect(checkDist(site({ "index.html": PROD_INDEX, "a.js": "Demo: nothing is sent, the link only works in this tab." }), false)).toHaveLength(1);
     expect(checkDist(site({ "index.html": PROD_INDEX, "a.js": "rien n'est envoyé, le lien ne marche que dans cet onglet" }), false)).toHaveLength(1);
     expect(checkDist(site({ "index.html": PROD_INDEX, "404.html": PROD_INDEX }), false)).toEqual(["404.html : propre à la démo"]);
@@ -128,10 +128,10 @@ describe("check-dist.mjs --demo", () => {
     expect(checkDist(site({ ...good(), "404.html": "autre" }), true)).toEqual(["404.html différent de index.html"]);
   });
 
-  it("échoue si une ressource est hors de la base /Shhdrop/", () => {
-    const h = DEMO_INDEX.replace("/Shhdrop/assets/", "/assets/");
+  it("échoue si une ressource est hors de la base /shhdrop/", () => {
+    const h = DEMO_INDEX.replace("/shhdrop/assets/", "/assets/");
     expect(checkDist(site({ ...good(), "index.html": h, "404.html": h }), true)).toEqual([
-      "index.html : « /assets/index-a.js » hors de la base /Shhdrop/",
+      "index.html : « /assets/index-a.js » hors de la base /shhdrop/",
     ]);
   });
 });

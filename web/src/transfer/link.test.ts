@@ -63,7 +63,7 @@ describe("liens (spec §32 : à la racine, secret après #)", () => {
       `https://x/s/AAAAAAAAAAAAAAAAAAAAAA#${K}`, // ancien format : aucune compatibilité
       `https://x/m/AAAAAAAAAAAAAAAAAAAAAA#${K}`,
       `https://x//#${K}`,
-      `https://x/Shhdrop/#${K}`, // base de démo hors démo
+      `https://x/shhdrop/#${K}`, // base de démo hors démo
     ];
     for (const u of bad) expect(() => parseLink(u), u).toThrow("lien_invalide");
   });
@@ -74,21 +74,21 @@ describe("liens (spec §32 : à la racine, secret après #)", () => {
     expect(p.origin).toBe("https://x.test");
   });
 
-  it("base /Shhdrop/ (démo) : chemin exigé, aller-retour", () => {
+  it("base /shhdrop/ (démo) : chemin exigé, aller-retour", () => {
     const k = newKLien();
-    const link = shareLink("https://skoow.github.io", k, "/Shhdrop/");
-    expect(link).toBe(`https://skoow.github.io/Shhdrop/#${b64u(k)}`);
-    expect(parseLink(link, "/Shhdrop/")).toEqual({ kind: "s", origin: "https://skoow.github.io", kLien: k });
-    expect(parseLink(`https://skoow.github.io/Shhdrop#${K}`, "/Shhdrop/").kind).toBe("s");
+    const link = shareLink("https://skoow.github.io", k, "/shhdrop/");
+    expect(link).toBe(`https://skoow.github.io/shhdrop/#${b64u(k)}`);
+    expect(parseLink(link, "/shhdrop/")).toEqual({ kind: "s", origin: "https://skoow.github.io", kLien: k });
+    expect(parseLink(`https://skoow.github.io/shhdrop#${K}`, "/shhdrop/").kind).toBe("s");
     const s = newSGestion();
-    expect(parseLink(manageLink("https://skoow.github.io", s, "/Shhdrop/"), "/Shhdrop/")).toEqual({
+    expect(parseLink(manageLink("https://skoow.github.io", s, "/shhdrop/"), "/shhdrop/")).toEqual({
       kind: "m",
       origin: "https://skoow.github.io",
       sGestion: s,
     });
-    for (const u of [`https://x/#${K}`, `https://x/Shhdropx/#${K}`, `https://x/Shhdrop/Shhdrop/#${K}`, `https://x/Shhdrop/s#${K}`])
-      expect(() => parseLink(u, "/Shhdrop/"), u).toThrow("lien_invalide");
-    for (const b of ["", "Shhdrop/", "/Shhdrop", "//", "/a b/"]) {
+    for (const u of [`https://x/#${K}`, `https://x/shhdropx/#${K}`, `https://x/shhdrop/shhdrop/#${K}`, `https://x/shhdrop/s#${K}`])
+      expect(() => parseLink(u, "/shhdrop/"), u).toThrow("lien_invalide");
+    for (const b of ["", "Shhdrop/", "/shhdrop", "//", "/a b/"]) {
       expect(() => parseLink(`https://x/#${K}`, b), b).toThrow("base_invalide");
       expect(() => shareLink("https://x.test", newKLien(), b), b).toThrow("base_invalide");
     }
