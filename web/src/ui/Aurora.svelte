@@ -25,6 +25,7 @@
   <img class="aur bloom" src="{base}assets/aurora-mint.png" alt="" width="128" height="128" decoding="async" />
 </div>
 <div class="grain" aria-hidden="true"></div>
+<div class="sides" aria-hidden="true" data-sides></div>
 
 <style>
   .aurora {
@@ -167,6 +168,29 @@
     opacity: 0.035;
   }
 
+  /* Papier peint maison sur les côtés (retours UI9) : les pictos de /assets/motif.svg (fichier
+     statique, CSP sans data:), masqués sur la colonne de contenu (≈ 800 px au centre) ; sur
+     téléphone, à peine un voile vers les bords. Très faible contraste : le texte garde son AA. */
+  .sides {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: url(/assets/motif.svg) 0 0 / 180px 180px repeat;
+    /* Plafond K5 (luminance ≤ 0,050 des fonds, home.spec) : 0,024 (mesuré : 0,028 dépasse). */
+    opacity: 0.024;
+    --col: 400px;
+    -webkit-mask-image: linear-gradient(to right, #000, #000 calc(50% - var(--col) - 160px), transparent calc(50% - var(--col)), transparent calc(50% + var(--col)), #000 calc(50% + var(--col) + 160px));
+    mask-image: linear-gradient(to right, #000, #000 calc(50% - var(--col) - 160px), transparent calc(50% - var(--col)), transparent calc(50% + var(--col)), #000 calc(50% + var(--col) + 160px));
+  }
+  @media (max-width: 899px) {
+    .sides {
+      opacity: 0.014;
+      -webkit-mask-image: linear-gradient(to right, #000, transparent 18%, transparent 82%, #000);
+      mask-image: linear-gradient(to right, #000, transparent 18%, transparent 82%, #000);
+    }
+  }
+
   /* Mouvement réduit : nappes immobiles, sans éclat. */
   @media (prefers-reduced-motion: reduce) {
     .aur,
@@ -177,7 +201,8 @@
   /* Contraste renforcé ou forcé : ni aurore ni grain (UI §20.7). */
   @media (prefers-contrast: more), (forced-colors: active) {
     .aurora,
-    .grain {
+    .grain,
+    .sides {
       display: none;
     }
   }

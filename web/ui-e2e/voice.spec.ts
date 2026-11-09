@@ -202,7 +202,7 @@ test("ligne vocale : nom générique renommable (Entrée, Échap, vide → gén�
 
   // Le vocal se renomme comme les autres (retours UI6) : crayon de la ligne sur ordinateur,
   // menu « … » sur téléphone (plus de crayon propre au vocal).
-  await expect(voice.locator(".head button")).toHaveCount(0);
+  await expect(voice.locator(".head button:not([data-clean] *)")).toHaveCount(0); // le bouclier de nettoyage suit le nom (UI9)
   const rename = async (from: string, to: string, opts: { cancel?: boolean; shot?: boolean } = {}) => {
     if (isMobile) {
       await voice.getByRole("button", { name: `Actions pour ${from}` }).click();

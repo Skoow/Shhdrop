@@ -75,7 +75,10 @@
     {/if}
   </span>
   <div class="main">
-    <bdi class="name" title={name} translate="no"><span class="b">{mid.head}</span><span class="e">{mid.tail}{ext}</span></bdi>
+    <span class="head">
+      <bdi class="name" title={name} translate="no"><span class="b">{mid.head}</span><span class="e">{mid.tail}{ext}</span></bdi>
+      {#if kind === "file" && cl?.mark}<CleanMark kind={cl.mark} text={t(cl.key)} />{/if}
+    </span>
     <span class="meta num">
       {#if row.state === "downloading"}
         <span class="st">{left === null ? t("dl.progress.start", { pct, rate: formatRate(row.rate, lang) }) : t("dl.progress", { pct, rate: formatRate(row.rate, lang), left: formatDuration(left, lang) })}</span>
@@ -85,7 +88,7 @@
         <span class="st">{t("dl.queued")}</span>
       {:else}
         {#if excerpt}<bdi class="ex" translate="no">{excerpt}</bdi>{/if}
-        {#if kind === "file"}<span>{t(typeKey(format))}</span><span aria-hidden="true">·</span><span>{formatBytes(row.total, lang)}</span>{#if cl?.mark}<CleanMark kind={cl.mark} text={t(cl.key)} />{/if}{:else if !excerpt}<span>{t(typeKey(format))}</span>{/if}
+        {#if kind === "file"}<span>{t(typeKey(format))}</span><span aria-hidden="true">·</span><span>{formatBytes(row.total, lang)}</span>{:else if !excerpt}<span>{t(typeKey(format))}</span>{/if}
         <!-- Téléchargé : dit par la pastille de l'icône (retours UI6). -->
         {#if row.state !== "done" && estimate !== null && !viewOnly}
           <span aria-hidden="true">·</span><span class="eta" title={t("dl.estimate.title")}>{t("dl.estimate", { time: formatDuration(estimate, lang) })}<span class="sr-only"> ({t("dl.estimate.title")})</span></span>
@@ -174,6 +177,11 @@
   .main {
     display: grid;
     gap: 2px;
+    min-width: 0;
+  }
+  .head {
+    display: flex;
+    align-items: center;
     min-width: 0;
   }
   .name {

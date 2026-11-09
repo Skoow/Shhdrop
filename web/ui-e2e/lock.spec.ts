@@ -81,13 +81,13 @@ test("réception : ouvert vert pour le texte (manifeste vérifié) ; fichier fer
     await expect(tip).toBeHidden();
   }
   const photo = page.locator("li.row").filter({ hasText: "foret-brume" });
-  await expect(photo.locator('.pic [data-lock="wait"] button')).toHaveAccessibleName("Chiffré, pas encore ouvert");
+  await expect(photo.locator('.pic [data-lock="wait"] button')).toHaveAccessibleName(/^Chiffré, pas encore ouvert(\. Nettoyé avant l'envoi|$)/);
   await expect(page.locator("li.row .pic [data-lock]")).toHaveCount(3); // chaque ligne a sa pastille
   for (const n of ["foret-brume.jpg", "contrat.pdf"]) {
     await page.getByRole("button", { name: `Télécharger ${n}` }).click();
     await expect(page.locator("li.row").filter({ hasText: n.split(".")[0]! })).toHaveAttribute("data-state", "done", { timeout: 30_000 });
   }
-  await expect(photo.locator('[data-lock="open"] button')).toHaveAccessibleName("Déchiffré et vérifié");
+  await expect(photo.locator('[data-lock="open"] button')).toHaveAccessibleName(/^Déchiffré et vérifié(\. Nettoyé avant l'envoi|$)/);
   await expect(page.locator('li.row [data-lock="open"]')).toHaveCount(3);
   await settle(page);
   await page.screenshot({ path: `${SHOTS}content-locks-${isMobile ? 390 : 1440}.png` });

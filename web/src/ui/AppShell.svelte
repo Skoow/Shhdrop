@@ -204,8 +204,8 @@
       {/each}
     </nav>
     <div class="base">
-      <p class="notrack"><span class="pip" aria-hidden="true"></span>{t("foot.notrack")}</p>
-      <p>{t("foot.copy")}</p>
+      <!-- Retours UI9 : le nom en bas à gauche, « © 2026 » à côté (plus de mention « aucune publicité »). -->
+      <p class="sig"><span class="wm" translate="no">Shhdrop</span><span>{t("foot.copy")}</span></p>
       <p class="num" data-build>{t("foot.version", { v: BUILD_ID })}</p>
     </div>
   </div>
@@ -413,7 +413,7 @@
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    background: url(/assets/motif.svg) 0 0 / 120px 120px repeat;
+    background: url(/assets/motif.svg) 0 0 / 180px 180px repeat;
     opacity: 0.045;
     -webkit-mask-image: linear-gradient(to bottom, transparent, #000 45%);
     mask-image: linear-gradient(to bottom, transparent, #000 45%);
@@ -537,17 +537,14 @@
   .base p {
     margin: 0;
   }
-  .notrack {
+  .sig {
     display: inline-flex;
-    align-items: center;
+    align-items: baseline;
     gap: var(--sp-2);
   }
-  .pip {
-    inline-size: 6px;
-    block-size: 6px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 0 3px rgb(95 227 181 / 0.14);
+  .wm {
+    color: var(--text-2);
+    font-weight: 600;
   }
   .base .num {
     margin-inline-start: auto;

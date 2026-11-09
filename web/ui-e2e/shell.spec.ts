@@ -38,8 +38,9 @@ test("pied de page (UI5) : Produit, Confiance, Légal ; sans traceur ; © ; vers
   await expect(foot.getByText(/^Salon\s+bientôt$/)).toBeVisible(); // pas un lien
   await expect(foot.getByRole("link", { name: /^Code source/ })).toHaveAttribute("href", "https://github.com/Skoow/shhdrop");
   await expect(foot.getByRole("link", { name: /^Code source/ })).toHaveAttribute("rel", "noopener noreferrer");
-  await expect(foot.getByText("Aucun traceur, aucune publicité")).toBeVisible();
-  await expect(foot.getByText(/^©\s2026\sShhdrop$/)).toBeVisible();
+  // Retours UI9 : plus de mention « aucune publicité » ; le nom en bas à gauche, « © 2026 » à côté.
+  await expect(foot.getByText(/publicité/)).toHaveCount(0);
+  await expect(foot.locator(".base .sig")).toHaveText(/^Shhdrop\s*©\s2026$/);
   await expect(foot.locator("[data-build]")).toHaveText(/^Version ([0-9a-f]{7}|dev)$/);
   await expect(foot.getByRole("combobox")).toHaveCount(0); // la langue est dans Réglages
   await page.evaluate(() => window.scrollTo(0, 0));
