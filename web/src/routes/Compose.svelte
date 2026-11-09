@@ -7,7 +7,7 @@
   import { MediaQuery } from "svelte/reactivity";
   import { chrome } from "../app/chrome.svelte";
   import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, TTL_MAX_HOURS, generatePassword, type ElementStatus, type Item, type KeepTtl } from "../index";
-  import type { PaidTier } from "../limits";
+  import { PAID, type PaidTier } from "../limits";
   import { blockKey, canClean, createComposer, type AddReport, type ComposeItem, type Source } from "../flows/compose.svelte";
   import { rowStatus, toDraftList } from "../flows/preupload";
   import { fileSettings } from "../flows/settings.svelte";
@@ -21,7 +21,7 @@
   import Button from "../ui/Button.svelte";
   import CapacityGauge from "../ui/CapacityGauge.svelte";
   import CategoryGroup from "../ui/CategoryGroup.svelte";
-  import { ChevronDown, Eye, Pencil, Plus, RefreshCw, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from "../ui/Icon";
+  import { ChevronDown, Eye, Lock, Pencil, Plus, RefreshCw, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from "../ui/Icon";
   import NamesTip from "../ui/NamesTip.svelte";
   import { composePreview } from "../ui/itemView";
   import { safeBlobType } from "../viewers/blobs";
@@ -516,16 +516,9 @@
 <svelte:document onpaste={onPaste} />
 
 {#snippet adder()}
-  <!-- Ordinateur : la zone de dépôt (un clic ouvre le sélecteur ; on dépose aussi n'importe où sur
-       la page) tient lieu de « Fichiers » ; à côté, la même liste d'actions que la feuille du téléphone. -->
+  <!-- Ordinateur : sous la liste, la même liste d'actions que la feuille du téléphone ; la zone de
+       dépôt (« Fichiers ») est en filigrane dans l'espace vide de la liste (retours DROP). -->
   <div class="adder bar">
-    <button type="button" class="dropzone" onclick={() => filesIn?.click()}>
-      <span class="dz-ic" aria-hidden="true"><Upload size={18} strokeWidth={1.8} /></span>
-      <span class="dz-tx">
-        <span class="dz-t">{t("compose.dropzone.title")}</span>
-        <span class="dz-s">{t("compose.dropzone.sub", { keys: pasteKeys })}</span>
-      </span>
-    </button>
     <div class="make" role="group" aria-label={t("compose.create.label")}>
       {#each rowActions as a (a.id)}
         <button type="button" class="mk" data-add={a.id} onclick={() => addAct(a.id, a.live)}>
@@ -552,7 +545,19 @@
           </Button>
         </div>
         <p class="free num" data-free>{freeText}</p>
-        <div class="cap"><CapacityGauge bytes={composer.totalBytes + removing} count={composer.count} head onpaid={showPaid} /></div>
+        <div class="cap">
+          <div class="capg"><CapacityGauge bytes={composer.totalBytes + removing} count={composer.count} head /></div>
+          <!-- Espaces des offres (retours OPT) : verrouillés, à côté de la jauge ; un appui ouvre la feuille d'information. -->
+          <div class="caps" data-paid-space>
+            {#each ["plus", "pro"] as const as tier (tier)}
+              {@const name = t(`paid.badge.${tier}`)}
+              <span id="cap-{tier}" class="sr-only">{t("paid.locked", { tier: name })}</span>
+              <button type="button" class="cpill num" aria-describedby="cap-{tier}" onclick={() => showPaid(tier)}
+                ><Lock size={13} strokeWidth={2} aria-hidden="true" /><span>{formatBytes(PAID[tier].bytes, lang)}</span>{" "}<span class="ct">· {name}</span></button
+              >
+            {/each}
+          </div>
+        </div>
         {#if removing > 0}<p class="removing" role="status">{t("compose.up.removing")}</p>{/if}
       </div>
 
@@ -598,6 +603,17 @@
           />
         {/each}
       </div>
+      {#if !narrow}
+        <!-- Filigrane (retours DROP) : l'espace vide sous la liste est la zone de dépôt ; un clic y
+             ouvre le choix de fichiers ; on dépose aussi n'importe où sur la page. Texte entier, jamais tronqué. -->
+        <button type="button" class="dropzone ghost" onclick={() => filesIn?.click()}>
+          <span class="dz-ic" aria-hidden="true"><Upload size={18} strokeWidth={1.8} /></span>
+          <span class="dz-tx">
+            <span class="dz-t">{t("compose.dropzone.title")}</span>
+            <span class="dz-s">{t("compose.dropzone.sub", { keys: pasteKeys })}</span>
+          </span>
+        </button>
+      {/if}
       </div>
       {#if !narrow}{@render adder()}{/if}
     </div>
@@ -813,7 +829,53 @@
   }
   .cap {
     grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
     min-width: 0;
+  }
+  .capg {
+    flex: 1 1 220px;
+    min-width: 0;
+  }
+  .caps {
+    display: flex;
+    flex: none;
+    gap: 6px;
+  }
+  /* Pastilles Plus et Pro : pointillés, cadenas et nom de l'offre en bleu, taille en blanc. */
+  .cpill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px dashed var(--plus-line);
+    border-radius: var(--r-pill);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: var(--fs-small);
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .cpill :global(svg),
+  .cpill .ct {
+    flex: none;
+    color: var(--plus);
+  }
+  @media (hover: hover) {
+    .cpill:hover {
+      background: var(--plus-tint);
+      border-color: var(--plus);
+    }
+  }
+  @media (forced-colors: active) {
+    .cpill {
+      border: 1px solid CanvasText;
+    }
   }
   /* Limites gratuites, dites en clair sous le titre (D41-16). */
   .free {
@@ -1262,40 +1324,48 @@
       gap: var(--sp-3);
       min-height: 0;
     }
-    /* Barre fine en bas de la liste : déposer ou choisir, puis « Créer sur place ». */
+    /* Barre fine en bas de la liste : « Créer sur place ». */
     .adder.bar {
       flex: none;
       display: flex;
       align-items: center;
+      justify-content: flex-end;
       gap: var(--sp-2);
       padding-top: var(--sp-3);
       border-top: 1px solid var(--hair);
     }
-    .adder.bar .dropzone {
-      flex: 1 1 auto;
-      min-width: 0;
-      min-height: 48px;
-      padding: 4px 12px 4px 6px;
-      gap: var(--sp-3);
-      border-radius: 14px;
+    /* Filigrane : occupe l'espace vide sous la liste, discret (texte plus clair, sans cadre) ;
+       le cadre réapparaît au survol et pendant un glisser-déposer. */
+    .dropzone.ghost {
+      flex: 1 0 128px;
+      flex-direction: column;
+      justify-content: center;
+      gap: var(--sp-2);
+      min-height: 128px;
+      border-color: transparent;
+      background: none;
+      color: var(--text-3);
+      text-align: center;
     }
-    .adder.bar .dz-ic {
-      width: 36px;
-      height: 36px;
-      border-radius: 10px;
+    .dropzone.ghost .dz-ic {
+      background: none;
+      color: var(--text-3);
     }
-    .adder.bar .dz-tx {
-      display: block;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+    .dropzone.ghost .dz-tx {
+      justify-items: center;
     }
-    .adder.bar .dz-t {
-      font-size: var(--fs-small);
+    .dropzone.ghost .dz-t {
+      font-weight: 560;
     }
-    .adder.bar .dz-s {
-      margin-inline-start: 8px;
-      font-size: var(--fs-micro);
+    .dropzone.ghost .dz-s {
+      color: var(--text-3);
+      opacity: 0.8;
+    }
+    .dropzone.ghost:active {
+      transform: none;
+    }
+    .dropzone.ghost:focus-visible {
+      border-color: var(--accent);
     }
     /* Photos et vidéos côte à côte (petites vignettes) : toutes les catégories tiennent ensemble. */
     .groups {
@@ -1339,8 +1409,8 @@
       position: relative;
       flex: 1 1 auto;
       min-height: 0;
-      display: grid;
-      align-content: start;
+      display: flex;
+      flex-direction: column;
       gap: var(--sp-2);
       overflow-y: auto;
       overscroll-behavior: contain;

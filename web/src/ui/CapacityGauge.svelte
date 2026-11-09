@@ -6,12 +6,11 @@
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { announce } from "./announce";
-  import Upsell from "./Upsell.svelte";
 
   /** `mini` : une ligne, pour la barre d'envoi du téléphone ; `head` : en-tête de la liste. */
-  /** `onpaid` : sous le dépassement, la ligne « Avec Plus… » (D41-16). */
-  type Props = { bytes: number; count: number; mini?: boolean; head?: boolean; onpaid?: (tier: "plus") => void };
-  let { bytes, count, mini = false, head = false, onpaid }: Props = $props();
+  /** Les espaces Plus et Pro sont des pastilles à côté de la jauge (Compose, retours OPT). */
+  type Props = { bytes: number; count: number; mini?: boolean; head?: boolean };
+  let { bytes, count, mini = false, head = false }: Props = $props();
 
   const lang = $derived(getLang());
   const max = $derived(formatBytes(CONTENT_MAX, lang));
@@ -54,7 +53,7 @@
     </div>
     {#if level === "near"}<span class="near">{t("compose.gauge.near")}</span>{/if}
   </div>
-  {#if level === "over"}<p class="over-msg" role="alert">{overText}</p>{#if onpaid}<Upsell {onpaid} />{/if}{/if}
+  {#if level === "over"}<p class="over-msg" role="alert">{overText}</p>{/if}
 {:else if mini}
   <!-- Rappel visuel de la barre du téléphone : les mesures accessibles sont dans l'en-tête. -->
   <div class={["mini", level]} aria-hidden="true">

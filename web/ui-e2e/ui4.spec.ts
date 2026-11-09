@@ -63,7 +63,7 @@ test("destinataire, ouverture non dernière : « Ce lien peut encore être ouver
   await page.screenshot({ path: `${SHOTS}content-not-last-${w(isMobile)}.png`, fullPage: true });
 });
 
-test("Lien prêt : échéance en deux lignes ; options : Plus et Pro en bleu", async ({ page, shh, isMobile }) => {
+test("Lien prêt : échéance en deux lignes ; options : Plus et Pro en bleu, texte blanc", async ({ page, shh, isMobile }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(shh.origin + "/");
@@ -72,7 +72,8 @@ test("Lien prêt : échéance en deux lignes ; options : Plus et Pro en bleu", a
   if (isMobile) await page.getByRole("button", { name: /^Options · / }).click();
   const lk = page.locator("[data-locked] button, button[data-locked]").filter({ visible: true }).first();
   await expect(lk).toBeVisible();
-  expect(await lk.evaluate((e) => [getComputedStyle(e).color, getComputedStyle(e).borderTopStyle, getComputedStyle(e).borderTopColor])).toEqual(["rgb(85, 150, 248)", "dashed", "rgb(59, 130, 246)"]);
+  expect(await lk.evaluate((e) => [getComputedStyle(e).color, getComputedStyle(e).borderTopStyle, getComputedStyle(e).borderTopColor])).toEqual(["rgb(233, 236, 242)", "dashed", "rgb(59, 130, 246)"]); // texte blanc, pointillés bleus (retours OPT)
+  expect(await lk.locator("svg").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(85, 150, 248)");
   await settle(page);
   await page.screenshot({ path: `${SHOTS}options-plus-${w(isMobile)}.png`, fullPage: !isMobile });
   if (isMobile) await page.keyboard.press("Escape");

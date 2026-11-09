@@ -19,10 +19,10 @@ const MIXED = [...PHOTOS, f("anniversaire-lou.webm"), f("contrat.pdf"), f("archi
 
 async function open(page: Page, origin: string) {
   await page.goto(origin + "/");
-  // Ordinateur : « Parcourir les fichiers » ; téléphone : une seule action, « Ajouter ».
-  await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
+  // Ordinateur : « Commencer » ; téléphone : une seule action, « Ajouter ».
+  await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
 }
-/** Choisit des fichiers par « Parcourir les fichiers » (accueil) ou la zone de dépôt (composeur). */
+/** Choisit des fichiers par la feuille d'ajout (« Commencer » ou « Ajouter ») ou la zone de dépôt (composeur). */
 async function browse(page: Page, files: string[] | { name: string; mimeType: string; buffer: Buffer }[], wait = true) {
   const before = await rows(page).count();
   await (await openFilePicker(page)).setFiles(files as never);
@@ -277,7 +277,9 @@ test.describe("fr-FR", () => {
     const opts = await options(page, isMobile);
     const locked = opts.locator("[data-locked] button, button[data-locked]");
     await expect(locked).toHaveCount(5);
-    await expect(opts.locator(".badge")).toHaveText(["Plus", "Plus", "Plus"]);
+    await expect(opts.locator(".badge")).toHaveText(["Plus", "Plus", "Pro"]);
+    // Retours OPT : espaces Plus et Pro en pastilles à côté de la jauge, unité « Go » comprise.
+    await expect(page.locator(".top [data-paid-space] button")).toHaveText([/^10\sGo · Plus$/, /^50\sGo · Pro$/]);
     for (const b of await locked.all()) {
       const r = (await b.boundingBox())!;
       expect(r.height).toBeGreaterThanOrEqual(43.5);
@@ -356,7 +358,7 @@ test.describe("fr-FR", () => {
     await page.getByRole("group", { name: "contrat.pdf supprimé" }).getByRole("button", { name: "Annuler" }).click();
     await expect(rows(page)).toHaveCount(3);
     await page.getByRole("button", { name: "Tout supprimer" }).click();
-    await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
     await page.getByRole("button", { name: "Annuler" }).click();
     await expect(rows(page)).toHaveCount(3);
   });
@@ -468,7 +470,7 @@ test.describe("fr-FR", () => {
 
     test.skip(browserName !== "chromium", "fichier creux de 2 Go : Chromium (chemin local)");
     await page.getByRole("button", { name: "Tout supprimer" }).click();
-    await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
     const dir = mkdtempSync(join(tmpdir(), "shh-2go-"));
     try {
       // Fichiers creux (aucun octet écrit sur le disque) : 2 Gio exactement, puis 2 Gio + 1 octet.
@@ -481,7 +483,7 @@ test.describe("fr-FR", () => {
       await expect(page.getByRole("alert").filter({ hasText: /^Trop gros/ })).toHaveCount(0);
       await expect(page.locator("#send-reason")).toHaveCount(0);
       await page.getByRole("button", { name: "Tout supprimer" }).click();
-      await expect(page.getByRole("button", { name: /^(Parcourir les fichiers|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
+      await expect(page.getByRole("button", { name: /^(Commencer|Ajouter)/ }).filter({ visible: true }).first()).toBeVisible();
       const p = join(dir, "film-2go-plus-1.bin");
       const fd = openSync(p, "w");
       ftruncateSync(fd, 2147483648 + 1);
@@ -492,14 +494,13 @@ test.describe("fr-FR", () => {
       expect(await page.locator(".top .fill").evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(255, 138, 128)");
       await expect(send(page)).toBeDisabled();
       await expect(page.locator("#send-reason")).toHaveText("Le total dépasse 2 Go. Supprimez des éléments.");
-      // D41-16 : sous l'erreur, une ligne discrète (ni alerte, ni fenêtre) et « En savoir plus ».
-      const up = page.locator(".top [data-upsell]");
-      await expect(up).toHaveText(/^Avec Plus\s:\sjusqu'à 10\sGo par partage et 7\sjours\.\s*En savoir plus$/);
+      // Retours OPT : plus de ligne « Avec Plus » en doublon, les pastilles 10 Go et 50 Go sont à côté de la jauge.
+      await expect(page.locator(".top [data-upsell]")).toHaveCount(0);
       await expect(page.getByRole("dialog")).toHaveCount(0);
       await page.waitForTimeout(6500);
       await capture(page, "compose-limit-size");
-      await up.getByRole("button", { name: "En savoir plus" }).click();
-      await expect(page.getByRole("dialog", { name: "Shhdrop Plus" })).toBeVisible();
+      await page.locator(".top [data-paid-space]").getByRole("button", { name: /^50\sGo · Pro$/ }).click();
+      await expect(page.getByRole("dialog", { name: "Shhdrop Pro" })).toBeVisible();
       await page.keyboard.press("Escape");
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -638,7 +639,7 @@ test.describe("fr-FR", () => {
     } else {
       await expect(page.getByRole("button", { name: "Ajouter", exact: true })).toHaveCount(0);
       await expect(page.locator(".dropzone")).toBeVisible();
-      await expect(page.getByRole("button", { name: /Parcourir les fichiers/ })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /^Commencer/ })).toHaveCount(0);
     }
   });
 

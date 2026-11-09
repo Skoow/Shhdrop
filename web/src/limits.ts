@@ -26,11 +26,12 @@ export const NAME_MAX = 120;
  * composeur comme des choix verrouillés, avec « Bientôt disponible » (D41-16) ; rien n'est en
  * vente tant que les Tasks P1 à P3 ne sont pas faites. Le nombre d'éléments n'en fait pas
  * partie : MAX_ITEMS vaut pour toutes (D41-17). Aucune n'apporte de sécurité de plus (§38.9.0).
+ * Ouvertures : Plus garde celles du gratuit, Pro va jusqu'à 50 (D41-36, retours OPT).
  */
 export type PaidTier = "plus" | "pro";
 export const PAID: Readonly<Record<PaidTier, { bytes: number; opens: number; ttlDays: readonly number[]; month: number; year: number }>> = {
-  plus: { bytes: 10 * 1024 ** 3, opens: 50, ttlDays: [2, 3, 7], month: 7, year: 70 },
-  pro: { bytes: 50 * 1024 ** 3, opens: 100, ttlDays: [2, 3, 7], month: 20, year: 200 },
+  plus: { bytes: 10 * 1024 ** 3, opens: MAX_OPENS, ttlDays: [2, 3, 7], month: 7, year: 70 },
+  pro: { bytes: 50 * 1024 ** 3, opens: 50, ttlDays: [2, 3, 7], month: 20, year: 200 },
 };
 
 /**

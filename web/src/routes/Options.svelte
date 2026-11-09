@@ -3,7 +3,7 @@
   // 12 h ou après 1 ouverture… » sur ordinateur), mot de passe, destinataire (interrupteur
   // « Autoriser le téléchargement », sous-option du coffre), estimation du temps d'envoi.
   // `compact` : feuille du téléphone, une ligne d'aide au plus par réglage.
-  // Choix payants (D41-16) : visibles mais verrouillés, avec leur badge « Plus » ; un appui
+  // Choix payants (D41-16) : visibles mais verrouillés, avec leur badge « Plus » ou « Pro » ; un appui
   // ouvre la feuille d'information (onpaid), jamais un achat. Ils ne changent aucune option.
   import { MAX_OPENS, PW_TRIES, TTL_HOURS } from "../index";
   import { PAID, type PaidTier } from "../limits";
@@ -70,7 +70,10 @@
 {:else}
 <section class={["opts", { compact, dense: part === "controls" }]} aria-labelledby={compact ? undefined : "opts-title"} aria-label={compact ? t("options.title") : undefined}>
   {#if !compact}<h2 id="opts-title" class="h">{t("options.title")}</h2>{/if}
-  {#if onpaid}<span id="{lockedId}-plus" class="sr-only">{t("paid.locked", { tier: t("paid.badge.plus") })}</span>{/if}
+  {#if onpaid}
+    <span id="{lockedId}-plus" class="sr-only">{t("paid.locked", { tier: t("paid.badge.plus") })}</span>
+    <span id="{lockedId}-pro" class="sr-only">{t("paid.locked", { tier: t("paid.badge.pro") })}</span>
+  {/if}
 
   <div class="block">
     {#if part === "all"}{@render summary()}{/if}
@@ -96,11 +99,11 @@
     <div class="ctl">
       <span class="cl" aria-hidden="true">{t("options.opens.label")}</span>
       <Segmented label={t("options.opens.label")} options={opensOptions} columns={5} bind:value={() => options.maxOpens, (v) => (options.maxOpens = v)} />
-      {#if onpaid && PAID.plus.opens > MAX_OPENS}
-        {@const label = t("paid.opens", { n: PAID.plus.opens })}
+      {#if onpaid && PAID.pro.opens > MAX_OPENS}
+        {@const label = t("paid.opens", { n: PAID.pro.opens })}
         <div class="locks" data-locked="opens">
-          <button type="button" class="lk num" aria-describedby="{lockedId}-plus" onclick={() => onpaid("plus")}><Lock size={14} strokeWidth={2} aria-hidden="true" />{label}</button>
-          {@render badge("plus")}
+          <button type="button" class="lk num" aria-describedby="{lockedId}-pro" onclick={() => onpaid("pro")}><Lock size={14} strokeWidth={2} aria-hidden="true" />{label}</button>
+          {@render badge("pro")}
         </div>
       {/if}
       <p class="hint">{t("options.opens.hint")}</p>
@@ -267,7 +270,8 @@
     border: 1px dashed var(--plus-line);
     border-radius: var(--r-sm);
     background: transparent;
-    color: var(--plus);
+    /* Texte en blanc (retours OPT) ; cadenas, pointillés et badge restent bleus. */
+    color: var(--text);
     font: inherit;
     font-size: var(--fs-small);
     font-weight: 560;

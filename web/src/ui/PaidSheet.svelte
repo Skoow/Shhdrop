@@ -21,7 +21,8 @@
   const lines = $derived([
     t("paid.ttl", { max: t("paid.days", { n: Math.max(...p.ttlDays) }), free: formatDuration(TTL_MAX_HOURS * 3600, lang) }),
     t("paid.firstOpen.effect"),
-    t("paid.opens.effect", { n: p.opens, free: MAX_OPENS }),
+    // Plus garde les ouvertures du gratuit (D41-36) : pas de ligne « jusqu'à 10 (gratuit : 10) ».
+    ...(p.opens > MAX_OPENS ? [t("paid.opens.effect", { n: p.opens, free: MAX_OPENS })] : []),
   ]);
 </script>
 

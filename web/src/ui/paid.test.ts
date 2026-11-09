@@ -46,16 +46,15 @@ describe("options : mot de passe généré seulement, choix payants verrouillés
     expect(options.password).not.toBe(before);
     expect(options.password).toHaveLength(11);
   });
-  it("2, 3 et 7 jours, « Démarrer à la première ouverture », « Jusqu'à 50 » : verrouillés, badge Plus, aucun effet sur les options", () => {
+  it("2, 3 et 7 jours, « Démarrer à la première ouverture » (Plus), « Jusqu'à 50 » (Pro) : verrouillés, texte blanc, aucun effet sur les options", () => {
     const { options, onpaid } = opts();
     const locked = [...document.querySelectorAll<HTMLButtonElement>("[data-locked] button, button[data-locked]")];
     expect(locked.map((b) => b.textContent!.replace(/\u202f/g, " ").trim())).toEqual(["2 jours", "3 jours", "7 jours", "Démarrer à la première ouverturePlus", "Jusqu'à 50"]);
-    for (const b of locked) expect(document.getElementById(b.getAttribute("aria-describedby")!)!.textContent).toBe("Avec Plus, bientôt disponible.");
-    expect(document.querySelectorAll(".badge")).toHaveLength(3);
-    for (const b of document.querySelectorAll(".badge")) expect(b.textContent).toBe("Plus");
+    const desc = locked.map((b) => document.getElementById(b.getAttribute("aria-describedby")!)!.textContent);
+    expect(desc).toEqual([...Array(4).fill("Avec Plus, bientôt disponible."), "Avec Pro, bientôt disponible."]);
+    expect([...document.querySelectorAll(".badge")].map((b) => b.textContent)).toEqual(["Plus", "Plus", "Pro"]);
     for (const b of locked) b.click();
-    expect(onpaid).toHaveBeenCalledTimes(5);
-    expect(onpaid.mock.calls.every((c) => c[0] === "plus")).toBe(true);
+    expect(onpaid.mock.calls.map((c) => c[0])).toEqual(["plus", "plus", "plus", "plus", "pro"]);
     expect([options.ttlHours, options.maxOpens]).toEqual([12, 1]);
   });
   it("sans onpaid : aucun choix verrouillé", () => {
@@ -69,17 +68,18 @@ describe("feuille Plus : honnête, rien à acheter", () => {
   it("ce que Plus ajoute, prix prévu de §38.8, « Bientôt disponible » ; ni formulaire, ni champ, ni achat", () => {
     show(PaidSheet, { open: true, tier: "plus" });
     const s = text();
-    for (const x of ["Shhdrop Plus", "10 Go par partage", "2 Go par partage", "50 Go par partage", "Durée jusqu'à 7 jours (gratuit : 24 h maximum)", "Jusqu'à 50 ouvertures (gratuit : 10)", "7 €", "70 €", "Bientôt disponible."])
+    for (const x of ["Shhdrop Plus", "10 Go par partage", "2 Go par partage", "50 Go par partage", "Durée jusqu'à 7 jours (gratuit : 24 h maximum)", "7 €", "70 €", "Bientôt disponible."])
       expect(s, x).toContain(x);
+    expect(s).not.toMatch(/ouvertures \(gratuit/); // D41-36 : Plus garde les ouvertures du gratuit
     expect(s).not.toMatch(/élément/); // D41-17 : le nombre d'éléments n'est pas vendu
     expect([...document.querySelectorAll("button")].map((b) => b.textContent).join("|")).not.toMatch(/Acheter|Payer|S'abonner/i);
     expect(s).not.toMatch(/offre limitée|plus que/i);
     expect(document.querySelectorAll("form, input, a[href]")).toHaveLength(0);
   });
-  it("Pro : 50 Go, 100 ouvertures, 20 € par mois et 200 € par an (2 mois offerts) ; mensuel par abonnement, annuel au choix ; carte et crypto-monnaies ; aucun frais caché", () => {
+  it("Pro : 50 Go, 50 ouvertures, 20 € par mois et 200 € par an (2 mois offerts) ; mensuel par abonnement, annuel au choix ; carte et crypto-monnaies ; aucun frais caché", () => {
     show(PaidSheet, { open: true, tier: "pro" });
     const s = text();
-    for (const x of ["Shhdrop Pro", "50 Go par partage", "Jusqu'à 100 ouvertures", "20 € par mois, TTC", "ou 200 € par an", "2 mois offerts", "Au mois :", "abonnement renouvelé automatiquement chaque mois, résiliable en un clic, sans frais.", "À l'année, au choix :", "paiement unique (rien n'est prélevé ensuite) ou renouvellement automatique", "Moyens de paiement", "Carte bancaire", "Crypto-monnaies", "Aucun frais caché."]) expect(s.replace(/[\u202f\u00a0]/g, " "), x).toContain(x);
+    for (const x of ["Shhdrop Pro", "50 Go par partage", "Jusqu'à 50 ouvertures (gratuit : 10)", "20 € par mois, TTC", "ou 200 € par an", "2 mois offerts", "Au mois :", "abonnement renouvelé automatiquement chaque mois, résiliable en un clic, sans frais.", "À l'année, au choix :", "paiement unique (rien n'est prélevé ensuite) ou renouvellement automatique", "Moyens de paiement", "Carte bancaire", "Crypto-monnaies", "Aucun frais caché."]) expect(s.replace(/[\u202f\u00a0]/g, " "), x).toContain(x);
     expect(s).not.toContain("220");
     expect(s).not.toContain("payé en une fois");
     // Aucun logo de marque tierce : les moyens de paiement sont des libellés et des pictogrammes maison.
@@ -88,19 +88,10 @@ describe("feuille Plus : honnête, rien à acheter", () => {
   });
 });
 
-describe("ligne « Avec Plus » au dépassement de 2 Go", () => {
-  it("au-delà de 2 Go : l'erreur claire, puis une ligne discrète et « En savoir plus » ; jamais en dessous", () => {
-    const onpaid = vi.fn();
-    show(CapacityGauge, { bytes: CONTENT_MAX + 1, count: 2, head: true, onpaid });
+describe("dépassement de 2 Go : l'erreur seule, les espaces Plus et Pro sont à côté de la jauge (retours OPT)", () => {
+  it("au-delà de 2 Go : « Trop gros », sans ligne « Avec Plus » en doublon", () => {
+    show(CapacityGauge, { bytes: CONTENT_MAX + 1, count: 2, head: true });
     expect(document.querySelector('[role="alert"]')!.textContent).toContain("Trop gros");
-    const up = document.querySelector("[data-upsell]")!;
-    expect(up.textContent!.replace(/ /g, " ")).toContain("Avec Plus : jusqu'à 10 Go par partage et 7 jours.");
-    expect(up.closest('[role="alert"], dialog')).toBeNull(); // ni alerte, ni fenêtre imposée
-    (up.querySelector("button") as HTMLButtonElement).click();
-    expect(onpaid).toHaveBeenCalledWith("plus");
-    while (mounted.length) void unmount(mounted.pop()!);
-    document.body.innerHTML = "";
-    show(CapacityGauge, { bytes: CONTENT_MAX, count: 2, head: true, onpaid });
     expect(document.querySelector("[data-upsell]")).toBeNull();
   });
 });
