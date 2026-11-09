@@ -14,6 +14,8 @@
   import { ArrowDown, ArrowUp, Ellipsis, Pencil, X } from "./Icon";
   import type { canClean } from "../flows/compose.svelte";
   import ItemNotes from "./ItemNotes.svelte";
+  import CleanMark from "./CleanMark.svelte";
+  import { cleanLineKey, cleanMark } from "../media/clean-label";
   import LockMark from "./LockMark.svelte";
   import { sendLock } from "./lock";
   import { formatBytes } from "../i18n/format";
@@ -157,6 +159,10 @@
   });
   // Chaque ligne a son cadenas (UI5) : un texte reste gris, il part dans le manifeste au clic.
   const lock = $derived(sendLock(upload, item.kind === "text" ? "text" : "file"));
+  // Nettoyage (D41-34) : 2ᵉ ligne de la bulle du cadenas ; sur la ligne, une étincelle si nettoyé,
+  // une pastille ambre si le nettoyage a échoué, rien si le fichier part tel quel.
+  const cleanLine = $derived(cleanLineKey(item));
+  const mark = $derived(cleanMark(item));
 </script>
 
 <!-- Alt + ↑/↓ depuis la poignée ou un bouton de la ligne (l'événement remonte). -->
@@ -179,7 +185,7 @@
     {:else}
       <FormatIcon {format} />
     {/if}
-    <LockMark badge tone={lock.tone} text={t(lock.key, { n: lock.n })} role={lock.tone === "error" ? "alert" : undefined} />
+    <LockMark badge tone={lock.tone} text={t(lock.key, { n: lock.n })} detail={cleanLine ? t(cleanLine) : undefined} role={lock.tone === "error" ? "alert" : undefined} />
   </span>
 
   <div class="main">
@@ -212,11 +218,9 @@
         <bdi class="nm" title={name} translate="no">
           <span class="b">{mid.head}</span><span class="e">{mid.tail}{shownExt}</span>
         </bdi>
-        <!-- Ordinateur : la marque « Non nettoyé » sur la ligne du nom (liste compacte, une ligne de détails). -->
-        {#if !compact}<ItemNotes {item} unclean="only" />{/if}
       </span>
       <span class="meta">
-        {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi><span class="sep" aria-hidden="true">·</span>{:else if item.kind === "file"}<span>{t(typeKey(format))}</span><span class="sep" aria-hidden="true">·</span>{/if}
+        {#if item.kind === "text" && firstLine(item.text)}<bdi class="sub" translate="no">{firstLine(item.text)}</bdi><span class="sep" aria-hidden="true">·</span>{:else if item.kind === "file"}<span class="ty">{t(typeKey(format))}{#if mark}<CleanMark kind={mark} />{/if}</span><span class="sep" aria-hidden="true">·</span>{/if}
         <span class="num">{formatBytes(item.size, getLang())}</span>
         {#if duration !== null}<span class="sep" aria-hidden="true">·</span><span class="num">{formatClock(duration)}</span>{/if}
         {#if upload}
@@ -233,7 +237,7 @@
           <span class="sep" aria-hidden="true">·</span>
           <button type="button" class="retry" onclick={onclean} disabled={cleaning} aria-label={t(fix === "nettoyer" ? "compose.clean.item" : item.clean === "echec" ? "compose.clean.retry" : "compose.up.retry", { name })} data-fix={fix}>{cleaning ? t("compose.cleaning") : t(fix === "nettoyer" ? "compose.clean.short" : "common.retry")}</button>
         {/if}
-        <ItemNotes {item} {cannotOpen} badgesOnly unclean={compact ? undefined : "skip"} />
+        <ItemNotes {item} {cannotOpen} badgesOnly />
       </span>
       <ItemNotes {item} {cannotOpen} lines />
     {/if}
@@ -372,9 +376,6 @@
     align-items: center;
     gap: 4px 10px;
     min-width: 0;
-  }
-  .head :global(.unclean) {
-    flex: none;
   }
   .nm {
     display: flex;

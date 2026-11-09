@@ -116,13 +116,14 @@ test.describe("fr-FR", () => {
     // Note : titre, puis la première ligne du contenu.
     const note = rows(page).filter({ hasText: "Code de la porte" });
     await expect(note.locator(".sub")).toHaveText("Le code de la porte est 4512B.");
-    // Archive : catégorie, laissée intacte (D41-27), pastille neutre.
-    await expect(rows(page).filter({ hasText: "archive.zip" }).locator('[data-clean="intact"]')).toHaveText("Archive laissée intacte");
-    // Nettoyage automatique (Task 9a, D41-23) : photos « Nettoyé » ; vidéo part sans clic,
-    // marquée « Non nettoyé ». Plus aucun bouton « Nettoyer tous les fichiers ».
-    await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator('[data-clean="nettoye"]')).toHaveAccessibleName("Nettoyé");
+    // Archive : catégorie, laissée intacte (D41-27) : rien sur la ligne, « Fichier tel quel » dans la bulle (D41-34).
+    await expect(rows(page).filter({ hasText: "archive.zip" }).locator("[data-clean]")).toHaveCount(0);
+    await expect(rows(page).filter({ hasText: "archive.zip" }).locator("[data-lock] button")).toHaveAccessibleName(/\. Fichier tel quel \(non modifié\)$/);
+    // Nettoyage automatique (Task 9a, D41-23) : étincelle sur les photos nettoyées ; la vidéo
+    // part sans clic, telle quelle. Plus aucun bouton « Nettoyer tous les fichiers ».
+    await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator('[data-clean="nettoye"]')).toBeVisible();
     await expect(page.getByRole("button", { name: "Nettoyer tous les fichiers" })).toHaveCount(0);
-    await expect(page.locator('[data-clean="non-nettoye"]').first()).toHaveText(/^Non nettoyé/);
+    await expect(page.locator("[data-row]").getByText(/^(Original|Nettoyé|Non nettoyé)$/)).toHaveCount(0);
     // Listes compactes (décision du 7 novembre) : aucune vignette, une icône de format par ligne,
     // type, taille, durée ; plus d'estimation par fichier ni par catégorie (décision du 8 novembre).
     await expect(page.locator("[data-row] img")).toHaveCount(0);
@@ -215,7 +216,7 @@ test.describe("fr-FR", () => {
     await expect(page.locator("[data-row].danger, [data-row] .row.danger").filter({ hasText: "installer.exe" })).toHaveCount(1);
     await expect(exe.getByText("Programme ou script : il peut agir sur l'appareil du destinataire.")).toBeVisible();
     await expect(rows(page).filter({ hasText: "vacances.jpg" }).getByText("Attention : c'est un programme, malgré son extension.")).toBeVisible();
-    await expect(rows(page).filter({ hasText: "sauvegarde" }).locator('[data-clean="intact"]')).toHaveText("Archive laissée intacte");
+    await expect(rows(page).filter({ hasText: "sauvegarde" }).locator("[data-clean]")).toHaveCount(0);
     await expect(exe.locator("svg.fi")).toHaveAttribute("data-format", "EXE");
     await expect(rows(page).filter({ hasText: "vacances.jpg" }).locator("svg.fi")).toHaveAttribute("data-format", "EXE");
     await expect(rows(page).filter({ hasText: "budget-2026.xlsx" }).locator("svg.fi")).toHaveAttribute("data-format", "XLS");
@@ -288,7 +289,7 @@ test.describe("fr-FR", () => {
     await expect(sheet).toBeVisible();
     await expect(sheet).toContainText("Bientôt disponible.");
     await expect(sheet).toContainText(/7\s€\s?par mois, TTC/);
-    await expect(sheet).toContainText(/ou 70\s€ par an, payé en une fois/);
+    await expect(sheet).toContainText(/ou 70\s€ par an/);
     await expect(sheet.locator("form, input, a[href]")).toHaveCount(0);
     await settle(page);
     expect(await axe(page)).toEqual([]);

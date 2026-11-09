@@ -25,7 +25,8 @@
   import { copyText } from "../ui/clipboard";
   import DownloadBar from "../ui/DownloadBar.svelte";
   import { formatOf } from "../ui/formats";
-  import { Download, Eye, Flag, Pause, Play, Square, Trash2 } from "../ui/Icon";
+  import { Download, Eye, Pause, Play, Square, Trash2 } from "../ui/Icon";
+  import { chrome } from "../app/chrome.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import InlineConfirm from "../ui/InlineConfirm.svelte";
   import { reducedMotion } from "../ui/motion";
@@ -328,6 +329,16 @@
     return null;
   }
   let reportOpen = $state(false);
+  // Signaler (retours UI7) : plus de bouton en haut ; le lien « Signaler » du pied de page ouvre
+  // la confirmation de CE partage tant qu'il est ouvert (AppShell lit chrome.report).
+  $effect(() => {
+    if (closer.closed || wiped || ended !== null) return;
+    const open = () => void (reportOpen = true);
+    chrome.report = open;
+    return () => {
+      if (chrome.report === open) chrome.report = null;
+    };
+  });
 
   // ---------- Visionneuse ----------
   let viewAt = $state<number | null>(null);
@@ -356,15 +367,6 @@
         ? t("content.summary.view", { n: entries.length, size: formatBytes(totalBytes, lang) })
         : t("content.summary", { n: entries.length, size: formatBytes(totalBytes, lang), time: formatDuration(transferSeconds(totalBytes, rate), lang) })}
     </p>
-    <!-- Signaler : en haut à droite, toujours visible (décision du propriétaire, retours UI4). -->
-    {#if !closer.closed}
-      <div class="report">
-        <Button variant="ghost" dense onpress={() => void (reportOpen = true)}>
-          {#snippet icon()}<Flag size={18} />{/snippet}
-          {t("content.report")}
-        </Button>
-      </div>
-    {/if}
   </header>
   {#if viewOnly}
     <p class="notice"><Eye size={18} aria-hidden="true" /> <span>{t("content.viewOnly")}</span></p>
@@ -574,23 +576,6 @@
     list-style: none;
     min-width: 0;
   }
-  /* En-tête : titre et « Signaler » sur la même ligne, le résumé dessous (retours UI4). */
-  .top {
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    column-gap: var(--sp-2);
-  }
-  .sum {
-    grid-column: 1 / -1;
-  }
-  .report {
-    grid-row: 1;
-    grid-column: 2;
-    margin-inline-end: -10px;
-  }
-  .report :global(button.ghost) {
-    color: var(--text-2);
-  }
   .eol {
     display: grid;
     justify-items: start;
@@ -613,10 +598,6 @@
     .eol {
       justify-items: center;
       text-align: center;
-    }
-    .report :global(button.ghost) {
-      gap: 6px;
-      padding-inline: 10px;
     }
   }
   .err {

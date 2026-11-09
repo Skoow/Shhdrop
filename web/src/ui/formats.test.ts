@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { formatOf } from "./formats";
+import { abbr, formatOf, KNOWN_EXTS } from "./formats";
+import { fr } from "../i18n/fr";
+import { en } from "../i18n/en";
 
 const f = (ext: string, sniffed: Parameters<typeof formatOf>[0]["sniffed"] = null, preview?: Parameters<typeof formatOf>[0]["preview"]) => formatOf({ kind: "file", ext, sniffed, preview });
 
@@ -33,5 +35,17 @@ describe("formatOf", () => {
     expect(f("verylong")).toEqual({ label: "", family: "file" });
     expect(f("dat")).toEqual({ label: "DAT", family: "file" });
     expect(formatOf({ kind: "text", ext: "" })).toEqual({ label: "", family: "note" });
+  });
+});
+
+describe("libellé de l'icône (retours UI7)", () => {
+  it("4 caractères au plus pour chaque extension connue et chaque libellé générique", () => {
+    for (const e of KNOWN_EXTS) expect(f(e).label.length, e).toBeLessThanOrEqual(4);
+    for (const d of [fr, en]) for (const [k, v] of Object.entries(d)) if (k.startsWith("format.short.")) expect(v.length, k).toBeLessThanOrEqual(4);
+  });
+  it("au-delà de 4 caractères : abrégé", () => {
+    expect(abbr("pdf")).toBe("PDF");
+    expect(abbr("WOFF2")).toBe("WOFF");
+    expect(abbr(" epub ")).toBe("EPUB");
   });
 });

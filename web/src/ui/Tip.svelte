@@ -7,8 +7,9 @@
   import type { Snippet } from "svelte";
   import type { ClassValue } from "svelte/elements";
 
-  type Props = { label: string; tip: string; class?: ClassValue; children: Snippet; [data: `data-${string}`]: string | undefined };
-  let { label, tip, class: cls, children, ...rest }: Props = $props();
+  /** `detail` : 2ᵉ ligne de la bulle (cadenas : l'état du nettoyage, D41-34). */
+  type Props = { label: string; tip: string; detail?: string; class?: ClassValue; children: Snippet; [data: `data-${string}`]: string | undefined };
+  let { label, tip, detail, class: cls, children, ...rest }: Props = $props();
 
   const id = $props.id();
   let btn: HTMLButtonElement | undefined = $state();
@@ -86,7 +87,7 @@
 >
   {@render children()}
 </button>
-<span bind:this={bubble} {id} role="tooltip" class="bubble" popover="manual" hidden>{tip}</span>
+<span bind:this={bubble} {id} role="tooltip" class="bubble" popover="manual" hidden>{#if detail}<span class="l1">{tip}<span class="sr-only">.</span></span> <span class="l2">{detail}</span>{:else}{tip}{/if}</span>
 
 <style>
   /* Cible de 44 px (règle du projet) sans changer la ligne : marges négatives. Les pastilles
@@ -133,6 +134,17 @@
   }
   .bubble[hidden] {
     display: none;
+  }
+  .l1,
+  .l2 {
+    display: block;
+  }
+  .l1 {
+    font-weight: 620;
+  }
+  .l2 {
+    margin-block-start: 2px;
+    color: var(--text-2);
   }
   /* Pointe vers le bouton. */
   .bubble::after {

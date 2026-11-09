@@ -10,6 +10,7 @@
   import { fileSettings } from "../flows/settings.svelte";
   import { BUILD_ID } from "../app/build";
   import { SOURCE_URL } from "../routes/pages/content";
+  import { chrome } from "../app/chrome.svelte";
 
   /** `locked` : pendant un envoi, la langue ne change pas (UI §10). */
   let { open = $bindable(false), locked = false }: { open: boolean; locked?: boolean } = $props();
@@ -26,6 +27,12 @@
   }
   function go(e: MouseEvent, path: string) {
     open = false;
+    // Partage ouvert : « Signaler » ouvre la confirmation de CE partage, comme le pied de page (UI7).
+    if (path === "/signaler" && chrome.report) {
+      e.preventDefault();
+      chrome.report();
+      return;
+    }
     followLink(e, path);
   }
 </script>
@@ -50,7 +57,7 @@
       <a class="row link" href={href("/confidentialite")} onclick={(e) => go(e, "/confidentialite")}>{t("shell.privacy")}<ArrowRight size={18} strokeWidth={1.8} aria-hidden="true" /></a>
       <!-- Retours UI5 : sur téléphone, le pied de page n'est qu'en bas de l'accueil ; ses liens sont aussi ici. -->
       {#each INFO_LINKS as l (l.path)}
-        <a class="row link" href={href(l.path)} onclick={(e) => go(e, l.path)}>{t(l.key)}<ArrowRight size={18} strokeWidth={1.8} aria-hidden="true" /></a>
+        <a class="row link" href={href(l.path)} onclick={(e) => go(e, l.path)}>{l.path === "/signaler" && chrome.report ? t("content.report") : t(l.key)}<ArrowRight size={18} strokeWidth={1.8} aria-hidden="true" /></a>
       {/each}
     </section>
     <section aria-labelledby="set-about">

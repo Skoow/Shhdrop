@@ -1,6 +1,7 @@
 // Nettoyage automatique des métadonnées (spec §35.2, Task 9a ; décision du propriétaire du
-// 8 novembre, D41-23) : marque « Nettoyé » dès l'ajout, marque « Non nettoyé » et sa raison,
-// envoi sans clic, résumé près d'Envoyer, réglage « Original », photo reçue sans GPS
+// 8 novembre, D41-23 ; présentation D41-34) : 2ᵉ ligne de la bulle du cadenas (« Nettoyé : … »,
+// « Fichier tel quel », « Nettoyage impossible : … »), étincelle ou pastille ambre sur la ligne,
+// envoi sans clic, résumé des échecs près d'Envoyer, réglage désactivé, photo reçue sans GPS
 // (octet par octet), images nettoyées toujours décodables (createImageBitmap).
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -16,6 +17,10 @@ const FX = (n: string) => readFileSync(fileURLToPath(new URL(`../src/media/fixtu
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-9a/", import.meta.url));
 const MARKERS = /ReperMake|ReperModel|ReperXMP|ReperThumb|ReperSecond|ReperMotion|2001:02:03/;
 const row = (page: Page, name: string) => page.locator("[data-row]").filter({ hasText: name });
+/** Bouton du cadenas de la ligne : son nom porte les deux lignes de la bulle (D41-34). */
+const lock = (page: Page, name: string) => row(page, name).locator("[data-lock] button");
+const esc = (s: string) => s.replace(/[.*+?^$()|[\]\\]/g, "\\$&");
+const detail = (s: string) => new RegExp("\\. " + esc(s).replace(/ : /g, "\\s: ") + "$");
 
 async function cleaned(name: string, mime: string): Promise<Buffer> {
   const r = await stripMetadata(new Blob([FX(name)]), mime, name);
@@ -47,9 +52,9 @@ test("photo avec GPS : « Nettoyé » à l'ajout, le destinataire reçoit la pho
   await s.page.goto(shh.origin + "/");
   await (await openFilePicker(s.page)).setFiles(photo);
   const r = row(s.page, "IMG_GPS");
-  // Retours UI4 : bouclier seul, nom « Nettoyé », détail dans la bulle (aria-describedby).
-  await expect(r.locator('[data-clean="nettoye"]')).toHaveAccessibleName("Nettoyé");
-  await expect(r.locator('[data-clean="nettoye"]')).toHaveAccessibleDescription("Nettoyé · lieu, appareil et date retirés");
+  // D41-34 : étincelle à côté du type ; le détail dans la bulle du cadenas (2ᵉ ligne).
+  await expect(r.locator('[data-clean="nettoye"]')).toBeVisible();
+  await expect(lock(s.page, "IMG_GPS")).toHaveAccessibleName(detail("Nettoyé : position, appareil et dates retirés"));
   await s.ctx.close();
   const s2 = await freshPage(browser);
   const sent = await sendShare(s2.page, shh.origin + "/", { files: [photo] });
@@ -66,7 +71,7 @@ test("photo avec GPS : « Nettoyé » à l'ajout, le destinataire reçoit la pho
   expect(got.length).toBeLessThan(photo.buffer.length);
 });
 
-test("états à l'écran : Nettoyé (photo, PDF), Non nettoyé avec raison (échec, PDF protégé, inconnu), archive laissée intacte (D41-27, D41-31) ; tout part sans clic (D41-23) ; résumé près d'Envoyer", async ({ page, shh, isMobile }) => {
+test("états à l'écran (D41-34) : nettoyé (photo, PDF), nettoyage impossible (échec, PDF protégé), tel quel (inconnu, archive) ; tout part sans clic (D41-23) ; résumé des échecs près d'Envoyer", async ({ page, shh, isMobile }) => {
   test.setTimeout(90_000);
   if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   const puts: string[] = [];
@@ -85,23 +90,26 @@ test("états à l'écran : Nettoyé (photo, PDF), Non nettoyé avec raison (éch
   ]);
   await expect(page.locator("[data-row]")).toHaveCount(6);
   await expect(row(page, "IMG_GPS").locator('[data-clean="nettoye"]')).toBeVisible();
-  await expect(row(page, "IMG_GPS").locator('[data-clean="non-nettoye"]')).toHaveCount(0);
-  const mark = (n: string) => row(page, n).locator('[data-clean="non-nettoye"]');
-  // « Non nettoyé » : petite pastille visible ; la raison dans le nom et la bulle (retours UI4).
-  await expect(mark("abime")).toHaveText("Non nettoyé");
-  await expect(mark("abime")).toHaveAccessibleName(/^Non nettoyé · Échec du nettoyage/);
-  await expect(mark("dessin")).toHaveAccessibleName(/^Non nettoyé · Format non reconnu/);
-  // PDF (D41-31) : informations cachées retirées ; signé → « Non nettoyé », laissé intact.
-  await expect(row(page, "devis").locator('[data-clean="nettoye"]')).toHaveAccessibleDescription("Nettoyé · auteur, logiciel, dates et miniatures retirés");
-  await expect(mark("signe")).toHaveAccessibleName(/^Non nettoyé · Fichier signé ou protégé/);
-  // Archive : jamais ouverte, pastille neutre (D41-27).
-  const intact = (n: string) => row(page, n).locator('[data-clean="intact"]');
-  await expect(intact("archive")).toHaveText("Archive laissée intacte");
-  await expect(mark("archive")).toHaveCount(0);
+  await expect(row(page, "IMG_GPS").locator('[data-clean="echec"]')).toHaveCount(0);
+  const fail = (n: string) => row(page, n).locator('[data-clean="echec"]');
+  // Échec : petite pastille ambre sur la ligne, la raison dans la bulle du cadenas.
+  await expect(fail("abime")).toBeVisible();
+  await expect(lock(page, "abime")).toHaveAccessibleName(detail("Nettoyage impossible : structure du fichier inattendue"));
+  // PDF (D41-31) : informations cachées retirées ; signé → nettoyage impossible, laissé intact.
+  await expect(lock(page, "devis")).toHaveAccessibleName(detail("Nettoyé : auteur, logiciel, dates et miniatures retirés"));
+  await expect(fail("signe")).toBeVisible();
+  await expect(lock(page, "signe")).toHaveAccessibleName(detail("Nettoyage impossible : fichier signé ou protégé"));
+  // Format inconnu, archive (jamais ouverte, D41-27) : « Fichier tel quel », rien sur la ligne.
+  for (const n of ["dessin", "archive"]) {
+    await expect(lock(page, n)).toHaveAccessibleName(detail("Fichier tel quel (non modifié)"));
+    await expect(row(page, n).locator("[data-clean]")).toHaveCount(0);
+  }
+  // Plus aucune marque écrite.
+  await expect(page.locator("[data-row]").getByText(/^(Original|Nettoyé|Non nettoyé|Archive laissée intacte)$/)).toHaveCount(0);
   // Aucun choix à faire : plus de bouton, envoi permis, résumé discret près d'Envoyer.
   await expect(page.getByRole("button", { name: /^Envoyer tel quel/ })).toHaveCount(0);
   await expect(page.locator("#send-reason").filter({ visible: true })).toHaveCount(0);
-  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("3 fichiers ne sont pas nettoyés");
+  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("2\u202ffichiers n'ont pas pu être nettoyés");
   await expect(sendButton(page).filter({ visible: true })).toBeEnabled();
   // Chacun part dès l'ajout, nettoyé ou non (une requête d'envoi par petit élément).
   await expect.poll(() => puts.length, { timeout: 30_000 }).toBe(6);
@@ -116,8 +124,8 @@ test("document Word avec auteur (Task 9b, D41-27) : « Nettoyé » à l'ajout, a
   await s.page.goto(shh.origin + "/");
   await (await openFilePicker(s.page)).setFiles(doc);
   const r = row(s.page, "rapport");
-  await expect(r.locator('[data-clean="nettoye"]')).toHaveAccessibleName("Nettoyé");
-  await expect(r.locator('[data-clean="nettoye"]')).toHaveAccessibleDescription("Nettoyé · propriétés du document (auteur, société, dates) et miniature retirées");
+  await expect(r.locator('[data-clean="nettoye"]')).toBeVisible();
+  await expect(lock(s.page, "rapport")).toHaveAccessibleName(detail("Nettoyé : auteur, société, dates et miniature retirés"));
   await expect(r.getByText(/modifications suivies|commentaires/)).toHaveCount(0);
   await s.ctx.close();
   const s2 = await freshPage(browser);
@@ -136,7 +144,7 @@ test("document Word avec auteur (Task 9b, D41-27) : « Nettoyé » à l'ajout, a
   expect(doc.buffer.toString("latin1")).toMatch(/ReperAuteur/);
 });
 
-test("réglage « Nettoyer automatiquement les fichiers » désactivé : marque « Original », rien de modifié", async ({ page, shh }) => {
+test("réglage « Nettoyer automatiquement les fichiers » désactivé : « Fichier tel quel » dans la bulle, rien sur la ligne, rien de modifié", async ({ page, shh }) => {
   await page.goto(shh.origin + "/");
   const tab = page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Réglages" });
   if (await tab.isVisible()) await tab.click();
@@ -147,7 +155,10 @@ test("réglage « Nettoyer automatiquement les fichiers » désactivé : marque 
   await expect(sw).toHaveAttribute("aria-checked", "false");
   await page.keyboard.press("Escape");
   await (await openFilePicker(page)).setFiles({ name: "IMG_GPS.jpg", mimeType: "image/jpeg", buffer: FX("iphone-like.jpg") });
-  await expect(row(page, "IMG_GPS").locator('[data-clean="original"]')).toHaveText(/^Original/);
+  await expect(lock(page, "IMG_GPS")).toHaveAccessibleName(detail("Fichier tel quel (non modifié)"));
+  await expect(row(page, "IMG_GPS").locator("[data-clean]")).toHaveCount(0);
+  await expect(row(page, "IMG_GPS").getByText("Original")).toHaveCount(0);
+  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveCount(0);
   await expect(page.locator("#send-reason").filter({ visible: true })).toHaveCount(0);
 });
 

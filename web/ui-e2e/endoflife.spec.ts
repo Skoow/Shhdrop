@@ -100,7 +100,10 @@ test("Signaler : feuille sans motif, corps fixe { proof, reason: \"report\" }, d
   page.on("request", (r) => {
     if (new URL(r.url()).pathname === "/api/shares/destroy") bodies.push(r.postData() ?? "");
   });
-  await page.getByRole("button", { name: "Signaler" }).click();
+  // Retours UI7 : « Signaler » n'existe que dans le pied de page ; sur un partage ouvert, il ouvre
+  // la confirmation de CE partage (même action qu'avant).
+  await expect(page.locator("main").getByRole("button", { name: /Signaler/ })).toHaveCount(0);
+  await page.locator("footer[data-foot]").getByRole("button", { name: "Signaler ce partage" }).click();
   const sheet = page.getByRole("dialog", { name: "Signaler ce contenu" });
   await expect(sheet).toBeVisible();
   await expect(sheet.getByText(/PHAROS/)).toBeVisible();
@@ -116,7 +119,7 @@ test("Signaler : feuille sans motif, corps fixe { proof, reason: \"report\" }, d
   await expect(fetchMeta(sent.link, shh.origin)).rejects.toBeInstanceOf(NotFoundError);
 });
 
-test("ouverture non dernière : ni « Détruire » ni « Terminer » ; « Ce lien peut encore être ouvert 2 fois. » ; « Signaler » en haut", async ({ page, shh, browser }) => {
+test("ouverture non dernière : ni « Détruire » ni « Terminer » ; « Ce lien peut encore être ouvert 2 fois. » ; « Signaler » dans le pied de page", async ({ page, shh, browser }) => {
   test.setTimeout(150_000);
   const sent = await opened(browser, shh.origin, 3);
   await page.goto(sent.link);
@@ -124,7 +127,8 @@ test("ouverture non dernière : ni « Détruire » ni « Terminer » ; « Ce lie
   await expect(page.locator("[data-eol]")).toHaveText("Ce lien peut encore être ouvert 2\u202ffois.");
   await expect(page.getByRole("button", { name: /^Détruire/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Terminer|J'ai fini/ })).toHaveCount(0);
-  const report = page.locator("header.top").getByRole("button", { name: "Signaler" });
+  await expect(page.locator("header.top").getByRole("button", { name: /Signaler/ })).toHaveCount(0);
+  const report = page.locator("footer[data-foot]").getByRole("button", { name: "Signaler ce partage" });
   await expect(report).toBeVisible();
   expect((await fetchMeta(sent.link, shh.origin)).opensLeft).toBe(2);
 });

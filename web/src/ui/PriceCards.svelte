@@ -1,8 +1,10 @@
 <script lang="ts">
-  // Prix des formules (retours UI6, spec §38.8.2, D41-32) : le prix MENSUEL en grand, l'annuel
-  // payé en une fois dessous (mois offerts calculés depuis PAID), puis les deux façons de payer
-  // (paiement unique, ou renouvellement automatique facultatif résiliable en un clic, sans frais)
-  // et « Aucun frais caché. ». Information seulement : rien n'est en vente, aucun bouton d'achat.
+  // Prix des formules (spec §38.8.2, D41-32, D41-34) : le prix MENSUEL en grand, l'annuel dessous
+  // (mois offerts calculés depuis PAID), puis comment payer : le mensuel par abonnement à
+  // renouvellement automatique (résiliable en un clic, sans frais), l'annuel au choix en paiement
+  // unique ou avec renouvellement ; moyens de paiement en libellés (carte bancaire,
+  // crypto-monnaies), sans logo de marque. Information seulement : rien n'est en vente, aucun
+  // bouton d'achat, rien n'est branché côté paiement.
   import { getLang, t } from "../i18n/i18n.svelte";
   import { PAID, type PaidTier } from "../limits";
   import { Check } from "./Icon";
@@ -24,11 +26,22 @@
       </li>
     {/each}
   </ul>
-  <div class="modes">
+  <div class="modes" data-modes>
     <p class="mh">{t("price.modes")}</p>
     <ul>
-      <li><Check size={16} strokeWidth={2.2} aria-hidden="true" /><span><b>{t("price.once")}</b> {t("price.once.body")}</span></li>
-      <li><Check size={16} strokeWidth={2.2} aria-hidden="true" /><span><b>{t("price.auto")}</b> {t("price.auto.body")}</span></li>
+      <li data-mode="month"><Check size={16} strokeWidth={2.2} aria-hidden="true" /><span><b>{t("price.monthly")}</b> {t("price.monthly.body")}</span></li>
+      <li data-mode="year"><Check size={16} strokeWidth={2.2} aria-hidden="true" /><span><b>{t("price.yearly")}</b> {t("price.yearly.body")}</span></li>
+    </ul>
+    <p class="mh">{t("price.means")}</p>
+    <ul class="means" data-means>
+      <li>
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><rect x="3" y="5.5" width="18" height="13" rx="2.5" /><path d="M3 9.5h18M6.5 15h4" /></svg>
+        <span><b>{t("price.card")}</b></span>
+      </li>
+      <li>
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="5" /><path d="M12 9.5v5" /></svg>
+        <span><b>{t("price.crypto")}</b> {t("price.crypto.body")}</span>
+      </li>
     </ul>
     <p class="hidden-fees">{t("price.noHidden")}</p>
   </div>
@@ -137,6 +150,23 @@
     flex: none;
     margin-top: 3px;
     color: var(--plus);
+  }
+  .means svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .modes .means li :global(svg) {
+    margin-top: 0;
+    color: var(--text-2);
+  }
+  .means li {
+    align-items: center;
+  }
+  .modes .mh + ul {
+    margin-block-end: var(--sp-2);
   }
   .hidden-fees {
     color: var(--text);

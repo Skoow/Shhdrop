@@ -1,12 +1,12 @@
-// Le seul endroit qui choisit le texte d'état du nettoyage d'un élément (spec §35.2 ; décision
-// D41-23 du propriétaire : nettoyage automatique et non bloquant — un fichier qui n'a pas pu
-// être nettoyé part sans clic, avec une marque « Non nettoyé » bien visible et sa raison).
-import type { Format } from "./format";
+// Le seul endroit qui choisit le texte d'état du nettoyage d'un élément (spec §35.2, D41-23 ;
+// présentation D41-34, retours UI7) : un seul endroit d'état par fichier, la bulle du cadenas,
+// dont la 2ᵉ ligne dit le nettoyage. Sur la ligne : une étincelle discrète si le fichier est
+// nettoyé, rien s'il part tel quel, une pastille ambre seulement si le nettoyage a échoué.
 import type { CleanFamily, CleanState } from "./strip";
 
 /** `original` : nettoyage automatique désactivé dans les Réglages (rien n'est modifié). */
 export type ItemCleanState = CleanState | "original";
-export type ItemClean = { clean: ItemCleanState; cleanFamily?: CleanFamily; cleanFormat?: Format; category?: string };
+export type ItemClean = { clean: ItemCleanState; cleanFamily?: CleanFamily };
 
 const DONE = {
   image: "clean.done.image",
@@ -17,48 +17,31 @@ const DONE = {
   vocal: "clean.done.vocal",
 } as const satisfies Record<CleanFamily, string>;
 
-/** Le fichier part avec ses métadonnées éventuelles (échec, protégé, format non pris en charge).
- *  Archives laissées intactes par décision (D41-27) : marque neutre, pas comptées ici. */
-export function isUncleaned(i: ItemClean): boolean {
-  return i.clean === "echec" || i.clean === "protege" || i.clean === "non_pris_en_charge";
+/** Le nettoyage a été tenté et n'a pas abouti (échec, fichier signé ou protégé) : le fichier part
+ *  tel quel, sans clic (D41-23). Compté dans « N fichiers n'ont pas pu être nettoyés ». */
+export function isCleanFailure(i: ItemClean): boolean {
+  return i.clean === "echec" || i.clean === "protege";
 }
 
-/** Raison courte de la marque « Non nettoyé » ; null pour un élément nettoyé, original ou texte. */
-export function uncleanedReasonKey(i: ItemClean) {
-  if (i.clean === "echec") return "clean.why.echec" as const;
-  if (i.clean === "protege") return "clean.why.protege" as const;
-  if (i.clean !== "non_pris_en_charge") return null;
-  switch (i.cleanFormat) {
-    case "mp4":
-    case "webm":
-      return "clean.why.video" as const;
-    case "mp3":
-    case "ogg":
-    case "flac":
-    case "wav":
-      return "clean.why.audio" as const;
-    default:
-      return "clean.why.unknown" as const;
-  }
-}
-
-/** Phrase d'état d'un élément (infobulle, lecteur d'écran) ; null : rien à dire (texte, texte brut). */
-export function cleanLabelKey(i: ItemClean) {
+/** 2ᵉ ligne de la bulle du cadenas ; null pour un texte (rien à nettoyer). */
+export function cleanLineKey(i: ItemClean) {
   switch (i.clean) {
     case "nettoye":
       return DONE[i.cleanFamily ?? "image"];
-    case "original":
-      return "clean.original.hint" as const;
     case "sans":
       return null;
-    case "intact":
-      return "clean.intact.archive.hint" as const;
+    case "echec":
+      return "clean.fail.echec" as const;
+    case "protege":
+      return "clean.fail.protege" as const;
     default:
-      return "clean.uncleaned.hint" as const;
+      // original (choix), intact (archive, D41-27), non_pris_en_charge (format non concerné)
+      return "clean.asis" as const;
   }
 }
 
-/** Marque neutre d'une archive laissée intacte par décision (D41-27) ; null sinon. */
-export function intactKey(i: ItemClean) {
-  return i.clean === "intact" ? ("clean.intact.archive" as const) : null;
+/** Marque de la ligne : étincelle (nettoyé), pastille ambre (échec), rien sinon. */
+export function cleanMark(i: ItemClean): "spark" | "fail" | null {
+  if (i.clean === "nettoye") return "spark";
+  return isCleanFailure(i) ? "fail" : null;
 }

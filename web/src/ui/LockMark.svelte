@@ -10,8 +10,11 @@
   import type { LockTone } from "./lock";
   import Tip from "./Tip.svelte";
 
-  type Props = { tone: LockTone; text: string; role?: "alert"; badge?: boolean; children?: Snippet };
-  let { tone, text, role, badge = false, children }: Props = $props();
+  // `detail` (D41-34, retours UI7) : 2ᵉ ligne de la bulle, l'état du nettoyage du fichier ; elle
+  // entre aussi dans le nom du bouton (tout reste dans les libellés).
+  type Props = { tone: LockTone; text: string; detail?: string; role?: "alert"; badge?: boolean; children?: Snippet };
+  let { tone, text, detail, role, badge = false, children }: Props = $props();
+  const label = $derived(detail ? `${text}. ${detail}` : text);
 </script>
 
 {#snippet glyph(px: number)}
@@ -37,14 +40,14 @@
   <!-- Pastille (UI5, UI6) : posée au coin bas-droit de l'icône de format (parent en position
        relative) ; bouton de 24 px (WCAG 2.5.8), au-dessus du bouton d'aperçu. -->
   <span class={["lock", tone, "badge"]} data-lock={tone}>
-    <Tip label={text} tip={text} class="pic-tip" data-corner="">
+    <Tip {label} tip={text} {detail} class="pic-tip" data-corner="">
       <span class="pill">{@render glyph(11)}</span>
     </Tip>
     {#if role === "alert"}<span class="sr-only" role="alert">{text}</span>{/if}
   </span>
 {:else}
   <span class={["lock", tone]} data-lock={tone}>
-    <Tip label={text} tip={text}>{@render glyph(15)}</Tip>
+    <Tip {label} tip={text} {detail}>{@render glyph(15)}</Tip>
     {#if role === "alert"}<span class="sr-only" role="alert">{text}</span>{/if}
     {@render children?.()}
   </span>

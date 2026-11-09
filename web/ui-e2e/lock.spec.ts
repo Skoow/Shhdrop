@@ -13,7 +13,7 @@ test.use({ locale: "fr-FR" });
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-LOCK/", import.meta.url));
 const SHOTS5 = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-UI5/", import.meta.url));
 
-test("envoi : cadenas gris tant que le segment n'est pas confirmé, vert après ; marques « Non nettoyé »", async ({ page, shh, isMobile }) => {
+test("envoi : cadenas gris tant que le segment n'est pas confirmé, vert après ; 2ᵉ ligne de la bulle : nettoyage (D41-34)", async ({ page, shh, isMobile }) => {
   test.setTimeout(90_000);
   if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   let release!: () => void;
@@ -33,10 +33,11 @@ test("envoi : cadenas gris tant que le segment n'est pas confirmé, vert après 
   await expect(r.locator('[data-lock="ok"]')).toHaveCount(0);
   release();
   // Retours UI4 : plus de texte sur la ligne ; le libellé est le nom du bouton et sa bulle.
-  await expect(r.locator('[data-lock="ok"] button')).toHaveAccessibleName("Chiffré et envoyé", { timeout: 30_000 });
+  // D41-34 : 2ᵉ ligne, le nettoyage (format inconnu : tel quel), dans le nom et dans la bulle.
+  await expect(r.locator('[data-lock="ok"] button')).toHaveAccessibleName("Chiffré et envoyé. Fichier tel quel (non modifié)", { timeout: 30_000 });
   await expect(r.locator('[data-lock="ok"]')).toHaveText("", { useInnerText: true });
-  await expect(r.locator('[data-lock="ok"] button')).toHaveAccessibleDescription("Chiffré et envoyé");
-  // Capture : cadenas et marques « Non nettoyé ».
+  await expect(r.locator('[data-lock="ok"] button')).toHaveAccessibleDescription(/^Chiffré et envoyé ?\. Fichier tel quel \(non modifié\)$/);
+  // Capture : cadenas et marques de nettoyage.
   await (await openFilePicker(page)).setFiles([
     { name: "plage-nuit.jpg", mimeType: "image/jpeg", buffer: readFileSync(file("plage-nuit.jpg")) },
     { name: "contrat.pdf", mimeType: "application/pdf", buffer: readFileSync(file("contrat.pdf")) },

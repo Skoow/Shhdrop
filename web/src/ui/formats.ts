@@ -41,6 +41,8 @@ EXT["html"] = { family: "code", label: "HTML" };
 EXT["svg"] = { family: "image", label: "SVG" };
 EXT["appimage"] = { family: "exec", label: "APP" };
 EXT["woff2"] = { family: "font", label: "WOFF" };
+/** Extensions connues (tests : chaque libellé tient en 4 caractères). */
+export const KNOWN_EXTS: readonly string[] = Object.keys(EXT);
 
 const SNIFF: Partial<Record<NonNullable<Sniffed>, Format>> = {
   zip: { family: "archive", label: "ZIP" },
@@ -113,4 +115,10 @@ function short(ext: string): string {
 /** Clé i18n de l'étiquette de type affichée dans la ligne (« Document PDF »…). */
 export function typeKey(f: Format) {
   return `format.${f.family}` as const;
+}
+
+/** Libellé écrit dans l'icône : 4 caractères au plus, sinon abrégé (les 4 premiers). */
+export function abbr(s: string): string {
+  const up = s.trim().toUpperCase();
+  return up.length <= 4 ? up : up.slice(0, 4);
 }

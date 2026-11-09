@@ -14,7 +14,7 @@
     <path d="M4 12h1.5M8 8.5v7M11.5 5.5v13M15 9v6M18.5 11v2" />
     <circle cx="20.6" cy="12" r="0.6" fill="currentColor" stroke="none" />
   {:else if id === "note"}
-    <path d="M6 3.5h8.5L19 8v11a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19V5a1.5 1.5 0 0 1 1-1.5z" />
+    <path d="M6.5 3.5h8L19 8v11a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19V5a1.5 1.5 0 0 1 1.5-1.5z" />
     <path d="M14 3.5V8h5M8.5 12.5h7M8.5 16h4.5" />
   {:else if id === "gallery"}
     <rect x="3" y="7" width="14" height="13" rx="2.5" />

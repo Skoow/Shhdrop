@@ -5,7 +5,7 @@
   // information (retours UI6). Couleurs : jetons --fmt-* (tokens.css). Aucun logo de marque.
   // Décorative : le type est dit en texte dans la ligne (aria-hidden ici).
   import { t } from "../i18n/i18n.svelte";
-  import type { Family, Format } from "./formats";
+  import { abbr, type Family, type Format } from "./formats";
 
   type Props = { format: Format; size?: number };
   let { format, size = 28 }: Props = $props();
@@ -33,16 +33,38 @@
     font: "other",
     file: "other",
   };
-  const label = $derived(format.label || t(`format.short.${format.family}`));
+  // Libellé : 4 caractères au plus (sinon abrégé), taille de police selon la longueur ; il tient
+  // toujours DANS la pastille, elle-même DANS la feuille (retours UI7). Garde-fou : s'il dépasse
+  // malgré tout (police de repli plus large), il est resserré à la largeur de la pastille.
+  const label = $derived(abbr(format.label || t(`format.short.${format.family}`)));
+  const fs = $derived(label.length <= 2 ? 8.4 : label.length === 3 ? 7.6 : 6.8);
+</script>
+
+<script module lang="ts">
+  /** Largeur utile de la pastille (unités du viewBox) : 21 de pastille moins 1,5 de marge de chaque côté. */
+  export const LABEL_MAX = 18;
+  /** Resserre le libellé s'il dépasse la pastille (mesure réelle, police comprise). */
+  function fit(el: SVGTextElement, _label: string) {
+    el.removeAttribute("textLength");
+    el.removeAttribute("lengthAdjust");
+    try {
+      if (el.getComputedTextLength() > LABEL_MAX) {
+        el.setAttribute("textLength", String(LABEL_MAX));
+        el.setAttribute("lengthAdjust", "spacingAndGlyphs");
+      }
+    } catch {
+      // happy-dom : pas de mesure, rien à faire
+    }
+  }
 </script>
 
 <svg class="fi" viewBox="0 0 32 40" width={size} height={Math.round(size * 1.25)} aria-hidden="true" focusable="false" data-format={format.label || format.family} data-tone={TONE[format.family]} style:--c="var(--fmt-{TONE[format.family]})">
   <path class="pg" d="M6 1.5h14.5l8 8V36a2.5 2.5 0 0 1-2.5 2.5H6A2.5 2.5 0 0 1 3.5 36V4A2.5 2.5 0 0 1 6 1.5Z" />
   <path class="fd" d="M20.5 1.5V7a2.5 2.5 0 0 0 2.5 2.5h5.5" />
   <!-- Pastille du libellé en haut (le cadenas occupe le coin bas-droit de l'icône dans les
-       listes) ; elle déborde à gauche de la feuille, comme une étiquette. -->
-  <rect class="tag" x="0.5" y="11" width="27" height="11" rx="3" />
-  <text x="14" y="19.1" text-anchor="middle" class={["lb", label.length > 3 && "long"]}>{label}</text>
+       listes), entièrement dans la feuille (x 5,5 à 26,5 ; la feuille va de 3,5 à 28,5). -->
+  <rect class="tag" x="5.5" y="12" width="21" height="10" rx="2.5" />
+  <text x="16" y="17" dominant-baseline="central" text-anchor="middle" class={["lb", label.length > 3 && "long"]} font-size={fs} {@attach (el: SVGTextElement) => fit(el, label)}>{label}</text>
   <!-- Pictogramme en bas à gauche, hors du coin du cadenas ; sinon deux lignes de texte. -->
   <g class={["gl", glyph ?? "lines"]} transform="translate(12 29.5) scale(0.6) translate(-16 -17.5)">
     {#if glyph === "image"}
@@ -103,14 +125,13 @@
   }
   .lb {
     font-family: var(--font-sans);
-    font-size: 8px;
     font-weight: 760;
-    letter-spacing: 0.02em;
+    letter-spacing: 0;
     fill: var(--on-fmt);
   }
+  /* 4 caractères : police resserrée (Mona Sans variable, axe de largeur) plutôt que plus petite. */
   .lb.long {
-    font-size: 6.6px;
-    letter-spacing: 0;
+    font-stretch: 78%;
   }
   @media (forced-colors: active) {
     .pg,

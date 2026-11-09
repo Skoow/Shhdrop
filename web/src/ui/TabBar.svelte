@@ -6,10 +6,8 @@
   import { followLink, href, router } from "../app/router.svelte";
   import { t, type Key } from "../i18n/i18n.svelte";
   import { announce } from "./announce";
-  import { MessagesSquare, Send, SlidersHorizontal, Clock } from "./Icon";
   import SettingsSheet from "./SettingsSheet.svelte";
-
-  const ICONS = { send: Send, shares: Clock, chat: MessagesSquare, settings: SlidersHorizontal } as const;
+  import TabIcon from "./TabIcon.svelte";
 
   let settings = $state(false);
   const current = $derived(settings ? "settings" : currentTab(router.current.name));
@@ -26,20 +24,19 @@
 <nav class="tabbar" aria-label={t("tabs.nav")} data-tabbar>
   <ul>
     {#each TABS as tab (tab.id)}
-      {@const Icon = ICONS[tab.id]}
       <li>
         {#if tab.id === "send"}
           <a class="tab" href={href("/")} aria-current={current === "send" ? "page" : undefined} onclick={(e) => go(e, "/")}>
-            <Icon size={22} strokeWidth={1.8} aria-hidden="true" /><span class="lb">{t("tabs.send")}</span>
+            <TabIcon id={tab.id} /><span class="lb">{t("tabs.send")}</span>
           </a>
         {:else if tab.soon}
           <button type="button" class="tab soon" aria-disabled="true" aria-describedby="tab-soon-{tab.id}" onclick={() => soon(tab.id)}>
-            <Icon size={22} strokeWidth={1.8} aria-hidden="true" /><span class="lb">{t(`tabs.${tab.id}` as Key)}</span>
+            <TabIcon id={tab.id} /><span class="lb">{t(`tabs.${tab.id}` as Key)}</span>
             <span class="dot" aria-hidden="true"></span><span class="badge" id="tab-soon-{tab.id}">{t("tabs.soon")}</span>
           </button>
         {:else}
           <button type="button" class="tab" aria-haspopup="dialog" aria-expanded={settings} aria-current={current === "settings" ? "page" : undefined} onclick={() => (settings = true)}>
-            <Icon size={22} strokeWidth={1.8} aria-hidden="true" /><span class="lb">{t("tabs.settings")}</span>
+            <TabIcon id={tab.id} /><span class="lb">{t("tabs.settings")}</span>
           </button>
         {/if}
       </li>

@@ -4,7 +4,7 @@ import { fr } from "../i18n/fr";
 import { readFileSync } from "node:fs";
 import { BLOCK_REASONS, blockKey, canClean, createComposer, splitName, type ComposeDeps } from "./compose.svelte";
 import { gate } from "./clean-gate";
-import { cleanLabelKey, intactKey, isUncleaned, uncleanedReasonKey } from "../media/clean-label";
+import { cleanLineKey, cleanMark, isCleanFailure } from "../media/clean-label";
 import type { StripResult } from "../media/strip";
 import { CATEGORY_ORDER, categoryOf } from "./kinds";
 import { HEAD_BYTES } from "./sniff";
@@ -68,7 +68,8 @@ describe("createComposer : ajout", () => {
     await c.add([f, jpeg("y.jpg")], "fichiers");
     expect(c.items.map((i) => i.clean)).toEqual(["echec", "echec"]);
     expect(c.items[0]!.data).toBe(f);
-    expect(c.items.map((i) => uncleanedReasonKey(i))).toEqual(["clean.why.echec", "clean.why.echec"]);
+    expect(c.items.map((i) => cleanLineKey(i))).toEqual(["clean.fail.echec", "clean.fail.echec"]);
+    expect(c.items.map((i) => cleanMark(i))).toEqual(["fail", "fail"]);
     expect(c.blockReason()).toBeNull();
     expect(c.uncleanedCount).toBe(2);
     await expect(gate(f)).resolves.toBe(f);
@@ -82,16 +83,17 @@ describe("createComposer : ajout", () => {
     const c = make({ strip: async (f, mime) => (seen.push((f as File).name), { state: "non_pris_en_charge", soon: fmt[mime] !== "inconnu", format: fmt[mime]! }) });
     const files = Object.keys(fmt).map((m, k) => file(["b.zip", "c.svg", "d.mp4", "e.mp3"][k]!, 3, m));
     await c.add(files, "fichiers");
-    const by = (n: string) => uncleanedReasonKey(c.items.find((i) => i.base === n)!);
-    expect([by("b"), by("c"), by("d"), by("e")]).toEqual([null, "clean.why.unknown", "clean.why.video", "clean.why.audio"]);
+    // Format non concerné (D41-34) : « Fichier tel quel (non modifié) », aucune marque sur la ligne.
+    for (const i of c.items) {
+      expect(cleanLineKey(i), i.base).toBe("clean.asis");
+      expect(cleanMark(i), i.base).toBeNull();
+    }
     const zip = c.items.find((i) => i.base === "b")!;
     expect(zip.clean).toBe("intact");
-    expect(intactKey(zip)).toBe("clean.intact.archive");
-    expect(cleanLabelKey(zip)).toBe("clean.intact.archive.hint");
     expect(zip.data).toBe(files[0]);
     expect(seen).not.toContain("b.zip");
     expect(c.blockReason()).toBeNull();
-    expect(c.uncleanedCount).toBe(3);
+    expect(c.uncleanedCount).toBe(0);
     for (const i of c.items) await expect(gate(i.data as Blob)).resolves.toBe(i.data);
   });
 
@@ -107,6 +109,9 @@ describe("createComposer : ajout", () => {
     await c.add([f], "fichiers");
     expect(strip).not.toHaveBeenCalled();
     expect(c.items[0]).toMatchObject({ clean: "original" });
+    expect(cleanLineKey(c.items[0]!)).toBe("clean.asis");
+    expect(cleanMark(c.items[0]!)).toBeNull();
+    expect(c.uncleanedCount).toBe(0);
     expect(c.items[0]!.data).toBe(f);
     expect(c.blockReason()).toBeNull();
     await expect(gate(f)).resolves.toBe(f);
@@ -134,19 +139,20 @@ describe("createComposer : ajout", () => {
     await c.add([new File([fx("meta.docx")], "rapport.docx"), pdfFile, new File([fx("signed.pdf")], "signe.pdf", { type: "application/pdf" })], "fichiers");
     const doc = c.items.find((i) => i.ext === ".docx")!;
     expect(doc).toMatchObject({ clean: "nettoye", cleanFamily: "bureautique" });
-    expect(cleanLabelKey(doc)).toBe("clean.done.office");
+    expect(cleanLineKey(doc)).toBe("clean.done.office");
+    expect(cleanMark(doc)).toBe("spark");
     expect(new TextDecoder("latin1").decode(await (doc.data as Blob).arrayBuffer())).not.toMatch(/ReperSociete|ReperTitre|ReperMiniature/);
     const pdf = c.items.find((i) => i.base === "devis")!;
     expect(pdf).toMatchObject({ clean: "nettoye", cleanFamily: "pdf" });
-    expect(cleanLabelKey(pdf)).toBe("clean.done.pdf");
+    expect(cleanLineKey(pdf)).toBe("clean.done.pdf");
     expect((pdf.data as Blob).size).toBe(pdfFile.size);
     const out = new TextDecoder("latin1").decode(await (pdf.data as Blob).arrayBuffer());
     expect(out).not.toMatch(/ReperAuteur|ReperXMP|ReperThumb/);
     expect(out).toContain("(Bonjour Shhdrop) Tj");
     const signed = c.items.find((i) => i.base === "signe")!;
     expect(signed.clean).toBe("protege");
-    expect(uncleanedReasonKey(signed)).toBe("clean.why.protege");
-    expect(intactKey(signed)).toBeNull();
+    expect(cleanLineKey(signed)).toBe("clean.fail.protege");
+    expect(isCleanFailure(signed)).toBe(true);
     expect(c.uncleanedCount).toBe(1);
   });
 
@@ -456,12 +462,15 @@ describe("blocages et textes de raison", () => {
   it("textes d'état du nettoyage : chaque clé existe en français et en anglais ; un texte n'a rien", async () => {
     const c = make();
     c.addText("t");
-    expect(cleanLabelKey(c.items[0]!)).toBeNull();
-    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.pdf", "clean.done.office", "clean.why.echec", "clean.why.protege", "clean.why.video", "clean.why.audio", "clean.intact.archive", "clean.intact.archive.hint", "clean.why.unknown", "clean.uncleaned.hint", "compose.uncleaned.one", "compose.uncleaned.other", "clean.original", "clean.original.hint", "clean.mark", "clean.mark.not"]) {
+    expect(cleanLineKey(c.items[0]!)).toBeNull();
+    expect(cleanMark(c.items[0]!)).toBeNull();
+    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.pdf", "clean.done.office", "clean.asis", "clean.fail.echec", "clean.fail.protege", "compose.uncleaned.one", "compose.uncleaned.other"]) {
       expect(fr[k as keyof typeof fr], k).toBeTruthy();
       expect(en[k as keyof typeof en], k).toBeTruthy();
     }
-    expect(fr["clean.done.image"]).toBe("Nettoyé · lieu, appareil et date retirés");
+    expect(fr["clean.done.image"]).toBe("Nettoyé\u202f: position, appareil et dates retirés");
+    expect(fr["clean.asis"]).toBe("Fichier tel quel (non modifié)");
+    for (const k of ["clean.mark", "clean.mark.not", "clean.original", "clean.original.hint"]) expect(k in fr, k).toBe(false);
   });
 });
 

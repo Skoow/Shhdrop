@@ -76,11 +76,15 @@ describe("feuille Plus : honnête, rien à acheter", () => {
     expect(s).not.toMatch(/offre limitée|plus que/i);
     expect(document.querySelectorAll("form, input, a[href]")).toHaveLength(0);
   });
-  it("Pro : 50 Go, 100 ouvertures, 20 € par mois et 200 € par an (2 mois offerts) ; deux façons de payer ; aucun frais caché", () => {
+  it("Pro : 50 Go, 100 ouvertures, 20 € par mois et 200 € par an (2 mois offerts) ; mensuel par abonnement, annuel au choix ; carte et crypto-monnaies ; aucun frais caché", () => {
     show(PaidSheet, { open: true, tier: "pro" });
     const s = text();
-    for (const x of ["Shhdrop Pro", "50 Go par partage", "Jusqu'à 100 ouvertures", "20 € par mois, TTC", "ou 200 € par an, payé en une fois", "2 mois offerts", "Paiement unique.", "résiliable à tout moment en un clic, sans frais", "Aucun frais caché."]) expect(s.replace(/[\u202f\u00a0]/g, " "), x).toContain(x);
+    for (const x of ["Shhdrop Pro", "50 Go par partage", "Jusqu'à 100 ouvertures", "20 € par mois, TTC", "ou 200 € par an", "2 mois offerts", "Au mois :", "abonnement renouvelé automatiquement chaque mois, résiliable en un clic, sans frais.", "À l'année, au choix :", "paiement unique (rien n'est prélevé ensuite) ou renouvellement automatique", "Moyens de paiement", "Carte bancaire", "Crypto-monnaies", "Aucun frais caché."]) expect(s.replace(/[\u202f\u00a0]/g, " "), x).toContain(x);
     expect(s).not.toContain("220");
+    expect(s).not.toContain("payé en une fois");
+    // Aucun logo de marque tierce : les moyens de paiement sont des libellés et des pictogrammes maison.
+    expect(document.querySelectorAll("img")).toHaveLength(0);
+    expect(s).not.toMatch(/Visa|Mastercard|Bitcoin|Ethereum|PayPal/i);
   });
 });
 

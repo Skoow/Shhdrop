@@ -11,7 +11,7 @@ const TEXT = "Code de la porte : 4512B";
 test.use({ locale: "fr-FR", timezoneId: "Europe/Paris" });
 const w = (isMobile: boolean) => (isMobile ? 390 : 1440);
 
-test("destinataire, dernière ouverture : bulle du cadenas, groupes, « Détruire », pied centré sur téléphone, Signaler en haut", async ({ page, shh, browser, isMobile }) => {
+test("destinataire, dernière ouverture : bulle du cadenas, groupes, « Détruire », pied centré sur téléphone, Signaler dans le pied de page", async ({ page, shh, browser, isMobile }) => {
   test.setTimeout(150_000);
   const s = await freshPage(browser);
   const sent = await sendShare(s.page, shh.origin + "/", { text: TEXT, files: [file("foret-brume.jpg"), file("contrat.pdf")], opens: 1 });
@@ -29,10 +29,11 @@ test("destinataire, dernière ouverture : bulle du cadenas, groupes, « Détruir
   // Groupe : bandeau du titre séparé de ses éléments par un filet.
   const head = page.locator('[data-group="texte"] .gh');
   expect(await head.evaluate((e) => getComputedStyle(e).borderBottomStyle)).toBe("solid");
-  // Dernière ouverture : « Détruire ce partage » et sa phrase ; Signaler dans l'en-tête.
+  // Dernière ouverture : « Détruire ce partage » et sa phrase ; Signaler dans le pied de page seulement (UI7).
   await expect(page.getByText(/^Vous êtes la dernière personne à ouvrir ce partage\./)).toBeVisible();
   await expect(page.getByRole("button", { name: "Détruire ce partage", exact: true })).toBeVisible();
-  await expect(page.locator("header.top").getByRole("button", { name: "Signaler" })).toBeVisible();
+  await expect(page.locator("header.top").getByRole("button", { name: /Signaler/ })).toHaveCount(0);
+  await expect(page.locator("footer[data-foot]").getByRole("button", { name: "Signaler ce partage" })).toBeVisible();
   const eolAlign = await page.locator("[data-eol]").evaluate((e) => getComputedStyle(e).textAlign);
   expect(eolAlign).toBe(isMobile ? "center" : "start");
   await settle(page);

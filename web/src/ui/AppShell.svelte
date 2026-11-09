@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { BUILD_ID } from "../app/build";
+  import { chrome } from "../app/chrome.svelte";
   import { followLink, href, navigate, router } from "../app/router.svelte";
   import { LICENSE_URL, SOURCE_URL } from "../routes/pages/content";
   import { t } from "../i18n/i18n.svelte";
@@ -78,8 +79,9 @@
   const BACK: ReadonlySet<string> = new Set([...INFO, "notfound", "manage"]);
   // Pied de page (retours UI5) : partout sur ordinateur ; sur téléphone, en bas de l'accueil et
   // des pages d'information seulement (ailleurs, ces liens sont dans Réglages).
-  const footOnPhone = $derived(router.current.name === "home" || router.current.name === "notfound" || INFO.has(router.current.name));
-  type FootLink = { label: string; path?: string; url?: string; soon?: boolean };
+  // Page d'un partage ouvert : le pied y est aussi sur téléphone, il porte « Signaler » (retours UI7).
+  const footOnPhone = $derived(router.current.name === "home" || router.current.name === "notfound" || INFO.has(router.current.name) || chrome.report !== null);
+  type FootLink = { label: string; path?: string; url?: string; soon?: boolean; report?: boolean };
   const footCols = $derived<{ id: string; title: string; links: FootLink[] }[]>([
     {
       id: "product",
@@ -97,7 +99,7 @@
         { label: t("shell.security"), path: "/securite" },
         { label: t("shell.privacy"), path: "/confidentialite" },
         { label: t("foot.source"), url: SOURCE_URL },
-        { label: t("foot.report"), path: "/signaler" },
+        { label: t("foot.report"), path: "/signaler", report: true },
       ],
     },
     {
@@ -110,7 +112,8 @@
       ],
     },
   ]);
-  const pathHere = (p: string) => (router.current.name !== "notfound" && location.pathname === href(p) ? "page" : undefined);
+  // « Envoyer » (/) n'est la page courante que sur l'accueil : un partage ouvert a aussi « / » pour chemin.
+  const pathHere = (p: string) => (router.current.name !== "notfound" && location.pathname === href(p) && (p !== "/" || router.current.name === "home") ? "page" : undefined);
   const back = $derived(BACK.has(router.current.name));
   let small = $state("");
   let raf = 0;
@@ -173,6 +176,10 @@
 {#if foot}
 <footer class={["foot", { phone: footOnPhone }]} data-foot>
   <div class="wrap foot-in">
+    <div class="brand">
+      <a class="foot-logo" href={href("/")} onclick={(e) => followLink(e, "/")} aria-label={t("shell.home")}><Logo /></a>
+      <p class="tag">{t("foot.tagline")}</p>
+    </div>
     <nav class="cols" aria-label={t("shell.nav")}>
       {#each footCols as col (col.id)}
         <div class="col">
@@ -180,12 +187,15 @@
           <ul aria-labelledby="foot-{col.id}">
             {#each col.links as l (l.label)}
               <li>
-                {#if l.soon}
+                {#if l.report && chrome.report}
+                  <!-- Partage ouvert : la confirmation de signalement de CE partage (même action qu'avant). -->
+                  <button type="button" class="fl" aria-haspopup="dialog" onclick={() => chrome.report?.()} data-report-share><span class="u">{t("content.report")}</span></button>
+                {:else if l.soon}
                   <span class="off">{l.label} <span class="soon">{t("foot.soon")}</span></span>
                 {:else if l.url}
-                  <a href={l.url} target="_blank" rel="noopener noreferrer">{l.label}<span class="sr-only"> {t("foot.external")}</span></a>
+                  <a class="fl" href={l.url} target="_blank" rel="noopener noreferrer"><span class="u">{l.label}</span><span class="sr-only"> {t("foot.external")}</span></a>
                 {:else if l.path}
-                  <a href={href(l.path)} aria-current={pathHere(l.path)} onclick={(e) => followLink(e, l.path!)}>{l.label}</a>
+                  <a class="fl" href={href(l.path)} aria-current={pathHere(l.path)} onclick={(e) => followLink(e, l.path!)}><span class="u">{l.label}</span></a>
                 {/if}
               </li>
             {/each}
@@ -194,7 +204,7 @@
       {/each}
     </nav>
     <div class="base">
-      <p>{t("foot.notrack")}</p>
+      <p class="notrack"><span class="pip" aria-hidden="true"></span>{t("foot.notrack")}</p>
       <p>{t("foot.copy")}</p>
       <p class="num" data-build>{t("foot.version", { v: BUILD_ID })}</p>
     </div>
@@ -372,12 +382,42 @@
     outline: none;
   }
 
+  /* Pied de page (retours UI7) : lueur discrète de la DA sous un filet supérieur lumineux (le
+     grain de l'aurore passe dessous), marque à gauche au même bord intérieur que l'en-tête,
+     colonnes hiérarchisées, liens sans soulignement (un trait se trace au survol et au focus). */
   .foot {
-    border-block-start: 1px solid var(--hair);
+    position: relative;
+    isolation: isolate;
     margin-block-start: var(--sp-8);
-    padding-block: var(--sp-6) calc(var(--sp-6) + env(safe-area-inset-bottom));
+    padding-block: var(--sp-7) calc(var(--sp-6) + env(safe-area-inset-bottom));
+    background:
+      radial-gradient(60% 120% at 12% 0%, rgb(95 227 181 / 0.07), transparent 70%),
+      radial-gradient(50% 90% at 88% 100%, rgb(85 150 248 / 0.05), transparent 70%),
+      linear-gradient(to bottom, transparent, rgb(7 8 12 / 0.55));
   }
-  /* Téléphone : seulement sur l'accueil et les pages d'information (ailleurs : Réglages). */
+  .foot::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    inset-block-start: 0;
+    block-size: 1px;
+    background: linear-gradient(90deg, transparent, rgb(95 227 181 / 0.45) 22%, rgb(233 236 242 / 0.16) 60%, transparent);
+  }
+  /* Papier peint maison (retours UI7) : petits pictos Shhdrop répétés (cadenas, clé, fichier,
+     onde, points de la Trame), fichier statique mis en cache (CSP : ni data: ni style inline),
+     à très faible contraste et fondu vers le haut ; retiré en contraste renforcé ou forcé. */
+  .foot::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: url(/assets/motif.svg) 0 0 / 120px 120px repeat;
+    opacity: 0.045;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 45%);
+    mask-image: linear-gradient(to bottom, transparent, #000 45%);
+  }
+  /* Téléphone : accueil, pages d'information et partage ouvert (ailleurs : Réglages). */
   @media (max-width: 899px) {
     .foot:not(.phone) {
       display: none;
@@ -385,18 +425,42 @@
   }
   .foot-in {
     display: grid;
-    gap: var(--sp-6);
+    grid-template-columns: minmax(14rem, 1fr) minmax(0, 2.4fr);
+    gap: var(--sp-7) var(--sp-6);
+  }
+  .brand {
+    display: grid;
+    align-content: start;
+    justify-items: start;
+    gap: var(--sp-3);
+  }
+  .foot-logo {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    color: var(--text);
+    border-radius: var(--r-sm);
+  }
+  .tag {
+    margin: 0;
+    max-width: 30ch;
+    color: var(--text-2);
+    font-size: var(--fs-small);
+    line-height: var(--lh-small);
+    text-wrap: pretty;
   }
   .cols {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--sp-5) var(--sp-6);
   }
   .ch {
-    margin: 0 0 var(--sp-2);
-    color: var(--text);
-    font-size: var(--fs-small);
+    margin: 0 0 var(--sp-3);
+    color: var(--text-3);
+    font-size: var(--fs-micro);
     font-weight: 640;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
   .col ul {
     display: grid;
@@ -404,18 +468,56 @@
     padding: 0;
     list-style: none;
   }
-  .col a,
+  .fl,
   .off {
     display: inline-flex;
     align-items: center;
     gap: var(--sp-2);
-    min-height: 44px;
+    min-height: 40px;
     color: var(--text-2);
     font-size: var(--fs-small);
-    text-underline-offset: 0.2em;
   }
-  .col a[aria-current="page"] {
+  .fl {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: var(--fs-small);
+    text-align: start;
+    text-decoration: none;
+    cursor: pointer;
+    transition:
+      color var(--dur-fast) var(--ease-out),
+      translate var(--dur-base) var(--ease-out);
+  }
+  /* Trait qui se trace de gauche à droite au survol et au focus (aucun soulignement au repos). */
+  .u {
+    background: linear-gradient(currentColor, currentColor) no-repeat 0 100% / 0 1px;
+    padding-block-end: 2px;
+    transition: background-size var(--dur-base) var(--ease-out);
+  }
+  .fl:hover,
+  .fl:focus-visible {
     color: var(--text);
+  }
+  /* Page courante : couleur d'accent, sans trait. */
+  .fl[aria-current="page"] {
+    color: var(--accent);
+  }
+  .fl:hover .u,
+  .fl:focus-visible .u {
+    background-size: 100% 1px;
+  }
+  @media (hover: hover) {
+    .fl:hover {
+      translate: 2px 0;
+    }
+  }
+  .fl:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 4px;
   }
   .off {
     color: var(--text-3);
@@ -427,16 +529,13 @@
     color: var(--text-2);
     font-size: var(--fs-micro);
   }
-  @media (hover: hover) {
-    .col a:hover {
-      color: var(--text);
-    }
-  }
   .base {
+    grid-column: 1 / -1;
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: var(--sp-2) var(--sp-5);
-    padding-block-start: var(--sp-4);
+    padding-block-start: var(--sp-5);
     border-block-start: 1px solid var(--hair);
     color: var(--text-3);
     font-size: var(--fs-small);
@@ -444,12 +543,72 @@
   .base p {
     margin: 0;
   }
+  .notrack {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+  .pip {
+    inline-size: 6px;
+    block-size: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgb(95 227 181 / 0.14);
+  }
+  .base .num {
+    margin-inline-start: auto;
+  }
+  @media (max-width: 899px) {
+    .foot-in {
+      grid-template-columns: 1fr;
+      gap: var(--sp-6);
+    }
+  }
   @media (max-width: 599px) {
+    .foot {
+      padding-block-start: var(--sp-6);
+    }
     .cols {
       grid-template-columns: 1fr 1fr;
+      gap: var(--sp-5) var(--sp-4);
     }
     .cols .col:last-child {
       grid-column: 1 / -1;
+    }
+    .fl,
+    .off {
+      min-height: 44px;
+    }
+    .base {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: var(--sp-1);
+    }
+    .base .num {
+      margin-inline-start: 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fl,
+    .u {
+      transition: none;
+    }
+    .fl:hover {
+      translate: none;
+    }
+  }
+  @media (prefers-contrast: more), (forced-colors: active) {
+    .foot {
+      background: none;
+      border-block-start: 1px solid var(--line-strong);
+    }
+    .foot::before,
+    .foot::after {
+      display: none;
+    }
+    .fl .u {
+      text-decoration: underline;
+      background: none;
     }
   }
 

@@ -32,9 +32,11 @@ test("pied de page (UI5) : Produit, Confiance, Légal ; sans traceur ; © ; vers
   for (const c of ["Produit", "Confiance", "Légal"]) await expect(foot.getByText(c, { exact: true })).toBeVisible();
   for (const l of ["Envoyer", "Offres Plus et Pro", "Sécurité", "Confidentialité", "Code source sur GitHub", "Signaler un abus", "Conditions d'utilisation", "Mentions légales", "Licence AGPL-3.0"])
     await expect(foot.getByRole("link", { name: new RegExp(`^${l}`) })).toBeVisible();
-  await expect(foot.getByRole("link")).toHaveCount(9);
+  // 9 liens, plus le logo (retour à l'accueil, UI7).
+  await expect(foot.getByRole("link")).toHaveCount(10);
+  await expect(foot.getByRole("link", { name: "Shhdrop, accueil" })).toBeVisible();
   await expect(foot.getByText(/^Salon\s+bientôt$/)).toBeVisible(); // pas un lien
-  await expect(foot.getByRole("link", { name: /^Code source/ })).toHaveAttribute("href", "https://github.com/Skoow/Shhdrop");
+  await expect(foot.getByRole("link", { name: /^Code source/ })).toHaveAttribute("href", "https://github.com/Skoow/shhdrop");
   await expect(foot.getByRole("link", { name: /^Code source/ })).toHaveAttribute("rel", "noopener noreferrer");
   await expect(foot.getByText("Aucun traceur, aucune publicité")).toBeVisible();
   await expect(foot.getByText(/^©\s2026\sShhdrop$/)).toBeVisible();

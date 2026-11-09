@@ -24,7 +24,7 @@ test("Sécurité : chiffrement, ce que voit le serveur, limites (historique, ong
   await expect(tech).not.toHaveAttribute("open");
   await tech.locator("summary").click();
   for (const x of ["AES-256-GCM", "Argon2id", "Permissions-Policy"]) await expect(tech).toContainText(x);
-  await expect(tech.getByRole("link", { name: /Code source public/ })).toHaveAttribute("href", "https://github.com/Skoow/Shhdrop");
+  await expect(tech.getByRole("link", { name: /Code source public/ })).toHaveAttribute("href", "https://github.com/Skoow/shhdrop");
   await expect(tech.getByRole("link", { name: /Spécification publique/ })).toHaveAttribute("href", /docs\/superpowers\/specs\/2026-11-03-shhdrop-design\.md$/);
   await tech.locator("summary").click();
   expect(await axe(page)).toEqual([]);
@@ -54,16 +54,19 @@ test("Confidentialité, Signaler, Conditions, Mentions : contenus, bandeau « En
   }
 });
 
-test("Offres : « 10 Go par partage », « 50 Go par partage » ; prix mensuel en grand, annuel, deux façons de payer ; rien à acheter ; capture", async ({ page, shh, isMobile }) => {
+test("Offres : « 10 Go par partage », « 50 Go par partage » ; prix mensuel en grand, annuel ; mensuel par abonnement, annuel au choix ; carte et crypto-monnaies ; rien à acheter ; capture", async ({ page, shh, isMobile }) => {
   if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(shh.origin + "/offres");
   const t = page.locator("[data-offers]");
   for (const x of ["2 Go par partage", "10 Go par partage", "50 Go par partage"]) await expect(t).toContainText(x);
   const norm = (s: string) => s.replace(/[\u202f\u00a0]/g, " ");
   const prices = page.locator("[data-prices]");
-  expect(norm(await prices.locator('[data-price="plus"]').innerText())).toMatch(/7 €\s+par mois, TTC[\s\S]*ou 70 € par an, payé en une fois[\s\S]*2 mois offerts/);
-  expect(norm(await prices.locator('[data-price="pro"]').innerText())).toMatch(/20 €\s+par mois, TTC[\s\S]*ou 200 € par an, payé en une fois[\s\S]*2 mois offerts/);
-  for (const x of ["Paiement unique.", "sans renouvellement", "Renouvellement automatique, si vous le souhaitez.", "résiliable à tout moment en un clic, sans frais", "Aucun frais caché."]) expect(norm(await prices.innerText())).toContain(x);
+  expect(norm(await prices.locator('[data-price="plus"]').innerText())).toMatch(/7 €\s+par mois, TTC[\s\S]*ou 70 € par an[\s\S]*2 mois offerts/);
+  expect(norm(await prices.locator('[data-price="pro"]').innerText())).toMatch(/20 €\s+par mois, TTC[\s\S]*ou 200 € par an[\s\S]*2 mois offerts/);
+  // D41-34 : mensuel par abonnement seulement ; annuel au choix ; carte bancaire et crypto-monnaies.
+  for (const x of ["Au mois :", "abonnement renouvelé automatiquement chaque mois, résiliable en un clic, sans frais.", "À l'année, au choix :", "paiement unique (rien n'est prélevé ensuite) ou renouvellement automatique, résiliable en un clic, sans frais.", "Carte bancaire", "Crypto-monnaies", "Aucun frais caché."]) expect(norm(await prices.innerText())).toContain(x);
+  expect(norm(await prices.innerText())).not.toContain("payé en une fois");
+  await expect(prices.locator("img")).toHaveCount(0);
   await expect(page.locator("main")).toContainText("Bientôt disponible.");
   await expect(page.locator("main button")).toHaveCount(0);
   // Le prix mensuel est le plus grand texte de la carte.

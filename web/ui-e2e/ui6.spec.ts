@@ -23,7 +23,7 @@ async function autoClean(page: Page, on: boolean) {
   await page.keyboard.press("Escape");
 }
 
-test("composeur : icônes en couleur, menu « … », aperçu par l'icône, Nettoyer d'un élément « Original » ; captures", async ({ page, shh, isMobile }) => {
+test("composeur : icônes en couleur, menu « … », aperçu par l'icône, Nettoyer d'un élément tel quel ; captures", async ({ page, shh, isMobile }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(shh.origin + "/");
@@ -56,9 +56,9 @@ test("composeur : icônes en couleur, menu « … », aperçu par l'icône, Nett
   await page.keyboard.press("Escape");
   await expect(viewer).toHaveCount(0);
 
-  // « Original » : Nettoyer proposé (menu sur téléphone, lien sur ordinateur), puis plus rien.
+  // Réglage désactivé (tel quel) : Nettoyer proposé (menu sur téléphone, lien sur ordinateur), puis plus rien.
   const photo = row(page, "plage-nuit.jpg");
-  await expect(photo.locator('[data-clean="original"]')).toBeVisible();
+  await expect(photo.locator("[data-clean]")).toHaveCount(0);
   if (isMobile) {
     await photo.getByRole("button", { name: "Actions pour plage-nuit.jpg" }).click();
     const menu = page.getByRole("dialog", { name: "plage-nuit.jpg" });
@@ -73,7 +73,7 @@ test("composeur : icônes en couleur, menu « … », aperçu par l'icône, Nett
   await expect(photo.locator('[data-clean="nettoye"]')).toBeVisible();
   await expect(photo.locator("[data-fix]")).toHaveCount(0);
   if (isMobile) {
-    // PDF « Original » : ni Aperçu ni Monter/Descendre ; Nettoyer seulement.
+    // PDF tel quel : ni Aperçu ni Monter/Descendre ; Nettoyer seulement.
     await row(page, "contrat.pdf").getByRole("button", { name: "Actions pour contrat.pdf" }).click();
     await expect(page.getByRole("dialog", { name: "contrat.pdf" }).locator(".mi")).toHaveText(["Renommer", "Nettoyer", "Supprimer"]);
     await page.keyboard.press("Escape");
