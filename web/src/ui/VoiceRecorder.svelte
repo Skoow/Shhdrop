@@ -16,7 +16,7 @@
   import { CaptureFailure, clock, limitMs, openStream, pickMime, stopStream, type CaptureError } from "../media/capture";
   import { LIVE_BARS, WAVE_BARS, decodeWave, startVoice, type VoiceRecording } from "../media/recorder";
   import { stripCaptureMeta } from "../media/strip-capture";
-  import { ChevronLeft, Mic, Pause, Trash2, X } from "./Icon";
+  import { ChevronLeft, Mic, Pause, X } from "./Icon";
   import { reducedMotion } from "./motion";
   import { swipeToRemove } from "./swipe";
   import VoiceClip from "./VoiceClip.svelte";
@@ -232,6 +232,13 @@
             ? t("voice.err.indisponible")
             : t("cap.err.misc"),
   );
+  const statusText = $derived(
+    phase === "starting"
+      ? t("cap.starting.mic")
+      : phase === "ready"
+        ? t(touch ? "voice.ready" : "voice.readyClick")
+        : t(phase === "paused" ? "voice.paused" : "cap.recording"),
+  );
   const upsell = $derived(CAPTURE_TIER === "free" ? t("cap.upsell", { max: formatDuration(CAPTURE_MAX_S.plus.voice, lang) }) : "");
 </script>
 
@@ -247,23 +254,17 @@
     </header>
 
     <div class="stage">
-      {#if phase === "starting"}
-        <p class="msg" role="status">{t("cap.starting.mic")}</p>
-      {:else if phase === "error"}
+      {#if phase === "error"}
         <div class="err" role="alert">
           <span class="err-ic" aria-hidden="true"><Mic size={28} strokeWidth={1.75} /></span>
           <p>{errText}</p>
           {#if error === "refuse"}<p class="how">{t("voice.err.refuse.how")}</p>{/if}
           <button type="button" class="pill solid" onclick={() => void start()}>{t("cap.retry")}</button>
         </div>
-      {:else if phase === "ready"}
-        <div class="idle">
-          <span class="disc" aria-hidden="true"><Mic size={40} strokeWidth={1.6} /></span>
-          <p class="hint">{t("voice.ready")}</p>
-        </div>
-      {:else if live || phase === "finishing"}
+      {:else if phase !== "review"}
+        <!-- Prêt, en cours, en pause : même bulle au même endroit (pas de saut entre les états). -->
         <div class="meter" bind:this={meterEl} {@attach touch && live && !confirming ? swipeToRemove(askCancel, { reduced: true }) : null}>
-          <div class={["state", { paused: phase === "paused" }]}>
+          <div class={["state", { paused: phase !== "recording" }]}>
             <span class="dot" aria-hidden="true"></span>
             <p class="timer num" data-timer>
               <span class="now">{clock(elapsed)}</span><span class="max">{t("voice.max", { max: clock(maxMs) })}</span>
@@ -272,8 +273,8 @@
           <div class={["bubble", "rec", { still: phase !== "recording" }]}>
             <Waveform peaks={levels} size="live" />
           </div>
-          <p class="status" role="status">{t(phase === "paused" ? "voice.paused" : "cap.recording")}</p>
-          {#if touch && live}<p class="swipe-hint" aria-hidden="true"><ChevronLeft size={14} strokeWidth={2} />{t("voice.swipe")}</p>{/if}
+          <p class="status" role="status">{statusText}</p>
+          {#if touch}<p class={["swipe-hint", { off: !live }]} aria-hidden="true"><ChevronLeft size={14} strokeWidth={2} />{t("voice.swipe")}</p>{/if}
         </div>
       {:else if phase === "review" && result}
         <div class="review">
@@ -297,25 +298,47 @@
       {#if phase === "review" && unclean}<p class="note warn" role="alert">{t("cap.unclean")}</p>{/if}
       {#if limitHit}<p class="note warn" role="status">{t("cap.limit")}{#if upsell}<span class="up">{upsell}</span>{/if}</p>{/if}
       <p class="note">{t("voice.note")}</p>
-      <div class={["ctl", { stack: phase === "review" }]}>
-        {#if phase === "review" && unclean}
-          <button type="button" class="pill solid" onclick={use}>{t("cap.keepAsIs")}</button>
-          <button type="button" class="pill" onclick={() => dlg?.close()}>{t("common.cancel")}</button>
-        {:else if phase === "review"}
-          <button type="button" class="pill solid" onclick={use}>{t("voice.done")}</button>
-          <button type="button" class="pill" onclick={rerecord}>{t("voice.rerecord")}</button>
-        {:else if live && !confirming}
-          <button type="button" class="side" aria-label={t("voice.cancel")} onclick={askCancel}><Trash2 size={22} strokeWidth={1.9} /></button>
-          <button type="button" class="big stop" aria-label={t("cap.rec.stop")} onclick={() => void finish()}><span></span></button>
-          {#if phase === "paused"}
-            <button type="button" class="side" aria-label={t("voice.resume")} onclick={resume}><Mic size={22} strokeWidth={1.9} /></button>
+      {#if phase === "review"}
+        <div class="ctl done">
+          {#if unclean}
+            <button type="button" class="pill" onclick={() => dlg?.close()}>{t("common.cancel")}</button>
+            <button type="button" class="pill solid" onclick={use}>{t("cap.keepAsIs")}</button>
           {:else}
-            <button type="button" class="side" aria-label={t("voice.pauseRec")} onclick={pause}><Pause size={22} strokeWidth={2} /></button>
+            <button type="button" class="side" aria-label={t("voice.rerecord")} onclick={rerecord}><Mic size={22} strokeWidth={1.9} /></button>
+            <button type="button" class="pill solid" onclick={use}>{t("voice.done")}</button>
           {/if}
-        {:else if phase !== "error" && !confirming}
-          <button type="button" class="big rec" aria-label={t("cap.rec.start")} disabled={phase !== "ready"} onclick={record}><span></span></button>
-        {/if}
-      </div>
+        </div>
+      {:else if phase !== "error"}
+        <!-- Pause à gauche, micro / arrêt au centre, Annuler à droite : positions fixes. -->
+        <div class="ctl">
+          {#if live && !confirming}
+            {#if phase === "paused"}
+              <button type="button" class="side" aria-label={t("voice.resume")} onclick={resume}><span class="resume-dot"></span></button>
+            {:else}
+              <button type="button" class="side" aria-label={t("voice.pauseRec")} onclick={pause}><Pause size={22} strokeWidth={2} /></button>
+            {/if}
+          {:else}
+            <span class="side ghost" aria-hidden="true"></span>
+          {/if}
+          <button
+            type="button"
+            class={["big", { on: phase !== "ready" && phase !== "starting" }]}
+            style:--lvl={phase === "recording" ? (levels.at(-1) ?? 0) : 0}
+            aria-label={t(phase === "ready" || phase === "starting" ? "cap.rec.start" : "cap.rec.stop")}
+            disabled={phase === "starting" || phase === "finishing" || confirming}
+            onclick={() => (phase === "ready" ? record() : void finish())}
+          >
+            <span class="ring" aria-hidden="true"></span>
+            <span class="ic mic" aria-hidden="true"><Mic size={32} strokeWidth={1.9} /></span>
+            <span class="ic sq" aria-hidden="true"></span>
+          </button>
+          {#if live && !confirming}
+            <button type="button" class="side" aria-label={t("voice.cancel")} onclick={askCancel}><X size={22} strokeWidth={2} /></button>
+          {:else}
+            <span class="side ghost" aria-hidden="true"></span>
+          {/if}
+        </div>
+      {/if}
     </footer>
   {/if}
 </dialog>
@@ -389,30 +412,6 @@
     place-items: center;
     min-height: 0;
     padding: var(--sp-4);
-  }
-  .msg {
-    margin: 0;
-    color: var(--text-2);
-  }
-  .idle {
-    display: grid;
-    justify-items: center;
-    gap: var(--sp-4);
-  }
-  .disc {
-    display: grid;
-    place-items: center;
-    width: 112px;
-    height: 112px;
-    border-radius: 50%;
-    background: var(--accent-tint);
-    color: var(--accent);
-    box-shadow: inset 0 0 0 1px var(--line);
-  }
-  .hint {
-    margin: 0;
-    color: var(--text-2);
-    text-align: center;
   }
   .meter,
   .review {
@@ -513,6 +512,9 @@
     letter-spacing: 0.02em;
     text-align: center;
   }
+  .swipe-hint.off {
+    visibility: hidden;
+  }
   .swipe-hint {
     display: inline-flex;
     align-items: center;
@@ -603,25 +605,24 @@
     justify-items: center;
     align-items: center;
     gap: var(--sp-3);
-    min-height: 76px;
+    min-height: 88px;
     width: 100%;
     max-width: 420px;
     margin-inline: auto;
   }
-  .ctl:has(> :only-child) {
-    grid-template-columns: auto;
-    justify-content: center;
-  }
-  .ctl:has(> .pill) {
+  /* Après l'arrêt : « Réenregistrer » en petite icône micro, « Valider » principal sur le reste. */
+  .ctl.done {
     display: flex;
-    justify-content: center;
-  }
-  /* Après l'arrêt : « Valider » en principal pleine largeur, « Réenregistrer » dessous. */
-  .ctl.stack {
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--sp-2);
+    gap: var(--sp-3);
     max-width: 26rem;
+  }
+  .ctl.done .pill {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 52px;
+  }
+  .ctl.done .side {
+    flex: none;
   }
   .side {
     display: grid;
@@ -636,37 +637,79 @@
     cursor: pointer;
     transition: transform var(--dur-press, 120ms) var(--ease-out);
   }
+  .side.ghost {
+    background: none;
+    pointer-events: none;
+  }
+  .resume-dot {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--danger);
+  }
+  /* Le micro est le bouton : il démarre, puis devient l'arrêt (carré) au même endroit ;
+     l'anneau autour suit le niveau de la voix. */
   .big {
+    position: relative;
     display: grid;
     place-items: center;
-    width: 76px;
-    height: 76px;
+    width: 80px;
+    height: 80px;
     padding: 0;
-    border: 3px solid var(--text);
+    border: 0;
     border-radius: 50%;
-    background: transparent;
+    background: var(--danger);
+    color: var(--on-danger);
     cursor: pointer;
     transition: transform var(--dur-press, 120ms) var(--ease-out);
   }
-  .big span {
-    width: 58px;
-    height: 58px;
-    border-radius: 50%;
-    background: var(--danger);
-    transition:
-      transform 160ms var(--ease-out),
-      border-radius 160ms var(--ease-out);
+  .big > * {
+    grid-area: 1 / 1;
   }
-  .big.stop span {
-    transform: scale(0.48);
-    border-radius: 12px;
+  .ring {
+    position: absolute;
+    inset: -6px;
+    border: 2px solid var(--danger);
+    border-radius: 50%;
+    opacity: 0;
+    transform: scale(calc(1 + var(--lvl, 0) * 0.35));
+    transition:
+      transform 90ms linear,
+      opacity 200ms var(--ease-out);
+    pointer-events: none;
+  }
+  .big.on .ring {
+    opacity: 0.55;
+  }
+  .ic {
+    display: grid;
+    place-items: center;
+    transition:
+      opacity 160ms var(--ease-out),
+      transform 160ms var(--ease-out);
+  }
+  .sq {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: currentColor;
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  .big.on .mic {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  .big.on .sq {
+    opacity: 1;
+    transform: none;
   }
   .big:disabled {
-    opacity: 0.4;
+    opacity: 0.45;
     cursor: default;
   }
   .side:active,
-  .big:active {
+  .big:active:not(:disabled) {
     transform: scale(0.94);
   }
   .pill {
@@ -680,22 +723,6 @@
     font: inherit;
     font-weight: 600;
     cursor: pointer;
-  }
-  .ctl:has(> .pill) .pill {
-    flex: 1 1 0;
-    max-width: 14rem;
-    min-width: 0;
-    padding-inline: var(--sp-4);
-    white-space: nowrap;
-  }
-  .ctl.stack .pill {
-    flex: none;
-    max-width: none;
-    min-height: 52px;
-  }
-  .ctl.stack .pill:not(.solid) {
-    border-color: transparent;
-    color: var(--text-2);
   }
   .pill.solid {
     border-color: transparent;
@@ -722,7 +749,8 @@
     }
     .side,
     .big,
-    .big span {
+    .ring,
+    .ic {
       transition: none;
     }
   }

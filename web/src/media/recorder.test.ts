@@ -10,7 +10,7 @@ class FakeRec {
   onstop: (() => void) | null = null;
   constructor(
     readonly stream: MediaStream,
-    readonly opts: { mimeType: string },
+    readonly opts: { mimeType: string; audioBitsPerSecond?: number },
   ) {
     FakeRec.last = this;
   }
@@ -73,6 +73,7 @@ describe("startVoice", () => {
     const { Audio, closed } = fakeAudio([0.3, -0.3]);
     const r = startVoice(stream, PICK, { Recorder: FakeRec as unknown as VoiceRecorderCtor, Audio, now, maxMs: 60_000 });
     expect(r.state()).toBe("recording");
+    expect(FakeRec.last.opts.audioBitsPerSecond).toBe(128_000);
     t = 2000;
     expect(r.elapsedMs()).toBe(2000);
     expect(r.level()).toBeGreaterThan(0.5);

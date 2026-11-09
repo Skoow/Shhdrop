@@ -17,9 +17,11 @@ describe("capacités (repli sur le sélecteur sans elles)", () => {
     expect(captureSupport({})).toEqual({ photo: false, video: false, voice: false });
     expect(captureSupport({ mediaDevices: {} as never, MediaRecorder: rec })).toEqual({ photo: false, video: false, voice: false });
   });
-  it("pickMime : MP4 d'abord (lisible partout), sinon WebM ; null si rien", () => {
-    expect(pickMime("voice", () => true)).toEqual({ mime: "audio/mp4;codecs=mp4a.40.2", ext: "m4a" });
-    expect(pickMime("voice", (m) => m === "audio/webm;codecs=opus")).toEqual({ mime: "audio/webm;codecs=opus", ext: "webm" });
+  it("pickMime : vocal en Opus d'abord, AAC sinon (Safari), jamais d'Ogg ; vidéo MP4 d'abord ; null si rien", () => {
+    expect(pickMime("voice", () => true)).toEqual({ mime: "audio/webm;codecs=opus", ext: "webm" });
+    const safari = (m: string) => m.startsWith("audio/mp4");
+    expect(pickMime("voice", safari)).toEqual({ mime: "audio/mp4;codecs=mp4a.40.2", ext: "m4a" });
+    expect(pickMime("voice", (m) => m === "audio/ogg;codecs=opus")).toBeNull();
     expect(pickMime("video", (m) => m === "video/mp4")).toEqual({ mime: "video/mp4", ext: "mp4" });
     expect(pickMime("video", (m) => m === "video/webm;codecs=vp8,opus")).toEqual({ mime: "video/webm;codecs=vp8,opus", ext: "webm" });
     expect(pickMime("video", () => false)).toBeNull();
@@ -32,7 +34,22 @@ describe("demandes au navigateur", () => {
     expect(constraintsFor("video", "user")).toMatchObject({ audio: true, video: { facingMode: { ideal: "user" } } });
     const v = constraintsFor("voice", "user");
     expect(v.video).toBe(false);
-    expect(v.audio).toMatchObject({ channelCount: 1, echoCancellation: true, noiseSuppression: true });
+    expect(v.audio).toEqual({ echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1, sampleRate: { ideal: 48_000 } });
+  });
+  it("openStream vocal : contraintes refusées → nouvel essai avec le micro brut ; refus de permission → pas de nouvel essai", async () => {
+    const ok = { getTracks: () => [] } as unknown as MediaStream;
+    const calls: MediaStreamConstraints[] = [];
+    const over = { getUserMedia: async (c: MediaStreamConstraints) => (calls.push(c), calls.length === 1 ? Promise.reject(dom("OverconstrainedError")) : ok) };
+    await expect(openStream(over, "voice", "user")).resolves.toBe(ok);
+    expect(calls[1]).toEqual({ audio: true, video: false });
+    let n = 0;
+    const refuse = { getUserMedia: async () => (n++, Promise.reject(dom("NotAllowedError"))) };
+    await expect(openStream(refuse, "voice", "user")).rejects.toMatchObject({ kind: "refuse" });
+    expect(n).toBe(1);
+    let m = 0;
+    const photo = { getUserMedia: async () => (m++, Promise.reject(dom("OverconstrainedError"))) };
+    await expect(openStream(photo, "photo", "environment")).rejects.toMatchObject({ kind: "absent" });
+    expect(m).toBe(1);
   });
   it("erreurs : permission refusée, aucun appareil, occupé, bloqué par la page, autre", () => {
     expect(errorKind(dom("NotAllowedError"))).toBe("refuse");

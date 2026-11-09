@@ -3,7 +3,7 @@
 // lu par un AnalyserNode (onde vivante) et forme d'onde calculée depuis l'audio décodé pour la
 // réécoute. Tout reste en mémoire ; à l'arrêt ou à l'annulation, chaque piste du micro est
 // arrêtée (`track.stop()`) et le contexte audio fermé. Aucun appel réseau.
-import { stopStream, type Picked } from "./capture";
+import { VOICE_BPS, stopStream, type Picked } from "./capture";
 
 export type VoiceState = "recording" | "paused" | "stopped";
 
@@ -16,7 +16,7 @@ type RecorderLike = {
   pause(): void;
   resume(): void;
 };
-export type VoiceRecorderCtor = new (s: MediaStream, o: { mimeType: string }) => RecorderLike;
+export type VoiceRecorderCtor = new (s: MediaStream, o: { mimeType: string; audioBitsPerSecond?: number }) => RecorderLike;
 
 type AnalyserLike = { fftSize: number; getFloatTimeDomainData(a: Float32Array<ArrayBuffer>): void };
 type AudioCtxLike = {
@@ -56,7 +56,7 @@ export function startVoice(
 ): VoiceRecording {
   const Rec = o.Recorder ?? (globalThis.MediaRecorder as unknown as VoiceRecorderCtor);
   const now = o.now ?? (() => performance.now());
-  const rec = new Rec(stream, { mimeType: picked.mime });
+  const rec = new Rec(stream, { mimeType: picked.mime, audioBitsPerSecond: VOICE_BPS });
   const chunks: Blob[] = [];
   const type = picked.mime.split(";")[0]!;
   let cancelled = false;

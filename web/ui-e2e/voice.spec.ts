@@ -18,7 +18,7 @@ test.use({
 });
 test.skip(({ browserName }) => browserName !== "chromium", "faux micro : Chromium seulement");
 
-const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-VOICE3/", import.meta.url));
+const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-VOICE5/", import.meta.url));
 
 async function spyStreams(page: Page) {
   await page.addInitScript(() => {
@@ -64,8 +64,27 @@ test("enregistrer 2 s → pause (minuteur figé) → reprendre → arrêter → 
   await spyStreams(page);
   await page.goto(shh.origin + "/");
   const rec = await openVoice(page);
-  await rec.getByRole("button", { name: "Démarrer l'enregistrement" }).click();
+  // Le micro est le bouton : il devient l'arrêt au même endroit ; minuteur et onde ne bougent pas.
+  const big = rec.getByRole("button", { name: "Démarrer l'enregistrement" });
+  await expect(rec.getByRole("status")).toHaveText(isMobile ? "Touchez pour enregistrer" : "Cliquez pour enregistrer");
+  const where = async (b: ReturnType<Page["locator"]>) => ({ mic: (await b.boundingBox())!, bubble: (await rec.locator(".bubble").boundingBox())!, timer: (await rec.locator("[data-timer]").boundingBox())! });
+  const before = await where(big);
+  expect(before.mic.width).toBeGreaterThanOrEqual(72);
+  if (isMobile) await rec.screenshot({ path: `${SHOTS}voice-initial-390.png` });
+  await big.click();
   await expect(rec.locator("[data-timer]")).toContainText("/ 30:00 max");
+  await page.waitForTimeout(250); // fin du fondu micro → carré
+  const after = await where(rec.getByRole("button", { name: "Arrêter l'enregistrement" }));
+  for (const k of ["mic", "bubble", "timer"] as const) {
+    expect(after[k].x, k).toBeCloseTo(before[k].x, 0);
+    expect(after[k].y, k).toBeCloseTo(before[k].y, 0);
+  }
+  // Pause à gauche du micro, Annuler à droite ; cibles ≥ 44 px.
+  const pz = (await rec.getByRole("button", { name: "Mettre en pause" }).boundingBox())!;
+  const cx = (await rec.getByRole("button", { name: "Annuler l'enregistrement" }).boundingBox())!;
+  expect(pz.x + pz.width).toBeLessThan(after.mic.x);
+  expect(cx.x).toBeGreaterThan(after.mic.x + after.mic.width);
+  for (const b of [pz, cx]) expect(Math.min(b.width, b.height)).toBeGreaterThanOrEqual(44);
   // Une seule ligne, même à 360 px.
   await page.setViewportSize({ width: 360, height: 740 });
   const one = await rec.locator("[data-timer]").evaluate((el) => {
@@ -150,9 +169,14 @@ test("arrêter → « Valider » sans réécouter → ligne ajoutée", async ({ 
   await rec.getByRole("button", { name: "Arrêter l'enregistrement" }).click();
   const ok = rec.getByRole("button", { name: "Valider" });
   await expect(ok).toBeVisible({ timeout: 10_000 });
-  await expect(rec.getByRole("button", { name: "Réenregistrer" })).toBeVisible();
+  const again = rec.getByRole("button", { name: "Réenregistrer" });
+  await expect(again).toBeVisible();
   await expect(rec.getByRole("button", { name: "Écouter l'enregistrement" })).toBeVisible();
-  if (isMobile) await rec.screenshot({ path: `${SHOTS}voice-stopped-valider-390.png` });
+  // « Valider » principal sur la largeur restante ; « Réenregistrer » en petite icône micro.
+  const [ob, ab] = [(await ok.boundingBox())!, (await again.boundingBox())!];
+  expect(ob.width).toBeGreaterThan(ab.width * 3);
+  expect(Math.min(ab.width, ab.height)).toBeGreaterThanOrEqual(44);
+  if (isMobile) await rec.screenshot({ path: `${SHOTS}voice-stopped-390.png` });
   await ok.click();
   await expect(rec).toBeHidden();
   await expect(page.locator("[data-row]").filter({ hasText: "Mémo vocal 1" })).toBeVisible();
@@ -160,7 +184,7 @@ test("arrêter → « Valider » sans réécouter → ligne ajoutée", async ({ 
 
 test("ligne vocale : nom générique renommable (Entrée, Échap, vide → générique) ; bulle centrée sous le nom ; alignée sur les autres lignes", async ({ page, shh, isMobile }) => {
   test.setTimeout(60_000);
-  const SHOTS4 = SHOTS.replace("task-VOICE3", "task-VOICE4");
+  const SHOTS4 = SHOTS.replace("task-VOICE5", "task-VOICE4");
   mkdirSync(SHOTS4, { recursive: true });
   if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(shh.origin + "/");

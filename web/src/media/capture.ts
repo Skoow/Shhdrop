@@ -14,6 +14,8 @@ type RecorderStatic = { isTypeSupported?: (m: string) => boolean };
 
 /** Débit vidéo plafonné : 5 min ≈ 94 Mo en mémoire. */
 export const VIDEO_BPS = 2_500_000;
+/** Débit des vocaux : meilleure qualité utile (Opus et AAC transparents pour la voix) ; ≈ 0,96 Mo par minute, ≈ 29 Mo pour 30 min. */
+export const VOICE_BPS = 128_000;
 
 /** Durée maximale d'enregistrement en ms (limits.ts : formule en vigueur par défaut). */
 export function limitMs(mode: "video" | "voice", tier: CaptureTier = CAPTURE_TIER): number {
@@ -30,10 +32,12 @@ export function clock(ms: number): string {
 }
 
 const MIMES = {
+  // Voix : Opus d'abord (meilleure qualité au même débit), AAC ensuite (Safari ancien).
+  // Pas d'Ogg : strip-capture ne sait pas l'effacer, et tout navigateur qui fait de l'Ogg Opus fait aussi du WebM Opus.
   voice: [
+    ["audio/webm;codecs=opus", "webm"],
     ["audio/mp4;codecs=mp4a.40.2", "m4a"],
     ["audio/mp4", "m4a"],
-    ["audio/webm;codecs=opus", "webm"],
     ["audio/webm", "webm"],
   ],
   video: [
@@ -47,7 +51,7 @@ const MIMES = {
 
 export type Picked = { mime: string; ext: string };
 
-/** Premier format accepté par le navigateur ; MP4 d'abord (lisible partout). */
+/** Premier format accepté par le navigateur, dans l'ordre de MIMES. */
 export function pickMime(mode: "video" | "voice", isSupported: (m: string) => boolean): Picked | null {
   for (const [mime, ext] of MIMES[mode]) if (isSupported(mime)) return { mime, ext };
   return null;
@@ -65,7 +69,11 @@ export function captureSupport(g: { mediaDevices?: MediaLike; MediaRecorder?: Re
 }
 
 export function constraintsFor(mode: CaptureMode, facing: Facing): MediaStreamConstraints {
-  if (mode === "voice") return { audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }, video: false };
+  if (mode === "voice")
+    return {
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1, sampleRate: { ideal: 48_000 } },
+      video: false,
+    };
   const video = { facingMode: { ideal: facing }, width: { ideal: mode === "photo" ? 1920 : 1280 }, height: { ideal: mode === "photo" ? 1080 : 720 } };
   return { video, audio: mode === "video" };
 }
@@ -99,7 +107,14 @@ export async function openStream(media: MediaLike | undefined, mode: CaptureMode
   try {
     return await media.getUserMedia(constraintsFor(mode, facing));
   } catch (e) {
-    throw new CaptureFailure(errorKind(e));
+    // Vocal : contraintes de qualité refusées par l'appareil → micro brut plutôt qu'un échec.
+    const name = (e as { name?: string } | null)?.name;
+    if (mode !== "voice" || (name !== "OverconstrainedError" && name !== "TypeError")) throw new CaptureFailure(errorKind(e));
+    try {
+      return await media.getUserMedia({ audio: true, video: false });
+    } catch (e2) {
+      throw new CaptureFailure(errorKind(e2));
+    }
   }
 }
 
@@ -119,7 +134,7 @@ export function snapshot(video: HTMLVideoElement, quality = 0.92): Promise<Blob>
   return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new CaptureFailure("inconnu"))), "image/jpeg", quality));
 }
 
-type RecorderCtor = new (s: MediaStream, o: { mimeType: string; videoBitsPerSecond?: number }) => {
+type RecorderCtor = new (s: MediaStream, o: { mimeType: string; videoBitsPerSecond?: number; audioBitsPerSecond?: number }) => {
   state: string;
   ondataavailable: ((e: { data: Blob }) => void) | null;
   onstop: (() => void) | null;
@@ -137,7 +152,7 @@ export function startRecorder(
 ): Recording {
   const Rec = o.Recorder ?? (globalThis.MediaRecorder as unknown as RecorderCtor);
   const now = o.now ?? (() => performance.now());
-  const rec = new Rec(stream, mode === "video" ? { mimeType: picked.mime, videoBitsPerSecond: VIDEO_BPS } : { mimeType: picked.mime });
+  const rec = new Rec(stream, mode === "video" ? { mimeType: picked.mime, videoBitsPerSecond: VIDEO_BPS } : { mimeType: picked.mime, audioBitsPerSecond: VOICE_BPS });
   const chunks: Blob[] = [];
   let cancelled = false;
   const type = picked.mime.split(";")[0]!;
