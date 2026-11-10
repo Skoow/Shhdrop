@@ -180,10 +180,12 @@ test.describe("fr-FR", () => {
 
   test("Annuler au milieu : composeur intact, avis, partage effacé côté serveur", async ({ page, shh }) => {
     test.setTimeout(120_000);
+    // Écoute posée AVANT tout ajout : l'envoi démarre dès l'ajout (§41.14), la création du
+    // partage peut donc partir avant « Chiffrer et envoyer » (test instable sinon).
+    const m = manageFrom(page, shh.origin);
     await page.goto(shh.origin + "/");
     await addText(page, "Texte à garder");
     await addFile(page, "doc.bin", 10 * MIB);
-    const m = manageFrom(page, shh.origin);
     await slowSegments(page, 1500);
     await sendButton(page).click();
     await expect(page.getByRole("heading", { name: "Chiffrement et envoi" })).toBeVisible({ timeout: 30_000 });
@@ -220,9 +222,11 @@ test.describe("fr-FR", () => {
 
   test("pagehide au milieu (fermeture de la page) : partage effacé côté serveur (destroy keepalive)", async ({ page, shh }) => {
     test.setTimeout(120_000);
+    // Écoute posée AVANT tout ajout : l'envoi démarre dès l'ajout (§41.14), la création du
+    // partage peut donc partir avant « Chiffrer et envoyer » (test instable sinon).
+    const m = manageFrom(page, shh.origin);
     await page.goto(shh.origin + "/");
     await addFile(page, "doc.bin", 10 * MIB);
-    const m = manageFrom(page, shh.origin);
     // Premier segment libre, les suivants retenus : l'envoi reste au milieu. (La page n'est pas
     // fermée pendant l'interception : seul l'événement pagehide est envoyé, voir plus bas.)
     await slowSegments(page, 60_000, [], 1);
@@ -243,9 +247,11 @@ test.describe("fr-FR", () => {
 
   test("double clic : une seule création", async ({ page, shh }) => {
     test.setTimeout(90_000);
+    // Écoute posée AVANT tout ajout : l'envoi démarre dès l'ajout (§41.14), la création du
+    // partage peut donc partir avant « Chiffrer et envoyer » (test instable sinon).
+    const m = manageFrom(page, shh.origin);
     await page.goto(shh.origin + "/");
     await addText(page, "double");
-    const m = manageFrom(page, shh.origin);
     await sendButton(page).dblclick();
     await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
     expect(m.creates()).toBe(1);
