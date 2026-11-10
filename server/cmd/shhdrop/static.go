@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -80,8 +81,12 @@ func staticHandler(dir string) (http.Handler, error) {
 			return
 		}
 		h := w.Header()
-		// Cache : aucun pour l'instant (retours CLEAN4, propriétaire : chaque changement d'interface
-		// visible tout de suite pendant le développement) ; no-store partout, posé par api.New.
+		// Cache : no-store partout, posé par api.New, sauf pour un fichier à empreinte de
+		// /assets/ qui existe (jamais pour un 404 ni pour le repli vers index.html) : un an,
+		// immuable (revue du 10 novembre ; remplace « aucun cache », retours CLEAN4).
+		if immutableAsset.MatchString("/"+name) && path.Base(name) == fi.Name() {
+			h.Set("Cache-Control", immutableCache)
+		}
 		// Variante précompressée au build (vite.config.ts, precompress) : mêmes octets une fois
 		// décompressés (SRI inchangée), jamais de compression à la volée ni sur /api/*.
 		if compressible(name) {
@@ -96,10 +101,18 @@ func staticHandler(dir string) (http.Handler, error) {
 				return
 			}
 		}
-		// Date nulle : pas de Last-Modified (Cache-Control: no-store partout).
+		// Date nulle : pas de Last-Modified (no-store, ou contenu immuable sous ce nom).
 		http.ServeContent(w, r, fi.Name(), time.Time{}, rs)
 	}), nil
 }
+
+// immutableAsset : fichiers de /assets/ dont le nom porte une empreinte du contenu (vite :
+// nom-EMPREINTE.ext, 8 caractères base64url ou plus). Leur contenu ne change jamais sous ce
+// nom : cache d'un an. Tout le reste garde le no-store posé par api.New (HTML, routes,
+// cadre PDF, polices de /fonts/ et images sans empreinte, robots.txt, sitemap.xml, manifeste).
+var immutableAsset = regexp.MustCompile(`^/assets/.+-[A-Za-z0-9_-]{8,}\.(js|css|woff2|png|webp|svg)$`)
+
+const immutableCache = "public, max-age=31536000, immutable"
 
 // compressible : types texte précompressés par le build (les images et polices le sont déjà).
 func compressible(name string) bool {

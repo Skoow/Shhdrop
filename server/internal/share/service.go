@@ -155,8 +155,13 @@ type Service struct {
 	// K_preuve et son décompte (audit F1) : jamais plus de 5 essais évalués, même en parallèle.
 	// Verrous rayés (id haché) : mémoire bornée, aucune donnée retenue.
 	attemptMu [64]sync.Mutex
-	uploadMu  sync.RWMutex // Finalize attend la fin des écritures de segments en cours
-	budget    readBudget   // octets lus par ouverture, en mémoire seulement
+	// uploadMus : verrous des envois, rayés par id comme attemptMu (revue du 10 novembre :
+	// un seul verrou pour tous retenait les segments de chacun pendant l'effacement ou
+	// l'agrandissement d'un seul). Par envoi : les écritures de segments le prennent en
+	// lecture ; Erase, Grow, la fin de Finalize et sweepOne en écriture, pour attendre la
+	// fin des écritures en vol de cet envoi. Jamais deux à la fois : aucun ordre à tenir.
+	uploadMus [256]sync.RWMutex
+	budget    readBudget // octets lus par ouverture, en mémoire seulement
 	// mem : échéances d'envoi, minute du dernier segment reçu et purge des « draining », en
 	// mémoire seulement (spec §36 S5, S12) : un redémarrage efface de toute façon ces partages
 	// (PurgeAtStart), aucun jeton n'y survivant.
@@ -186,6 +191,13 @@ func (s *Service) attemptLock(id string) *sync.Mutex {
 	h := fnv.New32a()
 	h.Write([]byte(id))
 	return &s.attemptMu[h.Sum32()%uint32(len(s.attemptMu))]
+}
+
+// uploadLock : verrou de l'envoi id (deux id peuvent partager un verrou : simple attente).
+func (s *Service) uploadLock(id string) *sync.RWMutex {
+	h := fnv.New32a()
+	h.Write([]byte(id))
+	return &s.uploadMus[h.Sum32()%uint32(len(s.uploadMus))]
 }
 
 // upload : échéance d'un envoi (ceil15(création + 6 h)) et minute du dernier segment reçu
@@ -454,8 +466,9 @@ func (s *Service) PutSegment(id string, n int, body []byte) error {
 	if !validID(id) {
 		return ErrNotFound
 	}
-	s.uploadMu.RLock()
-	defer s.uploadMu.RUnlock()
+	mu := s.uploadLock(id)
+	mu.RLock()
+	defer mu.RUnlock()
 	if !s.uploadOpen(id, s.now()) {
 		return ErrNotFound
 	}
@@ -508,8 +521,8 @@ func (s *Service) markReceived(id string, n int) error {
 // Finalize termine un envoi (spec §29.4, point 4) : tous les segments hors bourrage
 // présents, bourrage rempli d'octets aléatoires (crypto/rand, indiscernables d'un chiffré
 // pour qui lit le disque), puis passage en « ready » avec le sel, Argon2id, V_preuve, E,
-// la durée et les ouvertures. Le bourrage est écrit hors du verrou global (jusqu'à 2 Gio) ;
-// le changement d'état revérifie les segments sous uploadMu. Rejoué après succès : 404.
+// la durée et les ouvertures. Le bourrage est écrit hors du verrou de l'envoi (jusqu'à
+// 2 Gio) ; le changement d'état revérifie les segments sous ce verrou. Rejoué après succès : 404.
 func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 	if !validID(id) {
 		return 0, ErrNotFound
@@ -546,14 +559,15 @@ func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 		}
 		return 0, err
 	}
-	// Le gros du fichier (jusqu'à 2 Gio) atteint le disque ici, hors du verrou global ; la
+	// Le gros du fichier (jusqu'à 2 Gio) atteint le disque ici, hors du verrou de l'envoi ; la
 	// synchronisation sous le verrou ne porte plus que sur les dernières écritures (revue B4).
 	if err := s.syncFile(id); err != nil {
 		return 0, err
 	}
 
-	s.uploadMu.Lock() // plus aucune écriture de segment en vol
-	defer s.uploadMu.Unlock()
+	mu := s.uploadLock(id)
+	mu.Lock() // plus aucune écriture de segment en vol pour cet envoi
+	defer mu.Unlock()
 	now := s.now()
 	if !s.uploadOpen(id, now) {
 		return 0, ErrNotFound
@@ -628,6 +642,16 @@ func fullMask(segs int) []byte {
 	}
 	return m
 }
+
+// deleteBlob, eraseBlob, resizeBlob, closeDetached : suppression, effacement et changement de
+// taille d'un fichier, fermeture d'un descripteur détaché (variables pour tester les verrous
+// tenus pendant ce temps et les erreurs).
+var (
+	deleteBlob    = func(b *blob.Store, id string) error { return b.Delete(id) }
+	resizeBlob    = func(b *blob.Store, id string, size int64) error { return b.Resize(id, size) }
+	eraseBlob     = func(b *blob.Store, id string, off, n int64) error { return b.Erase(id, off, n) }
+	closeDetached = func(f *os.File) error { return f.Close() }
+)
 
 // syncBlob : contenu du fichier forcé sur le disque (variable pour tester l'ordre et l'échec).
 var syncBlob = func(b *blob.Store, id string) error { return b.Sync(id) }
@@ -749,7 +773,7 @@ func (s *Service) UnlockGrant(id string, kAcces, kPreuve []byte, grant string) (
 		}
 		s.gone.mu.Lock()
 		g := s.grantLocked(openKey{id, openN}, exp, now)
-		s.gone.mu.Unlock()
+		s.gone.unlock()
 		return Opened{N: openN, Envelope: envelope, Grant: g, OpensLeft: left}, nil
 	}
 	left, err := s.countFailure(id)
@@ -788,7 +812,7 @@ func (s *Service) Done(id string, openN int) error {
 	s.gone.mu.Lock()
 	s.gone.init()
 	delete(s.gone.grants, openKey{id, openN}) // l'ouverture finit : son octroi ne rouvre plus rien
-	s.gone.mu.Unlock()
+	s.gone.unlock()
 	if handled, err := s.doneDetached(id, openN); handled {
 		return err
 	}
@@ -837,7 +861,7 @@ func (s *Service) Done(id string, openN int) error {
 // doneDetached : done d'une ouverture d'un partage disparu ; handled si le partage est détaché.
 func (s *Service) doneDetached(id string, openN int) (handled bool, err error) {
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
+	defer s.gone.unlock()
 	s.gone.init()
 	d := s.gone.dead[id]
 	if d == nil {
@@ -1020,11 +1044,12 @@ func (s *Service) Sweep() (int, error) {
 	return removed, errors.Join(errs...)
 }
 
-// sweepOne revérifie l'échéance sous uploadMu : aucun Finalize ni PutSegment ne peut
-// s'intercaler entre la vérification et l'effacement (fichier, puis ligne).
+// sweepOne revérifie l'échéance sous le verrou de l'envoi : aucun Finalize ni PutSegment du
+// même envoi ne peut s'intercaler entre la vérification et l'effacement (fichier, puis ligne).
 func (s *Service) sweepOne(id string, now int64) (bool, error) {
-	s.uploadMu.Lock()
-	defer s.uploadMu.Unlock()
+	mu := s.uploadLock(id)
+	mu.Lock()
+	defer mu.Unlock()
 	var state string
 	var failed int
 	var exp sql.NullInt64
@@ -1080,8 +1105,9 @@ func (s *Service) PurgeAtStart() (int, error) {
 
 // destroy efface le fichier d'abord, puis la ligne ; renvoie si une ligne existait. Un
 // envoi effacé avant Finalize est signalé à OnAbandon (octets abandonnés, spec §29.5).
+// Jamais sous gone.mu (retire) : la suppression d'un fichier de 2 Gio est lente.
 func (s *Service) destroy(id string) (bool, error) {
-	if err := s.Blobs.Delete(id); err != nil {
+	if err := deleteBlob(s.Blobs, id); err != nil {
 		return false, err
 	}
 	var state string

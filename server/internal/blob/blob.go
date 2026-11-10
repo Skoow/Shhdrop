@@ -4,10 +4,12 @@ package blob
 import (
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 	"time"
 )
 
@@ -16,6 +18,93 @@ import (
 type Store struct {
 	Dir      string
 	NoSparse bool
+
+	// idMu : Reserve, Resize et Delete d'un même fichier ne se croisent pas (verrous rayés
+	// par identifiant) : chacun connaît la taille avant et après, le compteur reste exact.
+	idMu [64]sync.Mutex
+	// usage : octets réservés, comptés en mémoire (UsedBytes) plutôt que relus sur le disque
+	// à chaque création. Jamais sous la somme réelle des fichiers de ce processus :
+	//   - une place créée ou agrandie est comptée avant l'appel au système (inflight), et
+	//     corrigée ensuite si l'appel a échoué ;
+	//   - une place rendue (Delete, Resize réduit, correction) n'est décomptée qu'après coup,
+	//     et jamais si une relecture du dossier (Resync) a croisé l'opération ;
+	//   - une relecture ajoute à la somme lue la croissance des opérations qui l'ont croisée
+	//     (grown), au risque de la compter deux fois jusqu'à la relecture suivante.
+	// Un fichier supprimé par un autre processus (commande d'administration) reste compté
+	// jusqu'à la relecture suivante.
+	usage struct {
+		mu       sync.Mutex
+		synced   bool   // used vient d'une relecture du dossier
+		scanning bool   // relecture en cours
+		scans    uint64 // relectures commencées
+		used     int64
+		inflight int64 // croissance des opérations en cours
+		grown    int64 // croissance des opérations qui ont croisé la relecture en cours
+	}
+	scanMu    sync.Mutex // une relecture à la fois
+	afterScan func()     // tests : appelé entre la lecture du dossier et le recalage
+}
+
+// lock : verrou du fichier id.
+func (s *Store) lock(id string) *sync.Mutex {
+	h := fnv.New32a()
+	h.Write([]byte(id))
+	return &s.idMu[h.Sum32()%uint32(len(s.idMu))]
+}
+
+// begin annonce une opération qui peut créer grow octets (≥ 0), comptés d'avance ; rend le
+// repère à passer à end.
+func (s *Store) begin(grow int64) (scans uint64) {
+	u := &s.usage
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.inflight += grow
+	if u.scanning {
+		u.grown += grow
+	}
+	if u.synced {
+		u.used += grow
+	}
+	return u.scans
+}
+
+// end clôt l'opération annoncée par begin(grow) : la taille a changé de actual (≤ grow).
+// La différence est rendue au compteur, sauf si une relecture a croisé l'opération (la somme
+// relue en tient peut-être déjà compte : on garde le compte le plus haut).
+func (s *Store) end(scans uint64, grow, actual int64) {
+	u := &s.usage
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.inflight -= grow
+	if u.synced && !u.scanning && u.scans == scans {
+		u.used += actual - grow
+	}
+}
+
+// Resync relit le dossier et recale le compteur d'UsedBytes sur le disque (balayage du
+// janitor) : la commande d'administration supprime des fichiers depuis un autre processus.
+func (s *Store) Resync() error {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+	u := &s.usage
+	u.mu.Lock()
+	u.scanning = true
+	u.scans++
+	u.grown = u.inflight
+	u.mu.Unlock()
+	total, err := s.scan()
+	if s.afterScan != nil {
+		s.afterScan()
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.scanning = false
+	if err != nil {
+		return err // compteur gardé tel quel
+	}
+	u.used = total + u.grown
+	u.synced = true
+	return nil
 }
 
 var errID = errors.New("blob : identifiant invalide")
@@ -59,6 +148,20 @@ func (s *Store) Reserve(id string, size int64) error {
 	if size < 0 {
 		return errors.New("blob : taille négative")
 	}
+	mu := s.lock(id)
+	mu.Lock()
+	defer mu.Unlock()
+	scans := s.begin(size)
+	if err := s.reserve(p, size); err != nil {
+		s.end(scans, size, 0) // rien de créé, ou fichier retiré
+		return err
+	}
+	s.end(scans, size, size)
+	return wipeTimes(p)
+}
+
+// reserve crée et alloue le fichier ; en cas d'échec, il ne reste rien.
+func (s *Store) reserve(p string, size int64) error {
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return err
 	}
@@ -75,7 +178,7 @@ func (s *Store) Reserve(id string, size int64) error {
 		os.Remove(p)
 		return err
 	}
-	return wipeTimes(p)
+	return nil
 }
 
 // CheckAllocate vérifie au démarrage que le dossier permet l'allocation réelle (avec
@@ -203,8 +306,17 @@ func (s *Store) Delete(id string) error {
 	if err != nil {
 		return err
 	}
+	mu := s.lock(id)
+	mu.Lock()
+	defer mu.Unlock()
+	scans := s.begin(0)
+	var freed int64
+	defer func() { s.end(scans, 0, -freed) }()
+	fi, serr := os.Stat(p)
 	if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
+	} else if err == nil && serr == nil && !fi.IsDir() {
+		freed = fi.Size()
 	}
 	return nil
 }
@@ -227,8 +339,26 @@ func (s *Store) List() ([]string, error) {
 	return ids, nil
 }
 
-// UsedBytes additionne les tailles logiques des fichiers.
+// UsedBytes : somme des tailles logiques des fichiers, tenue en mémoire (usage) ; le dossier
+// n'est lu qu'au premier appel (démarrage) et par Resync.
 func (s *Store) UsedBytes() (int64, error) {
+	u := &s.usage
+	u.mu.Lock()
+	if u.synced {
+		defer u.mu.Unlock()
+		return u.used, nil
+	}
+	u.mu.Unlock()
+	if err := s.Resync(); err != nil {
+		return 0, err
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.used, nil
+}
+
+// scan additionne les tailles logiques des fichiers du dossier.
+func (s *Store) scan() (int64, error) {
 	ids, err := s.List()
 	if err != nil {
 		return 0, err
@@ -276,12 +406,27 @@ func (s *Store) Resize(id string, size int64) error {
 	if size < 0 {
 		return errors.New("blob : taille négative")
 	}
+	mu := s.lock(id)
+	mu.Lock()
+	defer mu.Unlock()
 	return s.withFile(id, func(f *os.File) error {
 		fi, err := f.Stat()
 		if err != nil {
 			return err
 		}
-		if size <= fi.Size() {
+		old := fi.Size()
+		grow := max(size-old, 0)
+		scans := s.begin(grow)
+		// La taille réelle après l'appel (réussi ou non) fait foi ; illisible : on garde
+		// le compte le plus haut.
+		defer func() {
+			now := max(old, size)
+			if fi, err := f.Stat(); err == nil {
+				now = fi.Size()
+			}
+			s.end(scans, grow, now-old)
+		}()
+		if size <= old {
 			return f.Truncate(size)
 		}
 		return allocate(f, size, s.NoSparse)

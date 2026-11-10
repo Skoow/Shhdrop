@@ -98,3 +98,52 @@ func TestReserveNoSparse(t *testing.T) {
 		t.Fatal("sonde laissée", es)
 	}
 }
+
+// Une réservation en cours (fallocate lent) pendant toute une relecture du dossier : sa
+// place, pas encore visible sur le disque, reste comptée après la relecture.
+func TestResyncCountsReservationInFlight(t *testing.T) {
+	s := newStore(t)
+	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if !fallocateSupported(t, s.Dir) {
+		t.Skip("fallocate non pris en charge ici")
+	}
+	if n, err := s.UsedBytes(); err != nil || n != 0 {
+		t.Fatal(n, err)
+	}
+	orig := fallocate
+	defer func() { fallocate = orig }()
+	entered, release := make(chan struct{}), make(chan struct{})
+	fallocate = func(fd int, size int64) error {
+		close(entered)
+		<-release
+		return orig(fd, size)
+	}
+	done := make(chan error, 1)
+	go func() { done <- s.Reserve(id1, 1<<20) }()
+	<-entered // fichier créé, vide
+	if n, err := s.UsedBytes(); err != nil || n != 1<<20 {
+		t.Fatal("réservation en cours non comptée d'avance :", n, err)
+	}
+	if err := s.Resync(); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.UsedBytes(); err != nil || n < 1<<20 {
+		t.Fatal("réservation en cours oubliée par la relecture :", n, err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	fallocate = orig
+	if n, err := s.UsedBytes(); err != nil || n < 1<<20 {
+		t.Fatal(n, err)
+	}
+	if err := s.Resync(); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.UsedBytes(); err != nil || n != 1<<20 {
+		t.Fatal(n, err)
+	}
+}

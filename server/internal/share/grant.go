@@ -144,7 +144,7 @@ func (s *Service) reopen(id string, kAcces, kPreuve []byte, grant string) (Opene
 	k := openKey{id, int(n)}
 	s.gone.mu.Lock()
 	live := s.liveGrantLocked(k) != nil
-	s.gone.mu.Unlock()
+	s.gone.unlock()
 	if !live || int(n) > issued || doneMask&(int64(1)<<(n-1)) != 0 {
 		return Opened{}, ErrGrantInvalid
 	}
@@ -156,9 +156,9 @@ func (s *Service) reopen(id string, kAcces, kPreuve []byte, grant string) (Opene
 		return Opened{}, &BadPassword{AttemptsLeft: left}
 	}
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
+	defer s.gone.unlock()
 	e := s.liveGrantLocked(k) // revérifié : un done ou un balayage a pu passer
-	if e == nil || s.gone.dead[id] != nil {
+	if e == nil || s.gone.dead[id] != nil || s.gone.retiringLocked(id) {
 		return Opened{}, ErrGrantInvalid
 	}
 	if e.reopens >= MaxReopens {
@@ -195,9 +195,9 @@ func (s *Service) Regrant(id string, openN int, tokenExp time.Time) (string, err
 		return "", err
 	}
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
+	defer s.gone.unlock()
 	k := openKey{id, openN}
-	if s.liveGrantLocked(k) == nil || s.gone.dead[id] != nil {
+	if s.liveGrantLocked(k) == nil || s.gone.dead[id] != nil || s.gone.retiringLocked(id) {
 		return "", ErrGone
 	}
 	cap := min(exp, tokenExp.Unix())
@@ -220,7 +220,7 @@ func (s *Service) sweepGrants(now int64) error {
 			due = append(due, k)
 		}
 	}
-	s.gone.mu.Unlock()
+	s.gone.unlock()
 	var errs []error
 	for _, k := range due {
 		if err := s.Done(k.id, k.openN); err != nil && !errors.Is(err, ErrGone) && !errors.Is(err, ErrNotFound) {
@@ -233,7 +233,7 @@ func (s *Service) sweepGrants(now int64) error {
 // GrantCount : octrois en mémoire (tests).
 func (s *Service) GrantCount() int {
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
+	defer s.gone.unlock()
 	return len(s.gone.grants)
 }
 
@@ -275,7 +275,7 @@ func (s *Service) MetaGrant(kAcces []byte, grant string) (Meta, error) {
 	if live {
 		s.cancelLeaveLocked(openKey{m.ID, int(n)}) // rechargement : la page revient (D41-28)
 	}
-	s.gone.mu.Unlock()
+	s.gone.unlock()
 	if !live {
 		return Meta{}, ErrNotFound
 	}

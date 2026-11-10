@@ -42,8 +42,9 @@ func (s *Service) PutChunks(id string, n, from int, body []byte) error {
 	if !validID(id) {
 		return ErrNotFound
 	}
-	s.uploadMu.RLock()
-	defer s.uploadMu.RUnlock()
+	mu := s.uploadLock(id)
+	mu.RLock()
+	defer mu.RUnlock()
 	bucket, _, err := s.draftRow(id)
 	if err != nil {
 		return err
@@ -169,8 +170,9 @@ func (s *Service) GrowCharged(id string, bucket int, charge func(bucket int) err
 		return ErrBusy
 	}
 	defer s.releaseFinalize(id)
-	s.uploadMu.Lock()
-	defer s.uploadMu.Unlock()
+	mu := s.uploadLock(id)
+	mu.Lock()
+	defer mu.Unlock()
 	old, mask, err := s.draftRow(id)
 	if err != nil {
 		return err
@@ -197,7 +199,7 @@ func (s *Service) GrowCharged(id string, bucket int, charge func(bucket int) err
 	if used+s.detachedBytes()+totalSize(bucket)-totalSize(old) > s.StorageMax {
 		return ErrFull
 	}
-	if err := s.Blobs.Resize(id, totalSize(bucket)); err != nil {
+	if err := resizeBlob(s.Blobs, id, totalSize(bucket)); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return ErrNotFound
 		}
@@ -223,8 +225,9 @@ func (s *Service) GrowCharged(id string, bucket int, charge func(bucket int) err
 }
 
 // Erase efface les segments [from, to) de l'envoi id (élément retiré) : plage rendue au
-// système de fichiers ou mise à zéro, fsync, bits remis à zéro. Sous uploadMu exclusif : une
-// écriture de segment en vol se termine avant. Refusé pendant un Finalize (ErrBusy).
+// système de fichiers ou mise à zéro, fsync, bits remis à zéro. Sous le verrou exclusif de
+// l'envoi : une écriture de segment en vol de cet envoi se termine avant, celles des autres
+// envois ne sont pas retenues. Refusé pendant un Finalize (ErrBusy).
 func (s *Service) Erase(id string, from, to int) error {
 	if !validID(id) {
 		return ErrNotFound
@@ -233,8 +236,9 @@ func (s *Service) Erase(id string, from, to int) error {
 		return ErrBusy
 	}
 	defer s.releaseFinalize(id)
-	s.uploadMu.Lock()
-	defer s.uploadMu.Unlock()
+	mu := s.uploadLock(id)
+	mu.Lock()
+	defer mu.Unlock()
 	bucket, mask, err := s.draftRow(id)
 	if err != nil {
 		return err
@@ -245,7 +249,7 @@ func (s *Service) Erase(id string, from, to int) error {
 	}
 	start := segOffset(bucket, from)
 	end := segOffset(bucket, to-1) + int64(SegmentSize(bucket, to-1))
-	if err := s.Blobs.Erase(id, start, end-start); err != nil {
+	if err := eraseBlob(s.Blobs, id, start, end-start); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return ErrNotFound
 		}
@@ -275,7 +279,8 @@ func (s *Service) Keep(id string) error {
 
 // finalizeDraft termine un brouillon (Finalize avec r.Bucket ≠ 0, claimFinalize déjà pris) :
 // segments manquants du palier final remplis d'aléa (trous d'éléments retirés et bourrage),
-// puis, sous uploadMu, en-tête et manifeste écrits, fichier ramené au palier final, « ready ».
+// puis, sous le verrou de l'envoi, en-tête et manifeste écrits, fichier ramené au palier
+// final, « ready ».
 func (s *Service) finalizeDraft(id string, reserved int, r FinalizeReq) (time.Duration, error) {
 	b := r.Bucket
 	if b > reserved {
@@ -334,13 +339,14 @@ func (s *Service) finalizeDraft(id string, reserved int, r FinalizeReq) (time.Du
 			c = e
 		}
 	}
-	// Le gros du fichier atteint le disque hors du verrou global (revue B4, comme Finalize).
+	// Le gros du fichier atteint le disque hors du verrou de l'envoi (revue B4, comme Finalize).
 	if err := s.syncFile(id); err != nil {
 		return 0, err
 	}
 
-	s.uploadMu.Lock()
-	defer s.uploadMu.Unlock()
+	mu := s.uploadLock(id)
+	mu.Lock()
+	defer mu.Unlock()
 	now := s.now()
 	if !s.uploadOpen(id, now) {
 		return 0, ErrNotFound
@@ -356,7 +362,10 @@ func (s *Service) finalizeDraft(id string, reserved int, r FinalizeReq) (time.Du
 			return 0, err
 		}
 	}
-	if err := s.Blobs.Resize(id, totalSize(b)); err != nil {
+	if err := resizeBlob(s.Blobs, id, totalSize(b)); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return 0, ErrNotFound // détruit pendant la finalisation
+		}
 		return 0, err
 	}
 	// En-tête, manifeste et taille finale sur le disque avant « ready ».

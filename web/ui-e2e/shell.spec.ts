@@ -114,7 +114,7 @@ test("capture() n'avale pas une vraie violation CSP", async ({ page, shh }) => {
   shh.cspViolations.length = 0;
 });
 
-test("vitesse : JS et CSS servis compressés (brotli) ; aucun cache pour l'instant (CLEAN4)", async ({ page, shh }) => {
+test("vitesse : JS et CSS servis compressés (brotli) ; fichiers à empreinte en cache un an, page jamais en cache", async ({ page, shh }) => {
   const seen: { url: string; enc: string; cache: string }[] = [];
   page.on("response", async (r) => {
     if (/\/assets\/index-[^/]+\.(js|css)$/.test(r.url())) {
@@ -129,6 +129,8 @@ test("vitesse : JS et CSS servis compressés (brotli) ; aucun cache pour l'insta
   expect(seen.map((s) => s.url.split(".").pop()).sort()).toEqual(["css", "js"]);
   for (const s of seen) {
     expect(s.enc, s.url).toBe("br");
-    expect(s.cache, s.url).toBe("no-store");
+    // Le nom porte l'empreinte du contenu, et index.html (jamais en cache) fixe ce nom et son
+    // empreinte SRI : un fichier en cache ne peut pas être une autre version (10 novembre).
+    expect(s.cache, s.url).toBe("public, max-age=31536000, immutable");
   }
 });

@@ -182,3 +182,36 @@ func TestRun(t *testing.T) {
 		t.Fatal("Run ne s'arrête pas")
 	}
 }
+
+// Revue du 10 novembre : la place utilisée est comptée en mémoire (blob.Store.UsedBytes) ; le
+// balayage la recale sur le disque, pour voir la place rendue par la commande
+// d'administration, qui supprime les fichiers depuis un autre processus.
+func TestRunResyncsUsedBytes(t *testing.T) {
+	s, _ := newSvc(t)
+	id := ready(t, s)
+	before, err := s.Blobs.UsedBytes()
+	if err != nil || before == 0 {
+		t.Fatal(before, err)
+	}
+	if err := os.Remove(filepath.Join(s.Blobs.Dir, id)); err != nil { // autre processus
+		t.Fatal(err)
+	}
+	if n, _ := s.Blobs.UsedBytes(); n != before {
+		t.Fatal("compteur changé sans balayage", n)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { Run(ctx, s, s.DB, 10*time.Millisecond); close(done) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if n, _ := s.Blobs.UsedBytes(); n == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Run n'a pas recalé la place utilisée")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+}

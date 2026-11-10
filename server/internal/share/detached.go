@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -68,6 +69,36 @@ type goneState struct {
 	watch  map[string]*watcher
 	grants map[openKey]*grantEntry // octrois d'ouverture (grant.go)
 	leaves map[openKey]int64       // départs de la dernière ouverture (leave.go) : heure du « je pars »
+	// closing : descripteurs détachés retirés de dead, à fermer hors de mu (unlock) ;
+	// closingBytes : leur place, comptée jusqu'à la fermeture faite (detachedBytes).
+	closing      []*detached
+	closingBytes int64
+	// retiring : partages dont le fichier est en cours de suppression hors de mu (retire) ;
+	// présence seulement, le temps d'une suppression. Ils passent déjà pour disparus.
+	retiring []string
+}
+
+// retiringLocked : le partage id est en cours de retrait (retire). Sous mu.
+func (g *goneState) retiringLocked(id string) bool { return slices.Contains(g.retiring, id) }
+
+// unlock rend mu, puis ferme les descripteurs détachés qui ne servent plus : la fermeture
+// rend jusqu'à 2 Gio au système de fichiers et ne doit pas retenir les lectures de segments
+// (revue du 10 novembre).
+func (g *goneState) unlock() {
+	ds := g.closing
+	g.closing = nil
+	g.mu.Unlock()
+	if len(ds) == 0 {
+		return
+	}
+	var n int64
+	for _, d := range ds {
+		closeDetached(d.f)
+		n += totalSize(d.bucket)
+	}
+	g.mu.Lock()
+	g.closingBytes -= n
+	g.mu.Unlock()
 }
 
 func (g *goneState) init() {
@@ -111,7 +142,8 @@ func (s *Service) OpenSegment(id string, n, openN int) (*Segment, error) {
 // vivant (« ready » ou « draining ») : l'ouverture doit avoir été émise et ne pas être
 // terminée. Partage disparu : seulement pour une ouverture active, jusqu'à la fin de grâce,
 // depuis le descripteur détaché ; sinon ErrGone. Chaque ouverture a un budget de lecture
-// (ErrBudget). Aucun segment en cours d'écriture n'est servi (Finalize attend uploadMu).
+// (ErrBudget). Aucun segment en cours d'écriture n'est servi (Finalize attend le verrou de
+// l'envoi).
 func (s *Service) OpenSegmentCtx(parent context.Context, id string, n, openN int) (*Segment, error) {
 	if !validID(id) || openN < 1 || openN > maxOpenN {
 		return nil, ErrNotFound
@@ -134,11 +166,14 @@ func (s *Service) openOnce(parent context.Context, id string, n, openN int) (seg
 	now := s.now()
 	k := openKey{id, openN}
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
+	defer s.gone.unlock()
 	s.gone.init()
 	if d := s.gone.dead[id]; d != nil {
 		seg, err := s.serveDetachedLocked(parent, id, d, k, n, now)
 		return seg, false, 0, err
+	}
+	if s.gone.retiringLocked(id) {
+		return nil, false, 0, ErrGone // en cours de retrait, sans droit de finir
 	}
 	var bucket, issued, failed int
 	var state string
@@ -220,7 +255,7 @@ func (s *Service) startLocked(parent context.Context, k openKey, r io.Reader, si
 			closeFile()
 		}
 		s.gone.mu.Lock()
-		defer s.gone.mu.Unlock()
+		defer s.gone.unlock()
 		now := s.now()
 		a.inflight--
 		a.last = now
@@ -234,8 +269,8 @@ func (s *Service) startLocked(parent context.Context, k openKey, r io.Reader, si
 }
 
 // reapLocked oublie les ouvertures qui ont perdu leur droit (fin de grâce, 120 s sans
-// segment) et ferme le descripteur quand plus aucune ne le garde et qu'aucune lecture n'est
-// en cours (jamais au milieu d'un segment).
+// segment) et retire le descripteur quand plus aucune ne le garde et qu'aucune lecture n'est
+// en cours (jamais au milieu d'un segment) ; il est fermé à la sortie du verrou (unlock).
 func (s *Service) reapLocked(id string, d *detached, now int64) {
 	for n := range d.opens {
 		if now >= d.graceEnd || !s.gone.active[openKey{id, n}].activeAt(now) {
@@ -243,7 +278,8 @@ func (s *Service) reapLocked(id string, d *detached, now int64) {
 		}
 	}
 	if len(d.opens) == 0 && d.refs == 0 {
-		d.f.Close()
+		s.gone.closing = append(s.gone.closing, d)
+		s.gone.closingBytes += totalSize(d.bucket)
 		delete(s.gone.dead, id)
 		for n := 1; n <= maxOpenN; n++ {
 			if a := s.gone.active[openKey{id, n}]; a != nil && a.inflight == 0 {
@@ -257,8 +293,8 @@ func (s *Service) reapLocked(id string, d *detached, now int64) {
 // fermeture, spec §41.8 cas 2).
 func (s *Service) detachedBytes() int64 {
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
-	var n int64
+	defer s.gone.unlock()
+	n := s.gone.closingBytes
 	for _, d := range s.gone.dead {
 		n += totalSize(d.bucket)
 	}
@@ -269,19 +305,31 @@ func (s *Service) detachedBytes() int64 {
 // ouvertures actives (non terminées) gardent le droit de finir jusqu'à event + 2 h, sur un
 // descripteur détaché ; sinon (signalement, administrateur) tous ses flux sont coupés.
 // Renvoie si une ligne existait.
+//
+// Le fichier (jusqu'à 2 Gio) est supprimé du dossier hors de gone.mu, que prend chaque
+// lecture de segment (revue du 10 novembre). En trois temps : sous gone.mu, la décision
+// (descripteur détaché, flux coupés) et l'inscription du partage dans retiring, qui le fait
+// passer pour disparu aux lectures et aux surveillances ; hors verrou, la suppression du
+// fichier ; sous gone.mu de nouveau, la ligne. L'ordre « fichier puis ligne » est gardé : si
+// la suppression échoue, la ligne reste et Sweep réessaie. Un retrait déjà en cours du même
+// partage : (false, nil), comme une ligne déjà effacée.
 func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 	now := s.now()
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
 	s.gone.init()
+	if s.gone.retiringLocked(id) {
+		s.gone.unlock()
+		return false, nil
+	}
 	var bucket, issued int
 	var doneMask int64
 	var accessV []byte
 	err := s.DB.QueryRow(`SELECT bucket, opens_issued, done_mask, access_v FROM shares WHERE id=?`, id).Scan(&bucket, &issued, &doneMask, &accessV)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
 	if err != nil {
+		s.gone.unlock()
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
 		return false, err
 	}
 	allowed := map[int]bool{}
@@ -295,6 +343,7 @@ func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 	if len(allowed) > 0 {
 		f, err := s.Blobs.OpenFile(id)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			s.gone.unlock()
 			return false, err
 		}
 		if f != nil {
@@ -304,10 +353,17 @@ func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 	if !grace {
 		s.revokeAllLocked(id)
 	}
-	ok, err := s.destroy(id)
+	s.gone.retiring = append(s.gone.retiring, id)
+	s.gone.unlock()
+
+	ok, err := s.destroy(id) // hors de gone.mu
+
+	s.gone.mu.Lock()
+	defer s.gone.unlock()
+	s.gone.retiring = slices.DeleteFunc(s.gone.retiring, func(x string) bool { return x == id })
 	if err != nil {
 		if d := s.gone.dead[id]; d != nil && d.refs == 0 {
-			d.f.Close()
+			d.f.Close() // fichier encore dans le dossier : rien n'est rendu au disque ici
 			delete(s.gone.dead, id)
 		}
 		return false, err
@@ -351,9 +407,9 @@ func (s *Service) Watch(id string, openN int) (Watch, error) {
 	}
 	now := s.now()
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
+	defer s.gone.unlock()
 	s.gone.init()
-	if s.gone.dead[id] != nil {
+	if s.gone.dead[id] != nil || s.gone.retiringLocked(id) {
 		return Watch{}, ErrGone
 	}
 	var state string
@@ -385,7 +441,7 @@ func (s *Service) Watch(id string, openN int) (Watch, error) {
 	return Watch{Gone: w.ch, Expires: time.Unix(exp.Int64, 0).UTC(), Stop: func() {
 		once.Do(func() {
 			s.gone.mu.Lock()
-			defer s.gone.mu.Unlock()
+			defer s.gone.unlock()
 			if w.n--; w.n == 0 && s.gone.watch[id] == w {
 				delete(s.gone.watch, id)
 			}
@@ -396,7 +452,7 @@ func (s *Service) Watch(id string, openN int) (Watch, error) {
 // WatchCount : surveillances en cours (tests).
 func (s *Service) WatchCount() int {
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
+	defer s.gone.unlock()
 	n := 0
 	for _, w := range s.gone.watch {
 		n += w.n
@@ -414,7 +470,7 @@ func (s *Service) PollRemoved() error {
 	// Toujours lu (un dossier, le plus souvent absent) : la demande « tout couper » de wipe
 	// est confirmée même sans descripteur détaché (revue B5).
 	if err := s.pollKillsLocked(); err != nil {
-		s.gone.mu.Unlock()
+		s.gone.unlock()
 		return err
 	}
 	set := map[string]bool{}
@@ -426,7 +482,7 @@ func (s *Service) PollRemoved() error {
 			set[k.id] = true
 		}
 	}
-	s.gone.mu.Unlock()
+	s.gone.unlock()
 	if len(set) == 0 {
 		return nil
 	}
@@ -455,7 +511,7 @@ func (s *Service) PollRemoved() error {
 		}
 	}
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
+	defer s.gone.unlock()
 	for id := range set {
 		if present[id] || s.gone.dead[id] != nil {
 			continue
@@ -472,7 +528,7 @@ func (s *Service) PollRemoved() error {
 // sweepGoneLocked : balayage des ouvertures inactives et des descripteurs détachés.
 func (s *Service) sweepGone(now int64) {
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
+	defer s.gone.unlock()
 	s.gone.init()
 	for id, d := range s.gone.dead {
 		s.reapLocked(id, d, now)

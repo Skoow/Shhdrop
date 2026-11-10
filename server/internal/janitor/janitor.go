@@ -14,7 +14,9 @@ import (
 	"github.com/skoow/shhdrop/server/internal/store"
 )
 
-// Run appelle Sweep puis Checkpoint à chaque période, jusqu'à l'annulation de ctx.
+// Run appelle Sweep, recale la place utilisée sur le disque (blob.Store.Resync : la commande
+// d'administration supprime des fichiers depuis un autre processus), puis Checkpoint, à
+// chaque période, jusqu'à l'annulation de ctx.
 func Run(ctx context.Context, svc *share.Service, db *sql.DB, every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
@@ -25,6 +27,9 @@ func Run(ctx context.Context, svc *share.Service, db *sql.DB, every time.Duratio
 		case <-t.C:
 		}
 		_, err := svc.Sweep()
+		if rerr := svc.Blobs.Resync(); rerr != nil {
+			err = errors.Join(err, rerr)
+		}
 		if cerr := store.Checkpoint(db); cerr != nil {
 			err = errors.Join(err, cerr)
 		}

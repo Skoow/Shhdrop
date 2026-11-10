@@ -451,7 +451,7 @@ func TestUploadQuotas(t *testing.T) {
 			t.Fatal("l'envoi d est toujours en cours", err)
 		}
 	})
-	t.Run("minuit : compteurs et envois en cours oubliés", func(t *testing.T) {
+	t.Run("minuit : envois en cours gardés (places et octets), envois terminés oubliés", func(t *testing.T) {
 		c := &stepClock{t: time.Date(2026, 11, 5, 23, 59, 0, 0, time.UTC)}
 		l := New(c.Now)
 		for _, id := range []string{"m1", "m2"} {
@@ -460,10 +460,134 @@ func TestUploadQuotas(t *testing.T) {
 			}
 		}
 		c.t = c.t.Add(2 * time.Minute)
+		if ra, err := l.BeginUpload(ip("1.2.3.4"), "m3", 1); !errors.Is(err, ErrQuota) || ra != pendingRetry {
+			t.Fatal("3ᵉ envoi en cours accepté après minuit", ra, err)
+		}
+		l.FinishUpload("m1") // toujours connu après minuit : sa place est rendue
 		if _, err := l.BeginUpload(ip("1.2.3.4"), "m3", 1); err != nil {
 			t.Fatal(err)
 		}
-		l.FinishUpload("m1") // inconnu depuis minuit : ignoré
+	})
+}
+
+// Minuit UTC (revue du 10 novembre) : un envoi en cours à minuit reste compté le lendemain
+// (création, octets, place d'envoi en cours) sous sa clé de la veille, retrouvée par le
+// secret de la veille, gardé en mémoire tant qu'un tel envoi vit. Les envois terminés la
+// veille, eux, sont oubliés à minuit comme avant.
+func TestMidnightCarriesInFlightUploads(t *testing.T) {
+	const gib = int64(1) << 30
+	eve := time.Date(2026, 11, 5, 23, 59, 0, 0, time.UTC)
+	t.Run("octets d'un envoi en cours comptés le lendemain, Reserve et Receive aussi", func(t *testing.T) {
+		now := eve
+		l := newLim(&now)
+		if _, err := l.BeginUpload(ip("2001:db8:1:1::1"), "a", 2*gib); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.BeginUpload(ip("2001:db8:1:1::1"), "fini", 4*gib); err != nil {
+			t.Fatal(err)
+		}
+		l.FinishUpload("fini") // terminé la veille : oublié à minuit
+		now = now.Add(2 * time.Minute)
+		if _, err := l.Reserve("a", 4*gib); err != nil {
+			t.Fatal("grow d'un envoi de la veille", err)
+		}
+		if ra, err := l.BeginUpload(ip("2001:db8:1:1::2"), "b", 3*gib); !errors.Is(err, ErrQuota) || ra <= pendingRetry {
+			t.Fatal("4 Gio en cours depuis la veille + 3 Gio acceptés", ra, err)
+		}
+		// Même /48, autre /64 : le bloc compte aussi l'envoi de la veille (12 Gio par /48).
+		if _, err := l.BeginUpload(ip("2001:db8:1:2::1"), "c", 6*gib); err != nil {
+			t.Fatal(err)
+		}
+		l.FinishUpload("c")
+		if _, err := l.BeginUpload(ip("2001:db8:1:3::1"), "d", 3*gib); !errors.Is(err, ErrQuota) {
+			t.Fatal("/48 : 4 Gio de la veille + 6 Gio + 3 Gio acceptés", err)
+		}
+		if _, err := l.BeginUpload(ip("2001:db8:1:1::2"), "b", 2*gib); err != nil {
+			t.Fatal("4 Gio en cours + 2 Gio refusés", err)
+		}
+		if _, err := l.Receive("a", 6*gib); err != nil {
+			t.Fatal(err)
+		}
+		if ra, err := l.Receive("a", 1); !errors.Is(err, ErrQuota) || ra <= 0 {
+			t.Fatal("octets reçus par un envoi de la veille non comptés", ra, err)
+		}
+	})
+	t.Run("le secret de la veille est jeté dès le dernier envoi de la veille terminé", func(t *testing.T) {
+		now := eve
+		l := newLim(&now)
+		old := l.secret
+		for _, id := range []string{"a", "b"} {
+			if _, err := l.BeginUpload(ip("1.2.3.4"), id, 2*gib); err != nil {
+				t.Fatal(err)
+			}
+		}
+		now = now.Add(2 * time.Minute)
+		l.Key(ip("1.2.3.4")) // rotation
+		if string(l.prev) != string(old) || string(l.secret) == string(old) {
+			t.Fatal("secret de la veille non gardé pendant un envoi en cours")
+		}
+		l.AbandonUpload("a")
+		if l.prev == nil {
+			t.Fatal("secret de la veille jeté alors qu'un envoi de la veille vit encore")
+		}
+		l.FinishUpload("b")
+		if l.prev != nil {
+			t.Fatal("secret de la veille gardé sans envoi de la veille")
+		}
+		if n := len(l.count64) + len(l.count48) + len(l.bytes64) + len(l.bytes48) + len(l.uploads) +
+			len(l.pend64) + len(l.pend48) + len(l.aband64) + len(l.aband48); n != 0 {
+			t.Fatal("compteurs de la veille non vidés", n)
+		}
+		// L'envoi b, terminé, ne compte plus : le jour repart de zéro.
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "c", 6*gib); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("aucun envoi en cours à minuit : aucun secret gardé", func(t *testing.T) {
+		now := eve
+		l := newLim(&now)
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "a", gib); err != nil {
+			t.Fatal(err)
+		}
+		l.FinishUpload("a")
+		now = now.Add(2 * time.Minute)
+		l.Key(ip("1.2.3.4"))
+		if l.prev != nil {
+			t.Fatal("secret de la veille gardé sans envoi en cours")
+		}
+	})
+	t.Run("un envoi de la veille jamais terminé est oublié après la vie maximale d'un envoi", func(t *testing.T) {
+		now := eve
+		l := newLim(&now)
+		for _, id := range []string{"a", "b"} {
+			if _, err := l.BeginUpload(ip("1.2.3.4"), id, 2*gib); err != nil {
+				t.Fatal(err)
+			}
+		}
+		now = eve.Add(UploadLife - time.Second)
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "c", 1); !errors.Is(err, ErrQuota) || l.prev == nil {
+			t.Fatal("envois de la veille oubliés trop tôt", err)
+		}
+		now = eve.Add(UploadLife)
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "c", 6*gib); err != nil {
+			t.Fatal(err)
+		}
+		if l.prev != nil || len(l.uploads) != 1 || len(l.pend64) != 1 || len(l.bytes64) != 1 {
+			t.Fatal("secret ou compteurs de la veille gardés", len(l.uploads), len(l.pend64), len(l.bytes64))
+		}
+		l.FinishUpload("a") // oublié : ignoré
+	})
+	t.Run("deux minuits : un envoi de l'avant-veille n'est pas gardé", func(t *testing.T) {
+		now := eve
+		l := newLim(&now)
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "a", gib); err != nil {
+			t.Fatal(err)
+		}
+		now = eve.Add(48 * time.Hour)
+		l.Key(ip("1.2.3.4"))
+		if l.prev != nil || len(l.uploads) != 0 {
+			t.Fatal("envoi de l'avant-veille gardé")
+		}
 	})
 }
 
@@ -475,7 +599,8 @@ func (c *stepClock) Now() time.Time { return c.t }
 
 // Spec §9.5, §35.1 (Task M2) : chaque compteur est vide après sa durée de vie (horloge
 // injectée) : ceux de la minute à la minute suivante, ceux du jour à minuit UTC ; une place
-// de transfert est rendue à la fin du transfert.
+// de transfert est rendue à la fin du transfert. Revue du 10 novembre : un envoi encore en
+// cours à minuit reste compté jusqu'à sa fin (6 h 15 au plus), avec le secret de la veille.
 func TestCountersEmptyAfterRotation(t *testing.T) {
 	now := time.Date(2026, 11, 4, 23, 58, 10, 0, time.UTC)
 	l := newLim(&now)
@@ -505,8 +630,14 @@ func TestCountersEmptyAfterRotation(t *testing.T) {
 		t.Fatal("minute", m, d)
 	}
 	now = time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC) // minuit UTC
-	if m, d := lens(); m != 0 || d != 0 {
+	// Seul l'envoi encore en cours (id-2) reste compté : lui-même, sa création, ses octets et
+	// sa place, par connexion et par bloc (7 entrées), sous le secret de la veille.
+	if m, d := lens(); m != 0 || d != 7 || l.prev == nil {
 		t.Fatal("minuit UTC", m, d)
+	}
+	l.FinishUpload("id-2")
+	if m, d := lens(); m != 0 || d != 0 || l.prev != nil {
+		t.Fatal("après le dernier envoi de la veille", m, d)
 	}
 	s := NewSlots(3, 2, 3)
 	rel, err := s.Acquire("a", "b")

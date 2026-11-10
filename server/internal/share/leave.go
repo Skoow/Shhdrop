@@ -46,7 +46,7 @@ func (s *Service) Leave(id string, openN int) error {
 	}
 	k := openKey{id, openN}
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
+	defer s.gone.unlock()
 	if s.liveGrantLocked(k) == nil || s.gone.dead[id] != nil {
 		return nil
 	}
@@ -77,7 +77,7 @@ func (s *Service) SweepLeaves() (int, error) {
 		due = append(due, k)
 		delete(s.gone.leaves, k)
 	}
-	s.gone.mu.Unlock()
+	s.gone.unlock()
 	n := 0
 	var errs []error
 	for _, k := range due {
@@ -94,6 +94,6 @@ func (s *Service) SweepLeaves() (int, error) {
 // LeaveCount : départs armés (tests).
 func (s *Service) LeaveCount() int {
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
+	defer s.gone.unlock()
 	return len(s.gone.leaves)
 }

@@ -25,7 +25,7 @@ func (s *Service) killDir() string { return filepath.Join(filepath.Dir(s.FrozenF
 // cutDetached coupe, dans ce processus, le partage détaché dont V_accès vaut v.
 func (s *Service) cutDetached(v []byte) bool {
 	s.gone.mu.Lock()
-	defer s.gone.mu.Unlock()
+	defer s.gone.unlock()
 	s.gone.init()
 	for id, d := range s.gone.dead {
 		if bytes.Equal(d.accessV, v) {
@@ -59,7 +59,7 @@ func (s *Service) CutAllDetached() (bool, error) {
 	for id, d := range s.gone.dead {
 		s.killLocked(id, d)
 	}
-	s.gone.mu.Unlock()
+	s.gone.unlock()
 	switch err := s.awaitKill(killAll); {
 	case errors.Is(err, ErrNotFound):
 		return false, nil
