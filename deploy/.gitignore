@@ -1,0 +1,5 @@
+# Réglages et état propres à chaque serveur (aucun secret, mais rien à publier).
+/.env
+/.release
+/.release.prev
+/.deploy.lock

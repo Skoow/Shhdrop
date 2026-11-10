@@ -1,0 +1,22 @@
+# Contexte de build de deploy/Dockerfile (docker build -f deploy/Dockerfile .) :
+# tout est exclu, sauf les sources du serveur, du site et de shhcheck.
+*
+!server/
+!web/
+!deploy/
+deploy/*
+!deploy/shhcheck/
+
+# Jamais dans l'image : dépendances installées, sorties de build, binaires, bases, captures.
+**/node_modules/
+web/dist/
+web/dist-demo/
+web/test-results/
+web/playwright-report/
+web/ui-e2e/__captures__/
+server/shhdrop
+server/shhdrop-e2etime
+**/*.db
+**/*.db-*
+**/.env
+**/.env.*

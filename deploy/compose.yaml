@@ -1,0 +1,117 @@
+# Pile de production de Shhdrop : Caddy (TLS) devant le serveur Go (spec §6, §15, §22, §36).
+# Lancée par deploy.sh, qui fournit les variables depuis deploy/.env et l'empreinte de l'image.
+#
+# Variables obligatoires :
+#   SHH_IMAGE      image du serveur, épinglée par empreinte : dépôt@sha256:…
+#   SHH_DOMAIN     nom du site (exemple : shhdrop.app)
+#   SHH_DATA_ROOT  point de montage du volume chiffré (LUKS2, noatime), par exemple /srv/shhdrop.
+#                  Doit contenir « data » (compte 65532, mode 0700) et « caddy » (root, 0700).
+# Variable facultative :
+#   SHH_STORAGE_MAX  plafond de stockage en octets (défaut : 200 Gio, spec §24)
+#
+# Réseau : Caddy utilise le réseau de la machine (il voit donc toujours la vraie adresse
+# du client, en IPv4 comme en IPv6, sans dépendre de la traduction d'adresses de Docker).
+# Le serveur Go est sur un réseau Docker interne, sans route vers Internet et sans port
+# publié : seul Caddy, depuis la machine, peut le joindre.
+
+name: shhdrop
+
+services:
+  shhdrop:
+    image: ${SHH_IMAGE:?SHH_IMAGE manquant (dépôt@sha256:…)}
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # Pas de vidage mémoire (spec §22) : il contiendrait des adresses et des jetons.
+    ulimits:
+      core: 0
+    pids_limit: 256
+    environment:
+      SHH_DATA_DIR: /data
+      SHH_STATIC_DIR: /site
+      # Toutes les interfaces DU CONTENEUR (réseau interne + sa boucle locale, pour le
+      # contrôle de santé). Accepté par le serveur parce que les deux lignes suivantes sont là.
+      SHH_LISTEN: 0.0.0.0:8080
+      # Échec fermé : sans X-Shh-Client-IP valide posé par Caddy, /api répond 500.
+      SHH_BEHIND_PROXY: "1"
+      # Seul pair de confiance : la passerelle du réseau interne, c'est-à-dire la machine,
+      # où Caddy écoute. /32 : le serveur ne croit X-Shh-Client-IP de personne d'autre.
+      SHH_TRUSTED_PROXY: 172.30.53.1/32
+      SHH_STORAGE_MAX: ${SHH_STORAGE_MAX:-214748364800}
+    networks:
+      interne:
+        ipv4_address: 172.30.53.2
+    volumes:
+      # Sous-dossier du volume chiffré, jamais créé par Docker : si le volume n'est pas
+      # déverrouillé et monté, le conteneur ne démarre pas, au lieu d'écrire sur le disque
+      # système en clair (spec §22).
+      - type: bind
+        source: ${SHH_DATA_ROOT:?SHH_DATA_ROOT manquant (point de montage du volume chiffré)}/data
+        target: /data
+        bind:
+          create_host_path: false
+    # Fichiers temporaires éventuels : en mémoire, jamais sur disque.
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    # Aucun journal de conteneur sur disque (audit de confidentialité P6, spec §36 S1).
+    # Pour lire un message de démarrage : « deploy.sh diagnose » (premier plan, rien d'écrit).
+    logging:
+      driver: none
+    # Le serveur laisse 30 s aux transferts en cours avant de s'arrêter.
+    stop_grace_period: 40s
+    healthcheck:
+      # /healthz ne répond qu'à la boucle locale du conteneur, sans passer par Caddy (spec §8).
+      test: ["CMD", "/shhcheck", "health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
+
+  caddy:
+    # Caddy 2.11.9 officiel (2.10 au minimum pour x25519mlkem768), épinglé par empreinte,
+    # relevée le 10 novembre 2026. Changer l'étiquette ET l'empreinte ensemble, puis
+    # relancer deploy/test-proxy.sh avec ce binaire.
+    image: caddy:2.11.9@sha256:0c2243efcf437ab7f7a978f1027fcf0d4f9be8a75df27b1b3fbc5dbe0ffa8cf0
+    restart: unless-stopped
+    network_mode: host
+    read_only: true
+    # root DANS le conteneur, mais sans aucune capacité sauf celle d'écouter sur 80 et 443.
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    ulimits:
+      core: 0
+    pids_limit: 256
+    environment:
+      SHH_DOMAIN: ${SHH_DOMAIN:?SHH_DOMAIN manquant (nom du site)}
+      SHH_UPSTREAM: 172.30.53.2:8080
+    # Empreinte du Caddyfile, calculée par deploy.sh : si le fichier change, le conteneur
+    # est recréé (l'API d'administration est coupée, donc pas de « caddy reload »).
+    labels:
+      app.shhdrop.caddyfile: ${SHH_CADDYFILE_SHA256:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Clés et certificats TLS, compte ACME : sur le volume chiffré eux aussi.
+      - type: bind
+        source: ${SHH_DATA_ROOT:?SHH_DATA_ROOT manquant}/caddy
+        target: /data
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /config:size=8m,mode=0700,noexec,nosuid,nodev
+    logging:
+      driver: none
+    depends_on:
+      - shhdrop
+
+networks:
+  interne:
+    # Aucune sortie vers Internet depuis le serveur Go : il n'en a pas besoin.
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.53.0/29
+          gateway: 172.30.53.1
