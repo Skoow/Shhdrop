@@ -41,6 +41,13 @@ Sans `GEN_VECTORS`, ce même test refait tous les vecteurs avec l'ancien moteur 
 | `manifest` | `sealFinal` : palier, en-tête, `manifest_json` (texte exact), `tail_sha256` (morceau du manifeste chiffré) ; manifeste de 65 532 octets pile et un de plus ; refus. |
 | `share` | Partage complet (voir ci-dessous). |
 
+## Écarts propres à JavaScript
+
+- `shareLinkWithPassword` sur une adresse illisible (`"pas une url"`) : le vecteur garde l'erreur `Invalid URL` levée par `new URL` ; le moteur Rust rend `lien_invalide`, comme pour tout autre lien refusé.
+- `parseLink("https://été.example/#…", "/")` : `new URL` convertit l'hôte non ASCII en Punycode (`https://xn--t-9fab.example`) ; le moteur Rust refuse tout hôte non ASCII (`lien_invalide`), faute des tables Unicode UTS 46. Ce refus est sans conséquence, parce que l'appelant compare toujours l'origine rendue à la sienne, qui est ASCII. Une étiquette déjà en `xn--…` est gardée telle quelle.
+- `shareLink` et `manageLink` rendent un résultat ou une erreur (`Result`) en Rust, avec les mêmes messages que les vecteurs (`origine_invalide`, `base_invalide`), là où JavaScript levait une exception.
+- `splitPassword` et `shareLinkWithPassword` ne lisent que des adresses `http:` ou `https:` en Rust ; JavaScript acceptait tout schéma lisible par `new URL`. Pour un autre schéma, Rust rend le lien inchangé sans mot de passe, ou `lien_invalide`. C'est sans risque : les liens de Shhdrop sont toujours en `http(s)` (`checkOrigin` l'impose), et ce cas finit toujours par un refus.
+
 ## `share`
 
 Il contient une note de 10 octets (`Allo été`, morceau 0), un petit fichier de 100 000 octets (morceaux 1 et 2, dans le segment 0 partagé) et un fichier de 9 Mio (segments 1 à 3 ; sa dernière pièce n'occupe que 16 des 64 morceaux du segment 3), avec les droits `enregistrer`. Le palier est 400 (7 segments). Les segments 4 et 5 ne contiennent rien, et le morceau du manifeste est le dernier du segment 6.

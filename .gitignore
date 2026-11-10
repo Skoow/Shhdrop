@@ -9,3 +9,4 @@ web/ui-e2e/__captures__/
 web/test-results/
 web/playwright-report/
 SHA256SUMS.repro
+engine/target/

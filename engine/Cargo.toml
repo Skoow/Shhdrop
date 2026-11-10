@@ -1,0 +1,18 @@
+# Espace de travail du moteur Shhdrop (spécification 2026-11-10-moteur-rust-1-chiffrement).
+# shhdrop-core : moteur sans navigateur, horloge, fichiers ni réseau. Le crate WebAssembly
+# s'ajoute aux membres dans une tâche suivante.
+[workspace]
+members = ["core"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97.0"
+license = "AGPL-3.0-only"
+publish = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# Pas de panic = "abort" : le déroulement par défaut est gardé pour les liaisons natives futures.
