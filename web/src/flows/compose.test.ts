@@ -77,23 +77,30 @@ describe("createComposer : ajout", () => {
     expect(c.uncleanedCount).toBe(1);
   });
 
-  it("non pris en charge : raison courte par format (vidéo, audio, inconnu), envoi libre ; archive laissée intacte sans analyse (D41-27)", async () => {
-    const fmt: Record<string, "mp4" | "mp3" | "inconnu"> = { "application/zip": "inconnu", "image/svg+xml": "inconnu", "video/mp4": "mp4", "audio/mpeg": "mp3" };
+  it("format non reconnu : document tel quel sans marque ; photo, vidéo ou son : marque ambre et décompte (décision du 10 novembre) ; archive intacte sans analyse (D41-27)", async () => {
+    const fmt: Record<string, "mp4" | "mp3" | "inconnu"> = { "application/zip": "inconnu", "image/tiff": "inconnu", "video/x-msvideo": "inconnu", "audio/aac": "inconnu", "application/x-thing": "inconnu" };
     const seen: string[] = [];
-    const c = make({ strip: async (f, mime) => (seen.push((f as File).name), { state: "non_pris_en_charge", soon: fmt[mime] !== "inconnu", format: fmt[mime]! }) });
-    const files = Object.keys(fmt).map((m, k) => file(["b.zip", "c.svg", "d.mp4", "e.mp3"][k]!, 3, m));
+    const c = make({ strip: async (f, mime) => (seen.push((f as File).name), { state: "non_pris_en_charge", format: fmt[mime]! }) });
+    const files = Object.keys(fmt).map((m, k) => file(["b.zip", "c.tiff", "d.avi", "e.aac", "f.bin"][k]!, 3, m));
     await c.add(files, "fichiers");
-    // Format non concerné (D41-34) : « Fichier tel quel (non modifié) », aucune marque sur la ligne.
-    for (const i of c.items) {
-      expect(cleanLineKey(i), i.base).toBe("clean.asis");
-      expect(cleanMark(i), i.base).toBeNull();
+    const by = (b: string) => c.items.find((i) => i.base === b)!;
+    // Une photo, une vidéo ou un son que le nettoyage ne sait pas lire peut porter une position :
+    // la personne est prévenue (ambre, compté, dit au destinataire), l'envoi reste libre.
+    for (const b of ["c", "d", "e"]) {
+      expect(by(b).clean, b).toBe("echec");
+      expect(cleanLineKey(by(b)), b).toBe("clean.fail.format");
+      expect(cleanMark(by(b)), b).toBe("fail");
+      expect(by(b).data, b).toBe(files[["b", "c", "d", "e", "f"].indexOf(b)]);
     }
-    const zip = c.items.find((i) => i.base === "b")!;
+    // Autre fichier (D41-34) : « Fichier tel quel (non modifié) », aucune marque sur la ligne.
+    expect(cleanLineKey(by("f"))).toBe("clean.asis");
+    expect(cleanMark(by("f"))).toBeNull();
+    const zip = by("b");
     expect(zip.clean).toBe("intact");
     expect(zip.data).toBe(files[0]);
     expect(seen).not.toContain("b.zip");
     expect(c.blockReason()).toBeNull();
-    expect(c.uncleanedCount).toBe(0);
+    expect(c.uncleanedCount).toBe(3);
     for (const i of c.items) await expect(gate(i.data as Blob)).resolves.toBe(i.data);
   });
 
@@ -474,7 +481,7 @@ describe("blocages et textes de raison", () => {
     c.addText("t");
     expect(cleanLineKey(c.items[0]!)).toBeNull();
     expect(cleanMark(c.items[0]!)).toBeNull();
-    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.pdf", "clean.done.office", "clean.asis", "clean.fail.echec", "clean.fail.protege", "compose.uncleaned.one", "compose.uncleaned.other"]) {
+    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.pdf", "clean.done.office", "clean.asis", "clean.fail.echec", "clean.fail.format", "clean.fail.protege", "compose.uncleaned.one", "compose.uncleaned.other"]) {
       expect(fr[k as keyof typeof fr], k).toBeTruthy();
       expect(en[k as keyof typeof en], k).toBeTruthy();
     }

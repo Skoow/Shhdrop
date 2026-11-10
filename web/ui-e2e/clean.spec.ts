@@ -101,8 +101,11 @@ test("états à l'écran (D41-34) : nettoyé (photo, PDF), nettoyage impossible 
   await expect(lock(page, "devis")).toHaveAccessibleName(detail("Nettoyé : auteur, logiciel, dates et miniatures retirés"));
   await expect(fail("signe")).toBeVisible();
   await expect(lock(page, "signe")).toHaveAccessibleName(detail("Nettoyage impossible : fichier signé ou protégé"));
-  // Format inconnu, archive (jamais ouverte, D41-27) : « Fichier tel quel », rien sur la ligne.
-  for (const n of ["dessin", "archive"]) {
+  // Image d'un format que le nettoyage ne lit pas (décision du 10 novembre) : pastille ambre.
+  await expect(fail("dessin")).toBeVisible();
+  await expect(lock(page, "dessin")).toHaveAccessibleName(detail("Nettoyage impossible : format non pris en charge"));
+  // Archive (jamais ouverte, D41-27) : « Fichier tel quel », rien sur la ligne.
+  for (const n of ["archive"]) {
     await expect(lock(page, n)).toHaveAccessibleName(detail("Fichier tel quel (non modifié)"));
     await expect(row(page, n).locator("[data-clean]")).toHaveCount(0);
   }
@@ -111,7 +114,7 @@ test("états à l'écran (D41-34) : nettoyé (photo, PDF), nettoyage impossible 
   // Aucun choix à faire : plus de bouton, envoi permis, résumé discret près d'Envoyer.
   await expect(page.getByRole("button", { name: /^Envoyer tel quel/ })).toHaveCount(0);
   await expect(page.locator("#send-reason").filter({ visible: true })).toHaveCount(0);
-  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("2\u202ffichiers n'ont pas pu être nettoyés");
+  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("3\u202ffichiers n'ont pas pu être nettoyés");
   await expect(sendButton(page).filter({ visible: true })).toBeEnabled();
   // Chacun part dès l'ajout, nettoyé ou non (une requête d'envoi par petit élément).
   await expect.poll(() => puts.length, { timeout: 30_000 }).toBe(6);

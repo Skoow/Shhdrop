@@ -662,6 +662,7 @@ export const fr = {
   "clean.done.vocal": "Enregistré ici, sans informations cachées",
   "clean.asis": "Fichier tel quel (non modifié)",
   "clean.fail.echec": "Nettoyage impossible\u202f: structure du fichier inattendue",
+  "clean.fail.format": "Nettoyage impossible\u202f: format non pris en charge",
   "clean.fail.protege": "Nettoyage impossible\u202f: fichier signé ou protégé",
   "clean.recv.done.image": "Nettoyé avant l'envoi\u202f: position, appareil et dates retirés",
   "clean.recv.done.video": "Nettoyé avant l'envoi\u202f: position, appareil et dates retirés",

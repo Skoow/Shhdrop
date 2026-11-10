@@ -5,11 +5,13 @@
 import type { ManifestClean } from "../index";
 export type { ManifestClean };
 import type { Key } from "../i18n/i18n.svelte";
+import type { Format } from "./format";
 import type { CleanFamily, CleanState } from "./strip";
 
 /** `original` : nettoyage automatique désactivé dans les Réglages (rien n'est modifié). */
 export type ItemCleanState = CleanState | "original";
-export type ItemClean = { clean: ItemCleanState; cleanFamily?: CleanFamily };
+/** `cleanFormat` avec `echec` : photo, vidéo ou son d'un format que le nettoyage ne sait pas lire. */
+export type ItemClean = { clean: ItemCleanState; cleanFamily?: CleanFamily; cleanFormat?: Format };
 
 const DONE = {
   image: "clean.done.image",
@@ -34,7 +36,7 @@ export function cleanLineKey(i: ItemClean) {
     case "sans":
       return null;
     case "echec":
-      return "clean.fail.echec" as const;
+      return i.cleanFormat === undefined ? ("clean.fail.echec" as const) : ("clean.fail.format" as const);
     case "protege":
       return "clean.fail.protege" as const;
     default:

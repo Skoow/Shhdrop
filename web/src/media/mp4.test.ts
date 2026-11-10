@@ -114,3 +114,52 @@ describe("MP4, MOV, M4A : nettoyage en place", () => {
     await expect(cleanMp4(new Blob([big]))).rejects.toThrow(/malformed/);
   });
 });
+
+describe("MP4 : nom du gestionnaire de piste (revue du 10 novembre)", () => {
+  // hdlr porte un nom libre écrit par l'appareil ou le logiciel (« GoPro AVC », « Core Media
+  // Video », « VideoHandler ») : l'écran dit « appareil retiré », il doit donc partir.
+  const names = (b: Uint8Array) =>
+    find(b, ["moov", "trak", "mdia", "hdlr"]).map((h) => {
+      const { body } = fullBox(b, h);
+      return b.subarray(body + 20, h.end);
+    });
+  for (const name of ["phone.mov", "faststart.mp4", "frag.mp4", "tags.m4a", "chromium.mp4"]) {
+    it(`${name} : nom à zéro, type du gestionnaire gardé, rien à refaire au 2e passage`, async () => {
+      const src = fx(name);
+      const kinds = (b: Uint8Array) => find(b, ["moov", "trak", "mdia", "hdlr"]).map((h) => ascii(b, fullBox(b, h).body + 4, 4));
+      const out = await clean(src);
+      expect(names(out).length).toBeGreaterThan(0);
+      for (const n of names(out)) expect([...n].every((v) => v === 0)).toBe(true);
+      expect(kinds(out)).toEqual(kinds(src).filter((k) => k !== "tmcd" && k !== "meta"));
+      expect(out.length).toBe(src.length);
+      expect(await cleanMp4(new Blob([out as Uint8Array<ArrayBuffer>]))).toEqual([]);
+    });
+  }
+  it("les fichiers d'essai portent bien un nom avant nettoyage", () => {
+    expect(names(fx("faststart.mp4")).some((n) => n.some((v) => v !== 0))).toBe(true);
+  });
+});
+
+describe("MP4 : nom de l'encodeur vidéo (revue du 10 novembre)", () => {
+  /** Les 32 octets « compressorname » de chaque entrée vidéo de stsd. */
+  const compressors = (b: Uint8Array) =>
+    find(b, ["moov", "trak", "mdia"]).flatMap((mdia) => {
+      const [h] = find(b, ["hdlr"], mdia.start + mdia.head, mdia.end);
+      if (!h || ascii(b, fullBox(b, h).body + 4, 4) !== "vide") return [];
+      return find(b, ["minf", "stbl", "stsd"], mdia.start + mdia.head, mdia.end).flatMap((stsd) => {
+        const { body } = fullBox(b, stsd);
+        return children(b, body + 4, stsd.end).map((e) => b.subarray(e.start + 50, e.start + 82));
+      });
+    });
+  for (const name of ["phone.mov", "faststart.mp4", "frag.mp4", "chromium.mp4"]) {
+    it(`${name} : 32 octets à zéro, même longueur, rien à refaire au 2e passage`, async () => {
+      const out = await clean(fx(name));
+      expect(compressors(out).length).toBeGreaterThan(0);
+      for (const c of compressors(out)) expect([...c].every((v) => v === 0)).toBe(true);
+      expect(await cleanMp4(new Blob([out as Uint8Array<ArrayBuffer>]))).toEqual([]);
+    });
+  }
+  it("les fichiers d'essai portent bien un nom d'encodeur avant nettoyage", () => {
+    expect(["phone.mov", "faststart.mp4", "frag.mp4", "chromium.mp4"].some((n) => compressors(fx(n)).some((c) => c.some((v) => v !== 0)))).toBe(true);
+  });
+});

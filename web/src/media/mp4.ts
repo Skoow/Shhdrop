@@ -8,6 +8,8 @@
 // - pistes de métadonnées minutées (gestionnaire « meta », codecs mebx, gpmd, camm, rtmd) et
 //   pistes timecode (tmcd, heure de la prise) : trak entière en « free » ET ses échantillons
 //   mis à zéro dans mdat (positions lues dans stsc, stsz, stco/co64).
+// - nom libre des gestionnaires (hdlr de mdia et de minf) et nom de l'encodeur vidéo (stsd,
+//   « compressorname ») mis à zéro : ils nomment l'appareil ou le logiciel ;
 // Gardés octet pour octet : flux audio et vidéo, matrice de tkhd (rotation), stsd, edts, mvex,
 // moof, sidx. Seul moov est lu en mémoire ; mdat jamais.
 import { Malformed, ascii, u32be, u64be } from "./bytes";
@@ -53,6 +55,40 @@ function wipeDates(m: Uint8Array, base: number, x: Box): void {
   const n = version === 1 ? 16 : version === 0 ? 8 : -1;
   if (n < 0 || body + n > x.end) throw new Malformed("date");
   m.fill(0, body - base, body - base + n);
+}
+
+/**
+ * Nom libre du gestionnaire (« GoPro AVC », « Core Media Video », « VideoHandler ») à zéro :
+ * il nomme l'appareil ou le logiciel. Le type (vide, soun…) est gardé ; un nom vide est valide
+ * (chaîne terminée par zéro en MP4, chaîne Pascal de longueur 0 en MOV).
+ */
+function wipeHandlerName(m: Uint8Array, base: number, x: Box): void {
+  const { body } = fullBox(m, x, base);
+  if (body + 20 > x.end) throw new Malformed("hdlr");
+  m.fill(0, body + 20 - base, x.end - base);
+}
+
+/** Type du gestionnaire d'une piste (« vide », « soun »…), ou "" s'il manque. */
+function handlerOf(m: Uint8Array, base: number, mdia: Box): string {
+  const h = children(m, mdia.start + mdia.head, mdia.end, base).find((k) => k.type === "hdlr");
+  if (!h) return "";
+  const { body } = fullBox(m, h, base);
+  return ascii(m, body + 4 - base, 4);
+}
+
+/**
+ * Piste vidéo : les 32 octets « compressorname » de chaque entrée de stsd (« GoPro AVC
+ * encoder », « Lavc… libx264 ») à zéro. Champ d'affichage seul, à place fixe (octet 50 de
+ * l'entrée, MP4 et MOV) : le décodage n'en dépend pas.
+ */
+function wipeCompressorNames(m: Uint8Array, base: number, stbl: Box): void {
+  const stsd = children(m, stbl.start + stbl.head, stbl.end, base).find((k) => k.type === "stsd");
+  if (!stsd) throw new Malformed("stsd");
+  const { body } = fullBox(m, stsd, base);
+  for (const e of children(m, body + 4, stsd.end, base)) {
+    if (e.start + 82 > e.end) throw new Malformed("stsd_entree");
+    m.fill(0, e.start + 50 - base, e.start + 82 - base);
+  }
 }
 
 /** Positions [début, fin) des échantillons d'une piste, regroupés par morceau (chunk). */
@@ -140,6 +176,11 @@ function cleanMoov({ box, bytes: m }: Moov, fragmented: boolean): { from: number
           for (const d of inner(t)) {
             if (!MDIA_KEEP.has(d.type)) freeIn(m, base, d);
             else if (DATED.has(d.type)) wipeDates(m, base, d);
+            else if (d.type === "hdlr") wipeHandlerName(m, base, d);
+            else if (d.type === "minf") {
+              for (const h of inner(d)) if (h.type === "hdlr") wipeHandlerName(m, base, h);
+              if (handlerOf(m, base, t) === "vide") wipeCompressorNames(m, base, stblOf(m, base, t));
+            }
           }
       }
     }

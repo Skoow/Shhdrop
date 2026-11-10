@@ -70,7 +70,7 @@ test("composeur : libellés dans l'icône, bulle du cadenas à deux lignes, éti
   await expect(row(page, "abime.jpg").locator('[data-clean="echec"]')).toBeVisible();
   await expect(row(page, "archive.zip").locator("[data-clean]")).toHaveCount(0);
   await expect(page.locator("[data-row]").getByText(/^(Original|Nettoyé|Non nettoyé|Archive laissée intacte)$/)).toHaveCount(0);
-  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("2\u202ffichiers n'ont pas pu être nettoyés"); // abime.jpg, budget-2026.xlsx (factice, 8 octets)
+  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("3\u202ffichiers n'ont pas pu être nettoyés"); // abime.jpg, budget-2026.xlsx (factice, 8 octets), image.webp (faux WebP : format non reconnu)
   await expect(row(page, "budget-2026.xlsx").locator('[data-clean="echec"]')).toBeVisible();
   // Tout reste dans les libellés : le nom du cadenas porte les deux lignes.
   await expect(lock(page, "plage-nuit.jpg")).toHaveAccessibleName(/\. Nettoyé\s: position, appareil et dates retirés$/);

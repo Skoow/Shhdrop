@@ -200,6 +200,17 @@ export function createComposer(deps: ComposeDeps = {}) {
   const strip = deps.strip ?? stripMetadata;
   const autoClean = deps.autoClean ?? (() => true);
 
+  /**
+   * Format que le nettoyage ne sait pas lire. Une photo, une vidéo ou un son (TIFF, RAW, AVI,
+   * AAC…) peut porter une position ou le nom de l'appareil : c'est un nettoyage qui n'a pas
+   * abouti (marque ambre, compté, dit au destinataire), pas un fichier « non concerné »
+   * (décision du propriétaire, 10 novembre ; précise D41-34). L'envoi reste libre.
+   */
+  function unsupported(category: Category, format: CleanFields["cleanFormat"]): CleanFields {
+    if (category === "photos" || category === "videos" || category === "audio") return { clean: "echec", cleanFormat: format };
+    return { clean: "non_pris_en_charge", cleanFormat: format };
+  }
+
   /** Nettoyage d'un fichier à l'ajout : données à envoyer et état. */
   async function cleanOf(f: File, source: Source, name: string, category: Category, captureStripped: boolean | undefined): Promise<{ data: Blob; c: CleanFields }> {
     // Photo prise ici : JPEG tiré d'un <canvas>, sans EXIF ni position par construction.
@@ -212,7 +223,7 @@ export function createComposer(deps: ComposeDeps = {}) {
     if (category === "archives") return { data: f, c: { clean: "intact" } };
     const r = await strip(f, f.type, name, { recorded: source === "video-ici" });
     if (r.state === "nettoye") return { data: r.data, c: { clean: "nettoye", cleanFamily: r.family } };
-    if (r.state === "non_pris_en_charge") return { data: f, c: { clean: r.state, cleanFormat: r.format } };
+    if (r.state === "non_pris_en_charge") return { data: f, c: unsupported(category, r.format) };
     return { data: f, c: { clean: r.state } };
   }
 
@@ -387,7 +398,7 @@ export function createComposer(deps: ComposeDeps = {}) {
         r.state === "nettoye"
           ? { clean: "nettoye", cleanFamily: it.voice || it.generic !== undefined ? "vocal" : r.family }
           : r.state === "non_pris_en_charge"
-            ? { clean: r.state, cleanFormat: r.format }
+            ? unsupported(it.category, r.format)
             : { clean: r.state };
       const data = r.state === "nettoye" ? r.data : it.data;
       set(items.map((i) => (i.id === id ? cleared({ ...i, clean: c.clean, cleanFamily: c.cleanFamily, cleanFormat: c.cleanFormat, data, size: data.size }) : i)));

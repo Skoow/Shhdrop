@@ -657,6 +657,7 @@ export const en = {
   "clean.done.vocal": "Recorded here, with no hidden information",
   "clean.asis": "File as is (not modified)",
   "clean.fail.echec": "Couldn't clean: unexpected file structure",
+  "clean.fail.format": "Couldn't clean: format not supported",
   "clean.fail.protege": "Couldn't clean: signed or protected file",
   "clean.recv.done.image": "Cleaned before sending: location, device and dates removed",
   "clean.recv.done.video": "Cleaned before sending: location, device and dates removed",
