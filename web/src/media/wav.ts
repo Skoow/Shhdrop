@@ -6,6 +6,8 @@ import { Malformed, concat, startsWith } from "./bytes";
 
 const KEEP: ReadonlySet<string> = new Set(["fmt ", "fact", "cue ", "data"]);
 const SMALL_MAX = 1 << 20;
+/** Blocs au plus : un en-tête lu (une attente) par bloc ; un vrai fichier en a moins de 20 (marge × 500). */
+export const CHUNKS_MAX = 10_000;
 
 /** Fichier nettoyé, ou null s'il n'y a rien à retirer. */
 export async function cleanWav(file: Blob): Promise<Blob | null> {
@@ -18,7 +20,8 @@ export async function cleanWav(file: Blob): Promise<Blob | null> {
   let dropped = riffEnd !== file.size;
   let fmt = false;
   let data = false;
-  for (let o = 12; o < riffEnd; ) {
+  for (let o = 12, count = 0; o < riffEnd; count++) {
+    if (count >= CHUNKS_MAX) throw new Malformed("trop_de_blocs");
     if (riffEnd - o < 8) throw new Malformed("bloc_court");
     const ch = new Uint8Array(await file.slice(o, o + 8).arrayBuffer());
     const id = String.fromCharCode(...ch.subarray(0, 4));

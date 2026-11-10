@@ -16,6 +16,8 @@ const META = new Set(["hdlr", "pitm", "iloc", "iinf", "iref", "iprp", "idat", "d
 const META_MAX = 8 * 1024 * 1024;
 /** Octets d'EXIF, de XMP et de boîtes neutralisées au plus. */
 const PATCH_MAX = 32 * 1024 * 1024;
+/** Extents EXIF/XMP au plus (en pratique un ou deux) : chacun est relu à part. */
+const TARGET_EXTENTS_MAX = 1024;
 const FREE = [0x66, 0x72, 0x65, 0x65];
 export const EMPTY_XMP = '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/"/><?xpacket end="w"?>';
 
@@ -91,6 +93,28 @@ function locations(m: Uint8Array, iloc: Box, base: number, idatAt: number | null
   return out;
 }
 
+/**
+ * Recherche de chevauchement en O(log n) : vrai si [from, to) recoupe l'un des extents (une
+ * longueur 0 va jusqu'à la fin du fichier). Extents triés par début ; fin maximale cumulée.
+ */
+function overlapIndex(extents: readonly Extent[], size: number): (from: number, to: number) => boolean {
+  const sorted = [...extents].sort((a, b) => a.at - b.at);
+  const starts = sorted.map((x) => x.at);
+  const maxEnd: number[] = [];
+  let m = -Infinity;
+  for (const x of sorted) maxEnd.push((m = Math.max(m, x.at + (x.len || size))));
+  return (from, to) => {
+    // Dernier extent qui commence avant `to` : ceux d'avant aussi ; l'un finit-il après `from` ?
+    let lo = 0, hi = starts.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (starts[mid]! < to) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo > 0 && maxEnd[lo - 1]! > from;
+  };
+}
+
 function fill(len: number, prefix: Uint8Array, pad: number): Uint8Array {
   const b = new Uint8Array(len).fill(pad);
   if (prefix.length <= len) b.set(prefix);
@@ -141,7 +165,9 @@ export async function cleanHeif(blob: Blob): Promise<Patch[]> {
   const list = iinf ? items(m, iinf, base) : [];
   const locs = iloc ? locations(m, iloc, base, idat ? idat.start + idat.head : null) : new Map();
   const targets = list.filter((i) => i.type === "Exif" || (i.type === "mime" && i.contentType.trim().toLowerCase() === "application/rdf+xml"));
-  const others = [...locs.entries()].filter(([id]) => !targets.some((t) => t.id === id)).flatMap(([, l]) => l.extents);
+  const targetIds = new Set(targets.map((t) => t.id));
+  const shared = overlapIndex([...locs.entries()].filter(([id]) => !targetIds.has(id)).flatMap(([, l]) => l.extents), blob.size);
+  if (targets.reduce((n, t) => n + (locs.get(t.id)?.extents.length ?? 0), 0) > TARGET_EXTENTS_MAX) throw new Malformed("heif_trop_d_extents");
   for (const t of targets) {
     const loc = locs.get(t.id);
     if (!loc) throw new Malformed("heif_sans_place");
@@ -150,9 +176,10 @@ export async function cleanHeif(blob: Blob): Promise<Patch[]> {
     for (const e of loc.extents) {
       if (e.at < 0 || e.len <= 0 || e.at + e.len > blob.size) throw new Malformed("heif_extent");
       if (loc.method === 1 && (e.at < idat!.start + idat!.head || e.at + e.len > idat!.end)) throw new Malformed("heif_idat");
-      if (others.some((x) => x.at < e.at + e.len && e.at < x.at + (x.len || blob.size))) throw new Malformed("heif_partage");
+      if (shared(e.at, e.at + e.len)) throw new Malformed("heif_partage");
       total += e.len;
     }
+    if (total > PATCH_MAX) throw new Malformed("heif_trop_de_correctifs");
     const want = t.type === "Exif" ? fill(total, concat([new Uint8Array(4), emptyTiff()]), 0) : fill(total, new TextEncoder().encode(EMPTY_XMP), 0x20);
     let o = 0;
     for (const e of loc.extents) {

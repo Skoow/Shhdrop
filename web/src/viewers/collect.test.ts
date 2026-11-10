@@ -29,6 +29,22 @@ describe("collectPreview", () => {
     expect([...new Uint8Array(await b.arrayBuffer())]).toEqual([1, 2, 3, 4, 5]);
     expect(given.every((u) => u.every((x) => x === 0))).toBe(true);
   });
+  it("tranches repliées dans le Blob au-delà du seuil et mises à zéro aussitôt, octets identiques", async () => {
+    const { o, given } = fake([[1, 2], [3, 4, 5], [6]]);
+    let zeroedEarly = false;
+    const b = await collectPreview(
+      o,
+      0,
+      (d) => {
+        if (d === 6) zeroedEarly = given[0]!.every((x) => x === 0) && given[1]!.every((x) => x === 0) && given[2]![0] === 6;
+      },
+      undefined,
+      4,
+    );
+    expect(zeroedEarly).toBe(true);
+    expect([...new Uint8Array(await b.arrayBuffer())]).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(given.every((u) => u.every((x) => x === 0))).toBe(true);
+  });
   it("type hors liste (HTML déclaré image) → type_refuse, aucune lecture", async () => {
     const { o, given } = fake([[1]], "image", "text/html");
     await expect(collectPreview(o, 0, () => undefined)).rejects.toThrow("type_refuse");

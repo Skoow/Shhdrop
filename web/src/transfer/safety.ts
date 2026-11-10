@@ -92,9 +92,17 @@ const PREVIEW: Record<string, PreviewKind> = {
  */
 // SVG retiré de la liste (scan de sécurité du 7 novembre) : même dans <img>, où son script ne
 // s'exécute pas, rien qui puisse en porter un n'est affiché ; HTML, XML et archives web non plus.
-export function previewKindOf(e: ManifestEntry): PreviewKind {
+/**
+ * Aperçu au plus sur un appareil à petite mémoire (moins de 4 Go, iPhone, iPad) : l'aperçu
+ * tient le fichier entier en mémoire, et l'image ou la vidéo décodée à peu près autant.
+ * Au-delà : « Télécharger » seulement (revue du 10 novembre).
+ */
+export const PREVIEW_MAX_SMALL = 50 * 1048576;
+
+/** `small` : appareil à petite mémoire (app/env.ts, lowMemory). */
+export function previewKindOf(e: ManifestEntry, small = false): PreviewKind {
   if (e.kind === "text") return "text";
-  if (e.size > PREVIEW_MAX) return "none";
+  if (e.size > (small ? PREVIEW_MAX_SMALL : PREVIEW_MAX)) return "none";
   const mime = e.mime.split(";")[0]!.toLowerCase();
   return Object.hasOwn(PREVIEW, mime) ? PREVIEW[mime]! : "none";
 }

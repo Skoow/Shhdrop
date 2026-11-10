@@ -122,6 +122,16 @@ describe("previewKindOf", () => {
   });
 });
 
+describe("aperçu sur un appareil à petite mémoire (revue du 10 novembre)", () => {
+  const MIB = 1048576;
+  it("au-delà de 50 Mio : téléchargement seulement ; jusqu'à 50 Mio : aperçu ; texte toujours", () => {
+    expect(previewKindOf(file("x", "video/mp4", 50 * MIB), true)).toBe("video");
+    expect(previewKindOf(file("x", "video/mp4", 50 * MIB + 1), true)).toBe("none");
+    expect(previewKindOf(file("x", "video/mp4", 150 * MIB), false)).toBe("video");
+    expect(previewKindOf({ kind: "text", name: "", mime: "text/plain", size: 90 * MIB, offset: 0 } as ManifestEntry, true)).toBe("text");
+  });
+});
+
 describe("isRiskyName", () => {
   it("extensions exécutables ou interprétées", () => {
     for (const e of ["exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "js", "jar", "apk", "app", "dmg", "pkg", "sh", "html", "htm", "hta", "lnk", "iso", "msix", "appx", "reg", "wsf", "cpl", "pif", "url", "command", "desktop"]) {

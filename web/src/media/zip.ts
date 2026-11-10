@@ -31,6 +31,8 @@ const EOCD = 0x06054b50;
 const CEN = 0x02014b50;
 const LOC = 0x04034b50;
 const MAX_ENTRIES = 65535;
+/** Répertoire central lu en mémoire au plus (celui d'un document Office fait quelques Kio). */
+export const CD_MAX = 16 * 1024 * 1024;
 const NAME_DEC = new TextDecoder("utf-8", { fatal: true });
 
 const read = async (f: Blob, o: number, n: number) => new Uint8Array(await f.slice(o, o + n).arrayBuffer());
@@ -59,6 +61,7 @@ export async function readZip(file: Blob): Promise<ZipFile> {
   if (total === 0xffff || cdSize === 0xffffffff || cdAt === 0xffffffff) throw new Malformed("zip64");
   if (disk !== 0 || cdDisk !== 0 || onDisk !== total) throw new Malformed("zip_disques");
   if (cdAt + cdSize !== eocdAt) throw new Malformed("zip_repertoire");
+  if (cdSize > CD_MAX) throw new Malformed("zip_repertoire_trop_grand");
   const cd = await read(file, cdAt, cdSize);
   const entries: ZipEntry[] = [];
   const names = new Set<string>();

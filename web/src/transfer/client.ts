@@ -25,6 +25,7 @@ import * as api from "./api";
 import { checkOrigin, parseLink, type ParsedLink } from "./link";
 import { type PreparedCaptcha } from "./prepare";
 import { isRiskyName, previewKindOf, safeName, type PreviewKind } from "./safety";
+import { lowMemory } from "../app/env";
 import { abortError } from "./upload";
 import { createDraft } from "./draft";
 import { DATA_SEGMENTS, segmentsNeeded } from "../crypto/elements";
@@ -629,7 +630,8 @@ export async function openShare(
       return {
         manifest: rd.manifest,
         safeName: (i) => safeName(entry(i).name),
-        previewKind: (i) => previewKindOf(entry(i)),
+        // Petit appareil : aperçu limité (l'aperçu tient le fichier entier en mémoire).
+        previewKind: (i) => previewKindOf(entry(i), typeof navigator !== "undefined" && lowMemory(navigator, Number.MAX_SAFE_INTEGER)),
         isRiskyFile: (i) => isRiskyName(safeName(entry(i).name)),
         item: (i) => wrap(() => rd.item(i)),
         saveItem: (i, sink) => wrap(() => rd.streamItem(i, sink)),

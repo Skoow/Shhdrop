@@ -7,6 +7,14 @@ import { Malformed, concat, startsWith } from "./bytes";
 
 /** Taille maximale traitée (toutes les pages sont relues pour vérifier leur CRC). */
 export const OGG_MAX = 1024 * 1024 * 1024;
+/** Pages renumérotées repliées dans le Blob tous les 16 Mio (au plus ~16 Mio de pages en mémoire JS). */
+export const OGG_FOLD = 16 * 1048576;
+/**
+ * Pages au plus (en-têtes et audio). Un fichier piégé de 1 Gio en pages minimales (27 octets)
+ * en compterait 40 millions, plusieurs minutes de calcul sur le fil principal. 500 000 pages
+ * couvrent près de 3 h de voix à 6 kbit/s avec un paquet par page, le pire cas réaliste.
+ */
+export const OGG_PAGES_MAX = 500_000;
 
 const TABLE = (() => {
   const t = new Uint32Array(256);
@@ -106,7 +114,7 @@ const VORBIS_COMMENT = new Uint8Array([3, ...new TextEncoder().encode("vorbis"),
 const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i]);
 
 /** Fichier nettoyé, ou null s'il n'y a rien à changer (commentaires déjà vides). */
-export async function cleanOgg(file: Blob): Promise<Blob | null> {
+export async function cleanOgg(file: Blob, foldBytes = OGG_FOLD, pagesMax = OGG_PAGES_MAX): Promise<Blob | null> {
   if (file.size > OGG_MAX) throw new Malformed("trop_gros");
   const r = new Reader(file);
   // En-têtes : paquets du premier flux jusqu'au dernier paquet d'en-tête.
@@ -148,32 +156,43 @@ export async function cleanOgg(file: Blob): Promise<Blob | null> {
   const opus = want === 2;
   const empty = opus ? OPUS_TAGS : VORBIS_COMMENT;
   if (!startsWith(packets[1]!, 0, opus ? "OpusTags" : "\x03vorbis")) throw new Malformed("commentaires");
-  // Toutes les pages audio : même flux, aucun nouveau début (chaîné), CRC justes.
-  const audio: Page[] = [];
+  const clean = same(packets[1]!, empty);
+  let acc: Blob | null = null;
+  let shift = 0;
+  if (!clean) {
+    // Le premier paquet doit être seul sur la première page (Opus et Vorbis l'exigent).
+    const lac = first.p.lacing;
+    if (lac.length === 0 || lac[lac.length - 1]! === 255 || lac.slice(0, -1).some((l) => l < 255)) throw new Malformed("premiere_page");
+    const newHeaders = [new Uint8Array(await file.slice(0, first.p.end).arrayBuffer()), ...headerPages([empty, ...packets.slice(2)], serial, first.p.seq + 1)];
+    shift = newHeaders.length - headerCount;
+    acc = new Blob(newHeaders as Uint8Array<ArrayBuffer>[]);
+  }
+  // Toutes les pages audio : même flux, aucun nouveau début (chaîné), CRC justes. Renumérotées
+  // (si le nombre de pages d'en-tête a changé), elles sont repliées dans le Blob tous les
+  // `foldBytes` : la mémoire JS n'en garde jamais plus.
+  let parts: Uint8Array<ArrayBuffer>[] = [];
+  let pending = 0;
+  let pages = headerCount;
   for (let q = headerEnd; q < file.size; ) {
-    const { p } = await page(r, q, file.size);
+    if (++pages > pagesMax) throw new Malformed("trop_de_pages");
+    const { p, bytes } = await page(r, q, file.size);
     if (p.serial !== serial || p.flags & 2) throw new Malformed("chaine");
-    audio.push(p);
+    if (acc && shift !== 0) {
+      const b = bytes.slice();
+      const dv = new DataView(b.buffer);
+      dv.setUint32(18, (p.seq + shift) >>> 0, true);
+      dv.setUint32(22, oggCrc(b), true);
+      parts.push(b);
+      pending += b.length;
+      if (pending >= foldBytes) {
+        acc = new Blob([acc, ...parts]);
+        parts = [];
+        pending = 0;
+      }
+    }
     q = p.end;
   }
-  if (same(packets[1]!, empty)) return null;
-
-  // Le premier paquet doit être seul sur la première page (Opus et Vorbis l'exigent).
-  const lac = first.p.lacing;
-  if (lac.length === 0 || lac[lac.length - 1]! === 255 || lac.slice(0, -1).some((l) => l < 255)) throw new Malformed("premiere_page");
-  const newHeaders = [new Uint8Array(await file.slice(0, first.p.end).arrayBuffer()), ...headerPages([empty, ...packets.slice(2)], serial, first.p.seq + 1)];
-  const shift = newHeaders.length - headerCount;
-  const parts: BlobPart[] = newHeaders as Uint8Array<ArrayBuffer>[];
-  for (const p of audio) {
-    if (shift === 0) {
-      parts.push(file.slice(p.start, p.end));
-      continue;
-    }
-    const b = new Uint8Array(await file.slice(p.start, p.end).arrayBuffer());
-    const dv = new DataView(b.buffer);
-    dv.setUint32(18, (p.seq + shift) >>> 0, true);
-    dv.setUint32(22, oggCrc(b), true);
-    parts.push(b);
-  }
-  return new Blob(parts, { type: file.type });
+  if (!acc) return null;
+  // Nombre de pages inchangé : les pages audio sont reprises telles quelles, d'un seul tenant.
+  return new Blob(shift === 0 ? [acc, file.slice(headerEnd)] : [acc, ...parts], { type: file.type });
 }

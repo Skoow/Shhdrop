@@ -6,6 +6,8 @@ import { Malformed, concat, startsWith } from "./bytes";
 const KEEP: ReadonlySet<number> = new Set([0, 3, 5]); // STREAMINFO, SEEKTABLE, CUESHEET
 /** En-têtes de métadonnées gardés lus en mémoire au plus (une table de recherche reste petite). */
 const KEPT_MAX = 16 << 20;
+/** Blocs de métadonnées au plus : un en-tête lu (une attente) par bloc ; un vrai fichier en a moins de 20 (marge × 500). */
+export const BLOCKS_MAX = 10_000;
 
 /** Fichier nettoyé, ou null s'il n'y a rien à retirer. */
 export async function cleanFlac(file: Blob): Promise<Blob | null> {
@@ -23,7 +25,8 @@ export async function cleanFlac(file: Blob): Promise<Blob | null> {
   let dropped = start > 0;
   let lastSeen = false;
   let first = true;
-  while (!lastSeen) {
+  for (let count = 0; !lastSeen; count++) {
+    if (count >= BLOCKS_MAX) throw new Malformed("trop_de_blocs");
     const bh = new Uint8Array(await file.slice(o, o + 4).arrayBuffer());
     if (bh.length < 4) throw new Malformed("bloc");
     lastSeen = (bh[0]! & 0x80) !== 0;
