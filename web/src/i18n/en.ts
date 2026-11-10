@@ -41,7 +41,7 @@ export const en = {
   "home.faq.back.q": "Can I recover a destroyed share?",
   "home.faq.back.a": "No. A destroyed or expired share is erased from the server and can't be opened again. Anything the recipient already saved stays with them.",
   "home.faq.scan.q": "Are my files scanned?",
-  "home.faq.scan.a": "No, the server can't read them. On your device, most photos (location, device, capture date) and PDF, Office and LibreOffice documents (author, company, dates) are cleaned before encryption; videos and audio are not yet, and the screen tells you so.",
+  "home.faq.scan.a": "No, the server can't read them. On your device, most photos (location, device, capture date) and PDF, Office and LibreOffice documents (author, company, dates) are cleaned before encryption; so are videos (location, device, dates) and audio (title, artist, software), without re-encoding. If a file can't be cleaned, the screen tells you so.",
   "home.faq.copy.q": "Can the recipient keep a copy?",
   "home.faq.copy.a": "Yes, if they save an item or take a screenshot: what they keep is theirs. Shhdrop erases the share, not what they saved.",
   "home.end.title": "Something to pass on?",

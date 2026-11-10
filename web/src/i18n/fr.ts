@@ -41,7 +41,7 @@ export const fr = {
   "home.faq.back.q": "Puis-je récupérer un partage détruit\u202f?",
   "home.faq.back.a": "Non. Un partage détruit ou expiré est effacé du serveur et ne peut plus être ouvert. Ce que le destinataire a déjà enregistré reste chez lui.",
   "home.faq.scan.q": "Mes fichiers sont-ils analysés\u202f?",
-  "home.faq.scan.a": "Non, le serveur ne peut pas les lire. Sur votre appareil, la plupart des photos (lieu, appareil, date de prise de vue) et des documents PDF, Office et LibreOffice (auteur, société, dates) sont nettoyés avant le chiffrement\u202f; les vidéos et les sons ne le sont pas encore, et l'écran vous le dit.",
+  "home.faq.scan.a": "Non, le serveur ne peut pas les lire. Sur votre appareil, la plupart des photos (lieu, appareil, date de prise de vue) et des documents PDF, Office et LibreOffice (auteur, société, dates) sont nettoyés avant le chiffrement\u202f; les vidéos (lieu, appareil, dates) et les sons (titre, artiste, logiciel) aussi, sans réencodage. Si un fichier ne peut pas être nettoyé, l'écran vous le dit.",
   "home.faq.copy.q": "Le destinataire peut-il garder une copie\u202f?",
   "home.faq.copy.a": "Oui, s'il enregistre un élément ou fait une capture d'écran\u202f: ce qu'il garde lui appartient. Shhdrop efface le partage, pas ce qu'il a enregistré.",
   "home.end.title": "Quelque chose à transmettre\u202f?",

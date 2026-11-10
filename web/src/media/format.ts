@@ -6,9 +6,9 @@ import { ascii, startsWith } from "./bytes";
 export const IMAGE_FORMATS = ["jpeg", "png", "webp", "gif", "heif"] as const;
 /** Documents : nettoyés ici (Task 9b). */
 export const DOC_FORMATS = ["pdf", "ooxml", "odf"] as const;
-/** Nettoyage prévu (Task 9c) : « bientôt pris en charge » d'ici là. */
-export const SOON_FORMATS = ["mp4", "webm", "mp3", "ogg", "flac", "wav"] as const;
-export type Format = (typeof IMAGE_FORMATS)[number] | (typeof DOC_FORMATS)[number] | (typeof SOON_FORMATS)[number] | "texte" | "inconnu";
+/** Vidéo et audio : nettoyés ici (Task 9c). */
+export const AV_FORMATS = ["mp4", "webm", "mp3", "ogg", "flac", "wav"] as const;
+export type Format = (typeof IMAGE_FORMATS)[number] | (typeof DOC_FORMATS)[number] | (typeof AV_FORMATS)[number] | "texte" | "inconnu";
 
 /** Octets de tête à lire pour `detectFormat`. */
 export const FORMAT_HEAD = 64;

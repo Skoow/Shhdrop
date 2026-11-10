@@ -9,6 +9,7 @@ import { readOrientation } from "./exif";
 import { EMPTY_XMP } from "./heif";
 import { children, topLevel } from "./isobmff";
 import { stripMetadata, type StripResult } from "./strip";
+import { found as foundAv } from "./test-markers";
 
 const fx = (n: string) => new Uint8Array(readFileSync(new URL(`./fixtures/${n}`, import.meta.url)));
 const MIME: Record<string, string> = { jpg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif", heic: "image/heic", avif: "image/avif" };
@@ -220,10 +221,44 @@ describe("nettoyage des images (spec §35.2)", () => {
     expect(await stripMetadata(big, "image/jpeg", "x.jpg")).toEqual({ state: "echec", reason: "trop_gros" });
     // PDF sans table xref : échec honnête (D41-31) ; le vrai nettoyage est éprouvé dans pdf.test.ts.
     expect(await stripMetadata(new Blob(["%PDF-1.7\n"]), "application/pdf", "a.pdf")).toEqual({ state: "echec", reason: "malformed:pdf_startxref" });
-    expect(await stripMetadata(new Blob(["<svg/>"]), "image/svg+xml", "a.svg")).toEqual({ state: "non_pris_en_charge", soon: false, format: "inconnu" });
+    expect(await stripMetadata(new Blob(["<svg/>"]), "image/svg+xml", "a.svg")).toEqual({ state: "non_pris_en_charge", format: "inconnu" });
     expect(await stripMetadata(new Blob(["bonjour"]), "text/plain", "a.txt")).toEqual({ state: "sans" });
     const rec = await stripMetadata(new Blob([fx("chromium.webm")]), "video/webm", "v.webm", { recorded: true });
     expect(rec).toMatchObject({ state: "nettoye", family: "video" });
-    expect(await stripMetadata(new Blob([fx("chromium.webm")]), "video/webm", "v.webm")).toEqual({ state: "non_pris_en_charge", soon: true, format: "webm" });
+    // Vidéo importée (Task 9c) : nettoyée elle aussi.
+    expect(await stripMetadata(new Blob([fx("chromium.webm")]), "video/webm", "v.webm")).toMatchObject({ state: "nettoye", family: "video" });
+  });
+});
+
+describe("nettoyage des vidéos et de l'audio (spec §35.2, Task 9c)", () => {
+  const AV: [string, string, "video" | "audio"][] = [
+    ["phone.mov", "video/quicktime", "video"],
+    ["faststart.mp4", "video/mp4", "video"],
+    ["frag.mp4", "video/mp4", "video"],
+    ["tags.m4a", "audio/mp4", "audio"],
+    ["meta.webm", "video/webm", "video"],
+    ["meta.mkv", "video/x-matroska", "video"],
+    ["meta.mp3", "audio/mpeg", "audio"],
+    ["meta.opus", "audio/ogg", "audio"],
+    ["meta.ogg", "audio/ogg", "audio"],
+    ["long.opus", "audio/ogg", "audio"],
+    ["meta.flac", "audio/flac", "audio"],
+    ["meta.wav", "audio/wav", "audio"],
+  ];
+  const AV_MARKERS = ["ReperTitre", "ReperArtiste", "ReperComment", "ReperMake", "ReperModel", "ReperSoftware", "ReperAlbum", "ReperOriginator", "ReperLogiciel", "ReperLong", "Lavf", "2001-02-03", "+12.5822"];
+  for (const [name, mime, family] of AV) {
+    it(`${name} : « nettoye » (${family}), aucun repère dans le résultat`, async () => {
+      const r = await stripMetadata(new Blob([fx(name)]), mime, name);
+      expect(r).toMatchObject({ state: "nettoye", family });
+      const out = new Uint8Array(await (r as { data: Blob }).data.arrayBuffer());
+      expect(foundAv(out, AV_MARKERS)).toEqual([]);
+    });
+  }
+  it("vidéo et audio tronqués → echec, jamais d'exception", async () => {
+    for (const [name, mime] of AV) {
+      const b = fx(name);
+      const r = await stripMetadata(new Blob([b.subarray(0, Math.floor(b.length / 3))]), mime, name);
+      expect(["echec", "nettoye"]).toContain(r.state);
+    }
   });
 });

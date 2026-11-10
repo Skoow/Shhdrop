@@ -5,15 +5,21 @@
 // abandon (signal) est propagé.
 import { STRIP_MAX } from "../limits";
 import { Malformed, equal } from "./bytes";
-import { FORMAT_HEAD, SOON_FORMATS, detectFormat, type Format } from "./format";
+import { cleanEbml } from "./ebml";
+import { cleanFlac } from "./flac";
+import { FORMAT_HEAD, detectFormat, type Format } from "./format";
 import { cleanGif } from "./gif";
 import { cleanHeif } from "./heif";
 import { cleanJpeg } from "./jpeg";
+import { audioRange } from "./mp3";
+import { cleanMp4 } from "./mp4";
+import { cleanOgg } from "./ogg";
 import { cleanOffice } from "./office";
 import { patchedBlob } from "./patch";
 import { cleanPdf } from "./pdf";
 import { cleanPng } from "./png";
 import { stripCaptureMeta } from "./strip-capture";
+import { cleanWav } from "./wav";
 import { cleanWebp } from "./webp";
 
 /** `intact` : laissé tel quel par décision (archives, D41-27 ; posé par le composeur). */
@@ -22,8 +28,8 @@ export type CleanFamily = "image" | "video" | "audio" | "pdf" | "bureautique" | 
 export type StripResult =
   | { state: "nettoye"; data: Blob; family: CleanFamily }
   | { state: "echec" | "protege"; reason: string } // reason : code interne, jamais affiché tel quel
-  /** `soon` : nettoyage prévu (vidéo, audio : Task 9c) ; `format` reconnu. */
-  | { state: "non_pris_en_charge"; soon: boolean; format: Format }
+  /** Format reconnu mais sans nettoyage (texte exclu : `sans`). */
+  | { state: "non_pris_en_charge"; format: Format }
   | { state: "sans" }
   | { state: "intact" };
 
@@ -71,8 +77,34 @@ async function run(file: Blob, mime: string, fmt: Format, opts: StripOpts): Prom
     if (!r.stripped) return { state: "echec", reason: "capture" };
     return { state: "nettoye", data: r.blob, family: type.startsWith("audio/") ? "vocal" : "video" };
   }
+  // Vidéo et audio importés (Task 9c, spec §35.2) : sans réencodage ; résultat relu par le même
+  // analyseur, qui ne doit plus rien trouver à changer.
+  const av: CleanFamily = type.startsWith("audio/") || fmt === "mp3" || fmt === "ogg" || fmt === "flac" || fmt === "wav" ? "audio" : "video";
+  if (fmt === "mp4" || fmt === "webm") {
+    const clean = fmt === "mp4" ? cleanMp4 : cleanEbml;
+    const data = patchedBlob(file, await clean(file), [], type);
+    opts.signal?.throwIfAborted();
+    if ((await clean(data)).length > 0 || data.size !== file.size) return { state: "echec", reason: "verification" };
+    return { state: "nettoye", data, family: av };
+  }
+  if (fmt === "mp3") {
+    const r = await audioRange(file);
+    const data = file.slice(r.from, r.to, type);
+    opts.signal?.throwIfAborted();
+    const again = await audioRange(data);
+    if (again.from !== 0 || again.to !== data.size) return { state: "echec", reason: "verification" };
+    return { state: "nettoye", data, family: "audio" };
+  }
+  if (fmt === "ogg" || fmt === "flac" || fmt === "wav") {
+    const clean = fmt === "ogg" ? cleanOgg : fmt === "flac" ? cleanFlac : cleanWav;
+    const out = await clean(file);
+    const data = out ? new Blob([out], { type }) : file;
+    opts.signal?.throwIfAborted();
+    if ((await clean(data)) !== null) return { state: "echec", reason: "verification" };
+    return { state: "nettoye", data, family: "audio" };
+  }
   if (fmt === "texte") return { state: "sans" };
-  return { state: "non_pris_en_charge", soon: (SOON_FORMATS as readonly string[]).includes(fmt), format: fmt };
+  return { state: "non_pris_en_charge", format: fmt };
 }
 
 export async function stripMetadata(file: Blob, mime: string, name: string, opts: StripOpts = {}): Promise<StripResult> {
