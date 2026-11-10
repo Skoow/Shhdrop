@@ -1,51 +1,125 @@
 {
-  "commit": "a287d19",
+  "commit": "fb77e09",
   "chromium": "153.0.8010.12",
-  "seal_mib_s": 164.3,
-  "open_mib_s": 387.6,
-  "argon2_ms": 196,
-  "send_bytes": 340867,
-  "open_bytes": 340867,
-  "note": "send_bytes et open_bytes : même ensemble de fichiers aujourd'hui (index.html, assets/index-*.js, assets/index-*.css, assets/argon2-*.js), en octets brotli ; médiane de 5 passes après une passe d'échauffement écartée ; 128 Mio.",
-  "runs": {
-    "seal_mib_s": [
-      160.2,
-      153.7,
-      164.3,
-      167.4,
-      171.7
+  "seal_mib_s": 228.9,
+  "open_mib_s": 421.1,
+  "argon2_ms": 259,
+  "argon2_first_ms": 262,
+  "send_bytes": 341435,
+  "open_bytes": 341435,
+  "stats": {
+    "seal_mib_s": {
+      "median": 228.9,
+      "min": 199.6,
+      "iqr": 13.7,
+      "runs": [
+        209.5,
+        213.5,
+        228.9,
+        199.6,
+        219.6,
+        227.3,
+        230.5,
+        224.4,
+        224.9,
+        233.9,
+        235.5,
+        241.6,
+        241.4,
+        240.3,
+        235.9
+      ]
+    },
+    "open_mib_s": {
+      "median": 421.1,
+      "min": 384.7,
+      "iqr": 27.5,
+      "runs": [
+        401.5,
+        384.7,
+        416.8,
+        421.1,
+        436.1,
+        419.5,
+        406.6,
+        385.2,
+        421.6,
+        405.3,
+        423.8,
+        430.8,
+        442,
+        443.5,
+        438.7
+      ]
+    },
+    "argon2_ms": {
+      "median": 259,
+      "min": 246,
+      "iqr": 27,
+      "runs": [
+        253,
+        309,
+        281,
+        278,
+        262,
+        313,
+        252,
+        249,
+        252,
+        246,
+        280,
+        259,
+        261,
+        248,
+        252
+      ]
+    }
+  },
+  "files": {
+    "send": [
+      {
+        "file": "/assets/argon2-6xTok3Cm.js",
+        "br_bytes": 151290
+      },
+      {
+        "file": "/assets/index-C3H0tMCH.js",
+        "br_bytes": 159134
+      },
+      {
+        "file": "/assets/index-eRPzjXIX.css",
+        "br_bytes": 29321
+      },
+      {
+        "file": "/assets/pow.worker-CqXgVHIX.js",
+        "br_bytes": 565
+      },
+      {
+        "file": "/index.html",
+        "br_bytes": 1125
+      }
     ],
-    "open_mib_s": [
-      417.9,
-      391.8,
-      387.6,
-      364.5,
-      376.8
-    ],
-    "argon2_ms": [
-      189,
-      194,
-      196,
-      233,
-      196
+    "open": [
+      {
+        "file": "/assets/argon2-6xTok3Cm.js",
+        "br_bytes": 151290
+      },
+      {
+        "file": "/assets/index-C3H0tMCH.js",
+        "br_bytes": 159134
+      },
+      {
+        "file": "/assets/index-eRPzjXIX.css",
+        "br_bytes": 29321
+      },
+      {
+        "file": "/assets/pow.worker-CqXgVHIX.js",
+        "br_bytes": 565
+      },
+      {
+        "file": "/index.html",
+        "br_bytes": 1125
+      }
     ]
   },
-  "files": [
-    {
-      "file": "index.html",
-      "br_bytes": 1119
-    },
-    {
-      "file": "assets/index-DikovCFG.js",
-      "br_bytes": 159137
-    },
-    {
-      "file": "assets/index-eRPzjXIX.css",
-      "br_bytes": 29321
-    },
-    {
-      "file": "assets/argon2-6xTok3Cm.js",
-      "br_bytes": 151290
-    }
-  ]
+  "note": "Médiane de 15 passes après une passe d'échauffement écartée (min et écart interquartile dans stats). 128 Mio pseudo-aléatoires (xorshift32) chiffrés puis rouverts en mémoire, octets vérifiés hors chrono. Copies comprises dans le temps mesuré : lecture du Blob par tranches de 4 Mio (chiffrement) ; à l'ouverture, une copie de chaque segment de 4 Mio donné au lecteur (il met à zéro ce qu'il reçoit). argon2_ms : médiane de 15 appels avec les paramètres de création, après un premier appel à froid (argon2_first_ms, instanciation comprise). send_bytes/open_bytes : octets brotli de ce que le navigateur charge sur le site construit (web/dist rebâti par ce script), route / pour envoyer, /#<partage> pour ouvrir, plus tout fichier assets/*.js|css|wasm cité de proche en proche par ces scripts (Argon2, Worker de preuve de travail, futur .wasm) ; cadre d'aperçu PDF exclu. Les deux ensembles sont aujourd'hui identiques (un seul bundle)."
 }
