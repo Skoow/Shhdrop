@@ -351,6 +351,11 @@ export const en = {
   "open.lastTry": "One more failure and the share will be destroyed.",
   "open.destroyedByPw": "Wrong password. The share has been destroyed.",
 
+  "content.noPreview": "No preview on the site for this file type: save it to open it.",
+  "content.undecodable.fmt": "This browser can't play the {fmt} format. Save the file, or open the link in {browser}.",
+  "content.undecodable.fmt.viewOnly": "This browser can't play the {fmt} format. Open the link in {browser} to view it.",
+  "content.browser.safari": "Safari",
+  "content.browser.chrome": "Chrome or Firefox",
   "content.undecodable":
     "This file can't be played on this device. Save it to open it with another app.",
   "content.risky":
@@ -663,7 +668,7 @@ export const en = {
   "compose.uncleaned.other": "{n}\u00a0files couldn't be cleaned",
   "settings.files": "Files",
   "settings.clean": "Clean files automatically",
-  "settings.clean.hint": "Removes hidden information from files (location, device, author, dates) on your device, before encryption. Off: files are sent as is (“Original” mark) and each one can still be cleaned from its menu. Forgotten when the tab closes.",
+  "settings.clean.hint": "Your files often hold hidden information: where and with what device a photo or video was taken, a document's author and dates, an audio file's title and software. On, Shhdrop removes it on your device, before encryption, without changing what you see or hear. Off (default): files are sent as is, and each one can be cleaned from its menu. Photos and videos taken here never contain any. Forgotten when the tab closes.",
   "settings.about": "About",
   "settings.about.body": "Shhdrop encrypts on your device before sending. No account, no tracker, public source code.",
   "settings.code": "Source code",

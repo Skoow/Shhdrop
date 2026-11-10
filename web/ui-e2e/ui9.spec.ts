@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { axe, expect, test } from "./fixtures";
 import { file, freshPage, sendShare, settle, unlock } from "./open-helpers";
-import { openFilePicker } from "./send-helpers";
+import { autoClean, openFilePicker } from "./send-helpers";
 import type { Locator, Page } from "@playwright/test";
 
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-UI9/", import.meta.url));
@@ -25,6 +25,7 @@ test("composeur : bouclier juste avant le nom, jamais repoussé par un nom long 
   test.setTimeout(120_000);
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(shh.origin + "/");
+  await autoClean(page, true);
   const jpg = readFileSync(file("plage-nuit.jpg"));
   const long = "vacances-ete-2026-plage-de-nuit-sous-les-etoiles-photo-originale-tres-longue.jpg";
   await (await openFilePicker(page)).setFiles([
@@ -54,7 +55,7 @@ test("composeur : bouclier juste avant le nom, jamais repoussé par un nom long 
 test("destinataire : bouclier juste avant le nom ; capture", async ({ page, shh, browser, isMobile }) => {
   test.setTimeout(150_000);
   const s = await freshPage(browser);
-  const sent = await sendShare(s.page, shh.origin + "/", { text: "Code de la porte : 4512B", files: [file("foret-brume.jpg"), file("archive.zip")], opens: 2 });
+  const sent = await sendShare(s.page, shh.origin + "/", { text: "Code de la porte : 4512B", files: [file("foret-brume.jpg"), file("archive.zip")], opens: 2, clean: true });
   await s.ctx.close();
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(sent.link);

@@ -12,7 +12,7 @@ import (
 )
 
 // Vitesse (retours CLEAN2) : variantes précompressées servies selon Accept-Encoding, jamais
-// sans elles ; cache longue durée seulement pour les fichiers à empreinte de /assets/.
+// sans elles ; aucun cache pour l'instant (retours CLEAN4).
 func TestStaticPrecompressedAndImmutable(t *testing.T) {
 	dir := t.TempDir()
 	js := bytes.Repeat([]byte("console.log('shhdrop');\n"), 200)
@@ -94,18 +94,11 @@ func TestStaticPrecompressedAndImmutable(t *testing.T) {
 	if r := get("/assets/aurora-ink.png", "br"); r.Header.Get("Vary") != "" {
 		t.Errorf("png : Vary %q", r.Header.Get("Vary"))
 	}
-	// Cache : immuable pour les fichiers à empreinte seulement (le reste garde l'en-tête du
-	// gestionnaire englobant, no-store, posé par api.New).
-	for p, want := range map[string]bool{
-		"/assets/index-AbCd_123.js":  true,
-		"/assets/style-Zz9_Yy8x.css": true,
-		"/assets/aurora-ink.png":     false,
-		"/":                          false,
-		"/robots.txt":                false,
-	} {
-		got := get(p, "").Header.Get("Cache-Control") == "public, max-age=31536000, immutable"
-		if got != want {
-			t.Errorf("%s : immuable = %v, attendu %v", p, got, want)
+	// Cache : aucun pour l'instant (retours CLEAN4) ; ce gestionnaire n'en pose aucun (le
+	// no-store vient de api.New, autour).
+	for _, p := range []string{"/assets/index-AbCd_123.js", "/assets/style-Zz9_Yy8x.css", "/", "/robots.txt"} {
+		if cc := get(p, "br").Header.Get("Cache-Control"); cc != "" {
+			t.Errorf("%s : Cache-Control %q", p, cc)
 		}
 	}
 }

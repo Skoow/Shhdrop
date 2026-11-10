@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { axe, expect, test } from "./fixtures";
 import { file, settle } from "./open-helpers";
-import { openFilePicker } from "./send-helpers";
+import { autoClean, enterComposer, openFilePicker } from "./send-helpers";
 
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-TABLE/", import.meta.url));
 test.use({ locale: "fr-FR", timezoneId: "Europe/Paris", deviceScaleFactor: 2 });
@@ -28,7 +28,10 @@ const FILES = ["foret-brume.jpg", "lac-gele.jpg", "plage-nuit.jpg", "contrat.pdf
 test("Votre envoi : un seul tableau, sous-en-têtes de catégorie, icône au bord ; badges hors cadre ; captures", async ({ page, shh, isMobile }) => {
   test.setTimeout(90_000);
   await page.setViewportSize(isMobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
-  await page.goto(shh.origin + "/envoyer");
+  // Réglages : onglet ou en-tête depuis l'accueil (la page d'envoi n'en a pas sur téléphone).
+  await page.goto(shh.origin + "/");
+  await autoClean(page, true);
+  await enterComposer(page);
   await (await openFilePicker(page)).setFiles(FILES.map(file));
   await expect(page.locator("[data-row]")).toHaveCount(FILES.length);
 

@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { stripMetadata } from "../src/media/strip";
 import { expect, test } from "./fixtures";
-import { openFilePicker } from "./send-helpers";
+import { autoClean, enterComposer, openFilePicker } from "./send-helpers";
 
 test.use({ locale: "fr-FR" });
 
@@ -68,7 +68,10 @@ test("vidéos et sons nettoyés : lisibles, même durée, mêmes dimensions", as
 });
 
 test("MOV de téléphone déposé dans le composeur : « Nettoyé » (position, appareil, dates)", async ({ page, shh }) => {
-  await page.goto(shh.origin + "/envoyer");
+  // Réglages : onglet ou en-tête depuis l'accueil (la page d'envoi n'en a pas sur téléphone).
+  await page.goto(shh.origin + "/");
+  await autoClean(page, true);
+  await enterComposer(page);
   await (await openFilePicker(page)).setFiles([PATH("phone.mov")]);
   const row = page.locator("[data-row]").filter({ hasText: "phone" });
   await expect(row.locator('[data-clean="nettoye"]')).toBeVisible({ timeout: 20_000 });

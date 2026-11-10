@@ -9,6 +9,7 @@
   // sons et textes seulement (previewKind) ; SVG, HTML et PDF n'arrivent jamais ici.
   // « Voir seulement » : aucun bouton de téléchargement, mention honnête dans le panneau.
   import { midSplitName } from "../ui/midname";
+  import { extLabel, otherBrowser } from "./hint";
   import { untrack } from "svelte";
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
@@ -160,7 +161,12 @@
       {:else if phase === "error"}
         <p class="msg" role="alert">{t("content.interrupted")}</p>
       {:else if phase === "undecodable"}
-        <p class="msg" role="alert">{viewOnly ? t("content.notViewable") : t("content.undecodable")}</p>
+        <!-- Format que ce navigateur ne décode pas (retours CLEAN4) : le format, et quel navigateur essayer. -->
+        {@const other = otherBrowser(cur.name)}
+        <p class="msg" role="alert">
+          {#if other && extLabel(cur.name)}{t(viewOnly ? "content.undecodable.fmt.viewOnly" : "content.undecodable.fmt", { fmt: extLabel(cur.name), browser: t(other === "safari" ? "content.browser.safari" : "content.browser.chrome") })}
+          {:else}{viewOnly ? t("content.notViewable") : t("content.undecodable")}{/if}
+        </p>
       {:else if url}
         {#if cur.kind === "image"}
           <ImageViewer {url} alt={cur.name} {viewOnly} onerror={() => (phase = "undecodable")} />

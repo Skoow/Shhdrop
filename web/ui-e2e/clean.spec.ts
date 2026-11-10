@@ -9,7 +9,7 @@ import type { Page } from "@playwright/test";
 import { stripMetadata } from "../src/media/strip";
 import { expect, test } from "./fixtures";
 import { file, freshPage, sendShare, unlock } from "./open-helpers";
-import { openFilePicker, sendButton } from "./send-helpers";
+import { autoClean, openFilePicker, sendButton } from "./send-helpers";
 
 test.use({ locale: "fr-FR" });
 
@@ -50,6 +50,7 @@ test("photo avec GPS : « Nettoyé » à l'ajout, le destinataire reçoit la pho
   const s = await freshPage(browser);
   const photo = { name: "IMG_GPS.jpg", mimeType: "image/jpeg", buffer: FX("iphone-like.jpg") };
   await s.page.goto(shh.origin + "/");
+  await autoClean(s.page, true); // désactivé par défaut (CLEAN4)
   await (await openFilePicker(s.page)).setFiles(photo);
   const r = row(s.page, "IMG_GPS");
   // D41-34 : étincelle à côté du type ; le détail dans la bulle du cadenas (2ᵉ ligne).
@@ -57,7 +58,7 @@ test("photo avec GPS : « Nettoyé » à l'ajout, le destinataire reçoit la pho
   await expect(lock(s.page, "IMG_GPS")).toHaveAccessibleName(detail("Nettoyé : position, appareil et dates retirés"));
   await s.ctx.close();
   const s2 = await freshPage(browser);
-  const sent = await sendShare(s2.page, shh.origin + "/", { files: [photo] });
+  const sent = await sendShare(s2.page, shh.origin + "/", { files: [photo], clean: true });
   await s2.ctx.close();
   await fakePicker(page);
   await page.goto(sent.link);
@@ -79,6 +80,7 @@ test("états à l'écran (D41-34) : nettoyé (photo, PDF), nettoyage impossible 
     if (q.method() === "PUT" && q.url().includes("/api/shares/segments/")) puts.push(q.url());
   });
   await page.goto(shh.origin + "/");
+  await autoClean(page, true); // désactivé par défaut (CLEAN4)
   const jpg = FX("iphone-like.jpg");
   await (await openFilePicker(page)).setFiles([
     { name: "IMG_GPS.jpg", mimeType: "image/jpeg", buffer: jpg },
@@ -122,6 +124,7 @@ test("document Word avec auteur (Task 9b, D41-27) : « Nettoyé » à l'ajout, a
   const doc = { name: "rapport.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: FX("meta.docx") };
   const s = await freshPage(browser);
   await s.page.goto(shh.origin + "/");
+  await autoClean(s.page, true); // désactivé par défaut (CLEAN4)
   await (await openFilePicker(s.page)).setFiles(doc);
   const r = row(s.page, "rapport");
   await expect(r.locator('[data-clean="nettoye"]')).toBeVisible();
@@ -129,7 +132,7 @@ test("document Word avec auteur (Task 9b, D41-27) : « Nettoyé » à l'ajout, a
   await expect(r.getByText(/modifications suivies|commentaires/)).toHaveCount(0);
   await s.ctx.close();
   const s2 = await freshPage(browser);
-  const sent = await sendShare(s2.page, shh.origin + "/", { files: [doc] });
+  const sent = await sendShare(s2.page, shh.origin + "/", { files: [doc], clean: true });
   await s2.ctx.close();
   await fakePicker(page);
   await page.goto(sent.link);
@@ -144,15 +147,15 @@ test("document Word avec auteur (Task 9b, D41-27) : « Nettoyé » à l'ajout, a
   expect(doc.buffer.toString("latin1")).toMatch(/ReperAuteur/);
 });
 
-test("réglage « Nettoyer automatiquement les fichiers » désactivé : « Fichier tel quel » dans la bulle, rien sur la ligne, rien de modifié", async ({ page, shh }) => {
+test("réglage « Nettoyer automatiquement les fichiers » désactivé par défaut : « Fichier tel quel » dans la bulle, rien sur la ligne, rien de modifié", async ({ page, shh }) => {
   await page.goto(shh.origin + "/");
   const tab = page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Réglages" });
   if (await tab.isVisible()) await tab.click();
   else await page.getByRole("banner").getByRole("button", { name: "Réglages" }).click();
   const sw = page.getByRole("dialog", { name: "Réglages" }).getByRole("switch", { name: "Nettoyer automatiquement les fichiers" });
-  await expect(sw).toHaveAttribute("aria-checked", "true");
-  await sw.click();
+  // Désactivé par défaut (décision du propriétaire, CLEAN4) ; l'explication est sous le réglage.
   await expect(sw).toHaveAttribute("aria-checked", "false");
+  await expect(sw).toHaveAccessibleDescription(/informations cachées.*Désactivé \(par défaut\)/);
   await page.keyboard.press("Escape");
   await (await openFilePicker(page)).setFiles({ name: "IMG_GPS.jpg", mimeType: "image/jpeg", buffer: FX("iphone-like.jpg") });
   await expect(lock(page, "IMG_GPS")).toHaveAccessibleName(detail("Fichier tel quel (non modifié)"));

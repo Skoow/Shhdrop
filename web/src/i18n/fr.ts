@@ -354,6 +354,11 @@ export const fr = {
   "open.lastTry": "Au prochain échec, le partage sera détruit.",
   "open.destroyedByPw": "Mot de passe incorrect. Le partage a été détruit.",
 
+  "content.noPreview": "Pas d'aperçu sur le site pour ce type de fichier\u202f: enregistrez-le pour l'ouvrir.",
+  "content.undecodable.fmt": "Ce navigateur ne sait pas lire le format {fmt}. Enregistrez le fichier, ou ouvrez le lien dans {browser}.",
+  "content.undecodable.fmt.viewOnly": "Ce navigateur ne sait pas lire le format {fmt}. Ouvrez le lien dans {browser} pour le voir.",
+  "content.browser.safari": "Safari",
+  "content.browser.chrome": "Chrome ou Firefox",
   "content.undecodable":
     "Ce fichier ne peut pas être lu sur cet appareil. Enregistrez-le pour l'ouvrir avec une autre application.",
   "content.risky":
@@ -668,7 +673,7 @@ export const fr = {
   "compose.uncleaned.other": "{n}\u202ffichiers n'ont pas pu être nettoyés",
   "settings.files": "Fichiers",
   "settings.clean": "Nettoyer automatiquement les fichiers",
-  "settings.clean.hint": "Retire les informations cachées des fichiers (lieu, appareil, auteur, dates) sur votre appareil, avant le chiffrement. Désactivé\u202f: les fichiers partent tels quels (marque «\u00a0Original\u00a0») et chacun peut encore être nettoyé depuis son menu. Réglage oublié à la fermeture de l'onglet.",
+  "settings.clean.hint": "Vos fichiers contiennent souvent des informations cachées\u202f: lieu et appareil d'une photo ou d'une vidéo, auteur et dates d'un document, titre et logiciel d'un son. Activé, Shhdrop les retire sur votre appareil, avant le chiffrement, sans toucher à ce qu'on voit ou entend. Désactivé (par défaut)\u202f: les fichiers partent tels quels, et chacun peut être nettoyé depuis son menu. Les photos et vidéos prises ici n'en contiennent jamais. Réglage oublié à la fermeture de l'onglet.",
   "settings.about": "À propos",
   "settings.about.body": "Shhdrop chiffre sur votre appareil avant l'envoi. Sans compte, sans traceur, code source public.",
   "settings.code": "Code source",

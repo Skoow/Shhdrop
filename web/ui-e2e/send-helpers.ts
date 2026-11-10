@@ -93,3 +93,14 @@ export const armed = (page: Page) =>
     return e.defaultPrevented;
   });
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Réglage « Nettoyer automatiquement les fichiers » (désactivé par défaut, retours CLEAN4). */
+export async function autoClean(page: Page, on: boolean) {
+  const tab = page.getByRole("navigation", { name: /^(Navigation principale|Main navigation)$/ }).getByRole("button", { name: /^(Réglages|Settings)$/ });
+  if (await tab.isVisible()) await tab.click();
+  else await page.getByRole("banner").getByRole("button", { name: /^(Réglages|Settings)$/ }).click();
+  const sw = page.getByRole("dialog", { name: /^(Réglages|Settings)$/ }).getByRole("switch", { name: /^(Nettoyer automatiquement les fichiers|Clean files automatically)$/ });
+  if ((await sw.getAttribute("aria-checked")) !== String(on)) await sw.click();
+  await expect(sw).toHaveAttribute("aria-checked", String(on));
+  await page.keyboard.press("Escape");
+}

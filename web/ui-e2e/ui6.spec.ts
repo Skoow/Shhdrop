@@ -5,23 +5,13 @@
 import { fileURLToPath } from "node:url";
 import { axe, expect, test } from "./fixtures";
 import { file, freshPage, sendShare, settle, unlock } from "./open-helpers";
-import { addText, openFilePicker } from "./send-helpers";
+import { addText, autoClean, openFilePicker } from "./send-helpers";
 import type { Page } from "@playwright/test";
 
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-UI6/", import.meta.url));
 test.use({ locale: "fr-FR", timezoneId: "Europe/Paris" });
 const w = (isMobile: boolean) => (isMobile ? 390 : 1440);
 const row = (page: Page, name: string) => page.locator("[data-row]").filter({ hasText: name });
-
-async function autoClean(page: Page, on: boolean) {
-  const tab = page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Réglages" });
-  if (await tab.isVisible()) await tab.click();
-  else await page.getByRole("banner").getByRole("button", { name: "Réglages" }).click();
-  const sw = page.getByRole("dialog", { name: "Réglages" }).getByRole("switch", { name: "Nettoyer automatiquement les fichiers" });
-  if ((await sw.getAttribute("aria-checked")) !== String(on)) await sw.click();
-  await expect(sw).toHaveAttribute("aria-checked", String(on));
-  await page.keyboard.press("Escape");
-}
 
 test("composeur : icônes en couleur, menu « … », aperçu par l'icône, Nettoyer d'un élément tel quel ; captures", async ({ page, shh, isMobile }) => {
   test.setTimeout(120_000);

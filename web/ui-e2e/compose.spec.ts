@@ -121,9 +121,10 @@ test.describe("fr-FR", () => {
     // Archive : catégorie, laissée intacte (D41-27) : rien sur la ligne, « Fichier tel quel » dans la bulle (D41-34).
     await expect(rows(page).filter({ hasText: "archive.zip" }).locator("[data-clean]")).toHaveCount(0);
     await expect(rows(page).filter({ hasText: "archive.zip" }).locator("[data-lock] button")).toHaveAccessibleName(/\. Fichier tel quel \(non modifié\)$/);
-    // Nettoyage automatique (Task 9a, D41-23) : étincelle sur les photos nettoyées ; la vidéo
-    // part sans clic, telle quelle. Plus aucun bouton « Nettoyer tous les fichiers ».
-    await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator('[data-clean="nettoye"]')).toBeVisible();
+    // Nettoyage automatique désactivé par défaut (CLEAN4) : la photo part telle quelle, sans
+    // marque sur la ligne. Plus aucun bouton « Nettoyer tous les fichiers ».
+    await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator("[data-clean]")).toHaveCount(0);
+    await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator("[data-lock] button")).toHaveAccessibleName(/\. Fichier tel quel \(non modifié\)$/);
     await expect(page.getByRole("button", { name: "Nettoyer tous les fichiers" })).toHaveCount(0);
     await expect(page.locator("[data-row]").getByText(/^(Original|Nettoyé|Non nettoyé)$/)).toHaveCount(0);
     // Listes compactes (décision du 7 novembre) : aucune vignette, une icône de format par ligne,
@@ -430,7 +431,8 @@ test.describe("fr-FR", () => {
     await browse(page, PHOTOS.slice(0, 2));
     await page.getByRole("button", { name: "Actions pour plage-nuit.jpg" }).click();
     const menu = page.getByRole("dialog", { name: "plage-nuit.jpg" });
-    await expect(menu.locator(".mi")).toHaveText(["Aperçu", "Renommer", "Supprimer"]);
+    // « Nettoyer » : le fichier part tel quel par défaut (CLEAN4), il peut être nettoyé d'ici.
+    await expect(menu.locator(".mi")).toHaveText(["Aperçu", "Renommer", "Nettoyer", "Supprimer"]);
     await settle(page);
     await capture(page, "compose-item-menu");
     await menu.getByRole("button", { name: "Renommer" }).click();

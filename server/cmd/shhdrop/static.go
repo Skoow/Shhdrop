@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -81,11 +80,8 @@ func staticHandler(dir string) (http.Handler, error) {
 			return
 		}
 		h := w.Header()
-		// Vitesse (retours CLEAN2) : un fichier à empreinte (/assets/nom-HASH.js|css) ne change
-		// jamais de contenu ; la page (no-store) le désigne avec son empreinte SRI (spec §28.3).
-		if immutableAsset.MatchString(r.URL.Path) {
-			h.Set("Cache-Control", "public, max-age=31536000, immutable")
-		}
+		// Cache : aucun pour l'instant (retours CLEAN4, propriétaire : chaque changement d'interface
+		// visible tout de suite pendant le développement) ; no-store partout, posé par api.New.
 		// Variante précompressée au build (vite.config.ts, precompress) : mêmes octets une fois
 		// décompressés (SRI inchangée), jamais de compression à la volée ni sur /api/*.
 		if compressible(name) {
@@ -104,9 +100,6 @@ func staticHandler(dir string) (http.Handler, error) {
 		http.ServeContent(w, r, fi.Name(), time.Time{}, rs)
 	}), nil
 }
-
-// immutableAsset : fichiers de vite nommés par leur empreinte (8 caractères base64url au moins).
-var immutableAsset = regexp.MustCompile(`^/assets/[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8,}\.(js|css)$`)
 
 // compressible : types texte précompressés par le build (les images et polices le sont déjà).
 func compressible(name string) bool {

@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { axe, expect, test } from "./fixtures";
 import { file, freshPage, sendShare, settle, unlock } from "./open-helpers";
-import { openFilePicker } from "./send-helpers";
+import { autoClean, openFilePicker } from "./send-helpers";
 import type { Page } from "@playwright/test";
 
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-UI7/", import.meta.url));
@@ -27,6 +27,7 @@ test("composeur : libellés dans l'icône, bulle du cadenas à deux lignes, éti
   test.setTimeout(120_000);
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(shh.origin + "/");
+  await autoClean(page, true);
   const jpg = readFileSync(file("plage-nuit.jpg"));
   await (await openFilePicker(page)).setFiles([
     { name: "plage-nuit.jpg", mimeType: "image/jpeg", buffer: jpg },

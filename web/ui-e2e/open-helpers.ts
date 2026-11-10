@@ -5,7 +5,7 @@ import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { expect } from "./fixtures";
-import { addText, openFilePicker, readyHeading, sendButton } from "./send-helpers";
+import { addText, autoClean, openFilePicker, readyHeading, sendButton } from "./send-helpers";
 
 const FILES = fileURLToPath(new URL("./files/", import.meta.url));
 export const file = (name: string) => join(FILES, name);
@@ -36,9 +36,11 @@ export type Sent = { link: string; password: string; manage: string };
 export async function sendShare(
   page: Page,
   url: string,
-  o: { text?: string; files?: (string | { name: string; mimeType: string; buffer: Buffer })[]; opens?: number; download?: boolean; isMobile?: boolean } = {},
+  o: { text?: string; files?: (string | { name: string; mimeType: string; buffer: Buffer })[]; opens?: number; download?: boolean; isMobile?: boolean; clean?: boolean } = {},
 ): Promise<Sent> {
   await page.goto(url);
+  // Nettoyage automatique : désactivé par défaut (CLEAN4) ; à activer pour l'éprouver.
+  if (o.clean) await autoClean(page, true);
   if (o.text !== undefined) await addText(page, o.text);
   if (o.files?.length) {
     const chooser = openFilePicker(page);

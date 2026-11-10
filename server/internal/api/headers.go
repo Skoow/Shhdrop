@@ -4,9 +4,10 @@ import "net/http"
 
 // securityHeaders : en-têtes de la spec §10, posés sur toutes les réponses
 // (sans require-trusted-types-for à ce stade).
-// Cache-Control: no-store partout : exigé pour /api/* et le HTML (bfcache, spec §21). Seule
-// exception (retours CLEAN2, vitesse) : les fichiers à empreinte de /assets/ (nom-HASH.js|css),
-// mis en cache un an par cmd/shhdrop/static.go ; leur contenu ne change jamais sous ce nom.
+// Cache-Control: no-store partout : exigé pour /api/* et le HTML (bfcache, spec §21). Les
+// fichiers du site aussi, pour l'instant (retours CLEAN4) : un changement d'interface est vu
+// tout de suite. Plus tard, les fichiers à empreinte (/assets/nom-HASH.js|css) pourront être mis
+// en cache longtemps sans risque (contenu fixe sous ce nom).
 var securityHeaders = [][2]string{
 	{"Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; " +
 		"img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; " +

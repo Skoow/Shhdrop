@@ -78,7 +78,8 @@ test("groupes et ordre de l'envoi ; texte, image, audio, vidéo ; pièges jamais
   // HEVC : Chromium ne le décode pas → message, Télécharger reste dans le panneau.
   await page.keyboard.press("ArrowRight");
   await expect(viewer.getByRole("heading", { name: "hevc.mov" })).toBeVisible();
-  await expect(viewer.getByText("Ce fichier ne peut pas être lu sur cet appareil.", { exact: false })).toBeVisible({ timeout: 20_000 });
+  // Le format et le navigateur à essayer (retours CLEAN4) : MOV, souvent en HEVC → Safari.
+  await expect(viewer.getByText("Ce navigateur ne sait pas lire le format MOV. Enregistrez le fichier, ou ouvrez le lien dans Safari.")).toBeVisible({ timeout: 20_000 });
   await expect(viewer.locator("video")).toHaveCount(0);
   await expect(viewer.getByRole("button", { name: "Télécharger hevc.mov" })).toBeVisible();
   await page.keyboard.press("Escape");

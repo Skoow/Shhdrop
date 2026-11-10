@@ -114,7 +114,7 @@ test("capture() n'avale pas une vraie violation CSP", async ({ page, shh }) => {
   shh.cspViolations.length = 0;
 });
 
-test("vitesse : JS et CSS servis compressés (brotli) et mis en cache pour un an, la page jamais", async ({ page, shh }) => {
+test("vitesse : JS et CSS servis compressés (brotli) ; aucun cache pour l'instant (CLEAN4)", async ({ page, shh }) => {
   const seen: { url: string; enc: string; cache: string }[] = [];
   page.on("response", async (r) => {
     if (/\/assets\/index-[^/]+\.(js|css)$/.test(r.url())) {
@@ -129,6 +129,6 @@ test("vitesse : JS et CSS servis compressés (brotli) et mis en cache pour un an
   expect(seen.map((s) => s.url.split(".").pop()).sort()).toEqual(["css", "js"]);
   for (const s of seen) {
     expect(s.enc, s.url).toBe("br");
-    expect(s.cache, s.url).toBe("public, max-age=31536000, immutable");
+    expect(s.cache, s.url).toBe("no-store");
   }
 });
