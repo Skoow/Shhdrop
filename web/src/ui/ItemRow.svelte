@@ -371,15 +371,16 @@
   .grip-slot :global(.grip) {
     margin-inline: -6px;
   }
-  /* Icône recollée au bord gauche (retours TABLE) : le dessin (28 px) centré dans sa cible de
-     44 px laissait 8 px vides ; la cible déborde d'autant sur la marge du tableau. */
+  /* Icône alignée sur le mot de la catégorie (« Photos ») au-dessus (retours CLEAN3) : le dessin
+     (28 px) est centré dans sa cible de 44 px, donc 8 px à gauche ; le bandeau de catégorie a
+     10 px de retrait (CategoryGroup) : 2 px de plus suffisent. */
   .pic {
     position: relative;
     display: grid;
     place-items: center;
     width: 44px;
     height: 44px;
-    margin-inline-start: -8px;
+    margin-inline-start: 2px;
   }
   .main {
     display: grid;
@@ -392,6 +393,10 @@
     /* Le bouclier de nettoyage (flex: none) suit le nom ; seul le nom rétrécit (ellipse au milieu). */
     gap: 0;
     min-width: 0;
+  }
+  /* Avertissements sous le nom : même retrait que la 2ᵉ ligne. */
+  .main > :global(.line) {
+    margin-inline-start: 21px;
   }
   .cslot {
     flex: none;
@@ -451,12 +456,15 @@
     padding: 0;
     cursor: pointer;
   }
+  /* 2ᵉ ligne (type, taille…) alignée sur le début du nom, après l'emplacement du bouclier
+     (15 px + 6 px, .cslot) : retours CLEAN3. */
   .meta {
     display: flex;
     flex-wrap: wrap;
     min-width: 0;
     align-items: center;
     gap: 4px 8px;
+    padding-inline-start: 21px;
     color: var(--text-2);
     font-size: var(--fs-small);
   }

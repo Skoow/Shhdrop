@@ -44,13 +44,18 @@ test("Votre envoi : un seul tableau, sous-en-têtes de catégorie, icône au bor
     expect(await g.locator(":scope > .head").evaluate((e) => getComputedStyle(e).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
   }
 
-  // Icône recollée : son dessin commence au plus à 14 px du bord intérieur du tableau.
-  const gap = await page.locator("[data-row]").first().evaluate((li) => {
-    const t = li.closest(".groups")!.getBoundingClientRect().left;
-    return li.querySelector("svg.fi")!.getBoundingClientRect().left - t;
-  });
-  expect(gap).toBeLessThanOrEqual(14);
-
+  // Icône du type alignée sur le mot de la catégorie (« Photos », « Documents ») au-dessus
+  // (retours CLEAN3), à 1 px près.
+  for (const g of await groups.all()) {
+    const h3 = (await g.locator(":scope > .head h3").boundingBox())!.x;
+    for (const fi of await g.locator("[data-row] svg.fi").all()) expect(Math.abs((await fi.boundingBox())!.x - h3)).toBeLessThanOrEqual(1);
+  }
+  // 2ᵉ ligne (type, taille) alignée sur le début du nom.
+  for (const r of await page.locator("[data-row]").all()) {
+    const [nm, meta] = [(await r.locator(".nm").boundingBox())!.x, (await r.locator(".meta").boundingBox())!];
+    const first = await r.locator(".meta > *").first().boundingBox();
+    expect(Math.abs((first ?? meta).x - nm)).toBeLessThanOrEqual(1);
+  }
   // Bouclier de nettoyage AVANT le nom, emplacement fixe : tous les noms commencent au même x,
   // qu'il y ait un bouclier (photos nettoyées, échecs) ou non.
   const xs = await page.locator("[data-row] .nm").evaluateAll((ns) => ns.map((n) => Math.round(n.getBoundingClientRect().left)));
@@ -87,8 +92,10 @@ test("pied : « Offres … et » couleur des liens du pied, Plus et Pro en bleu,
   await expect(link).toHaveText("Offres Plus et Pro");
   await expect(link).toHaveAttribute("aria-current", "page");
   const color = (sel: string) => link.locator(sel).evaluate((e) => getComputedStyle(e).color);
-  // Page des offres (lien courant) : blanc, comme un lien survolé ; ailleurs, la couleur des autres liens.
-  expect(await link.evaluate((e) => getComputedStyle(e).color)).toBe(WHITE);
+  // Même sur la page des offres (lien courant) : « Offres » et « et » en gris, comme le pied (CLEAN3).
+  expect(await link.evaluate((e) => getComputedStyle(e).color)).not.toBe(WHITE);
+  const grey = await page.locator("footer a.fl").filter({ hasText: "Conditions" }).evaluate((e) => getComputedStyle(e).color);
+  expect(await link.evaluate((e) => getComputedStyle(e).color)).toBe(grey);
   expect(await color(".tier.plus")).toBe(PLUS);
   expect(await color(".tier.pro")).toBe(PRO);
   await link.scrollIntoViewIfNeeded();

@@ -507,11 +507,11 @@
   .fl[aria-current="page"] {
     color: var(--accent);
   }
-  /* Ligne des offres (retours TABLE, CLEAN2) : le texte garde la couleur des autres liens du pied,
-     seuls « Plus » et « Pro » prennent le bleu de leur offre ; jamais le vert d'accent, même sur
-     la page des offres (là, le texte passe en blanc comme un lien survolé). */
+  /* Ligne des offres (retours TABLE, CLEAN2, CLEAN3) : « Offres » et « et » toujours en gris
+     comme le reste du pied, même sur la page des offres ; seuls « Plus » et « Pro » prennent le
+     bleu de leur offre ; jamais le vert d'accent. */
   .fl.tiers[aria-current="page"] {
-    color: var(--text);
+    color: var(--text-2);
   }
   .tier.plus {
     color: var(--plus);

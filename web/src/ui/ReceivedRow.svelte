@@ -208,11 +208,13 @@
     /* pre : l'espace en tête de la queue (« … 2026.jpg ») reste visible. */
     white-space: pre;
   }
+  /* 2ᵉ ligne alignée sur le début du nom, après l'emplacement du bouclier (retours CLEAN3). */
   .meta {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0 6px;
+    padding-inline-start: 21px;
     min-width: 0;
     color: var(--text-2);
     font-size: var(--fs-micro);
