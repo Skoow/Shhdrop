@@ -1,7 +1,11 @@
 // Nettoyage des documents Office (OOXML : .docx, .xlsx, .pptx et variantes) et ODF (.odt,
 // .ods, .odp…) (spec §35.2, Task 9b) : propriétés du document remplacées par des versions
 // minimales de même nom, miniatures retirées (et leurs références), métadonnées des images
-// intégrées retirées (pixels inchangés), ZIP réécrit (zip.ts). Règle du propriétaire (8
+// intégrées retirées (pixels inchangés), chemins locaux retirés (modèle attaché de Word et sa
+// relation, x15ac:absPath d'Excel), paramètres d'imprimante retirés (parties printerSettings,
+// leurs relations, types de contenu et citations r:id ; ODF : nom et réglages de l'imprimante
+// de settings.xml), ZIP réécrit (zip.ts). customXml/ est gardé : il porte des données liées au
+// document (bibliographie, contrôles de contenu liés), le retirer altérerait le document. Règle du propriétaire (8
 // novembre, D41-27) : on ne retire que ce qui n'altère pas le document lui-même ; commentaires,
 // personnes et suivi des modifications restent intacts (auteurs et dates compris). Le résultat est relu par le même analyseur : il ne doit
 // plus rien demander, sinon `Malformed` (→ `echec`).
@@ -25,6 +29,41 @@ const RELS = "http://schemas.openxmlformats.org/package/2006/relationships";
 const CT = "http://schemas.openxmlformats.org/package/2006/content-types";
 const THUMB_REL = /\/metadata\/thumbnail$/u;
 const MANIFEST = "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0";
+const CONFIG = "urn:oasis:names:tc:opendocument:xmlns:config:1.0";
+/** ODF settings.xml : nom de l'imprimante vidé, réglages du pilote (base64, nom compris) retirés. */
+const ODF_SETTINGS: readonly XmlRule[] = [
+  { el: qn(CONFIG, "config-item"), when: (a) => a.get(qn(CONFIG, "name")) === "PrinterName", text: "" },
+  { el: qn(CONFIG, "config-item"), when: (a) => a.get(qn(CONFIG, "name")) === "PrinterSetup", drop: true },
+];
+
+/** Paramètres d'imprimante (nom de l'imprimante) et modèle attaché (chemin local, nom d'utilisateur). */
+const PRINTER_REL = /\/printerSettings$/u;
+const TEMPLATE_REL = /\/attachedTemplate$/u;
+const PRINTER_PART = /^(word|xl|ppt)\/printerSettings\/[^/]+$/u;
+/** Parties qui peuvent porter un chemin local : modèle attaché (Word), dossier du classeur (Excel). */
+const PATH_PARTS = ["word/settings.xml", "xl/workbook.xml"];
+const RELS_PART = /^(?:.*\/)?_rels\/[^/]*\.rels$/u;
+// Espaces de noms : variantes « transitional » et « strict ».
+const R_NS = ["http://schemas.openxmlformats.org/officeDocument/2006/relationships", "http://purl.oclc.org/ooxml/officeDocument/relationships"];
+const W_NS = ["http://schemas.openxmlformats.org/wordprocessingml/2006/main", "http://purl.oclc.org/ooxml/wordprocessingml/main"];
+const SML_NS = ["http://schemas.openxmlformats.org/spreadsheetml/2006/main", "http://purl.oclc.org/ooxml/spreadsheetml/main"];
+const X15AC = "http://schemas.microsoft.com/office/spreadsheetml/2010/11/ac";
+
+/** Partie source d'un fichier de relations : « word/_rels/document.xml.rels » → « word/document.xml » ; paquet → "". */
+function relsSource(rels: string): string {
+  const i = rels.lastIndexOf("_rels/");
+  return rels.slice(0, i) + rels.slice(i + 6, -5);
+}
+/** Partie visée par `target` depuis `source` (chemin relatif ou absolu, « .. » résolus). */
+function partPath(source: string, target: string): string {
+  const segs = target.startsWith("/") ? [] : source.split("/").slice(0, -1);
+  for (const s of target.split(/[/\\]/u)) {
+    if (s === "..") segs.pop();
+    else if (s && s !== ".") segs.push(s);
+  }
+  return segs.join("/");
+}
+const norm = (t: string) => t.replace(/^\//u, "");
 
 const OOXML_PROPS = new Set(["docProps/core.xml", "docProps/app.xml", "docProps/custom.xml"]);
 const OOXML_MEDIA = /^(word|xl|ppt)\/media\/[^/]+$/u;
@@ -73,28 +112,63 @@ async function plan(file: Blob, zip: ZipFile, kind: OfficeKind): Promise<Plan> {
   if (kind === "ooxml") {
     if (zip.entries.some((e) => e.name.startsWith("_xmlsignatures/"))) return { ...p, protege: true };
     if (!byName.has("[Content_Types].xml")) throw new Malformed("ooxml");
-    // Miniatures : parties docProps/thumbnail.* et cibles des relations « thumbnail ».
-    const thumbs = new Set(zip.entries.filter((e) => /^docProps\/thumbnail\.[^/]+$/iu.test(e.name)).map((e) => e.name));
-    const rels = byName.get("_rels/.rels");
-    const norm = (t: string) => t.replace(/^\//u, "");
-    if (rels) {
-      rewriteXml(await xml(rels), [
-        {
-          el: qn(RELS, "Relationship"),
-          when: (a) => {
-            if (THUMB_REL.test(a.get("Type") ?? "") && byName.has(norm(a.get("Target") ?? ""))) thumbs.add(norm(a.get("Target")!));
-            return false;
-          },
-          drop: true,
-        },
+    // Parties retirées : miniatures (docProps/thumbnail.* et cibles des relations « thumbnail »
+    // du paquet) et paramètres d'imprimante (nom de l'imprimante, réglages du pilote).
+    const removed = new Set(zip.entries.filter((e) => /^docProps\/thumbnail\.[^/]+$/iu.test(e.name) || PRINTER_PART.test(e.name)).map((e) => e.name));
+    const relsFiles = zip.entries.filter((e) => RELS_PART.test(e.name));
+    const relRule = (en: ZipEntry, keep: (a: ReadonlyMap<string, string>, target: string | null) => boolean): XmlRule => ({
+      el: qn(RELS, "Relationship"),
+      when: (a) => !keep(a, a.get("TargetMode") === "External" ? null : partPath(relsSource(en.name), a.get("Target") ?? "")),
+      drop: true,
+    });
+    const doomed = (root: boolean, type: string) => (root && THUMB_REL.test(type)) || PRINTER_REL.test(type);
+    for (const en of relsFiles) {
+      const root = en.name === "_rels/.rels";
+      rewriteXml(await xml(en), [
+        relRule(en, (a, target) => {
+          if (target !== null && doomed(root, a.get("Type") ?? "") && byName.has(target)) removed.add(target);
+          return true;
+        }),
       ]);
-      await rewrite(rels, [{ el: qn(RELS, "Relationship"), when: (a) => THUMB_REL.test(a.get("Type") ?? "") || thumbs.has(norm(a.get("Target") ?? "")), drop: true }]);
     }
-    for (const t of thumbs) p.edits.set(t, null);
-    const lower = new Set([...thumbs].map((t) => t.toLowerCase()));
+    // Relations retirées (vers une partie retirée, imprimante, modèle attaché) ; identifiants
+    // retirés, par partie source, pour que plus rien ne les cite.
+    const droppedIds = new Map<string, Set<string>>();
+    for (const en of relsFiles) {
+      const root = en.name === "_rels/.rels";
+      const ids = new Set<string>();
+      await rewrite(en, [
+        relRule(en, (a, target) => {
+          const type = a.get("Type") ?? "";
+          const gone = doomed(root, type) || TEMPLATE_REL.test(type) || (target !== null && removed.has(target));
+          if (gone) ids.add(a.get("Id") ?? "");
+          return !gone;
+        }),
+      ]);
+      if (!root && ids.size > 0) droppedIds.set(relsSource(en.name), ids);
+    }
+    for (const t of removed) p.edits.set(t, null);
+    const lower = new Set([...removed].map((t) => t.toLowerCase()));
     await rewrite(byName.get("[Content_Types].xml")!, [{ el: qn(CT, "Override"), when: (a) => lower.has(norm(a.get("PartName") ?? "").toLowerCase()), drop: true }]);
+    // Parties qui citent une relation retirée, et chemins locaux : modèle attaché (Word),
+    // dossier du classeur (Excel, x15ac:absPath). Une citation restante → `Malformed`.
+    const cited = new Set([...droppedIds.keys(), ...PATH_PARTS].filter((n) => byName.has(n) && !removed.has(n)));
+    for (const n of cited) {
+      const ids = droppedIds.get(n) ?? new Set<string>();
+      const hit = (a: ReadonlyMap<string, string>) => R_NS.some((r) => ids.has(a.get(qn(r, "id")) ?? "\0"));
+      const next = rewriteXml(await xml(byName.get(n)!), [
+        ...W_NS.flatMap((w): XmlRule[] => [
+          { el: qn(w, "attachedTemplate"), drop: true },
+          { el: qn(w, "printerSettings"), when: hit, drop: true },
+        ]),
+        { el: qn(X15AC, "absPath"), drop: true },
+        ...SML_NS.flatMap((x) => R_NS.map((r): XmlRule => ({ el: qn(x, "pageSetup"), when: hit, attr: qn(r, "id"), remove: true }))),
+      ]);
+      for (const id of ids) if (new RegExp(`=\\s*["']${id.replace(/[^\w.-]/gu, "\\$&")}["']`, "u").test(next)) throw new Malformed("ooxml_relation");
+      await edit(byName.get(n)!, next);
+    }
     for (const en of zip.entries) {
-      if (thumbs.has(en.name) || en.name === "_rels/.rels" || en.name === "[Content_Types].xml") continue;
+      if (removed.has(en.name) || cited.has(en.name) || RELS_PART.test(en.name) || en.name === "[Content_Types].xml") continue;
       if (OOXML_PROPS.has(en.name)) await edit(en, minimalPart(await xml(en), () => false));
       else if (OOXML_MEDIA.test(en.name)) await image(en);
     }
@@ -118,7 +192,8 @@ async function plan(file: Blob, zip: ZipFile, kind: OfficeKind): Promise<Plan> {
       const src = await xml(en);
       const office = rootTag(src).name.split(":")[0]!;
       await edit(en, minimalPart(src, (a) => a === `${office}:version`, `<${office}:meta/>`));
-    } else if (ODF_MEDIA.test(en.name)) await image(en);
+    } else if (en.name === "settings.xml") await rewrite(en, ODF_SETTINGS);
+    else if (ODF_MEDIA.test(en.name)) await image(en);
   }
   return p;
 }

@@ -131,8 +131,9 @@ test("document Word avec auteur (Task 9b, D41-27) : « Nettoyé » à l'ajout, a
   await (await openFilePicker(s.page)).setFiles(doc);
   const r = row(s.page, "rapport");
   await expect(r.locator('[data-clean="nettoye"]')).toBeVisible();
-  await expect(lock(s.page, "rapport")).toHaveAccessibleName(detail("Nettoyé : auteur, société, dates et miniature retirés"));
-  await expect(r.getByText(/modifications suivies|commentaires/)).toHaveCount(0);
+  await expect(lock(s.page, "rapport")).toHaveAccessibleName(detail("Nettoyé : propriétés, chemin local du fichier et imprimante retirés (auteurs des commentaires et liens vers d'autres fichiers gardés)"));
+  // Aucune remarque sur la ligne (D41-27) ; la bulle du cadenas et celle du bouclier disent le texte exact.
+  await expect(r.getByText(/modifications suivies|commentaires/).and(s.page.locator(":not([data-lock] *, [data-clean] *)"))).toHaveCount(0);
   await s.ctx.close();
   const s2 = await freshPage(browser);
   const sent = await sendShare(s2.page, shh.origin + "/", { files: [doc], clean: true });

@@ -62,16 +62,19 @@ describe("métadonnées des captures (MediaRecorder de Chromium)", () => {
     });
   }
 
-  it("MP4 synthétique : version 0 (dates sur 4 octets), udta → free", async () => {
+  it("MP4 synthétique : version 0 (dates sur 4 octets), udta et meta → free remplies de zéros (contenu illisible)", async () => {
     const box = (t: string, body: number[]) => [0, 0, 0, 8 + body.length, ...[...t].map((c) => c.charCodeAt(0)), ...body];
     const mvhd = box("mvhd", [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9]);
-    const udta = box("udta", [...box("©too", [65, 66])]);
-    const moov = box("moov", [...mvhd, ...udta]);
+    const udta = box("udta", [...box("\xa9too", [...Buffer.from("ReperEncodeur")])]);
+    const meta = box("meta", [0, 0, 0, 0, ...box("ilst", [...Buffer.from("ReperTitre")])]);
+    const moov = box("moov", [...mvhd, ...udta, ...meta]);
     const src = new Uint8Array([...box("ftyp", [105, 115, 111, 109]), ...moov]);
     const out = await bytes((await stripCaptureMeta(new Blob([src]))).blob);
+    expect(out.length).toBe(src.length);
     expect(latin(out)).toContain("mvhd\0\0\0\0\0\0\0\0\0\0\0\0\x09\x09");
-    expect(latin(out)).toContain("free");
-    expect(latin(out)).not.toContain("udta");
+    expect(latin(out)).toContain(`\0\0\0${String.fromCharCode(udta.length)}free${"\0".repeat(udta.length - 8)}`);
+    expect(latin(out)).toContain(`free${"\0".repeat(meta.length - 8)}`);
+    for (const t of ["udta", "meta", "\xa9too", "ilst", "ReperEncodeur", "ReperTitre"]) expect(latin(out)).not.toContain(t);
   });
 
   it("inconnu ou abîmé : Blob rendu inchangé (stripped: false)", async () => {

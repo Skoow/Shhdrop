@@ -1,12 +1,19 @@
 // Nettoyage des PDF (spec §35.2, Task 9b) sur les fichiers d'essai de scripts/gen-fixtures.mjs.
-// pdf.js n'est pas en dépendance : la lisibilité se vérifie par la structure (chaque entrée de
-// chaque table xref pointe toujours sur « N G obj », même longueur, texte de page intact).
+// La lisibilité se vérifie par la structure (chaque entrée de chaque table xref pointe toujours
+// sur « N G obj », même longueur, texte de page intact) ; les images, par le décodeur de pdf.js.
 import { readFileSync } from "node:fs";
+import { deflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
+import { cleanJpeg } from "./jpeg";
 import { cleanPdf } from "./pdf";
 import { stripMetadata, type StripResult } from "./strip";
 import { found } from "./test-markers";
 
+// Décodeur JPEG de pdf.js (déjà en dépendance, sans déclaration de types) : preuve que les
+// images neutralisées en place restent décodables, pixels identiques.
+const DECODERS = "pdfjs-dist/image_decoders/pdf.image_decoders.mjs";
+type Jpeg = { parse(b: Uint8Array): void; width: number; height: number; getData(o: { width: number; height: number; forceRGB: boolean }): Uint8ClampedArray };
+const { JpegImage } = (await import(/* @vite-ignore */ DECODERS)) as { JpegImage: new () => Jpeg };
 const fx = (n: string) => new Uint8Array(readFileSync(new URL(`./fixtures/${n}`, import.meta.url)));
 const MARKERS = ["ReperAuteur", "ReperAncien", "ReperCreateur", "ReperLogiciel", "ReperXMP", "ReperXMPPage", "ReperThumb", "ReperModel", "20010203", "FEFF005200650070"];
 const latin1 = (b: Uint8Array) => new TextDecoder("latin1").decode(b);
@@ -105,4 +112,93 @@ describe("PDF hostile (revue du 10 novembre)", () => {
     const { r } = await clean("hostile.pdf", new TextEncoder().encode(pdf));
     expect(r).toEqual({ state: "echec", reason: "malformed:pdf_xref_w" });
   });
+});
+
+/** PDF minimal d'une page qui affiche l'image `img` (objet 4) ; objets de plus : `extra`. */
+function imagePdf(filter: string, img: Uint8Array, extra: [number, string, Uint8Array?][] = []): Uint8Array {
+  const enc = (t: string) => Uint8Array.from(t, (c) => c.charCodeAt(0));
+  const objs: [number, string, Uint8Array?][] = [
+    [1, "<< /Type /Catalog /Pages 2 0 R >>"],
+    [2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"],
+    [3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 16 8] /Resources << /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >>"],
+    [4, `<< /Type /XObject /Subtype /Image /Width 16 /Height 8 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter ${filter}`, img],
+    [5, "<<", enc("q 16 0 0 8 0 0 cm /Im1 Do Q")],
+    ...extra,
+  ];
+  const parts: Uint8Array[] = [enc("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")];
+  let pos = parts[0]!.length;
+  const offs = new Map<number, number>();
+  const push = (b: Uint8Array) => (parts.push(b), (pos += b.length));
+  for (const [n, d, stream] of objs) {
+    offs.set(n, pos);
+    if (stream) {
+      push(enc(`${n} 0 obj\n${d} /Length ${stream.length} >>\nstream\n`));
+      push(stream);
+      push(enc("\nendstream\nendobj\n"));
+    } else push(enc(`${n} 0 obj\n${d}\nendobj\n`));
+  }
+  const size = Math.max(...offs.keys()) + 1;
+  const rows = Array.from({ length: size }, (_, n) => (offs.has(n) ? `${String(offs.get(n)).padStart(10, "0")} 00000 n \n` : "0000000000 65535 f \n"));
+  push(enc(`xref\n0 ${size}\n${rows.join("")}trailer\n<< /Size ${size} /Root 1 0 R >>\nstartxref\n${pos}\n%%EOF\n`));
+  const out = new Uint8Array(pos);
+  let o = 0;
+  for (const p of parts) (out.set(p, o), (o += p.length));
+  return out;
+}
+const PHOTO = ["ReperMake", "ReperModel", "ReperXMP", "ReperIPTC", "ReperCOM", "ReperJFXX", "ReperMPF", "ReperSecond", "ReperMotion", "2001:02:03"];
+const GPS = new Uint8Array([0, 0, 0, 12, 0, 0, 0, 1, 0, 0, 0, 34, 0, 0, 0, 1, 0, 0, 0, 56, 0, 0, 0, 1]);
+const pixels = (b: Uint8Array) => {
+  const j = new JpegImage();
+  j.parse(b);
+  return j.getData({ width: j.width, height: j.height, forceRGB: true });
+};
+/** Segments APPn (Adobe excepté) et COM retirés d'un JPEG : reste décodable. */
+function withoutApp(b: Uint8Array): Uint8Array {
+  const out: number[] = [0xff, 0xd8];
+  let o = 2;
+  while (b[o + 1] !== 0xda) {
+    const len = (b[o + 2]! << 8) | b[o + 3]!;
+    const m = b[o + 1]!;
+    if (!((m >= 0xe0 && m <= 0xef && m !== 0xee) || m === 0xfe)) out.push(...b.subarray(o, o + 2 + len));
+    o += 2 + len;
+  }
+  return new Uint8Array([...out, ...b.subarray(o)]);
+}
+
+describe("PDF : images intégrées (revue du 10 novembre)", () => {
+  const photo = fx("iphone-like.jpg");
+
+  it("image /DCTDecode : EXIF (GPS compris), XMP, IPTC, COM, MPF et ce qui suit l'EOI mis à zéro en place ; même longueur ; pixels identiques", async () => {
+    const pdf = imagePdf("/DCTDecode", photo);
+    expect(found(pdf, PHOTO).length).toBeGreaterThan(5);
+    const { r, out } = await clean("photo.pdf", pdf);
+    expect(r.state).toBe("nettoye");
+    expect(out.length).toBe(pdf.length);
+    expect(found(out, PHOTO)).toEqual([]);
+    expect(found(out, [latin1(GPS)])).toEqual([]);
+    const at = latin1(pdf).indexOf("stream\n", latin1(pdf).indexOf("4 0 obj")) + 7;
+    const img = out.subarray(at, at + photo.length);
+    expect(pixels(img)).toEqual(pixels(photo));
+    expect(cleanJpeg(img).length).toBeGreaterThan(0); // relu par jpeg.ts : structure valide
+    expect(await cleanPdf(new Blob([out as Uint8Array<ArrayBuffer>]))).toEqual({ state: "ok", patches: [] });
+  });
+
+  it("image compressée autrement (Flate puis DCT, JPX) : vérifiée ; informations présentes → echec, absentes → nettoye", async () => {
+    const meta = await clean("f.pdf", imagePdf("[/FlateDecode /DCTDecode]", deflateSync(photo)));
+    expect(meta.r).toEqual({ state: "echec", reason: "malformed:pdf_image_meta" });
+    const bare = withoutApp(cleanJpeg(photo)); // sans segment d'informations, rien après l'EOI
+    expect(pixels(bare)).toEqual(pixels(photo));
+    expect((await clean("g.pdf", imagePdf("[/FlateDecode /DCTDecode]", deflateSync(bare)))).r.state).toBe("nettoye");
+    const box = (t: string, body: number[]) => [0, 0, 0, 8 + body.length, ...[...t].map((c) => c.charCodeAt(0)), ...body];
+    const jp2 = (more: number[]) => new Uint8Array([...box("jP  ", [13, 10, 135, 10]), ...box("ftyp", [...Buffer.from("jp2 \0\0\0\0jp2 ")]), ...more, ...box("jp2c", [0xff, 0x4f, 0xff, 0x51])]);
+    expect((await clean("j.pdf", imagePdf("/JPXDecode", jp2(box("xml ", [...Buffer.from("<x>ReperXMP</x>")]))))).r).toEqual({ state: "echec", reason: "malformed:pdf_image_meta" });
+    expect((await clean("k.pdf", imagePdf("/JPXDecode", jp2([])))).r.state).toBe("nettoye");
+  });
+
+  it("budget global de décompression : flux d'objets sous 50 Mio chacun mais 225 Mio en tout → echec, sans figer", async () => {
+    const zeros = deflateSync(new Uint8Array(45 * 1048576));
+    const extra: [number, string, Uint8Array][] = [6, 7, 8, 9, 10].map((n) => [n, "<< /Type /ObjStm /N 0 /First 0 /Filter /FlateDecode", zeros]);
+    const { r } = await clean("bombe.pdf", imagePdf("/DCTDecode", photo, extra));
+    expect(r).toEqual({ state: "echec", reason: "malformed:pdf_budget" });
+  }, 30_000);
 });

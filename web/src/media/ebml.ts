@@ -2,9 +2,9 @@
 // - Tags (titre, artiste, commentaire, date, encodeur…) : élément entier remplacé par un Void de
 //   même taille totale ;
 // - dans Info : Title, DateUTC, SegmentUUID, PrevUUID, NextUUID, SegmentFilename, PrevFilename,
-//   NextFilename : Void de même taille ; MuxingApp et WritingApp (obligatoires) réécrits
-//   « shhdrop » complété d'octets nuls (chaîne vide si la place manque) ; un CRC-32 de Info
-//   devenu faux est lui aussi remplacé par un Void.
+//   NextFilename : Void de même taille ; MuxingApp et WritingApp (obligatoires) mis à zéro
+//   (chaîne vide complétée d'octets nuls, permise par la norme ; aucune marque du service,
+//   comme strip-capture.ts) ; un CRC-32 de Info devenu faux est lui aussi remplacé par un Void.
 // Gardés : pistes, Cluster, Cues, chapitres, pièces jointes (polices de sous-titres). Aucune
 // position ne bouge : SeekHead et Cues restent justes. Taille inconnue permise seulement pour
 // Segment et Cluster ; tout le reste → `Malformed`.
@@ -22,9 +22,8 @@ const CRC32 = 0xbf;
 const SEGMENT_KIDS: ReadonlySet<number> = new Set([0x114d9b74, INFO, 0x1654ae6b, CLUSTER, 0x1c53bb6b, 0x1043a770, 0x1941a469, TAGS, VOID, CRC32]);
 /** Info : remplacés par un Void. */
 const INFO_VOID: ReadonlySet<number> = new Set([0x7ba9, 0x4461, 0x73a4, 0x3cb923, 0x3eb923, 0x7384, 0x3c83ab, 0x3e83bb]);
-/** Info : réécrits « shhdrop ». */
+/** Info : mis à zéro (obligatoires, donc gardés). */
 const INFO_APP: ReadonlySet<number> = new Set([0x4d80, 0x5741]);
-const SHHDROP = new TextEncoder().encode("shhdrop");
 /** Info lu en mémoire au plus. */
 const INFO_MAX = 1 << 20;
 
@@ -153,7 +152,6 @@ async function cleanInfo(r: Reader, info: El): Promise<Patch[]> {
     if (INFO_VOID.has(id.value)) out.push({ at: info.start + p, bytes: voidBytes(end - p) });
     else if (INFO_APP.has(id.value)) {
       const want = new Uint8Array(end - data);
-      if (want.length >= SHHDROP.length) want.set(SHHDROP);
       if (!same(b.subarray(data, end), want)) out.push({ at: info.start + data, bytes: want });
     } else if (id.value === CRC32) crc = { at: info.start + p, len: end - p };
     p = end;

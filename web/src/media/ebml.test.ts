@@ -26,11 +26,18 @@ describe("WebM et MKV : nettoyage en place", () => {
     });
   }
 
-  it("meta.webm : repères présents avant ; MuxingApp « shhdrop » ; données des Cluster identiques", async () => {
+  it("meta.webm : repères présents avant ; MuxingApp et WritingApp vidés (octets nuls, aucune marque) ; données des Cluster identiques", async () => {
     const src = fx("meta.webm");
     expect(found(src, MARKERS).length).toBeGreaterThan(2);
     const out = await clean(src);
-    expect(indexOf(out, new TextEncoder().encode("shhdrop"))).toBeGreaterThan(0);
+    expect(found(out, ["shhdrop", "Shhdrop"])).toEqual([]);
+    for (const id of [[0x4d, 0x80], [0x57, 0x41]]) {
+      const at = indexOf(out, new Uint8Array(id));
+      expect(at).toBeGreaterThan(0);
+      const sz = vint(out, at + 2, false);
+      expect(sz.value).toBeGreaterThan(0);
+      expect([...out.subarray(at + 2 + sz.len, at + 2 + sz.len + sz.value)].every((x) => x === 0)).toBe(true);
+    }
     // Premier Cluster (1F 43 B6 75) et tout ce qui suit jusqu'aux Tags : identiques.
     const c = indexOf(src, new Uint8Array([0x1f, 0x43, 0xb6, 0x75]));
     const tags = indexOf(src, new Uint8Array([0x12, 0x54, 0xc3, 0x67]), c);

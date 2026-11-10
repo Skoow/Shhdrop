@@ -1,4 +1,4 @@
-// JPEG (spec §35.2) : reconstruction segment par segment. Gardés : SOI, APP0 JFIF, APP2 ICC
+// JPEG (spec §35.2) : reconstruction segment par segment. Gardés : SOI, APP0 JFIF (sans vignette), APP2 ICC
 // (tous les morceaux, dans l'ordre), APP14 Adobe, tables, SOFn, SOS et données compressées
 // octet pour octet, EOI. APP1 EXIF réécrit avec la seule orientation (boutisme d'origine, sans
 // IFD1). Tout le reste est retiré, y compris ce qui suit le premier EOI (images secondaires
@@ -8,7 +8,7 @@ import { isLittle, orientationTiff, orientationToKeep } from "./exif";
 
 const EXIF_ID = "Exif\0\0";
 /** Tables et trames gardées : DQT, DHT, DAC, DRI, DNL, SOF0 à SOF15 (sauf DHT, JPG, DAC). */
-function keptTable(m: number): boolean {
+export function keptTable(m: number): boolean {
   return m === 0xdb || m === 0xc4 || m === 0xcc || m === 0xdd || m === 0xdc || (m >= 0xc0 && m <= 0xcf && m !== 0xc8);
 }
 
@@ -18,7 +18,7 @@ function segment(m: number, body: Uint8Array): Uint8Array {
 }
 
 /** Fin des données compressées qui suivent un SOS : position du marqueur suivant. */
-function scanEnd(b: Uint8Array, o: number): number {
+export function scanEnd(b: Uint8Array, o: number): number {
   for (let i = o; i < b.length - 1; i++) {
     if (b[i] !== 0xff) continue;
     let j = i + 1;
@@ -65,7 +65,9 @@ export function cleanJpeg(b: Uint8Array): Uint8Array<ArrayBuffer> {
       continue;
     }
     if (m === 0xe0) {
-      if (startsWith(body, 0, "JFIF\0")) out.push(seg); // JFXX (vignette) retiré
+      // JFIF réécrit sans sa vignette (Xthumbnail = Ythumbnail = 0, longueur 16) : la vignette
+      // peut montrer l'image d'avant le recadrage. JFIF trop court : retiré. JFXX : retiré.
+      if (startsWith(body, 0, "JFIF\0") && body.length >= 14) out.push(segment(0xe0, concat([body.subarray(0, 12), new Uint8Array(2)])));
     } else if (m === 0xe1) {
       if (startsWith(body, 0, EXIF_ID) && !exifDone) {
         exifDone = true;
