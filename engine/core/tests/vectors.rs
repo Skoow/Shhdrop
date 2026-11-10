@@ -1,8 +1,12 @@
-// Rejoue les sections `encoding`, `password` et `link` de engine/vectors/v2.json (produites par
+// Rejoue les sections `encoding`, `password`, `link`, `hkdf`, `sha256`, `argon2id` et `access` de engine/vectors/v2.json (produites par
 // l'ancien moteur TypeScript) : chaque cas, sans exception, doit redonner la même sortie ou le
 // même message d'erreur.
 use serde_json::Value;
 use shhdrop_core::encoding::{b64u, unb64u};
+use shhdrop_core::kdf::{
+    KDF_CREATE, KDF_MAX, KDF_MIN, derive_access, hkdf, password_key, password_key_for_create,
+    sha256,
+};
 use shhdrop_core::link::{
     ParsedLink, check_origin, manage_link, parse_link, share_link, share_link_with_password,
     split_password,
@@ -201,4 +205,122 @@ fn link() {
     ] {
         assert!(seen.get(f).copied().unwrap_or(0) > 0, "aucun cas pour {f}");
     }
+}
+
+#[test]
+fn hkdf_cases() {
+    let v = vectors();
+    let cases = v["hkdf"].as_array().unwrap();
+    assert!(!cases.is_empty());
+    for c in cases {
+        let len = usize::try_from(c["len"].as_u64().unwrap()).unwrap();
+        let okm = hkdf(
+            &unhex(c["ikm"].as_str().unwrap()),
+            c["info"].as_str().unwrap(),
+            len,
+        );
+        assert_eq!(*okm, unhex(c["okm"].as_str().unwrap()), "{c}");
+    }
+}
+
+#[test]
+fn sha256_cases() {
+    let v = vectors();
+    let cases = v["sha256"].as_array().unwrap();
+    assert!(!cases.is_empty());
+    for c in cases {
+        let d = sha256(&unhex(c["input"].as_str().unwrap()));
+        assert_eq!(d.to_vec(), unhex(c["digest"].as_str().unwrap()), "{c}");
+    }
+}
+
+#[test]
+fn kdf_constants() {
+    let v = vectors();
+    for (name, p) in [
+        ("KDF_MIN", KDF_MIN),
+        ("KDF_MAX", KDF_MAX),
+        ("KDF_CREATE", KDF_CREATE),
+    ] {
+        let c = &v["constants"][name];
+        assert_eq!(c["ops"].as_u64(), Some(u64::from(p.ops)), "{name}");
+        assert_eq!(c["mem"].as_u64(), Some(u64::from(p.mem)), "{name}");
+    }
+}
+
+#[test]
+fn argon2id_cases() {
+    let v = vectors();
+    let cases = v["argon2id"].as_array().unwrap();
+    let mut computed = 0;
+    let mut not_applicable = 0;
+    for c in cases {
+        let pw = c["password"].as_str().unwrap();
+        // L'entrée est bien le texte du vecteur (avant NFC).
+        assert_eq!(
+            pw.as_bytes(),
+            unhex(c["password_utf8"].as_str().unwrap()),
+            "{c}"
+        );
+        let salt = unhex(c["salt"].as_str().unwrap());
+        let (Some(ops), Some(mem)) = (
+            c["ops"].as_u64().and_then(|x| u32::try_from(x).ok()),
+            c["mem"].as_u64().and_then(|x| u32::try_from(x).ok()),
+        ) else {
+            // Sans objet en Rust (engine/vectors/README.md) : paramètre non entier ou négatif,
+            // impossible à écrire en `u32`. JavaScript le refusait comme « invalides ».
+            assert_eq!(c["error"], "paramètres KDF invalides", "{c}");
+            not_applicable += 1;
+            continue;
+        };
+        let got = match c["fn"].as_str().unwrap() {
+            "passwordKey" => password_key(pw, &salt, ops, mem),
+            "passwordKeyForCreate" => {
+                // `passwordKeyForCreate` impose KDF_CREATE : le vecteur doit le refléter.
+                assert_eq!((ops, mem), (KDF_CREATE.ops, KDF_CREATE.mem), "{c}");
+                password_key_for_create(pw, &salt)
+            }
+            other => panic!("fonction inconnue dans les vecteurs : {other}"),
+        };
+        if c["error"].is_null() {
+            computed += 1;
+        }
+        check(c, got.map(|k| k.as_bytes().to_vec()), |_| {
+            unhex(c["key"].as_str().unwrap())
+        });
+    }
+    assert_eq!(computed, 3, "clés calculées attendues");
+    assert_eq!(
+        not_applicable, 1,
+        "un seul cas sans objet attendu (ops: 2.5)"
+    );
+}
+
+#[test]
+fn access_cases() {
+    let v = vectors();
+    let cases = v["access"].as_array().unwrap();
+    let mut ok = 0;
+    for c in cases {
+        if let Value::String(e) = &c["error"] {
+            // Sans objet en Rust : `KLien` et `KMdp` font 32 octets par construction ; la seule
+            // entrée de taille libre (octets lus d'un lien) passe par `parse_link`, qui la refuse.
+            // Les cas `shareId` et `accessKeys` (K_maître, K_env, K_preuve) viennent en Task 5.
+            assert_eq!(e, "clé ou sel de taille invalide", "{c}");
+            continue;
+        }
+        let a = derive_access(&KLien::from_bytes(key32(c["k_lien"].as_str().unwrap())));
+        assert_eq!(
+            a.k_acces.as_bytes().to_vec(),
+            unhex(c["k_acces"].as_str().unwrap()),
+            "{c}"
+        );
+        assert_eq!(
+            a.v_acces.to_vec(),
+            unhex(c["v_acces"].as_str().unwrap()),
+            "{c}"
+        );
+        ok += 1;
+    }
+    assert_eq!(ok, 2);
 }

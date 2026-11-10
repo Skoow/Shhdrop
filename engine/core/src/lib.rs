@@ -5,10 +5,11 @@
 
 pub mod encoding;
 mod error;
+pub mod kdf;
 mod keys;
 pub mod link;
 pub mod password;
 mod whatwg;
 
 pub use error::{Error, Result};
-pub use keys::{KLien, SGestion};
+pub use keys::{KAcces, KLien, KMdp, SGestion};

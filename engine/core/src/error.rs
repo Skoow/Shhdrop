@@ -13,6 +13,18 @@ pub enum Error {
     BaseInvalide,
     /// Lien de partage ou de gestion illisible ou refusé.
     LienInvalide,
+    /// `passwordKey` : mot de passe vide.
+    MotDePasseVide,
+    /// `passwordKeyForCreate` : mot de passe qui n'a pas la forme de `generatePassword`.
+    MotDePasseNonGenere,
+    /// `checkKdfParams` : paramètres au-dessus du plafond (KDF_MAX).
+    KdfInvalides,
+    /// `checkKdfParams` : paramètres en dessous du minimum (KDF_MIN).
+    KdfTropFaibles,
+    /// K_lien, K_mdp ou sel de mauvaise taille.
+    TailleInvalide,
+    /// Argon2id n'a pas pu s'exécuter (mémoire de 64 Mio refusée) : message de `argon2-run.ts`.
+    Argon2Echec,
 }
 
 impl Error {
@@ -23,6 +35,12 @@ impl Error {
             Error::OrigineInvalide => "origine_invalide",
             Error::BaseInvalide => "base_invalide",
             Error::LienInvalide => "lien_invalide",
+            Error::MotDePasseVide => "mot_de_passe_vide",
+            Error::MotDePasseNonGenere => "mot_de_passe_non_genere",
+            Error::KdfInvalides => "paramètres KDF invalides",
+            Error::KdfTropFaibles => "paramètres KDF trop faibles",
+            Error::TailleInvalide => "clé ou sel de taille invalide",
+            Error::Argon2Echec => "argon2_echec",
         }
     }
 }
@@ -47,5 +65,20 @@ mod tests {
         assert_eq!(Error::OrigineInvalide.to_string(), "origine_invalide");
         assert_eq!(Error::BaseInvalide.to_string(), "base_invalide");
         assert_eq!(Error::LienInvalide.to_string(), "lien_invalide");
+        assert_eq!(Error::MotDePasseVide.to_string(), "mot_de_passe_vide");
+        assert_eq!(
+            Error::MotDePasseNonGenere.to_string(),
+            "mot_de_passe_non_genere"
+        );
+        assert_eq!(Error::KdfInvalides.to_string(), "paramètres KDF invalides");
+        assert_eq!(
+            Error::KdfTropFaibles.to_string(),
+            "paramètres KDF trop faibles"
+        );
+        assert_eq!(
+            Error::TailleInvalide.to_string(),
+            "clé ou sel de taille invalide"
+        );
+        assert_eq!(Error::Argon2Echec.to_string(), "argon2_echec");
     }
 }

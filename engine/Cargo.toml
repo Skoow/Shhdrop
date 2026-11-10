@@ -1,8 +1,8 @@
 # Espace de travail du moteur Shhdrop (spécification 2026-11-10-moteur-rust-1-chiffrement).
 # shhdrop-core : moteur sans navigateur, horloge, fichiers ni réseau. Le crate WebAssembly
-# s'ajoute aux membres dans une tâche suivante.
+# shhdrop-wasm : liaison WebAssembly du site ; n'expose encore qu'Argon2id (mesure, Task 4).
 [workspace]
-members = ["core"]
+members = ["core", "wasm"]
 resolver = "2"
 
 [workspace.package]
@@ -16,3 +16,9 @@ opt-level = 3
 lto = true
 codegen-units = 1
 # Pas de panic = "abort" : le déroulement par défaut est gardé pour les liaisons natives futures.
+
+# Argon2id (64 Mio, 3 passes) en mode debug : plusieurs secondes par appel sans optimisation.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3

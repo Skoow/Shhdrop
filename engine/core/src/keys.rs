@@ -41,6 +41,14 @@ secret32!(
     /// Secret de gestion, dans le fragment du lien de gestion.
     SGestion
 );
+secret32!(
+    /// K_accès = HKDF(K_lien, « shhdrop/v2/acces ») : son empreinte V_accès est donnée au serveur.
+    KAcces
+);
+secret32!(
+    /// K_mdp = Argon2id(mot de passe NFC, sel) : ne quitte jamais l'appareil.
+    KMdp
+);
 
 #[cfg(test)]
 mod tests {
@@ -53,5 +61,7 @@ mod tests {
             format!("{:?}", SGestion::from_bytes([7; 32])),
             "SGestion(…)"
         );
+        assert_eq!(format!("{:?}", KAcces::from_bytes([7; 32])), "KAcces(…)");
+        assert_eq!(format!("{:?}", KMdp::from_bytes([7; 32])), "KMdp(…)");
     }
 }
