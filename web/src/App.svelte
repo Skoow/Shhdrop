@@ -7,6 +7,7 @@
   import { guardFileDrop, reloadIfRestored } from "./app/lifecycle";
   import { readLink, readShare, scrubAddressBar, type LinkState, type ShareTake } from "./app/link";
   import { href, router } from "./app/router.svelte";
+  import { applySeo } from "./app/seo";
   import { setScreenTitle } from "./app/title";
   import { getLang } from "./i18n/i18n.svelte";
   import { watchKeyboard } from "./app/viewport";
@@ -92,6 +93,8 @@
     const name = router.current.name;
     if (!supported) setScreenTitle("unsupported");
     else if (name !== "home" && name !== "envoyer") setScreenTitle(name);
+    // Référencement : description, canonique et noindex par route (app/seo.ts).
+    applySeo(supported ? name : "unsupported");
   });
 
   // UI §9 : clavier virtuel ouvert → classe kbd-open sur <html> (barres collées dans le flux).

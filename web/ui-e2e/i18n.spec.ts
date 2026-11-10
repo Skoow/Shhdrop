@@ -41,13 +41,16 @@ test.describe("français par défaut", () => {
     // Titre par route (scan UX B9) : accueil, puis Sécurité.
     await openSecurity(page);
     await expect(page).toHaveTitle("Security · Shhdrop");
+    // Accueil : titre descriptif (référencement, retours CLEAN2) ; page d'envoi : « Envoyer ».
     await page.goto(shh.origin + "/");
-    await expect(page).toHaveTitle("Envoyer · Shhdrop");
+    await expect(page).toHaveTitle("Partage chiffré de bout en bout, sans compte · Shhdrop");
 
     await switchLang(page, "English");
-    await expect(page).toHaveTitle("Send · Shhdrop");
+    await expect(page).toHaveTitle("End-to-end encrypted sharing, no account · Shhdrop");
     await switchLang(page, "Français");
     await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+    await expect(page).toHaveTitle("Partage chiffré de bout en bout, sans compte · Shhdrop");
+    await page.goto(shh.origin + "/envoyer");
     await expect(page).toHaveTitle("Envoyer · Shhdrop");
 
     const stored = await page.evaluate(async () => ({

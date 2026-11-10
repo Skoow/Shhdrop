@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Pages publiques indexées (app/seo.ts, INDEXED) ; domaine de la spécification (shhdrop.app). -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://shhdrop.app/</loc></url>
+  <url><loc>https://shhdrop.app/securite</loc></url>
+  <url><loc>https://shhdrop.app/confidentialite</loc></url>
+  <url><loc>https://shhdrop.app/offres</loc></url>
+  <url><loc>https://shhdrop.app/conditions</loc></url>
+  <url><loc>https://shhdrop.app/mentions-legales</loc></url>
+</urlset>

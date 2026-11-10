@@ -28,10 +28,23 @@
     <link rel="stylesheet" href="/src/ui/fonts.css" />
     <link rel="stylesheet" href="/src/ui/tokens.css" />
     <link rel="stylesheet" href="/src/ui/base.css" />
-    <title>Shhdrop</title>
+    <!-- Référencement (retours CLEAN2) : description par défaut ; app/seo.ts la met à jour par page,
+         avec l'adresse canonique et « noindex » hors des pages publiques. Aucune balise og:* (UI §12). -->
+    <meta
+      name="description"
+      content="Envoyez fichiers, photos, vidéos et notes chiffrés de bout en bout, sans compte, par un lien avec mot de passe qui s'autodétruit. Le serveur ne lit rien."
+    />
+    <title>Partage chiffré de bout en bout, sans compte · Shhdrop</title>
   </head>
   <body>
     <div id="app"></div>
+    <!-- Sans JavaScript (moteurs de recherche qui n'exécutent pas les scripts, navigateurs bridés) :
+         ce que fait Shhdrop, et pourquoi le site a besoin de JavaScript (chiffrement sur l'appareil). -->
+    <noscript>
+      <h1>Shhdrop : partage chiffré de bout en bout, sans compte</h1>
+      <p>Envoyez fichiers, photos, vidéos, notes et messages vocaux par un lien protégé par un mot de passe, qui s'autodétruit après un temps ou un nombre d'ouvertures choisis. Tout est chiffré sur votre appareil : le serveur ne peut rien lire.</p>
+      <p>Le chiffrement se fait dans votre navigateur : activez JavaScript pour utiliser Shhdrop.</p>
+    </noscript>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

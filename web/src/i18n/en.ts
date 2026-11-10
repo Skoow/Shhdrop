@@ -287,6 +287,13 @@ export const en = {
   "verif.cancel": "Cancel the upload",
   "verif.more": "Learn more",
 
+  "seo.home": "Send files, photos, videos and notes end-to-end encrypted, no account needed, with a password-protected link that self-destructs. The server reads nothing.",
+  "seo.securite": "How Shhdrop protects what you send: end-to-end encryption in the browser, key in the link never sent to the server, password, automatic destruction.",
+  "seo.confidentialite": "What Shhdrop sees and doesn't: no account, no IP address stored, no analytics, no trackers; file metadata cleaned on your device.",
+  "seo.offres": "Shhdrop Plus and Pro plans, coming soon: more space, longer durations and more opens, with the same end-to-end encryption.",
+  "seo.conditions": "Terms of use of Shhdrop, an end-to-end encrypted sharing service with no account.",
+  "seo.mentions": "Legal notice of Shhdrop: publisher, host and contact.",
+  "title.landing": "End-to-end encrypted sharing, no account",
   "title.home": "Send",
   "title.envoyer": "Send",
   "title.sealing": "Sending",

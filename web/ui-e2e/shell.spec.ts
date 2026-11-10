@@ -49,12 +49,31 @@ test("pied de page (UI5) : Produit, Confiance, Légal ; sans traceur ; © ; vers
 });
 });
 
-test("robots.txt interdit /s/ et /m/", async ({ request, shh }) => {
-  const res = await request.get(shh.origin + "/robots.txt");
-  expect(res.status()).toBe(200);
-  const body = await res.text();
-  expect(body).toContain("Disallow: /s/");
-  expect(body).toContain("Disallow: /m/");
+test("référencement : robots.txt et sitemap.xml ; pages publiques indexées, pages privées « noindex »", async ({ page, request, shh }) => {
+  const robots = await request.get(shh.origin + "/robots.txt");
+  expect(robots.status()).toBe(200);
+  expect(await robots.text()).toContain("Sitemap: https://shhdrop.app/sitemap.xml");
+  const map = await request.get(shh.origin + "/sitemap.xml");
+  expect(map.status()).toBe(200);
+  expect(map.headers()["content-type"]).toMatch(/xml/);
+  const locs = [...(await map.text()).matchAll(/<loc>https:\/\/shhdrop\.app([^<]*)<\/loc>/g)].map((m) => m[1]);
+  expect(locs).toEqual(["/", "/securite", "/confidentialite", "/offres", "/conditions", "/mentions-legales"]);
+  const meta = (n: string) => page.locator(`meta[name="${n}"]`);
+  for (const p of locs) {
+    await page.goto(shh.origin + p);
+    await expect(meta("robots"), p).toHaveAttribute("content", "index, follow");
+    await expect(page.locator('link[rel="canonical"]'), p).toHaveAttribute("href", shh.origin + p);
+    expect((await meta("description").getAttribute("content"))!.length, p).toBeGreaterThan(40);
+  }
+  for (const p of ["/envoyer", "/signaler", "/inconnu"]) {
+    await page.goto(shh.origin + p);
+    await expect(meta("robots"), p).toHaveAttribute("content", "noindex");
+    await expect(page.locator('link[rel="canonical"]'), p).toHaveCount(0);
+  }
+  // Un partage ouvert (« /#clé ») n'est jamais indexé, et la canonique ne garde aucun fragment.
+  await page.goto(shh.origin + "/#AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+  await expect(meta("robots")).toHaveAttribute("content", "noindex");
+  await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
 });
 
 test("translate=no et meta notranslate", async ({ page, shh }) => {
