@@ -22,7 +22,7 @@ Chaque signalement donne la gravité, l'endroit, le problème et une correction 
 
 ## Règles techniques
 
-- Aucune crypto maison : WebCrypto et libsodium uniquement, avec les paramètres de la spécification.
+- Aucune crypto maison : bibliothèques reconnues uniquement (site : WebCrypto et libsodium ; apps : libsodium et bibliothèques de chiffrement reconnues), avec les paramètres de la spécification. Le site et les apps doivent donner les mêmes résultats, prouvés par des vecteurs de test communs (décision du propriétaire, 10 novembre).
 - Le serveur ne doit jamais recevoir ni stocker de contenu, de nom de fichier, de clé ou de mot de passe en clair. Le test « le serveur ne voit rien » bloque toute mise en ligne.
 - Aucune ressource tierce sur le site : pas de CDN, de police externe, d'analytics ni de traceur. Seule exception, validée par le propriétaire : le repli Google reCAPTCHA, chargé après un clic et seulement dans un cadre isolé sur un autre site, jamais sur une page qui détient des clés (spécification §26).
 - Aucune adresse IP enregistrée sur disque.
