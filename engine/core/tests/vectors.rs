@@ -1,8 +1,13 @@
-// Rejoue les sections `encoding`, `password`, `link`, `hkdf`, `sha256`, `argon2id` et `access`
-// de engine/vectors/v2.json (produites par l'ancien moteur TypeScript) : chaque cas, sans
-// exception, doit redonner la même sortie ou le même message d'erreur.
+// Rejoue les sections `encoding`, `password`, `link`, `hkdf`, `sha256`, `argon2id`, `access`,
+// `content` et `envelope` de engine/vectors/v2.json (produites par l'ancien moteur TypeScript) :
+// chaque cas, sans exception, doit redonner la même sortie ou le même message d'erreur.
+mod support;
+
 use serde_json::Value;
 use shhdrop_core::encoding::{b64u, unb64u};
+use shhdrop_core::envelope::{
+    access_keys, content_keys, content_keys_checked, open, seal, share_id,
+};
 use shhdrop_core::kdf::{
     KDF_CREATE, KDF_MAX, KDF_MIN, derive_access, hkdf, password_key, password_key_for_create,
     sha256,
@@ -12,20 +17,15 @@ use shhdrop_core::link::{
     split_password,
 };
 use shhdrop_core::password::{generate, is_generated};
-use shhdrop_core::{KLien, SGestion};
+use shhdrop_core::platform::{KeyHandle, Platform};
+use shhdrop_core::{Error, KLien, KMdp, SGestion, Seed};
+use support::{block_on, platform, replay, unhex};
+use zeroize::Zeroizing;
 
 fn vectors() -> Value {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../vectors/v2.json");
     let text = std::fs::read_to_string(path).expect("lecture de v2.json");
     serde_json::from_str(&text).expect("JSON de v2.json")
-}
-
-fn unhex(s: &str) -> Vec<u8> {
-    assert!(s.len().is_multiple_of(2), "hex de longueur impaire : {s}");
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("hex"))
-        .collect()
 }
 
 fn key32(s: &str) -> [u8; 32] {
@@ -84,8 +84,9 @@ fn password_generate() {
             let d = draws.pop().expect("plus de tirages que dans le vecteur");
             assert_eq!(buf.len(), d.len(), "taille du tirage");
             buf.copy_from_slice(&d);
+            Ok(())
         };
-        let pw = generate(&mut rng);
+        let pw = generate(&mut rng).unwrap();
         assert_eq!(pw, c["password"].as_str().unwrap(), "{c}");
         assert!(draws.is_empty(), "tirages non consommés : {c}");
     }
@@ -299,31 +300,180 @@ fn argon2id_cases() {
     );
 }
 
+fn hexf(c: &Value, f: &str) -> Vec<u8> {
+    unhex(
+        c[f].as_str()
+            .unwrap_or_else(|| panic!("champ {f} absent : {c}")),
+    )
+}
+
+/// `n` octets 0, 1, 2, … (entrée `seq` du générateur).
+fn seq(n: usize) -> Vec<u8> {
+    (0..n).map(|i| i as u8).collect()
+}
+
+/// Vérifie qu'une poignée tient la clé brute `raw` du vecteur : la même sonde AES-GCM sous la
+/// poignée et sous `raw` importée donne le même chiffré (la clé ne sort jamais du fournisseur).
+fn same_key(p: &impl Platform, k: KeyHandle, raw: &[u8], what: &str) {
+    let raw: [u8; 32] = raw.try_into().expect("32 octets");
+    let r = block_on(p.aes_import(Zeroizing::new(raw))).unwrap();
+    let probe = |h| block_on(p.aes_seal_batch(h, b"sonde", &[[7; 12]], &seq(16), 16)).unwrap();
+    assert_eq!(probe(k), probe(r), "{what}");
+    p.aes_drop(r);
+}
+
+/// En-tête de 48 octets : « SHH2 », version 2, 11 octets nuls, engagement (format, Task 6).
+fn header(engagement: &[u8; 32]) -> Vec<u8> {
+    [&b"SHH2\x02"[..], &[0; 11], &engagement[..]].concat()
+}
+
 #[test]
 fn access_cases() {
     let v = vectors();
     let cases = v["access"].as_array().unwrap();
-    let mut ok = 0;
+    let p = platform(1);
+    let (mut ok, mut refused) = (0, 0);
     for c in cases {
         if let Value::String(e) = &c["error"] {
-            // Sans objet en Rust : `KLien` et `KMdp` font 32 octets par construction ; la seule
-            // entrée de taille libre (octets lus d'un lien) passe par `parse_link`, qui la refuse.
-            // Les cas `shareId` et `accessKeys` (K_maître, K_env, K_preuve) viennent en Task 5.
-            assert_eq!(e, "clé ou sel de taille invalide", "{c}");
+            // Le générateur a passé `seq(n)` de la taille donnée dans le nom du cas.
+            let got: Result<(), Error> = match c["name"].as_str().unwrap() {
+                "deriveAccess : K_lien de 31 octets" => {
+                    KLien::from_slice(&seq(31)).map(|k| drop(derive_access(&k)))
+                }
+                "shareId : K_lien de 33 octets" => KLien::from_slice(&seq(33)).map(drop),
+                "accessKeys : K_lien de 31 octets" => KLien::from_slice(&seq(31))
+                    .and_then(|l| KMdp::from_slice(&seq(32)).map(|m| (l, m)))
+                    .map(drop),
+                "accessKeys : K_mdp de 31 octets" => KLien::from_slice(&seq(32))
+                    .and_then(|l| KMdp::from_slice(&seq(31)).map(|m| (l, m)))
+                    .map(drop),
+                other => panic!("refus inconnu dans les vecteurs : {other}"),
+            };
+            assert_eq!(got.unwrap_err().to_string(), *e, "{c}");
+            refused += 1;
             continue;
         }
-        let a = derive_access(&KLien::from_bytes(key32(c["k_lien"].as_str().unwrap())));
+        let k_lien = KLien::from_slice(&hexf(c, "k_lien")).unwrap();
+        let k_mdp = KMdp::from_slice(&hexf(c, "k_mdp")).unwrap();
+        let a = derive_access(&k_lien);
+        assert_eq!(a.k_acces.as_bytes().to_vec(), hexf(c, "k_acces"), "{c}");
+        assert_eq!(a.v_acces.to_vec(), hexf(c, "v_acces"), "{c}");
+        assert_eq!(share_id(&k_lien).to_vec(), hexf(c, "id"), "{c}");
+        // K_maître et K_env ne sortent pas du moteur : le vecteur est vérifié par sa chaîne HKDF
+        // (K_maître → K_env, K_preuve), puis K_env contre la poignée rendue par access_keys.
+        let ikm = [&k_lien.as_bytes()[..], &k_mdp.as_bytes()[..]].concat();
+        let k_maitre = hkdf::<32>(&ikm, "shhdrop/v2/maitre");
+        assert_eq!(k_maitre.to_vec(), hexf(c, "k_maitre"), "{c}");
+        let k_env = hkdf::<32>(&*k_maitre, "shhdrop/v2/enveloppe");
+        assert_eq!(k_env.to_vec(), hexf(c, "k_env"), "{c}");
+        let ak = block_on(access_keys(&p, &k_lien, &k_mdp)).unwrap();
+        same_key(&p, ak.k_env, &hexf(c, "k_env"), "k_env");
+        assert_eq!(ak.k_preuve.as_bytes().to_vec(), hexf(c, "k_preuve"), "{c}");
+        assert_eq!(ak.v_preuve.to_vec(), hexf(c, "v_preuve"), "{c}");
+        p.aes_drop(ak.k_env);
+        ok += 1;
+    }
+    assert_eq!((ok, refused), (2, 4));
+}
+
+#[test]
+fn content_cases() {
+    let v = vectors();
+    let cases = v["content"].as_array().unwrap();
+    let p = platform(1);
+    let (mut ok, mut refused) = (0, 0);
+    for c in cases {
+        let r = Seed::from_slice(&hexf(c, "r"));
+        if let Value::String(e) = &c["error"] {
+            let got = match c["fn"].as_str().unwrap() {
+                "contentKeys" => r.and_then(|r| block_on(content_keys(&p, &r))),
+                "contentKeysChecked" => {
+                    r.and_then(|r| block_on(content_keys_checked(&p, &r, &hexf(c, "engagement"))))
+                }
+                other => panic!("fonction inconnue dans les vecteurs : {other}"),
+            };
+            assert_eq!(got.err().map(|g| g.to_string()), Some(e.clone()), "{c}");
+            refused += 1;
+            continue;
+        }
+        let r = r.unwrap();
+        let engagement = hexf(c, "engagement");
+        for checked in [false, true] {
+            let ck = if checked {
+                block_on(content_keys_checked(&p, &r, &engagement)).unwrap()
+            } else {
+                block_on(content_keys(&p, &r)).unwrap()
+            };
+            assert_eq!(ck.engagement.to_vec(), engagement, "{c}");
+            same_key(&p, ck.k_contenu, &hexf(c, "k_contenu"), "k_contenu");
+            // probe = AES-GCM(K_contenu, nonce(0, faux) = 12 zéros, en-tête, probe_plain).
+            let probe = block_on(p.aes_seal_batch(
+                ck.k_contenu,
+                &header(&ck.engagement),
+                &[[0; 12]],
+                &hexf(c, "probe_plain"),
+                16,
+            ))
+            .unwrap();
+            assert_eq!(probe, hexf(c, "probe"), "{c}");
+            p.aes_drop(ck.k_contenu);
+        }
         assert_eq!(
-            a.k_acces.as_bytes().to_vec(),
-            unhex(c["k_acces"].as_str().unwrap()),
-            "{c}"
-        );
-        assert_eq!(
-            a.v_acces.to_vec(),
-            unhex(c["v_acces"].as_str().unwrap()),
-            "{c}"
+            hkdf::<32>(r.as_bytes(), "shhdrop/v2/contenu").to_vec(),
+            hexf(c, "k_contenu")
         );
         ok += 1;
     }
-    assert_eq!(ok, 2);
+    assert_eq!((ok, refused), (2, 4));
+}
+
+#[test]
+fn envelope_cases() {
+    let v = vectors();
+    let cases = v["envelope"].as_array().unwrap();
+    let (mut sealed, mut opened, mut refused) = (0, 0, 0);
+    for c in cases {
+        let k_lien = KLien::from_slice(&hexf(c, "k_lien")).unwrap();
+        let k_mdp = KMdp::from_slice(&hexf(c, "k_mdp")).unwrap();
+        let (e, id, hdr) = (hexf(c, "e"), hexf(c, "id"), hexf(c, "header"));
+        match c["fn"].as_str().unwrap() {
+            "seal" => {
+                let draws = c["random"].as_array().unwrap();
+                let p = replay(draws.iter().map(|d| unhex(d.as_str().unwrap())).collect());
+                let ak = block_on(access_keys(&p, &k_lien, &k_mdp)).unwrap();
+                let r = Seed::from_slice(&hexf(c, "r")).unwrap();
+                // L'en-tête du vecteur est bien celui de R (engagement compris).
+                let eng = block_on(content_keys(&p, &r)).unwrap().engagement;
+                assert_eq!(header(&eng), hdr, "{c}");
+                assert_eq!(share_id(&k_lien).to_vec(), id, "{c}");
+                let got = block_on(seal(
+                    &p,
+                    ak.k_env,
+                    &r,
+                    &id.clone().try_into().unwrap(),
+                    &hdr.clone().try_into().unwrap(),
+                ))
+                .unwrap();
+                assert_eq!(got, e, "{c}");
+                // Tous les tirages du vecteur consommés : au-delà, replay échoue.
+                assert!(p.random(&mut []).is_err(), "tirage non consommé : {c}");
+                sealed += 1;
+            }
+            "open" => {
+                let p = platform(1);
+                let ak = block_on(access_keys(&p, &k_lien, &k_mdp)).unwrap();
+                let got = block_on(open(&p, ak.k_env, &e, &id, &hdr));
+                check(c, got.map(|s| s.as_bytes().to_vec()), |_| hexf(c, "r"));
+                if c["error"].is_null() {
+                    opened += 1;
+                } else {
+                    assert_eq!(c["error"], "paquet_corrompu", "{c}");
+                    refused += 1;
+                }
+            }
+            other => panic!("fonction inconnue dans les vecteurs : {other}"),
+        }
+    }
+    assert_eq!((sealed, opened), (1, 1));
+    assert!(refused >= 10, "{refused}");
 }

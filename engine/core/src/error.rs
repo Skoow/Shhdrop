@@ -25,6 +25,17 @@ pub enum Error {
     TailleInvalide,
     /// Argon2id n'a pas pu s'exécuter (mémoire de 64 Mio refusée) : message de `argon2-run.ts`.
     Argon2Echec,
+    /// L'aléa de la plateforme a échoué (`getRandomValues` qui lève, générateur du système
+    /// indisponible) : jamais de tampon nul utilisé à la place.
+    AleatoireIndisponible,
+    /// Erreur unique de toute ouverture (taille, tag, autre id, autre en-tête, autre clé,
+    /// engagement faux) : aucun oracle sur la cause.
+    PaquetCorrompu,
+    /// Graine de contenu R qui ne fait pas 32 octets (`checkSeed`).
+    GraineInvalide,
+    /// Le fournisseur n'a pas pu importer une clé ou chiffrer (lot mal formé, poignée inconnue,
+    /// échec de WebCrypto) : jamais un échec d'ouverture, qui reste `PaquetCorrompu`.
+    ChiffrementEchec,
 }
 
 impl Error {
@@ -41,6 +52,10 @@ impl Error {
             Error::KdfTropFaibles => "paramètres KDF trop faibles",
             Error::TailleInvalide => "clé ou sel de taille invalide",
             Error::Argon2Echec => "argon2_echec",
+            Error::AleatoireIndisponible => "aleatoire_indisponible",
+            Error::PaquetCorrompu => "paquet_corrompu",
+            Error::GraineInvalide => "graine invalide",
+            Error::ChiffrementEchec => "chiffrement_echec",
         }
     }
 }
@@ -80,5 +95,12 @@ mod tests {
             "clé ou sel de taille invalide"
         );
         assert_eq!(Error::Argon2Echec.to_string(), "argon2_echec");
+        assert_eq!(
+            Error::AleatoireIndisponible.to_string(),
+            "aleatoire_indisponible"
+        );
+        assert_eq!(Error::PaquetCorrompu.to_string(), "paquet_corrompu");
+        assert_eq!(Error::GraineInvalide.to_string(), "graine invalide");
+        assert_eq!(Error::ChiffrementEchec.to_string(), "chiffrement_echec");
     }
 }

@@ -4,12 +4,16 @@
 #![forbid(unsafe_code)]
 
 pub mod encoding;
+pub mod envelope;
 mod error;
 pub mod kdf;
 mod keys;
 pub mod link;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod native;
 pub mod password;
+pub mod platform;
 mod whatwg;
 
 pub use error::{Error, Result};
-pub use keys::{KAcces, KLien, KMdp, SGestion};
+pub use keys::{KAcces, KLien, KMdp, KPreuve, SGestion, Seed};

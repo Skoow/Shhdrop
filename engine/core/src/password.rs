@@ -5,9 +5,12 @@
 //! que sous 252 = 4 × 63 (aucun biais de modulo).
 //!
 //! L'aléa vient de l'appelant (`rng` remplit le tampon : WebCrypto sur le site, le système dans
-//! les apps) : le moteur ne dépend d'aucune source du système. Les octets sont consommés dans le
+//! les apps) : le moteur ne dépend d'aucune source du système. Un aléa qui échoue arrête le
+//! tirage (`aleatoire_indisponible`) : jamais de boucle sur un tampon nul ni de mot de passe tiré
+//! d'octets non aléatoires. Les octets sont consommés dans le
 //! même ordre que l'ancien moteur : tirages complets de 22 octets, nouveau tirage pour chaque
 //! nouvel essai.
+use crate::error::Result;
 use zeroize::Zeroize;
 
 /// Minuscules sans i j l o s z (20), majuscules sans B I O S Z (21), chiffres 2 à 9 (8), 14 spéciaux.
@@ -33,8 +36,9 @@ pub fn is_generated(pw: &str) -> bool {
         && pw.chars().filter(|&c| in_family(3)(c)).count() == PASSWORD_SPECIALS
 }
 
-/// Tire un mot de passe généré ; `rng` remplit chaque tampon de 22 octets d'aléa uniforme.
-pub fn generate(rng: &mut impl FnMut(&mut [u8])) -> String {
+/// Tire un mot de passe généré ; `rng` remplit chaque tampon de 22 octets d'aléa uniforme, ou
+/// échoue (erreur rendue telle quelle, tampon et essai en cours effacés).
+pub fn generate(rng: &mut impl FnMut(&mut [u8]) -> Result<()>) -> Result<String> {
     let alphabet = PASSWORD_ALPHABET.as_bytes(); // ASCII : un octet par symbole
     let n = alphabet.len(); // 63
     let limit = 256 - 256 % n; // 252
@@ -42,7 +46,11 @@ pub fn generate(rng: &mut impl FnMut(&mut [u8])) -> String {
     loop {
         let mut pw = String::with_capacity(PASSWORD_LEN);
         while pw.len() < PASSWORD_LEN {
-            rng(&mut buf);
+            if let Err(e) = rng(&mut buf) {
+                buf.zeroize();
+                pw.zeroize();
+                return Err(e);
+            }
             for &b in &buf {
                 if usize::from(b) < limit && pw.len() < PASSWORD_LEN {
                     pw.push(char::from(alphabet[usize::from(b) % n]));
@@ -51,7 +59,7 @@ pub fn generate(rng: &mut impl FnMut(&mut [u8])) -> String {
         }
         buf.zeroize();
         if is_generated(&pw) {
-            return pw;
+            return Ok(pw);
         }
         pw.zeroize();
     }
@@ -60,9 +68,10 @@ pub fn generate(rng: &mut impl FnMut(&mut [u8])) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Error;
 
     /// splitmix64 : générateur de test déterministe (jamais utilisé hors des tests).
-    fn test_rng(seed: u64) -> impl FnMut(&mut [u8]) {
+    fn test_rng(seed: u64) -> impl FnMut(&mut [u8]) -> Result<()> {
         let mut s = seed;
         move |buf: &mut [u8]| {
             for b in buf.iter_mut() {
@@ -72,6 +81,7 @@ mod tests {
                 z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
                 *b = (z ^ (z >> 31)) as u8;
             }
+            Ok(())
         }
     }
 
@@ -155,7 +165,7 @@ mod tests {
         let mut rng = test_rng(1);
         let mut counts = std::collections::HashMap::<char, usize>::new();
         for _ in 0..n {
-            let p = generate(&mut rng);
+            let p = generate(&mut rng).unwrap();
             assert_eq!(p.chars().count(), PASSWORD_LEN);
             for c in p.chars() {
                 assert!(PASSWORD_ALPHABET.contains(c));
@@ -201,8 +211,9 @@ mod tests {
         let mut rng = |buf: &mut [u8]| {
             assert_eq!(buf.len(), 22);
             buf.copy_from_slice(&draws.pop().expect("tirage de trop"));
+            Ok(())
         };
-        assert_eq!(generate(&mut rng), "aA2!!?aA2aA");
+        assert_eq!(generate(&mut rng).unwrap(), "aA2!!?aA2aA");
         assert!(draws.is_empty());
     }
 
@@ -216,16 +227,44 @@ mod tests {
             v
         }];
         draws.reverse();
-        let mut rng = |buf: &mut [u8]| buf.copy_from_slice(&draws.pop().unwrap());
-        assert_eq!(generate(&mut rng), "aA2!?@aA2aA");
+        let mut rng = |buf: &mut [u8]| {
+            buf.copy_from_slice(&draws.pop().unwrap());
+            Ok(())
+        };
+        assert_eq!(generate(&mut rng).unwrap(), "aA2!?@aA2aA");
         assert!(draws.is_empty());
+    }
+
+    #[test]
+    fn aleatoire_qui_echoue() {
+        // Un aléa qui échoue (getRandomValues qui lève) arrête le tirage : jamais de boucle sans
+        // fin sur un tampon nul, jamais de mot de passe tiré d'octets non aléatoires.
+        let mut calls = 0;
+        let mut fail = |_: &mut [u8]| {
+            calls += 1;
+            Err(Error::AleatoireIndisponible)
+        };
+        assert_eq!(generate(&mut fail), Err(Error::AleatoireIndisponible));
+        assert_eq!(calls, 1);
+        // Échec au 2e tirage (le 1er, une seule famille, est refusé) : erreur, pas de résultat.
+        let mut n = 0;
+        let mut late = |buf: &mut [u8]| {
+            n += 1;
+            if n > 1 {
+                return Err(Error::AleatoireIndisponible);
+            }
+            buf.fill(0);
+            Ok(())
+        };
+        assert_eq!(generate(&mut late), Err(Error::AleatoireIndisponible));
+        assert_eq!(n, 2);
     }
 
     #[test]
     fn accepte_les_mots_de_passe_generes() {
         let mut rng = test_rng(2);
         for _ in 0..40 {
-            assert!(is_generated(&generate(&mut rng)));
+            assert!(is_generated(&generate(&mut rng).unwrap()));
         }
         assert!(is_generated("aC3!cD5?#Fg"));
         assert!(is_generated("a!C?3#D5eFg"));

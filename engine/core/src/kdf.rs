@@ -304,7 +304,9 @@ mod tests {
                 n = n.wrapping_add(37);
                 *b = n;
             }
-        });
+            Ok(())
+        })
+        .unwrap();
         assert!(is_generated(&g));
         let a = password_key_for_create(&g, &SALT).unwrap();
         assert_eq!(hex(a.as_bytes()), pk(&g, &SALT, KDF_CREATE).unwrap());
