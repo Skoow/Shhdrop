@@ -7,6 +7,7 @@
 // Le nom est toujours le nom nettoyé (safeName, puis zipName pour le dossier) ; le type MIME
 // du manifeste n'est jamais utilisé. close() n'est appelé qu'à la fin d'une lecture complète.
 import type { ItemSink } from "../flows/downloads.svelte";
+import { lowMemory } from "../app/env";
 import { zipName } from "../zip/store-zip";
 
 /** Délai avant la révocation de l'URL du repli : le téléchargement a le temps de démarrer. */
@@ -113,6 +114,15 @@ export function blobDownloads(d: BlobDeps, foldBytes = FOLD_BYTES) {
       },
     };
   };
+}
+
+/**
+ * Sans sélecteur de fichier (iPhone, Firefox), un fichier est assemblé en mémoire avant d'être
+ * enregistré (spec §18.7). Vrai si l'un des éléments risque d'épuiser la mémoire de cet appareil
+ * (plus de 200 Mio sur un petit appareil, lowMemory) : l'écran prévient, sans rien bloquer.
+ */
+export function needsMemoryWarning(sizes: readonly number[], hasPicker: boolean, nav: Navigator): boolean {
+  return !hasPicker && sizes.some((n) => lowMemory(nav, n));
 }
 
 /** Lien <a download> cliqué par le code, retiré aussitôt (repli sans sélecteur). */

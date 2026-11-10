@@ -573,6 +573,7 @@ export const fr = {
   "dl.fail.gone": "Ce partage n'est plus disponible.",
   "dl.all": "Tout télécharger",
   "dl.zip": "Tout télécharger en .zip",
+  "dl.big.warn": "Fichier volumineux\u202f: cet appareil doit l'assembler en mémoire avant de l'enregistrer, et le téléchargement peut échouer. Dans ce cas, ouvrez le lien sur un ordinateur.",
   "dl.zip.tooBig": "Cet appareil ne peut pas assembler une archive de cette taille. Utilisez « Tout télécharger ».",
   "dl.multi": "Si votre navigateur bloque les téléchargements multiples, autorisez-les pour ce site, ou utilisez l'archive .zip.",
   "dl.all.progress": "{done} / {total} · {bytes} / {size} · {rate} · encore {left}",

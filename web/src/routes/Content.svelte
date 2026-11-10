@@ -34,7 +34,7 @@
   import ReportSheet from "../ui/ReportSheet.svelte";
   import NamesTip from "../ui/NamesTip.svelte";
   import { collectPreview, previewQueue } from "../viewers/collect";
-  import { blobDownloads, clickDownload, inDirectory, pickFile, type DirHandle, type SavePicker } from "../viewers/save";
+  import { blobDownloads, clickDownload, inDirectory, needsMemoryWarning, pickFile, type DirHandle, type SavePicker } from "../viewers/save";
   import ViewerPanel, { type ViewItem } from "../viewers/ViewerPanel.svelte";
   import { ZIP_BLOB_MAX, ZIP_BLOB_MAX_SMALL, createZip, zipName } from "../zip/store-zip";
 
@@ -188,6 +188,8 @@
   // ---------- Archive .zip (spec §41.6) ----------
   const zipBytes = totals.reduce((a, n) => a + n, 0) + entries.reduce((a, _, i) => a + 2 * fileName(i).length * 4 + 160, 0) + 120;
   const zipTooBig = !savePicker && typeof navigator !== "undefined" && zipBytes > (lowMemory(navigator, Number.MAX_SAFE_INTEGER) ? ZIP_BLOB_MAX_SMALL : ZIP_BLOB_MAX);
+  // Sans sélecteur, un gros fichier est assemblé en mémoire : prévenir sur un petit appareil.
+  const bigWarn = typeof navigator !== "undefined" && needsMemoryWarning(totals, savePicker !== undefined, navigator);
   async function startZip() {
     if (disabled) return;
     const name = "shhdrop.zip";
@@ -374,6 +376,7 @@
       all={allSum}
       zip={dl.zip}
       {zipTooBig}
+      {bigWarn}
       {risky}
       multi={!dirPicker}
       {disabled}

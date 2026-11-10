@@ -568,6 +568,7 @@ export const en = {
   "dl.fail.gone": "This share is no longer available.",
   "dl.all": "Download all",
   "dl.zip": "Download all as .zip",
+  "dl.big.warn": "Large file: this device has to assemble it in memory before saving it, and the download may fail. If it does, open the link on a computer.",
   "dl.zip.tooBig": "This device cannot build an archive this large. Use \"Download all\".",
   "dl.multi": "If your browser blocks multiple downloads, allow them for this site, or use the .zip archive.",
   "dl.all.progress": "{done} / {total} · {bytes} / {size} · {rate} · {left} left",

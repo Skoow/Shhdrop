@@ -1,6 +1,6 @@
 // Destinations des téléchargements reçus (UI §9.9, §9.8.6).
 import { describe, expect, it, vi } from "vitest";
-import { CLICK_GAP_MS, blobDownloads, inDirectory, pickFile, type DirHandle } from "./save";
+import { CLICK_GAP_MS, blobDownloads, inDirectory, needsMemoryWarning, pickFile, type DirHandle } from "./save";
 
 function writable() {
   const w = { data: [] as number[], closed: 0, aborted: 0 };
@@ -82,5 +82,21 @@ describe("blobDownloads", () => {
     ]);
     create.mockRestore();
     revoke.mockRestore();
+  });
+});
+
+describe("avertissement mémoire (UI §9.2.5, spec §18.7 ; revue du 10 novembre)", () => {
+  const MiB = 1048576;
+  const IOS = { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15", maxTouchPoints: 5 } as Navigator;
+  const DESKTOP = { userAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0", maxTouchPoints: 0 } as Navigator;
+  it("sans sélecteur de fichier, un fichier de plus de 200 Mio sur un appareil à petite mémoire : prévenir", () => {
+    expect(needsMemoryWarning([10 * MiB, 300 * MiB], false, IOS)).toBe(true);
+    expect(needsMemoryWarning([200 * MiB], false, IOS)).toBe(false);
+    expect(needsMemoryWarning([300 * MiB], false, { ...DESKTOP, deviceMemory: 2 } as Navigator)).toBe(true);
+  });
+  it("avec sélecteur (écriture en flux), ou sur un appareil qui a la mémoire : rien", () => {
+    expect(needsMemoryWarning([1500 * MiB], true, IOS)).toBe(false);
+    expect(needsMemoryWarning([1500 * MiB], false, DESKTOP)).toBe(false);
+    expect(needsMemoryWarning([], false, IOS)).toBe(false);
   });
 });

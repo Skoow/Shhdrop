@@ -17,6 +17,8 @@
     zip: Row | null;
     /** L'archive ne peut pas être assemblée sur cet appareil (Blob trop gros) : raison affichée. */
     zipTooBig: boolean;
+    /** Un élément risque d'épuiser la mémoire de l'appareil (assemblage sans sélecteur de fichier). */
+    bigWarn?: boolean;
     /** Noms des fichiers à risque inclus (confirmation avant de commencer). */
     risky: string[];
     /** Sans sélecteur de dossier : un téléchargement par fichier, à la suite. */
@@ -31,7 +33,7 @@
     onresumezip: () => void;
     onstopzip: () => void;
   };
-  let { all, zip, zipTooBig, risky, multi, disabled, onall, onzip, onpause, onresume, onstop, onpausezip, onresumezip, onstopzip }: Props = $props();
+  let { all, zip, zipTooBig, bigWarn = false, risky, multi, disabled, onall, onzip, onpause, onresume, onstop, onpausezip, onresumezip, onstopzip }: Props = $props();
   const lang = $derived(getLang());
 
   const left = $derived(all.rate > 0 ? (all.total - all.bytes) / all.rate : null);
@@ -67,6 +69,7 @@
     {/if}
   </div>
   {#if zipTooBig}<p class="note">{t("dl.zip.tooBig")}</p>{/if}
+  {#if bigWarn}<p class="note" data-big-warn>{t("dl.big.warn")}</p>{/if}
 
   {#if all.active > 0}
     <div class="prog" data-progress="all">
