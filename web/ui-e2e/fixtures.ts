@@ -218,8 +218,33 @@ export function captureOf(l: Locator, o: Parameters<Locator["screenshot"]>[0]): 
  * sous WebKit (l'écriture y est permise après un geste, sans permission).
  */
 export async function grantClipboard(ctx: BrowserContext, origin?: string): Promise<void> {
-  const webkit = ctx.browser()?.browserType().name() === "webkit";
-  await ctx.grantPermissions(webkit ? ["clipboard-read"] : ["clipboard-read", "clipboard-write"], origin === undefined ? undefined : { origin });
+  if (ctx.browser()?.browserType().name() === "webkit") return webkitClipboard(ctx);
+  await ctx.grantPermissions(["clipboard-read", "clipboard-write"], origin === undefined ? undefined : { origin });
+}
+
+/**
+ * WebKit (Playwright) ne lit pas le presse-papiers du système en mode sans tête : la page
+ * témoin se fermait (« Target page… has been closed », CI du 10 novembre). On y relève donc ce
+ * que le site écrit, au point d'écriture lui-même (navigator.clipboard.writeText), sans rien
+ * changer à son comportement ; readClipboard rend la dernière écriture de l'onglet.
+ */
+const clipWatched = new WeakSet<BrowserContext>();
+async function webkitClipboard(ctx: BrowserContext): Promise<void> {
+  if (clipWatched.has(ctx)) return;
+  clipWatched.add(ctx);
+  await ctx.addInitScript(() => {
+    const c = navigator.clipboard;
+    if (!c) return;
+    const write = c.writeText.bind(c);
+    c.writeText = async (s: string) => {
+      (window as unknown as { __shhClip?: string }).__shhClip = s;
+      try {
+        await write(s);
+      } catch {
+        // l'écriture réelle peut être refusée en mode sans tête : seule la valeur compte ici
+      }
+    };
+  });
 }
 
 /** Capture 1x dans ui-e2e/__captures__/<projet>/<nom>.png (ignoré par git, artefact CI). */
@@ -257,6 +282,9 @@ export async function axe(page: Page) {
 const CLIP_ORIGIN = "http://localhost:9/";
 export async function readClipboard(page: Page): Promise<string> {
   const ctx = page.context();
+  if (ctx.browser()?.browserType().name() === "webkit") {
+    return page.evaluate(() => (window as unknown as { __shhClip?: string }).__shhClip ?? "");
+  }
   await grantClipboard(ctx, CLIP_ORIGIN.slice(0, -1));
   const p = await ctx.newPage();
   try {

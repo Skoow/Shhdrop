@@ -13,10 +13,10 @@ test("PDF : affiché dans le cadre isolé (2 pages), JavaScript du PDF jamais ex
   const s = await freshPage(browser);
   const sent = await sendShare(s.page, shh.origin + "/", { files: [file("simple.pdf"), file("js.pdf")] });
   await s.ctx.close();
-  const csp: string[] = [];
   const foreign: string[] = [];
   const dialogs: string[] = [];
-  page.on("console", (m) => /Content Security Policy|Refused to/i.test(m.text()) && csp.push(m.text()));
+  // Violations CSP : relevées par la garde de fixtures.ts (page et cadre), qui ignore le seul
+  // style injecté par Playwright pendant une capture sous WebKit (CI du 10 novembre).
   page.on("request", (r) => !r.url().startsWith(shh.origin) && !r.url().startsWith("blob:") && !r.url().startsWith("data:") && foreign.push(r.url()));
   page.on("dialog", (d) => {
     dialogs.push(d.message());
@@ -51,5 +51,4 @@ test("PDF : affiché dans le cadre isolé (2 pages), JavaScript du PDF jamais ex
   expect(dialogs).toEqual([]);
   expect(page.url().startsWith(shh.origin)).toBe(true);
   expect(foreign).toEqual([]);
-  expect(csp).toEqual([]);
 });
