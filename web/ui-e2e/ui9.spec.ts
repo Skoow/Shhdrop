@@ -1,4 +1,4 @@
-// Retours UI9 du propriétaire, sur le vrai serveur : bouclier de nettoyage juste après le nom
+// Retours UI9 du propriétaire, sur le vrai serveur : bouclier de nettoyage juste avant le nom (retours CLEAN2)
 // (composeur et destinataire, ellipse du nom préservée), pied de page signé « Shhdrop © 2026 »
 // en bas à gauche, papier peint de pictos sur les côtés de la page. Captures fr-FR ×2, 390 et 1440 px.
 import { readFileSync } from "node:fs";
@@ -12,16 +12,16 @@ const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-e
 test.use({ locale: "fr-FR", timezoneId: "Europe/Paris", deviceScaleFactor: 2 });
 const w = (isMobile: boolean) => (isMobile ? 390 : 1440);
 
-/** Bouclier après le nom, sur sa ligne, centré sur le texte et dans la ligne. */
+/** Bouclier juste AVANT le nom (retours CLEAN2), sur sa ligne, centré sur le texte et dans la ligne. */
 async function afterName(row: Locator, name: string) {
   const [nm, sh, r] = [await row.locator(name).boundingBox(), await row.locator("[data-clean] svg").boundingBox(), await row.boundingBox()];
-  expect(sh!.x).toBeGreaterThanOrEqual(nm!.x + nm!.width);
-  expect(sh!.x - (nm!.x + nm!.width)).toBeLessThanOrEqual(8);
+  expect(sh!.x + sh!.width).toBeLessThanOrEqual(nm!.x);
+  expect(nm!.x - (sh!.x + sh!.width)).toBeLessThanOrEqual(8);
   expect(Math.abs(sh!.y + sh!.height / 2 - (nm!.y + nm!.height / 2))).toBeLessThanOrEqual(1.5);
   expect(sh!.x + sh!.width).toBeLessThanOrEqual(r!.x + r!.width);
 }
 
-test("composeur : bouclier juste après le nom, jamais repoussé par un nom long (ellipse au milieu) ; capture", async ({ page, shh, isMobile }) => {
+test("composeur : bouclier juste avant le nom, jamais repoussé par un nom long (ellipse au milieu) ; capture", async ({ page, shh, isMobile }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(shh.origin + "/");
@@ -51,7 +51,7 @@ test("composeur : bouclier juste après le nom, jamais repoussé par un nom long
   await page.screenshot({ path: `${SHOTS}composeur-${w(isMobile)}.png` });
 });
 
-test("destinataire : bouclier juste après le nom ; capture", async ({ page, shh, browser, isMobile }) => {
+test("destinataire : bouclier juste avant le nom ; capture", async ({ page, shh, browser, isMobile }) => {
   test.setTimeout(150_000);
   const s = await freshPage(browser);
   const sent = await sendShare(s.page, shh.origin + "/", { text: "Code de la porte : 4512B", files: [file("foret-brume.jpg"), file("archive.zip")], opens: 2 });

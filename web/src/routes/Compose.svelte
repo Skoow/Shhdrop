@@ -558,8 +558,8 @@
             {#each ["plus", "pro"] as const as tier (tier)}
               {@const name = t(`paid.badge.${tier}`)}
               <span id="cap-{tier}" class="sr-only">{t("paid.locked", { tier: name })}</span>
-              <button type="button" class="cpill num" data-tier={tier} aria-describedby="cap-{tier}" onclick={() => showPaid(tier)}
-                ><span class="pv"><Lock size={13} strokeWidth={2} aria-hidden="true" /><span>{formatBytes(PAID[tier].bytes, lang)}</span></span>{" "}<span class="sr-only">{"· "}</span><span class="ct">{name}</span></button
+              <button type="button" class="cpill num" data-tier={tier} title={name} aria-describedby="cap-{tier}" onclick={() => showPaid(tier)}
+                ><span class="pv"><Lock size={13} strokeWidth={2} aria-hidden="true" /><span>{formatBytes(PAID[tier].bytes, lang)}</span></span><span class="sr-only">{" · "}{name}</span></button
               >
             {/each}
           </div>
@@ -859,7 +859,7 @@
   .caps {
     display: flex;
     flex: none;
-    gap: 10px;
+    gap: 6px;
   }
   /* Pastilles Plus et Pro : pointillés, cadenas et nom de l'offre au bleu de SON offre (Plus
      ciel, Pro profond), taille en blanc. Cible d'appui de 44 px (bouton), visuel compact de
@@ -902,24 +902,11 @@
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
-  .cpill :global(svg),
-  .cpill .ct {
+  /* Le nom de l'offre n'est plus écrit (retours CLEAN2) : bleu de l'offre, bulle au survol
+     (title), lecteurs d'écran (« 10 Go · Plus ») et feuille d'information à l'appui. */
+  .cpill :global(svg) {
     flex: none;
     color: var(--tc);
-  }
-  /* Nom de l'offre en badge, toujours HORS du cadre pointillé (retours TABLE), comme dans les options. */
-  .cpill {
-    gap: 6px;
-  }
-  .cpill .ct {
-    display: inline-flex;
-    align-items: center;
-    padding: 1px 8px;
-    border-radius: var(--r-pill);
-    background: var(--tc-tint);
-    font-size: 0.75rem;
-    font-weight: 680;
-    letter-spacing: 0.02em;
   }
   @media (hover: hover) {
     .cpill:hover .pv {

@@ -81,7 +81,7 @@
   // des pages d'information seulement (ailleurs, ces liens sont dans Réglages).
   // Page d'un partage ouvert : le pied y est aussi sur téléphone, il porte « Signaler » (retours UI7).
   const footOnPhone = $derived(router.current.name === "home" || router.current.name === "notfound" || INFO.has(router.current.name) || chrome.report !== null);
-  /** `tiers` : « Plus » et « Pro » du libellé au bleu de leur offre, le reste en blanc (retours TABLE). */
+  /** `tiers` : « Plus » et « Pro » du libellé au bleu de leur offre, le reste comme les autres liens. */
   type FootLink = { label: string; path?: string; url?: string; soon?: boolean; report?: boolean; tiers?: boolean };
   const footCols = $derived<{ id: string; title: string; links: FootLink[] }[]>([
     {
@@ -507,9 +507,9 @@
   .fl[aria-current="page"] {
     color: var(--accent);
   }
-  /* Ligne des offres (retours TABLE) : texte en blanc, « Plus » et « Pro » au bleu de leur offre ;
-     jamais le vert d'accent, même sur la page des offres. */
-  .fl.tiers,
+  /* Ligne des offres (retours TABLE, CLEAN2) : le texte garde la couleur des autres liens du pied,
+     seuls « Plus » et « Pro » prennent le bleu de leur offre ; jamais le vert d'accent, même sur
+     la page des offres (là, le texte passe en blanc comme un lien survolé). */
   .fl.tiers[aria-current="page"] {
     color: var(--text);
   }

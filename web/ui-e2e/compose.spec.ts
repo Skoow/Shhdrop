@@ -279,7 +279,9 @@ test.describe("fr-FR", () => {
     const opts = await options(page, isMobile);
     const locked = opts.locator("[data-locked] button, button[data-locked]");
     await expect(locked).toHaveCount(5);
-    await expect(opts.locator(".badge")).toHaveText(["Plus", "Plus", "Pro"]);
+    // Nom de l'offre en bulle au survol, plus de badge écrit (retours CLEAN2).
+    await expect(opts.locator(".badge")).toHaveCount(0);
+    expect(await locked.evaluateAll((bs) => bs.map((b) => b.getAttribute("title")))).toEqual(["Plus", "Plus", "Plus", "Plus", "Pro"]);
     // Retours OPT : espaces Plus et Pro en pastilles à côté de la jauge, unité « Go » comprise.
     await expect(page.locator(".top [data-paid-space] button")).toHaveText([/^10\sGo · Plus$/, /^50\sGo · Pro$/]);
     for (const b of await locked.all()) {

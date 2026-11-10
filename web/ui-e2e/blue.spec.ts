@@ -18,8 +18,8 @@ test("composeur et options : Plus en bleu ciel, Pro en bleu profond ; captures",
   await page.goto(shh.origin + "/");
   await addText(page, "Le code de la porte est 4471.");
   const pills = page.locator("[data-paid-space] button");
-  expect(await pills.nth(0).locator(".ct").evaluate(color)).toBe(PLUS);
-  expect(await pills.nth(1).locator(".ct").evaluate(color)).toBe(PRO);
+  expect(await pills.nth(0).locator("svg").evaluate(color)).toBe(PLUS);
+  expect(await pills.nth(1).locator("svg").evaluate(color)).toBe(PRO);
   await settle(page);
   await page.screenshot({ path: `${SHOTS}compose-top-${w(isMobile)}.png` });
   if (isMobile) await page.getByRole("button", { name: /^Options · / }).click();

@@ -79,7 +79,7 @@ test("pied de page : aucun soulignement (repos, survol, focus), couleur et annea
   expect(await deco(link)).toMatch(/^(nonenone,?)+$/);
 });
 
-test("composeur : bouclier de nettoyage après le nom avec sa bulle, pastille cadenas dans l'icône ; capture", async ({ page, shh, isMobile }) => {
+test("composeur : bouclier de nettoyage avant le nom avec sa bulle, pastille cadenas dans l'icône ; capture", async ({ page, shh, isMobile }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(shh.origin + "/");
@@ -96,11 +96,11 @@ test("composeur : bouclier de nettoyage après le nom avec sa bulle, pastille ca
   await expect(done).toBeVisible();
   await expect(fail).toBeVisible();
   await expect(row("archive.zip").locator("[data-clean]")).toHaveCount(0);
-  // Bouclier : 15 px, juste après le nom (retours UI9), centré sur le texte ; bouton nommé par sa bulle.
+  // Bouclier : 15 px, juste AVANT le nom (retours CLEAN2), centré sur le texte ; bouton nommé par sa bulle.
   const sh = await done.locator("svg").boundingBox();
   expect(sh!.width).toBeCloseTo(15, 0);
   const sz = await row("plage-nuit.jpg").locator(".nm").boundingBox();
-  expect(sh!.x).toBeGreaterThan(sz!.x + sz!.width);
+  expect(sh!.x + sh!.width).toBeLessThanOrEqual(sz!.x);
   expect(Math.abs(sh!.y + sh!.height / 2 - (sz!.y + sz!.height / 2))).toBeLessThanOrEqual(1.5);
   await expect(done.getByRole("button")).toHaveAccessibleName(/^Nettoyé\s: position, appareil et dates retirés$/);
   await expect(fail.getByRole("button")).toHaveAccessibleName(/^Nettoyage impossible\s: structure du fichier inattendue$/);

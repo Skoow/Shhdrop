@@ -21,7 +21,7 @@ test("haut du composeur : pastilles 10 Go · Plus et 50 Go · Pro à côté de l
   for (const [i, p] of (await pills.all()).entries()) {
     expect(await p.evaluate((e) => getComputedStyle(e).color)).toBe("rgb(233, 236, 242)");
     expect(await p.locator(".pv").evaluate((e) => [getComputedStyle(e).borderTopStyle, getComputedStyle(e).borderTopColor])).toEqual(["dashed", BLUE[i]![1]]);
-    expect(await p.locator(".ct").evaluate((e) => getComputedStyle(e).color)).toBe(BLUE[i]![0]);
+    expect(await p.locator("svg").evaluate((e) => getComputedStyle(e).color)).toBe(BLUE[i]![0]);
     expect((await p.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect((await p.locator(".pv").boundingBox())!.height).toBeLessThan(40);
   }
@@ -36,11 +36,12 @@ test("haut du composeur : pastilles 10 Go · Plus et 50 Go · Pro à côté de l
   const opts = page.locator(".opts").filter({ visible: true });
   const opens = opts.locator('[data-locked="opens"]');
   await expect(opens.locator("button")).toHaveText(/^Jusqu'à 50$/);
-  await expect(opens.locator(".badge")).toHaveText("Pro");
+  // Plus de badge écrit (retours CLEAN2) : le nom de l'offre en bulle au survol.
+  await expect(opens.locator("button")).toHaveAttribute("title", "Pro");
   // « Jusqu'à 50 » et son badge au bleu Pro, les durées au bleu Plus (retours BLUE).
   expect(await opens.locator("button").evaluate((e) => getComputedStyle(e).borderTopColor)).toBe("rgb(52, 97, 255)");
-  expect(await opens.locator(".badge").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(92, 128, 255)");
-  expect(await opts.locator('[data-locked="ttl"] .badge').evaluate((e) => getComputedStyle(e).color)).toBe("rgb(62, 193, 245)");
+  expect(await opens.locator("button svg").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(92, 128, 255)");
+  expect(await opts.locator('[data-locked="ttl"] button svg').first().evaluate((e) => getComputedStyle(e).color)).toBe("rgb(62, 193, 245)");
   for (const b of await opts.locator("[data-locked] button, button[data-locked]").all())
     expect(await b.evaluate((e) => getComputedStyle(e).color)).toBe("rgb(233, 236, 242)");
   await settle(page);

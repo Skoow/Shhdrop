@@ -74,8 +74,9 @@
   </span>
   <div class="main">
     <span class="head">
+      <!-- Bouclier avant le nom, emplacement fixe (retours CLEAN2) : noms alignés. -->
+      <span class="cslot">{#if kind === "file" && cl?.mark}<CleanMark kind={cl.mark} text={t(cl.key)} />{/if}</span>
       <bdi class="name" title={name} translate="no"><span class="b">{mid.head}</span><span class="e">{mid.tail}{ext}</span></bdi>
-      {#if kind === "file" && cl?.mark}<CleanMark kind={cl.mark} text={t(cl.key)} />{/if}
     </span>
     <span class="meta num">
       {#if row.state === "downloading"}
@@ -151,6 +152,13 @@
 </li>
 
 <style>
+  .cslot {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    width: 15px;
+    margin-inline-end: 6px;
+  }
   /* Icône de format et sa pastille cadenas (UI5). */
   .pic {
     position: relative;

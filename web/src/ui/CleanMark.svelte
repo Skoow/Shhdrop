@@ -1,6 +1,6 @@
 <script lang="ts">
   // Marque de nettoyage d'un fichier (retours UI8, remplace l'étincelle de D41-34) : petit
-  // bouclier maison juste après le nom (retours UI9), centré sur le texte, jamais repoussé hors de la ligne, avec sa propre bulle
+  // bouclier maison juste avant le nom (retours CLEAN2, emplacement fixe posé par la ligne), centré sur le texte, jamais repoussé hors de la ligne, avec sa propre bulle
   // (survol, focus clavier, appui). Nettoyé : bouclier coché, couleur d'accent. Échec : même
   // bouclier, ambre, « ! » à l'intérieur. Tel quel : aucune marque (l'appelant n'en pose pas).
   // Le texte de la bulle est aussi le nom du bouton ; la forme change avec l'état, pas que la couleur.
@@ -27,7 +27,6 @@
     flex: none;
     display: inline-flex;
     align-items: center;
-    margin-inline-start: 4px;
     line-height: 0;
   }
   svg {

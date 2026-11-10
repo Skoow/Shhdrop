@@ -214,10 +214,12 @@
       </div>
     {:else}
       <span class="head">
+        <!-- Bouclier de nettoyage AVANT le nom (retours CLEAN2), dans un emplacement de largeur fixe,
+             vide s'il n'y a rien à dire : tous les noms commencent au même endroit. -->
+        <span class="cslot">{#if mark && cleanLine}<CleanMark kind={mark} text={t(cleanLine)} />{/if}</span>
         <bdi class="nm" title={name} translate="no">
           <span class="b">{mid.head}</span><span class="e">{mid.tail}{shownExt}</span>
         </bdi>
-        {#if mark && cleanLine}<CleanMark kind={mark} text={t(cleanLine)} />{/if}
       </span>
       <span class="meta">
         <!-- Une note ne montre que son titre, jamais son contenu (retour propriétaire). -->
@@ -390,6 +392,13 @@
     /* Le bouclier de nettoyage (flex: none) suit le nom ; seul le nom rétrécit (ellipse au milieu). */
     gap: 0;
     min-width: 0;
+  }
+  .cslot {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    width: 15px;
+    margin-inline-end: 6px;
   }
   .nm {
     display: flex;

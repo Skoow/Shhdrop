@@ -3,7 +3,7 @@
   // 12 h ou après 1 ouverture… » sur ordinateur), mot de passe, destinataire (interrupteur
   // « Autoriser le téléchargement », sous-option du coffre), estimation du temps d'envoi.
   // `compact` : feuille du téléphone, une ligne d'aide au plus par réglage.
-  // Choix payants (D41-16) : visibles mais verrouillés, avec leur badge « Plus » ou « Pro » ; un appui
+  // Choix payants (D41-16) : visibles mais verrouillés, au bleu de leur offre ; le nom « Plus » ou « Pro » n'est plus écrit (retours CLEAN2) : bulle au survol, lecteurs d'écran, et feuille d'information à l'appui ; un appui
   // ouvre la feuille d'information (onpaid), jamais un achat. Ils ne changent aucune option.
   import { MAX_OPENS, PW_TRIES, TTL_HOURS } from "../index";
   import { PAID, type PaidTier } from "../limits";
@@ -58,9 +58,6 @@
   <p class="line"><ShieldAlert size={16} strokeWidth={1.9} aria-hidden="true" /><span>{t("options.pw.lead")}</span></p>
   <p class="line"><ShieldAlert size={16} strokeWidth={1.9} aria-hidden="true" /><span>{t("options.tries", { n: PW_TRIES })}</span></p>
 {/snippet}
-{#snippet badge(tier: PaidTier)}
-  <span class="badge {tier}">{t(`paid.badge.${tier}`)}</span>
-{/snippet}
 
 {#if part === "summary"}
   <div class="sumpart">
@@ -84,20 +81,15 @@
         <div class="locks" data-locked="ttl">
           {#each PAID.plus.ttlDays as d (d)}
             {@const label = t("paid.days", { n: d })}
-            <button type="button" class="lk num" aria-describedby="{lockedId}-plus" onclick={() => onpaid("plus")}><Lock size={14} strokeWidth={2} aria-hidden="true" />{label}</button>
+            <button type="button" class="lk num" title={t("paid.badge.plus")} aria-describedby="{lockedId}-plus" onclick={() => onpaid("plus")}><Lock size={14} strokeWidth={2} aria-hidden="true" />{label}</button>
           {/each}
-          {@render badge("plus")}
         </div>
       {/if}
       <p class="hint">{t("options.ttl.hint")}</p>
       {#if onpaid}
-        <!-- Badge toujours hors du cadre, comme les autres choix verrouillés (retours TABLE). -->
-        <div class="locks lkline">
-          <button type="button" class="lkrow" data-locked="first-open" aria-describedby="{lockedId}-plus" onclick={() => onpaid("plus")}>
-            <Lock size={16} strokeWidth={2} aria-hidden="true" /><span class="lkt">{t("paid.firstOpen")}</span>
-          </button>
-          {@render badge("plus")}
-        </div>
+        <button type="button" class="lkrow" data-locked="first-open" title={t("paid.badge.plus")} aria-describedby="{lockedId}-plus" onclick={() => onpaid("plus")}>
+          <Lock size={16} strokeWidth={2} aria-hidden="true" /><span class="lkt">{t("paid.firstOpen")}</span>
+        </button>
       {/if}
     </div>
     <div class="ctl">
@@ -106,8 +98,7 @@
       {#if onpaid && PAID.pro.opens > MAX_OPENS}
         {@const label = t("paid.opens", { n: PAID.pro.opens })}
         <div class="locks" data-locked="opens">
-          <button type="button" class="lk num pro" aria-describedby="{lockedId}-pro" onclick={() => onpaid("pro")}><Lock size={14} strokeWidth={2} aria-hidden="true" />{label}</button>
-          {@render badge("pro")}
+          <button type="button" class="lk num pro" title={t("paid.badge.pro")} aria-describedby="{lockedId}-pro" onclick={() => onpaid("pro")}><Lock size={14} strokeWidth={2} aria-hidden="true" />{label}</button>
         </div>
       {/if}
       <p class="hint">{t("options.opens.hint")}</p>
@@ -264,16 +255,14 @@
     align-items: center;
     gap: var(--sp-1);
   }
-  /* Chaque verrou et badge au bleu de SON offre (Plus ciel, Pro profond). */
+  /* Chaque verrou au bleu de SON offre (Plus ciel, Pro profond). */
   .lk,
-  .lkrow,
-  .badge {
+  .lkrow {
     --tc: var(--plus);
     --tc-tint: var(--plus-tint);
     --tc-line: var(--plus-line);
   }
-  .lk.pro,
-  .badge.pro {
+  .lk.pro {
     --tc: var(--pro);
     --tc-tint: var(--pro-tint);
     --tc-line: var(--pro-line);
@@ -288,20 +277,16 @@
     border: 1px dashed var(--tc-line);
     border-radius: var(--r-sm);
     background: transparent;
-    /* Texte en blanc (retours OPT) ; cadenas, pointillés et badge restent bleus. */
+    /* Texte en blanc (retours OPT) ; cadenas et pointillés restent bleus. */
     color: var(--text);
     font: inherit;
     font-size: var(--fs-small);
     font-weight: 560;
     cursor: pointer;
   }
-  .lkline {
-    flex-wrap: nowrap;
-    margin-top: 2px;
-  }
   .lkrow {
-    flex: 1;
-    min-width: 0;
+    width: 100%;
+    margin-top: 2px;
     text-align: start;
   }
   .lkt {
@@ -321,21 +306,9 @@
       border-color: var(--tc);
     }
   }
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 1px 8px;
-    border-radius: var(--r-pill);
-    background: var(--tc-tint);
-    color: var(--tc);
-    font-size: 0.75rem;
-    font-weight: 680;
-    letter-spacing: 0.02em;
-  }
   @media (forced-colors: active) {
     .lk,
-    .lkrow,
-    .badge {
+    .lkrow {
       border: 1px solid CanvasText;
     }
     .warn {

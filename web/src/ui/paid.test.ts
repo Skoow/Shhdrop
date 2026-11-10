@@ -52,7 +52,8 @@ describe("options : mot de passe généré seulement, choix payants verrouillés
     expect(locked.map((b) => b.textContent!.replace(/\u202f/g, " ").trim())).toEqual(["2 jours", "3 jours", "7 jours", "Démarrer à la première ouverture", "Jusqu'à 50"]);
     const desc = locked.map((b) => document.getElementById(b.getAttribute("aria-describedby")!)!.textContent);
     expect(desc).toEqual([...Array(4).fill("Avec Plus, bientôt disponible."), "Avec Pro, bientôt disponible."]);
-    expect([...document.querySelectorAll(".badge")].map((b) => b.textContent)).toEqual(["Plus", "Plus", "Pro"]);
+    expect(document.querySelectorAll(".badge")).toHaveLength(0);
+    expect(locked.map((b) => b.title)).toEqual(["Plus", "Plus", "Plus", "Plus", "Pro"]);
     for (const b of locked) b.click();
     expect(onpaid.mock.calls.map((c) => c[0])).toEqual(["plus", "plus", "plus", "plus", "pro"]);
     expect([options.ttlHours, options.maxOpens]).toEqual([12, 1]);
