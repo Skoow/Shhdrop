@@ -233,11 +233,20 @@ describe("fetchMeta, shareStatus, destroyShare : correspondance des erreurs", ()
     expect(await reject(shareStatus(MANAGE, ORIGIN, server(() => j(500, { error: "internal" })).net))).toBeInstanceOf(ServerError);
     expect(await reject(shareStatus(MANAGE, ORIGIN, server(() => j(200, { opens_used: "x" })).net))).toBeInstanceOf(NotFoundError);
     expect(await reject(shareStatus(MANAGE, ORIGIN, server(() => "net").net))).toEqual(new Error("reseau"));
+    for (const code of [400, 403, 405])
+      expect(await reject(shareStatus(MANAGE, ORIGIN, server(() => j(code, { error: "nope" })).net)), String(code)).toBeInstanceOf(ServerError);
   });
   it("destroyShare", async () => {
     expect(await reject(destroyShare(MANAGE, ORIGIN, server(() => j(404, { error: "not_found" })).net))).toBeInstanceOf(NotFoundError);
     expect(await reject(destroyShare(MANAGE, ORIGIN, server(() => j(429, { error: "limit", retry_after_s: 9 })).net))).toBeInstanceOf(LimitError);
     expect(await reject(destroyShare(MANAGE, ORIGIN, server(() => "net").net))).toEqual(new Error("reseau"));
+    // Revue du 10 novembre : seul 404 ou 410 vaut « disparu ». Un refus d'un intermédiaire
+    // (403 d'un pare-feu, 400, 405, 413) ne doit pas faire afficher « supprimé ».
+    for (const code of [400, 401, 403, 405, 413]) {
+      const e = await reject(destroyShare(MANAGE, ORIGIN, server(() => j(code, { error: "nope" })).net));
+      expect(e, String(code)).toBeInstanceOf(ServerError);
+    }
+    expect(await reject(destroyShare(MANAGE, ORIGIN, server(() => j(410, { error: "gone" })).net))).toBeInstanceOf(NotFoundError);
     // lien de partage : meta passe, destroy refusé (mauvais mot de passe côté serveur) → NotFoundError
     const s = server(() => undefined);
     expect(await reject(destroyShare(LINK, ORIGIN, { password: PW, ...s.net }))).toBeInstanceOf(NotFoundError);

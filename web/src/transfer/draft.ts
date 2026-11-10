@@ -317,6 +317,9 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
           cr.bucket = need;
         }
         const data = await sealer.piece(j);
+        // Le chiffrement ne s'interrompt pas : brouillon perdu ou élément retiré entre-temps →
+        // on s'arrête ici, sans remettre l'élément en « envoi » (revue du 10 novembre).
+        throwIfAborted(signal);
         e.phase = "envoi";
         changed();
         e.touched = true;

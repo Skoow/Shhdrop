@@ -271,3 +271,43 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     expect(fake.inspect()[0]!.state).toBe("draining"); // ouverture unique consommée
   });
 });
+
+describe("brouillon perdu pendant le chiffrement (revue du 10 novembre)", { timeout: 60_000 }, () => {
+  it("keep répond 404 pendant qu'un segment se chiffre : l'élément ne reste pas en « envoi », le clic aboutit", async () => {
+    const { fake, net } = setup(400 * 1048576);
+    let lose = false;
+    const fetch = (async (u: RequestInfo | URL, i?: RequestInit) => {
+      const req = new Request(u, i);
+      if (lose && new URL(req.url).pathname === "/api/shares/keep") {
+        lose = false;
+        return new Response('{"error":"not_found"}', { status: 404 });
+      }
+      return fake.handle(req);
+    }) as typeof globalThis.fetch;
+    // Chiffrement ralenti : la fenêtre « dans sealer.piece » dure environ une seconde.
+    const subtle = crypto.subtle as unknown as { encrypt: (...a: unknown[]) => Promise<ArrayBuffer> };
+    const real = subtle.encrypt.bind(crypto.subtle);
+    let slow = true;
+    subtle.encrypt = async (...a) => {
+      if (slow) await new Promise((r) => setTimeout(r, 15));
+      return real(...a);
+    };
+    try {
+      const d = createDraft(ORIGIN, { ...net, fetch, solveCaptcha, auto: true, keepMs: 40 });
+      const data = file(9 * 1048576, 3);
+      d.sync([{ id: "a", data }]);
+      await until(() => d.status("a")?.phase === "chiffrement");
+      await new Promise((r) => setTimeout(r, 100));
+      lose = true;
+      await until(() => d.status("a")?.phase === "attente");
+      slow = false;
+      await new Promise((r) => setTimeout(r, 1500));
+      expect(d.status("a")?.phase).toBe("attente");
+      const done = d.finalize([{ id: "a", item: fileItem("a.bin", data) }], { password: PW, ttlHours: 24, maxOpens: 1, solveCaptcha });
+      const r = await Promise.race([done.then(() => "finalisé"), new Promise((res) => setTimeout(() => res("bloqué"), 15_000))]);
+      expect(r).toBe("finalisé");
+    } finally {
+      subtle.encrypt = real;
+    }
+  });
+});

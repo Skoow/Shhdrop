@@ -139,6 +139,16 @@ function readerError(e: unknown): Error {
   return new NotFoundError();
 }
 
+// Destruction et état (destroyShare, shareStatus, Opened.destroy) : comme readerError, sauf
+// qu'un refus HTTP autre que 404 ou 410 (403 d'un pare-feu, 400, 405, 413…) n'est pas
+// « introuvable ». Sinon l'écran dirait « supprimé » alors que le partage existe encore
+// (revue du 10 novembre). Texte fixe (ServerError) : l'écran propose de réessayer.
+function destroyError(e: unknown): Error {
+  const mapped = readerError(e);
+  if (mapped instanceof NotFoundError && e instanceof api.HttpError && e.status !== 404 && e.status !== 410) return new ServerError(false);
+  return mapped;
+}
+
 // Erreurs côté expéditeur (createShare, prepareCaptcha) : 404 → NotFoundError (envoi échu),
 // 429 → LimitError, autre code HTTP → Error(code du serveur) ; le reste tel quel
 // (Error("reseau"), AbortError, erreurs locales).
@@ -647,7 +657,7 @@ export async function openShare(
               destroying = false;
               throw e;
             }
-          }, (e) => (e instanceof Error && e.message === "cles_effacees" ? e : readerError(e))),
+          }, (e) => (e instanceof Error && e.message === "cles_effacees" ? e : destroyError(e))),
         wipe: () => {
           wiped = true;
           zero();
@@ -719,7 +729,7 @@ export async function destroyShare(link: string, expectedOrigin: string, opts: {
       keys?.kPreuve.fill(0);
       p.kLien.fill(0);
     }
-  }, readerError);
+  }, destroyError);
 }
 
 export async function shareStatus(
@@ -729,5 +739,5 @@ export async function shareStatus(
 ): Promise<{ opensUsed: number; maxOpens: number; expiresInS: number; state: string }> {
   const p = parseFor(manage, expectedOrigin);
   if (p.kind !== "m") throw new Error("lien_invalide");
-  return guarded(() => api.status(api.ctx(p.origin, net), p.sGestion), readerError);
+  return guarded(() => api.status(api.ctx(p.origin, net), p.sGestion), destroyError);
 }
