@@ -64,7 +64,7 @@
   const viewKind = (i: number): ViewItem["kind"] | null => {
     const k = kinds[i];
     if (entries[i]!.kind === "text" || k === "text") return "text";
-    return k === "image" || k === "video" || k === "audio" ? k : null; // PDF : Task 22 (pas de bouton d'ici là)
+    return k === "image" || k === "video" || k === "audio" || k === "pdf" ? k : null; // PDF : cadre isolé (UI §13)
   };
   /** Nom de fichier d'un élément : une note devient un .txt. */
   const fileName = (i: number) => (entries[i]!.kind === "text" && !/\.txt$/i.test(names[i]!) ? `${names[i]}.txt` : names[i]!);

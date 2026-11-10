@@ -80,6 +80,11 @@ export function checkDist(dir, demo) {
     // couvrirait pas. La démo en garde un (son faux serveur, chargé à part).
     for (const f of all) {
       if (!/\.m?js$/.test(f.rel)) continue;
+      // Cadre PDF isolé (UI §13) : pdf.js garde trois import() (WebAssembly, worker séparé) sur
+      // des chemins que nos options n'empruntent pas (useWasm: false, worker sur le fil
+      // principal). Hors SRI par construction (script classique, origine opaque, aucun secret),
+      // et la CSP du cadre ne laisse charger que des scripts du site : exempté, lui seul.
+      if (f.rel === "pdf-frame.js") continue;
       const n = f.data.toString("utf8").match(/(?<![\w$.])import\s*\(/g)?.length ?? 0;
       if (n > 0) problems.push(`${f.rel} : import() dynamique (${n} fois), interdit en production`);
     }

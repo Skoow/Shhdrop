@@ -58,9 +58,10 @@ test("listes compactes : groupes, icônes par format, types, tailles, temps esti
   await expect(row(page, "contrat.pdf")).not.toContainText(/env\.\s/);
   await expect(page.locator(".sum")).not.toContainText("(estimation)");
   await expect(page.locator(".gm.eta")).toHaveCount(0);
-  // « Voir » sur image, vidéo, audio, texte ; jamais sur SVG, PDF, programme, archive.
-  for (const n of ["foret-brume.jpg", "vocal.ogg", "anniversaire-lou.webm"]) await expect(row(page, n).getByRole("button", { name: `Voir ${n}` })).toBeVisible();
-  for (const n of ["trap.svg", "contrat.pdf", "installer.exe", "archive.zip"]) {
+  // « Voir » sur image, vidéo, audio, texte et PDF (cadre isolé, CLEAN5) ; jamais sur SVG,
+  // programme, archive : seulement « Télécharger ».
+  for (const n of ["foret-brume.jpg", "vocal.ogg", "anniversaire-lou.webm", "contrat.pdf"]) await expect(row(page, n).getByRole("button", { name: `Voir ${n}` })).toBeVisible();
+  for (const n of ["trap.svg", "installer.exe", "archive.zip"]) {
     await expect(row(page, n).getByRole("button", { name: /^Voir/ })).toHaveCount(0);
     await expect(row(page, n).getByRole("button", { name: `Télécharger ${n}` })).toBeVisible();
   }
@@ -211,7 +212,7 @@ test("visionneuse en panneau : précédent, suivant, Début, Fin, Échap rend le
   const dlg = page.getByRole("dialog");
   await expect(dlg).toHaveAttribute("aria-roledescription", "carousel");
   await expect(dlg.getByRole("heading")).toHaveText("foret-brume.jpg");
-  await expect(dlg.locator(".count")).toHaveText("2 / 6"); // la note est la première
+  await expect(dlg.locator(".count")).toHaveText("2 / 7"); // la note est la première
   await expect(dlg.locator("img")).toBeVisible();
   // Un panneau, pas toute la page.
   const box = (await dlg.boundingBox())!;
@@ -222,11 +223,11 @@ test("visionneuse en panneau : précédent, suivant, Début, Fin, Échap rend le
   await page.keyboard.press("ArrowRight");
   await expect(dlg.getByRole("heading")).toHaveText("lac-gele.jpg");
   await page.keyboard.press("End");
-  await expect(dlg.getByRole("heading")).toHaveText("vocal.ogg");
+  await expect(dlg.getByRole("heading")).toHaveText("contrat.pdf"); // les documents viennent en dernier (CLEAN5 : PDF visible)
   await page.keyboard.press("Home");
   await expect(dlg.locator("pre")).toHaveText(TEXT);
   await page.keyboard.press("ArrowLeft"); // déjà au début : rien
-  await expect(dlg.locator(".count")).toHaveText("1 / 6");
+  await expect(dlg.locator(".count")).toHaveText("1 / 7");
   // Balayage au doigt (événements de pointeur tactiles) : élément suivant, puis fermeture vers le bas.
   const stage = dlg.locator(".stage");
   const swipe = (dx: number, dy: number) =>

@@ -32,6 +32,7 @@ Exécution (le bundle ne contient que le code d'exécution de Svelte et libsodiu
 
 - `svelte` 5.57.3 : MIT, Copyright (c) Svelte contributors
 - `libsodium-wrappers-sumo` 0.8.4 et `libsodium-sumo` 0.8.4 : ISC
+- `pdfjs-dist` 6.5.438 : Apache-2.0, Copyright Mozilla Foundation et contributeurs de pdf.js (https://github.com/mozilla/pdf.js). Seulement dans le cadre PDF isolé (`pdf-frame.js`), non modifié ; texte de la licence : https://www.apache.org/licenses/LICENSE-2.0. Dépendance facultative `@napi-rs/canvas` (MIT) : pour Node seulement, jamais servie.
 - Dépendances de `svelte` (fermeture complète, outils de compilation compris) :
   - MIT : `@jridgewell/remapping` 2.3.5, `@jridgewell/gen-mapping` 0.3.13, `@jridgewell/sourcemap-codec` 1.6.0, `@jridgewell/trace-mapping` 0.3.31, `@jridgewell/resolve-uri` 3.1.2, `@sveltejs/acorn-typescript` 1.0.13, `@types/estree` 1.0.10, `acorn` 8.19.0, `clsx` 2.1.1, `devalue` 5.9.4, `esm-env` 1.2.2, `esrap` 2.4.0, `is-reference` 3.0.3, `locate-character` 3.0.0, `magic-string` 0.30.21, `zimmerframe` 1.1.5
   - Apache-2.0 : `aria-query` 5.3.1, `axobject-query` 4.1.0

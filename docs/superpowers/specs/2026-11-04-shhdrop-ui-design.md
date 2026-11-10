@@ -1032,7 +1032,7 @@ Clés principales (extrait normatif ; le plan fixe la liste complète) :
 - Données : le parent envoie `{ type: "pdf", bytes }` (ArrayBuffer **transféré**) après `{ type: "ready" }` venu de `event.source === iframe.contentWindow`. Le cadre n'accepte que les messages de `window.parent`, renvoie `{ type: "rendered", pages }` ou `{ type: "error" }`. Cible `"*"` imposée par l'origine opaque ; la vérification porte sur `event.source`.
 - Commandes : page précédente/suivante, zoom −/+, ajustement à la largeur ; libellés passés par le parent.
 - Échec (erreur, 20 s, PDF chiffré) : « Ce PDF ne peut pas être affiché ici. » + Enregistrer.
-- Les noms d'options ci-dessus sont à vérifier dans `pdfjs-dist@6.5.438` avant le prototype (`disableWorkerRendering` n'est pas une option documentée de pdf.js) ; ce paragraphe est corrigé selon le résultat.
+- **Vérifié le 10 novembre (Task 22, retours CLEAN5)** dans `pdfjs-dist@6.5.438` : `isEvalSupported` et `disableWorkerRendering` **n'existent plus** (pdf.js 6 ne compile plus rien par `new Function`) ; options retenues : `useWasm: false`, `enableXfa: false`, `isOffscreenCanvasSupported: false`, `stopAtErrors: false`, rendu `annotationMode: 0`. Ni polices standard ni cartes CMap chargées (aucune requête depuis le cadre) : polices du système en repli. Le bundle du cadre garde trois `import()` de pdf.js sur des chemins inutilisés (WebAssembly, worker séparé) : `check-dist.mjs` exempte `pdf-frame.js` seul.
 - Le prototype de la tâche PDF décide : il tourne contre le **serveur Go** (en-têtes réels), sur Chromium **et** WebKit ; échec sur l'un des deux → visionneuse retirée, `pdf` en « Enregistrer seulement ». La démo n'est qu'un contrôle de plus (ni CORP ni `frame-ancestors` sur Pages).
 
 ---

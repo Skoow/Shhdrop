@@ -22,6 +22,8 @@ const DEFAULT = { audio: "audio/mp4", video: "video/mp4" } as const;
 
 /** Type du Blob d'aperçu, ou null : pas d'aperçu (aucune URL ne doit être créée). */
 export function safeBlobType(kind: PreviewKind, manifestMime: string): string | null {
+  // PDF : jamais d'URL ; le Blob part tel quel vers le cadre isolé (PdfViewer, UI §13).
+  if (kind === "pdf") return "application/pdf";
   if (kind !== "image" && kind !== "audio" && kind !== "video") return null;
   const m = manifestMime.split(";")[0]!.trim().toLowerCase();
   const list: readonly string[] = TYPE_SUR[kind];

@@ -1,0 +1,48 @@
+/* Cadre PDF isolé : fond sombre de l'application, pages centrées, barre de zoom en haut. */
+:root {
+  color-scheme: dark;
+}
+html,
+body {
+  margin: 0;
+  background: #0b0d12;
+  color: #e9ecf2;
+  font: 14px/1.4 system-ui, sans-serif;
+}
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  background: rgb(11 13 18 / 0.92);
+}
+.bar button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid rgb(233 236 242 / 0.16);
+  border-radius: 12px;
+  background: #151821;
+  color: inherit;
+  font-size: 18px;
+  cursor: pointer;
+}
+.bar button:focus-visible {
+  outline: 2px solid #5fe3b5;
+  outline-offset: 2px;
+}
+.pages {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 12px;
+  overflow-x: auto;
+}
+canvas {
+  display: block;
+  max-width: none;
+  background: #fff;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.4);
+}

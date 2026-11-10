@@ -54,6 +54,18 @@ async function restoredPage(ctx: BrowserContext, origin: string): Promise<Page |
 }
 
 test.use({ locale: "fr-FR" });
+// Ce test décrit le comportement de Chromium lui-même (profil persistant, restauration de
+// session), pas celui de l'application. Sous forte charge (suite complète, 4 workers),
+// Chromium bloque parfois plusieurs minutes au lancement ou à la fermeture d'un profil : une
+// seule reprise, ici seulement ; chaque étape a son délai et son nom pour dire où il bloque.
+test.describe.configure({ retries: 1 });
+
+/** Étape nommée, bornée à `ms` : un blocage de Chromium échoue vite et dit où. */
+function step<T>(name: string, run: () => Promise<T>, ms = 45_000): Promise<T> {
+  return test.step(name, () =>
+    Promise.race([run(), new Promise<never>((_, ko) => setTimeout(() => ko(new Error(`${name} : bloqué plus de ${ms / 1000} s (Chromium)`)), ms))]),
+  );
+}
 
 for (const late of [false, true]) {
   test(`profil persistant : # absent de l'historique et du disque ; onglet restauré ${late ? "après 3 min : clé oubliée" : "aussitôt : « Rouvrir »"}`, async ({ shh, browser, browserName }) => {
@@ -65,7 +77,7 @@ for (const late of [false, true]) {
     const key = sent.link.slice(sent.link.indexOf("#") + 1);
     const dir = mkdtempSync(join(tmpdir(), "shh-profile-"));
     try {
-      let ctx = await launch(dir);
+      let ctx = await step("lancement du profil", () => launch(dir));
       // late : l'horloge de la page avance de 3 min sur la vraie (fermeture « il y a 3 min »).
       if (late) await ctx.addInitScript(() => { const n = Date.now; Date.now = () => n() - 180_000; });
       const page = ctx.pages()[0] ?? (await ctx.newPage());
@@ -74,7 +86,7 @@ for (const late of [false, true]) {
       // M3 : l'entrée d'historique de l'onglet ne porte plus le # (replaceState).
       expect(await page.evaluate(() => ({ href: location.href, n: history.length }))).toEqual({ href: shh.origin + "/", n: 2 });
       expect(await page.evaluate(() => sessionStorage.getItem("shh.og") ?? "")).toContain(key);
-      await ctx.close();
+      await step("fermeture du profil", () => ctx.close());
 
       // Ce que le profil garde sur le disque (rapport : M2 « Session Storage », M3 « History »).
       const onDisk = filesWith(dir, key);
@@ -85,7 +97,7 @@ for (const late of [false, true]) {
 
       // Réouverture avec restauration de la session.
       restoreOnStartup(dir);
-      ctx = await launch(dir);
+      ctx = await step("relance avec restauration", () => launch(dir));
       const back = await restoredPage(ctx, shh.origin);
       test.info().annotations.push({ type: "onglet restauré", description: back ? back.url() : "aucun" });
       expect(back, "Chromium restaure l'onglet (constaté le 8 novembre)").toBeDefined();
@@ -107,7 +119,7 @@ for (const late of [false, true]) {
           await expect(back.getByRole("heading", { name: "Ce lien est incomplet. Rouvrez-le depuis le message d'origine." })).toBeVisible();
         }
       }
-      await ctx.close();
+      await step("fermeture finale", () => ctx.close());
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

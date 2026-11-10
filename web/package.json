@@ -8,15 +8,16 @@
     "node": ">=22.2.0"
   },
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && vite build -c vite.pdf-frame.config.ts",
     "check": "tsc --noEmit && npm --prefix tools/svelte-check exec -- svelte-check --workspace . --tsconfig ./tsconfig.json --fail-on-warnings",
     "test": "tsc --noEmit && vitest run src scripts",
     "test:e2e": "vitest run e2e --testTimeout=120000 --hookTimeout=120000",
     "test:ui": "playwright test",
-    "build:demo": "vite build --mode demo"
+    "build:demo": "vite build --mode demo && vite build -c vite.pdf-frame.config.ts --mode demo"
   },
   "dependencies": {
     "libsodium-wrappers-sumo": "0.8.4",
+    "pdfjs-dist": "6.5.438",
     "svelte": "5.57.3"
   },
   "devDependencies": {

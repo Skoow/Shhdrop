@@ -1,5 +1,5 @@
 <script module lang="ts">
-  export type ViewItem = { i: number; name: string; kind: "image" | "video" | "audio" | "text"; size: number; text?: string };
+  export type ViewItem = { i: number; name: string; kind: "image" | "video" | "audio" | "pdf" | "text"; size: number; text?: string };
 </script>
 
 <script lang="ts">
@@ -10,6 +10,7 @@
   // « Voir seulement » : aucun bouton de téléchargement, mention honnête dans le panneau.
   import { midSplitName } from "../ui/midname";
   import { extLabel, otherBrowser } from "./hint";
+  import PdfViewer from "./PdfViewer.svelte";
   import { untrack } from "svelte";
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
@@ -64,6 +65,8 @@
   let phase = $state<Phase>("loading");
   let got = $state(0);
   let url = $state<string | null>(null);
+  /** PDF : le Blob lui-même (transféré au cadre isolé), jamais une URL de la page. */
+  let pdf = $state<Blob | null>(null);
   $effect(() => {
     const c = cur;
     if (!c) return;
@@ -81,8 +84,11 @@
     untrack(() => load(c.i, (d) => (got = d), ctl.signal)).then(
       (blob) => {
         if (ctl.signal.aborted) return;
-        mine = trackUrl(blob);
-        url = mine;
+        if (c.kind === "pdf") pdf = blob;
+        else {
+          mine = trackUrl(blob);
+          url = mine;
+        }
         phase = "shown";
       },
       () => {
@@ -93,6 +99,7 @@
       ctl.abort();
       if (mine) revoke(mine);
       url = null;
+      pdf = null;
     };
   });
 
@@ -167,6 +174,8 @@
           {#if other && extLabel(cur.name)}{t(viewOnly ? "content.undecodable.fmt.viewOnly" : "content.undecodable.fmt", { fmt: extLabel(cur.name), browser: t(other === "safari" ? "content.browser.safari" : "content.browser.chrome") })}
           {:else}{viewOnly ? t("content.notViewable") : t("content.undecodable")}{/if}
         </p>
+      {:else if pdf && cur.kind === "pdf"}
+        <PdfViewer blob={pdf} label={cur.name} onerror={() => (phase = "undecodable")} />
       {:else if url}
         {#if cur.kind === "image"}
           <ImageViewer {url} alt={cur.name} {viewOnly} onerror={() => (phase = "undecodable")} />

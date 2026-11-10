@@ -15,8 +15,9 @@ describe("safeBlobType (UI §9.8)", () => {
     expect(safeBlobType("audio", "audio/ogg")).toBe("audio/ogg");
     expect(safeBlobType("audio", "text/html")).toBe("audio/mp4");
   });
-  it("none, text, pdf → null", () => {
-    for (const k of ["none", "text", "pdf"] as const) expect(safeBlobType(k, "image/png"), k).toBeNull();
+  it("none, text → null ; pdf → application/pdf (Blob transféré au cadre isolé, jamais d'URL)", () => {
+    for (const k of ["none", "text"] as const) expect(safeBlobType(k, "image/png"), k).toBeNull();
+    expect(safeBlobType("pdf", "text/html")).toBe("application/pdf");
   });
 });
 
