@@ -6,8 +6,10 @@ import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
 import { addFile, addText, readyHeading, sendButton } from "./send-helpers";
 
-const BANNER_FR = "Démo : rien n'est envoyé, le lien ne marche que dans cet onglet.";
-const BANNER_EN = "Demo: nothing is sent, the link only works in this tab.";
+// Audit F5 (8 novembre) : la démo garde ses données chiffrées dans ce navigateur, sur une
+// origine partagée par tous les sites GitHub Pages du compte : « ne mettez rien de réel ».
+const BANNER_FR = "Démo : rien n'est envoyé, le lien ne marche que dans cet onglet. N'y mettez rien de réel.";
+const BANNER_EN = "Demo: nothing is sent, the link only works in this tab. Don't put anything real in it.";
 const TITLE_FR = "Un lien, un mot de passe, puis plus rien.";
 
 const ID = Buffer.from(Uint8Array.from({ length: 16 }, (_, i) => i * 11 + 3)).toString("base64url");

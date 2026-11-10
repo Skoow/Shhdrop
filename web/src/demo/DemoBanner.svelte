@@ -5,12 +5,14 @@
 <script lang="ts">
   // Bandeau permanent de la démo (UI §14.3) : en haut de toutes les pages, non fermable.
   // Le texte vit ici, pas dans le dictionnaire de production (check-dist.mjs l'y interdit).
+  // « Rien de réel » (audit F5) : les partages de la démo restent chiffrés dans ce navigateur,
+  // sur une origine (github.io) partagée par tous les sites GitHub Pages du compte.
   import { getLang } from "../i18n/i18n.svelte";
   import { TriangleAlert } from "../ui/Icon";
 
   const TEXT = {
-    fr: "Démo : rien n'est envoyé, le lien ne marche que dans cet onglet.",
-    en: "Demo: nothing is sent, the link only works in this tab.",
+    fr: "Démo : rien n'est envoyé, le lien ne marche que dans cet onglet. N'y mettez rien de réel.",
+    en: "Demo: nothing is sent, the link only works in this tab. Don't put anything real in it.",
   } as const;
 </script>
 

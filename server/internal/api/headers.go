@@ -13,9 +13,12 @@ import "net/http"
 // worker-src … blob: : le Worker d'Argon2id est lancé depuis un Blob dont les octets viennent
 // d'un fetch avec `integrity` (web/src/crypto/argon2-run.worker.ts) ; new Worker(url) n'a pas
 // de contrôle d'intégrité (spec §28.3). Un Blob ne donne rien de plus à un script déjà exécuté.
+// connect-src … blob: : Chrome (156) relit lui-même une image blob: qu'il ne sait pas décoder
+// (HEIC) et la CSP bloquait cette relecture (CI du 10 novembre). Une adresse blob: ne désigne
+// que des données déjà présentes dans la page : rien ne peut sortir par là.
 var securityHeaders = [][2]string{
 	{"Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; " +
-		"img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self'; " +
+		"img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' blob:; worker-src 'self' blob:; frame-src 'self'; " +
 		"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types svelte-trusted-html shhdrop"},
 	{"Referrer-Policy", "no-referrer"},
 	{"X-Content-Type-Options", "nosniff"},

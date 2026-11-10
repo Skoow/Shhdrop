@@ -442,7 +442,7 @@ func TestFifthBadPasswordIsNotFound(t *testing.T) {
 
 var wantHeaders = map[string]string{
 	"Content-Security-Policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; " +
-		"img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self'; " +
+		"img-src 'self' blob:; media-src 'self' blob:; connect-src 'self' blob:; worker-src 'self' blob:; frame-src 'self'; " +
 		"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types svelte-trusted-html shhdrop",
 	"Referrer-Policy":              "no-referrer",
 	"X-Content-Type-Options":       "nosniff",
