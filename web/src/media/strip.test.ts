@@ -262,3 +262,16 @@ describe("nettoyage des vidéos et de l'audio (spec §35.2, Task 9c)", () => {
     }
   });
 });
+
+describe("EXIF illisible (revue du 10 novembre)", () => {
+  it("JPEG : l'EXIF abîmé est retiré, la photo est nettoyée (pas d'échec qui la laisserait partir avec sa position)", async () => {
+    const b = fx("iphone-like.jpg").slice();
+    const at = indexOf(b, new TextEncoder().encode("Exif\0\0"));
+    expect(at).toBeGreaterThan(0);
+    b[at + 6] = b[at + 7] = 0x58; // « XX » à la place de « II » ou « MM »
+    const { r, out } = await clean("iphone-like.jpg", b);
+    expect(r.state).toBe("nettoye");
+    expect(found(out)).toEqual([]);
+    expect(indexOf(out, new TextEncoder().encode("Exif\0\0"))).toBe(-1);
+  });
+});

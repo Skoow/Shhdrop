@@ -103,7 +103,11 @@ const RISKY = new Set(["exe", "msi", "bat", "cmd", "com", "scr", "ps1", "vbs", "
   // Audit F4 (7 novembre) : images disque (contournent la marque « provenant d'Internet »),
   // OneNote, aide compilée, macros Office, requêtes web Excel, raccourcis et scripts Windows.
   "img", "vhd", "vhdx", "one", "chm", "xlsm", "docm", "pptm", "xlam", "ppam", "iqy", "slk", "scf", "jse", "vbe", "psm1",
-  "appref-ms", "application", "gadget", "msc", "settingcontent-ms"]);
+  "appref-ms", "application", "gadget", "msc", "settingcontent-ms",
+  // Revue du 10 novembre : bibliothèques et compléments, modèles et classeurs à macros,
+  // installeurs et correctifs, scripts, raccourcis de recherche.
+  "dll", "xll", "wsh", "msp", "cab", "dotm", "xltm", "potm", "ppsm", "sldm", "xlsb", "py", "jnlp", "diagcab",
+  "library-ms", "search-ms", "inetloc", "deb", "rpm", "appimage"]);
 
 /** Extension exécutable ou interprétée : avertir avant l'enregistrement (spec §12). À appeler sur un nom passé par safeName. */
 export function isRiskyName(name: string): boolean {

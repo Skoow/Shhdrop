@@ -130,6 +130,8 @@ describe("isRiskyName", () => {
     }
     // Ouverts localement dans un navigateur, leur script s'exécute (scan du 7 novembre, F4 en partie).
     for (const e of ["svg", "svgz", "xhtml", "xht", "mht", "mhtml"]) expect(isRiskyName(`f.${e}`), e).toBe(true);
+    // Revue du 10 novembre : bibliothèques et compléments, modèles à macros, installeurs, scripts.
+    for (const e of ["dll", "xll", "wsh", "msp", "cab", "dotm", "xltm", "potm", "ppsm", "sldm", "xlsb", "py", "jnlp", "diagcab", "library-ms", "search-ms", "inetloc", "deb", "rpm", "appimage"]) expect(isRiskyName(`f.${e}`), e).toBe(true);
     // Images disque, OneNote, aide compilée, macros Office, raccourcis et scripts Windows (audit F4).
     for (const e of ["img", "vhd", "vhdx", "one", "chm", "mht", "mhtml", "svg", "xlsm", "docm", "pptm", "xlam", "ppam", "iqy", "slk", "lnk", "scf", "hta", "jse", "vbe", "ps1", "psm1", "appref-ms", "application", "gadget", "msc", "settingcontent-ms"]) {
       expect(isRiskyName(`facture.${e}`), e).toBe(true);

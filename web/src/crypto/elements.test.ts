@@ -296,3 +296,16 @@ describe("éléments (spec §41.14)", () => {
     ).rejects.toThrow("chevauchement");
   });
 });
+
+describe("lecture du fichier à l'envoi (revue du 10 novembre, performance)", () => {
+  it("une seule lecture du Blob par plage, pas une par morceau de 64 Kio", async () => {
+    const blob = new Blob([pseudo(SEG_PLAIN + 3 * CHUNK + 5, 9)]);
+    let reads = 0;
+    const slice = blob.slice.bind(blob);
+    blob.slice = (...a: Parameters<Blob["slice"]>) => (reads++, slice(...a));
+    const el = await elementSealer(blob, 0);
+    for (let j = 0; j < el.pieces.length; j++) await el.piece(j);
+    expect(el.pieces.length).toBe(2);
+    expect(reads).toBe(2);
+  });
+});

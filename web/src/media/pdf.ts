@@ -266,10 +266,14 @@ async function xrefStream(src: Src, off: number): Promise<Section> {
   };
   const entries = new Map<number, Ent>();
   const rec = w0 + w1 + w2;
+  // Entrée de largeur nulle : la boucle tournerait /Index fois sans lire un octet (fichier
+  // hostile, revue du 10 novembre). Le nombre d'entrées est aussi borné par les octets du flux.
+  if (rec === 0) throw new Malformed("pdf_xref_w");
   let o = 0;
   for (let s = 0; s < index.length; s += 2) {
     const first = int(index[s]);
     const count = int(index[s + 1]);
+    if (count > (data.length - o) / rec) throw new Malformed("pdf_xref_court");
     for (let k = 0; k < count; k++, o += rec) {
       if (o + rec > data.length) throw new Malformed("pdf_xref_court");
       const t = field(o, w0, 1);

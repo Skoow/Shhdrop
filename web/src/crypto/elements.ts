@@ -110,7 +110,7 @@ export type ElementSealer = {
  * Prépare l'élément `blob` placé au morceau `first` du paquet (frontière de segment pour un
  * élément d'un segment ou plus ; dans un seul segment pour un petit). Clé neuve à chaque
  * appel : un nouvel essai (« Réessayer ») ou une nouvelle place ne réutilise jamais un nonce
- * sous une clé. Le Blob est lu par tranches (un morceau à la fois) ; un File modifié depuis
+ * sous une clé. Le Blob est lu par tranches (une plage de 4 Mio au plus à la fois) ; un File modifié depuis
  * l'ajout fait échouer la lecture (NotReadableError).
  */
 export async function elementSealer(blob: Blob, first: number): Promise<ElementSealer> {
@@ -140,27 +140,32 @@ export async function elementSealer(blob: Blob, first: number): Promise<ElementS
       const g0 = p.seg * SEG_CHUNKS + p.from; // premier morceau, numéro dans le paquet
       const pre = g0 === 0 ? HEADER : 0;
       const out = new Uint8Array(pre + p.chunks * CHUNK_CT);
-      const chunk = new Uint8Array(CHUNK);
+      // Une seule lecture du Blob par plage (4 Mio au plus), puis les morceaux chiffrés en
+      // parallèle : mêmes octets produits (nonce = numéro du morceau), environ 4 fois plus
+      // vite que 64 lectures de 64 Kio (mesuré, revue du 10 novembre).
+      const plain = new Uint8Array(p.chunks * CHUNK);
       try {
-        for (let c = 0; c < p.chunks; c++) {
-          chunk.fill(0);
-          const lo = (g0 + c - first) * CHUNK;
-          if (lo < blob.size) {
-            // Au-delà de la fin (emprise arrondie, Q-H2-1) : morceau de zéros chiffrés.
-            const part = new Uint8Array(await blob.slice(lo, Math.min(blob.size, lo + CHUNK)).arrayBuffer());
-            if (part.length !== Math.min(CHUNK, blob.size - lo)) throw new Error("lecture_incomplete");
-            chunk.set(part);
-            part.fill(0);
-          }
-          const ct = await crypto.subtle.encrypt(
-            { name: "AES-GCM", iv: nonce(g0 + c, false), additionalData: ELEMENT_AD, tagLength: 128 },
-            key,
-            chunk,
-          );
-          out.set(new Uint8Array(ct), pre + c * CHUNK_CT);
+        const lo = (g0 - first) * CHUNK;
+        // Au-delà de la fin (emprise arrondie, Q-H2-1) : morceaux de zéros chiffrés.
+        const hi = Math.min(blob.size, lo + plain.length);
+        if (lo < hi) {
+          const part = new Uint8Array(await blob.slice(lo, hi).arrayBuffer());
+          if (part.length !== hi - lo) throw new Error("lecture_incomplete");
+          plain.set(part);
+          part.fill(0);
         }
+        await Promise.all(
+          Array.from({ length: p.chunks }, async (_, c) => {
+            const ct = await crypto.subtle.encrypt(
+              { name: "AES-GCM", iv: nonce(g0 + c, false), additionalData: ELEMENT_AD, tagLength: 128 },
+              key,
+              plain.subarray(c * CHUNK, (c + 1) * CHUNK),
+            );
+            out.set(new Uint8Array(ct), pre + c * CHUNK_CT);
+          }),
+        );
       } finally {
-        chunk.fill(0);
+        plain.fill(0);
       }
       return out;
     },

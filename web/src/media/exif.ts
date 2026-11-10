@@ -27,6 +27,19 @@ export function readOrientation(tiff: Uint8Array): number | null {
   return null;
 }
 
+/**
+ * Orientation à garder pendant un nettoyage, ou null. Un EXIF illisible (abîmé, tronqué) est
+ * retiré comme le reste : il ne fait pas échouer le nettoyage, sinon la photo partirait avec
+ * toutes ses informations, position comprise (revue du 10 novembre).
+ */
+export function orientationToKeep(tiff: Uint8Array): number | null {
+  try {
+    return readOrientation(tiff);
+  } catch {
+    return null;
+  }
+}
+
 /** Boutisme d'un en-tête TIFF (vrai : « II », petit-boutiste). */
 export function isLittle(tiff: Uint8Array): boolean {
   return tiff[0] === 0x49;

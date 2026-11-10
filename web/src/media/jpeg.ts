@@ -4,7 +4,7 @@
 // IFD1). Tout le reste est retiré, y compris ce qui suit le premier EOI (images secondaires
 // MPF, cartes de gain et de profondeur, vidéo des photos animées).
 import { Malformed, concat, slice, startsWith, u16be, u8 } from "./bytes";
-import { isLittle, orientationTiff, readOrientation } from "./exif";
+import { isLittle, orientationTiff, orientationToKeep } from "./exif";
 
 const EXIF_ID = "Exif\0\0";
 /** Tables et trames gardées : DQT, DHT, DAC, DRI, DNL, SOF0 à SOF15 (sauf DHT, JPG, DAC). */
@@ -70,7 +70,7 @@ export function cleanJpeg(b: Uint8Array): Uint8Array<ArrayBuffer> {
       if (startsWith(body, 0, EXIF_ID) && !exifDone) {
         exifDone = true;
         const tiff = body.subarray(EXIF_ID.length);
-        const orient = readOrientation(tiff);
+        const orient = orientationToKeep(tiff);
         if (orient !== null && orient !== 1) out.push(segment(0xe1, concat([new TextEncoder().encode(EXIF_ID), orientationTiff(orient, isLittle(tiff))])));
       }
       // XMP, XMP étendu, second EXIF : retirés

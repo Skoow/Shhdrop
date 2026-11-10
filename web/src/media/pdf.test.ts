@@ -98,3 +98,11 @@ describe("PDF (spec §35.2)", () => {
     }
   });
 });
+
+describe("PDF hostile (revue du 10 novembre)", () => {
+  it("table de références en flux avec /W [0 0 0] : refusée tout de suite, sans boucle sur /Index", async () => {
+    const pdf = "%PDF-1.5\n1 0 obj\n<< /Type /XRef /W [0 0 0] /Size 4000000 /Index [0 4000000] /Length 0 >>\nstream\n\nendstream\nendobj\nstartxref\n9\n%%EOF\n";
+    const { r } = await clean("hostile.pdf", new TextEncoder().encode(pdf));
+    expect(r).toEqual({ state: "echec", reason: "malformed:pdf_xref_w" });
+  });
+});

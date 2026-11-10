@@ -3,7 +3,7 @@
 // bloc auxiliaire inconnu. Bloc critique inconnu ou CRC faux : échec.
 import { Malformed, ascii, concat, slice, startsWith, u32be } from "./bytes";
 import { crc32 } from "./crc32";
-import { isLittle, orientationTiff, readOrientation } from "./exif";
+import { isLittle, orientationTiff, orientationToKeep } from "./exif";
 
 const SIG = "\x89PNG\r\n\x1a\n";
 const CRITICAL = new Set(["IHDR", "PLTE", "IDAT", "IEND"]);
@@ -40,7 +40,7 @@ export function cleanPng(b: Uint8Array): Uint8Array<ArrayBuffer> {
       if (type === "IEND") break; // rien après IEND
     } else if (KEPT.has(type)) out.push(all);
     else if (type === "eXIf") {
-      const orient = readOrientation(data);
+      const orient = orientationToKeep(data);
       if (orient !== null && orient !== 1) out.push(chunk("eXIf", orientationTiff(orient, isLittle(data))));
     }
     o += 12 + len;
