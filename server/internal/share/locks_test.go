@@ -22,12 +22,12 @@ func hookErase(t *testing.T, f func(b *blob.Store, id string, off, n int64) erro
 // twoUploads crée deux envois (paliers ba et bb) dont les verrous d'envoi diffèrent.
 func twoUploads(t *testing.T, s *Service, ba, bb int) (a, b string) {
 	t.Helper()
-	a, _, err := s.Create(newKeys().req(ba, 1, 1))
+	a, _, err := s.createAny(newKeys().req(ba, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for range 100 {
-		if b, _, err = s.Create(newKeys().req(bb, 1, 1)); err != nil {
+		if b, _, err = s.createAny(newKeys().req(bb, 1, 1)); err != nil {
 			t.Fatal(err)
 		}
 		if s.uploadLock(a) != s.uploadLock(b) {
@@ -209,7 +209,7 @@ func TestDetachedClosedOutsideGoneLock(t *testing.T) {
 // ramené au palier final, est « introuvable » (404), pas une erreur du serveur (500).
 func TestFinalizeDraftGoneBeforeResizeIsNotFound(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(160, 1, 1))
+	id, _, err := s.createAny(newKeys().req(160, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}

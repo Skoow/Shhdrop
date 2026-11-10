@@ -32,6 +32,12 @@ import { checkOrigin, manageLink, shareLink } from "./link";
 import { readCaptcha, takeCaptcha, type PreparedCaptcha } from "./prepare";
 import { SERVER_STALL_MS, abortError } from "./upload";
 
+/**
+ * Segments pleins réservés au plus à la création (D42-6) : palier 400, plafond de création du
+ * serveur (CreateMaxBucket) ; la réservation grandit ensuite par grow, au fil de l'envoi.
+ */
+export const CREATE_SEGMENTS = 6;
+
 /** Signe de vie du brouillon (le serveur efface un envoi sans nouvelle depuis 15 min). */
 export const KEEP_MS = 240_000;
 
@@ -63,6 +69,11 @@ type El = {
   data?: Blob;
   first: number; // premier morceau ; -1 : pas encore placé
   chunks: number; // emprise en morceaux : les seuls nécessaires (audit H-2, D41-38)
+  /**
+   * Fin (morceau exclu) de la dernière plage dont l'envoi est parti ; 0 : aucune. Au-delà,
+   * rien n'existe sur le serveur : un élément retiré ou en erreur y rend sa place (D42-6).
+   */
+  reach: number;
   parts: number; // requêtes d'envoi (une par segment touché)
   partsDone: number;
   phase: ElementPhase;
@@ -146,9 +157,10 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       const wait = cap.receivedAt + CAPTCHA_MIN_MS - performance.now();
       if (wait > 0) await sleep(wait, signal);
       throwIfAborted(signal);
-      // Réservation : fichiers déjà placés et en attente (la place exacte suit, par grow).
+      // Réservation : fichiers déjà placés et en attente, au plus CREATE_SEGMENTS segments
+      // (D42-6 : le serveur refuse plus) ; la suite vient par grow, au fil de l'envoi.
       const pending = usedSegments() + segmentsNeeded([...els.values()].filter((e) => e.first < 0).map((e) => e.src.size));
-      const bucket = reservationFor(Math.min(DATA_SEGMENTS, pending));
+      const bucket = reservationFor(Math.min(CREATE_SEGMENTS, DATA_SEGMENTS, pending));
       // Jamais interrompue : un brouillon créé resterait inconnu.
       const r = await api.create(c, acc.kAcces, sGestion, { bucket, hp: "", shown_at: cap.shownAt, ...fields });
       return { kLien, sGestion, token: r.uploadToken, bucket };
@@ -211,7 +223,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       e.first = -1;
       e.k?.fill(0);
       e.k = undefined;
-      e.acked = e.inflight = e.partsDone = 0;
+      e.acked = e.inflight = e.partsDone = e.reach = 0;
       e.touched = false;
       e.phase = "attente";
       e.error = undefined;
@@ -237,8 +249,12 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
     const t = new Uint8Array(DATA_CHUNKS);
     for (const e of els.values()) {
       if (e.first < 0 || e.chunks === 0) continue;
-      if (e.data && isSmall(e.data.size)) t.fill(1, e.first, e.first + e.chunks);
-      else t.fill(2, e.first, Math.ceil((e.first + e.chunks) / SEG_CHUNKS) * SEG_CHUNKS);
+      // En erreur : seule la place déjà partie reste prise (un essai neuf la reprend ailleurs) ;
+      // un élément placé derrière laisserait sinon un trou jamais reçu (D42-6) ou un grow refusé.
+      const end = e.phase === "erreur" ? Math.min(e.first + e.chunks, e.reach) : e.first + e.chunks;
+      if (end <= e.first) continue;
+      if (e.data && isSmall(e.data.size)) t.fill(1, e.first, end);
+      else t.fill(2, e.first, Math.ceil(end / SEG_CHUNKS) * SEG_CHUNKS);
     }
     for (const h of holds) t.fill(2, h.from * SEG_CHUNKS, h.to * SEG_CHUNKS);
     for (const [a, z] of voids) t.fill(1, a, z);
@@ -323,6 +339,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
         e.phase = "envoi";
         changed();
         e.touched = true;
+        e.reach = n * SEG_CHUNKS + p.from + p.chunks;
         // Segment entier : envoi simple ; sinon, plage de morceaux (?from).
         const from = p.from === 0 && p.chunks === SEG_CHUNKS ? undefined : p.from;
         await withBudget(deadline, { signal, onRetry: (r) => hooks.onRetry?.(r) }, (s) =>
@@ -380,7 +397,9 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
     // morceaux restent exclus et sont remplacés par le serveur à finalize (void).
     const small = e.first >= 0 && e.chunks > 0 && e.data !== undefined && isSmall(e.data.size);
     const big = e.first >= 0 && e.chunks > 0 && !small;
-    const hold: Hold | null = big ? { from: e.first / SEG_CHUNKS, to: Math.ceil((e.first + e.chunks) / SEG_CHUNKS), bytes: e.data?.size ?? e.src.size } : null;
+    // Grand élément : seuls ses segments déjà partis sont gardés puis effacés (abort fait :
+    // plus aucun envoi ne part) ; le reste de sa place est libre aussitôt (D42-6).
+    const hold: Hold | null = big && e.touched ? { from: e.first / SEG_CHUNKS, to: Math.ceil(e.reach / SEG_CHUNKS), bytes: e.data?.size ?? e.src.size } : null;
     if (hold) holds.add(hold);
     const voided: [number, number] | null = small ? [e.first, e.first + e.chunks] : null;
     if (voided) voids.push(voided); // exclu jusqu'à la fin de l'envoi interrompu
@@ -392,7 +411,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       // Rien n'est parti : la place est libre.
       if (voided && !e.touched && voids.includes(voided)) voids.splice(voids.indexOf(voided), 1);
       const cr = created;
-      if (cr && hold && e.touched) ok = await eraseOnServer(cr, hold);
+      if (cr && hold) ok = await eraseOnServer(cr, hold);
     } finally {
       if (hold && ok) holds.delete(hold);
       if (hold && !ok) stuck.add(hold);
@@ -403,7 +422,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
 
   function fresh(id: string, src: Blob): El {
     const chunks = footprintFor(src.size);
-    return { id, src, first: -1, chunks, parts: Math.ceil(chunks / SEG_CHUNKS), partsDone: 0, phase: "attente", acked: 0, inflight: 0, ac: new AbortController(), touched: false };
+    return { id, src, first: -1, chunks, reach: 0, parts: Math.ceil(chunks / SEG_CHUNKS), partsDone: 0, phase: "attente", acked: 0, inflight: 0, ac: new AbortController(), touched: false };
   }
 
   // --- interface ------------------------------------------------------------------------

@@ -37,7 +37,7 @@ func TestFinalizeSyncsBeforeReady(t *testing.T) {
 			return id, withFill(id, 1, 6)
 		}},
 		"brouillon": {func(t *testing.T, s *Service) (string, FinalizeReq) {
-			id, _, err := s.Create(newKeys().req(160, 1, 1))
+			id, _, err := s.createAny(newKeys().req(160, 1, 1))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -83,7 +83,7 @@ func TestFinalizeAbortsWhenSyncFails(t *testing.T) {
 	for name, draft := range map[string]bool{"au clic": false, "brouillon": true} {
 		t.Run(name, func(t *testing.T) {
 			s, _ := newSvc(t)
-			id, _, err := s.Create(newKeys().req(16, 1, 1))
+			id, _, err := s.createAny(newKeys().req(16, 1, 1))
 			if err != nil {
 				t.Fatal(err)
 			}

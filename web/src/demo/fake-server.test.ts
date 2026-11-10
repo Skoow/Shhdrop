@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { findIn, needle } from "../../e2e/scan";
 import { b64u, utf8 } from "../crypto/encoding";
-import { segmentSize } from "../crypto/container";
+import { CHUNK_CT, HEADER, segmentSize } from "../crypto/container";
 import {
   BadPasswordError,
   GrantInvalidError,
@@ -495,6 +495,34 @@ describe("faux serveur de démo : requêtes brutes", () => {
       for (const x of seg) worst = Math.max(worst, (run = x === 0 ? run + 1 : 0));
       expect(worst, `segment ${n}`).toBeLessThan(4096);
     }
+  });
+
+  it("D42-6 : création au plus au palier 400 ; grow borné par le plus haut segment reçu ; aléa de finalize borné par les morceaux reçus", async () => {
+    let offset = 0;
+    const fake = createFakeServer({ now: () => Date.now() + offset });
+    expect((await created(fake, () => (offset += 4000), 800)).r.status).toBe(400);
+    const { r } = await created(fake, () => (offset += 4000), 160);
+    expect(r.status).toBe(201);
+    const { upload_token } = (await r.json()) as { upload_token: string };
+    const auth = { Authorization: `Bearer ${upload_token}` };
+    const call = (path: string, init: RequestInit) => fake.handle(new Request(`${ORIGIN}/api/shares${path}`, init));
+    const grow = (bucket: number) => call("/grow", { method: "POST", headers: auth, body: JSON.stringify({ bucket }) });
+    expect((await grow(400)).status).toBe(400); // rien reçu : 2 segments de marge, palier 160
+    // Un morceau par palier, au dernier segment plein de la réservation (l'attaque de D42-6).
+    let bucket = 160;
+    for (const next of [400, 800, 1600]) {
+      const n = Math.floor((bucket - 1) / 64) - 1;
+      expect((await call(`/segments/${n}?from=0`, { method: "PUT", headers: auth, body: new Uint8Array(CHUNK_CT) })).status).toBe(204);
+      expect((await grow(next === 800 ? 1600 : next)).status).toBe(next === 800 ? 400 : 204); // au-delà de la marge
+      if (next === 800) expect((await grow(800)).status).toBe(204);
+      bucket = next;
+    }
+    const { fill_from: _f, fill_to: _t, ...noFill } = FIN;
+    const fin = (b: number) =>
+      call("/finalize", { method: "POST", headers: auth, body: JSON.stringify({ ...noFill, bucket: b, header: b64u(new Uint8Array(HEADER)), tail: b64u(new Uint8Array(CHUNK_CT)) }) });
+    const res = await fin(1600); // 1 596 morceaux d'aléa pour 3 reçus
+    expect([res.status, await res.json()]).toEqual([409, { error: "incomplete" }]);
+    expect(fake.inspect()[0]).toMatchObject({ state: "uploading", bucket: 1600 });
   });
 
   it("routes inconnues et méthodes fausses → 404 not_found", async () => {

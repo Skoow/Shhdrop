@@ -201,8 +201,14 @@ func (s *Service) uploadLock(id string) *sync.RWMutex {
 }
 
 // upload : échéance d'un envoi (ceil15(création + 6 h)) et minute du dernier segment reçu
-// (0 : aucun), en mémoire seulement.
-type upload struct{ deadline, progress int64 }
+// (0 : aucun), en mémoire seulement. recv : morceaux reçus depuis la création, renvois et
+// morceaux effacés ensuite compris (jamais décompté) ; top : 1 + plus haut segment dont un
+// morceau a été reçu (0 : aucun). Ils bornent Grow et l'aléa écrit à finalize (D42-6).
+type upload struct {
+	deadline, progress int64
+	recv               int64
+	top                int
+}
 
 // uploadOpen : l'envoi id est connu de ce processus et son échéance n'est pas passée.
 func (s *Service) uploadOpen(id string, now int64) bool {
@@ -229,6 +235,42 @@ func (s *Service) touchUpload(id string, now int64) {
 		s.mem.up[id] = u
 	}
 }
+
+// noteReceived compte k morceaux reçus au segment n de l'envoi id (après leur écriture).
+func (s *Service) noteReceived(id string, n, k int) {
+	s.mem.mu.Lock()
+	defer s.mem.mu.Unlock()
+	if u, ok := s.mem.up[id]; ok {
+		u.recv += int64(k)
+		u.top = max(u.top, n+1)
+		s.mem.up[id] = u
+	}
+}
+
+// received : morceaux reçus et 1 + plus haut segment reçu de l'envoi id (voir upload).
+func (s *Service) received(id string) (recv int64, top int) {
+	s.mem.mu.Lock()
+	defer s.mem.mu.Unlock()
+	u := s.mem.up[id]
+	return u.recv, u.top
+}
+
+// padFactor, padMargin : l'aléa écrit à finalize (en morceaux) ne dépasse jamais
+// padFactor × morceaux reçus + padMargin (D42-6). Un vrai client reste dessous
+// (amplify_test.go) : sous la fin de ses données, les trous (fin non envoyée du dernier
+// segment d'un grand élément, plus courte que ses 64 premiers morceaux ; vides des segments
+// partagés, le premier ajustement ne laissant qu'un segment au plus à moitié vide ; éléments
+// retirés, dont les morceaux reçus comptent) ne dépassent pas ses données plus un segment ; et
+// le palier final vaut au plus 2,5 fois le précédent, que la fin des données dépasse :
+// aléa ≤ 2,5 × (2 × reçus + 64) − reçus = 4 × reçus + 160. La marge couvre ce reste, les
+// petits paliers (160 morceaux au plus) et un segment d'élément retiré pendant son envoi.
+const (
+	padFactor = 4
+	padMargin = 8 * SegChunks
+)
+
+// padAllowed : aléa permis (en morceaux) pour recv morceaux reçus.
+func padAllowed(recv int64) int64 { return padFactor*recv + padMargin }
 
 func (s *Service) setPurge(id string, at int64) {
 	s.mem.mu.Lock()
@@ -369,8 +411,26 @@ func notEmptyHash(vs ...[]byte) bool {
 	return true
 }
 
+// CreateMaxBucket : plus grand palier accepté à la création (D42-6) : 6 segments pleins
+// (24 Mio de données) et le morceau du manifeste, ce que le client réserve au plus d'emblée
+// (web/src/transfer/draft.ts, CREATE_SEGMENTS). Au-delà, la réservation ne grandit que par
+// Grow, au fil des segments reçus. L'aléa écrit à finalize est borné à part (padAllowed) :
+// créé au plafond et finalisé vide, un brouillon ne dépasse pas growLimit(0) = 160.
+const CreateMaxBucket = 400
+
 // Validate vérifie les champs d'une création (aussi revérifiés par Create).
 func Validate(r CreateReq) error {
+	if err := validCreate(r); err != nil {
+		return err
+	}
+	if r.Bucket > CreateMaxBucket {
+		return ErrBadRequest
+	}
+	return nil
+}
+
+// validCreate : Validate sans le plafond du palier (tests de grands paliers, create).
+func validCreate(r CreateReq) error {
 	if !validID(r.ID) || !validBucket(r.Bucket) || len(r.AccessV) != 32 || len(r.ManageV) != 32 ||
 		!notEmptyHash(r.AccessV, r.ManageV) {
 		return ErrBadRequest
@@ -408,11 +468,14 @@ func validFill(from, to, segs int) bool {
 // tel quel). Un V_accès ou un V_gestion déjà présent (ou un id déjà pris, en base ou sur
 // disque) donne ErrConflict, sans toucher au partage existant : sans K_accès ni S_gestion,
 // personne ne peut provoquer ce refus (aucun oracle d'existence, revue K1, I2).
-func (s *Service) Create(r CreateReq) (string, int, error) {
+func (s *Service) Create(r CreateReq) (string, int, error) { return s.create(r, Validate) }
+
+// create : Create avec la validation valid (validCreate dans les tests de grands paliers).
+func (s *Service) create(r CreateReq, valid func(CreateReq) error) (string, int, error) {
 	if s.Frozen() {
 		return "", 0, ErrFrozen
 	}
-	if err := Validate(r); err != nil {
+	if err := valid(r); err != nil {
 		return "", 0, err
 	}
 	id := r.ID
@@ -486,6 +549,7 @@ func (s *Service) PutSegment(id string, n int, body []byte) error {
 		}
 		return err
 	}
+	s.noteReceived(id, n, chunksIn(bucket, n))
 	s.clearPart(id, n, n+1)
 	return s.markReceived(id, n)
 }
@@ -551,6 +615,11 @@ func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 		return 0, ErrBadRequest
 	}
 	if !hasAllBut(mask, segs, r.FillFrom, r.FillTo) {
+		return 0, ErrIncomplete
+	}
+	// Bourrage borné par les morceaux reçus (D42-6) : [FillFrom, FillTo) ne touche jamais le
+	// dernier segment, ses segments sont pleins.
+	if recv, _ := s.received(id); int64(r.FillTo-r.FillFrom)*SegChunks > padAllowed(recv) {
 		return 0, ErrIncomplete
 	}
 	if err := s.fillRandom(id, bucket, r.FillFrom, r.FillTo); err != nil {

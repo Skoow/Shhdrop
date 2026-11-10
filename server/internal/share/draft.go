@@ -68,6 +68,7 @@ func (s *Service) PutChunks(id string, n, from int, body []byte) error {
 		}
 		return err
 	}
+	s.noteReceived(id, n, k)
 	all := ^uint64(0) >> (SegChunks - chunks)
 	bits := (^uint64(0) >> (SegChunks - k)) << from
 	s.mem.mu.Lock()
@@ -133,15 +134,12 @@ func validVoid(v [][2]int, bucket int) bool {
 const growMargin = 2
 
 // growLimit : plus grand palier permis par Grow, le plus petit qui contient les segments
-// jusqu'au dernier reçu, plus growMargin segments pleins, plus le morceau du manifeste.
-func growLimit(mask []byte, segs int, part map[int]uint64) int {
-	hi := -1
-	for n := 0; n < segs; n++ {
-		if mask[n/8]&(1<<(n%8)) != 0 || part[n] != 0 {
-			hi = n
-		}
-	}
-	need := (hi+1+growMargin)*SegChunks + 1
+// jusqu'au plus haut dont un morceau a été reçu (top = 1 + son numéro, voir upload), plus
+// growMargin segments pleins, plus le morceau du manifeste. Un segment reçu puis effacé
+// (élément retiré) compte encore : effacer ne fait rien gagner à qui garde ses segments, et le
+// client peut placer l'élément suivant juste après un élément en cours d'effacement.
+func growLimit(top int) int {
+	need := (top+growMargin)*SegChunks + 1
 	for _, b := range Buckets {
 		if b >= need {
 			return b
@@ -177,7 +175,8 @@ func (s *Service) GrowCharged(id string, bucket int, charge func(bucket int) err
 	if err != nil {
 		return err
 	}
-	if !validBucket(bucket) || bucket <= old || bucket > growLimit(mask, SegmentCount(old), s.partOf(id)) {
+	_, top := s.received(id)
+	if !validBucket(bucket) || bucket <= old || bucket > growLimit(top) {
 		return ErrBadRequest
 	}
 	if charge != nil {
@@ -291,11 +290,12 @@ func (s *Service) finalizeDraft(id string, reserved int, r FinalizeReq) (time.Du
 		return 0, err
 	}
 	part := s.partOf(id)
+	recv, top := s.received(id)
 	// Palier final borné par les segments reçus, avec la marge de Grow (revue M1) : sans
-	// cela, un brouillon réservé d'emblée à 2 Gio et finalisé vide ferait écrire 2 Gio d'aléa.
+	// cela, un brouillon réservé à 2 Gio et finalisé vide ferait écrire 2 Gio d'aléa.
 	// Le client finalise au plus petit palier qui contient son dernier morceau envoyé
 	// (bucketFor), toujours sous cette borne.
-	if b > growLimit(mask, SegmentCount(reserved), part) {
+	if b > growLimit(top) {
 		return 0, ErrBadRequest
 	}
 	segs := SegmentCount(b)
@@ -315,6 +315,9 @@ func (s *Service) finalizeDraft(id string, reserved int, r FinalizeReq) (time.Du
 			have[c/SegChunks] &^= 1 << (c % SegChunks)
 		}
 	}
+	// Plages [début, fin) du fichier à remplir d'aléa, et leur total en morceaux.
+	var holes [][2]int64
+	var fill int64
 	for n := 0; n < segs; n++ {
 		chunks := chunksIn(b, n)
 		for c := 0; c < chunks; {
@@ -330,13 +333,22 @@ func (s *Service) finalizeDraft(id string, reserved int, r FinalizeReq) (time.Du
 			if n == 0 && c == 0 {
 				from = 0
 			}
-			if err := s.fillRange(id, from, chunkOffset(b, n, e)); err != nil {
-				if errors.Is(err, fs.ErrNotExist) {
-					return 0, ErrNotFound
-				}
-				return 0, err
-			}
+			holes = append(holes, [2]int64{from, chunkOffset(b, n, e)})
+			fill += int64(e - c)
 			c = e
+		}
+	}
+	// Aléa borné par les morceaux reçus (D42-6) : un morceau par palier ne suffit plus à
+	// faire écrire tout un grand palier. Le morceau du manifeste, réécrit ensuite, compte.
+	if fill > padAllowed(recv) {
+		return 0, ErrIncomplete
+	}
+	for _, h := range holes {
+		if err := s.fillRange(id, h[0], h[1]); err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return 0, ErrNotFound
+			}
+			return 0, err
 		}
 	}
 	// Le gros du fichier atteint le disque hors du verrou de l'envoi (revue B4, comme Finalize).

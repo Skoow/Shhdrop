@@ -87,7 +87,7 @@ func TestValidateRefusesEmptyHashVerifier(t *testing.T) {
 	// Scénario de l'audit : partage dont les vérificateurs valent SHA-256("") ; rien ne
 	// le crée, et même inséré à la main, {"manage": n'importe quoi} ne le détruit pas.
 	s, _ := newSvc(t)
-	if _, _, err := s.Create(k.req(1, 1, 1)); err != nil {
+	if _, _, err := s.createAny(k.req(1, 1, 1)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DB.Exec(`UPDATE shares SET access_v=?, proof_v=?, manage_v=?`, empty[:], empty[:], empty[:]); err != nil {

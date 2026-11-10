@@ -743,6 +743,11 @@ func TestCreateRefusals(t *testing.T) {
 	// Plus grand palier gratuit : 32 770 refusé (le serveur ne connaît que les paliers, spec §41.2).
 	b["bucket"] = 32770
 	expect(t, post(b), 400, badRequest)
+	// D42-6 : création au plus au palier 400 (la réservation grandit ensuite par grow).
+	for _, big := range []int{800, 32769} {
+		b["bucket"] = big
+		expect(t, post(b), 400, badRequest)
+	}
 	expect(t, post(k.createBody(1, 1, alt, shown)), 201, "")
 
 	// Jeton shown_at expiré (plus de 2 min) : refusé.
@@ -852,11 +857,15 @@ func TestCreateQuota(t *testing.T) {
 func TestCreateConflictAndFinalizeV2(t *testing.T) {
 	e := newEnv(t, false, nil)
 	k := newKeys()
-	c := e.create(t, "", k, 400, 2) // 7 segments
+	c := e.create(t, "", k, 160, 2) // grow à 400 (7 segments) avant le segment 2
 	alt, shown := e.captchaFor(t, "")
 	expect(t, e.do(req{method: "POST", path: "/api/shares", hdr: k.createHdr(), body: mustJSON(k.createBody(1, 1, alt, shown))}), 400, badRequest)
 	segs := map[int][]byte{}
 	for _, n := range []int{0, 1, 2, 6} {
+		if n == 2 {
+			expect(t, e.do(req{method: "POST", path: "/api/shares/grow", body: mustJSON(map[string]int{"bucket": 400}),
+				hdr: auth(c.UploadToken)}), 204, "")
+		}
 		segs[n] = rnd(share.SegmentSize(400, n))
 		expect(t, e.do(req{method: "PUT", path: fmt.Sprintf("/api/shares/segments/%d", n), body: segs[n],
 			hdr: auth(c.UploadToken)}), 204, "")

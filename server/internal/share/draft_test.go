@@ -31,7 +31,7 @@ func draftFin(id string, bucket int) FinalizeReq {
 
 func TestGrowExtendsReservationAndKeepsSegments(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(80, 1, 1))
+	id, _, err := s.createAny(newKeys().req(80, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestGrowExtendsReservationAndKeepsSegments(t *testing.T) {
 
 func TestGrowRefusedWhenStorageFull(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(80, 1, 1))
+	id, _, err := s.createAny(newKeys().req(80, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestGrowRefusedWhenStorageFull(t *testing.T) {
 
 func TestEraseWipesSegmentsOnDisk(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(400, 1, 1)) // 7 segments
+	id, _, err := s.createAny(newKeys().req(400, 1, 1)) // 7 segments
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestEraseAfterFinalizeIsNotFound(t *testing.T) {
 
 func TestEraseRefusedDuringFinalize(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(80, 1, 1))
+	id, _, err := s.createAny(newKeys().req(80, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestEraseRefusedDuringFinalize(t *testing.T) {
 
 func TestKeepPreventsStallSweep(t *testing.T) {
 	s, c := newSvc(t)
-	id, _, err := s.Create(newKeys().req(80, 1, 1))
+	id, _, err := s.createAny(newKeys().req(80, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestKeepPreventsStallSweep(t *testing.T) {
 
 func TestFinalizeDraftShrinksFillsAndWritesHeaderAndTail(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(160, 1, 1)) // réservation : 3 segments
+	id, _, err := s.createAny(newKeys().req(160, 1, 1)) // réservation : 3 segments
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestFinalizeDraftShrinksFillsAndWritesHeaderAndTail(t *testing.T) {
 
 func TestFinalizeDraftFillsHolesWithRandom(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(400, 1, 1))
+	id, _, err := s.createAny(newKeys().req(400, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestFinalizeDraftFillsHolesWithRandom(t *testing.T) {
 // Audit H1 : la réservation ne dépasse jamais les segments reçus de plus de growMargin.
 func TestGrowBoundedByReceivedSegments(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(80, 1, 1))
+	id, _, err := s.createAny(newKeys().req(80, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func mostlyRandom(b []byte) bool { return bytes.Count(b, []byte{0}) < len(b)/100
 
 func TestPutChunksPackedAndFinalizeFills(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(160, 1, 1))
+	id, _, err := s.createAny(newKeys().req(160, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestPutChunksPackedAndFinalizeFills(t *testing.T) {
 
 func TestPutChunksCompletesSegment(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(80, 1, 1))
+	id, _, err := s.createAny(newKeys().req(80, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +396,7 @@ func TestPutChunksCompletesSegment(t *testing.T) {
 
 func TestEraseClearsPartialSegment(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(160, 1, 1))
+	id, _, err := s.createAny(newKeys().req(160, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +416,7 @@ func TestEraseClearsPartialSegment(t *testing.T) {
 
 func TestGrowCountsPartialSegments(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(160, 1, 1))
+	id, _, err := s.createAny(newKeys().req(160, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +430,7 @@ func TestGrowCountsPartialSegments(t *testing.T) {
 
 func TestFinalizeDraftVoidValidation(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(80, 1, 1))
+	id, _, err := s.createAny(newKeys().req(80, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}

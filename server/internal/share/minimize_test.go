@@ -42,7 +42,7 @@ func TestOnlyExpiresAtInDB(t *testing.T) {
 	s, c := newSvc(t)
 	k := newKeys()
 	c.Add(37 * time.Second)
-	id, _, err := s.Create(k.req(1, 6, 1))
+	id, _, err := s.createAny(k.req(1, 6, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestPurgeAtStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	up, _, _ := s.Create(newKeys().req(1, 1, 1))
+	up, _, _ := s.createAny(newKeys().req(1, 1, 1))
 	kd := newKeys()
 	draining := ready(t, s, kd, 1, 24, 1)
 	s.Unlock(draining, kd.acces, kd.preuve)
@@ -130,7 +130,7 @@ func TestPurgeAtStart(t *testing.T) {
 // envoi inconnu de la mémoire (aucun Create dans ce processus) n'accepte aucun segment.
 func TestUploadUnknownToMemory(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(1, 1, 1))
+	id, _, err := s.createAny(newKeys().req(1, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}

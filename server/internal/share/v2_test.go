@@ -13,7 +13,7 @@ import (
 // Envoi v2 de 7 segments (palier 400), segments reçus sauf ceux de skip.
 func upload400(t *testing.T, s *Service, k keys, skip ...int) string {
 	t.Helper()
-	id, segs, err := s.Create(k.req(400, 1, 2))
+	id, segs, err := s.createAny(k.req(400, 1, 2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestCreateConflict(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
 	r := k.req(1, 1, 1)
-	if _, _, err := s.Create(r); err != nil {
+	if _, _, err := s.createAny(r); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.PutSegment(r.ID, 0, segBody(1, 0, 9)); err != nil {
@@ -152,7 +152,7 @@ func TestCreateConflict(t *testing.T) {
 	sameID := newKeys().req(16, 1, 1)
 	sameID.ID = r.ID
 	for name, c := range map[string]CreateReq{"V_accès": sameAccess.req(16, 1, 1), "V_gestion": sameManage.req(16, 1, 1), "id": sameID} {
-		if _, _, err := s.Create(c); !errors.Is(err, ErrConflict) {
+		if _, _, err := s.createAny(c); !errors.Is(err, ErrConflict) {
 			t.Fatal(name, err)
 		}
 		if _, err := os.Stat(filepath.Join(s.Blobs.Dir, c.ID)); c.ID != r.ID && !errors.Is(err, os.ErrNotExist) {
@@ -165,7 +165,7 @@ func TestCreateConflict(t *testing.T) {
 		t.Fatal("partage existant touché")
 	}
 	// D'autres secrets : création acceptée, quel que soit l'état du partage existant.
-	if _, _, err := s.Create(newKeys().req(1, 1, 1)); err != nil {
+	if _, _, err := s.createAny(newKeys().req(1, 1, 1)); err != nil {
 		t.Fatal(err)
 	}
 	// Fichier orphelin du même nom : conflit aussi, jamais écrasé.
@@ -173,7 +173,7 @@ func TestCreateConflict(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(s.Blobs.Dir, orphan.ID), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Create(orphan); !errors.Is(err, ErrConflict) {
+	if _, _, err := s.createAny(orphan); !errors.Is(err, ErrConflict) {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(s.Blobs.Dir, orphan.ID)); string(b) != "x" {
@@ -189,8 +189,8 @@ func TestOnAbandon(t *testing.T) {
 	got := map[string]int{}
 	s.OnAbandon = func(id string, bucket int) { mu.Lock(); got[id] = bucket; mu.Unlock() }
 	k, k2 := newKeys(), newKeys()
-	destroyed, _, _ := s.Create(k.req(16, 1, 1))
-	swept, _, _ := s.Create(newKeys().req(1, 1, 1))
+	destroyed, _, _ := s.createAny(k.req(16, 1, 1))
+	swept, _, _ := s.createAny(newKeys().req(1, 1, 1))
 	ready(t, s, k2, 1, 1, 1)
 	if err := s.DestroyManaged(k.gestion); err != nil {
 		t.Fatal(err)

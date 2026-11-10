@@ -204,7 +204,7 @@ func TestDeleteDuringDownloadGrace(t *testing.T) {
 				t.Fatal(err)
 			}
 			mustGone(t, s, id, 0, o2) // autre ouverture, pas commencée
-			if _, _, err := s.Create(newKeys().req(gb, 1, 1)); !errors.Is(err, ErrFull) {
+			if _, _, err := s.createAny(newKeys().req(gb, 1, 1)); !errors.Is(err, ErrFull) {
 				t.Fatal("place libérée avant la fermeture du descripteur", err)
 			}
 			for n := 1; n < SegmentCount(gb); n++ {
@@ -218,7 +218,7 @@ func TestDeleteDuringDownloadGrace(t *testing.T) {
 			if n := heldFDs(t, s, id); n > 0 {
 				t.Fatal("descripteur encore ouvert", n)
 			}
-			if _, _, err := s.Create(newKeys().req(gb, 1, 1)); err != nil {
+			if _, _, err := s.createAny(newKeys().req(gb, 1, 1)); err != nil {
 				t.Fatal("place non libérée", err)
 			}
 		})

@@ -68,6 +68,17 @@ type transfers struct {
 	dl, ul  *limits.Slots
 	base    time.Duration
 	minRate int64 // octets par seconde
+	// now : départ des échéances de transfert (nil : time.Now ; remplacé par les tests pour
+	// fixer l'instant où l'échéance commence, après avoir constaté la place prise).
+	now func() time.Time
+}
+
+// start : instant de départ d'une échéance de transfert.
+func (t transfers) start() time.Time {
+	if t.now != nil {
+		return t.now()
+	}
+	return time.Now()
 }
 
 func defaultTransfers() transfers {

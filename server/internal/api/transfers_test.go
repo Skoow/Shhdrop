@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -187,25 +189,53 @@ func TestSegmentConcurrencyCap(t *testing.T) {
 
 // Audit E1 : un client plus lent que le débit minimal est coupé à l'échéance et rend sa
 // place, sans attendre le WriteTimeout de 300 s ; il ne reçoit jamais un segment complet.
+//
+// Déterministe : l'échéance (1 s) ne part qu'une fois la place du client lent constatée.
+// Avant, le test devait voir le refus 429 dans la seconde de l'échéance, ce qui échouait sur
+// une machine chargée (« place prise par le client lent »).
 func TestSlowReaderCutOff(t *testing.T) {
 	x := defaultTransfers()
 	x.dl = limits.NewSlots(1, 1, 1)
 	x.base, x.minRate = time.Second, 1<<40
+	// Le prochain départ d'échéance (celui du GET lent) attend release, place prise.
+	var hold atomic.Bool
+	armed, release := make(chan struct{}), make(chan struct{})
+	x.now = func() time.Time {
+		if hold.CompareAndSwap(true, false) {
+			close(armed)
+			<-release
+		}
+		return time.Now()
+	}
 	e := newEnvFull(t, false, nil, nil, x)
 	ids, toks := e.tokens(t, 80, 2)
 	srv := prodServer(t, e.h)
-	start := time.Now()
+	var once sync.Once
+	free := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(free) // avant srv.Close (ordre inverse) : jamais de gestionnaire bloqué
+	hold.Store(true)
 	cn := slowGET(t, srv, ids[0], 0, toks[0], "2001:db8::1")
-	waitFor(t, "place prise par le client lent", func() bool {
-		resp, _ := getSeg(t, srv, ids[1], 1, toks[1], "2001:db8::1")
-		return resp.StatusCode == 429
-	})
-	waitFor(t, "place rendue après l'échéance", func() bool {
-		resp, _ := getSeg(t, srv, ids[1], 1, toks[1], "2001:db8::1")
-		return resp.StatusCode == 200
-	})
-	if d := time.Since(start); d < time.Second || d > 4*time.Second {
-		t.Fatalf("coupé après %v (échéance : 1 s)", d)
+	select {
+	case <-armed:
+	case <-time.After(30 * time.Second):
+		t.Fatal("GET lent jamais servi")
+	}
+	if resp, _ := getSeg(t, srv, ids[1], 1, toks[1], "2001:db8::1"); resp.StatusCode != 429 {
+		t.Fatal("place du client lent non prise :", resp.Status)
+	}
+	start := time.Now()
+	free() // l'échéance de 1 s part maintenant
+	for x.dl.Len() != 0 {
+		if time.Since(start) > 60*time.Second {
+			t.Fatal("place jamais rendue (le WriteTimeout est de 300 s)")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if d := time.Since(start); d < time.Second {
+		t.Fatalf("coupé après %v, avant l'échéance de 1 s", d)
+	}
+	if resp, b := getSeg(t, srv, ids[1], 1, toks[1], "2001:db8::1"); resp.StatusCode != 200 || len(b) != share.SegmentSize(80, 1) {
+		t.Fatal("place rendue mais GET refusé :", resp.Status, len(b))
 	}
 	// La place rendue prouve que le gestionnaire est sorti. Le noyau finit d'envoyer ce qu'il
 	// avait déjà en file (hors du tas Go), mais le client ne reçoit jamais le segment entier.

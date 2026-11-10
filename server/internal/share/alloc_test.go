@@ -9,7 +9,7 @@ import (
 // tampon de 4 Mio ; le tampon est à la taille de la plage, plafonné à fillChunk.
 func TestFillRangeAllocatesNoMoreThanRange(t *testing.T) {
 	s, _ := newSvc(t)
-	id, _, err := s.Create(newKeys().req(160, 1, 1))
+	id, _, err := s.createAny(newKeys().req(160, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}

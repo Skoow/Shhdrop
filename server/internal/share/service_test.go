@@ -88,7 +88,7 @@ func segBody(bucket, n int, fill byte) []byte {
 // ready crée un partage complet (segments remplis de n+1) et le finalise.
 func ready(t *testing.T, s *Service, k keys, bucket, ttl, opens int) string {
 	t.Helper()
-	id, segs, err := s.Create(k.req(bucket, ttl, opens))
+	id, segs, err := s.createAny(k.req(bucket, ttl, opens))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestSizing(t *testing.T) {
 func TestFullFlow(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
-	id, segs, err := s.Create(k.req(1600, 1, 1))
+	id, segs, err := s.createAny(k.req(1600, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestFinalizeRounding(t *testing.T) {
 func TestFinalizeIncomplete(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
-	id, _, _ := s.Create(k.req(80, 1, 1))
+	id, _, _ := s.createAny(k.req(80, 1, 1))
 	s.PutSegment(id, 1, segBody(80, 1, 1))
 	if _, err := s.Finalize(id, fin(id)); !errors.Is(err, ErrIncomplete) {
 		t.Fatal(err)
@@ -261,7 +261,7 @@ func TestFinalizeIncomplete(t *testing.T) {
 func TestPutSegmentRules(t *testing.T) {
 	s, c := newSvc(t)
 	k := newKeys()
-	id, segs, _ := s.Create(k.req(80, 1, 1))
+	id, segs, _ := s.createAny(k.req(80, 1, 1))
 	if err := s.PutSegment(id, segs, segBody(80, 0, 1)); !errors.Is(err, ErrBadSegment) {
 		t.Fatal("n hors palier", err)
 	}
@@ -291,7 +291,7 @@ func TestPutSegmentRules(t *testing.T) {
 		t.Fatal("après finalize", err)
 	}
 	// envoi abandonné : délai de 6 h arrondi au quart d'heure (10:02 → 16:15)
-	id2, _, _ := s.Create(newKeys().req(1, 1, 1))
+	id2, _, _ := s.createAny(newKeys().req(1, 1, 1))
 	c.Add(6*time.Hour + 12*time.Minute) // 16:14 : encore accepté
 	if err := s.PutSegment(id2, 0, segBody(1, 0, 1)); err != nil {
 		t.Fatal("avant délai", err)
@@ -308,7 +308,7 @@ func TestPutSegmentRules(t *testing.T) {
 func TestParallelPutSegments(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
-	id, segs, _ := s.Create(k.req(1600, 1, 1))
+	id, segs, _ := s.createAny(k.req(1600, 1, 1))
 	var wg sync.WaitGroup
 	for n := 0; n < segs; n++ {
 		wg.Add(1)
@@ -506,11 +506,11 @@ func TestLargestBucket(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
 	const b = 32769
-	id, segs, err := s.Create(k.req(b, 1, 1))
+	id, segs, err := s.createAny(k.req(b, 1, 1))
 	if err != nil || segs != 513 {
 		t.Fatal(segs, err)
 	}
-	if _, _, err := s.Create(k.req(32770, 1, 1)); err == nil {
+	if _, _, err := s.createAny(k.req(32770, 1, 1)); err == nil {
 		t.Fatal("palier 32 770 accepté")
 	}
 	fi, err := os.Stat(filepath.Join(s.Blobs.Dir, id))
@@ -548,7 +548,7 @@ func TestLargestBucket(t *testing.T) {
 func TestUploadDeadlineRounded(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
-	id, _, err := s.Create(k.req(1, 1, 1)) // 10:02
+	id, _, err := s.createAny(k.req(1, 1, 1)) // 10:02
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,11 +564,11 @@ func TestUploadDeadlineRounded(t *testing.T) {
 func TestSweepEmptyUpload(t *testing.T) {
 	s, c := newSvc(t)
 	k := newKeys()
-	empty, _, err := s.Create(k.req(16, 1, 1)) // 10:02, échéance 16:15, balayage vide à 10:20
+	empty, _, err := s.createAny(k.req(16, 1, 1)) // 10:02, échéance 16:15, balayage vide à 10:20
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, _, err := s.Create(newKeys().req(16, 1, 1))
+	started, _, err := s.createAny(newKeys().req(16, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,7 +638,7 @@ func TestReadAfterExpiry(t *testing.T) {
 func TestReadUploading(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
-	id, _, _ := s.Create(k.req(1, 1, 1))
+	id, _, _ := s.createAny(k.req(1, 1, 1))
 	if _, err := readSegment(s, id, 0, 1); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
@@ -698,7 +698,7 @@ func TestDestroyAdmin(t *testing.T) {
 func TestStatus(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
-	id, _, _ := s.Create(k.req(1, 6, 4))
+	id, _, _ := s.createAny(k.req(1, 6, 4))
 	st, err := s.Status(k.gestion)
 	// v2 : les ouvertures ne sont connues qu'à la finalisation (spec §29.8).
 	if err != nil || st.State != "uploading" || st.MaxOpens != 0 || st.OpensUsed != 0 {
@@ -719,23 +719,23 @@ func TestStatus(t *testing.T) {
 func TestCreateLimits(t *testing.T) {
 	s, _ := newSvc(t)
 	s.StorageMax = 2*(48+16*65552) + 48 + 65552
-	if _, _, err := s.Create(newKeys().req(16, 1, 1)); err != nil {
+	if _, _, err := s.createAny(newKeys().req(16, 1, 1)); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Create(newKeys().req(16, 1, 1)); err != nil {
+	if _, _, err := s.createAny(newKeys().req(16, 1, 1)); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Create(newKeys().req(16, 1, 1)); !errors.Is(err, ErrFull) {
+	if _, _, err := s.createAny(newKeys().req(16, 1, 1)); !errors.Is(err, ErrFull) {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Create(newKeys().req(1, 1, 1)); err != nil {
+	if _, _, err := s.createAny(newKeys().req(1, 1, 1)); err != nil {
 		t.Fatal("encore de la place pour un petit", err)
 	}
 	if err := os.WriteFile(s.FrozenFile, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	s.StorageMax = 1 << 40
-	if _, _, err := s.Create(newKeys().req(1, 1, 1)); !errors.Is(err, ErrFrozen) {
+	if _, _, err := s.createAny(newKeys().req(1, 1, 1)); !errors.Is(err, ErrFrozen) {
 		t.Fatal(err)
 	}
 }
@@ -750,7 +750,7 @@ func TestParallelCreateFull(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, err := s.Create(newKeys().req(16, 1, 1))
+			_, _, err := s.createAny(newKeys().req(16, 1, 1))
 			mu.Lock()
 			defer mu.Unlock()
 			if err == nil {
@@ -782,12 +782,12 @@ func TestCreateValidation(t *testing.T) {
 	for i, f := range bad {
 		r := k.req(1, 1, 1)
 		f(&r)
-		if _, _, err := s.Create(r); !errors.Is(err, ErrBadRequest) {
+		if _, _, err := s.createAny(r); !errors.Is(err, ErrBadRequest) {
 			t.Fatal(i, err)
 		}
 	}
 	for _, b := range Buckets[:2] { // évite de réserver 100 Mio par cas
-		if _, _, err := s.Create(newKeys().req(b, 1, 10)); err != nil {
+		if _, _, err := s.createAny(newKeys().req(b, 1, 10)); err != nil {
 			t.Fatal(b, err)
 		}
 	}
@@ -815,7 +815,7 @@ func TestFinalizeValidation(t *testing.T) {
 		func(r *FinalizeReq) { r.Envelope = rnd(61) },
 		func(r *FinalizeReq) { r.Envelope = nil },
 	}
-	id, _, err := s.Create(k.req(1, 1, 1))
+	id, _, err := s.createAny(k.req(1, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -844,7 +844,7 @@ func TestFinalizeValidation(t *testing.T) {
 func TestSweep(t *testing.T) {
 	s, c := newSvc(t)
 	k := newKeys()
-	abandoned, _, _ := s.Create(newKeys().req(1, 1, 1))
+	abandoned, _, _ := s.createAny(newKeys().req(1, 1, 1))
 	expired := ready(t, s, newKeys(), 1, 1, 1) // 11:15
 	long := ready(t, s, newKeys(), 1, 24, 2)   // 10:15 le lendemain
 	drained := ready(t, s, k, 1, 24, 1)        // draining, purge à ceil15(10:02 + 6 h) = 16:15
@@ -1017,7 +1017,7 @@ func TestCreateCleansUpOnInsertError(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
 	s.DB.Close()
-	if _, _, err := s.Create(k.req(1, 1, 1)); err == nil {
+	if _, _, err := s.createAny(k.req(1, 1, 1)); err == nil {
 		t.Fatal("erreur attendue")
 	}
 	if ids, _ := s.Blobs.List(); len(ids) != 0 {
@@ -1061,7 +1061,7 @@ func TestDestroyExpired(t *testing.T) {
 	s, c := newSvc(t)
 	k, ku := newKeys(), newKeys()
 	id := ready(t, s, k, 1, 1, 1)
-	up, _, _ := s.Create(ku.req(1, 1, 1))
+	up, _, _ := s.createAny(ku.req(1, 1, 1))
 	c.Add(6*time.Hour + 15*time.Minute) // 16:17 : partage expiré, envoi échu (16:15)
 	for x, k := range map[string]keys{id: k, up: ku} {
 		if err := s.DestroyWithProof(k.acces, rnd(32), false); !errors.Is(err, ErrNotFound) {
@@ -1110,7 +1110,7 @@ func TestSweepStalledUpload(t *testing.T) {
 	s, c := newSvc(t)
 	k := newKeys()
 	c.Add(30 * time.Second) // 10:02:30
-	id, _, err := s.Create(k.req(80, 1, 1))
+	id, _, err := s.createAny(k.req(80, 1, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1156,7 +1156,7 @@ func TestCreateNoAllocateIsFull(t *testing.T) {
 	t.Cleanup(func() { reserveBlob = orig })
 	reserveBlob = func(*blob.Store, string, int64) error { return blob.ErrNoAllocate }
 	k := newKeys()
-	_, _, err := s.Create(k.req(1, 1, 1))
+	_, _, err := s.createAny(k.req(1, 1, 1))
 	if !errors.Is(err, ErrFull) || errors.Is(err, blob.ErrNoAllocate) {
 		t.Fatal(err)
 	}
@@ -1170,7 +1170,7 @@ func TestCreateNoAllocateIsFull(t *testing.T) {
 	// Une autre erreur n'est pas convertie en « plein ».
 	boom := errors.New("boum")
 	reserveBlob = func(*blob.Store, string, int64) error { return boom }
-	if _, _, err := s.Create(k.req(1, 1, 1)); !errors.Is(err, boom) || errors.Is(err, ErrFull) {
+	if _, _, err := s.createAny(k.req(1, 1, 1)); !errors.Is(err, boom) || errors.Is(err, ErrFull) {
 		t.Fatal(err)
 	}
 }

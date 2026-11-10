@@ -118,6 +118,39 @@ func TestDraftRoutes(t *testing.T) {
 	}
 }
 
+// D42-6 : un morceau par palier (au dernier segment plein de la réservation) fait grandir le
+// brouillon par grow, mais finalize refuse d'écrire tout le palier en aléa pour si peu reçu :
+// 409 « incomplete » (le client affiche une erreur d'envoi, pas « partage disparu »).
+func TestDraftAmplificationRefused(t *testing.T) {
+	e := newEnv(t, false, nil)
+	k := newKeys()
+	c := e.create(t, "", k, 160, 1)
+	bucket := 160
+	for _, next := range []int{400, 800, 1600} {
+		n := (bucket-1)/64 - 1
+		expect(t, e.do(req{method: "PUT", path: fmt.Sprintf("/api/shares/segments/%d?from=0", n),
+			body: rnd(share.ChunkCT), hdr: auth(c.UploadToken)}), 204, "")
+		expect(t, e.do(req{method: "POST", path: "/api/shares/grow", body: mustJSON(map[string]int{"bucket": next}),
+			hdr: auth(c.UploadToken)}), 204, "")
+		bucket = next
+	}
+	fin := k.finBody(1, 1)
+	delete(fin, "fill_from")
+	delete(fin, "fill_to")
+	fin["bucket"] = 1600
+	fin["header"] = enc.EncodeToString(rnd(48))
+	fin["tail"] = enc.EncodeToString(rnd(65552))
+	expect(t, e.do(req{method: "POST", path: "/api/shares/finalize", body: mustJSON(fin), hdr: auth(c.UploadToken)}),
+		409, `{"error":"incomplete"}`)
+	raw, err := os.ReadFile(filepath.Join(e.dir, "blobs", c.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if z := bytes.Count(raw, []byte{0}); z < len(raw)*9/10 {
+		t.Fatalf("aléa écrit malgré le refus (%d octets non nuls sur %d)", len(raw)-z, len(raw))
+	}
+}
+
 // Les octets reçus comptent au quota du jour (spec §41.14) : 429 jusqu'à minuit au-delà.
 func TestDraftReceivedBytesQuota(t *testing.T) {
 	e := newEnv(t, false, nil)

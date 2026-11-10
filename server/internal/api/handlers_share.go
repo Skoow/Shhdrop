@@ -174,7 +174,7 @@ func (s *server) putSegment(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 	// Échéance de lecture du corps proportionnelle au plus grand segment possible.
-	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(s.xfer.deadline(maxSegmentLen))); err != nil &&
+	if err := http.NewResponseController(w).SetReadDeadline(s.xfer.start().Add(s.xfer.deadline(maxSegmentLen))); err != nil &&
 		!errors.Is(err, http.ErrNotSupported) {
 		fail(w, err)
 		return
@@ -408,7 +408,7 @@ func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {
 	defer stop()
 	// Échéance propre à la requête (remplace le WriteTimeout de 300 s) : un client trop
 	// lent est coupé et rend sa place. Absente des tests en mémoire (ErrNotSupported).
-	if err := rc.SetWriteDeadline(time.Now().Add(s.xfer.deadline(sec.Size()))); err != nil &&
+	if err := rc.SetWriteDeadline(s.xfer.start().Add(s.xfer.deadline(sec.Size()))); err != nil &&
 		!errors.Is(err, http.ErrNotSupported) {
 		fail(w, err)
 		return

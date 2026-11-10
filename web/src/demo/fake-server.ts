@@ -36,6 +36,20 @@ const WATCH_HOLD_MS = 25_000;
 const GRANT_TTL_S = 30 * 60; // octroi d'ouverture (spec §41.4)
 const MAX_REOPENS = 10;
 const LEAVE_DELAY_S = 180; // « je pars » de la dernière ouverture → suppression (D41-28)
+// D42-6 (comme server/internal/share) : palier de création plafonné, réservation agrandie par
+// grow jusqu'à 2 segments au-delà du plus haut segment reçu, aléa de finalize borné par les
+// morceaux reçus (renvois et morceaux effacés compris).
+const CREATE_MAX_BUCKET = 400; // CreateMaxBucket
+const GROW_MARGIN = 2; // growMargin
+const PAD_FACTOR = 4, PAD_MARGIN = 8 * SEG_CHUNKS; // padFactor, padMargin
+
+function growLimit(top: number): number {
+  const need = (top + GROW_MARGIN) * SEG_CHUNKS + 1;
+  for (const b of BUCKETS) if (b >= need) return b;
+  return BUCKETS[BUCKETS.length - 1]!;
+}
+
+const chunksIn = (bucket: number, n: number) => Math.min(SEG_CHUNKS, bucket - n * SEG_CHUNKS);
 
 type State = "uploading" | "ready" | "draining";
 
@@ -56,6 +70,10 @@ type Share = {
   manageV: Uint8Array;
   envelope: Uint8Array | null;
   segments: (Uint8Array | undefined)[];
+  /** Envoi (D42-6) : morceaux reçus, 1 + plus haut segment reçu, morceaux présents par segment. */
+  recv?: number;
+  top?: number;
+  have?: (Uint8Array | undefined)[];
   uploadDeadline: number; // s ; 0 hors envoi
   progressAt: number | null; // s, à la minute ; null hors envoi
   expiresAt: number; // s ; 0 pendant l'envoi
@@ -420,7 +438,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     const altcha = str(b.altcha), hp = str(b.hp), shown = str(b.shown_at);
     if (altcha === null || hp === null || shown === null) throw badRequest();
     const accessV = await sha256(ka), manageV = await sha256(sg);
-    if (!(BUCKETS as readonly number[]).includes(bucket)) throw badRequest();
+    if (!(BUCKETS as readonly number[]).includes(bucket) || bucket > CREATE_MAX_BUCKET) throw badRequest();
     // Anti-robot : aucune preuve vérifiée ; seuls le jeton shown_at (émis ici, usage unique,
     // valable 2 min) et le délai de 3 s sont contrôlés, comme le fait le vrai serveur.
     const at = shownAt.get(shown);
@@ -483,15 +501,30 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
         s.segments[n] = seg = fresh;
       }
       seg.set(body, (n === 0 ? HEADER : 0) + from * CHUNK_CT - pre);
+      received(s, n, from, k);
       opts.onSegment?.(id, n, seg);
       s.progressAt = minute(now());
       return empty(204);
     }
     if (n >= s.segments.length || body.length !== segmentSize(s.bucket, n)) throw badRequest();
     s.segments[n] = body;
+    received(s, n, 0, chunksIn(s.bucket, n));
     opts.onSegment?.(id, n, body);
     s.progressAt = minute(now());
     return empty(204);
+  }
+
+  /** Fin de l'envoi : compteurs oubliés, comme la mémoire du vrai serveur (forget). */
+  function forgetUpload(s: Share) {
+    delete s.recv;
+    delete s.top;
+    delete s.have;
+  }
+
+  function received(s: Share, n: number, from: number, k: number) {
+    s.recv = (s.recv ?? 0) + k;
+    s.top = Math.max(s.top ?? 0, n + 1);
+    ((s.have ??= [])[n] ??= new Uint8Array(SEG_CHUNKS)).fill(1, from, from + k);
   }
 
   const FINALIZE_KEYS = ["salt", "kdf_ops", "kdf_mem", "proof_v", "envelope", "ttl_hours", "max_opens", "fill_from", "fill_to", "bucket", "header", "tail", "void"];
@@ -508,11 +541,12 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     const [, s] = uploading(req);
     const b = await readJSON(req, ["bucket"]);
     const bucket = int(b.bucket);
-    if (b.bucket === undefined || !(BUCKETS as readonly number[]).includes(bucket) || bucket <= s.bucket) throw badRequest();
+    if (b.bucket === undefined || !(BUCKETS as readonly number[]).includes(bucket) || bucket <= s.bucket || bucket > growLimit(s.top ?? 0)) throw badRequest();
     const old = s.bucket;
     const next: (Uint8Array | undefined)[] = new Array(segmentCount(bucket)).fill(undefined);
     s.segments.forEach((x, n) => (next[n] = x));
     if (old % SEG_CHUNKS !== 0) next[segmentCount(old) - 1] = undefined; // dernier segment partiel
+    if (old % SEG_CHUNKS !== 0 && s.have) s.have[segmentCount(old) - 1] = undefined;
     s.segments = next;
     s.bucket = bucket;
     s.progressAt = minute(now());
@@ -527,6 +561,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     for (let n = from; n < to; n++) {
       s.segments[n]?.fill(0);
       s.segments[n] = undefined;
+      if (s.have) s.have[n] = undefined;
     }
     s.progressAt = minute(now());
     return empty(204);
@@ -566,8 +601,20 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     if (draft) {
       const fb = int(b.bucket);
       const hdr = decodeB64(b.header, HEADER), tail = decodeB64(b.tail, CHUNK_CT);
-      if (!(BUCKETS as readonly number[]).includes(fb) || fb > s.bucket) throw badRequest();
+      if (!(BUCKETS as readonly number[]).includes(fb) || fb > s.bucket || fb > growLimit(s.top ?? 0)) throw badRequest();
       const segs = segmentCount(fb);
+      // Morceaux de petits éléments retirés (audit H-2) : vérifiés, puis remplacés par de l'aléa.
+      const voids = b.void === undefined ? [] : b.void;
+      if (!Array.isArray(voids) || voids.length > 512) throw badRequest();
+      for (const v of voids as unknown[])
+        if (!Array.isArray(v) || v.length !== 2 || !Number.isInteger(v[0]) || !Number.isInteger(v[1]) || !(v[0] >= 0 && v[0] < v[1] && v[1] <= fb - 1)) throw badRequest();
+      // Aléa borné par les morceaux reçus (D42-6) : morceaux absents ou retirés du palier final.
+      const voided = new Set<number>();
+      for (const v of voids as [number, number][]) for (let c = v[0]; c < v[1]; c++) voided.add(c);
+      let fill = 0;
+      for (let n = 0; n < segs; n++)
+        for (let c = 0; c < chunksIn(fb, n); c++) if (s.have?.[n]?.[c] !== 1 || voided.has(n * SEG_CHUNKS + c)) fill++;
+      if (fill > PAD_FACTOR * (s.recv ?? 0) + PAD_MARGIN) throw new HttpFail(409, "incomplete");
       const out: Uint8Array[] = [];
       for (let n = 0; n < segs; n++) {
         const size = segmentSize(fb, n);
@@ -577,12 +624,8 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
         else for (let o = 0; o < size; o += 65536) crypto.getRandomValues(seg.subarray(o, Math.min(size, o + 65536)));
         out.push(seg);
       }
-      // Morceaux de petits éléments retirés (audit H-2) : remplacés par de l'aléa.
-      const voids = b.void === undefined ? [] : b.void;
-      if (!Array.isArray(voids) || voids.length > 512) throw badRequest();
-      for (const v of voids as unknown[]) {
-        if (!Array.isArray(v) || v.length !== 2 || !Number.isInteger(v[0]) || !Number.isInteger(v[1]) || !(v[0] >= 0 && v[0] < v[1] && v[1] <= fb - 1)) throw badRequest();
-        for (let c = v[0] as number; c < (v[1] as number); c++) {
+      for (const v of voids as [number, number][]) {
+        for (let c = v[0]; c < v[1]; c++) {
           const n = Math.floor(c / SEG_CHUNKS), at = (n === 0 ? HEADER : 0) + (c % SEG_CHUNKS) * CHUNK_CT;
           for (let o = at; o < at + CHUNK_CT; o += 65536) crypto.getRandomValues(out[n]!.subarray(o, Math.min(at + CHUNK_CT, o + 65536)) as Uint8Array<ArrayBuffer>);
         }
@@ -596,6 +639,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
       out.forEach((x, n) => opts.onSegment?.(id, n, x));
       Object.assign(s, { salt, kdf: { ops, mem }, proofV, envelope, ttlHours: ttl, maxOpens, opensLeft: maxOpens });
       s.state = "ready";
+      forgetUpload(s);
       s.expiresAt = ceil15(now() + ttl * 3600);
       s.uploadDeadline = 0;
       s.progressAt = null;
@@ -605,6 +649,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     // Bourrage : vide [k, k), ou [from, to) avec 1 ≤ from < to ≤ dernier segment (exclu).
     if (!(from >= 0 && from <= to && to <= segs - 1 && (from === to || from >= 1))) throw badRequest();
     if (s.segments.some((x, n) => x === undefined && (n < from || n >= to))) throw new HttpFail(409, "incomplete");
+    if ((to - from) * SEG_CHUNKS > PAD_FACTOR * (s.recv ?? 0) + PAD_MARGIN) throw new HttpFail(409, "incomplete"); // D42-6
     for (let n = from; n < to; n++) {
       const pad = new Uint8Array(segmentSize(s.bucket, n));
       for (let o = 0; o < pad.length; o += 65536) crypto.getRandomValues(pad.subarray(o, o + 65536));
@@ -613,6 +658,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     }
     Object.assign(s, { salt, kdf: { ops, mem }, proofV, envelope, ttlHours: ttl, maxOpens, opensLeft: maxOpens });
     s.state = "ready";
+    forgetUpload(s);
     s.expiresAt = ceil15(now() + ttl * 3600);
     s.uploadDeadline = 0;
     s.progressAt = null;

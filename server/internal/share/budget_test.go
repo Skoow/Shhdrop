@@ -22,7 +22,7 @@ func TestOpenSegmentBudget(t *testing.T) {
 	s, c := newSvc(t)
 	k := newKeys()
 	const bucket = 160 // 3 segments
-	id, segs, err := s.Create(k.req(bucket, 1, 2))
+	id, segs, err := s.createAny(k.req(bucket, 1, 2))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -60,7 +60,11 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     expect(d.removing).toBe(9 * 1048576); // place rendue seulement après l'effacement confirmé
     await until(() => seen.some((r) => r.path === "/api/shares/erase"));
     const er = JSON.parse(seen.find((r) => r.path === "/api/shares/erase")!.body.toString());
-    expect(er).toEqual({ from: 2, to: 5 }); // b placé après a (segments 0 et 1), 3 segments
+    // b placé après a (segments 0 et 1) ; seuls ses segments déjà partis sont effacés (D42-6),
+    // le reste de sa place (3 segments) est rendu sans requête.
+    const erasedAt = seen.findIndex((r) => r.path === "/api/shares/erase");
+    const bSegs = seen.slice(0, erasedAt).filter((r) => r.method === "PUT").map((r) => Number(r.path.split("/").pop())).filter((n) => n >= 2);
+    expect(er).toEqual({ from: 2, to: Math.max(...bSegs) + 1 });
     await until(() => fake.inspect()[0]!.present.every((n) => n < 2));
     await until(() => d.removing === 0);
 
@@ -186,6 +190,36 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     const grows = seen.filter((r) => r.path === "/api/shares/grow").map((r) => JSON.parse(r.body.toString()).bucket);
     expect(creates).toEqual([80]);
     expect(grows).toEqual([160, 400]); // au fil de l'envoi : segment 1, puis segment 2
+  });
+
+  it("D42-6 : 30 Mio : création au palier 400 (plafond du serveur), puis grow au fil de l'envoi", async () => {
+    const { seen, net } = setup();
+    const big = file(30 * 1048576, 5); // 8 segments
+    const d = createDraft(ORIGIN, { ...net, solveCaptcha, auto: true });
+    d.sync([{ id: "a", data: big }]);
+    const r = await d.finalize([{ id: "a", item: fileItem("gros.bin", big) }], { ttlHours: 1, maxOpens: 1, password: PW, solveCaptcha });
+    const creates = seen.filter((x) => x.path === "/api/shares").map((x) => JSON.parse(x.body.toString()).bucket);
+    const grows = seen.filter((x) => x.path === "/api/shares/grow").map((x) => JSON.parse(x.body.toString()).bucket);
+    expect(creates).toEqual([400]);
+    expect(grows).toEqual([800]); // avant le segment 6
+    const o = await openShare(r.link, PW, ORIGIN, undefined, net);
+    expect(Buffer.from(await o.item(0)).equals(Buffer.from(await big.arrayBuffer()))).toBe(true);
+  });
+
+  it("D42-6 : grand fichier retiré pendant son premier segment : sa place non envoyée est rendue, le suivant se place juste après", async () => {
+    const { fake, seen, net } = setup(4 * 1048576); // un segment par seconde
+    const a = file(1000, 1), b = file(40 * 1048576, 2), c = file(5 * 1048576, 3);
+    const d = createDraft(ORIGIN, { ...net, solveCaptcha, auto: true });
+    d.sync([{ id: "a", data: a }, { id: "b", data: b }]);
+    await until(() => d.status("a")?.phase === "pret" && d.status("b")?.phase === "envoi");
+    d.sync([{ id: "a", data: a }, { id: "c", data: c }]); // b (segments 1 à 10) retiré pendant l'envoi du segment 1
+    const r = await d.finalize([{ id: "a", item: fileItem("a", a) }, { id: "c", item: fileItem("c", c) }], { ttlHours: 1, maxOpens: 1, password: PW, solveCaptcha });
+    expect(JSON.parse(seen.find((x) => x.path === "/api/shares/erase")!.body.toString())).toEqual({ from: 1, to: 2 });
+    expect(seen.some((x) => x.path === "/api/shares/grow")).toBe(false); // c aux segments 2 et 3, sous la réservation
+    expect(fake.inspect()[0]).toMatchObject({ bucket: 400 });
+    const o = await openShare(r.link, PW, ORIGIN, undefined, net);
+    expect(o.manifest.items[1]!.offset).toBe(2 * SEG_PLAIN);
+    expect(Buffer.from(await o.item(1)).equals(Buffer.from(await c.arrayBuffer()))).toBe(true);
   });
 
   it("audit M4 : effacement refusé (503 busy) réessayé ; deux retraits rapides tous deux effacés", async () => {
