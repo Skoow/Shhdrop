@@ -311,3 +311,27 @@ test("Permissions-Policy : refus explicites reconnus, presse-papiers illisible, 
   }
   expect(policyMsgs).toEqual([]);
 });
+
+test.describe("intégrité des scripts et des styles (spec §28.3)", () => {
+  test("index.html porte une empreinte sur son script et sa feuille de style ; l'application se charge", async ({ page, shh }) => {
+    await page.goto(shh.origin + "/");
+    await expect(page.locator("#app > *").first()).toBeVisible();
+    const tags = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLScriptElement | HTMLLinkElement>('script[src], link[rel="stylesheet"]')].map((e) => e.integrity),
+    );
+    expect(tags.length).toBeGreaterThanOrEqual(2);
+    for (const i of tags) expect(i).toMatch(/^sha384-[A-Za-z0-9+/]{64}$/);
+  });
+
+  test("un script dont les octets ont changé en route est refusé par le navigateur : rien ne s'exécute", async ({ page, shh }) => {
+    // Un seul octet ajouté au script servi (ce que ferait un intermédiaire ou un cache piégé).
+    await page.route("**/assets/index-*.js", async (route) => {
+      const res = await route.fetch();
+      await route.fulfill({ response: res, body: Buffer.concat([await res.body(), Buffer.from("\n;window.__piege=1")]) });
+    });
+    await page.goto(shh.origin + "/");
+    await page.waitForLoadState("load");
+    expect(await page.evaluate(() => (window as unknown as { __piege?: number }).__piege)).toBeUndefined();
+    await expect(page.locator("#app > *")).toHaveCount(0);
+  });
+});

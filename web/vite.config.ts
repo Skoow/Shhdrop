@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { defineConfig, type Plugin } from "vite";
 import { DEMO_BASE, DEMO_META } from "./scripts/demo-meta.mjs";
+import { addSri } from "./scripts/sri.mjs";
 
 /**
  * Production : le build échoue si un module de src/demo/ entre dans le bundle (A41 : un faux
@@ -20,6 +21,35 @@ export function demoGuard(): Plugin {
         const bad = Object.keys(out.modules).filter((id) => id.replace(/\\/g, "/").includes("/src/demo/"));
         if (bad.length > 0) this.error(`code de démo dans le build de production : ${bad.join(", ")}`);
       }
+    },
+  };
+}
+
+/**
+ * Intégrité des sous-ressources (spec §28.3) : une empreinte SHA-384 sur chaque script et
+ * feuille de style de index.html, calculée sur les fichiers écrits. Le navigateur refuse
+ * alors tout script ou style dont les octets ne correspondent pas ; l'empreinte de
+ * index.html fixe tout ce qu'il charge. Contrôle : scripts/check-dist.mjs. À placer avant
+ * demoMeta (qui copie index.html en 404.html) ; precompress passe après (closeBundle).
+ */
+export function sri(base: string): Plugin {
+  let outDir = "";
+  return {
+    name: "shh-sri",
+    apply: "build",
+    configResolved(c) {
+      outDir = join(c.root, c.build.outDir);
+    },
+    writeBundle() {
+      const page = join(outDir, "index.html");
+      const read = (rel: string) => {
+        try {
+          return readFileSync(join(outDir, rel));
+        } catch {
+          return null;
+        }
+      };
+      writeFileSync(page, addSri(readFileSync(page, "utf8"), read, base));
     },
   };
 }
@@ -94,7 +124,7 @@ export function precompress(): Plugin {
 export default defineConfig(({ mode }) => {
   const demo = mode === "demo";
   return {
-    plugins: [svelte(), ...(demo ? [demoMeta()] : [demoGuard(), precompress()])],
+    plugins: [svelte(), sri(demo ? DEMO_BASE : "/"), ...(demo ? [demoMeta()] : [demoGuard(), precompress()])],
     base: demo ? DEMO_BASE : "/",
     define: { __SHH_BUILD__: JSON.stringify(buildId()) },
     build: {

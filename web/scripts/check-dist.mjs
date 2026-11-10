@@ -10,6 +10,7 @@ import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { DEMO_BASE, DEMO_META } from "./demo-meta.mjs";
 import { findAnalytics, findErrorListeners } from "./no-analytics.mjs";
+import { checkSri } from "./sri.mjs";
 
 const MARK = "__SHH_DEMO__";
 
@@ -64,6 +65,11 @@ export function checkDist(dir, demo) {
   }
   const all = raw.filter((f) => !/\.(br|gz)$/.test(f.rel));
   const index = readFileSync(join(dir, "index.html"), "utf8");
+
+  // Spec §28.3 : chaque script et feuille de style de index.html porte une empreinte exacte
+  // (production et démo). Le cadre PDF (pdf-frame.html) en est exempté pour l'instant : il vit
+  // dans une origine opaque, où une empreinte exigerait des en-têtes CORS sur ses deux fichiers.
+  problems.push(...checkSri("index.html", index, (rel) => byRel.get(rel) ?? null, demo ? DEMO_BASE : "/"));
 
   // Spec §35.1 (Task M2) : aucune statistique, aucun écouteur global d'erreurs, dans tout build.
   for (const f of all) {

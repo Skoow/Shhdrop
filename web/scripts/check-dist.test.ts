@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { checkDist } from "./check-dist.mjs";
+import { addSri, sha384 } from "./sri.mjs";
 import { DEMO_CSP } from "./demo-meta.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./check-dist.mjs", import.meta.url));
@@ -24,9 +25,21 @@ const DEMO_INDEX = `<!doctype html><html><head>
     <script type="module" crossorigin src="/shhdrop/assets/index-a.js"></script>
 </head><body></body></html>`;
 
-function site(files: Record<string, string>): string {
+/** Site d'essai ; `sri` (défaut) : index.html reçoit les empreintes comme au build (spec §28.3). */
+function site(input: Record<string, string>, sri = true): string {
   const d = mkdtempSync(join(tmpdir(), "check-dist-"));
   dirs.push(d);
+  const files: Record<string, string> = { ...input };
+  if (sri) files["assets/index-a.js"] ??= "console.info(1)"; // le script que chargent PROD_INDEX et DEMO_INDEX
+  for (const page of ["index.html", "404.html"]) {
+    if (!sri || files[page] === undefined) continue;
+    const base = files[page]!.includes('"/shhdrop/') ? "/shhdrop/" : "/";
+    try {
+      files[page] = addSri(files[page]!, (rel: string) => (files[rel] === undefined ? null : Buffer.from(files[rel]!)), base);
+    } catch {
+      // ressource absente du site d'essai : la page reste telle quelle (le test porte sur autre chose)
+    }
+  }
   for (const [name, text] of Object.entries(files)) {
     mkdirSync(join(d, name, ".."), { recursive: true });
     writeFileSync(join(d, name), text);
@@ -86,6 +99,26 @@ describe("check-dist.mjs, production", () => {
     ]);
     const demo = { "index.html": DEMO_INDEX, "404.html": DEMO_INDEX, "assets/install-a.js": 'const MARK="__SHH_DEMO__";gtag(1)' };
     expect(checkDist(site(demo), true)).toEqual(["assets/install-a.js : statistique « gtag( » (spec §35.1)"]);
+  });
+
+  it("SRI (spec §28.3) : échoue si un script ou une feuille de style n'a pas d'empreinte, ou une fausse ; passe avec la bonne", () => {
+    const js = "console.info(1)";
+    const page = (attrs: string) => `<!doctype html><html><head>\n<script type="module" crossorigin src="/assets/index-a.js"${attrs}></script>\n<link rel="stylesheet" crossorigin href="/assets/a.css">\n</head><body></body></html>`;
+    const files = { "assets/index-a.js": js, "assets/a.css": "a{}" };
+    const none = run([site({ "index.html": page(""), ...files }, false)]);
+    expect(none.code).toBe(1);
+    expect(none.err.trim().split("\n")).toEqual([
+      "check-dist : index.html : /assets/index-a.js sans attribut integrity (spec §28.3)",
+      "check-dist : index.html : /assets/a.css sans attribut integrity (spec §28.3)",
+    ]);
+    const wrong = run([site({ "index.html": page(` integrity="${sha384(Buffer.from("autre"))}"`), ...files }, false)]);
+    expect(wrong.err).toContain("index.html : /assets/index-a.js : empreinte integrity différente du fichier");
+    const good = addSri(page(""), (rel: string) => Buffer.from((files as Record<string, string>)[rel]!));
+    expect(good).toContain(`src="/assets/index-a.js" integrity="${sha384(Buffer.from(js))}"`);
+    expect(run([site({ "index.html": good, ...files }, false)])).toEqual({ code: 0, err: "" });
+    // Fichier absent du site, script en ligne : refusés.
+    expect(run([site({ "index.html": good }, false)]).err).toContain("index.html : /assets/index-a.js absent du site");
+    expect(run([site({ "index.html": `<!doctype html><html><head><script>1</script></head></html>` }, false)]).err).toContain("index.html : script en ligne");
   });
 
   it("échoue si le build manque", () => {
