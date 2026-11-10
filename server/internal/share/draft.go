@@ -149,10 +149,19 @@ func growLimit(mask []byte, segs int, part map[int]uint64) int {
 	return Buckets[len(Buckets)-1]
 }
 
-// Grow porte la réservation de l'envoi id au palier bucket (strictement plus grand) : place
-// vérifiée contre StorageMax comme à la création, fichier agrandi, masque prolongé (segments
-// reçus gardés). Refusé pendant un Finalize (ErrBusy).
-func (s *Service) Grow(id string, bucket int) error {
+// Grow : GrowCharged sans débit de quota.
+func (s *Service) Grow(id string, bucket int) error { return s.GrowCharged(id, bucket, nil) }
+
+// GrowCharged porte la réservation de l'envoi id au palier bucket (strictement plus grand) :
+// place vérifiée contre StorageMax comme à la création, fichier agrandi, masque prolongé
+// (segments reçus gardés). Refusé pendant un Finalize ou un autre Grow (ErrBusy).
+//
+// charge (facultatif) débite le quota du nouveau palier (revue B3a). Il est appelé ici, sous
+// la réservation de l'envoi (claimFinalize : un seul Grow à la fois par id), une fois la
+// demande reconnue valable et avant de toucher au fichier ; son erreur refuse
+// l'agrandissement. Si la suite échoue, il est rappelé avec l'ancien palier, lu sous la même
+// réservation (jamais plus tôt) : le quota ne passe pas sous ce que le disque réserve.
+func (s *Service) GrowCharged(id string, bucket int, charge func(bucket int) error) (err error) {
 	if !validID(id) {
 		return ErrNotFound
 	}
@@ -168,6 +177,16 @@ func (s *Service) Grow(id string, bucket int) error {
 	}
 	if !validBucket(bucket) || bucket <= old || bucket > growLimit(mask, SegmentCount(old), s.partOf(id)) {
 		return ErrBadRequest
+	}
+	if charge != nil {
+		if err := charge(bucket); err != nil {
+			return err
+		}
+		defer func() {
+			if err != nil {
+				charge(old) // plus bas que le débit : ne peut pas être refusé
+			}
+		}()
 	}
 	s.createMu.Lock()
 	defer s.createMu.Unlock()
@@ -266,11 +285,18 @@ func (s *Service) finalizeDraft(id string, reserved int, r FinalizeReq) (time.Du
 	if err != nil {
 		return 0, err
 	}
+	part := s.partOf(id)
+	// Palier final borné par les segments reçus, avec la marge de Grow (revue M1) : sans
+	// cela, un brouillon réservé d'emblée à 2 Gio et finalisé vide ferait écrire 2 Gio d'aléa.
+	// Le client finalise au plus petit palier qui contient son dernier morceau envoyé
+	// (bucketFor), toujours sous cette borne.
+	if b > growLimit(mask, SegmentCount(reserved), part) {
+		return 0, ErrBadRequest
+	}
 	segs := SegmentCount(b)
 	// Morceaux présents par segment : segment reçu en entier (masque ; reçu au palier de
 	// réservation ≥ b, il couvre ses morceaux au palier b), ou en partie (part) ; moins les
 	// morceaux des petits éléments retirés (Void, audit H-2).
-	part := s.partOf(id)
 	have := make([]uint64, segs)
 	for n := range have {
 		if mask[n/8]&(1<<(n%8)) != 0 {
@@ -308,6 +334,10 @@ func (s *Service) finalizeDraft(id string, reserved int, r FinalizeReq) (time.Du
 			c = e
 		}
 	}
+	// Le gros du fichier atteint le disque hors du verrou global (revue B4, comme Finalize).
+	if err := s.syncFile(id); err != nil {
+		return 0, err
+	}
 
 	s.uploadMu.Lock()
 	defer s.uploadMu.Unlock()
@@ -327,6 +357,10 @@ func (s *Service) finalizeDraft(id string, reserved int, r FinalizeReq) (time.Du
 		}
 	}
 	if err := s.Blobs.Resize(id, totalSize(b)); err != nil {
+		return 0, err
+	}
+	// En-tête, manifeste et taille finale sur le disque avant « ready ».
+	if err := s.syncFile(id); err != nil {
 		return 0, err
 	}
 	exp := ceil15(now + int64(r.TTLHours)*3600)

@@ -312,3 +312,9 @@ func (s *Store) Erase(id string, off, n int64) error {
 		return f.Sync()
 	})
 }
+
+// Sync force le contenu du fichier sur le disque (fdatasync sous Linux : données et taille,
+// sans les dates), avant que le partage soit annoncé prêt (revue B4).
+func (s *Store) Sync(id string) error {
+	return s.withFile(id, datasync)
+}

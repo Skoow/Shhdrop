@@ -2,6 +2,7 @@ package blob
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -179,5 +180,31 @@ func TestRemoveProbes(t *testing.T) {
 	// Dossier absent : rien à faire.
 	if err := (&Store{Dir: filepath.Join(t.TempDir(), "absent")}).RemoveProbes(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Revue B4 : Sync force le contenu du fichier sur le disque (avant « ready ») ; les dates
+// restent à l'epoch ; fichier absent : fs.ErrNotExist ; identifiant invalide refusé.
+func TestSync(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	const id = "AAAAAAAAAAAAAAAAAAAAAA"
+	if err := s.Sync(id); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("fichier absent", err)
+	}
+	if err := s.Sync("../x"); err == nil {
+		t.Fatal("identifiant invalide accepté")
+	}
+	if err := s.Reserve(id, 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteAt(id, 10, []byte("abc")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Sync(id); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(filepath.Join(s.Dir, id))
+	if err != nil || fi.Size() != 100 || !fi.ModTime().Equal(time.Unix(0, 0)) {
+		t.Fatal(fi.Size(), fi.ModTime(), err)
 	}
 }

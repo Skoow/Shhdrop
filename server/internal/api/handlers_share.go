@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	altcha "github.com/altcha-org/altcha-lib-go"
@@ -178,7 +179,7 @@ func (s *server) putSegment(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSegmentLen))
+	body, err := readBody(http.MaxBytesReader(w, r.Body, maxSegmentLen), r.ContentLength)
 	if err != nil {
 		fail(w, errBadRequest)
 		return
@@ -207,6 +208,21 @@ func (s *server) putSegment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// readBody lit le corps d'un segment. Longueur annoncée (Content-Length, déjà plafonnée par
+// l'appelant) : un seul tampon de cette taille, sans les copies de croissance d'io.ReadAll
+// (revue B8) ; un corps plus court est une erreur, et net/http ne livre jamais plus que
+// l'annonce. Longueur inconnue (envoi par blocs) : io.ReadAll, borné par le lecteur reçu.
+func readBody(r io.Reader, announced int64) ([]byte, error) {
+	if announced < 0 {
+		return io.ReadAll(r)
+	}
+	body := make([]byte, announced)
+	if _, err := io.ReadFull(r, body); err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
 func (s *server) finalize(w http.ResponseWriter, r *http.Request) {
@@ -402,10 +418,18 @@ func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	// En flux depuis le fichier (audit E1). Une copie incomplète (client coupé, échéance,
 	// erreur de lecture) coupe la connexion : une réponse tronquée ne passe pas pour complète.
-	if k, err := io.Copy(w, sec); err != nil || k != sec.Size() {
+	// Tampon de 256 Kio repris d'une réserve (revue B8) ; struct{ io.Writer } masque le
+	// ReadFrom de la réponse, qui recopierait sinon par tranches de 32 Kio.
+	buf := copyBufs.Get().(*[]byte)
+	k, err := io.CopyBuffer(struct{ io.Writer }{w}, sec, *buf)
+	copyBufs.Put(buf)
+	if err != nil || k != sec.Size() {
 		panic(http.ErrAbortHandler)
 	}
 }
+
+// copyBufs : tampons de copie des segments servis (un par téléchargement en cours).
+var copyBufs = sync.Pool{New: func() any { b := make([]byte, 256<<10); return &b }}
 
 func (s *server) done(w http.ResponseWriter, r *http.Request) {
 	// openN ne vient que du jeton signé : impossible de marquer l'ouverture d'un autre.
@@ -474,24 +498,26 @@ func (s *server) grow(w http.ResponseWriter, r *http.Request) {
 		fail(w, errBadRequest)
 		return
 	}
-	old, err := s.svc.UploadBucket(id)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	// Place débitée d'avance au quota du jour (audit H1) ; rendue si l'agrandissement échoue.
-	if share.ValidBucket(*b.Bucket) && *b.Bucket > old {
-		if retry, err := s.lim.Reserve(id, share.ContentBytes(*b.Bucket)); err != nil {
-			writeLimit(w, retry)
-			return
+	// Place débitée d'avance au quota du jour (audit H1), par Grow lui-même, sous la
+	// réservation de l'envoi, et rendue par lui si l'agrandissement échoue (revue B3a) : un
+	// grow refusé ou « busy » en parallèle ne touche plus au quota.
+	var retry time.Duration
+	quota := false
+	err = s.svc.GrowCharged(id, *b.Bucket, func(bucket int) error {
+		d, err := s.lim.Reserve(id, share.ContentBytes(bucket))
+		if err != nil {
+			retry, quota = d, true
 		}
-	}
-	if err := s.svc.Grow(id, *b.Bucket); err != nil {
-		s.lim.Reserve(id, share.ContentBytes(old))
+		return err
+	})
+	switch {
+	case quota:
+		writeLimit(w, retry)
+	case err != nil:
 		fail(w, err)
-		return
+	default:
+		w.WriteHeader(http.StatusNoContent)
 	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // POST /api/shares/erase {"from": a, "to": b} : efface tout de suite, sur le disque, les

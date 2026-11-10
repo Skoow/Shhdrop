@@ -546,6 +546,11 @@ func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 		}
 		return 0, err
 	}
+	// Le gros du fichier (jusqu'à 2 Gio) atteint le disque ici, hors du verrou global ; la
+	// synchronisation sous le verrou ne porte plus que sur les dernières écritures (revue B4).
+	if err := s.syncFile(id); err != nil {
+		return 0, err
+	}
 
 	s.uploadMu.Lock() // plus aucune écriture de segment en vol
 	defer s.uploadMu.Unlock()
@@ -559,6 +564,10 @@ func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 	}
 	if !hasAllBut(mask, segs, r.FillFrom, r.FillTo) {
 		return 0, ErrIncomplete
+	}
+	// Dernière écriture faite : le fichier est sur le disque avant d'être annoncé « ready ».
+	if err := s.syncFile(id); err != nil {
+		return 0, err
 	}
 	exp := ceil15(now + int64(r.TTLHours)*3600)
 	// segments_mask passe à « tous reçus » : la base ne garde pas la frontière du bourrage,
@@ -620,10 +629,26 @@ func fullMask(segs int) []byte {
 	return m
 }
 
+// syncBlob : contenu du fichier forcé sur le disque (variable pour tester l'ordre et l'échec).
+var syncBlob = func(b *blob.Store, id string) error { return b.Sync(id) }
+
+// syncFile force le fichier de l'envoi id sur le disque avant « ready » (revue B4) : après une
+// panne de courant, un partage « ready » dont le contenu n'aurait pas atteint le disque
+// serait servi vide ou tronqué. Fichier effacé entre-temps : ErrNotFound.
+func (s *Service) syncFile(id string) error {
+	if err := syncBlob(s.Blobs, id); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 // fillWrite : écriture d'une tranche du bourrage (variable pour compter les écritures en test).
 var fillWrite = func(s *Service, id string, off int64, b []byte) error { return s.Blobs.WriteAt(id, off, b) }
 
-// fillChunk : taille des écritures du bourrage (un seul tampon, réutilisé).
+// fillChunk : taille maximale des écritures du bourrage (un seul tampon par plage, réutilisé).
 const fillChunk = 4 << 20
 
 // fillRandom écrit des octets de crypto/rand dans les segments [from, to).
@@ -636,7 +661,10 @@ func (s *Service) fillRandom(id string, bucket, from, to int) error {
 
 // fillRange écrit des octets de crypto/rand dans [start, end) du fichier id.
 func (s *Service) fillRange(id string, start, end int64) error {
-	buf := make([]byte, fillChunk)
+	if start >= end {
+		return nil
+	}
+	buf := make([]byte, min(fillChunk, end-start)) // jamais 4 Mio pour un seul morceau (revue B8)
 	for off := start; off < end; {
 		n := min(int64(len(buf)), end-off)
 		b := buf[:n]

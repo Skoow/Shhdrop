@@ -442,8 +442,8 @@ func TestFifthBadPasswordIsNotFound(t *testing.T) {
 
 var wantHeaders = map[string]string{
 	"Content-Security-Policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; " +
-		"img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; " +
-		"base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+		"img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; frame-src 'self'; " +
+		"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
 	"Referrer-Policy":              "no-referrer",
 	"X-Content-Type-Options":       "nosniff",
 	"Permissions-Policy":           "microphone=(self), camera=(self), geolocation=(), display-capture=(), clipboard-read=(), usb=(), serial=(), hid=(), payment=(), gyroscope=(), accelerometer=(), magnetometer=(), midi=(), xr-spatial-tracking=(), browsing-topics=(), interest-cohort=()",

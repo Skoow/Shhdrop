@@ -411,12 +411,11 @@ func (s *Service) WatchCount() int {
 func (s *Service) PollRemoved() error {
 	s.gone.mu.Lock()
 	s.gone.init()
-	if len(s.gone.dead) > 0 {
-		err := s.pollKillsLocked()
-		if err != nil {
-			s.gone.mu.Unlock()
-			return err
-		}
+	// Toujours lu (un dossier, le plus souvent absent) : la demande « tout couper » de wipe
+	// est confirmée même sans descripteur détaché (revue B5).
+	if err := s.pollKillsLocked(); err != nil {
+		s.gone.mu.Unlock()
+		return err
 	}
 	set := map[string]bool{}
 	for id := range s.gone.watch {

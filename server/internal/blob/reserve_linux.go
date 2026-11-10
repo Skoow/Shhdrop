@@ -50,3 +50,13 @@ func punchHole(f *os.File, off, n int64) bool {
 	}
 	return unix.Fallocate(int(f.Fd()), unix.FALLOC_FL_PUNCH_HOLE|unix.FALLOC_FL_KEEP_SIZE, off, n) == nil
 }
+
+// datasync : fdatasync (données et taille du fichier ; les dates, remises à l'epoch, n'ont
+// pas à atteindre le disque), repris s'il est interrompu par un signal.
+func datasync(f *os.File) error {
+	for {
+		if err := unix.Fdatasync(int(f.Fd())); !errors.Is(err, unix.EINTR) {
+			return err
+		}
+	}
+}

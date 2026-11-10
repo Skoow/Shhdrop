@@ -10,8 +10,8 @@ import "net/http"
 // en cache longtemps sans risque (contenu fixe sous ce nom).
 var securityHeaders = [][2]string{
 	{"Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; " +
-		"img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; frame-src 'self'; object-src 'none'; " +
-		"base-uri 'none'; form-action 'self'; frame-ancestors 'none'"},
+		"img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; frame-src 'self'; " +
+		"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"},
 	{"Referrer-Policy", "no-referrer"},
 	{"X-Content-Type-Options", "nosniff"},
 	// camera=(self) : photo et vidéo prises dans l'interface (Q-REC1 acceptée par le propriétaire,

@@ -153,7 +153,7 @@ func TestSubject(t *testing.T) {
 	for name, bad := range map[string]string{
 		"autre type": s.Issue('u', "x", 0, now.Add(time.Hour)),
 		"autre clé":  other.Issue('d', "x", 1, now.Add(time.Hour)),
-		"modifié":    tok[:len(tok)-1] + string("AB"[strings.IndexByte("AB", tok[len(tok)-1])+1&1]),
+		"modifié":    tok[:len(tok)-1] + string("AB"[(strings.IndexByte("AB", tok[len(tok)-1])+1)&1]),
 		"vide":       "",
 	} {
 		if id, _, err := s.Subject(bad, 'd'); err == nil || id != "" {

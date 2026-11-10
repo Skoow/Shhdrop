@@ -132,9 +132,25 @@ func runAdmin(args []string, cfg config.Config, stdin io.Reader, stdout, stderr 
 			return fail(err)
 		}
 		fmt.Fprintf(stdout, "%d partages effacés, fichiers compris (%s)\n", n, dir)
+		// Un téléchargement commencé sur un partage déjà retiré finit sur un descripteur que
+		// seul le serveur en marche tient (grâce de 2 h, spec §41.8) : il doit le couper (revue B5).
+		cut, err := svc.CutAllDetached()
+		if err != nil {
+			return fail(err)
+		}
+		if cut {
+			fmt.Fprintln(stdout, "lectures en cours coupées par le serveur en marche")
+		} else {
+			fmt.Fprintln(stdout, "ATTENTION : le serveur n'a pas confirmé la coupure des lectures en cours. "+
+				"S'il tourne, le redémarrer maintenant : sinon, un téléchargement déjà commencé peut encore finir (jusqu'à 2 h). "+
+				"S'il est arrêté, il n'y a rien à couper.")
+		}
 	}
 	return 0
 }
+
+// adminKillWait : attente de la réponse du serveur en marche (kill.go).
+var adminKillWait = 3 * time.Second
 
 // adminDataDir : chemin absolu d'un dossier existant qui contient shares.db.
 func adminDataDir(dir string) (string, error) {
@@ -193,7 +209,7 @@ func openService(cfg config.Config, dir string) (*share.Service, func(), error) 
 	svc, err := share.NewService(share.Config{DB: db, Blobs: &blob.Store{Dir: filepath.Join(dir, "blobs")},
 		Now: cfg.Now, StorageMax: cfg.StorageMaxBytes, FrozenFile: filepath.Join(dir, "frozen"),
 		// Partage déjà retiré mais encore lu (grâce) : le serveur en marche le coupe (kill.go).
-		KillWait: 3 * time.Second})
+		KillWait: adminKillWait})
 	if err != nil {
 		db.Close()
 		return nil, nil, err

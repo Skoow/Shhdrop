@@ -27,7 +27,7 @@ func TestLeaveHTTP(t *testing.T) {
 	last, _ := e.unlock(t, c.ID, k)
 	for name, r := range map[string]req{
 		"corps":       leave(last, []byte("<script>")),
-		"falsifié":    leave(last[:len(last)-2]+"AA", nil),
+		"falsifié":    leave(tamper(last), nil),
 		"jeton envoi": leave(c.UploadToken, nil),
 		"sans jeton":  {method: "POST", path: "/api/shares/leave"},
 		"GET":         {method: "GET", path: "/api/shares/leave", hdr: auth(last)},
@@ -50,4 +50,22 @@ func TestLeaveHTTP(t *testing.T) {
 		t.Fatal(n, err)
 	}
 	expect(t, e.do(req{method: "GET", path: "/api/shares/meta", hdr: access(k)}), 404, "")
+}
+
+// tamper change le dernier caractère d'un jeton pour un autre, à coup sûr différent
+// (« …AA » à la place des deux derniers redonnait le jeton d'origine une fois sur 4 096).
+func tamper(tok string) string {
+	c := byte('A')
+	if tok[len(tok)-1] == 'A' {
+		c = 'B'
+	}
+	return tok[:len(tok)-1] + string(c)
+}
+
+func TestTamperChangesToken(t *testing.T) {
+	for _, tok := range []string{"x.yAA", "x.yAB", "x.yBA", "x.y_w"} {
+		if got := tamper(tok); got == tok || len(got) != len(tok) || got[:len(got)-1] != tok[:len(tok)-1] {
+			t.Fatalf("tamper(%q) = %q", tok, got)
+		}
+	}
 }

@@ -2,13 +2,17 @@ package api
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
 
+	"github.com/skoow/shhdrop/server/internal/limits"
 	"github.com/skoow/shhdrop/server/internal/share"
 )
 
@@ -153,5 +157,49 @@ func TestDraftGrowDebitsQuota(t *testing.T) {
 	}
 	if got, _ := e.svc.UploadBucket(c.ID); got != 80 {
 		t.Fatal("réservation agrandie malgré le refus", got)
+	}
+}
+
+// Revue B3a : des grow refusés (palier non supérieur, ou « busy ») en parallèle d'un grow
+// accepté ne ramènent jamais la réservation du quota sous le palier réservé sur le disque.
+// Sonde : une création de (6 Gio − palier 160 + 1 octet) doit être refusée par le quota.
+func TestGrowQuotaNeverBelowDisk(t *testing.T) {
+	e := newEnv(t, false, nil)
+	for i := 0; i < 30; i++ {
+		ip := fmt.Sprintf("198.51.100.%d", i+1)
+		remote := ip + ":1000"
+		c := e.create(t, remote, newKeys(), 16, 1)
+		grow := func(b int, from string) int {
+			return e.do(req{method: "POST", path: "/api/shares/grow", body: mustJSON(map[string]any{"bucket": b}),
+				hdr: auth(c.UploadToken), remote: from}).Code
+		}
+		var wg sync.WaitGroup
+		good := 0
+		for j := 0; j < 8; j++ {
+			wg.Add(1)
+			go func() { defer wg.Done(); grow(16, remote) }()
+			if j == 3 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					// « busy » : nouvel essai, comme le client ; d'une autre adresse à chaque
+					// fois (le quota suit l'envoi, la limite de débit suit l'adresse).
+					for k := 0; ; k++ {
+						if good = grow(160, fmt.Sprintf("203.0.%d.%d:1000", 100+i, k%250+1)); good != 503 {
+							return
+						}
+						runtime.Gosched()
+					}
+				}()
+			}
+		}
+		wg.Wait()
+		if b, err := e.svc.UploadBucket(c.ID); err != nil || b != 160 || good != 204 {
+			t.Fatal("palier", b, err, good)
+		}
+		probe := limits.BytesPer64 - share.ContentBytes(160) + 1
+		if _, err := e.srv.lim.BeginUpload(netip.MustParseAddr(ip), fmt.Sprintf("sonde-%d", i), probe); !errors.Is(err, limits.ErrQuota) {
+			t.Fatalf("essai %d : quota sous-débité (palier 160 sur le disque, sonde de %d octets acceptée : %v)", i, probe, err)
+		}
 	}
 }

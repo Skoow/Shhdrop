@@ -33,34 +33,49 @@ func TestPdfFrameCORP(t *testing.T) {
 	}
 }
 
-func TestPdfFrameAncestors(t *testing.T) {
+// Le cadre PDF a sa propre CSP, fermée (revue du 10 novembre) : il ne charge que son script
+// et sa feuille de style, dessine des <canvas> (images blob: et data:), et n'ouvre aucune
+// connexion, aucun cadre, aucun Worker, aucun WebAssembly (pdf.js y tourne sur le fil
+// principal, useWasm: false). Seule la page de l'application peut l'embarquer.
+func TestPdfFrameCSP(t *testing.T) {
 	e := newEnv(t, false, nil)
+	const want = "default-src 'none'; script-src 'self'; style-src 'self'; img-src blob: data:; " +
+		"connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'"
 	csp := get(e, "/pdf-frame.html")["Content-Security-Policy"]
-	if len(csp) != 1 || !strings.Contains(csp[0], "frame-ancestors 'self'") {
-		t.Fatalf("/pdf-frame.html : CSP = %v", csp)
-	}
-	if strings.Contains(csp[0], "frame-ancestors 'none'") {
-		t.Fatalf("/pdf-frame.html garde frame-ancestors 'none' : %v", csp)
-	}
-	// Le reste de la CSP est identique : seul frame-ancestors change.
-	want := strings.Replace(securityHeaders[0][1], "frame-ancestors 'none'", "frame-ancestors 'self'", 1)
-	if csp[0] != want {
-		t.Errorf("CSP du cadre PDF différente de la CSP par défaut hors frame-ancestors :\n%s\n%s", csp[0], want)
+	if len(csp) != 1 || csp[0] != want {
+		t.Fatalf("/pdf-frame.html : CSP = %v\nattendu %s", csp, want)
 	}
 	for _, p := range []string{"/", "/pdf-frame.js", "/pdf-frame.css", "/s/x", "/pdf-frame.html/x", "/api/health"} {
 		c := get(e, p)["Content-Security-Policy"]
-		if len(c) != 1 || !strings.Contains(c[0], "frame-ancestors 'none'") || strings.Contains(c[0], "frame-ancestors 'self'") {
-			t.Errorf("%s : CSP = %v, attendu frame-ancestors 'none'", p, c)
+		if len(c) != 1 || c[0] != securityHeaders[0][1] || !strings.Contains(c[0], "frame-ancestors 'none'") ||
+			strings.Contains(c[0], "frame-ancestors 'self'") {
+			t.Errorf("%s : CSP = %v, attendu la CSP commune (frame-ancestors 'none')", p, c)
 		}
 	}
 }
 
 func TestFrameSrcDefault(t *testing.T) {
 	e := newEnv(t, false, nil)
-	for _, p := range []string{"/", "/s/x", "/pdf-frame.html"} {
+	for _, p := range []string{"/", "/s/x"} {
 		c := get(e, p)["Content-Security-Policy"]
 		if len(c) != 1 || !strings.Contains(c[0], "frame-src 'self'; object-src 'none'") {
 			t.Errorf("%s : frame-src modifié : %v", p, c)
+		}
+	}
+	// Le cadre PDF n'embarque lui-même aucun cadre (default-src 'none').
+	if c := get(e, "/pdf-frame.html")["Content-Security-Policy"]; len(c) != 1 || strings.Contains(c[0], "frame-src") ||
+		!strings.HasPrefix(c[0], "default-src 'none';") {
+		t.Errorf("/pdf-frame.html : %v", c)
+	}
+}
+
+// Workers (preuve de travail, chiffrement) : seulement ceux du site, dit explicitement.
+func TestWorkerSrc(t *testing.T) {
+	e := newEnv(t, false, nil)
+	for _, p := range []string{"/", "/s/x", "/api/health"} {
+		c := get(e, p)["Content-Security-Policy"]
+		if len(c) != 1 || !strings.Contains(c[0], "; worker-src 'self';") {
+			t.Errorf("%s : worker-src absent : %v", p, c)
 		}
 	}
 }

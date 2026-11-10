@@ -21,6 +21,10 @@ import (
 
 func adminSetup(t *testing.T) (config.Config, *share.Service) {
 	t.Helper()
+	// Attente de la réponse du serveur (destroy, wipe) : écourtée, aucun serveur ne tourne ici.
+	orig := adminKillWait
+	adminKillWait = 300 * time.Millisecond
+	t.Cleanup(func() { adminKillWait = orig })
 	dir := t.TempDir()
 	cfg := config.Config{DataDir: dir, Now: time.Now, StorageMaxBytes: 1 << 40}
 	db, err := store.Open(filepath.Join(dir, "shares.db"))
