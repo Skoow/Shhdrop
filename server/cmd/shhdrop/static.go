@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -78,9 +80,85 @@ func staticHandler(dir string) (http.Handler, error) {
 			}
 			return
 		}
+		h := w.Header()
+		// Vitesse (retours CLEAN2) : un fichier à empreinte (/assets/nom-HASH.js|css) ne change
+		// jamais de contenu ; la page (no-store) le désigne avec son empreinte SRI (spec §28.3).
+		if immutableAsset.MatchString(r.URL.Path) {
+			h.Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
+		// Variante précompressée au build (vite.config.ts, precompress) : mêmes octets une fois
+		// décompressés (SRI inchangée), jamais de compression à la volée ni sur /api/*.
+		if compressible(name) {
+			h.Add("Vary", "Accept-Encoding")
+			if ef, enc := encodedVariant(fsys, name, r.Header.Get("Accept-Encoding")); ef != nil {
+				defer ef.Close()
+				if t := mime.TypeByExtension(path.Ext(name)); t != "" {
+					h.Set("Content-Type", t)
+				}
+				h.Set("Content-Encoding", enc)
+				http.ServeContent(w, r, fi.Name(), time.Time{}, ef)
+				return
+			}
+		}
 		// Date nulle : pas de Last-Modified (Cache-Control: no-store partout).
 		http.ServeContent(w, r, fi.Name(), time.Time{}, rs)
 	}), nil
+}
+
+// immutableAsset : fichiers de vite nommés par leur empreinte (8 caractères base64url au moins).
+var immutableAsset = regexp.MustCompile(`^/assets/[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8,}\.(js|css)$`)
+
+// compressible : types texte précompressés par le build (les images et polices le sont déjà).
+func compressible(name string) bool {
+	switch path.Ext(name) {
+	case ".js", ".css", ".html", ".svg", ".webmanifest", ".xml", ".txt":
+		return true
+	}
+	return false
+}
+
+// encodedVariant : name.br, sinon name.gz, si le client les accepte et qu'ils existent.
+func encodedVariant(fsys fs.FS, name, accept string) (interface {
+	io.ReadSeeker
+	io.Closer
+}, string) {
+	for _, enc := range [...]struct{ token, ext string }{{"br", ".br"}, {"gzip", ".gz"}} {
+		if !accepts(accept, enc.token) {
+			continue
+		}
+		f, _, err := openRegular(fsys, name+enc.ext)
+		if err != nil {
+			continue
+		}
+		rsc, ok := f.(interface {
+			io.ReadSeeker
+			io.Closer
+		})
+		if !ok {
+			f.Close()
+			continue
+		}
+		return rsc, enc.token
+	}
+	return nil, ""
+}
+
+// accepts : vrai si Accept-Encoding contient token sans « q=0 ».
+func accepts(header, token string) bool {
+	for _, part := range strings.Split(header, ",") {
+		fields := strings.Split(strings.TrimSpace(part), ";")
+		if !strings.EqualFold(strings.TrimSpace(fields[0]), token) {
+			continue
+		}
+		for _, p := range fields[1:] {
+			p = strings.ReplaceAll(strings.TrimSpace(p), " ", "")
+			if p == "q=0" || p == "q=0.0" || p == "q=0.00" || p == "q=0.000" {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // appRoutes : chemins de l'application qui répondent 200 (voir match() dans

@@ -15,7 +15,9 @@ import (
 
 // Spec §36 S2 (Task M2) : le serveur ne lit aucun en-tête hors de la liste blanche, jamais
 // User-Agent ni Referer, et l'adresse du pair seulement dans clientip.go et /healthz.
-var readHeaders = []string{"Authorization", "X-Shh-Client-IP", "X-Shh-Access", "X-Shh-Manage", "X-Shh-Grant"}
+// Accept-Encoding (retours CLEAN2) : choix de la variante précompressée d'un fichier du site
+// (cmd/shhdrop/static.go) ; même valeur dans tous les navigateurs visés, jamais gardé ni journalisé.
+var readHeaders = []string{"Authorization", "X-Shh-Client-IP", "X-Shh-Access", "X-Shh-Manage", "X-Shh-Grant", "Accept-Encoding"}
 
 type srcFile struct {
 	path string

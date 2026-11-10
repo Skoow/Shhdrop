@@ -6,6 +6,7 @@
 // Sortie 0 si tout va bien ; sinon 1, une ligne par problème sur stderr.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { DEMO_BASE, DEMO_META } from "./demo-meta.mjs";
 import { findAnalytics, findErrorListeners } from "./no-analytics.mjs";
@@ -44,7 +45,24 @@ const metaRe = (attrs) => {
 export function checkDist(dir, demo) {
   const problems = [];
   if (!existsSync(join(dir, "index.html"))) return [`${dir} : index.html absent (build manquant ?)`];
-  const all = files(dir).map((p) => ({ rel: relative(dir, p), data: readFileSync(p) }));
+  const raw = files(dir).map((p) => ({ rel: relative(dir, p), data: readFileSync(p) }));
+  // Variantes précompressées (.br, .gz) : chacune doit redonner exactement son fichier source ;
+  // elles ne sont pas relues comme du texte (le source l'est déjà). Aucune dans la démo.
+  const byRel = new Map(raw.map((f) => [f.rel, f.data]));
+  for (const f of raw) {
+    const m = /^(.*)\.(br|gz)$/.exec(f.rel);
+    if (!m) continue;
+    if (demo) problems.push(`${f.rel} : variante précompressée dans la démo`);
+    const src = byRel.get(m[1]);
+    let out = null;
+    try {
+      out = m[2] === "br" ? brotliDecompressSync(f.data) : gunzipSync(f.data);
+    } catch {
+      out = null;
+    }
+    if (!src || !out || !out.equals(src)) problems.push(`${f.rel} : ne redonne pas ${m[1]}`);
+  }
+  const all = raw.filter((f) => !/\.(br|gz)$/.test(f.rel));
   const index = readFileSync(join(dir, "index.html"), "utf8");
 
   // Spec §35.1 (Task M2) : aucune statistique, aucun écouteur global d'erreurs, dans tout build.

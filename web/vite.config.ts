@@ -1,7 +1,8 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { execFileSync } from "node:child_process";
-import { copyFileSync } from "node:fs";
+import { copyFileSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { defineConfig, type Plugin } from "vite";
 import { DEMO_BASE, DEMO_META } from "./scripts/demo-meta.mjs";
 
@@ -60,10 +61,40 @@ export function buildId(): string {
   return /^[0-9a-f]{7,12}$/.test(id) ? id.slice(0, 7) : "dev";
 }
 
+/** Types texte précompressés (les images et polices le sont déjà) ; mêmes extensions que static.go. */
+export const COMPRESSIBLE = /\.(js|css|html|svg|webmanifest|xml|txt)$/;
+
+/**
+ * Vitesse (retours CLEAN2) : à côté de chaque fichier texte de plus de 1 Kio, une variante
+ * brotli (.br, qualité 11) et gzip (.gz, niveau 9, sans date : reproductible), servies par le
+ * serveur Go selon Accept-Encoding. Les octets décompressés sont identiques (SRI inchangée ;
+ * contrôle : scripts/check-dist.mjs). Production seulement (GitHub Pages compresse la démo).
+ */
+export function precompress(): Plugin {
+  let outDir = "";
+  return {
+    name: "shh-precompress",
+    apply: "build",
+    configResolved(c) {
+      outDir = join(c.root, c.build.outDir);
+    },
+    closeBundle() {
+      const walk = (d: string): string[] => readdirSync(d).flatMap((n) => (statSync(join(d, n)).isDirectory() ? walk(join(d, n)) : [join(d, n)]));
+      for (const f of walk(outDir)) {
+        if (!COMPRESSIBLE.test(f)) continue;
+        const data = readFileSync(f);
+        if (data.length < 1024) continue;
+        writeFileSync(f + ".br", brotliCompressSync(data, { params: { [constants.BROTLI_PARAM_QUALITY]: 11, [constants.BROTLI_PARAM_SIZE_HINT]: data.length } }));
+        writeFileSync(f + ".gz", gzipSync(data, { level: 9 }));
+      }
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const demo = mode === "demo";
   return {
-    plugins: [svelte(), demo ? demoMeta() : demoGuard()],
+    plugins: [svelte(), ...(demo ? [demoMeta()] : [demoGuard(), precompress()])],
     base: demo ? DEMO_BASE : "/",
     define: { __SHH_BUILD__: JSON.stringify(buildId()) },
     build: {

@@ -113,3 +113,22 @@ test("capture() n'avale pas une vraie violation CSP", async ({ page, shh }) => {
   await expect.poll(() => shh.cspViolations.length).toBeGreaterThan(0);
   shh.cspViolations.length = 0;
 });
+
+test("vitesse : JS et CSS servis compressés (brotli) et mis en cache pour un an, la page jamais", async ({ page, shh }) => {
+  const seen: { url: string; enc: string; cache: string }[] = [];
+  page.on("response", async (r) => {
+    if (/\/assets\/index-[^/]+\.(js|css)$/.test(r.url())) {
+      const h = await r.allHeaders();
+      seen.push({ url: r.url(), enc: h["content-encoding"] ?? "", cache: h["cache-control"] ?? "" });
+    }
+  });
+  const doc = await page.goto(shh.origin + "/");
+  expect((await doc!.allHeaders())["cache-control"]).toBe("no-store");
+  // L'application démarre : le JS compressé a été décodé et exécuté.
+  await expect(page.locator("main h1").first()).toBeVisible();
+  expect(seen.map((s) => s.url.split(".").pop()).sort()).toEqual(["css", "js"]);
+  for (const s of seen) {
+    expect(s.enc, s.url).toBe("br");
+    expect(s.cache, s.url).toBe("public, max-age=31536000, immutable");
+  }
+});
