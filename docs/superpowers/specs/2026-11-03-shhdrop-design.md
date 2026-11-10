@@ -2572,3 +2572,38 @@ Demande du propriétaire : « dès qu'un fichier est ajouté, il commence déjà
 | H-4 | Faible | `erase` concurrent d'un `PUT` | Un `PUT` reçu en entier juste avant son interruption peut s'écrire après l'effacement | Le client attend la fin de la requête interrompue avant `erase` ; reliquat éventuel indéchiffrable (`k_i` oubliée) et recouvert ou rempli à `finalize` |
 | H-5 | Faible | Ancien `finalize` (`fill_from`, `fill_to`) | Deux modes de finalisation côté serveur | Gardé pour le mode « au clic » (S4, Q-MIN1) ; à retirer s'il n'est jamais livré |
 | H-6 | Faible | Effacement « vrai » | Un trou rendu au système de fichiers ne garantit pas l'effacement physique (SSD, journal), comme la suppression d'un fichier entier | Disque chiffré (D2) ; effacement cryptographique par H-1 |
+
+---
+
+## 42. Décisions du propriétaire et corrections de la revue complète (v2.12, 10 novembre 2026)
+
+Revue complète du dépôt le 10 novembre (serveur, client et chiffrement, performance, tests, déploiement) : rapport dans `docs/superpowers/audits/2026-11-10-revue-complete.md`. Le propriétaire a validé les corrections proposées, sauf la protection contre les connexions lentes (D42-9). Chaque ligne dit ce qu'elle remplace.
+
+### 42.0 Journal des décisions
+
+| # | Décision | Remplace ou précise |
+|---|---|---|
+| D42-1 | **Envois en cours comptés après minuit UTC.** À la rotation du jour, un envoi en cours garde sa place dans les quotas (créations, octets, envois simultanés) sous sa clé de la veille. Le secret de la veille reste en mémoire seulement, 6 h 15 au plus (durée de vie d'un envoi), puis il est mis à zéro. Rien sur disque, aucune adresse gardée. | §9.3, §9.5 (« effacés chaque jour », « secret jeté à minuit ») ; §29.5 (« envois en cours compris ») ; §35.1 point 2. Limite assumée : jusqu'à 6 h 15 après minuit, la mémoire relie le pseudonyme de la veille à celui du jour pour une adresse dont un envoi chevauche minuit. |
+| D42-2 | **Photo, vidéo ou son d'un format que le nettoyage ne sait pas lire** (TIFF, RAW, AVI, AAC, SVG…) : pastille ambre, compté dans « N fichiers n'ont pas pu être nettoyés », texte « Nettoyage impossible : format non pris en charge », dit au destinataire comme un échec. L'envoi reste libre. Les autres fichiers de format inconnu restent « Fichier tel quel ». | D41-34 (« format non concerné : aucune marque ») pour ces trois catégories seulement. |
+| D42-3 | **Fichiers à empreinte en cache un an** : `Cache-Control: public, max-age=31536000, immutable` pour `/assets/…-EMPREINTE.(js\|css\|woff2\|png\|webp\|svg)` seulement. `index.html`, toutes les routes HTML, `/pdf-frame.*`, `/api/*`, polices et images sans empreinte restent `no-store`. | §10 (« `no-store` partout… à rouvrir avant la mise en ligne ») ; §27.5. À faire : donner une empreinte aux polices et aux images de `public/`, ou les sortir de `/assets/` (la règle reconnaît un nom, pas une empreinte réelle). |
+| D42-4 | **SRI livrée pour `index.html`** (production et démo) : greffon `shh-sri`, contrôle dans `check-dist.mjs`, test navigateur (un script modifié d'un octet n'est pas exécuté). | §28.3. **Écart restant** : `pdf-frame.html` n'a pas d'empreinte. Le cadre vit dans une origine opaque : une empreinte exigerait des en-têtes CORS sur `pdf-frame.js` et `pdf-frame.css`, alors que le serveur n'en pose aucun (§10). À trancher. `verif/index.html` n'existe pas encore. |
+| D42-5 | **Cadre PDF sans réseau** : CSP propre à `/pdf-frame.html` (`default-src 'none'; script-src 'self'; style-src 'self'; img-src blob: data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`). `worker-src 'self'` ajouté à la CSP de l'application. | §10 (CSP), UI §13. |
+| D42-6 | **Quota de `grow` débité sous la réservation de finalisation** ; palier final d'un brouillon borné par les segments reçus (même marge que `grow`). | §29.5, H-8. Limite restante : un seul morceau envoyé dans le dernier segment fait encore écrire le plus grand palier en aléa ; le remède (création petite, agrandissement par `grow` seulement) reste à faire. |
+| D42-7 | **Partage « prêt » seulement après synchronisation du fichier sur le disque** (`fdatasync`) ; un échec de synchronisation annule la finalisation. | §7.4, §9.2. |
+| D42-8 | **`admin wipe` coupe aussi les lectures en cours** du serveur en marche (demande `kill/all`), ou dit de le redémarrer s'il ne confirme pas. Le serveur lit le dossier `kill/` chaque seconde, même sans descripteur détaché. | §15.3, §41.8. |
+| D42-9 | **Refusé par le propriétaire** : la protection contre les connexions lentes qui occupent les places d'envoi et de lecture (échéance glissante, part par /48). | Constat B1 de la revue : reste ouvert, par choix. |
+| D42-10 | **Suppression et état d'un partage** : seuls 404 et 410 valent « disparu ». Tout autre refus HTTP (403 d'un intermédiaire, 400, 405, 413) rend une erreur avec « Réessayer », et le secret de gestion est gardé. | §13 (gestion des erreurs). |
+| D42-11 | **Nettoyage MP4 et MOV** : le nom libre des gestionnaires de piste (`hdlr`) et le nom de l'encodeur vidéo (`compressorname` de `stsd`) sont mis à zéro. Un EXIF illisible (JPEG, PNG, WebP) est retiré au lieu de faire échouer le nettoyage. | §35.2. |
+| D42-12 | **Verrou d'envoi par partage** (256 verrous rayés par identifiant) à la place du verrou global ; suppression de fichier et fermeture des descripteurs détachés hors du verrou des lectures ; place utilisée tenue par un compteur en mémoire, recalé par le concierge chaque minute (la place rendue par une commande d'administration est vue en 60 s au plus). | §9.3, §9.5 (structures en mémoire : marqueur `retiring`, compteur de place ; aucune n'est par personne). |
+| D42-13 | **Kit de déploiement** dans `deploy/` : Caddy (TLS 1.3 seul avec échange hybride X25519MLKEM768, HTTP/3 coupé, aucun journal, `X-Shh-Client-IP` remplacé), image Docker, `compose.yaml`, `deploy.sh` avec retour arrière, `test-proxy.sh`. | §15, §22, §30. **À valider** : TLS 1.3 seul et HTTP/3 coupé (hors spécification) ; site dans l'image (§15.3) plutôt qu'archive (§28.7) ; hébergeur, registre d'images. |
+
+### 42.1 Encore ouvert après cette revue
+
+- **Code vérifiable (§28)** : build reproductible prouvé, manifeste signé, vérificateur, provenance de l'image contrôlée par `deploy.sh`. SRI seule ne protège pas d'un serveur compromis (§28.3).
+- **Trusted Types et COEP** (idées I2, I3 de l'audit du 8 novembre) : essayés le 10 novembre, pas intégrables tels quels. Trusted Types bloque la création du Worker anti-robot (il faut une politique pour son adresse) ; l'essai COEP n'a pas abouti à une mesure fiable. Tâche dédiée, d'abord en mode rapport seul.
+- **libsodium chargé à la demande** (−151 Ko brotli sur l'accueil) : demande une seconde entrée de build chargée par un `<script integrity>` créé par le code (§28.3 interdit `import()`).
+- **Gros fichier reçu sans `showSaveFilePicker`** (iPhone, Firefox) : jusqu'à 2 Gio assemblés en mémoire. Remède : écriture en flux dans OPFS.
+- **Argon2id sur le fil principal** (0,25 à 1 s de gel) : à déplacer dans un Worker, qui serait hors SRI comme le Worker anti-robot.
+- **Textes de nettoyage** : « auteur retiré » (Office : les auteurs de commentaires restent, D41-27 ; chemins locaux `absPath`, modèle attaché) ; PDF : les images intégrées gardent leur EXIF. Le texte du destinataire pour D42-2 dit encore « structure du fichier inattendue ».
+- **Historique du navigateur** : un test prouve que la clé du lien reste dans l'historique de Chromium (§5.3 corrigée ; la page Sécurité le dit dans les deux langues). Pas de test Firefox.
+- **Légal (§17)**, mentions légales à compléter, déclaration ANSSI : inchangés.
