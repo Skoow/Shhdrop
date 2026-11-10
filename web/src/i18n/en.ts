@@ -351,7 +351,6 @@ export const en = {
   "open.lastTry": "One more failure and the share will be destroyed.",
   "open.destroyedByPw": "Wrong password. The share has been destroyed.",
 
-  "content.noPreview": "No preview on the site for this file type: save it to open it.",
   "content.undecodable.fmt": "This browser can't play the {fmt} format. Save the file, or open the link in {browser}.",
   "content.undecodable.fmt.viewOnly": "This browser can't play the {fmt} format. Open the link in {browser} to view it.",
   "content.browser.safari": "Safari",

@@ -80,3 +80,22 @@ export function isArchiveSniff(s: Sniffed, ext: string): boolean {
 export function isExecutableSniff(s: Sniffed): boolean {
   return EXEC_SNIFF.has(s);
 }
+
+/**
+ * Type d'un fichier dont le navigateur ne donne aucun type (File.type vide, fréquent pour MKV,
+ * FLAC ou HEIC selon le système) : d'après l'extension, pour les seuls formats que le site sait
+ * afficher (retours CLEAN5) ; sinon « application/octet-stream » (téléchargement seulement).
+ */
+const EXT_MIME: Readonly<Record<string, string>> = {
+  ".mkv": "video/x-matroska",
+  ".mka": "audio/x-matroska",
+  ".flac": "audio/flac",
+  ".mov": "video/quicktime",
+  ".m4a": "audio/mp4",
+  ".opus": "audio/ogg",
+  ".heic": "image/heic",
+  ".pdf": "application/pdf",
+};
+export function mimeFromExt(ext: string): string {
+  return EXT_MIME[ext.toLowerCase()] ?? "application/octet-stream";
+}

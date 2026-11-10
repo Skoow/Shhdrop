@@ -354,7 +354,6 @@ export const fr = {
   "open.lastTry": "Au prochain échec, le partage sera détruit.",
   "open.destroyedByPw": "Mot de passe incorrect. Le partage a été détruit.",
 
-  "content.noPreview": "Pas d'aperçu sur le site pour ce type de fichier\u202f: enregistrez-le pour l'ouvrir.",
   "content.undecodable.fmt": "Ce navigateur ne sait pas lire le format {fmt}. Enregistrez le fichier, ou ouvrez le lien dans {browser}.",
   "content.undecodable.fmt.viewOnly": "Ce navigateur ne sait pas lire le format {fmt}. Ouvrez le lien dans {browser} pour le voir.",
   "content.browser.safari": "Safari",

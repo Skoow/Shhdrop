@@ -162,9 +162,14 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
   });
 
   it("D41-28 : « je pars » de la dernière ouverture → effacé après 3 min ; rechargement → annulé ; ouverture non dernière → rien", async ({ expect }) => {
+    // Horloge figée une fois le partage créé (seul `offset` l'avance ensuite) : sous charge, les
+    // secondes réelles d'Argon2id s'ajoutaient aux 179 s simulées et effaçaient le partage trop
+    // tôt (test instable). La création, elle, a besoin d'une horloge qui avance.
     let offset = 0;
-    const { fake, net, statuses } = setup({ now: () => Date.now() + offset });
+    let frozen: number | null = null;
+    const { fake, net, statuses } = setup({ now: () => (frozen ?? Date.now()) + offset });
     const r = await share(net, 2);
+    frozen = Date.now();
     const first = await openShare(r.link, PW, ORIGIN, undefined, net);
     first.leave(); // non dernière : aucune requête
     const last = await openShare(r.link, PW, ORIGIN, undefined, net);

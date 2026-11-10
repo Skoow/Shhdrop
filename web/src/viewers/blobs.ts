@@ -14,8 +14,8 @@ export const AUTO_IMAGE_MAX = 20 * 1048576;
  */
 export const TYPE_SUR = {
   image: ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif", "image/heic"],
-  audio: ["audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg", "audio/webm", "audio/wav"],
-  video: ["video/mp4", "video/quicktime", "video/webm"],
+  audio: ["audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg", "audio/webm", "audio/wav", "audio/flac", "audio/x-flac", "audio/x-matroska"],
+  video: ["video/mp4", "video/quicktime", "video/webm", "video/x-matroska"],
 } as const;
 
 const DEFAULT = { audio: "audio/mp4", video: "video/mp4" } as const;

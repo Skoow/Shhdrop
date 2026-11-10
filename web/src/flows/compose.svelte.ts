@@ -13,7 +13,7 @@ import { DOC_FORMATS, IMAGE_FORMATS, detectFormat, type Format } from "../media/
 import { stripMetadata, type CleanFamily, type StripResult } from "../media/strip";
 import { approve } from "./clean-gate";
 import { CATEGORY_ORDER, categoryOf, extOf, type Category } from "./kinds";
-import { HEAD_BYTES, isExecutableSniff, sniff, type Sniffed } from "./sniff";
+import { HEAD_BYTES, isExecutableSniff, mimeFromExt, sniff, type Sniffed } from "./sniff";
 
 /** `photo-ici`, `video-ici` : pris dans l'interface (caméra maison, media/capture.ts), jamais dans la galerie. */
 export type Source = "fichiers" | "photo" | "video" | "depot" | "collage" | "photo-ici" | "video-ici";
@@ -556,7 +556,7 @@ export function createComposer(deps: ComposeDeps = {}) {
     return items.map((i) =>
       i.kind === "text"
         ? { kind: "text", name: cleanName(i.base), mime: i.mime, data: i.data }
-        : { kind: "file", name: cleanName(i.base + i.ext), mime: i.mime || "application/octet-stream", data: i.data, clean: manifestClean(i) ?? undefined },
+        : { kind: "file", name: cleanName(i.base + i.ext), mime: i.mime || mimeFromExt(i.ext), data: i.data, clean: manifestClean(i) ?? undefined },
     );
   }
 

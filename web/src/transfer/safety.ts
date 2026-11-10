@@ -72,6 +72,12 @@ const PREVIEW: Record<string, PreviewKind> = {
   "audio/ogg": "audio",
   "audio/webm": "audio",
   "audio/wav": "audio",
+  // Retours CLEAN5 : FLAC et Matroska (MKV, MKA). Lus par Chrome, Firefox et Safari récents
+  // (FLAC) ; MKV surtout par Chrome. Sinon, message « format illisible ici » (viewers/hint.ts).
+  "audio/flac": "audio",
+  "audio/x-flac": "audio",
+  "audio/x-matroska": "audio",
+  "video/x-matroska": "video",
   "video/mp4": "video",
   "video/webm": "video",
   "video/quicktime": "video",

@@ -145,9 +145,6 @@
   </div>
   {#if viewOnly && !canView}
     <p class="note">{t("content.notViewable")}</p>
-  {:else if kind === "file" && !canView}
-    <!-- Pas d'aperçu sur le site pour ce type (retours CLEAN4) : dit sur la ligne, pas après un clic. -->
-    <p class="note" data-no-preview>{t("content.noPreview")}</p>
   {/if}
   {#if row.state === "failed" && row.reason && kind === "file"}
     <p class="err" role="alert">{t(FAIL[row.reason])}</p>
