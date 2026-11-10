@@ -6,7 +6,7 @@
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
-import { axe, expect, test } from "./fixtures";
+import { axe, captureOf, expect, test } from "./fixtures";
 import { file, settle } from "./open-helpers";
 import { autoClean, enterComposer, openFilePicker } from "./send-helpers";
 
@@ -104,7 +104,7 @@ test("pied : « Offres … et » couleur des liens du pied, Plus et Pro en bleu,
   await link.scrollIntoViewIfNeeded();
   await settle(page);
   expect(await axe(page)).toEqual([]);
-  await page.locator("footer").screenshot({ path: `${SHOTS}pied-${w(isMobile)}.png` });
+  await captureOf(page.locator("footer"), { path: `${SHOTS}pied-${w(isMobile)}.png` });
   await page.goto(shh.origin + "/securite");
   const other = page.locator("footer a.fl:not([aria-current])").filter({ hasText: "Conditions" });
   const linkColor = await other.evaluate((e) => getComputedStyle(e).color);

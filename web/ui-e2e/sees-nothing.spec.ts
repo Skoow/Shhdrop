@@ -11,7 +11,9 @@ import { expect, test } from "./fixtures";
 import { addText, openFilePicker, readyHeading, sendButton } from "./send-helpers";
 
 const TEXT = "MOT-REPERE-NAVIGATEUR-5d1e : le code de la porte est 4471";
-const NAME = "nom-repere-navigateur-a83f.pdf";
+// Aucune fenêtre de 8 caractères du nom ne doit exister dans un en-tête ordinaire : « navigate »
+// (Sec-Fetch-Mode, envoyé par WebKit) donnait un faux positif sur « GET / » (CI du 10 novembre).
+const NAME = "nom-repere-fureteur-a83f.pdf";
 const CONTENT = "CONTENU-REPERE-NAVIGATEUR-0c6b ".repeat(4000);
 const windows = (label: string, s: string) => Array.from({ length: s.length - 7 }, (_, i) => needle(`${label}[${i}]`, s.slice(i, i + 8)));
 

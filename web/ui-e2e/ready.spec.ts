@@ -4,13 +4,13 @@
 import type { BrowserContext, Page } from "@playwright/test";
 import { NotFoundError, fetchMeta } from "../src/index";
 import { qrPath } from "../src/qr/qr";
-import { axe, capture, expect, readClipboard, test } from "./fixtures";
+import { axe, capture, expect, grantClipboard, readClipboard, test } from "./fixtures";
 import { addText, armed, readyHeading, sendButton } from "./send-helpers";
 
 const LINK_RE = /^http:\/\/127\.0\.0\.1:\d+\/#[A-Za-z0-9_-]{43}$/;
 
 async function toReady(page: Page, context: BrowserContext, origin: string, text = "Le code de la porte est 4471.") {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin });
+  await grantClipboard(context, origin);
   await page.goto(origin + "/");
   await addText(page, text);
   await sendButton(page).click();

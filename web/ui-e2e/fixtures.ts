@@ -2,7 +2,7 @@
 // web/dist-demo servie comme par GitHub Pages (fixture `demo`).
 // Gardes de fin de test : aucune violation CSP, aucune requête hors de l'origine du serveur.
 import AxeBuilder from "@axe-core/playwright";
-import { errors, test as base, expect, type Page } from "@playwright/test";
+import { errors, test as base, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { get } from "node:http";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -111,6 +111,11 @@ async function guard(page: Page, origin: string): Promise<{ cspViolations: strin
   const cspViolations: string[] = [];
   const foreignRequests: string[] = [];
   harness.set(page, { capturing: false, event: 0, console: 0 });
+  // Toute capture de la page (page.screenshot appelé par un spec, pas seulement capture()) :
+  // sous WebKit, Playwright injecte une feuille de style que la CSP refuse ; ce refus-là, et
+  // lui seul, est ignoré le temps de la capture (CI rouge du 10 novembre : 92 faux échecs).
+  const rawShot = page.screenshot.bind(page);
+  page.screenshot = ((o?: Parameters<Page["screenshot"]>[0]) => during(page, () => rawShot(o))) as Page["screenshot"];
   await page.exposeFunction("__shhCsp", (d: string) => {
     if (!swallowHarnessStyle(page, "event", d)) cspViolations.push(d);
   });
@@ -185,20 +190,48 @@ export const test = base.extend<{ shh: Shh; demo: Demo; shhServer: Pick<StartOpt
 
 export { expect };
 
+/** Exécute une capture en ignorant, sous WebKit, le seul refus CSP du style injecté par Playwright. */
+async function during<T>(page: Page, shot: () => Promise<T>): Promise<T> {
+  const w = harness.get(page);
+  if (!w || w.capturing) return shot();
+  Object.assign(w, { capturing: true, event: 0, console: 0 });
+  try {
+    const r = await shot();
+    await page.evaluate(() => 0); // aller-retour : les messages de la capture sont arrivés
+    return r;
+  } finally {
+    w.capturing = false;
+  }
+}
+
+/** Capture d'un élément (locator.screenshot), sous la même garde que les captures de page. */
+export function captureOf(l: Locator, o: Parameters<Locator["screenshot"]>[0]): Promise<Buffer> {
+  return during(l.page(), () => l.screenshot(o));
+}
+
+/**
+ * Presse-papiers autorisé pour les tests. WebKit ne connaît pas « clipboard-write » (erreur
+ * « Unknown permission », CI du 10 novembre) : on donne ce que le navigateur accepte.
+ */
+export async function grantClipboard(ctx: BrowserContext, origin?: string): Promise<void> {
+  const o = origin === undefined ? undefined : { origin };
+  for (const perms of [["clipboard-read", "clipboard-write"], ["clipboard-read"]]) {
+    try {
+      await ctx.grantPermissions(perms, o);
+      return;
+    } catch (e) {
+      if (!String(e).includes("Unknown permission")) throw e;
+    }
+  }
+}
+
 /** Capture 1x dans ui-e2e/__captures__/<projet>/<nom>.png (ignoré par git, artefact CI). */
 export async function capture(page: Page, nom: string): Promise<string> {
   const project = test.info().project.name;
   const dir = `${CAPTURES}/${project}`;
   mkdirSync(dir, { recursive: true });
   const path = `${dir}/${nom}.png`;
-  const w = harness.get(page);
-  if (w) Object.assign(w, { capturing: true, event: 0, console: 0 });
-  try {
-    await page.screenshot({ path });
-    await page.evaluate(() => 0); // aller-retour : les messages de la capture sont arrivés
-  } finally {
-    if (w) w.capturing = false;
-  }
+  await page.screenshot({ path });
   return path;
 }
 
@@ -227,7 +260,7 @@ export async function axe(page: Page) {
 const CLIP_ORIGIN = "http://localhost:9/";
 export async function readClipboard(page: Page): Promise<string> {
   const ctx = page.context();
-  await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: CLIP_ORIGIN.slice(0, -1) });
+  await grantClipboard(ctx, CLIP_ORIGIN.slice(0, -1));
   const p = await ctx.newPage();
   try {
     await p.route(CLIP_ORIGIN, (r) => r.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>clip</title>" }));

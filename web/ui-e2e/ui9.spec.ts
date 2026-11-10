@@ -3,7 +3,7 @@
 // en bas à gauche, papier peint de pictos sur les côtés de la page. Captures fr-FR ×2, 390 et 1440 px.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { axe, expect, test } from "./fixtures";
+import { axe, captureOf, expect, test } from "./fixtures";
 import { file, freshPage, sendShare, settle, unlock } from "./open-helpers";
 import { autoClean, openFilePicker } from "./send-helpers";
 import type { Locator, Page } from "@playwright/test";
@@ -100,7 +100,7 @@ test("pied : « Shhdrop © 2026 » en bas à gauche, plus de « publicité » ; 
   const res = await page.request.get(shh.origin + "/assets/motif.svg");
   expect((await res.body()).length).toBeLessThan(4096);
   await settle(page);
-  await foot.screenshot({ path: `${SHOTS}pied-${w(isMobile)}.png` });
+  await captureOf(foot, { path: `${SHOTS}pied-${w(isMobile)}.png` });
   await page.evaluate(() => scrollTo(0, 0));
   expect(await axe(page)).toEqual([]);
   await page.emulateMedia({ contrast: "more" } as Parameters<Page["emulateMedia"]>[0]);

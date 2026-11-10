@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { openShare } from "../src/index";
-import { expect, test } from "./fixtures";
+import { captureOf, expect, test } from "./fixtures";
 import { file, freshPage, unlock } from "./open-helpers";
 import { addText, noViewTransition, openFilePicker, readyHeading, sendButton } from "./send-helpers";
 
@@ -91,7 +91,7 @@ test("ordinateur : filigrane de dépôt dans la liste (texte entier, clic → ch
   await chooser;
   await expect(noteRow(page)).not.toContainText("4471");
   await page.screenshot({ path: SHOTS + "composeur-filigrane-1440.png" });
-  await noteRow(page).screenshot({ path: SHOTS + "ligne-note-1440.png" });
+  await captureOf(noteRow(page), { path: SHOTS + "ligne-note-1440.png" });
 
   // Destinataire : même règle, le contenu se lit avec « Voir ».
   await sendButton(page).click();

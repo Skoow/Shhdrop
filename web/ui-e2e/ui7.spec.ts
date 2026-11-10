@@ -4,7 +4,7 @@
 // (mensuel par abonnement, annuel au choix, carte et crypto-monnaies). Captures fr-FR ×2 à 390 et 1440 px.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { axe, expect, test } from "./fixtures";
+import { axe, captureOf, expect, test } from "./fixtures";
 import { file, freshPage, sendShare, settle, unlock } from "./open-helpers";
 import { autoClean, openFilePicker } from "./send-helpers";
 import type { Page } from "@playwright/test";
@@ -133,7 +133,7 @@ test("pied de page : logo au bord intérieur de l'en-tête, liens sans soulignem
   expect(res.ok()).toBe(true);
   expect((await res.body()).length).toBeLessThan(4096);
   await settle(page);
-  await foot.screenshot({ path: `${SHOTS}pied-${w(isMobile)}.png` });
+  await captureOf(foot, { path: `${SHOTS}pied-${w(isMobile)}.png` });
   // Audit en haut de page : l'accueil estompe le composeur au défilement (animation liée au défilement).
   await page.evaluate(() => scrollTo(0, 0));
   expect(await axe(page)).toEqual([]);

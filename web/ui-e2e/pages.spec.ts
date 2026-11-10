@@ -2,7 +2,7 @@
 // Confidentialité, Conditions et Mentions légales (squelettes « En cours de rédaction », aucune
 // identité inventée), Signaler un abus, Offres (« par partage »). Captures fr-FR 390 et 1440.
 import { fileURLToPath } from "node:url";
-import { axe, expect, test } from "./fixtures";
+import { axe, captureOf, expect, test } from "./fixtures";
 
 test.use({ locale: "fr-FR" });
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-UI5/", import.meta.url));
@@ -93,5 +93,5 @@ test("en-tête : air au-dessus du logo, Réglages ≥ 44 px (icône 24 px) ; pie
   const foot = page.locator("footer[data-foot]");
   await foot.scrollIntoViewIfNeeded();
   await expect(foot).toBeVisible();
-  await foot.screenshot({ path: `${SHOTS}pied-${w(isMobile)}.png` });
+  await captureOf(foot, { path: `${SHOTS}pied-${w(isMobile)}.png` });
 });

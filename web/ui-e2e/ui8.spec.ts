@@ -4,7 +4,7 @@
 // destinataire par le manifeste chiffré, icônes maison. Captures fr-FR ×2 à 390 et 1440 px.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { axe, expect, test } from "./fixtures";
+import { axe, captureOf, expect, test } from "./fixtures";
 import { file, freshPage, sendShare, settle, unlock } from "./open-helpers";
 import { autoClean, openFilePicker } from "./send-helpers";
 import type { Locator, Page } from "@playwright/test";
@@ -45,7 +45,7 @@ test("accueil : « Comment ça marche » sur un fond sobre (ni biais, ni réglur
   expect(st.clip).toBe("none");
   expect(st.tex).not.toMatch(/repeating|url\(/);
   await settle(page);
-  await how.screenshot({ path: `${SHOTS}accueil-comment-${w(isMobile)}.png`, animations: "disabled" });
+  await captureOf(how, { path: `${SHOTS}accueil-comment-${w(isMobile)}.png`, animations: "disabled" });
 });
 
 test("pied de page : aucun soulignement (repos, survol, focus), couleur et anneau de focus au clavier ; capture", async ({ page, shh, isMobile }) => {
@@ -74,7 +74,7 @@ test("pied de page : aucun soulignement (repos, survol, focus), couleur et annea
   expect(ring).toEqual({ m: true, s: "solid", w: "2px" });
   expect(await deco(link)).toMatch(/^(nonenone,?)+$/);
   await settle(page);
-  await foot.screenshot({ path: `${SHOTS}pied-${w(isMobile)}.png` });
+  await captureOf(foot, { path: `${SHOTS}pied-${w(isMobile)}.png` });
   await page.emulateMedia({ forcedColors: "active" });
   expect(await deco(link)).toMatch(/^(nonenone,?)+$/);
 });

@@ -8,7 +8,9 @@ import { expect, test } from "./fixtures";
 import { freshPage, sendShare, unlock } from "./open-helpers";
 
 const TEXT = "Le code du portail est 2208.";
-const exe = process.env.PW_LOCAL_CHROMIUM === "1" ? { executablePath: "/opt/pw-browsers/chromium" } : {};
+// Chromium complet (nouveau mode sans tête) : le « headless shell » par défaut n'écrit pas
+// Default/Preferences et ne restaure pas les sessions (CI rouge du 10 novembre).
+const exe = process.env.PW_LOCAL_CHROMIUM === "1" ? { executablePath: "/opt/pw-browsers/chromium" } : { channel: "chromium" };
 
 /** Fichiers du profil qui contiennent `needle` (UTF-8 ou UTF-16LE, octets bruts). */
 function filesWith(dir: string, needle: string): string[] {

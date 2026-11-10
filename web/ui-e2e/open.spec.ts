@@ -3,7 +3,7 @@
 // aucune requête hors de l'origine).
 import type { Page } from "@playwright/test";
 import { NotFoundError, PW_TRIES, fetchMeta, shareStatus } from "../src/index";
-import { axe, capture, expect, readClipboard, test } from "./fixtures";
+import { axe, capture, expect, grantClipboard, readClipboard, test } from "./fixtures";
 import { freshPage, noteRow, pwField, sendShare, settle, unlock, unlockButton } from "./open-helpers";
 import { armed } from "./send-helpers";
 
@@ -183,7 +183,7 @@ test.describe("navigateur intégré (Instagram)", () => {
     const s = await freshPage(browser);
     const sent = await sendShare(s.page, shh.origin + "/", { text: TEXT });
     await s.ctx.close();
-    await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: shh.origin });
+    await grantClipboard(context, shh.origin);
     const api = apiPaths(page);
     await page.goto(sent.link);
     await expect(page.getByText(/^Vous êtes dans le navigateur intégré de Instagram/)).toBeVisible();

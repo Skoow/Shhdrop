@@ -6,7 +6,7 @@
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
-import { expect, test } from "./fixtures";
+import { captureOf, expect, test } from "./fixtures";
 import { openFilePicker, enterComposer } from "./send-helpers";
 
 const local = process.env.PW_LOCAL_CHROMIUM === "1" ? { executablePath: "/opt/pw-browsers/chromium" } : {};
@@ -72,7 +72,7 @@ test("enregistrer 2 s → pause (minuteur figé) → reprendre → arrêter → 
   const where = async (b: ReturnType<Page["locator"]>) => ({ mic: (await b.boundingBox())!, bubble: (await rec.locator(".bubble").boundingBox())!, timer: (await rec.locator("[data-timer]").boundingBox())! });
   const before = await where(big);
   expect(before.mic.width).toBeGreaterThanOrEqual(72);
-  if (isMobile) await rec.screenshot({ path: `${SHOTS}voice-initial-390.png` });
+  if (isMobile) await captureOf(rec, { path: `${SHOTS}voice-initial-390.png` });
   await big.click();
   await expect(rec.locator("[data-timer]")).toContainText("/ 30:00 max");
   await page.waitForTimeout(250); // fin du fondu micro → carré
@@ -103,14 +103,14 @@ test("enregistrer 2 s → pause (minuteur figé) → reprendre → arrêter → 
   const s1 = await shape();
   await expect.poll(shape, { timeout: 3000 }).not.toBe(s1);
   await expect(timer(rec)).toHaveText("0:02", { timeout: 4000 });
-  if (isMobile) await rec.screenshot({ path: `${SHOTS}voice-recording-390.png` });
+  if (isMobile) await captureOf(rec, { path: `${SHOTS}voice-recording-390.png` });
 
   await rec.getByRole("button", { name: "Mettre en pause" }).click();
   await expect(rec.getByRole("status").filter({ hasText: "En pause" })).toBeVisible();
   const frozen = await timer(rec).textContent();
   await page.waitForTimeout(1300);
   await expect(timer(rec)).toHaveText(frozen!);
-  if (isMobile) await rec.screenshot({ path: `${SHOTS}voice-paused-390.png` });
+  if (isMobile) await captureOf(rec, { path: `${SHOTS}voice-paused-390.png` });
 
   await rec.getByRole("button", { name: "Reprendre l'enregistrement" }).click();
   await page.waitForTimeout(1100);
@@ -137,7 +137,7 @@ test("enregistrer 2 s → pause (minuteur figé) → reprendre → arrêter → 
     return { rate: a.playbackRate, pitch: a.preservesPitch };
   });
   expect(media).toEqual({ rate: 1.5, pitch: true });
-  if (isMobile) await rec.screenshot({ path: `${SHOTS}voice-review-390.png` });
+  if (isMobile) await captureOf(rec, { path: `${SHOTS}voice-review-390.png` });
   await expect(rec.getByRole("button", { name: "Réenregistrer" })).toBeVisible();
   await rec.getByRole("button", { name: "Valider" }).click();
   await expect(rec).toBeHidden();
@@ -149,7 +149,7 @@ test("enregistrer 2 s → pause (minuteur figé) → reprendre → arrêter → 
   await expect(row.locator('[data-clean="nettoye"]')).toBeVisible();
   if (isMobile) {
     await page.waitForTimeout(800); // fin des animations d'arrivée de la ligne
-    await row.screenshot({ path: `${SHOTS}voice-row-390.png` });
+    await captureOf(row, { path: `${SHOTS}voice-row-390.png` });
     await page.screenshot({ path: `${SHOTS}voice-compose-390.png` });
   }
   await row.getByRole("button", { name: /^Vitesse de lecture\s*: 1×$/ }).click();
@@ -178,7 +178,7 @@ test("arrêter → « Valider » sans réécouter → ligne ajoutée", async ({ 
   const [ob, ab] = [(await ok.boundingBox())!, (await again.boundingBox())!];
   expect(ob.width).toBeGreaterThan(ab.width * 3);
   expect(Math.min(ab.width, ab.height)).toBeGreaterThanOrEqual(44);
-  if (isMobile) await rec.screenshot({ path: `${SHOTS}voice-stopped-390.png` });
+  if (isMobile) await captureOf(rec, { path: `${SHOTS}voice-stopped-390.png` });
   await ok.click();
   await expect(rec).toBeHidden();
   await expect(page.locator("[data-row]").filter({ hasText: "Mémo vocal 1" })).toBeVisible();
@@ -224,7 +224,7 @@ test("ligne vocale : nom générique renommable (Entrée, Échap, vide → gén�
     expect(clip.y).toBeGreaterThanOrEqual(pic.y + pic.height);
     expect(Math.abs(clip.x + clip.width / 2 - (vr.x + vr.width / 2))).toBeLessThan(0.75);
   }
-  if (isMobile) await voice.screenshot({ path: `${SHOTS4}voice-row-390.png` });
+  if (isMobile) await captureOf(voice, { path: `${SHOTS4}voice-row-390.png` });
 
   // Le vocal se renomme comme les autres (retours UI6) : crayon de la ligne sur ordinateur,
   // menu « … » sur téléphone (plus de crayon propre au vocal).
