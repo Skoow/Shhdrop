@@ -35,16 +35,19 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     sha2::Sha256::digest(data).into()
 }
 
-/// HKDF-SHA-256 à sel vide (RFC 5869 : équivaut à un sel de 32 zéros), `len` octets.
+/// HKDF-SHA-256 à sel vide (RFC 5869 : équivaut à un sel de 32 zéros), `N` octets.
 ///
-/// `len` est toujours une constante du moteur (16 ou 32) ; au-delà de 255 × 32 = 8 160 octets,
-/// HKDF n'est pas défini : c'est un bogue de l'appelant, et la fonction panique (comme
-/// `deriveBits` levait une exception).
-pub fn hkdf(ikm: &[u8], info: &str, len: usize) -> Zeroizing<Vec<u8>> {
-    let mut okm = Zeroizing::new(vec![0u8; len]);
-    hkdf::Hkdf::<sha2::Sha256>::new(None, ikm)
-        .expand(info.as_bytes(), &mut okm)
-        .expect("HKDF : longueur demandée au-delà de 8 160 octets");
+/// La longueur est un paramètre de type : `N` au-delà de 255 × 32 = 8 160 octets (où HKDF
+/// n'est pas défini) est refusé à la compilation, donc l'appel ne peut pas échouer :
+///
+/// ```compile_fail
+/// let _ = shhdrop_core::kdf::hkdf::<8161>(b"", "");
+/// ```
+pub fn hkdf<const N: usize>(ikm: &[u8], info: &str) -> Zeroizing<[u8; N]> {
+    const { assert!(N > 0 && N <= 255 * 32, "HKDF-SHA-256 : 1 à 8 160 octets") };
+    let mut okm = Zeroizing::new([0u8; N]);
+    // `expand` n'échoue que pour une longueur hors de 1..=8 160, exclue ci-dessus.
+    let _ = hkdf::Hkdf::<sha2::Sha256>::new(None, ikm).expand(info.as_bytes(), &mut *okm);
     okm
 }
 
@@ -62,9 +65,7 @@ pub fn check_kdf_params(ops: u32, mem: u32) -> Result<()> {
 
 /// K_accès = HKDF(K_lien, « shhdrop/v2/acces »), V_accès = SHA-256(K_accès).
 pub fn derive_access(k_lien: &KLien) -> AccessKeys {
-    let okm = hkdf(k_lien.as_bytes(), "shhdrop/v2/acces", 32);
-    let mut bytes = Zeroizing::new([0u8; 32]);
-    bytes.copy_from_slice(&okm);
+    let bytes = hkdf::<32>(k_lien.as_bytes(), "shhdrop/v2/acces");
     let v_acces = sha256(&*bytes);
     AccessKeys {
         k_acces: KAcces::from_bytes(*bytes),
@@ -152,16 +153,16 @@ mod tests {
 
     #[test]
     fn hkdf_rfc5869_cas_3() {
-        let okm = hkdf(&[0x0b; 22], "", 42);
+        let okm = hkdf::<42>(&[0x0b; 22], "");
         assert_eq!(
-            hex(&okm),
+            hex(&*okm),
             "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8"
         );
     }
 
     #[test]
     fn hkdf_32_octets() {
-        assert_eq!(hkdf(&[1; 32], "x", 32).len(), 32);
+        assert_eq!(hkdf::<32>(&[1; 32], "x").len(), 32);
     }
 
     #[test]

@@ -18,6 +18,7 @@ Sans `GEN_VECTORS`, ce même test refait tous les vecteurs avec l'ancien moteur 
 - JSON à clés triées, indentation de 2 espaces, LF final.
 - **Aléa** : pour chaque cas, `crypto.getRandomValues` est remplacé par un flux SHA-256 en mode compteur (bloc i = SHA-256(UTF-8(`shhdrop/vecteurs/v2/` + étiquette) ‖ i sur 4 octets gros-boutistes)). `random` liste, dans l'ordre, les octets reçus par chaque appel : il suffit de les rejouer. Le flux n'est utile que pour régénérer.
 - Entrées fixes non aléatoires : `seq` (octets 0, 1, 2, … à partir d'une valeur) ou SHA-256 d'une étiquette. Elles sont écrites en clair dans chaque cas.
+- NFC des mots de passe (`argon2id`) : la version d'Unicode est celle de la crate `unicode-normalization` épinglée dans `engine/Cargo.lock` (JavaScript : celle du navigateur). Changer cette version, c'est vérifier que ces vecteurs passent toujours.
 - Gros clairs : `{"xorshift32": {"seed": s, "len": n}}`. x ^= x << 13, x ^= x >>> 17, x ^= x << 5 sur 32 bits, état initial `s`. Chaque nouvel état donne 4 octets petit-boutistes, et le dernier groupe est tronqué à `n`. `plain_sha256` permet de vérifier le résultat.
 
 ## Sections

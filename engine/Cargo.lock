@@ -43,6 +43,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
 dependencies = [
  "hybrid-array",
+ "zeroize",
 ]
 
 [[package]]
@@ -99,6 +100,7 @@ dependencies = [
  "block-buffer",
  "crypto-common",
  "ctutils",
+ "zeroize",
 ]
 
 [[package]]
@@ -248,7 +250,9 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "base64",
+ "blake2",
  "hkdf",
+ "hmac",
  "serde_json",
  "sha2",
  "unicode-normalization",

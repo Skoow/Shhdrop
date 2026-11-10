@@ -9,9 +9,13 @@ publish.workspace = true
 
 [dependencies]
 argon2 = { version = "0.6", default-features = false, features = ["alloc", "zeroize"] }
+# blake2 et hmac ne sont pas appelés directement : déclarés pour activer `zeroize` (états internes
+# de BLAKE2b dans Argon2id, de HMAC dans HKDF, effacés à la destruction ; Cargo unifie les fonctions).
+blake2 = { version = "0.11", default-features = false, features = ["zeroize"] }
 base64 = { version = "0.23", default-features = false, features = ["alloc"] }
 hkdf = "0.13"
-sha2 = { version = "0.11", default-features = false }
+hmac = { version = "0.13", default-features = false, features = ["zeroize"] }
+sha2 = { version = "0.11", default-features = false, features = ["zeroize"] }
 unicode-normalization = { version = "0.1", default-features = false }
 zeroize = { version = "1.9", default-features = false, features = ["alloc"] }
 

@@ -1,6 +1,6 @@
-// Rejoue les sections `encoding`, `password`, `link`, `hkdf`, `sha256`, `argon2id` et `access` de engine/vectors/v2.json (produites par
-// l'ancien moteur TypeScript) : chaque cas, sans exception, doit redonner la même sortie ou le
-// même message d'erreur.
+// Rejoue les sections `encoding`, `password`, `link`, `hkdf`, `sha256`, `argon2id` et `access`
+// de engine/vectors/v2.json (produites par l'ancien moteur TypeScript) : chaque cas, sans
+// exception, doit redonner la même sortie ou le même message d'erreur.
 use serde_json::Value;
 use shhdrop_core::encoding::{b64u, unb64u};
 use shhdrop_core::kdf::{
@@ -213,13 +213,16 @@ fn hkdf_cases() {
     let cases = v["hkdf"].as_array().unwrap();
     assert!(!cases.is_empty());
     for c in cases {
-        let len = usize::try_from(c["len"].as_u64().unwrap()).unwrap();
-        let okm = hkdf(
-            &unhex(c["ikm"].as_str().unwrap()),
-            c["info"].as_str().unwrap(),
-            len,
-        );
-        assert_eq!(*okm, unhex(c["okm"].as_str().unwrap()), "{c}");
+        let ikm = unhex(c["ikm"].as_str().unwrap());
+        let info = c["info"].as_str().unwrap();
+        // Longueur fixée à la compilation : une branche par longueur des vecteurs.
+        let okm = match c["len"].as_u64().unwrap() {
+            16 => hkdf::<16>(&ikm, info).to_vec(),
+            32 => hkdf::<32>(&ikm, info).to_vec(),
+            42 => hkdf::<42>(&ikm, info).to_vec(),
+            n => panic!("longueur HKDF absente du test : {n}"),
+        };
+        assert_eq!(okm, unhex(c["okm"].as_str().unwrap()), "{c}");
     }
 }
 
