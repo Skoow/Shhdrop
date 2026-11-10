@@ -380,3 +380,28 @@ test.describe("Argon2id à la demande, hors du fil principal (10 novembre)", () 
     expect(await page.evaluate(() => [...document.scripts].filter((x) => /argon2-/.test(x.src)).map((x) => x.integrity.slice(0, 7)))).toEqual(["sha384-"]);
   });
 });
+
+test("Trusted Types (10 novembre) : une chaîne brute donnée à innerHTML ou à new Worker est refusée ; seules deux politiques existent", async ({ page, shh, browserName }) => {
+  test.skip(browserName !== "chromium", "Trusted Types : vérifié sous Chromium (les autres moteurs l'appliquent selon leur version)");
+  await page.goto(shh.origin + "/");
+  await expect(page.locator("main h1").first()).toBeVisible();
+  const r = await page.evaluate(() => {
+    const tryIt = (f: () => void) => {
+      try {
+        f();
+        return "accepté";
+      } catch (e) {
+        return (e as Error).name;
+      }
+    };
+    const tt = (window as unknown as { trustedTypes: { createPolicy(n: string, r: object): unknown } }).trustedTypes;
+    return {
+      html: tryIt(() => void (document.createElement("div").innerHTML = "<img src=x onerror=alert(1)>")),
+      worker: tryIt(() => void new Worker("/assets/x.js")),
+      policy: tryIt(() => void tt.createPolicy("autre", { createHTML: (s: string) => s })),
+    };
+  });
+  expect(r).toEqual({ html: "TypeError", worker: "TypeError", policy: "TypeError" });
+  // Les refus ci-dessus sont voulus : ils ne comptent pas comme des violations du site.
+  shh.cspViolations.length = 0;
+});

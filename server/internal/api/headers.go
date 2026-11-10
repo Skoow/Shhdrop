@@ -3,7 +3,9 @@ package api
 import "net/http"
 
 // securityHeaders : en-têtes de la spec §10, posés sur toutes les réponses
-// (sans require-trusted-types-for à ce stade).
+// Trusted Types (10 novembre) : toute chaîne brute donnée à un point d'injection de script
+// est refusée ; seules deux politiques existent, celle des gabarits de Svelte et « shhdrop »
+// (web/src/app/trusted.ts : nos fichiers de assets/ et les Blob de cette origine).
 // Cache-Control: no-store par défaut : exigé pour /api/* et le HTML (bfcache, spec §21), gardé
 // pour tout fichier du site dont le nom ne porte pas d'empreinte. Seule exception, posée par
 // le gestionnaire des fichiers du site (cmd/shhdrop/static.go, immutableAsset) : les fichiers
@@ -14,7 +16,7 @@ import "net/http"
 var securityHeaders = [][2]string{
 	{"Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; " +
 		"img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self'; " +
-		"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"},
+		"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types svelte-trusted-html shhdrop"},
 	{"Referrer-Policy", "no-referrer"},
 	{"X-Content-Type-Options", "nosniff"},
 	// camera=(self) : photo et vidéo prises dans l'interface (Q-REC1 acceptée par le propriétaire,

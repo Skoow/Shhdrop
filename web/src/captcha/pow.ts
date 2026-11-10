@@ -3,7 +3,10 @@
 // Pas encore de pré-calcul ni de borne vraie avec repli (Task 14) : sans repli, le calcul va
 // jusqu'au bout, comme le prévoit la spécification.
 import type { CaptchaCtx, CaptchaProof } from "../index";
+import { scriptUrl } from "../app/trusted";
 import { parseChallenge, payload } from "./search";
+// Adresse du fichier du Worker, écrite par Vite (assets/pow.worker-EMPREINTE.js).
+import powWorkerUrl from "./pow.worker.ts?worker&url";
 
 export function solvePow(challenge: unknown, ctx: CaptchaCtx, signal?: AbortSignal, onTried?: (tried: number) => void): Promise<CaptchaProof> {
   return new Promise((resolve, reject) => {
@@ -12,7 +15,7 @@ export function solvePow(challenge: unknown, ctx: CaptchaCtx, signal?: AbortSign
     let w: Worker;
     try {
       c = parseChallenge(challenge);
-      w = new Worker(new URL("./pow.worker.ts", import.meta.url), { type: "module" });
+      w = new Worker(scriptUrl(powWorkerUrl), { type: "module" });
     } catch {
       return reject(new Error("pow_indisponible"));
     }
