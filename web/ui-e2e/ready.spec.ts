@@ -136,7 +136,7 @@ test.describe("fr-FR", () => {
 
   test("mot de passe généré de 11 caractères : affiché exactement comme il est copié (scan UX B5 ; D41-15 : plus de saisie)", async ({ page, shh, context }) => {
     test.setTimeout(120_000);
-    await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: shh.origin });
+    await grantClipboard(context, shh.origin);
     await toReady(page, context, shh.origin);
     const gen = await valueOf(page, pwCard(page));
     expect(gen).toHaveLength(11);

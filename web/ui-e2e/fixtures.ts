@@ -40,7 +40,9 @@ function swallowHarnessStyle(page: Page, channel: "event" | "console", text: str
     channel === "event"
       ? text.startsWith("style-src-elem inline ")
       : text.startsWith("Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive");
-  if (!known || w[channel] >= 1) return false;
+  // Un refus par document de la page (cadre PDF compris) : Playwright injecte son style dans
+  // chacun (CI du 10 novembre). Au-delà du nombre de documents, c'est un vrai refus.
+  if (!known || w[channel] >= page.frames().length) return false;
   w[channel]++;
   return true;
 }
@@ -210,19 +212,14 @@ export function captureOf(l: Locator, o: Parameters<Locator["screenshot"]>[0]): 
 }
 
 /**
- * Presse-papiers autorisé pour les tests. WebKit ne connaît pas « clipboard-write » (erreur
- * « Unknown permission », CI du 10 novembre) : on donne ce que le navigateur accepte.
+ * Presse-papiers autorisé pour les tests. WebKit ne connaît pas « clipboard-write » : la
+ * demander lève « Unknown permission », et la liste refusée reste attachée au contexte, si bien
+ * que le newPage() suivant lève à son tour (CI du 10 novembre). On ne la demande donc jamais
+ * sous WebKit (l'écriture y est permise après un geste, sans permission).
  */
 export async function grantClipboard(ctx: BrowserContext, origin?: string): Promise<void> {
-  const o = origin === undefined ? undefined : { origin };
-  for (const perms of [["clipboard-read", "clipboard-write"], ["clipboard-read"]]) {
-    try {
-      await ctx.grantPermissions(perms, o);
-      return;
-    } catch (e) {
-      if (!String(e).includes("Unknown permission")) throw e;
-    }
-  }
+  const webkit = ctx.browser()?.browserType().name() === "webkit";
+  await ctx.grantPermissions(webkit ? ["clipboard-read"] : ["clipboard-read", "clipboard-write"], origin === undefined ? undefined : { origin });
 }
 
 /** Capture 1x dans ui-e2e/__captures__/<projet>/<nom>.png (ignoré par git, artefact CI). */

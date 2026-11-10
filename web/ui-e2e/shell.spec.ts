@@ -114,7 +114,7 @@ test("capture() n'avale pas une vraie violation CSP", async ({ page, shh }) => {
   shh.cspViolations.length = 0;
 });
 
-test("vitesse : JS et CSS servis compressés (brotli) ; fichiers à empreinte en cache un an, page jamais en cache", async ({ page, shh }) => {
+test("vitesse : JS et CSS servis compressés (brotli) ; fichiers à empreinte en cache un an, page jamais en cache", async ({ page, shh, browserName }) => {
   const seen: { url: string; enc: string; cache: string }[] = [];
   page.on("response", async (r) => {
     if (/\/assets\/index-[^/]+\.(js|css)$/.test(r.url())) {
@@ -128,7 +128,9 @@ test("vitesse : JS et CSS servis compressés (brotli) ; fichiers à empreinte en
   await expect(page.locator("main h1").first()).toBeVisible();
   expect(seen.map((s) => s.url.split(".").pop()).sort()).toEqual(["css", "js"]);
   for (const s of seen) {
-    expect(s.enc, s.url).toBe("br");
+    // WebKit sous Linux n'annonce brotli qu'en HTTPS : en HTTP (serveur de test), il reçoit la
+    // variante gzip, précompressée elle aussi (CI du 10 novembre). Les autres reçoivent brotli.
+    expect(s.enc, s.url).toBe(browserName === "webkit" ? "gzip" : "br");
     // Le nom porte l'empreinte du contenu, et index.html (jamais en cache) fixe ce nom et son
     // empreinte SRI : un fichier en cache ne peut pas être une autre version (10 novembre).
     expect(s.cache, s.url).toBe("public, max-age=31536000, immutable");
