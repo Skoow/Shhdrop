@@ -13,3 +13,10 @@ declare const __SHH_BUILD__: string | undefined;
 declare module "pdfjs-dist/build/pdf.worker.mjs" {
   export const WorkerMessageHandler: unknown;
 }
+
+// Fichier Argon2id du build de production (greffon shh-argon2, vite.config.ts) : son adresse
+// et son empreinte SRI.
+declare module "virtual:shh-argon2" {
+  export const src: string;
+  export const integrity: string;
+}

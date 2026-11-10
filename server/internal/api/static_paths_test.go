@@ -74,7 +74,7 @@ func TestWorkerSrc(t *testing.T) {
 	e := newEnv(t, false, nil)
 	for _, p := range []string{"/", "/s/x", "/api/health"} {
 		c := get(e, p)["Content-Security-Policy"]
-		if len(c) != 1 || !strings.Contains(c[0], "; worker-src 'self';") {
+		if len(c) != 1 || !strings.Contains(c[0], "; worker-src 'self' blob:;") {
 			t.Errorf("%s : worker-src absent : %v", p, c)
 		}
 	}

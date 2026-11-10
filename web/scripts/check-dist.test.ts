@@ -121,6 +121,19 @@ describe("check-dist.mjs, production", () => {
     expect(run([site({ "index.html": `<!doctype html><html><head><script>1</script></head></html>` }, false)]).err).toContain("index.html : script en ligne");
   });
 
+  it("Argon2id hors du script principal (10 novembre) : libsodium absent de index-*.js ; son fichier porte l'empreinte inscrite dans le script", () => {
+    const argon = "self.__shhArgon2id=1";
+    const main = (extra: string) => `const a="/assets/argon2-AbCd1234.js";${extra}`;
+    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": "x.crypto_pwhash(1)" }), false)).toEqual([
+      "assets/index-a.js : libsodium (crypto_pwhash) dans le script principal : il doit rester dans assets/argon2-*.js",
+    ]);
+    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": main("") }), false)).toEqual(["assets/argon2-AbCd1234.js : cité par le script principal, absent du site"]);
+    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": main(""), "assets/argon2-AbCd1234.js": argon }), false)).toEqual([
+      "assets/argon2-AbCd1234.js : son empreinte SHA-384 n'est pas inscrite dans le script principal (chargement sans contrôle d'intégrité)",
+    ]);
+    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": main(`const i="${sha384(Buffer.from(argon))}"`), "assets/argon2-AbCd1234.js": argon }), false)).toEqual([]);
+  });
+
   it("échoue si le build manque", () => {
     expect(run([join(tmpdir(), "absent-check-dist")]).code).toBe(1);
   });

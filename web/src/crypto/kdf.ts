@@ -1,4 +1,4 @@
-import sodium from "libsodium-wrappers-sumo";
+import { runArgon2id } from "./argon2-run";
 import { utf8 } from "./encoding";
 import { isGeneratedPassword } from "./password";
 import type { KAcces, KLien, KMdp, SGestion } from "./types";
@@ -88,11 +88,11 @@ export async function passwordKey(password: string, salt: Uint8Array<ArrayBuffer
   if (password.length === 0) throw new Error("mot_de_passe_vide");
   if (salt.length !== 16) throw new Error("clé ou sel de taille invalide");
   checkKdfParams(params);
-  await sodium.ready;
   // NFC : un même mot de passe saisi sur des claviers différents donne la même clé.
-  const k = sodium.crypto_pwhash(32, password.normalize("NFC"), salt, params.ops, params.mem, sodium.crypto_pwhash_ALG_ARGON2ID13);
-  // Copie dans un ArrayBuffer à nous, puis effacement de la sortie de libsodium.
-  const out = new Uint8Array(k) as KMdp;
-  k.fill(0);
-  return out;
+  const pw = utf8(password.normalize("NFC"));
+  try {
+    return (await runArgon2id(pw, salt, params.ops, params.mem)) as KMdp;
+  } finally {
+    pw.fill(0);
+  }
 }

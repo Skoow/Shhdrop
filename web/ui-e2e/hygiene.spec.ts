@@ -2,7 +2,7 @@
 // dépôt de fichier neutralisé hors du composeur (UI §9.2.2).
 import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
-import { goSecurity } from "./open-helpers";
+import { freshPage, goSecurity, sendShare, unlock } from "./open-helpers";
 
 const KEY = Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => 255 - i * 3)).toString("base64url");
 const KEY2 = Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => i * 5)).toString("base64url");
@@ -333,5 +333,50 @@ test.describe("intégrité des scripts et des styles (spec §28.3)", () => {
     await page.waitForLoadState("load");
     expect(await page.evaluate(() => (window as unknown as { __piege?: number }).__piege)).toBeUndefined();
     await expect(page.locator("#app > *")).toHaveCount(0);
+  });
+});
+
+test.describe("Argon2id à la demande, hors du fil principal (10 novembre)", () => {
+  test("accueil : libsodium n'est pas chargé ; à l'envoi : fichier vérifié lu une fois, calcul dans un Worker ; l'ouverture donne le même contenu", async ({ page, shh, browser }) => {
+    test.setTimeout(120_000);
+    const argon: string[] = [];
+    const workers: string[] = [];
+    const watch = (p: Page) => {
+      p.on("request", (r) => void (/\/assets\/argon2-[^/]+\.js$/.test(r.url()) && argon.push(r.url())));
+      p.on("worker", (w) => workers.push(w.url()));
+    };
+    watch(page);
+    await page.goto(shh.origin + "/");
+    await expect(page.locator("main h1").first()).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    expect(argon).toEqual([]);
+    const s = await freshPage(browser);
+    watch(s.page);
+    const sent = await sendShare(s.page, shh.origin + "/", { text: "Argon2id dans un Worker" });
+    await s.ctx.close();
+    expect(argon.length).toBe(1);
+    expect(workers.filter((u) => u.startsWith("blob:")).length).toBe(1);
+    await page.goto(sent.link);
+    await unlock(page, sent.password);
+    // unlock() a vu « Contenu » : la clé dérivée est la bonne (sinon, « mot de passe incorrect »).
+    expect(workers.filter((u) => u.startsWith("blob:")).length).toBe(2);
+  });
+
+  test("repli : sans Worker depuis un Blob, le même fichier vérifié est chargé dans la page et l'ouverture marche", async ({ page, shh, browser }) => {
+    test.setTimeout(120_000);
+    const s = await freshPage(browser);
+    const sent = await sendShare(s.page, shh.origin + "/", { text: "repli sans Worker" });
+    await s.ctx.close();
+    await page.addInitScript(() => {
+      const Real = window.Worker;
+      window.Worker = function (url: string | URL, o?: WorkerOptions) {
+        if (String(url).startsWith("blob:")) throw new DOMException("refusé", "SecurityError");
+        return new Real(url, o);
+      } as unknown as typeof Worker;
+    });
+    await page.goto(sent.link);
+    await unlock(page, sent.password);
+    // unlock() a vu « Contenu » : la clé dérivée est la bonne (sinon, « mot de passe incorrect »).
+    expect(await page.evaluate(() => [...document.scripts].filter((x) => /argon2-/.test(x.src)).map((x) => x.integrity.slice(0, 7)))).toEqual(["sha384-"]);
   });
 });

@@ -3,9 +3,11 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
-import { defineConfig, type Plugin } from "vite";
+import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { build, defineConfig, type Plugin } from "vite";
 import { DEMO_BASE, DEMO_META } from "./scripts/demo-meta.mjs";
-import { addSri } from "./scripts/sri.mjs";
+import { addSri, sha384 } from "./scripts/sri.mjs";
 
 /**
  * Production : le build échoue si un module de src/demo/ entre dans le bundle (A41 : un faux
@@ -50,6 +52,47 @@ export function sri(base: string): Plugin {
         }
       };
       writeFileSync(page, addSri(readFileSync(page, "utf8"), read, base));
+    },
+  };
+}
+
+/**
+ * Argon2id (libsodium, la moitié du JavaScript) hors du script principal : construit à part en
+ * script classique, écrit sous assets/argon2-EMPREINTE.js, chargé à la demande par
+ * src/crypto/argon2-run.worker.ts, qui remplace argon2-run.ts dans ce build. L'adresse et
+ * l'empreinte SHA-384 sont inscrites dans le script principal (module virtuel) : pas d'import()
+ * dynamique (spec §28.3), et le navigateur refuse un fichier dont les octets diffèrent.
+ * Production seulement : la CSP de la démo (connect-src 'none') interdit de lire le fichier.
+ */
+export function argon2Chunk(base: string): Plugin {
+  const VIRTUAL = "virtual:shh-argon2";
+  const here = fileURLToPath(new URL(".", import.meta.url));
+  let meta = { src: "", integrity: "" };
+  return {
+    name: "shh-argon2",
+    apply: "build",
+    enforce: "pre", // avant la résolution de Vite, pour remplacer ./argon2-run
+    async buildStart() {
+      const out = await build({
+        configFile: false,
+        root: here,
+        logLevel: "warn",
+        build: { write: false, sourcemap: false, lib: { entry: join(here, "src/crypto/argon2.entry.ts"), name: "shhArgon2", formats: ["iife"], fileName: () => "argon2.js" } },
+      });
+      const chunk = (Array.isArray(out) ? out : [out]).flatMap((o) => ("output" in o ? o.output : [])).find((c) => c.type === "chunk");
+      if (!chunk || chunk.type !== "chunk") throw new Error("shh-argon2 : build vide");
+      const code = Buffer.from(chunk.code);
+      const fileName = `assets/argon2-${createHash("sha256").update(code).digest("base64url").slice(0, 8)}.js`;
+      this.emitFile({ type: "asset", fileName, source: code });
+      meta = { src: base + fileName, integrity: sha384(code) };
+    },
+    resolveId(source, importer) {
+      if (source === VIRTUAL) return "\0" + VIRTUAL;
+      if (source === "./argon2-run" && importer?.replace(/\\/g, "/").endsWith("/src/crypto/kdf.ts")) return join(here, "src/crypto/argon2-run.worker.ts");
+      return null;
+    },
+    load(id) {
+      return id === "\0" + VIRTUAL ? `export const src = ${JSON.stringify(meta.src)}; export const integrity = ${JSON.stringify(meta.integrity)};` : null;
     },
   };
 }
@@ -124,7 +167,7 @@ export function precompress(): Plugin {
 export default defineConfig(({ mode }) => {
   const demo = mode === "demo";
   return {
-    plugins: [svelte(), sri(demo ? DEMO_BASE : "/"), ...(demo ? [demoMeta()] : [demoGuard(), precompress()])],
+    plugins: [svelte(), sri(demo ? DEMO_BASE : "/"), ...(demo ? [demoMeta()] : [argon2Chunk("/"), demoGuard(), precompress()])],
     base: demo ? DEMO_BASE : "/",
     define: { __SHH_BUILD__: JSON.stringify(buildId()) },
     build: {

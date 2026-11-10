@@ -10,7 +10,7 @@ import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { DEMO_BASE, DEMO_META } from "./demo-meta.mjs";
 import { findAnalytics, findErrorListeners } from "./no-analytics.mjs";
-import { checkSri } from "./sri.mjs";
+import { checkSri, sha384 } from "./sri.mjs";
 
 const MARK = "__SHH_DEMO__";
 
@@ -93,6 +93,18 @@ export function checkDist(dir, demo) {
       if (f.rel === "pdf-frame.js") continue;
       const n = f.data.toString("utf8").match(/(?<![\w$.])import\s*\(/g)?.length ?? 0;
       if (n > 0) problems.push(`${f.rel} : import() dynamique (${n} fois), interdit en production`);
+    }
+    // Argon2id (libsodium) vit dans son propre fichier, chargé à la demande avec contrôle
+    // d'intégrité (fetch + integrity, puis Worker ; repli : <script integrity>). Le script
+    // principal ne doit ni contenir libsodium, ni citer un fichier dont il n'a pas l'empreinte.
+    const mains = all.filter((f) => /^assets\/index-[^/]+\.js$/.test(f.rel)).map((f) => ({ rel: f.rel, text: f.data.toString("utf8") }));
+    for (const m of mains) {
+      if (m.text.includes("crypto_pwhash")) problems.push(`${m.rel} : libsodium (crypto_pwhash) dans le script principal : il doit rester dans assets/argon2-*.js`);
+      for (const [, rel] of m.text.matchAll(/\/(assets\/argon2-[A-Za-z0-9_-]+\.js)/g)) {
+        const data = byRel.get(rel);
+        if (!data) problems.push(`${rel} : cité par le script principal, absent du site`);
+        else if (!m.text.includes(sha384(data))) problems.push(`${rel} : son empreinte SHA-384 n'est pas inscrite dans le script principal (chargement sans contrôle d'intégrité)`);
+      }
     }
     if (existsSync(join(dir, "404.html"))) problems.push("404.html : propre à la démo");
     return problems;

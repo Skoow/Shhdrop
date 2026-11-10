@@ -8,9 +8,12 @@ import "net/http"
 // pour tout fichier du site dont le nom ne porte pas d'empreinte. Seule exception, posée par
 // le gestionnaire des fichiers du site (cmd/shhdrop/static.go, immutableAsset) : les fichiers
 // à empreinte de /assets/ (contenu fixe sous ce nom), en cache un an.
+// worker-src … blob: : le Worker d'Argon2id est lancé depuis un Blob dont les octets viennent
+// d'un fetch avec `integrity` (web/src/crypto/argon2-run.worker.ts) ; new Worker(url) n'a pas
+// de contrôle d'intégrité (spec §28.3). Un Blob ne donne rien de plus à un script déjà exécuté.
 var securityHeaders = [][2]string{
 	{"Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; " +
-		"img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; frame-src 'self'; " +
+		"img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self'; " +
 		"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"},
 	{"Referrer-Policy", "no-referrer"},
 	{"X-Content-Type-Options", "nosniff"},
