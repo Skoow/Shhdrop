@@ -1,0 +1,51 @@
+{
+  "commit": "a287d19",
+  "chromium": "153.0.8010.12",
+  "seal_mib_s": 164.3,
+  "open_mib_s": 387.6,
+  "argon2_ms": 196,
+  "send_bytes": 340867,
+  "open_bytes": 340867,
+  "note": "send_bytes et open_bytes : même ensemble de fichiers aujourd'hui (index.html, assets/index-*.js, assets/index-*.css, assets/argon2-*.js), en octets brotli ; médiane de 5 passes après une passe d'échauffement écartée ; 128 Mio.",
+  "runs": {
+    "seal_mib_s": [
+      160.2,
+      153.7,
+      164.3,
+      167.4,
+      171.7
+    ],
+    "open_mib_s": [
+      417.9,
+      391.8,
+      387.6,
+      364.5,
+      376.8
+    ],
+    "argon2_ms": [
+      189,
+      194,
+      196,
+      233,
+      196
+    ]
+  },
+  "files": [
+    {
+      "file": "index.html",
+      "br_bytes": 1119
+    },
+    {
+      "file": "assets/index-DikovCFG.js",
+      "br_bytes": 159137
+    },
+    {
+      "file": "assets/index-eRPzjXIX.css",
+      "br_bytes": 29321
+    },
+    {
+      "file": "assets/argon2-6xTok3Cm.js",
+      "br_bytes": 151290
+    }
+  ]
+}
