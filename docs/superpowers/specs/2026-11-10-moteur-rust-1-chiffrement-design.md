@@ -17,7 +17,7 @@ Décisions du propriétaire (10 novembre) :
 
 1. Le site se comporte exactement comme avant : les tests existants (vitest, e2e, Playwright, « le serveur ne voit rien ») passent **sans changer leurs attentes**.
 2. Compatibilité dans les deux sens : un partage créé par l'ancien moteur TypeScript s'ouvre avec le moteur Rust, et l'inverse, prouvé par des vecteurs de test octet pour octet.
-3. Vitesse : chiffrement et déchiffrement au moins aussi rapides qu'aujourd'hui (mesure de la revue : 277 Mio/s en envoi, 542 Mio/s en lecture, Chromium, CPU ×1). Argon2id au plus 1,5 fois plus lent qu'aujourd'hui (≈ 0,25 s).
+3. Vitesse (exigence du propriétaire, 10 novembre : rien de plus lent qu'aujourd'hui) : chiffrement et déchiffrement au moins aussi rapides (mesure de la revue : 277 Mio/s en envoi, 542 Mio/s en lecture, Chromium, CPU ×1), Argon2id pas plus lent (≈ 0,25 s), poids téléchargé pour envoyer ou ouvrir pas plus lourd ; marge de mesure 5 %. Une mesure moins bonne bloque la mise en ligne.
 4. Le code TypeScript remplacé est supprimé (pas deux moteurs en parallèle).
 
 ## 3. Périmètre
@@ -75,7 +75,7 @@ Le moteur ne fait lui-même ni AES ni tirage aléatoire. Il appelle un fournisse
 - Le moteur dérive les clés (HKDF), les passe une seule fois à `aes_import`, puis met ses octets à zéro.
 - Un échec de `aes_open` devient l'erreur unique « paquet corrompu » (pas d'oracle).
 
-HKDF-SHA-256, SHA-256, HMAC-SHA-256 et Argon2id sont faits **dans le moteur**, partout, avec les crates RustCrypto `hkdf`, `sha2`, `hmac`, `argon2`. Le fournisseur natif (tests Rust aujourd'hui, apps plus tard) utilise `aes-gcm` (RustCrypto) ; il n'entre pas dans le `.wasm` du site. Les comparaisons de secrets passent par la crate `subtle` (temps constant). Si Argon2id en Rust dépasse 1,5 fois la durée actuelle (critère 3), le plan le mesure d'abord ; à défaut, on garde temporairement libsodium pour ce seul calcul, et le propriétaire est prévenu.
+HKDF-SHA-256, SHA-256, HMAC-SHA-256 et Argon2id sont faits **dans le moteur**, partout, avec les crates RustCrypto `hkdf`, `sha2`, `hmac`, `argon2`. Le fournisseur natif (tests Rust aujourd'hui, apps plus tard) utilise `aes-gcm` (RustCrypto) ; il n'entre pas dans le `.wasm` du site. Les comparaisons de secrets passent par la crate `subtle` (temps constant). Le plan mesure Argon2id en Rust d'abord : s'il est plus lent que l'actuel (critère 3), on garde libsodium pour ce seul calcul, et le propriétaire est prévenu.
 
 ## 6. Interface vers le site
 
