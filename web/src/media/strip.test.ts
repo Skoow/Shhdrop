@@ -94,7 +94,7 @@ describe("nettoyage des images (spec §35.2)", () => {
     expect(out.subarray(out.length - body.length)).toEqual(body);
   });
 
-  it("JPEG : APP0 JFIF réécrit sans sa vignette (16 octets, vignette 0 × 0), densité gardée", async () => {
+  it("JPEG : APP0 JFIF gardé tel quel, vignette comprise (décision du propriétaire, 10 novembre)", async () => {
     const src = fx("iphone-like.jpg");
     const [m0, app0] = jpegSegments(src)[0]!;
     expect(m0).toBe(0xe0);
@@ -103,10 +103,10 @@ describe("nettoyage des images (spec §35.2)", () => {
     const b = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, jfif.length + 2, ...jfif, ...src.subarray(2 + 2 + app0.length + 2)]);
     const { r, out } = await clean("v.jpg", b);
     expect(r.state).toBe("nettoye");
-    expect(foundAv(out, ["ReperVignetteJF"])).toEqual([]);
+    expect(foundAv(out, ["ReperVignetteJF"])).toEqual(["ReperVignetteJF"]);
     const [m, d] = jpegSegments(out)[0]!;
     expect(m).toBe(0xe0);
-    expect([...d]).toEqual([...app0.subarray(0, 12), 0, 0]);
+    expect([...d]).toEqual(jfif);
   });
 
   it("JPEG progressif : tous les balayages et marqueurs RST gardés", async () => {

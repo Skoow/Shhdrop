@@ -155,7 +155,7 @@ describe("bureautique (spec §35.2)", () => {
   const RELS = (body: string) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${body}</Relationships>`;
   const PRINTER = new Uint8Array([...new TextEncoder().encode("ReperImprimante"), 0, ...[..."ReperImprimante"].flatMap((c) => [c.charCodeAt(0), 0])]);
 
-  it("DOCX : modèle attaché (chemin local) et paramètres d'imprimante retirés, paquet cohérent", async () => {
+  it("DOCX : modèle attaché (chemin local) retiré ; paramètres d'imprimante gardés (décision du 10 novembre) ; paquet cohérent", async () => {
     const src = await sourceParts("meta.docx");
     const ct = dec.decode(src.get("[Content_Types].xml")).replace("</Types>", '<Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.printerSettings"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/></Types>');
     const docRels = dec.decode(src.get("word/_rels/document.xml.rels")).replace("</Relationships>", `<Relationship Id="rId20" Type="${R}/settings" Target="settings.xml"/><Relationship Id="rId21" Type="${R}/printerSettings" Target="printerSettings/printerSettings1.bin"/></Relationships>`);
@@ -164,18 +164,18 @@ describe("bureautique (spec §35.2)", () => {
     const setRels = RELS(`<Relationship Id="rId1" Type="${R}/attachedTemplate" Target="file:///C:\\Users\\ReperUtilisateur\\AppData\\Roaming\\Microsoft\\Templates\\Normal.dotm" TargetMode="External"/>`);
     const bytes = await variant("meta.docx", { "[Content_Types].xml": ct, "word/_rels/document.xml.rels": docRels, "word/document.xml": doc, "word/settings.xml": settings, "word/_rels/settings.xml.rels": setRels, "word/printerSettings/printerSettings1.bin": PRINTER });
     const { parts, raw, text } = await open(await clean("p.docx", bytes));
-    expect(found(raw, ["ReperUtilisateur", "ReperImprimante"])).toEqual([]);
-    for (const b of allBytes(parts)) expect(found(b, ["ReperUtilisateur", "ReperImprimante"])).toEqual([]);
-    expect(parts.has("word/printerSettings/printerSettings1.bin")).toBe(false);
+    expect(found(raw, ["ReperUtilisateur"])).toEqual([]);
+    for (const b of allBytes(parts)) expect(found(b, ["ReperUtilisateur"])).toEqual([]);
+    expect(found(parts.get("word/printerSettings/printerSettings1.bin")!, ["ReperImprimante"])).toEqual(["ReperImprimante"]);
     expect(text("word/settings.xml")).toContain('<w:zoom w:percent="100"/><w:defaultTabStop w:val="708"/>');
-    expect(text("word/_rels/document.xml.rels")).not.toContain("printerSettings");
+    expect(text("word/_rels/document.xml.rels")).toContain("printerSettings");
     expect(text("word/_rels/document.xml.rels")).toContain('Target="settings.xml"');
-    expect(text("word/document.xml")).toContain('<w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>');
+    expect(text("word/document.xml")).toContain('<w:printerSettings r:id="rId21"/>');
     expect(text("word/document.xml")).toContain('w:author="ReperSuivi"');
     consistent(parts, await sourceParts("", bytes));
   });
 
-  it("XLSX : chemin local (x15ac:absPath) et paramètres d'imprimante retirés, mise en page gardée, paquet cohérent", async () => {
+  it("XLSX : chemin local (x15ac:absPath) retiré ; paramètres d'imprimante gardés ; paquet cohérent", async () => {
     const src = await sourceParts("meta.xlsx");
     const ct = dec.decode(src.get("[Content_Types].xml")).replace("</Types>", '<Override PartName="/xl/printerSettings/printerSettings1.bin" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.printerSettings"/></Types>');
     const wb = dec.decode(src.get("xl/workbook.xml")).replace("<sheets>", '<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice Requires="x15"><x15ac:absPath xmlns:x15ac="http://schemas.microsoft.com/office/spreadsheetml/2010/11/ac" url="C:\\Users\\ReperUtilisateur\\Documents\\"/></mc:Choice></mc:AlternateContent><sheets>');
@@ -183,37 +183,28 @@ describe("bureautique (spec §35.2)", () => {
     const sheetRels = RELS(`<Relationship Id="rId1" Type="${R}/printerSettings" Target="../printerSettings/printerSettings1.bin"/>`);
     const bytes = await variant("meta.xlsx", { "[Content_Types].xml": ct, "xl/workbook.xml": wb, "xl/worksheets/sheet1.xml": sheet, "xl/worksheets/_rels/sheet1.xml.rels": sheetRels, "xl/printerSettings/printerSettings1.bin": PRINTER });
     const { parts, raw, text } = await open(await clean("p.xlsx", bytes));
-    expect(found(raw, ["ReperUtilisateur", "ReperImprimante"])).toEqual([]);
-    for (const b of allBytes(parts)) expect(found(b, ["ReperUtilisateur", "ReperImprimante"])).toEqual([]);
-    expect(parts.has("xl/printerSettings/printerSettings1.bin")).toBe(false);
+    expect(found(raw, ["ReperUtilisateur"])).toEqual([]);
+    for (const b of allBytes(parts)) expect(found(b, ["ReperUtilisateur"])).toEqual([]);
+    expect(parts.has("xl/printerSettings/printerSettings1.bin")).toBe(true);
     expect(text("xl/workbook.xml")).not.toContain("absPath");
     expect(text("xl/workbook.xml")).toContain('<sheet name="Feuille1"');
-    expect(text("xl/worksheets/sheet1.xml")).toContain('<pageSetup paperSize="9" orientation="landscape"/>');
-    expect(text("[Content_Types].xml")).not.toContain("printerSettings");
+    expect(text("xl/worksheets/sheet1.xml")).toContain('<pageSetup paperSize="9" orientation="landscape" r:id="rId1"/>');
+    expect(text("[Content_Types].xml")).toContain("printerSettings");
     expect(text("xl/persons/person.xml")).toContain('displayName="ReperPersonne"');
     consistent(parts, await sourceParts("", bytes));
   });
 
-  it("ODT : nom et réglages de l'imprimante retirés de settings.xml, autres réglages gardés", async () => {
+  it("ODT : settings.xml gardé tel quel, imprimante comprise (décision du 10 novembre)", async () => {
     const C = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0"';
     const settings = `<?xml version="1.0" encoding="UTF-8"?>\n<office:document-settings ${C} office:version="1.3"><office:settings><config:config-item-set config:name="ooo:configuration-settings"><config:config-item config:name="PrinterName" config:type="string">ReperImprimante</config:config-item><config:config-item config:name="PrinterSetup" config:type="base64Binary">UmVwZXJJbXByaW1hbnRl</config:config-item><config:config-item config:name="PrinterIndependentLayout" config:type="string">high-resolution</config:config-item></config:config-item-set></office:settings></office:document-settings>`;
     const src = await sourceParts("meta.odt");
     const entries = [...src].map(([n, b]): [string, Uint8Array<ArrayBuffer>, { store?: boolean }] => [n, b as Uint8Array<ArrayBuffer>, { store: n === "mimetype" }]);
     entries.push(["settings.xml", new TextEncoder().encode(settings), {}]);
     const { parts, text } = await open(await clean("s.odt", zipBytes(entries)));
-    expect(found(parts.get("settings.xml")!, ["ReperImprimante", "UmVwZXJJbXByaW1hbnRl"])).toEqual([]);
-    expect(text("settings.xml")).toContain('<config:config-item config:name="PrinterName" config:type="string"></config:config-item>');
-    expect(text("settings.xml")).toContain('config:name="PrinterIndependentLayout"');
-    expect(text("settings.xml")).not.toContain("PrinterSetup");
+    expect(text("settings.xml")).toBe(settings);
   });
 
-  it("imprimante citée par une partie inconnue → echec (jamais de paquet incohérent)", async () => {
-    const src = await sourceParts("meta.xlsx");
-    const wb = dec.decode(src.get("xl/workbook.xml")).replace("<sheets>", '<fileVersion r:id="rId7"/><sheets>');
-    const wbRels = dec.decode(src.get("xl/_rels/workbook.xml.rels")).replace("</Relationships>", `<Relationship Id="rId7" Type="${R}/printerSettings" Target="printerSettings/printerSettings1.bin"/></Relationships>`);
-    const bytes = await variant("meta.xlsx", { "xl/workbook.xml": wb, "xl/_rels/workbook.xml.rels": wbRels, "xl/printerSettings/printerSettings1.bin": PRINTER });
-    expect((await clean("q.xlsx", bytes)).state).toBe("echec");
-  });
+
 
   it("refus : document protégé (OLE) ou signé → protege ; ZIP64, nom en double, tronqué, sans [Content_Types] → echec ; sans DecompressionStream → echec", async () => {
     expect((await clean("protected.docx")).state).toBe("protege");

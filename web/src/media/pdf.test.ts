@@ -168,31 +168,16 @@ function withoutApp(b: Uint8Array): Uint8Array {
 describe("PDF : images intégrées (revue du 10 novembre)", () => {
   const photo = fx("iphone-like.jpg");
 
-  it("image /DCTDecode : EXIF (GPS compris), XMP, IPTC, COM, MPF et ce qui suit l'EOI mis à zéro en place ; même longueur ; pixels identiques", async () => {
-    const pdf = imagePdf("/DCTDecode", photo);
-    expect(found(pdf, PHOTO).length).toBeGreaterThan(5);
-    const { r, out } = await clean("photo.pdf", pdf);
-    expect(r.state).toBe("nettoye");
-    expect(out.length).toBe(pdf.length);
-    expect(found(out, PHOTO)).toEqual([]);
-    expect(found(out, [latin1(GPS)])).toEqual([]);
-    const at = latin1(pdf).indexOf("stream\n", latin1(pdf).indexOf("4 0 obj")) + 7;
-    const img = out.subarray(at, at + photo.length);
-    expect(pixels(img)).toEqual(pixels(photo));
-    expect(cleanJpeg(img).length).toBeGreaterThan(0); // relu par jpeg.ts : structure valide
-    expect(await cleanPdf(new Blob([out as Uint8Array<ArrayBuffer>]))).toEqual({ state: "ok", patches: [] });
-  });
-
-  it("image compressée autrement (Flate puis DCT, JPX) : vérifiée ; informations présentes → echec, absentes → nettoye", async () => {
-    const meta = await clean("f.pdf", imagePdf("[/FlateDecode /DCTDecode]", deflateSync(photo)));
-    expect(meta.r).toEqual({ state: "echec", reason: "malformed:pdf_image_meta" });
-    const bare = withoutApp(cleanJpeg(photo)); // sans segment d'informations, rien après l'EOI
-    expect(pixels(bare)).toEqual(pixels(photo));
-    expect((await clean("g.pdf", imagePdf("[/FlateDecode /DCTDecode]", deflateSync(bare)))).r.state).toBe("nettoye");
+  it("images intégrées jamais modifiées, quel que soit leur format (décision du propriétaire, 10 novembre)", async () => {
     const box = (t: string, body: number[]) => [0, 0, 0, 8 + body.length, ...[...t].map((c) => c.charCodeAt(0)), ...body];
-    const jp2 = (more: number[]) => new Uint8Array([...box("jP  ", [13, 10, 135, 10]), ...box("ftyp", [...Buffer.from("jp2 \0\0\0\0jp2 ")]), ...more, ...box("jp2c", [0xff, 0x4f, 0xff, 0x51])]);
-    expect((await clean("j.pdf", imagePdf("/JPXDecode", jp2(box("xml ", [...Buffer.from("<x>ReperXMP</x>")]))))).r).toEqual({ state: "echec", reason: "malformed:pdf_image_meta" });
-    expect((await clean("k.pdf", imagePdf("/JPXDecode", jp2([])))).r.state).toBe("nettoye");
+    const jp2 = new Uint8Array([...box("jP  ", [13, 10, 135, 10]), ...box("ftyp", [...Buffer.from("jp2 \0\0\0\0jp2 ")]), ...box("xml ", [...Buffer.from("<x>ReperXMP</x>")]), ...box("jp2c", [0xff, 0x4f, 0xff, 0x51])]);
+    for (const [filter, data] of [["/DCTDecode", photo], ["[/FlateDecode /DCTDecode]", deflateSync(photo)], ["/JPXDecode", jp2]] as const) {
+      const pdf = imagePdf(filter, data);
+      const { r, out } = await clean("photo.pdf", pdf);
+      expect(r.state, filter).toBe("nettoye");
+      const at = latin1(pdf).indexOf("stream\n", latin1(pdf).indexOf("4 0 obj")) + 7;
+      expect(Buffer.from(out.subarray(at, at + data.length)).equals(Buffer.from(data)), filter).toBe(true);
+    }
   });
 
   it("budget global de décompression : flux d'objets sous 50 Mio chacun mais 225 Mio en tout → echec, sans figer", async () => {

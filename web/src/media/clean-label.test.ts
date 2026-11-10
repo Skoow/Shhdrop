@@ -22,9 +22,9 @@ describe("nettoyage dit au destinataire (D41-35)", () => {
   });
 
   it("bureautique : texte exact (les auteurs des commentaires restent, D41-27)", () => {
-    expect(fr["clean.done.office"]).toBe("Nettoyé\u202f: propriétés, chemin local du fichier et imprimante retirés (auteurs des commentaires et liens vers d'autres fichiers gardés)");
-    expect(fr["clean.recv.done.office"]).toBe("Nettoyé avant l'envoi\u202f: propriétés, chemin local du fichier et imprimante retirés (auteurs des commentaires et liens vers d'autres fichiers gardés)");
-    expect(en["clean.done.office"]).toBe("Cleaned: properties, local file path and printer removed (comment authors and links to other files kept)");
-    expect(en["clean.recv.done.office"]).toBe("Cleaned before sending: properties, local file path and printer removed (comment authors and links to other files kept)");
+    expect(fr["clean.done.office"]).toBe("Nettoyé\u202f: propriétés et chemin local du fichier retirés (auteurs des commentaires et liens vers d'autres fichiers gardés)");
+    expect(fr["clean.recv.done.office"]).toBe("Nettoyé avant l'envoi\u202f: propriétés et chemin local du fichier retirés (auteurs des commentaires et liens vers d'autres fichiers gardés)");
+    expect(en["clean.done.office"]).toBe("Cleaned: properties and local file path removed (comment authors and links to other files kept)");
+    expect(en["clean.recv.done.office"]).toBe("Cleaned before sending: properties and local file path removed (comment authors and links to other files kept)");
   });
 });

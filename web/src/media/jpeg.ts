@@ -1,4 +1,4 @@
-// JPEG (spec §35.2) : reconstruction segment par segment. Gardés : SOI, APP0 JFIF (sans vignette), APP2 ICC
+// JPEG (spec §35.2) : reconstruction segment par segment. Gardés : SOI, APP0 JFIF, APP2 ICC
 // (tous les morceaux, dans l'ordre), APP14 Adobe, tables, SOFn, SOS et données compressées
 // octet pour octet, EOI. APP1 EXIF réécrit avec la seule orientation (boutisme d'origine, sans
 // IFD1). Tout le reste est retiré, y compris ce qui suit le premier EOI (images secondaires
@@ -65,9 +65,8 @@ export function cleanJpeg(b: Uint8Array): Uint8Array<ArrayBuffer> {
       continue;
     }
     if (m === 0xe0) {
-      // JFIF réécrit sans sa vignette (Xthumbnail = Ythumbnail = 0, longueur 16) : la vignette
-      // peut montrer l'image d'avant le recadrage. JFIF trop court : retiré. JFXX : retiré.
-      if (startsWith(body, 0, "JFIF\0") && body.length >= 14) out.push(segment(0xe0, concat([body.subarray(0, 12), new Uint8Array(2)])));
+      // JFIF gardé tel quel, vignette comprise (décision du propriétaire, 10 novembre) ; JFXX retiré.
+      if (startsWith(body, 0, "JFIF\0")) out.push(seg);
     } else if (m === 0xe1) {
       if (startsWith(body, 0, EXIF_ID) && !exifDone) {
         exifDone = true;

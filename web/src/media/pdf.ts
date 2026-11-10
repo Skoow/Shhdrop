@@ -4,17 +4,12 @@
 // « N G obj null … endobj » : aucun octet ne bouge, les tables xref restent justes. Refus :
 // /Encrypt ou signature (/ByteRange) → protégé ; /Info dans un flux d'objets, xref illisible,
 // objet qui ne commence pas là où la table l'annonce → `Malformed` (→ `echec`).
-// Images intégrées : un flux /DCTDecode (octets JPEG tels quels dans le fichier) voit ses
-// segments d'informations (EXIF et GPS, XMP, IPTC, COM, MPF…, vignette JFIF, et tout ce qui
-// suit l'EOI) mis à zéro en place, même longueur ; les pixels ne changent pas. Une image
-// compressée autrement (Flate puis DCT, JPX) n'est pas modifiable en place : vérifiée
-// seulement, et si elle porte des informations → `Malformed` (→ `echec`, jamais « Nettoyé »).
-// Lecture par fenêtres de 4 Mio ; les flux xref, d'objets et d'images Flate sont décompressés
+// Images intégrées : jamais modifiées (décision du propriétaire, 10 novembre).
+// Lecture par fenêtres de 4 Mio ; les flux xref et d'objets sont décompressés
 // en lecture seule (`DecompressionStream('deflate')`), 50 Mio par flux et INFLATE_BUDGET en
 // tout (fichier hostile : l'onglet ne doit pas se figer).
 import { STRIP_MAX } from "../limits";
 import { Malformed } from "./bytes";
-import { keptTable, scanEnd } from "./jpeg";
 import type { Patch } from "./patch";
 import { inflate } from "./zip";
 
@@ -30,7 +25,7 @@ const WIN = 4 * 1048576;
 const WS = new Set([0, 9, 10, 12, 13, 32]);
 const DELIM = new Set([..."()<>[]{}/%"].map((c) => c.charCodeAt(0)));
 const MAX_SECTIONS = 1000;
-/** Décompression permise pour tout le fichier (flux xref, d'objets, images Flate). */
+/** Décompression permise pour tout le fichier (flux xref et d'objets). */
 export const INFLATE_BUDGET = 200 * 1048576;
 type Budget = { left: number };
 
@@ -423,7 +418,6 @@ async function analyse(file: Blob): Promise<PdfResult> {
     if (!e || e.t !== 1) throw new Malformed("pdf_longueur");
     return int((await objectAt(src, e.off)).value ?? undefined);
   };
-  const images: { off: number; o: Obj; chain: string[]; len: number }[] = [];
   for (const off of [...objs.keys()].sort((a, b) => a - b)) {
     const { n, g, k } = objs.get(off)!;
     const o = await objectAt(src, off);
@@ -432,10 +426,6 @@ async function analyse(file: Blob): Promise<PdfResult> {
     if (!isDict(o.value)) continue;
     const type = nameOf(o.value.get("Type"));
     if (type === "Metadata") targets.set(off, { off, n, g, k });
-    if (o.stream) {
-      const chain = filters(o.value);
-      if (chain.includes("DCTDecode") || chain.includes("JPXDecode")) images.push({ off, o, chain, len: await lengthOf(o, k) });
-    }
     if (type === "ObjStm" && o.stream) {
       const data = await streamBytes(src, o, await lengthOf(o, k), budget);
       const c: Ctx = { b: data, eof: true };
@@ -488,110 +478,9 @@ async function analyse(file: Blob): Promise<PdfResult> {
     bytes.set([0x6e, 0x75, 0x6c, 0x6c], 1); // « null »
     patches.push({ at: o.headerEnd, bytes });
   }
-  // Images : après les miniatures (une miniature est elle-même une image, déjà neutralisée).
-  for (const im of images) if (!targets.has(im.off)) patches.push(...(await imagePatches(src, im.o, im.chain, im.len, budget)));
   patches.sort((a, b) => a.at - b.at);
   await leftovers(src, patches);
   return { state: "ok", patches };
-}
-
-// ---------- Images intégrées ----------
-/** Filtres d'un flux, dans l'ordre ; nom attendu. */
-function filters(d: Map<string, PdfVal>): string[] {
-  const f = d.get("Filter");
-  if (f === undefined || f === null) return [];
-  const list = Array.isArray(f) ? f : [f];
-  return list.map((x) => nameOf(x) ?? (() => { throw new Malformed("pdf_filtre"); })());
-}
-
-const allZero = (b: Uint8Array) => b.every((x) => x === 0);
-
-/**
- * Correctifs (positions dans `b`) qui mettent à zéro les informations d'un JPEG sans rien
- * déplacer : segment d'informations → COM de même longueur rempli de zéros (ignoré par tout
- * décodeur) ; vignette d'un APP0 JFIF → zéros ; octets après l'EOI → zéros. Gardés : APP0
- * JFIF, APP2 ICC, APP14 Adobe (couleurs), tables, trames, balayages. Mêmes règles que jpeg.ts.
- */
-export function jpegInPlace(b: Uint8Array): Patch[] {
-  const bad = () => new Malformed("pdf_jpeg");
-  if (b[0] !== 0xff || b[1] !== 0xd8) throw bad();
-  const out: Patch[] = [];
-  const has = (body: Uint8Array, id: string) => body.length >= id.length && [...id].every((c, i) => body[i] === c.charCodeAt(0));
-  let o = 2;
-  let sos = false;
-  for (;;) {
-    if (o + 1 >= b.length || b[o] !== 0xff) throw bad();
-    while (o + 2 < b.length && b[o + 1] === 0xff) o++;
-    const m = b[o + 1]!;
-    if (m === 0xd9) {
-      if (!sos) throw bad();
-      if (!allZero(b.subarray(o + 2))) out.push({ at: o + 2, bytes: new Uint8Array(b.length - o - 2) });
-      return out;
-    }
-    if (m === 0x01 || m === 0x00 || (m >= 0xd0 && m <= 0xd8) || o + 4 > b.length) throw bad();
-    const len = (b[o + 2]! << 8) | b[o + 3]!;
-    if (len < 2 || o + 2 + len > b.length) throw bad();
-    const body = b.subarray(o + 4, o + 2 + len);
-    if (m === 0xda) {
-      sos = true;
-      try {
-        o = scanEnd(b, o + 2 + len);
-      } catch {
-        throw bad();
-      }
-      continue;
-    }
-    const jfif = m === 0xe0 && has(body, "JFIF\0");
-    const kept = jfif || (m === 0xe2 && has(body, "ICC_PROFILE\0")) || (m === 0xee && has(body, "Adobe"));
-    if (kept) {
-      if (jfif && body.length > 14 && !allZero(body.subarray(14))) out.push({ at: o + 4 + 14, bytes: new Uint8Array(body.length - 14) });
-    } else if ((m >= 0xe0 && m <= 0xef) || m === 0xfe) {
-      if (m !== 0xfe || !allZero(body)) {
-        const p = new Uint8Array(len + 1);
-        p.set([0xfe, b[o + 2]!, b[o + 3]!]);
-        out.push({ at: o + 1, bytes: p });
-      }
-    } else if (!keptTable(m)) throw bad();
-    o += 2 + len;
-  }
-}
-
-/** JPEG 2000 (JP2/JPX) : boîte d'informations (XML, XMP en « uuid », adresse, propriété intellectuelle). */
-function jpxHasMeta(b: Uint8Array): boolean {
-  if (b[0] === 0xff && b[1] === 0x4f) return false; // flux de code seul : aucune boîte
-  for (let o = 0; o < b.length; ) {
-    if (o + 8 > b.length) throw new Malformed("pdf_jpx");
-    let len = ((b[o]! << 24) | (b[o + 1]! << 16) | (b[o + 2]! << 8) | b[o + 3]!) >>> 0;
-    const type = String.fromCharCode(...b.subarray(o + 4, o + 8));
-    let head = 8;
-    if (len === 1) {
-      if (o + 16 > b.length) throw new Malformed("pdf_jpx");
-      len = Number(new DataView(b.buffer, b.byteOffset + o + 8, 8).getBigUint64(0));
-      head = 16;
-    } else if (len === 0) len = b.length - o;
-    if (len < head || o + len > b.length) throw new Malformed("pdf_jpx");
-    if (type === "xml " || type === "uuid" || type === "uinf" || type === "jp2i") return true;
-    o += len;
-  }
-  return false;
-}
-
-async function imagePatches(src: Src, o: Obj, chain: string[], len: number, budget: Budget): Promise<Patch[]> {
-  if (len > STRIP_MAX) throw new Malformed("pdf_image_trop_grosse");
-  const start = o.stream!.dataStart;
-  const raw = new Uint8Array(await src.bytes(start, len));
-  if (raw.length !== len) throw new Malformed("pdf_flux");
-  const key = chain.join(" ");
-  if (key === "DCTDecode") return jpegInPlace(raw).map((p) => ({ at: start + p.at, bytes: p.bytes }));
-  let meta: boolean;
-  if (key === "FlateDecode DCTDecode") {
-    const parms = (o.value as Map<string, PdfVal>).get("DecodeParms");
-    if (parms !== undefined && parms !== null && !(Array.isArray(parms) && parms.every((x) => x === null))) throw new Malformed("pdf_image_filtre");
-    meta = jpegInPlace(await inflateBudget(raw, budget)).length > 0;
-  } else if (key === "JPXDecode") meta = jpxHasMeta(raw);
-  else throw new Malformed("pdf_image_filtre");
-  if (meta) throw new Malformed("pdf_image_meta");
-  return [];
 }
 
 /**
