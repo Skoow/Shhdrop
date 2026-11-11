@@ -29,7 +29,9 @@ build() { # $1 : dossier absolu de la copie (même disposition que le dépôt : 
   ln -s "$web/node_modules" "$1/web/node_modules"
   (cd "$1/web" && npm run build >"$1.log" 2>&1) || { cat "$1.log" >&2; exit 1; }
   (cd "$1/web/dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
-  # Moteur (pas encore dans dist avant la Task 10) : le .wasm et sa colle.
+  # Moteur tel que construit par build-engine.mjs (web/src/engine/pkg, ignoré par git : le .wasm
+  # et sa colle JavaScript). Le greffon shh-engine (vite.config.ts) en émet le .wasm dans dist/assets (déjà compté ci-dessus) ; ces
+  # empreintes nomment en plus la sortie brute de wasm-bindgen si les deux builds diffèrent.
   (cd "$1/web/src/engine" && find pkg -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
 }
 

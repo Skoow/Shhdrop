@@ -1,6 +1,6 @@
 # Moteur Rust, sous-projet 1 : chiffrement et format des partages
 
-Date : 10 novembre 2026 · Statut : à valider par le propriétaire
+Date : 10 novembre 2026 · Statut : validée par le propriétaire le 10 novembre 2026, en service depuis le 11 novembre (D42-21)
 Spécification de référence : `2026-11-03-shhdrop-design.md` (D42-20 : moteur commun en Rust pour le site et les futures apps).
 
 ## 1. Objectif

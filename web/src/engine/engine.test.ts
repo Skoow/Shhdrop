@@ -896,6 +896,30 @@ describe("Argon2id : Worker neuf par appel (couche TypeScript)", () => {
     expect(await errorOf(() => passwordKeyForCreate(E, PW, salt, async () => refuse))).toBe("mot_de_passe_non_genere");
     expect(inPage).not.toHaveBeenCalled();
   });
+
+  it("Worker : toute erreur qui n'est pas un refus connu du moteur devient argon2_echec (aucun message brut vers l'interface)", () => {
+    const pw = utf8(PW);
+    const throwing = (x: unknown): KdfJob => ({
+      get module(): WebAssembly.Module {
+        throw x;
+      },
+      pw,
+      salt,
+      ops: 3,
+      mem: 67108864,
+      create: false,
+    });
+    for (const x of [new WebAssembly.RuntimeError("unreachable"), new Error("secret xyz"), new TypeError("unreachable"), "secret xyz", null]) {
+      expect(handle(throwing(x))).toEqual({ error: "argon2_echec" });
+    }
+    // Les refus du moteur restent tels quels.
+    expect(handle({ module: E.module, pw: utf8(PW), salt, ops: 2, mem: 67108864, create: false })).toEqual({ error: "paramètres KDF trop faibles" });
+    expect(handle({ module: E.module, pw: utf8("motdepasse"), salt, ops: 0, mem: 0, create: true })).toEqual({ error: "mot_de_passe_non_genere" });
+    expect(handle({ module: E.module, pw: utf8(PW), salt: new Uint8Array(15), ops: 3, mem: 67108864, create: false })).toEqual({ error: "clé ou sel de taille invalide" });
+    for (const code of ["mot_de_passe_vide", "mot_de_passe_non_genere", "paramètres KDF invalides", "paramètres KDF trop faibles", "clé ou sel de taille invalide", "argon2_echec"]) {
+      expect(handle(throwing(new Error(code)))).toEqual({ error: code });
+    }
+  });
 });
 
 describe("Argon2id : Worker bloqué ou calcul non transmissible (décisions Task 11)", () => {

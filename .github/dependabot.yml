@@ -20,6 +20,10 @@ updates:
   # wasm-bindgen demande aussi de changer la version de wasm-bindgen-cli (0.2.130) dans
   # .github/actions/engine-toolchain, web/scripts/build-engine.mjs et deploy/Dockerfile : sans
   # cela, wasm-bindgen refuse le .wasm (versions différentes) et la CI échoue.
+  # Le build utilise l'option expérimentale --experimental-reset-state-function de
+  # wasm-bindgen-cli (web/scripts/build-engine.mjs : instance neuve après une panique). À chaque
+  # montée de version, vérifier qu'elle existe encore et que la reprise après panique marche
+  # (tests de panique du moteur : web/src/engine/index.test.ts).
   - package-ecosystem: cargo
     directory: /engine
     schedule:

@@ -7,6 +7,13 @@ import { initSync, passwordKey, passwordKeyForCreate } from "./pkg/shhdrop_wasm.
 export type KdfJob = { module: WebAssembly.Module; pw: Uint8Array; salt: Uint8Array; ops: number; mem: number; create: boolean };
 export type KdfReply = { k: Uint8Array } | { error: string };
 
+/**
+ * Refus que le moteur peut rendre pour K_mdp (engine/core/src/error.rs, kdf.rs) : rendus tels
+ * quels. Toute autre erreur (panique wasm « unreachable », mémoire refusée, bogue) devient
+ * argon2_echec : aucun message brut ne remonte à l'interface.
+ */
+const KDF_REFUSALS = new Set(["mot_de_passe_vide", "mot_de_passe_non_genere", "paramètres KDF invalides", "paramètres KDF trop faibles", "clé ou sel de taille invalide", "argon2_echec"]);
+
 /** Calcule K_mdp ; le mot de passe reçu (copie du Worker) est effacé dans tous les cas. */
 export function handle(job: KdfJob): KdfReply {
   try {
@@ -14,7 +21,7 @@ export function handle(job: KdfJob): KdfReply {
     const k = job.create ? passwordKeyForCreate(job.pw, job.salt) : passwordKey(job.pw, job.salt, job.ops, job.mem);
     return { k };
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "argon2_echec" };
+    return { error: e instanceof Error && !(e instanceof WebAssembly.RuntimeError) && KDF_REFUSALS.has(e.message) ? e.message : "argon2_echec" };
   } finally {
     job.pw.fill(0);
   }
