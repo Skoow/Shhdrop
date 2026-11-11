@@ -3,7 +3,7 @@
 import { fileURLToPath } from "node:url";
 import { axe, expect, test } from "./fixtures";
 import { settle } from "./open-helpers";
-import { addText } from "./send-helpers";
+import { addText, composerFits } from "./send-helpers";
 
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-OPT/", import.meta.url));
 test.use({ locale: "fr-FR", timezoneId: "Europe/Paris", deviceScaleFactor: 2 });
@@ -26,9 +26,9 @@ test("haut du composeur : pastilles 10 Go · Plus et 50 Go · Pro à côté de l
     expect((await p.locator(".pv").boundingBox())!.height).toBeLessThan(40);
   }
   await expect(pills.nth(1)).toHaveAccessibleDescription("Avec Pro, bientôt disponible.");
-  // Rien ne déborde : pas de défilement horizontal, et à 1440 la page tient sans défiler.
+  // Rien ne déborde : pas de défilement horizontal, et à 1440 le composeur tient dans l'écran (pied dessous).
   expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= innerWidth)).toBe(true);
-  if (!isMobile) expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight)).toBe(true);
+  if (!isMobile) expect(await composerFits(page)).toBe(true);
   await settle(page);
   await page.screenshot({ path: `${SHOTS}compose-top-${w(isMobile)}.png` });
 

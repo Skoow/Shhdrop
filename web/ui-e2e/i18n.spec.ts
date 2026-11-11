@@ -1,28 +1,12 @@
 import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
+import { footLink, langGroup, switchLang } from "./foot-helpers";
 
-/** La langue se change dans Réglages : entrée de l'en-tête (ordinateur, écrans sans onglets) ou onglet. */
-async function switchLang(page: Page, to: "English" | "Français") {
-  const gear = page.getByRole("banner").getByRole("button", { name: /^(Réglages|Settings)$/ });
-  if (await gear.isVisible()) await gear.click();
-  else await page.locator("[data-tabbar]").getByRole("button", { name: /^(Réglages|Settings)$/ }).click();
-  const dlg = page.getByRole("dialog", { name: /^(Réglages|Settings)$/ });
-  await dlg.getByRole("button", { name: to }).click();
-  await page.keyboard.press("Escape");
-  await expect(dlg).toBeHidden();
-}
-
-/**
- * Va à la page Sécurité : lien du pied de page (ordinateur) ; sur téléphone, le pied de page
- * est masqué : on passe par Réglages.
- */
+/** Va à la page Sécurité : lien du pied de page (présent partout, ordinateur et téléphone). */
 async function openSecurity(page: Page) {
-  const foot = page.getByRole("link", { name: /^(Sécurité|Security)$/ }).filter({ visible: true }).first();
-  if (await foot.isVisible().catch(() => false)) return foot.click();
-  const gear = page.getByRole("banner").getByRole("button", { name: /^(Réglages|Settings)$/ });
-  if (await gear.isVisible()) await gear.click();
-  else await page.locator("[data-tabbar]").getByRole("button", { name: /^(Réglages|Settings)$/ }).click();
-  await page.getByRole("dialog", { name: /^(Réglages|Settings)$/ }).getByRole("link", { name: /^(Sécurité|Security)$/ }).click();
+  const l = footLink(page, /^(Sécurité|Security)$/);
+  await l.scrollIntoViewIfNeeded();
+  await l.click();
 }
 
 test.describe("français par défaut", () => {
@@ -127,19 +111,16 @@ test("le verre de l'en-tête apparaît au défilement et pas avant", async ({ pa
   await expect(header).not.toHaveClass(/scrolled/);
 });
 
-test("Réglages, langue : chaque bouton porte sa langue (lang) et son état (aria-pressed)", async ({ page, shh }) => {
+test("pied de page, langue : chaque bouton porte sa langue (lang) et son état (aria-pressed)", async ({ page, shh }) => {
   await page.goto(shh.origin + "/inconnu");
   await expect(page.getByRole("banner").getByRole("button", { name: /English|Français/ })).toHaveCount(0);
   const html = await page.locator("html").getAttribute("lang");
   await switchLang(page, html === "fr" ? "English" : "Français");
   await expect(page.locator("html")).toHaveAttribute("lang", html === "fr" ? "en" : "fr");
-  const gear = page.getByRole("banner").getByRole("button", { name: /^(Réglages|Settings)$/ });
-  if (await gear.isVisible()) await gear.click();
-  else await page.locator("[data-tabbar]").getByRole("button", { name: /^(Réglages|Settings)$/ }).click();
-  const dlg = page.getByRole("dialog", { name: /^(Réglages|Settings)$/ });
-  await expect(dlg.getByRole("button", { name: "Français" })).toHaveAttribute("lang", "fr");
-  await expect(dlg.getByRole("button", { name: "English" })).toHaveAttribute("lang", "en");
-  await expect(dlg.getByRole("button", { name: html === "fr" ? "English" : "Français" })).toHaveAttribute("aria-pressed", "true");
+  const grp = langGroup(page);
+  await expect(grp.getByRole("button", { name: "Français" })).toHaveAttribute("lang", "fr");
+  await expect(grp.getByRole("button", { name: "English" })).toHaveAttribute("lang", "en");
+  await expect(grp.getByRole("button", { name: html === "fr" ? "English" : "Français" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("le secret du # ne fuit ni dans le DOM, ni dans le titre, ni dans la console, ni dans une requête", async ({ page, shh }) => {

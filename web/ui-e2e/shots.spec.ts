@@ -54,10 +54,10 @@ test("audit : tous les écrans", async ({ page, shh, browser }) => {
   await shot(page, "01b-accueil-page", true);
   await page.locator("section.why").scrollIntoViewIfNeeded();
   await shot(page, "02-pourquoi");
-  if (PHONE) await page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Réglages" }).click();
-  else await page.getByRole("banner").getByRole("button", { name: "Réglages" }).click();
-  await shot(page, "03-reglages");
-  await page.keyboard.press("Escape");
+  // Plus de panneau Réglages : son contenu est dans le pied de page.
+  await page.locator("footer[data-foot] [data-foot-prefs]").scrollIntoViewIfNeeded();
+  await shot(page, "03-reglages-pied");
+  await page.evaluate(() => scrollTo(0, 0));
   await page.evaluate(() => scrollTo(0, 0));
   if (PHONE) {
     await enterComposer(page); // « Commencer » mène à la page d'envoi (D41-37)

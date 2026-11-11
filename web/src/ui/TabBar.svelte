@@ -1,23 +1,17 @@
 <script lang="ts">
   // Barre d'onglets du téléphone (< 900 px), façon app : Envoyer, Mes partages (bientôt),
-  // Salon (bientôt), Réglages (feuille : langue, Sécurité, Confidentialité, À propos).
+  // Salon (bientôt). Plus d'onglet Réglages : langue, nettoyage et liens sont dans le pied de page.
   // Visibilité décidée par app/tabbar.ts ; masquée sur ordinateur par la CSS seule.
   import { currentTab, TABS, type TabId } from "../app/tabbar";
   import { followLink, href, router } from "../app/router.svelte";
   import { t, type Key } from "../i18n/i18n.svelte";
   import { announce } from "./announce";
-  import SettingsSheet from "./SettingsSheet.svelte";
   import TabIcon from "./TabIcon.svelte";
 
-  let settings = $state(false);
-  const current = $derived(settings ? "settings" : currentTab(router.current.name));
+  const current = $derived(currentTab(router.current.name));
 
   function soon(id: TabId) {
     announce(t(`tabs.soon.${id}` as Key));
-  }
-  function go(e: MouseEvent, path: string) {
-    settings = false;
-    followLink(e, path);
   }
 </script>
 
@@ -26,25 +20,19 @@
     {#each TABS as tab (tab.id)}
       <li>
         {#if tab.id === "send"}
-          <a class="tab" href={href("/")} aria-current={current === "send" ? "page" : undefined} onclick={(e) => go(e, "/")}>
+          <a class="tab" href={href("/")} aria-current={current === "send" ? "page" : undefined} onclick={(e) => followLink(e, "/")}>
             <TabIcon id={tab.id} /><span class="lb">{t("tabs.send")}</span>
           </a>
-        {:else if tab.soon}
+        {:else}
           <button type="button" class="tab soon" aria-disabled="true" aria-describedby="tab-soon-{tab.id}" onclick={() => soon(tab.id)}>
             <TabIcon id={tab.id} /><span class="lb">{t(`tabs.${tab.id}` as Key)}</span>
             <span class="dot" aria-hidden="true"></span><span class="badge" id="tab-soon-{tab.id}">{t("tabs.soon")}</span>
-          </button>
-        {:else}
-          <button type="button" class="tab" aria-haspopup="dialog" aria-expanded={settings} aria-current={current === "settings" ? "page" : undefined} onclick={() => (settings = true)}>
-            <TabIcon id={tab.id} /><span class="lb">{t("tabs.settings")}</span>
           </button>
         {/if}
       </li>
     {/each}
   </ul>
 </nav>
-
-<SettingsSheet bind:open={settings} />
 
 <style>
   .tabbar {
@@ -80,7 +68,7 @@
     padding: 0;
     max-width: 560px;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .tab {
     position: relative;

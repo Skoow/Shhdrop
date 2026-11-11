@@ -5,6 +5,13 @@ import { plural, type Lang } from "./format";
 type Dict = Record<keyof typeof fr, string>;
 const dicts: Record<Lang, Dict> = { fr, en };
 
+/** Langues proposées dans le pied de page, chacune nommée dans sa propre langue. Ajouter une
+ *  langue : son dictionnaire, son code dans `Lang` (format.ts) et une ligne ici. */
+export const LANGS: readonly { code: Lang; name: string }[] = [
+  { code: "fr", name: "Français" },
+  { code: "en", name: "English" },
+];
+
 // Les clés à pluriel s'écrivent « base.one » / « base.other » ; on appelle t("base", { n }).
 type Strip<K> = K extends `${infer B}.${"one" | "other"}` ? B : K;
 export type Key = Strip<keyof typeof fr>;

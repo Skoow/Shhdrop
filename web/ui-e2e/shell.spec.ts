@@ -24,7 +24,7 @@ for (const p of ["/s/x", "/m/x"]) {
 
 test.describe("fr-FR", () => {
   test.use({ locale: "fr-FR" });
-test("pied de page (UI5) : Produit, Confiance, Légal ; sans traceur ; © ; version du build ; visible en bas de l'accueil, téléphone compris", async ({ page, shh }) => {
+test("pied de page (UI5) : Produit, Confiance, Légal ; langue, nettoyage, À propos ; sans traceur ; © ; version du build ; visible en bas de l'accueil, téléphone compris", async ({ page, shh }) => {
   await page.goto(shh.origin + "/");
   const foot = page.locator("footer[data-foot]");
   await foot.scrollIntoViewIfNeeded();
@@ -42,7 +42,11 @@ test("pied de page (UI5) : Produit, Confiance, Légal ; sans traceur ; © ; vers
   await expect(foot.getByText(/publicité/)).toHaveCount(0);
   await expect(foot.locator(".base .sig")).toHaveText(/^Shhdrop\s*©\s2026$/);
   await expect(foot.locator("[data-build]")).toHaveText(/^Version ([0-9a-f]{7}|dev)$/);
-  await expect(foot.getByRole("combobox")).toHaveCount(0); // la langue est dans Réglages
+  // Langue : boutons du pied (pas de liste déroulante), nettoyage automatique, À propos.
+  await expect(foot.getByRole("combobox")).toHaveCount(0);
+  await expect(foot.getByRole("group", { name: "Langue" }).getByRole("button")).toHaveText(["Français", "English"]);
+  await expect(foot.getByRole("switch", { name: "Nettoyer automatiquement les fichiers" })).toBeVisible();
+  await expect(foot.getByText("Shhdrop chiffre sur votre appareil avant l'envoi.", { exact: false })).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(600); // fin des apparitions au défilement
   expect(await axe(page)).toEqual([]);

@@ -4,27 +4,27 @@
   import { chrome } from "../app/chrome.svelte";
   import { followLink, href, navigate, router } from "../app/router.svelte";
   import { LICENSE_URL, SOURCE_URL } from "../routes/pages/content";
-  import { t } from "../i18n/i18n.svelte";
+  import { fileSettings } from "../flows/settings.svelte";
+  import type { Lang } from "../i18n/format";
+  import { getLang, LANGS, setLang, t } from "../i18n/i18n.svelte";
   import Aurora from "./Aurora.svelte";
-  import GearIcon from "./GearIcon.svelte";
   import { ChevronLeft } from "./Icon";
   import LiveRegion from "./LiveRegion.svelte";
   import Logo from "./Logo.svelte";
-  import SettingsSheet from "./SettingsSheet.svelte";
+  import Switch from "./Switch.svelte";
   import TabBar from "./TabBar.svelte";
 
   type Props = {
     children: Snippet;
     /** Emplacement du bandeau de démo (vide hors démo). */
     banner?: Snippet;
-    /** Vrai pendant un envoi : la langue ne change pas (UI §10, panneau Réglages). */
-    langLocked?: boolean;
+    /** Vrai pendant un envoi : le pied reste affiché mais ses liens, la langue (UI §10) et le
+     *  nettoyage automatique sont désactivés, pour qu'aucun clic ne quitte la page et coupe l'envoi. */
+    busy?: boolean;
     /** Barre d'onglets du téléphone (app/tabbar.ts) ; rendue sous 900 px seulement (CSS). */
     tabs?: boolean;
-    /** Pied de page (faux pendant la composition et l'envoi : l'écran de travail tient sans défilement). */
-    foot?: boolean;
   };
-  let { children, banner, langLocked = false, tabs = false, foot = true }: Props = $props();
+  let { children, banner, busy = false, tabs = false }: Props = $props();
 
   // Téléphone : la page réserve la hauteur de la barre d'onglets (base.css, html.has-tabbar).
   $effect(() => {
@@ -63,12 +63,13 @@
     main?.focus();
   }
 
-  // Réglages (langue, Sécurité, Confidentialité, À propos) : entrée discrète de l'en-tête sur
-  // ordinateur et sur les écrans du téléphone sans barre d'onglets ; sinon l'onglet Réglages.
-  let settingsOpen = $state(false);
-  // Téléphone : l'onglet Réglages suffit ; l'en-tête ne garde l'entrée que chez le destinataire
-  // et sur la gestion (pas d'onglets, sinon plus aucun moyen de changer de langue).
-  const gearOnPhone = $derived(router.current.name === "open" || router.current.name === "manage");
+  // Plus de roue ni de panneau Réglages (retours du propriétaire du 11 novembre) : langue,
+  // nettoyage automatique et « À propos » sont dans le pied de page, sur toutes les pages.
+  function pick(l: Lang) {
+    if (!busy) setLang(l);
+  }
+  // Lien désactivé pendant l'envoi : annoncé comme tel, avec sa raison, et hors du parcours clavier.
+  const off = $derived(busy ? { "aria-disabled": "true" as const, "aria-describedby": "foot-busy", tabindex: -1 } : {});
 
   const here = (name: string) => (router.current.name === name ? "page" : undefined);
 
@@ -77,10 +78,8 @@
   // fois défilé (titre marqué data-large-title, sinon le h1 de l'écran). Sur ordinateur, rien ne change.
   const INFO: ReadonlySet<string> = new Set(["securite", "confidentialite", "conditions", "mentions", "signaler", "offres"]);
   const BACK: ReadonlySet<string> = new Set([...INFO, "notfound", "manage"]);
-  // Pied de page (retours UI5) : partout sur ordinateur ; sur téléphone, en bas de l'accueil et
-  // des pages d'information seulement (ailleurs, ces liens sont dans Réglages).
-  // Page d'un partage ouvert : le pied y est aussi sur téléphone, il porte « Signaler » (retours UI7).
-  const footOnPhone = $derived(router.current.name === "home" || router.current.name === "notfound" || INFO.has(router.current.name) || chrome.report !== null);
+  // Pied de page sur toutes les pages, ordinateur et téléphone, composeur compris (retours du
+  // 11 novembre) ; sur ordinateur, le composeur tient dans l'écran et le pied est juste dessous.
   /** `tiers` : « Plus » et « Pro » du libellé au bleu de leur offre, le reste comme les autres liens. */
   type FootLink = { label: string; path?: string; url?: string; soon?: boolean; report?: boolean; tiers?: boolean };
   const footCols = $derived<{ id: string; title: string; links: FootLink[] }[]>([
@@ -166,9 +165,6 @@
       <!-- Logo « Trame » (scripts/gen-logo.mjs) ; l'introduction ne se joue que sur l'accueil, une fois par chargement. -->
       <Logo />
     </a>
-    <button type="button" class={["gear", { phone: gearOnPhone }]} aria-label={t("settings.title")} title={t("settings.title")} aria-haspopup="dialog" aria-expanded={settingsOpen} onclick={() => (settingsOpen = true)}>
-      <GearIcon size={26} />
-    </button>
   </div>
 </header>
 
@@ -176,11 +172,14 @@
   {@render children()}
 </main>
 
-{#if foot}
-<footer class={["foot", { phone: footOnPhone }]} data-foot>
+<footer class={["foot", { busy }]} data-foot>
   <div class="wrap foot-in">
+    {#if busy}
+      <!-- Envoi en cours : raison lisible des liens et réglages désactivés. -->
+      <p id="foot-busy" class="busy-note" data-foot-busy>{t("foot.busy")}</p>
+    {/if}
     <div class="brand">
-      <a class="foot-logo" href={href("/")} onclick={(e) => followLink(e, "/")} aria-label={t("shell.home")}><Logo /></a>
+      <a class="foot-logo" href={href("/")} aria-label={t("shell.home")} {...off} onclick={(e) => (busy ? e.preventDefault() : followLink(e, "/"))}><Logo /></a>
       <p class="tag">{t("foot.tagline")}</p>
     </div>
     <nav class="cols" aria-label={t("shell.nav")}>
@@ -190,11 +189,14 @@
           <ul aria-labelledby="foot-{col.id}">
             {#each col.links as l (l.label)}
               <li>
-                {#if l.report && chrome.report}
+                {#if l.soon}
+                  <span class="off">{l.label} <span class="soon">{t("foot.soon")}</span></span>
+                {:else if busy}
+                  <!-- Envoi en cours : lien désactivé (hors du clavier, sans effet au clic, CSS pointer-events). -->
+                  <a class="fl" href={l.url ?? href(l.path ?? "/")} {...off} onclick={(e) => e.preventDefault()}>{l.report && chrome.report ? t("content.report") : l.label}</a>
+                {:else if l.report && chrome.report}
                   <!-- Partage ouvert : la confirmation de signalement de CE partage (même action qu'avant). -->
                   <button type="button" class="fl" aria-haspopup="dialog" onclick={() => chrome.report?.()} data-report-share>{t("content.report")}</button>
-                {:else if l.soon}
-                  <span class="off">{l.label} <span class="soon">{t("foot.soon")}</span></span>
                 {:else if l.url}
                   <a class="fl" href={l.url} target="_blank" rel="noopener noreferrer">{l.label}<span class="sr-only"> {t("foot.external")}</span></a>
                 {:else if l.path && l.tiers}
@@ -210,6 +212,26 @@
         </div>
       {/each}
     </nav>
+    <!-- Ex-panneau Réglages : langue, nettoyage automatique, À propos (le code source est déjà
+         dans « Confiance »). Réglages en mémoire seulement, rien n'est stocké. -->
+    <div class="prefs" data-foot-prefs>
+      <section class="pref" aria-labelledby="foot-lang">
+        <p class="ch" id="foot-lang">{t("settings.lang")}</p>
+        <div class="langs" role="group" aria-labelledby="foot-lang">
+          {#each LANGS as l (l.code)}
+            <button type="button" class="lang" lang={l.code} aria-pressed={getLang() === l.code} aria-disabled={busy} aria-describedby={busy ? "foot-busy" : undefined} onclick={() => pick(l.code)}>{l.name}</button>
+          {/each}
+        </div>
+      </section>
+      <section class="pref" aria-labelledby="foot-files">
+        <p class="ch" id="foot-files">{t("settings.files")}</p>
+        <Switch label={t("settings.clean")} hint={t("settings.clean.hint")} checked={fileSettings.autoClean} disabled={busy} reason="foot-busy" onchange={(v) => (fileSettings.autoClean = v)} />
+      </section>
+      <section class="pref" aria-labelledby="foot-about">
+        <p class="ch" id="foot-about">{t("settings.about")}</p>
+        <p class="about">{t("settings.about.body")}</p>
+      </section>
+    </div>
     <div class="base">
       <!-- Retours UI9 : le nom en bas à gauche, « © 2026 » à côté (plus de mention « aucune publicité »). -->
       <p class="sig"><span class="wm" translate="no">Shhdrop</span><span>{t("foot.copy")}</span></p>
@@ -217,11 +239,8 @@
     </div>
   </div>
 </footer>
-{/if}
 
 {#if tabs}<TabBar />{/if}
-
-<SettingsSheet bind:open={settingsOpen} locked={langLocked} />
 
 <LiveRegion />
 
@@ -293,7 +312,7 @@
   .banner-slot ~ .top {
     padding-top: 0;
   }
-  /* Retours UI5 : sur téléphone, un peu d'air au-dessus du logo et de Réglages, en plus de la
+  /* Retours UI5 : sur téléphone, un peu d'air au-dessus du logo, en plus de la
      zone sûre (sur ordinateur, la barre de 64 px les centre déjà). */
   @media (max-width: 899px) {
     .top,
@@ -347,40 +366,6 @@
     text-decoration: none;
     border-radius: var(--r-sm);
   }
-  /* Réglages : discret, une icône seule (nom accessible « Réglages »), sans cadre. */
-  /* Réglages (retours UI5) : icône de 26 px, cible de 48 px, sur ordinateur aussi. */
-  .gear {
-    display: grid;
-    place-items: center;
-    width: 48px;
-    height: 48px;
-    margin-inline-start: auto;
-    margin-inline-end: -8px;
-    padding: 0;
-    border: 0;
-    border-radius: 12px;
-    background: transparent;
-    color: var(--text-2);
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    transition:
-      color var(--dur-fast) var(--ease-out),
-      background-color var(--dur-fast) var(--ease-out),
-      transform var(--dur-press) var(--ease-out);
-  }
-  .gear:active {
-    transform: scale(0.94);
-  }
-  .gear[aria-expanded="true"] {
-    color: var(--text);
-  }
-  @media (hover: hover) {
-    .gear:hover {
-      color: var(--text);
-      background: rgb(255 255 255 / 0.05);
-    }
-  }
-
   main {
     min-height: 60dvh;
     padding-block: var(--sp-5);
@@ -424,12 +409,6 @@
     opacity: 0.045;
     -webkit-mask-image: linear-gradient(to bottom, transparent, #000 45%);
     mask-image: linear-gradient(to bottom, transparent, #000 45%);
-  }
-  /* Téléphone : accueil, pages d'information et partage ouvert (ailleurs : Réglages). */
-  @media (max-width: 899px) {
-    .foot:not(.phone) {
-      display: none;
-    }
   }
   .foot-in {
     display: grid;
@@ -549,6 +528,86 @@
     background: var(--surface-2);
     color: var(--text-2);
     font-size: var(--fs-micro);
+  }
+  /* Envoi en cours : liens et réglages désactivés (raison dite en tête du pied). */
+  .busy-note {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--r-md);
+    background: rgb(255 255 255 / 0.04);
+    box-shadow: inset 0 0 0 1px var(--hair);
+    color: var(--text-2);
+    font-size: var(--fs-small);
+  }
+  .foot [aria-disabled="true"] {
+    color: var(--text-disabled);
+    cursor: not-allowed;
+  }
+  .foot a[aria-disabled="true"] {
+    pointer-events: none;
+  }
+  .busy .tier {
+    color: inherit;
+  }
+  /* Ex-panneau Réglages : langue, nettoyage automatique, À propos. */
+  .prefs {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(12rem, 1fr) minmax(0, 2fr) minmax(0, 1.4fr);
+    gap: var(--sp-5) var(--sp-6);
+    padding-block-start: var(--sp-5);
+    border-block-start: 1px solid var(--hair);
+  }
+  .pref {
+    display: grid;
+    align-content: start;
+    min-width: 0;
+  }
+  .langs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+  .lang {
+    min-height: 44px;
+    min-width: 6.5rem;
+    padding: 0 var(--sp-4);
+    border: 0;
+    border-radius: 12px;
+    background: rgb(255 255 255 / 0.05);
+    box-shadow: inset 0 0 0 1px var(--hair-2);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--fs-small);
+    font-weight: 560;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .lang[aria-pressed="true"] {
+    background: var(--accent-tint);
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  .lang:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .lang[aria-disabled="true"][aria-pressed="false"] {
+    background: transparent;
+  }
+  .about {
+    margin: 0;
+    max-width: 40ch;
+    color: var(--text-2);
+    font-size: var(--fs-small);
+    line-height: var(--lh-small);
+    text-wrap: pretty;
+  }
+  @media (max-width: 899px) {
+    .prefs {
+      grid-template-columns: 1fr;
+    }
   }
   .base {
     grid-column: 1 / -1;
@@ -688,10 +747,6 @@
       opacity: 0;
       pointer-events: none;
     }
-    /* Téléphone : rien en haut à droite, sauf chez le destinataire et sur la gestion. */
-    .gear:not(.phone) {
-      display: none;
-    }
     main {
       padding-block: var(--sp-3) var(--sp-6);
     }
@@ -701,19 +756,10 @@
     .small {
       transition: none;
     }
-    .gear {
-      transition: none;
-    }
-    .gear:active {
-      transform: none;
-    }
   }
   @media (forced-colors: active) {
     .top.scrolled {
       background: Canvas;
-    }
-    .gear {
-      color: ButtonText;
     }
   }
 </style>

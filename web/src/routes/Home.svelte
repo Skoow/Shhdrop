@@ -26,6 +26,8 @@
   import SealBand from "../ui/SealBand.svelte";
   import SectionBg from "../ui/SectionBg.svelte";
   import Vessel from "../ui/Vessel.svelte";
+  import TabIcon from "../ui/TabIcon.svelte";
+  import { announce } from "../ui/announce";
   import Closing from "./home/Closing.svelte";
   import Faq from "./home/Faq.svelte";
   import HowItWorks from "./home/HowItWorks.svelte";
@@ -163,6 +165,16 @@
           {@render cert(Timer, t("home.fact.erase"))}
           {@render cert(UserX, t("home.fact.account"))}
         </ul>
+        <!-- Salon (spec §39 : « le bouton du salon est à part, pour qu'on le voie ») : à part des
+             actions d'envoi, bien visible, pas encore construit (désactivé, « bientôt »). -->
+        <div class="room" data-room>
+          <button type="button" class="room-b" aria-disabled="true" aria-describedby="room-soon" onclick={() => announce(t("tabs.soon.chat"))}>
+            <span class="room-ic" aria-hidden="true"><TabIcon id="chat" size={22} /></span>
+            <span class="room-t">{t("foot.room")}</span>
+            <span class="room-soon">{t("foot.soon")}</span>
+          </button>
+          <p id="room-soon" class="room-s">{t("tabs.soon.chat")}</p>
+        </div>
       {/if}
     </div>
 
@@ -298,7 +310,7 @@
   /* Arguments (retours HOME5) : pastilles de verre, contour lumineux par masque qui s'éclaire
      sous le pointeur (magnet : --lx, --ly), médaillon d'icône qui se soulève au survol. */
   .certs {
-    order: 4;
+    order: 5;
     list-style: none;
     margin: 0;
     padding: 0;
@@ -407,6 +419,64 @@
     line-height: 1.3;
     font-weight: 640;
     letter-spacing: -0.005em;
+  }
+
+  /* Salon (bientôt) : à part des actions d'envoi, désactivé mais lisible. */
+  .room {
+    order: 4;
+    display: grid;
+    justify-items: start;
+    gap: 6px;
+  }
+  .room-b {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+    padding: 6px 14px 6px 6px;
+    border: 1px dashed rgb(233 236 242 / 0.24);
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.03);
+    color: var(--text-2);
+    font: inherit;
+    font-size: 0.9375rem;
+    font-weight: 640;
+    cursor: not-allowed;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .room-b:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .room-ic {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgb(255 255 255 / 0.06);
+    color: var(--text-2);
+  }
+  .room-soon {
+    padding: 1px 8px;
+    border-radius: var(--r-pill);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: var(--fs-micro);
+    font-weight: 560;
+  }
+  .room-s {
+    margin: 0;
+    padding-inline: 6px;
+    color: var(--text-3);
+    font-size: var(--fs-small);
+  }
+  @media (forced-colors: active) {
+    .room-b {
+      border: 1px dashed GrayText;
+      color: GrayText;
+    }
   }
 
   /* ---------- Le coffre : fenêtre de dépôt ---------- */
@@ -650,8 +720,7 @@
       background: transparent;
       box-shadow: none;
     }
-    .home.compact .compose :global(.vessel > .line),
-    .home.compact .compose :global(.vessel > .spot-clip) {
+    .home.compact .compose :global(.vessel > .line) {
       display: none;
     }
   }
@@ -967,6 +1036,9 @@
     }
     .certs {
       margin-top: var(--sp-2);
+    }
+    .room {
+      order: 6;
     }
     .compose {
       order: 0;

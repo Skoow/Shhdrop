@@ -1,6 +1,6 @@
 // Téléphone : la croix « Fermer » est TOUJOURS en haut à droite (demande du propriétaire), dans
 // chaque fenêtre ouvrable : feuilles du bas (Ajouter, Nouveau texte, Options, menu d'une ligne,
-// Réglages, Partager et QR, confirmation, Signaler), caméra, enregistreur vocal, visionneuse.
+// Partager et QR, confirmation, Signaler), caméra, enregistreur vocal, visionneuse.
 // Vérifié : dans le quart supérieur droit de la fenêtre (partie visible), cible ≥ 44 px, dans
 // l'écran. Le retour (flèche) des en-têtes reste à gauche : ce n'est pas une fermeture.
 // Captures fr-FR 390 × 844 (×2) : .superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-CLOSE/.
@@ -77,8 +77,8 @@ test("expéditeur : chaque fenêtre a « Fermer » en haut à droite", async ({ 
   test.setTimeout(120_000);
   await page.goto(shh.origin + "/");
 
-  await page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Réglages" }).click();
-  await checkAndClose(page, page.getByRole("dialog", { name: "Réglages" }));
+  // Plus de panneau Réglages (retours du 11 novembre) : son contenu est dans le pied de page.
+  await expect(page.getByRole("button", { name: "Réglages" })).toHaveCount(0);
 
   await checkAndClose(page, await openAdd(page), "feuille-ajouter");
 
@@ -120,15 +120,14 @@ test("expéditeur : chaque fenêtre a « Fermer » en haut à droite", async ({ 
   await expect(readyHeading(page)).toBeVisible();
 });
 
-test("destinataire : Réglages, visionneuse et Signaler ont « Fermer » en haut à droite", async ({ page, shh, browser }) => {
+test("destinataire : visionneuse et Signaler ont « Fermer » en haut à droite", async ({ page, shh, browser }) => {
   test.setTimeout(120_000);
   const { ctx, page: sender } = await freshPage(browser);
   const s = await sendShare(sender, shh.origin + "/", { files: [file("foret-brume.jpg")] });
   await ctx.close();
   await page.goto(s.link);
 
-  await page.getByRole("banner").getByRole("button", { name: "Réglages" }).click();
-  await checkAndClose(page, page.getByRole("dialog", { name: "Réglages" }));
+  await expect(page.getByRole("button", { name: "Réglages" })).toHaveCount(0);
 
   await unlock(page, s.password);
   await page.getByRole("button", { name: "Voir foret-brume.jpg" }).click();

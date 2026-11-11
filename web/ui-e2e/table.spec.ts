@@ -28,7 +28,7 @@ const FILES = ["foret-brume.jpg", "lac-gele.jpg", "plage-nuit.jpg", "contrat.pdf
 test("Votre envoi : un seul tableau, sous-en-têtes de catégorie, icône au bord ; badges hors cadre ; captures", async ({ page, shh, isMobile }) => {
   test.setTimeout(90_000);
   await page.setViewportSize(isMobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
-  // Réglages : onglet ou en-tête depuis l'accueil (la page d'envoi n'en a pas sur téléphone).
+  // Nettoyage automatique : interrupteur du pied de page.
   await page.goto(shh.origin + "/");
   await autoClean(page, true);
   await enterComposer(page);

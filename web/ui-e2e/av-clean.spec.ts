@@ -68,7 +68,7 @@ test("vidéos et sons nettoyés : lisibles, même durée, mêmes dimensions", as
 });
 
 test("MOV de téléphone déposé dans le composeur : « Nettoyé » (position, appareil, dates)", async ({ page, shh }) => {
-  // Réglages : onglet ou en-tête depuis l'accueil (la page d'envoi n'en a pas sur téléphone).
+  // Nettoyage automatique : interrupteur du pied de page.
   await page.goto(shh.origin + "/");
   await autoClean(page, true);
   await enterComposer(page);

@@ -10,6 +10,7 @@ import { stripMetadata } from "../src/media/strip";
 import { expect, test } from "./fixtures";
 import { file, freshPage, sendShare, unlock } from "./open-helpers";
 import { autoClean, openFilePicker, sendButton } from "./send-helpers";
+import { cleanSwitch } from "./foot-helpers";
 
 test.use({ locale: "fr-FR" });
 
@@ -153,14 +154,11 @@ test("document Word avec auteur (Task 9b, D41-27) : « Nettoyé » à l'ajout, a
 
 test("réglage « Nettoyer automatiquement les fichiers » désactivé par défaut : « Fichier tel quel » dans la bulle, rien sur la ligne, rien de modifié", async ({ page, shh }) => {
   await page.goto(shh.origin + "/");
-  const tab = page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Réglages" });
-  if (await tab.isVisible()) await tab.click();
-  else await page.getByRole("banner").getByRole("button", { name: "Réglages" }).click();
-  const sw = page.getByRole("dialog", { name: "Réglages" }).getByRole("switch", { name: "Nettoyer automatiquement les fichiers" });
+  // Le réglage est dans le pied de page (retours du 11 novembre : plus de panneau Réglages).
+  const sw = cleanSwitch(page);
   // Désactivé par défaut (décision du propriétaire, CLEAN4) ; l'explication est sous le réglage.
   await expect(sw).toHaveAttribute("aria-checked", "false");
   await expect(sw).toHaveAccessibleDescription(/informations cachées.*Désactivé \(par défaut\)/);
-  await page.keyboard.press("Escape");
   await (await openFilePicker(page)).setFiles({ name: "IMG_GPS.jpg", mimeType: "image/jpeg", buffer: FX("iphone-like.jpg") });
   await expect(lock(page, "IMG_GPS")).toHaveAccessibleName(detail("Fichier tel quel (non modifié)"));
   await expect(row(page, "IMG_GPS").locator("[data-clean]")).toHaveCount(0);

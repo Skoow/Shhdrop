@@ -16,11 +16,11 @@ describe("barre d'onglets (téléphone)", () => {
     expect(tabBarVisible({ ...base, route: "home", composing: true })).toBe(false);
     expect(tabBarVisible({ ...base, route: "home", supported: false })).toBe(false);
   });
-  it("onglets : Envoyer, Mes partages (bientôt), Salon (bientôt), Réglages ; onglet courant", () => {
-    expect(TABS.map((t) => `${t.id}${t.soon ? "*" : ""}`)).toEqual(["send", "shares*", "chat*", "settings"]);
+  it("onglets : Envoyer, Mes partages (bientôt), Salon (bientôt), sans Réglages (pied de page) ; onglet courant", () => {
+    expect(TABS.map((t) => `${t.id}${t.soon ? "*" : ""}`)).toEqual(["send", "shares*", "chat*"]);
     expect(currentTab("home")).toBe("send");
-    expect(currentTab("securite")).toBe("settings");
-    expect(currentTab("confidentialite")).toBe("settings");
+    expect(currentTab("securite")).toBeNull();
+    expect(currentTab("confidentialite")).toBeNull();
     expect(currentTab("notfound")).toBeNull();
   });
 });

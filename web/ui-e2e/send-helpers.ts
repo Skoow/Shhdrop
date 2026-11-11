@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { expect } from "./fixtures";
+import { cleanSwitch } from "./foot-helpers";
 
 /**
  * Téléphone (< 760 px) : une seule action « Ajouter » (accueil : grand bouton ; composeur : « + »
@@ -96,11 +97,23 @@ export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Réglage « Nettoyer automatiquement les fichiers » (désactivé par défaut, retours CLEAN4). */
 export async function autoClean(page: Page, on: boolean) {
-  const tab = page.getByRole("navigation", { name: /^(Navigation principale|Main navigation)$/ }).getByRole("button", { name: /^(Réglages|Settings)$/ });
-  if (await tab.isVisible()) await tab.click();
-  else await page.getByRole("banner").getByRole("button", { name: /^(Réglages|Settings)$/ }).click();
-  const sw = page.getByRole("dialog", { name: /^(Réglages|Settings)$/ }).getByRole("switch", { name: /^(Nettoyer automatiquement les fichiers|Clean files automatically)$/ });
+  // Pied de page (retours du 11 novembre : plus de panneau Réglages), sur toutes les pages.
+  const sw = cleanSwitch(page);
+  await sw.scrollIntoViewIfNeeded();
   if ((await sw.getAttribute("aria-checked")) !== String(on)) await sw.click();
   await expect(sw).toHaveAttribute("aria-checked", String(on));
-  await page.keyboard.press("Escape");
+  await page.evaluate(() => scrollTo(0, 0));
 }
+
+/**
+ * Ordinateur : l'écran d'envoi tient entier dans la hauteur de l'écran (page en haut) et le pied
+ * de page vient juste dessous, sans le tasser (exigence du propriétaire ; retours du 11 novembre).
+ * Remplace l'ancienne vérification « la page ne défile pas » (le pied est désormais affiché).
+ */
+export const composerFits = (page: Page) =>
+  page.evaluate(() => {
+    scrollTo(0, 0);
+    const app = document.querySelector("[data-composer]")!.getBoundingClientRect();
+    const foot = document.querySelector("footer[data-foot]")!.getBoundingClientRect();
+    return app.top >= 0 && app.bottom <= innerHeight && foot.top >= app.bottom;
+  });

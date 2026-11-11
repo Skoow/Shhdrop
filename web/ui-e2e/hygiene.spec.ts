@@ -213,8 +213,7 @@ test("fichier déposé sur /s/x : défaut empêché, l'adresse ne change pas", a
   expect(page.url()).toBe(url);
 });
 
-// Sécurité : lien du pied de page ; téléphone avec onglets (pied masqué) : onglet Réglages ;
-// écrans sans onglets (destinataire, gestion) : Réglages de l'en-tête. Même feuille Réglages.
+// Sécurité : lien du pied de page, présent sur toutes les pages (goSecurity).
 
 // I1 : liens abîmés (ponctuation ajoutée par une messagerie, autre chemin, ancien format
 // /s/{id}, majuscule) : le routeur les classe en accueil ou en 404, le « # » est retiré quand même.

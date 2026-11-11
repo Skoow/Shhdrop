@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "./en";
 import { fr } from "./fr";
 import { formatBytes, formatDuration, formatRate, plural } from "./format";
-import { detectLang, getLang, setLang, t } from "./i18n.svelte";
+import { detectLang, getLang, LANGS, setLang, t } from "./i18n.svelte";
 
 const NNBSP = " ";
 
@@ -120,6 +120,11 @@ describe("t et langue", () => {
     expect(document.documentElement.lang).toBe("fr");
     expect(localStorage.length).toBe(0);
     expect(document.cookie).toBe("");
+  });
+
+  it("LANGS : une entrée par dictionnaire, nommée dans sa langue, codes uniques", () => {
+    expect(LANGS.map((l) => l.code)).toEqual(["fr", "en"]);
+    expect(LANGS.map((l) => l.name)).toEqual(["Français", "English"]);
   });
 
   it("detectLang : la première langue fr ou en décide ; sinon français", () => {

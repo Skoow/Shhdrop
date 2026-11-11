@@ -77,18 +77,14 @@ test("Offres : « 10 Go par partage », « 50 Go par partage » ; prix mensuel e
   await page.screenshot({ path: `${SHOTS}offres-${w(isMobile)}.png`, fullPage: true });
 });
 
-test("en-tête : air au-dessus du logo, Réglages ≥ 44 px (icône 24 px) ; pied de page ; captures", async ({ page, shh, isMobile }) => {
+test("en-tête : air au-dessus du logo, sans roue des Réglages ; pied de page ; captures", async ({ page, shh, isMobile }) => {
   if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(shh.origin + "/securite");
   // Le premier élément de la barre (logo, ou « Retour » sur téléphone) n'est plus collé en haut.
   const first = await page.locator(isMobile ? "header.top .bar" : "header.top a.logo").boundingBox();
   expect(first!.y).toBeGreaterThanOrEqual(8);
-  const gear = page.getByRole("banner").getByRole("button", { name: "Réglages" });
-  if (!isMobile) {
-    const g = await gear.boundingBox();
-    expect(Math.min(g!.width, g!.height)).toBeGreaterThanOrEqual(44);
-    expect((await gear.locator("svg").boundingBox())!.width).toBeGreaterThanOrEqual(24);
-  }
+  // Plus de roue des Réglages (retours du 11 novembre) : son contenu est dans le pied de page.
+  await expect(page.getByRole("banner").getByRole("button", { name: "Réglages" })).toHaveCount(0);
   await page.screenshot({ path: `${SHOTS}entete-${w(isMobile)}.png` });
   const foot = page.locator("footer[data-foot]");
   await foot.scrollIntoViewIfNeeded();

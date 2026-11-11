@@ -107,8 +107,9 @@
   {#if demo}<demo.Banner />{/if}
 {/snippet}
 
-<!-- Pied de page masqué pendant la composition et l'envoi : l'écran de travail tient sans défilement (UI §22). -->
-<AppShell banner={demo ? demoBanner : undefined} langLocked={sending} {tabs} foot={!chrome.composing && !sending}>
+<!-- Pied de page sur toutes les pages (retours du 11 novembre) ; pendant un envoi, ses liens et
+     réglages sont désactivés (busy). Ordinateur : le composeur tient dans l'écran, le pied dessous. -->
+<AppShell banner={demo ? demoBanner : undefined} busy={sending} {tabs}>
   {#if !supported}
     <Unsupported />
   {:else if router.current.name === "notfound"}

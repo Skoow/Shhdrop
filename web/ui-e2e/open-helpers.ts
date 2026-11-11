@@ -111,10 +111,8 @@ export const noteRow = (page: Page, title = "Note") => page.locator('li.row[data
 
 /** Aller à la page Sécurité : lien du pied de page s'il est visible, sinon Réglages (onglet ou en-tête). */
 export async function goSecurity(page: Page) {
+  // Pied de page sur toutes les pages, ordinateur et téléphone (retours du 11 novembre).
   const foot = page.locator("footer.foot").getByRole("link", { name: "Sécurité", exact: true });
-  if (await foot.isVisible()) return foot.click();
-  const tab = page.getByRole("navigation", { name: "Navigation principale" }).getByRole("button", { name: "Réglages" });
-  if (await tab.isVisible()) await tab.click();
-  else await page.getByRole("banner").getByRole("button", { name: "Réglages" }).click();
-  await page.getByRole("dialog", { name: "Réglages" }).getByRole("link", { name: "Sécurité", exact: true }).click();
+  await foot.scrollIntoViewIfNeeded();
+  await foot.click();
 }

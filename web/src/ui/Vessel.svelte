@@ -2,7 +2,8 @@
   // Réceptacle (UI §20.1, §20.4 « Accueil et composeur ») : la capsule ouverte du logo, en grand.
   // Verre statique (--vessel, sans backdrop-filter : K6), contour SVG sur la forme exacte (rayon 32)
   // qui part du milieu du bord haut, ouverture de 60° ; lumière qui parcourt le contour vide
-  // (ambiance, arrêtée hors écran et onglet caché) ; projecteur au pointeur fin. Contenu : `children`.
+  // (ambiance, arrêtée hors écran et onglet caché). Plus de projecteur au pointeur (retours du
+  // propriétaire du 11 novembre). Contenu : `children`.
   // Le dépôt (`drop`) et les catégories viennent en Task 10–11.
   import type { Snippet } from "svelte";
   import type { HTMLAttributes } from "svelte/elements";
@@ -32,25 +33,6 @@
     io.observe(el);
     return () => io.disconnect();
   });
-
-  // Projecteur : une écriture de transform par image au plus (CSSOM, jamais d'attribut style).
-  let spot: HTMLSpanElement | undefined = $state();
-  let lit = $state(false);
-  let raf = 0;
-  let x = 0;
-  let y = 0;
-  function move(e: PointerEvent) {
-    if (e.pointerType !== "mouse" || !el) return;
-    const r = el.getBoundingClientRect();
-    x = e.clientX - r.left;
-    y = e.clientY - r.top;
-    if (!raf)
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        spot?.style.setProperty("transform", `translate(${x}px, ${y}px)`);
-      });
-  }
-  $effect(() => () => cancelAnimationFrame(raf));
 </script>
 
 <svelte:document onvisibilitychange={() => (hidden = document.hidden)} />
@@ -60,11 +42,7 @@
   bind:clientWidth={w}
   bind:clientHeight={h}
   {...rest}
-  class={["vessel", { empty, drop, lit, still: hidden || !onscreen }]}
-  onpointerenter={(e) => (lit = e.pointerType === "mouse")}
-  onpointerleave={() => (lit = false)}
-  onpointermove={move}
->
+  class={["vessel", { empty, drop, still: hidden || !onscreen }]}>
   <svg class="line" viewBox="0 0 {w || 1} {h || 1}" aria-hidden="true" focusable="false">
     {#if d}
       <path class="track" {d} pathLength="100" />
@@ -76,7 +54,6 @@
       {/if}
     {/if}
   </svg>
-  <span class="spot-clip" aria-hidden="true"><span class="spot" bind:this={spot}></span></span>
   {@render children()}
 </div>
 
@@ -193,36 +170,8 @@
     }
   }
 
-  /* Projecteur : disque menthe à 7 %, 420 px, déplacé par transform. */
-  .spot-clip {
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    overflow: hidden;
-    border-radius: inherit;
-    pointer-events: none;
-  }
-  .spot {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 420px;
-    height: 420px;
-    margin: -210px 0 0 -210px;
-    border-radius: 50%;
-    opacity: 0;
-    background: radial-gradient(closest-side, rgb(95 227 181 / 0.07), transparent);
-    transition: opacity var(--dur-slow) var(--ease-out);
-  }
-  @media (hover: hover) and (pointer: fine) {
-    .lit .spot {
-      opacity: 1;
-    }
-  }
-
   @media (prefers-reduced-motion: reduce) {
-    .comet,
-    .spot {
+    .comet {
       display: none;
     }
     /* L'ouverture change d'un coup (état drop) ; seule la couleur passe en fondu. */
@@ -242,8 +191,7 @@
     .track {
       stroke: CanvasText;
     }
-    .comet,
-    .spot-clip {
+    .comet {
       display: none;
     }
   }

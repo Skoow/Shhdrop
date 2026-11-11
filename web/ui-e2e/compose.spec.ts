@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
 import { axe, capture, expect, readClipboard, test } from "./fixtures";
-import { openFilePicker, pickInAddSheet, enterComposer } from "./send-helpers";
+import { composerFits, openFilePicker, pickInAddSheet, enterComposer } from "./send-helpers";
 import { MIMES } from "../src/media/capture";
 
 /** Le navigateur testé sait-il enregistrer un vocal ? Sinon le site masque « Vocal » (media/capture.ts, captureSupport). */
@@ -167,12 +167,12 @@ test.describe("fr-FR", () => {
       const made = (await canVoice(page)) ? ["Photo ou vidéo", "Vocal", "Note"] : ["Photo ou vidéo", "Note"];
       await expect(page.getByRole("group", { name: "Créer sur place" }).getByRole("button")).toHaveText(made);
       await expect(page.getByRole("button", { name: /^Déposez des fichiers n'importe où sur la page/ })).toBeVisible();
-      // Exigence du propriétaire : tout tient dans l'écran, sans défilement de page ; le bouton
+      // Exigence du propriétaire : tout le composeur tient dans l'écran (le pied de page est dessous) ; le bouton
       // d'envoi est entièrement visible (1440 × 900 puis 1920 × 1080).
       for (const size of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
         await page.setViewportSize(size);
         await page.waitForTimeout(700);
-        expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight), `${size.width} : pas de défilement`).toBe(true);
+        expect(await composerFits(page), `${size.width} : le composeur tient dans l'écran, pied dessous`).toBe(true);
         expect(await inViewport(send(page)), `${size.width} : bouton visible`).toBe(true);
         for (const l of [page.locator(".top .ht"), page.getByRole("radiogroup", { name: "Durée" }), page.getByRole("radiogroup", { name: "Ouvertures" }), page.locator(".box"), page.getByRole("switch", { name: "Autoriser le téléchargement" }), page.locator(".summary")])
           expect(await inViewport(l), `${size.width} : ${await l.first().evaluate((e) => e.className)}`).toBe(true);
@@ -598,7 +598,7 @@ test.describe("fr-FR", () => {
     await expect(page.locator("[data-row] .nm", { hasText: "Image collée 1.png" })).toHaveCount(1);
   });
 
-  test("2 notes, 3 photos, 1 vidéo, 2 documents, 1 archive : sans défilement de page ; catégories visibles à 1920, atteignables dans la liste à 1440 ; captures", async ({ page, shh, isMobile }) => {
+  test("2 notes, 3 photos, 1 vidéo, 2 documents, 1 archive : le composeur tient dans l'écran ; catégories visibles à 1920, atteignables dans la liste à 1440 ; captures", async ({ page, shh, isMobile }) => {
     await open(page, shh.origin);
     await browse(page, [...PHOTOS.slice(0, 3), f("anniversaire-lou.webm"), f("contrat.pdf"), f("budget-2026.xlsx"), f("archive.zip")]);
     await expect(rows(page)).toHaveCount(7);
@@ -610,7 +610,7 @@ test.describe("fr-FR", () => {
       for (const size of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
         await page.setViewportSize(size);
         await page.waitForTimeout(700);
-        expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight), `${size.width} : pas de défilement`).toBe(true);
+        expect(await composerFits(page), `${size.width} : le composeur tient dans l'écran, pied dessous`).toBe(true);
         expect(await inViewport(send(page))).toBe(true);
         // Chaque catégorie présente a son titre visible, dans l'écran et dans la zone de la liste.
         const heads = await page.locator(".group h3").evaluateAll((hs) => {
@@ -627,7 +627,8 @@ test.describe("fr-FR", () => {
         if (size.width === 1920) expect(heads.filter((h) => !h.ok), `${size.width}`).toEqual([]);
         else {
           await page.locator(".group h3", { hasText: "Archives" }).scrollIntoViewIfNeeded();
-          expect(await page.evaluate(() => document.scrollingElement!.scrollHeight <= innerHeight)).toBe(true);
+          // La liste a défilé en elle-même ; la page, non (le pied de page reste dessous).
+          expect(await page.evaluate(() => scrollY)).toBe(0);
           await expect(page.locator(".group h3", { hasText: "Archives" })).toBeInViewport();
         }
       }

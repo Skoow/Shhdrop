@@ -257,16 +257,16 @@
   // ---------- Ordinateur : tout le composeur dans l'écran, sans défilement de page ----------
   // Exigence du propriétaire : à 1440 × 900 comme à 1920 × 1080, en-tête, capacité, liste,
   // options, phrase et bouton d'envoi tiennent dans l'écran ; seule la liste défile au besoin.
-  // Hauteur de l'app = hauteur de l'écran − ce qui est au-dessus − ce qui est en dessous (mesurés).
+  // Le pied de page est juste en dessous (on le voit en faisant défiler), il ne tasse rien.
+  // Hauteur de l'app = hauteur de l'écran − ce qui est au-dessus − le bas de <main> (mesurés).
   function fitViewport(node: HTMLElement) {
     let raf = 0;
     const fit = () => {
       raf = 0;
-      // Ce qui est sous l'app (bas du cadre, pied de page), mesuré jusqu'au bas du pied de page :
-      // la hauteur du document (et du corps) vaut au moins celle de l'écran, elle fausserait la mesure.
+      // Ce qui est sous l'app jusqu'au bas de <main> (bas du cadre, marge) ; le pied de page,
+      // après <main>, n'entre pas dans le calcul : il vient sous l'écran d'envoi.
       const r = node.getBoundingClientRect();
-      // Sans pied de page (masqué pendant la composition, UI §22) : le bas de <main>.
-      const end = document.querySelector("body > footer, footer.foot") ?? document.querySelector("main") ?? document.body;
+      const end = document.querySelector("main") ?? document.body;
       const tail = end.getBoundingClientRect().bottom - r.bottom;
       node.style.setProperty("--app-h", `${Math.max(520, Math.floor(innerHeight - (r.top + scrollY) - tail))}px`);
     };
@@ -285,7 +285,7 @@
       node.style.removeProperty("--app-h");
     };
   }
-  // Ordinateur, composeur ouvert : pied de page resserré (règle globale plus bas).
+  // Ordinateur, composeur ouvert : <main> resserré (règle globale plus bas).
   $effect(() => {
     document.documentElement.classList.toggle("composing", shown && !narrow);
     chrome.composing = shown; // téléphone : la barre d'onglets cède la place à la barre d'envoi
@@ -520,8 +520,8 @@
 <svelte:document onpaste={onPaste} />
 
 {#snippet adder()}
-  <!-- Ordinateur : sous la liste, la même liste d'actions que la feuille du téléphone ; la zone de
-       dépôt (« Fichiers ») est en filigrane dans l'espace vide de la liste (retours DROP). -->
+  <!-- Ordinateur : sous l'en-tête de la liste, la même liste d'actions que la feuille du téléphone ;
+       la zone de dépôt (« Fichiers ») est dessous, en filigrane dans l'espace vide (retours DROP). -->
   <div class="adder bar">
     <div class="make" role="group" aria-label={t("compose.create.label")}>
       {#each rowActions as a (a.id)}
@@ -535,7 +535,7 @@
 {/snippet}
 
 {#snippet app()}
-  <div class={["app", { narrow }]} {@attach narrow ? null : fitViewport}>
+  <div class={["app", { narrow }]} data-composer {@attach narrow ? null : fitViewport}>
     <div class="list-col">
       <div class="top">
         <div class="tt">
@@ -566,6 +566,9 @@
         </div>
         {#if removing > 0}<p class="removing" role="status">{t("compose.up.removing")}</p>{/if}
       </div>
+      <!-- Ordinateur : « Créer sur place » en haut, bien visible, au-dessus de la zone de dépôt
+           (retours du propriétaire du 11 novembre). -->
+      {#if !narrow}{@render adder()}{/if}
 
 
 
@@ -622,16 +625,18 @@
         <!-- Filigrane (retours DROP) : l'espace vide sous la liste est la zone de dépôt ; un clic y
              ouvre le choix de fichiers ; on dépose aussi n'importe où sur la page. Texte entier,
              jamais tronqué. Liste vide (page d'envoi) : grand cadre au centre, texte blanc. -->
+        <!-- Liste vide : la flèche SOUS le texte (retours du propriétaire du 11 novembre). -->
+        {#snippet upIcon()}<span class="dz-ic" aria-hidden="true"><Upload size={18} strokeWidth={1.8} /></span>{/snippet}
         <button type="button" class={["dropzone", filled ? "ghost" : "empty"]} onclick={() => filesIn?.click()}>
-          <span class="dz-ic" aria-hidden="true"><Upload size={18} strokeWidth={1.8} /></span>
+          {#if filled}{@render upIcon()}{/if}
           <span class="dz-tx">
             <span class="dz-t">{t("compose.dropzone.title")}</span>
             <span class="dz-s">{t("compose.dropzone.sub")}</span>
           </span>
+          {#if !filled}{@render upIcon()}{/if}
         </button>
       {/if}
       </div>
-      {#if !narrow}{@render adder()}{/if}
     </div>
 
     {#if narrow}
@@ -1407,15 +1412,15 @@
       gap: var(--sp-3);
       min-height: 0;
     }
-    /* Barre fine en bas de la liste : « Créer sur place ». */
+    /* « Créer sur place » en haut de la liste, sous l'en-tête et la capacité (retours du
+       propriétaire du 11 novembre) : bien visible, icône et libellé. */
     .adder.bar {
       flex: none;
       display: flex;
       align-items: center;
-      justify-content: flex-end;
+      justify-content: flex-start;
       gap: var(--sp-2);
-      padding-top: var(--sp-3);
-      border-top: 1px solid var(--hair);
+      padding-inline: 4px;
     }
     /* Filigrane : occupe l'espace vide sous la liste, discret (texte plus clair, sans cadre) ;
        le cadre réapparaît au survol et pendant un glisser-déposer. */
@@ -1469,12 +1474,12 @@
       flex-wrap: nowrap;
       gap: 6px;
     }
-    /* Liste étroite : les pastilles « Créer » gardent leur icône (et « Bientôt »), le libellé passe
+    /* Liste très étroite seulement : les pastilles « Créer » gardent leur icône, le libellé passe
        aux lecteurs d'écran ; la zone de dépôt garde sa phrase. */
     .list-col {
       container-type: inline-size;
     }
-    @container (max-width: 760px) {
+    @container (max-width: 380px) {
       .adder.bar .mk {
         padding: 0 12px;
       }
@@ -1565,11 +1570,8 @@
       margin-top: auto;
     }
   }
-  /* Composeur ouvert sur ordinateur : le pied de page se resserre pour tenir dans l'écran. */
-  :global(html.composing footer.foot) {
-    margin-block-start: 0;
-    padding-block: var(--sp-2);
-  }
+  /* Composeur ouvert sur ordinateur : <main> resserré, l'écran d'envoi tient dans la hauteur ;
+     le pied de page vient dessous, inchangé. */
   :global(html.composing main) {
     min-height: 0;
     padding-block: var(--sp-3) var(--sp-2);
