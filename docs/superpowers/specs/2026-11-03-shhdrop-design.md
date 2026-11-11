@@ -1914,6 +1914,8 @@ Toutes les étiquettes commencent par `shhdrop/v2/salon/` : séparation de domai
 
 #### 39.2.3 Format des trames (taille unique)
 
+> **Remplacé (11 novembre)** par le format SHC3 de la spec du salon v3 (`2026-11-11-salon-v3-design.md` §3.2.1) ; le texte ci-dessous est gardé pour mémoire.
+
 - **Trame** (corps de `POST /api/salons/trame`, toujours **4 140 octets**) = « SHC1 » (4) ‖ `nonce_ext` (24, aléatoire) ‖ XChaCha20-Poly1305-IETF(`K_trame`, `nonce_ext`, `O`, données authentifiées = « SHC1 » ‖ `tag_salon`) ; `O` = **4 096 octets** exactement.
 - `O` = `type` (1) ‖ `IK_exp` (32) ‖ `e` (4) ‖ `i` (4) ‖ `long` (2) ‖ `corps` (`long` octets) ‖ zéros. Le serveur ne voit ni le type, ni l'expéditeur, ni la taille réelle.
 - `type` 1, **message** : `corps` = `nonce_int` (24) ‖ XChaCha20-Poly1305-IETF(`MK_i`, `nonce_int`, `M`, données authentifiées = « SHCM1 » ‖ `tag_salon` ‖ `IK_exp` ‖ `e` ‖ `i`) ‖ signature Ed25519 (64) de « SHCM1 » ‖ `tag_salon` ‖ `e` ‖ `i` ‖ `nonce_int` ‖ chiffré. Place utile pour `M` : 4 096 − 43 − 24 − 16 − 64 = **3 949 octets**. La signature est vérifiée **avant** de déchiffrer ; une trame dont `IK_exp` n'est pas un membre annoncé est jetée.

@@ -41,6 +41,12 @@ Décisions prises le 11 novembre :
 - **Service d'authentification** : aucun. Il n'y a pas d'identité à certifier : l'entrée se prouve par le lien et le mot de passe (`K_preuve_s`, §39.2.1), et l'identité d'un participant est sa clé éphémère. **Vérification** possible par un code par participant (§9, point 4).
 - Le serveur ne voit jamais le contenu MLS : chaque message MLS est placé dans l'enveloppe extérieure de taille fixe de §39.2.3 (`K_trame`, 4 140 octets), dont l'en-tête en clair ne porte que « volatile » et la règle d'effacement (§10). Un message MLS plus grand (Welcome, Commit d'un grand groupe) est découpé en plusieurs trames de même taille. Le serveur ne distingue donc ni le type (message, Commit, Welcome, accusé, « écrit »), ni l'expéditeur, ni la taille.
 
+### 3.2.1 Format de la trame (remplace §39.2.3)
+
+- Trame = `"SHC3"` (4 octets) ‖ `drapeaux` (1 octet : bit 0 volatile, bits 1–2 règle d'effacement 0 désactivé / 1 instantané / 2 10 min / 3 1 h, bits 3–7 à zéro) ‖ `nonce` (24 octets, aléatoire) ‖ XChaCha20-Poly1305(`K_trame`, `nonce`, `O`, données authentifiées = `"SHC3"` ‖ `drapeaux` ‖ `tag_salon`) ; total **4 140 octets** (4 + 1 + 24 + 4 095 + 16).
+- `O` = `len` (2 octets, gros-boutiste) ‖ charge (un message MLS, **4 093 octets au plus**) ‖ zéros jusqu'à 4 095 octets ; à l'ouverture, `len` et le bourrage nul sont vérifiés après l'authentification ; tout échec donne `trame_corrompue`.
+- Le serveur lit `drapeaux` sans clé (un bit réservé non nul → trame refusée) ; le modifier fait échouer l'authentification chez les membres.
+
 ### 3.3 Clés du salon gardées de §39.2.1
 
 `K_lien`, `K_accès_s`, `S_gestion`, `sel`, `K_mdp` (Argon2id), `K_maître_s`, `K_preuve_s`, `K_trame`, `tag_salon` : inchangés. Ils sont calculés par le moteur Rust (HKDF RustCrypto, Argon2id déjà en place). XChaCha20-Poly1305 de l'enveloppe : crate `chacha20poly1305` (RustCrypto).
@@ -56,7 +62,7 @@ Le moteur Rust porte tout le protocole du salon (groupe MLS, enveloppe, découpa
 ### 3.6 Résultat de l'essai (11 novembre) : utilisable, avec réserves
 
 - **Bibliothèque** : `openmls` **=0.9.2** (22 octobre), `openmls_rust_crypto`, `openmls_basic_credential`, `openmls_traits` 0.6.0 ; licence MIT ; Phoenix R&D et CE Labs ; audit SRLabs de 2026 (8 constats corrigés ; **rapport à lire avant le code**) ; utilisée par Wire (sur un fork) et XMTP. Compile vers WebAssembly sans réglage particulier (feature `js` sur la cible wasm seulement, jamais en natif).
-- **Suite** : MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519 (0x0001). Message MLS dans `O` de la trame de 4 140 o sous `K_trame` (§3.2) ; Commit, Welcome et KeyPackage tiennent dans 4 096 o pour 10 membres (au plus 2 551 o mesurés) : pas de découpage nécessaire en V1, mais le format le garde possible.
+- **Suite** : MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519 (0x0001). Message MLS dans `O` de la trame de 4 140 o sous `K_trame` (§3.2) ; Commit, Welcome et KeyPackage tiennent dans les 4 093 o utiles pour 10 membres (au plus 2 551 o mesurés) : pas de découpage nécessaire en V1, mais le format le garde possible.
 - **Temps mesurés dans Chromium, 10 membres** : chiffrer ou déchiffrer un message ~0,2 ms ; ajout d'un membre ~2 ms ; scénario complet (9 ajouts, 900 réceptions, retrait, renouvellement) ~0,3 s. Natif : apps en opt-level 3 (20 à 40 fois plus lent sinon).
 - **Poids** : ~359 Ko brotli, dans un **module wasm à part**, chargé seulement sur les pages du salon. Les pages de partage gardent le moteur actuel (141 Ko).
 - **Règles retenues** : arbre dans le Welcome, aucun GroupInfo publié, **external commits refusés** ; premier Commit de l'époque dans l'ordre du serveur gagne, les autres sont rejoués ; ajouts faits par le membre en ligne de plus petit siège ; si personne n'est en ligne, l'arrivant attend (« En attente d'un participant en ligne ») ; chaque Commit reçu est vérifié avant fusion (seul le créateur retire autrui, chaque ajout est lié à un siège par son `nonce_arrivée` signé) ; `max_past_epochs(1)` (un message envoyé juste avant un Commit reste lisible ; perte de confidentialité persistante limitée à une époque).
