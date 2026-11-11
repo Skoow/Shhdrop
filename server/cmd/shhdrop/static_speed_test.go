@@ -20,14 +20,23 @@ func TestStaticPrecompressedAndImmutable(t *testing.T) {
 	zw := gzip.NewWriter(&gz)
 	zw.Write(js)
 	zw.Close()
+	wasm := append([]byte("\x00asm\x01\x00\x00\x00"), bytes.Repeat([]byte{1, 2, 3, 4}, 400)...)
+	var wgz bytes.Buffer
+	wz := gzip.NewWriter(&wgz)
+	wz.Write(wasm)
+	wz.Close()
 	files := map[string][]byte{
-		"index.html":                  []byte("<!doctype html><title>x</title>"),
-		"assets/index-AbCd_123.js":    js,
-		"assets/index-AbCd_123.js.gz": gz.Bytes(),
-		"assets/index-AbCd_123.js.br": []byte("BROTLI"),
-		"assets/aurora-ink.png":       []byte("png"),
-		"assets/style-Zz9_Yy8x.css":   []byte("a{}"),
-		"robots.txt":                  []byte("User-agent: *\n"),
+		"assets/engine-bJc2cw0Z.wasm":    wasm,
+		"assets/engine-bJc2cw0Z.wasm.gz": wgz.Bytes(),
+		"assets/engine-bJc2cw0Z.wasm.br": []byte("BROTLI-WASM"),
+		"assets/engine.wasm":             wasm,
+		"index.html":                     []byte("<!doctype html><title>x</title>"),
+		"assets/index-AbCd_123.js":       js,
+		"assets/index-AbCd_123.js.gz":    gz.Bytes(),
+		"assets/index-AbCd_123.js.br":    []byte("BROTLI"),
+		"assets/aurora-ink.png":          []byte("png"),
+		"assets/style-Zz9_Yy8x.css":      []byte("a{}"),
+		"robots.txt":                     []byte("User-agent: *\n"),
 	}
 	for n, b := range files {
 		p := filepath.Join(dir, n)
@@ -86,6 +95,40 @@ func TestStaticPrecompressedAndImmutable(t *testing.T) {
 			}
 		}
 	}
+	// Moteur WebAssembly (spec moteur §7) : variantes servies comme pour un script, type
+	// application/wasm gardé sous toute Content-Encoding, cache d'un an sous son nom à empreinte.
+	for _, c := range cases {
+		r := get("/assets/engine-bJc2cw0Z.wasm", c.accept)
+		if r.StatusCode != 200 || r.Header.Get("Content-Encoding") != c.enc || r.Header.Get("Content-Type") != "application/wasm" || r.Header.Get("Vary") != "Accept-Encoding" {
+			t.Errorf("wasm %q : statut %d, encodage %q (attendu %q), type %q, Vary %q", c.accept, r.StatusCode, r.Header.Get("Content-Encoding"), c.enc, r.Header.Get("Content-Type"), r.Header.Get("Vary"))
+		}
+		if cc := r.Header.Values("Cache-Control"); len(cc) != 1 || cc[0] != "public, max-age=31536000, immutable" {
+			t.Errorf("wasm %q : Cache-Control %q", c.accept, cc)
+		}
+		b := body(r)
+		switch c.enc {
+		case "br":
+			if string(b) != "BROTLI-WASM" {
+				t.Errorf("wasm %q : pas la variante .br", c.accept)
+			}
+		case "gzip":
+			zr, err := gzip.NewReader(bytes.NewReader(b))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d, _ := io.ReadAll(zr); !bytes.Equal(d, wasm) {
+				t.Errorf("wasm %q : gzip ne redonne pas le fichier", c.accept)
+			}
+		case "":
+			if !bytes.Equal(b, wasm) {
+				t.Errorf("wasm %q : corps différent du fichier", c.accept)
+			}
+		}
+	}
+	// Sans empreinte : pas de cache d'un an.
+	if cc := get("/assets/engine.wasm", "br").Header.Get("Cache-Control"); cc != "" {
+		t.Errorf("engine.wasm : Cache-Control %q", cc)
+	}
 	// Sans variante : servi tel quel.
 	if r := get("/robots.txt", "br, gzip"); r.Header.Get("Content-Encoding") != "" || string(body(r)) != "User-agent: *\n" {
 		t.Errorf("robots.txt : encodage %q", r.Header.Get("Content-Encoding"))
@@ -116,14 +159,17 @@ func TestStaticPrecompressedAndImmutable(t *testing.T) {
 // sans empreinte, ni le HTML, ni le cadre PDF, ni rien hors de /assets/.
 func TestImmutableAsset(t *testing.T) {
 	for p, want := range map[string]bool{
-		"/assets/index-yRSR4HNN.js":      true, // noms émis par vite (web/dist/assets)
-		"/assets/index-eRPzjXIX.css":     true,
-		"/assets/pow.worker-CqXgVHIX.js": true,
-		"/assets/mona-AbCd_-12.woff2":    true,
-		"/assets/photo-AbCdEf12.webp":    true,
-		"/assets/photo-AbCdEf12.png":     true,
-		"/assets/motif-AbCdEf12.svg":     true,
-		"/assets/sub/chunk-AbCdEf12.js":  true,
+		"/assets/index-yRSR4HNN.js":       true, // noms émis par vite (web/dist/assets)
+		"/assets/index-eRPzjXIX.css":      true,
+		"/assets/pow.worker-CqXgVHIX.js":  true,
+		"/assets/mona-AbCd_-12.woff2":     true,
+		"/assets/photo-AbCdEf12.webp":     true,
+		"/assets/photo-AbCdEf12.png":      true,
+		"/assets/motif-AbCdEf12.svg":      true,
+		"/assets/sub/chunk-AbCdEf12.js":   true,
+		"/assets/engine-bJc2cw0Z.wasm":    true, // moteur WebAssembly (spec moteur §7)
+		"/assets/engine.wasm":             false,
+		"/assets/engine-bJc2cw0Z.wasm.br": false,
 		// Sans empreinte dans web/dist : jamais immuables.
 		"/assets/aurora-ink.png":                        false,
 		"/assets/aurora-mint.png":                       false,

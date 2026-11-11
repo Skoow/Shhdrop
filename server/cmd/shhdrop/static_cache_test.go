@@ -20,6 +20,8 @@ func TestCacheControlEndToEnd(t *testing.T) {
 		"assets/index-yRSR4HNN.js.br":                 "BROTLI",
 		"assets/index-eRPzjXIX.css":                   "a{}",
 		"assets/pow.worker-CqXgVHIX.js":               "onmessage=null",
+		"assets/engine-bJc2cw0Z.wasm":                 "\x00asm\x01\x00\x00\x00",
+		"assets/engine-bJc2cw0Z.wasm.br":              "BROTLI",
 		"assets/aurora-ink.png":                       "png",
 		"assets/grain.png":                            "png",
 		"assets/motif.svg":                            "<svg/>",
@@ -62,6 +64,7 @@ func TestCacheControlEndToEnd(t *testing.T) {
 		{"/assets/index-yRSR4HNN.js", 200, year},
 		{"/assets/index-eRPzjXIX.css", 200, year},
 		{"/assets/pow.worker-CqXgVHIX.js", 200, year},
+		{"/assets/engine-bJc2cw0Z.wasm", 200, year},
 		{"/assets/absent-AbCdEf12.js", 404, none}, // un 404 n'est jamais mis en cache un an
 		{"/assets/aurora-ink.png", 200, none},
 		{"/assets/grain.png", 200, none},
@@ -97,6 +100,10 @@ func TestCacheControlEndToEnd(t *testing.T) {
 	// Variante précompressée : même cache, et Vary: Accept-Encoding gardé (un cache partagé
 	// ne sert jamais du brotli à qui ne l'accepte pas).
 	for accept, enc := range map[string]string{"br": "br", "identity": ""} {
+		// Moteur WebAssembly : type application/wasm gardé avec Content-Encoding (spec moteur §7).
+		if res := get("GET", "/assets/engine-bJc2cw0Z.wasm", accept); res.Header.Get("Content-Encoding") != enc || res.Header.Get("Content-Type") != "application/wasm" || res.Header.Get("Vary") != "Accept-Encoding" || res.Header.Get("Cache-Control") != year {
+			t.Errorf("wasm %q : encodage %q, type %q, Vary %q, Cache-Control %q", accept, res.Header.Get("Content-Encoding"), res.Header.Get("Content-Type"), res.Header.Get("Vary"), res.Header.Get("Cache-Control"))
+		}
 		res := get("GET", "/assets/index-yRSR4HNN.js", accept)
 		if res.Header.Get("Content-Encoding") != enc || res.Header.Get("Vary") != "Accept-Encoding" || res.Header.Get("Cache-Control") != year {
 			t.Errorf("%q : encodage %q, Vary %q, Cache-Control %q", accept, res.Header.Get("Content-Encoding"), res.Header.Get("Vary"), res.Header.Get("Cache-Control"))

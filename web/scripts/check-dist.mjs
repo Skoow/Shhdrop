@@ -112,6 +112,13 @@ export function checkDist(dir, demo) {
         else if (!m.text.includes(sha384(data))) problems.push(`${rel} : son empreinte SHA-384 n'est pas inscrite dans le script principal (chargement sans contrôle d'intégrité)`);
       }
     }
+    // Moteur WebAssembly : précompressé comme le texte (vite.config.ts, COMPRESSIBLE ; servi par
+    // static.go avec Content-Encoding), sinon 481 Ko seraient lus au lieu de 141 Ko en brotli.
+    for (const f of all) {
+      if (!/\.wasm$/i.test(f.rel) || f.data.length < 1024) continue;
+      const missing = [".br", ".gz"].filter((e) => !byRel.has(f.rel + e));
+      if (missing.length) problems.push(`${f.rel} : sans variante ${missing.join(" ni ")} : le moteur serait téléchargé sans compression`);
+    }
     if (existsSync(join(dir, "404.html"))) problems.push("404.html : propre à la démo");
     return problems;
   }

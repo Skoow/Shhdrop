@@ -210,11 +210,12 @@ export function buildId(): string {
   return /^[0-9a-f]{7,12}$/.test(id) ? id.slice(0, 7) : "dev";
 }
 
-/** Types texte précompressés (les images et polices le sont déjà) ; mêmes extensions que static.go. */
-export const COMPRESSIBLE = /\.(js|css|html|svg|webmanifest|xml|txt)$/;
+/** Types précompressés : texte, et le moteur WebAssembly (spec moteur §7 ; les images et polices le
+ * sont déjà) ; mêmes extensions que static.go. */
+export const COMPRESSIBLE = /\.(js|css|html|svg|webmanifest|xml|txt|wasm)$/;
 
 /**
- * Vitesse (retours CLEAN2) : à côté de chaque fichier texte de plus de 1 Kio, une variante
+ * Vitesse (retours CLEAN2) : à côté de chaque fichier texte (ou .wasm) de plus de 1 Kio, une variante
  * brotli (.br, qualité 11) et gzip (.gz, niveau 9, sans date : reproductible), servies par le
  * serveur Go selon Accept-Encoding. Les octets décompressés sont identiques (SRI inchangée ;
  * contrôle : scripts/check-dist.mjs). Production seulement (GitHub Pages compresse la démo).

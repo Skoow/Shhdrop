@@ -110,14 +110,15 @@ func staticHandler(dir string) (http.Handler, error) {
 // nom-EMPREINTE.ext, 8 caractères base64url ou plus). Leur contenu ne change jamais sous ce
 // nom : cache d'un an. Tout le reste garde le no-store posé par api.New (HTML, routes,
 // cadre PDF, polices de /fonts/ et images sans empreinte, robots.txt, sitemap.xml, manifeste).
-var immutableAsset = regexp.MustCompile(`^/assets/.+-[A-Za-z0-9_-]{8,}\.(js|css|woff2|png|webp|svg)$`)
+var immutableAsset = regexp.MustCompile(`^/assets/.+-[A-Za-z0-9_-]{8,}\.(js|css|woff2|png|webp|svg|wasm)$`)
 
 const immutableCache = "public, max-age=31536000, immutable"
 
-// compressible : types texte précompressés par le build (les images et polices le sont déjà).
+// compressible : types précompressés par le build : texte, et le moteur WebAssembly (481 Ko,
+// 141 Ko en brotli, spec moteur §7) ; les images et polices le sont déjà.
 func compressible(name string) bool {
 	switch path.Ext(name) {
-	case ".js", ".css", ".html", ".svg", ".webmanifest", ".xml", ".txt":
+	case ".js", ".css", ".html", ".svg", ".webmanifest", ".xml", ".txt", ".wasm":
 		return true
 	}
 	return false

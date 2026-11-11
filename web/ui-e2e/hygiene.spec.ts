@@ -456,8 +456,22 @@ test.describe("moteur WebAssembly : chargement vérifié (spec moteur §7)", () 
       test.skip(browserName !== "chromium", "chemin de production vérifié sous Chromium");
       test.setTimeout(120_000);
       const seen = watchEngine(page);
+      const wasmRes = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith(".wasm"));
       await page.goto(shh.origin + "/");
       expect(await kdf(page)).toBe(`cle ${KDF.key}`);
+      // Le .wasm arrive en brotli (variante .br du build), sous son type et avec un cache d'un an
+      // (nom à empreinte) : 141 Ko transférés au lieu de 481 Ko.
+      const res = await wasmRes;
+      const h = await res.allHeaders();
+      expect({ encoding: h["content-encoding"], type: h["content-type"], cache: h["cache-control"] }).toEqual({
+        encoding: "br",
+        type: "application/wasm",
+        cache: "public, max-age=31536000, immutable",
+      });
+      const sizes = await res.request().sizes();
+      const raw = (await res.body()).length;
+      console.info(`moteur .wasm : ${sizes.responseBodySize} octets transférés (br), ${raw} octets décodés`);
+      expect(sizes.responseBodySize).toBeLessThan(raw / 2);
       expect(await kdf(page)).toBe(`cle ${KDF.key}`);
       expect(seen.wasm).toHaveLength(1);
       expect(seen.wasm[0]).toMatch(/^\/assets\/engine-[A-Za-z0-9_-]{8}\.wasm$/);

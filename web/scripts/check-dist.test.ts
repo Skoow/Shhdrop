@@ -1,5 +1,6 @@
 // check-dist.mjs (UI §14.3, A41) : production sans trace de démo ; démo avec ses protections.
 import { execFileSync } from "node:child_process";
+import { brotliCompressSync, gzipSync } from "node:zlib";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -156,6 +157,20 @@ describe("check-dist.mjs, production", () => {
       "assets/engine-kdf-AbCd1234.js : son empreinte SHA-384 n'est pas inscrite dans le script principal (chargement sans contrôle d'intégrité)",
     ]);
     expect(prod(`const w="/assets/engine-kdf-AbCd1234.js";const i="${sha384(Buffer.from(w))}";`, { "assets/engine-kdf-AbCd1234.js": w })).toEqual([]);
+  });
+
+  it("moteur WebAssembly : en production, tout .wasm de plus de 1 Kio a ses variantes .br et .gz (servies par static.go), qui redonnent le fichier", () => {
+    const wasm = String.fromCharCode(0, 97, 115, 109, 1, 0, 0, 0) + "\x01".repeat(2000);
+    const w = "assets/engine-AbCd1234.wasm";
+    const prod = (extra: Record<string, string | Buffer>) => checkDist(site({ "index.html": PROD_INDEX, [w]: wasm, ...(extra as Record<string, string>) }), false);
+    const br = brotliCompressSync(Buffer.from(wasm));
+    const gz = gzipSync(Buffer.from(wasm));
+    expect(prod({})).toEqual([`${w} : sans variante .br ni .gz : le moteur serait téléchargé sans compression`]);
+    expect(prod({ [w + ".br"]: br })).toEqual([`${w} : sans variante .gz : le moteur serait téléchargé sans compression`]);
+    expect(prod({ [w + ".br"]: br, [w + ".gz"]: gz })).toEqual([]);
+    expect(prod({ [w + ".br"]: br, [w + ".gz"]: gzipSync(Buffer.from("autre")) })).toEqual([`${w}.gz : ne redonne pas ${w}`]);
+    // Petit .wasm (moins de 1 Kio, comme pour le texte : precompress ne le compresse pas) : rien exigé.
+    expect(prod({ "assets/petit-AbCd1234.wasm": "\0asm" }).filter((p) => p.includes("petit"))).toEqual([]);
   });
 
   it("moteur WebAssembly : aucun octet de .wasm en ligne dans le script principal de production (base64 ou tableau)", () => {
