@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: server/go.mod
@@ -29,6 +31,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - id: toolchain
         uses: ./.github/actions/engine-toolchain
         with:
@@ -51,6 +55,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: web/.node-version
@@ -64,14 +70,21 @@ jobs:
       - run: cd web && node scripts/check-dist.mjs
       - run: cd web && npm run build:demo && node scripts/check-dist.mjs --demo
       - run: cd web && npm run check
+      # Toutes les dépendances, outils de build et de test compris (audit du 11 novembre, M11) :
+      # Vite, Vitest, Playwright, svelte-check tournent dans la CI et produisent le site. Cet
+      # audit contient celui des seules dépendances d'exécution (--omit=dev), au même niveau.
       - name: npm audit
         working-directory: web
-        run: npm audit --omit=dev --audit-level=high
+        run: |
+          npm audit --audit-level=high
+          npm audit --audit-level=high --prefix tools/svelte-check
   e2e:
     needs: [go, web]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: server/go.mod
@@ -90,6 +103,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: server/go.mod
@@ -133,6 +148,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: web/.node-version
@@ -159,26 +176,89 @@ jobs:
           ls -R sums
           diff sums/sums-ubuntu-latest/SHA256SUMS sums/sums-ubuntu-24.04/SHA256SUMS
           echo "$(wc -l < sums/sums-ubuntu-latest/SHA256SUMS) fichiers identiques sur les deux machines"
-  # Le pkg du moteur (.wasm et colle) construit par l'étape « engine » de deploy/Dockerfile, qui
-  # répète les commandes de web/scripts/build-engine.mjs (pas de Node dans cette étape), doit être
-  # identique, octet pour octet, à celui des builds de la CI (empreintes du job repro).
+  # L'image de production, construite par deploy/Dockerfile avec le même SHH_BUILD_ID que la CI :
+  # - son pkg du moteur (.wasm et colle ; étape « engine », qui répète les commandes de
+  #   web/scripts/build-engine.mjs, sans Node) et tout son site (étape « web », dist/ entier)
+  #   doivent être identiques, octet pour octet, à ceux des builds de la CI (SHA256SUMS du job
+  #   repro) : sinon le site servi ne serait pas le build public vérifiable (spec §28, audit I6) ;
+  # - l'image complète, puis le test du proxy (deploy/test-proxy.sh) avec ses deux binaires, son
+  #   site et le binaire Caddy de l'image épinglée dans deploy/compose.yaml (audit M9).
   repro-docker:
     needs: repro
     runs-on: ubuntu-latest
-    # Image rust à télécharger, wasm-bindgen-cli à compiler, moteur en release.
-    timeout-minutes: 30
+    # Image rust à télécharger, wasm-bindgen-cli à compiler, moteur en release, puis le site.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sums-ubuntu-latest
           path: sums
-      - name: pkg de l'image identique à celui de la CI
+      # Même valeur que repro.sh (git rev-parse --short=7 HEAD) : même pied de page, mêmes octets.
+      - name: Identifiant de build
+        run: echo "SHH_BUILD_ID=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+      - name: pkg et site de l'image identiques à ceux de la CI
         run: |
-          docker build -f deploy/Dockerfile --target engine-pkg --output "type=local,dest=$RUNNER_TEMP/image" .
-          grep '  pkg/' sums/SHA256SUMS > "$RUNNER_TEMP/ci.sums"
-          # Liste vide = rien à comparer : échec. Le diff compare ensuite la liste entière.
-          [ -s "$RUNNER_TEMP/ci.sums" ] || { echo "aucun fichier pkg/ dans SHA256SUMS" >&2; exit 1; }
-          (cd "$RUNNER_TEMP/image" && find pkg -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$RUNNER_TEMP/image.sums"
-          diff "$RUNNER_TEMP/ci.sums" "$RUNNER_TEMP/image.sums"
-          echo "pkg de l'image identique à celui de la CI :"; cat "$RUNNER_TEMP/image.sums"
+          docker build -f deploy/Dockerfile --build-arg SHH_BUILD_ID --target engine-pkg --output "type=local,dest=$RUNNER_TEMP/image" .
+          docker build -f deploy/Dockerfile --build-arg SHH_BUILD_ID --target web-dist --output "type=local,dest=$RUNNER_TEMP/image" .
+          # SHA256SUMS : « ./… » pour dist/, « pkg/… » pour le moteur (web/scripts/repro.sh).
+          grep '  \./' sums/SHA256SUMS > "$RUNNER_TEMP/ci-dist.sums" || true
+          grep '  pkg/' sums/SHA256SUMS > "$RUNNER_TEMP/ci-pkg.sums" || true
+          # Liste vide = rien à comparer : échec. Le diff compare ensuite les listes entières
+          # (un fichier en plus ou en moins dans l'image échoue aussi).
+          [ -s "$RUNNER_TEMP/ci-dist.sums" ] || { echo "aucun fichier de dist/ dans SHA256SUMS" >&2; exit 1; }
+          [ -s "$RUNNER_TEMP/ci-pkg.sums" ] || { echo "aucun fichier pkg/ dans SHA256SUMS" >&2; exit 1; }
+          (cd "$RUNNER_TEMP/image/dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$RUNNER_TEMP/image-dist.sums"
+          (cd "$RUNNER_TEMP/image" && find pkg -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$RUNNER_TEMP/image-pkg.sums"
+          diff "$RUNNER_TEMP/ci-pkg.sums" "$RUNNER_TEMP/image-pkg.sums"
+          diff "$RUNNER_TEMP/ci-dist.sums" "$RUNNER_TEMP/image-dist.sums"
+          echo "image identique à la CI : $(wc -l < "$RUNNER_TEMP/image-pkg.sums") fichiers pkg/, $(wc -l < "$RUNNER_TEMP/image-dist.sums") fichiers dist/"
+      - name: Image complète
+        run: docker build -f deploy/Dockerfile --build-arg SHH_BUILD_ID -t shhdrop:ci .
+      # Sans --build-arg SHH_BUILD_ID, l'image doit refuser de se construire (audit I6).
+      - name: Image sans SHH_BUILD_ID refusée
+        run: |
+          if docker build -f deploy/Dockerfile --target web-dist --output "type=local,dest=$RUNNER_TEMP/sans-id" . > "$RUNNER_TEMP/sans-id.log" 2>&1; then
+            echo "image construite sans SHH_BUILD_ID" >&2; exit 1
+          fi
+          grep -q 'SHH_BUILD_ID manquant' "$RUNNER_TEMP/sans-id.log" || { cat "$RUNNER_TEMP/sans-id.log" >&2; exit 1; }
+      - name: Test du proxy avec l'image et le Caddy de compose.yaml
+        run: |
+          out="$RUNNER_TEMP/proxy"
+          mkdir -p "$out"
+          id=$(docker create shhdrop:ci)
+          docker cp "$id:/shhdrop" "$out/shhdrop"
+          docker cp "$id:/shhcheck" "$out/shhcheck"
+          docker cp "$id:/site" "$out/site"
+          docker rm "$id"
+          caddy_image=$(grep -oE 'caddy:[0-9][^ ]*@sha256:[0-9a-f]{64}' deploy/compose.yaml)
+          [ "$(printf '%s\n' "$caddy_image" | wc -l)" = 1 ] || { echo "image caddy introuvable dans compose.yaml" >&2; exit 1; }
+          id=$(docker create "$caddy_image")
+          docker cp "$id:/usr/bin/caddy" "$out/caddy"
+          docker rm "$id"
+          CADDY="$out/caddy" SHHDROP_BIN="$out/shhdrop" SHHCHECK_BIN="$out/shhcheck" STATIC_DIR="$out/site" deploy/test-proxy.sh
+  # Scripts de déploiement et de build (audit M9) : ShellCheck épinglé (archive vérifiée par son
+  # empreinte), go vet du petit programme deploy/shhcheck.
+  deploy-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: deploy/shhcheck/go.mod
+          cache: false
+      # ShellCheck 0.11.0, publié le 4 août 2025 ; empreinte relevée le 11 novembre 2026 (le
+      # binaire extrait est identique à celui d'une installation indépendante).
+      - name: ShellCheck 0.11.0
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/shellcheck.tar.xz" \
+            https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+          echo "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/shellcheck-v0.11.0" >> "$GITHUB_PATH"
+      - run: make lint-deploy

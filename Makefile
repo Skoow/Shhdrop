@@ -1,4 +1,4 @@
-.PHONY: test test-engine test-go test-web test-e2e test-ui test-repro
+.PHONY: test test-engine test-go test-web test-e2e test-ui test-repro lint-deploy test-proxy
 
 test: test-engine test-go test-web test-e2e
 
@@ -28,3 +28,17 @@ test-ui:
 # Build reproductible (spec §28.1) : deux builds dans deux dossiers, mêmes empreintes.
 test-repro:
 	web/scripts/repro.sh
+
+# Scripts de déploiement et de build : syntaxe, ShellCheck (0.11.0 en CI, job deploy-lint),
+# go vet de deploy/shhcheck (module à part, hors de test-go).
+lint-deploy:
+	bash -n deploy/deploy.sh && bash -n deploy/test-proxy.sh
+	for f in web/scripts/*.sh; do bash -n "$$f" || exit 1; done
+	shellcheck deploy/*.sh web/scripts/*.sh
+	cd deploy/shhcheck && go vet ./...
+
+# Test du proxy (deploy/test-proxy.sh) : Caddy 2.10 ou plus dans le PATH (ou CADDY=…), site
+# construit. La CI le lance avec l'image complète et le Caddy de compose.yaml (job repro-docker).
+test-proxy:
+	cd web && npm run build
+	deploy/test-proxy.sh

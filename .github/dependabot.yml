@@ -9,6 +9,13 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+  # Outil de vérification des composants Svelte (npm run check), verrou à part (M10).
+  - package-ecosystem: npm
+    directory: /web/tools/svelte-check
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
   - package-ecosystem: gomod
     directory: /server
     schedule:
@@ -35,6 +42,25 @@ updates:
         patterns: ["wasm-bindgen", "wasm-bindgen-futures", "js-sys"]
   - package-ecosystem: github-actions
     directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+  # Images de base de deploy/Dockerfile (étiquette ET empreinte, M10). Chaque image doit rester
+  # alignée sur sa source de vérité, sinon le build ou la comparaison avec la CI échoue (job
+  # repro-docker) : rust = engine/rust-toolchain.toml, node = web/.node-version, golang ≥
+  # « toolchain » de server/go.mod et deploy/shhcheck/go.mod. Une proposition qui ne change que
+  # l'image se complète à la main avant fusion.
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+  # Image de Caddy de deploy/compose.yaml (2.10 au minimum). Avant fusion : relancer
+  # deploy/test-proxy.sh avec ce binaire (la CI le fait, job repro-docker).
+  - package-ecosystem: docker-compose
+    directory: /deploy
     schedule:
       interval: weekly
     cooldown:

@@ -2,34 +2,39 @@ name: pages
 # Démo de l'interface sur GitHub Pages (aucun serveur : rien n'est envoyé ; UI §14.3).
 # Publiée seulement quand le workflow « ci » (tests Go, tests web, e2e, UI) a réussi sur main :
 # workflow_run se déclenche à la fin de ci, jamais sur un push rouge (CLAUDE.md : le test « le
-# serveur ne voit rien » bloque toute mise en ligne). workflow_dispatch : relance manuelle, sur la
-# branche choisie (le déploiement vers l'environnement github-pages reste soumis à ses règles).
+# serveur ne voit rien » bloque toute mise en ligne).
+# Pas de workflow_dispatch (audit du 11 novembre) : il publiait n'importe quelle branche, sans ci
+# verte. Pour republier : relancer le workflow « ci » du commit voulu de main (Re-run).
 on:
   workflow_run:
     workflows: [ci]
     types: [completed]
     branches: [main]
-  workflow_dispatch:
 permissions:
   contents: read
+# Une publication commencée va jusqu'au bout (une publication interrompue peut laisser Pages
+# entre deux versions) ; la suivante attend son tour.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   build:
-    # Une ci verte, sur un push (jamais une pull request, même d'une branche nommée « main »).
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    # Une ci verte, sur un push de main (jamais une pull request, même d'une branche nommée « main »).
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     steps:
       # Le commit exact que ci a validé, pas la pointe actuelle de main.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      # Pas de cache npm (audit du 11 novembre) : ce job publie, et un cache est inscriptible par
+      # tout code npm des jobs de ci (tests, Playwright) ; npm ci vérifie déjà chaque paquet
+      # contre les empreintes du verrou, mais rien de ce qui est publié ne doit venir d'un cache.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: web/.node-version
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          package-manager-cache: false
       # Moteur WebAssembly (npm run build:demo commence par npm run build:engine).
       - uses: ./.github/actions/engine-toolchain
       # Build de démo (UI §14.3) : faux serveur en mémoire, CSP meta, base /shhdrop/, 404.html.
