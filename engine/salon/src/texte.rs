@@ -11,7 +11,7 @@
 //! des inversions de sens et de tout `Default_Ignorable_Code_Point` ; 3. NFC ; 4. toute espace
 //! Unicode (`White_Space`) devient U+0020, regroupées et rognées ; 5. 2 à 24 graphèmes, 8 points de
 //! code au plus par graphème (contre l'empilement de marques) ; 6. seulement lettres, chiffres,
-//! marques, espace et `- _ . '`, au moins une lettre ou un chiffre ; 7. une seule écriture
+//! marques, espace et `- _ . '` (l'apostrophe typographique U+2019 devient `'` à l'étape 2), au moins une lettre ou un chiffre ; 7. une seule écriture
 //! (UAX #24 : intersection des `Script_Extension`, comme le contrôle « une seule écriture » d'UTS #39 ;
 //! Han avec hiragana et katakana, avec bopomofo ou avec hangul sont permis comme dans UTS #39) ;
 //! 8. pas d'émoji : les blocs de pictogrammes sont refusés par plages de points de code
@@ -26,11 +26,11 @@
 use crate::error::{Error, Result};
 use unicode_normalization::UnicodeNormalization;
 use unicode_script::{Script, ScriptExtension, UnicodeScript};
+use unicode_security::confusable_detection::skeleton;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub(crate) const TEXTE_GRAPHEMES: usize = 2000;
 pub(crate) const TEXTE_OCTETS: usize = 3500;
-pub(crate) const EXTRAIT_GRAPHEMES: usize = 140;
 const PSEUDO_MIN: usize = 2;
 const PSEUDO_MAX: usize = 24;
 const PSEUDO_POINTS_PAR_GRAPHEME: usize = 8;
@@ -47,15 +47,6 @@ fn est_inversion_de_sens(c: char) -> bool {
 
 /// Texte d'un message : voir l'en-tête du module.
 pub fn nettoyer_texte(s: &str) -> Result<String> {
-    nettoyer(s, TEXTE_GRAPHEMES, true)
-}
-
-/// Extrait d'une réponse : mêmes règles, 140 graphèmes, vide permis (réponse à une pièce).
-pub(crate) fn nettoyer_extrait(s: &str) -> Result<String> {
-    nettoyer(s, EXTRAIT_GRAPHEMES, false)
-}
-
-fn nettoyer(s: &str, max_graphemes: usize, non_vide: bool) -> Result<String> {
     let nfc: String = s.nfc().collect();
     let sans: String = nfc
         .chars()
@@ -63,13 +54,9 @@ fn nettoyer(s: &str, max_graphemes: usize, non_vide: bool) -> Result<String> {
         .collect();
     let out: String = sans.nfc().collect();
     if out.is_empty() {
-        return if non_vide {
-            Err(Error::TexteInvalide)
-        } else {
-            Ok(out)
-        };
+        return Err(Error::TexteInvalide);
     }
-    if out.len() > TEXTE_OCTETS || out.graphemes(true).count() > max_graphemes {
+    if out.len() > TEXTE_OCTETS || out.graphemes(true).count() > TEXTE_GRAPHEMES {
         return Err(Error::TexteTropLong);
     }
     Ok(out)
@@ -105,6 +92,7 @@ fn pseudo_nettoye(s: &str) -> String {
     let sans: String = nfc
         .chars()
         .filter(|&c| !c.is_control() && !est_ignorable(c))
+        .map(|c| if c == '\u{2019}' { '\'' } else { c })
         .collect();
     let mut out = String::new();
     let mut espace = false;
@@ -201,7 +189,10 @@ pub fn verifier_pseudo(s: &str) -> Result<String> {
 /// en cyrillique) : voir le rapport de la tâche 5.
 pub fn cle_unicite(pseudo: &str) -> String {
     let bas: String = pseudo.nfkc().collect::<String>().to_lowercase();
-    bas.nfkc()
+    // Squelette UTS #39 (sosies : « А » cyrillique = « A » latin, « 0 » = « O », « 1 » = « l »),
+    // puis minuscules de nouveau (le squelette peut redonner des majuscules).
+    let sq: String = skeleton(&bas).collect::<String>().to_lowercase();
+    sq.nfkc()
         .filter(|&c| c.is_alphanumeric() || (!c.is_whitespace() && !c.is_ascii() && se_lie(c)))
         .collect()
 }
@@ -409,13 +400,6 @@ mod tests {
         );
         // un graphème = plusieurs points de code : compté une fois
         assert!(nettoyer_texte(&"👨\u{200D}👩\u{200D}👧".repeat(100)).is_ok());
-        // 140 graphèmes pour un extrait
-        assert!(nettoyer_extrait(&"a".repeat(140)).is_ok());
-        assert_eq!(
-            nettoyer_extrait(&"a".repeat(141)).unwrap_err(),
-            Error::TexteTropLong
-        );
-        assert_eq!(nettoyer_extrait("").unwrap(), "");
     }
 
     #[test]
@@ -483,13 +467,40 @@ mod tests {
     }
 
     #[test]
+    fn pseudo_apostrophe_typographique() {
+        assert_eq!(verifier_pseudo("L\u{2019}éa").unwrap(), "L'éa");
+        assert_eq!(verifier_pseudo("O\u{2019}Neil").unwrap(), "O'Neil");
+        assert_eq!(cle_unicite("O\u{2019}Neil"), cle_unicite("O'Neil"));
+        // les autres apostrophes et guillemets restent refusés
+        for ko in [
+            "L\u{2018}éa",
+            "L\u{2032}éa",
+            "L\u{201C}éa",
+            "L`éa",
+            "L\u{2BC}éa\u{2BC}\u{2BC}!",
+        ] {
+            assert!(verifier_pseudo(ko).is_err(), "{ko:?}");
+        }
+    }
+
+    #[test]
     fn pseudo_cle_unicite() {
         assert_eq!(cle_unicite("léa"), cle_unicite("Léa"));
-        assert_eq!(cle_unicite("Léa"), "léa");
         assert_eq!(cle_unicite("Le\u{301}a"), cle_unicite("Léa"));
         assert_eq!(cle_unicite("Jean-Luc O'Neil_x.y"), "jeanluconeilxy");
         assert_eq!(cle_unicite("ＬＥＡ"), "lea");
         assert_ne!(cle_unicite("Léa"), cle_unicite("Lea"));
+        // sosies entre écritures (squelette UTS #39) : A, i et e cyrilliques (U+0410, U+0456, U+0435), c (U+0441)
+        let latin = cle_unicite("Alice");
+        assert_eq!(cle_unicite("\u{410}lice"), latin);
+        assert_eq!(cle_unicite("\u{410}li\u{441}\u{435}"), latin);
+        assert_eq!(cle_unicite("\u{410}l\u{456}c\u{435}"), latin);
+        assert_ne!(cle_unicite("Alicia"), latin);
+        // vrai sosie tout cyrillique (pseudonyme valide) : A U+0410, palochka U+04CF, i U+0456, c U+0441, e U+0435
+        let spoof = "\u{410}\u{4CF}\u{456}\u{441}\u{435}";
+        assert_eq!(verifier_pseudo(spoof).unwrap(), spoof);
+        assert_eq!(cle_unicite(spoof), latin);
+        assert!(verifier_pseudo("\u{410}lice").is_err()); // mêlé
     }
 
     #[test]

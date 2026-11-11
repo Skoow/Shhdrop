@@ -1,5 +1,5 @@
 //! Formats des messages du salon (spec salon v3 §4.1) : JSON strict, clés exactes, dans la
-//! charge utile d'une trame (`MAX_CHARGE` = 4 093 octets au plus).
+//! charge utile d'une trame (l'encodeur : `JSON_MAX` = 3 900 octets au plus ; le décodeur lit jusqu'à `MAX_CHARGE` = 4 093).
 //!
 //! `{"v":3,"id":<b64u 22>,"t":<ms>,"e":<0..3>,"k":"<sorte>", …champs}`. Pas de champ en trop,
 //! manquant ni de mauvais type pour une sorte connue (`message_invalide`) ; une sorte inconnue
@@ -18,7 +18,7 @@
 //! efface l'arbre JSON lu avant de le libérer. Les copies faites par `serde_json` pendant la
 //! lecture et la mémoire de l'appelant (`octets`) ne sont pas couvertes.
 use crate::error::{Error, Result};
-use crate::texte::{emoji_valide, nettoyer_extrait, nettoyer_nom, nettoyer_texte, verifier_pseudo};
+use crate::texte::{emoji_valide, nettoyer_nom, nettoyer_texte, verifier_pseudo};
 use crate::trame::{MAX_CHARGE, Regle};
 use serde_json::{Map, Value};
 use shhdrop_core::encoding::{b64u, unb64u};
@@ -32,6 +32,11 @@ const COULEURS: u8 = 9;
 const PALIER_MAX: u32 = 8000;
 const MIME_MAX: usize = 100;
 const SORTE_MAX: usize = 32;
+/// Borne dure de l'encodeur : le JSON fait 3 900 octets au plus (la charge utile d'une trame est
+/// de 4 093 ; MLS ajoute environ 146 octets, mesurés en essai). L'échappement JSON peut doubler un
+/// texte (`"`, `\\` et les sauts de ligne), donc un texte de 2 000 guillemets est refusé.
+pub const JSON_MAX: usize = 3900;
+const _: () = assert!(JSON_MAX < MAX_CHARGE);
 
 pub type IdMessage = [u8; 16];
 
@@ -102,7 +107,6 @@ pub enum Message {
     },
     Reponse {
         cible: IdMessage,
-        extrait: String,
         x: String,
     },
     Modif {
@@ -163,7 +167,7 @@ fn verifier(e: &Enveloppe) -> Result<()> {
     }
     let texte = |s: &str| propre(s, nettoyer_texte);
     match &e.message {
-        Message::Texte { x } | Message::Modif { x, .. } => texte(x),
+        Message::Texte { x } | Message::Modif { x, .. } | Message::Reponse { x, .. } => texte(x),
         Message::Piece {
             palier,
             nom,
@@ -185,10 +189,6 @@ fn verifier(e: &Enveloppe) -> Result<()> {
             } else {
                 Err(Error::MessageInvalide)
             }
-        }
-        Message::Reponse { extrait, x, .. } => {
-            propre(extrait, nettoyer_extrait)?;
-            texte(x)
         }
         Message::Recu { ids } | Message::Vu { ids } => {
             if (1..=IDS_MAX).contains(&ids.len()) {
@@ -245,7 +245,7 @@ struct Plafond(Zeroizing<Vec<u8>>);
 
 impl Write for Plafond {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if self.0.len() + buf.len() > MAX_CHARGE {
+        if self.0.len() + buf.len() > JSON_MAX {
             return Err(std::io::ErrorKind::OutOfMemory.into());
         }
         self.0.extend_from_slice(buf);
@@ -327,10 +327,9 @@ fn ecrire(w: &mut Plafond, e: &Enveloppe) -> std::io::Result<()> {
             cle_id(w, "cible", cible)?;
             cle_texte(w, "emoji", emoji)?;
         }
-        Message::Reponse { cible, extrait, x } => {
+        Message::Reponse { cible, x } => {
             k(w, "reponse")?;
             cle_id(w, "cible", cible)?;
-            cle_texte(w, "extrait", extrait)?;
             cle_texte(w, "x", x)?;
         }
         Message::Modif { cible, x } => {
@@ -385,10 +384,10 @@ fn ecrire(w: &mut Plafond, e: &Enveloppe) -> std::io::Result<()> {
 }
 
 /// Charge utile d'une trame. `message_invalide` si un champ sort des règles (y compris un texte
-/// non nettoyé ou une sorte `Inconnu`), `trop_grand` si le JSON dépasse `MAX_CHARGE` octets.
+/// non nettoyé ou une sorte `Inconnu`), `trop_grand` si le JSON dépasse `JSON_MAX` (3 900) octets.
 pub fn encoder(e: &Enveloppe) -> Result<Zeroizing<Vec<u8>>> {
     verifier(e)?;
-    let mut w = Plafond(Zeroizing::new(Vec::with_capacity(MAX_CHARGE)));
+    let mut w = Plafond(Zeroizing::new(Vec::with_capacity(JSON_MAX)));
     ecrire(&mut w, e).map_err(|_| Error::TropGrand)?;
     Ok(w.0)
 }
@@ -528,7 +527,6 @@ fn message(sorte: &str, o: &mut Map<String, Value>) -> Result<Message> {
         },
         "reponse" => Message::Reponse {
             cible: id(o, "cible")?,
-            extrait: texte(o, "extrait")?,
             x: texte(o, "x")?,
         },
         "modif" => Message::Modif {
@@ -651,12 +649,6 @@ mod tests {
             },
             Message::Reponse {
                 cible: [2; 16],
-                extrait: "Bonj".into(),
-                x: "Salut".into(),
-            },
-            Message::Reponse {
-                cible: [2; 16],
-                extrait: String::new(),
                 x: "Salut".into(),
             },
             Message::Modif {
@@ -875,11 +867,12 @@ mod tests {
         refuse(r#""k":"texte","x":"a\rb""#);
         refuse(r#""k":"texte","x":"e\u0301""#); // pas NFC
         refuse(r#""k":"modif","cible":"BwcHBwcHBwcHBwcHBwcHBw","x":"a\tb""#);
-        refuse(r#""k":"reponse","cible":"BwcHBwcHBwcHBwcHBwcHBw","extrait":"a\u0000","x":"b""#);
+        refuse(r#""k":"reponse","cible":"BwcHBwcHBwcHBwcHBwcHBw","extrait":"a","x":"b""#); // plus d'extrait
+        refuse(r#""k":"reponse","cible":"BwcHBwcHBwcHBwcHBwcHBw","x":"b\u0000""#);
         refuse(&format!(r#""k":"texte","x":"{}""#, "a".repeat(2001)));
         refuse(&format!(
-            r#""k":"reponse","cible":"BwcHBwcHBwcHBwcHBwcHBw","extrait":"{}","x":"b""#,
-            "a".repeat(141)
+            r#""k":"reponse","cible":"BwcHBwcHBwcHBwcHBwcHBw","x":"{}""#,
+            "a".repeat(2001)
         ));
         refuse(r#""k":"profil","pseudo":"A","couleur":1,"avatar":null"#);
         refuse(r#""k":"profil","pseudo":" Léa","couleur":1,"avatar":null"#);
@@ -1050,29 +1043,30 @@ mod tests {
 
     #[test]
     fn envoi_trop_gros() {
-        // Pire cas d'un texte seul : 2 000 caractères doublés par l'échappement JSON (\n, ") : tient.
-        for c in ["\n", "\"", "\\"] {
-            let e = Enveloppe {
-                heure_ms: 9_007_199_254_740_991,
-                ..env(Message::Texte { x: c.repeat(2000) })
-            };
-            let o = encoder(&e).unwrap();
-            assert!(o.len() <= crate::MAX_CHARGE, "{}", o.len());
-            assert_eq!(decoder(&o).unwrap(), e);
+        // 3 500 octets de texte ordinaire : tient.
+        let e = env(Message::Texte {
+            x: "é".repeat(1750),
+        });
+        let o = encoder(&e).unwrap();
+        assert!(o.len() <= JSON_MAX);
+        assert_eq!(decoder(&o).unwrap(), e);
+        // 2 000 guillemets, saut de ligne ou barre : l'échappement double le JSON, au-delà de 3 900 octets.
+        for c in ["\"", "\n", "\\"] {
+            let e = env(Message::Texte { x: c.repeat(2000) });
+            assert_eq!(encoder(&e).unwrap_err(), Error::TropGrand, "{c:?}");
         }
-        // Une réponse peut dépasser la charge utile d'une trame : trop_grand, sans panique.
-        let m = Message::Reponse {
-            cible: [0; 16],
-            extrait: "\n".repeat(140),
-            x: "\n".repeat(2000),
-        };
-        assert_eq!(encoder(&env(m)).unwrap_err(), Error::TropGrand);
-        let m = Message::Reponse {
-            cible: [0; 16],
-            extrait: "é".repeat(140),
-            x: "é".repeat(1700),
-        };
-        assert!(encoder(&env(m)).is_ok());
+        // la borne est exacte
+        let entete = encoder(&env(Message::Texte { x: "a".into() }))
+            .unwrap()
+            .len()
+            - 1;
+        let n = (JSON_MAX - entete) / 2;
+        let e = env(Message::Texte { x: "\"".repeat(n) });
+        assert_eq!(encoder(&e).unwrap().len(), entete + 2 * n);
+        let e = env(Message::Texte {
+            x: "\"".repeat(n + 1),
+        });
+        assert_eq!(encoder(&e).unwrap_err(), Error::TropGrand);
         assert_eq!(
             encoder(&env(Message::Texte { x: "\u{1}".into() })).unwrap_err(),
             Error::MessageInvalide

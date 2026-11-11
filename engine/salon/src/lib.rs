@@ -13,7 +13,8 @@ mod trame;
 pub use cles::{CleAcces, ClesSalon, cle_acces, cles_salon};
 pub use error::{Error, Result};
 pub use message::{
-    Enveloppe, Graine, IdMessage, Message, RefPiece, SortePiece, decoder, encoder, est_volatile,
+    Enveloppe, Graine, IdMessage, JSON_MAX, Message, RefPiece, SortePiece, decoder, encoder,
+    est_volatile,
 };
 pub use stockage::{Fournisseur, Stockage};
 pub use texte::{cle_unicite, nettoyer_nom, nettoyer_texte, verifier_pseudo};
