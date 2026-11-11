@@ -11,6 +11,7 @@
   import { setScreenTitle } from "./app/title";
   import { getLang } from "./i18n/i18n.svelte";
   import { watchKeyboard } from "./app/viewport";
+  import History from "./routes/History.svelte";
   import Manage from "./routes/Manage.svelte";
   import NotFound from "./routes/NotFound.svelte";
   import Open from "./routes/Open.svelte";
@@ -123,6 +124,8 @@
     {#key linkGen}<Open take={takeShare} />{/key}
   {:else if router.current.name === "manage"}
     {#key linkGen}<Manage take={takeManage} />{/key}
+  {:else if router.current.name === "envois"}
+    <History />
   {:else if router.current.name === "offres"}
     <Offres />
   {:else}

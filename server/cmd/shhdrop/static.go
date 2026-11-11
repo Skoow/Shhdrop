@@ -179,6 +179,7 @@ var appRoutes = map[string]bool{
 	"/signaler":         true,
 	"/offres":           true,
 	"/envoyer":          true,
+	"/envois":           true,
 }
 
 // staticName : chemin de l'URL → nom dans le dossier ; refuse les segments cachés.

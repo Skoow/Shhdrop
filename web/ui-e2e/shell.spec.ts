@@ -30,10 +30,10 @@ test("pied de page (UI5) : Produit, Confiance, Légal ; langue, nettoyage, À pr
   await foot.scrollIntoViewIfNeeded();
   await expect(foot).toBeVisible();
   for (const c of ["Produit", "Confiance", "Légal"]) await expect(foot.getByText(c, { exact: true })).toBeVisible();
-  for (const l of ["Envoyer", "Offres Plus et Pro", "Sécurité", "Confidentialité", "Code source sur GitHub", "Signaler un abus", "Conditions d'utilisation", "Mentions légales", "Licence AGPL-3.0"])
+  for (const l of ["Envoyer", "Vos envois", "Offres Plus et Pro", "Sécurité", "Confidentialité", "Code source sur GitHub", "Signaler un abus", "Conditions d'utilisation", "Mentions légales", "Licence AGPL-3.0"])
     await expect(foot.getByRole("link", { name: new RegExp(`^${l}`) })).toBeVisible();
-  // 9 liens, plus le logo (retour à l'accueil, UI7).
-  await expect(foot.getByRole("link")).toHaveCount(10);
+  // 10 liens (dont « Vos envois », Task H), plus le logo (retour à l'accueil, UI7).
+  await expect(foot.getByRole("link")).toHaveCount(11);
   await expect(foot.getByRole("link", { name: "Shhdrop, accueil" })).toBeVisible();
   await expect(foot.getByText(/^Salon\s+bientôt$/)).toBeVisible(); // pas un lien
   await expect(foot.getByRole("link", { name: /^Code source/ })).toHaveAttribute("href", "https://github.com/Skoow/shhdrop");

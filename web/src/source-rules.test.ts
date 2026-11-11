@@ -46,7 +46,7 @@ const RE_DEMO_IMPORT = new RegExp(
   "g",
 );
 
-const UI_DIRS = ["routes", "ui", "flows", "viewers", "media", "captcha", "app"];
+const UI_DIRS = ["routes", "ui", "flows", "viewers", "media", "captcha", "app", "history"];
 const inUiDir = (rel: string) => UI_DIRS.includes(rel.split("/")[0]!);
 
 function offenders(
@@ -74,10 +74,25 @@ describe("règles de sources", () => {
     expect(offenders(RE_FORBIDDEN_IMPORT, inUiDir)).toEqual([]));
   it("pas de fetch( ni XMLHttpRequest dans les écrans", () =>
     expect(offenders(/\bfetch\s*\(|XMLHttpRequest/, inUiDir)).toEqual([]));
-  it("aucun stockage navigateur", () =>
+  it("aucun stockage navigateur (hors historique local, ci-dessous)", () =>
     expect(
-      offenders(/localStorage|indexedDB|document\.cookie/),
+      offenders(/localStorage|indexedDB|document\.cookie/, (r) => r !== "history/live.svelte.ts"),
     ).toEqual([]));
+  // Spec §33, §33.1 : exception écrite, l'historique local chiffré des envois. Seul
+  // history/live.svelte.ts lit `indexedDB` (pour le passer à history/store.ts, qui chiffre) ;
+  // aucun localStorage ni cookie, même là ; et rien d'autre que history/ ne lit le stockage.
+  it("historique : indexedDB lu seulement par history/live.svelte.ts, jamais localStorage ni cookie", () => {
+    const live = files.find((f) => f.rel === "history/live.svelte.ts");
+    expect(live?.text).toMatch(/indexedDB/);
+    expect(live?.text).not.toMatch(/localStorage|document\.cookie|sessionStorage/);
+    expect(offenders(/\bIDB(?:Factory|Database|ObjectStore|Transaction)\b/, (r) => !r.startsWith("history/"))).toEqual([]);
+  });
+  it("historique : aucun secret de partage ni nom d'élément dans HistoryEntry", () => {
+    const store = files.find((f) => f.rel === "history/store.ts")!;
+    const type = store.text.match(/export type HistoryEntry = \{([\s\S]*?)\n\};/)![1]!;
+    const fields = [...type.matchAll(/^\s+(\w+):/gm)].map((m) => m[1]);
+    expect(fields).toEqual(["id", "manage", "createdAt", "sizeBytes", "itemsCount", "expiresAt", "maxOpens", "opensUsed", "opens", "state", "lastSeenAt", "endedAt", "destroyedHere"]);
+  });
   // Spec §41.4 : exception écrite, l'octroi d'ouverture de l'onglet (session/open-grant.ts),
   // et plus tard le salon (chat/session.ts, §39.13.3). Nulle part ailleurs.
   it("sessionStorage seulement dans session/open-grant.ts (et chat/session.ts)", () =>

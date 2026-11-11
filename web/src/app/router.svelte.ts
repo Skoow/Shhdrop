@@ -34,7 +34,7 @@ export const INFO_PATHS: Readonly<Record<string, InfoRoute>> = {
 
 export type Route = {
   /** envoyer : page d'envoi (composeur, même vide), où mène « Commencer » (retours DROP). */
-  name: "home" | "envoyer" | "open" | "manage" | InfoRoute | "offres" | "notfound";
+  name: "home" | "envoyer" | "envois" | "open" | "manage" | InfoRoute | "offres" | "notfound";
 };
 
 /**
@@ -63,6 +63,8 @@ export function match(pathname: string, hash = "", base: string = import.meta.en
   if (info !== undefined) return { name: info };
   if (p === "/offres") return { name: "offres" };
   if (p === "/envoyer") return { name: "envoyer" };
+  // Tableau de bord « Vos envois » (spec §33, §33.1) : historique local, aucun secret dans l'adresse.
+  if (p === "/envois") return { name: "envois" };
   // « /s/ » reste réservé aux futurs liens universels (spec §16) : aucune route aujourd'hui.
   return { name: "notfound" };
 }

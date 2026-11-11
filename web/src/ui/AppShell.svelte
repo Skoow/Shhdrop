@@ -79,7 +79,7 @@
   // secondaires de l'expéditeur, et le grand titre de l'écran qui se réduit dans la barre une
   // fois défilé (titre marqué data-large-title, sinon le h1 de l'écran). Sur ordinateur, rien ne change.
   const INFO: ReadonlySet<string> = new Set(["securite", "confidentialite", "conditions", "mentions", "signaler", "offres"]);
-  const BACK: ReadonlySet<string> = new Set([...INFO, "notfound", "manage"]);
+  const BACK: ReadonlySet<string> = new Set([...INFO, "notfound", "manage", "envois"]);
   // Pied de page sur toutes les pages, ordinateur et téléphone, composeur compris (retours du
   // 11 novembre) ; sur ordinateur, le composeur tient dans l'écran et le pied est juste dessous.
   /** `tiers` : « Plus » et « Pro » du libellé au bleu de leur offre, le reste comme les autres liens. */
@@ -90,6 +90,7 @@
       title: t("foot.product"),
       links: [
         { label: t("foot.send"), path: "/" },
+        { label: t("foot.shares"), path: "/envois" },
         { label: t("foot.room"), soon: true },
         { label: t("foot.offers"), path: "/offres", tiers: true },
       ],

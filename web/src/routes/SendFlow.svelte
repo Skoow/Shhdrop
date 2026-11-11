@@ -288,6 +288,8 @@
     {summary}
     ttlHours={sent.ttlHours}
     maxOpens={sent.maxOpens}
+    itemsCount={sent.names.length}
+    sizeBytes={sent.bytes}
     ondone={reset}
     onforget={forget}
     onnew={reset}

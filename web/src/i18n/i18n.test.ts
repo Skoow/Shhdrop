@@ -296,3 +296,24 @@ describe("décompte et échéance (retours UI4 : deux lignes, date et heure exac
     expect(formatEndsAt(new Date(2026, 0, 3, 9, 5).getTime(), "fr")).toBe("Se termine le 3 janv. à 9 h 05");
   });
 });
+
+describe("heures de l'historique (spec §33, UI §9.6.3)", () => {
+  it("formatDayTime : « 5 nov., 21 h 14 » ; « Nov 5, 9:14 PM »", async () => {
+    const { formatDayTime } = await import("./format");
+    const at = new Date(2026, 10, 5, 21, 14, 30).getTime();
+    expect(formatDayTime(at, "fr")).toBe("5 nov., 21 h 14");
+    expect(formatDayTime(at, "en").replace(/[\u00a0\u202f]/gu, " ")).toBe("Nov 5, 9:14 PM");
+  });
+  it("formatAgo : à l'instant, minutes, heures, jours (espaces insécables)", async () => {
+    const { formatAgo } = await import("./format");
+    expect(formatAgo(30_000, "fr")).toBe("à l'instant");
+    expect(formatAgo(3 * 60_000 + 5, "fr")).toBe("il y a 3\u202fmin");
+    expect(formatAgo(2 * 3600_000 + 5, "fr")).toBe("il y a 2\u202fh");
+    expect(formatAgo(86_400_000, "fr")).toBe("il y a 1\u202fjour");
+    expect(formatAgo(3 * 86_400_000, "fr")).toBe("il y a 3\u202fjours");
+    expect(formatAgo(30_000, "en")).toBe("just now");
+    expect(formatAgo(3 * 60_000, "en")).toBe("3\u00a0min ago");
+    expect(formatAgo(86_400_000, "en")).toBe("1\u00a0day ago");
+    expect(formatAgo(-5, "fr")).toBe("à l'instant");
+  });
+});

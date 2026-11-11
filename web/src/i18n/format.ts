@@ -108,3 +108,25 @@ export function formatClock(epochMs: number, lang: Lang): string {
   if (lang === "fr") return `${d.getHours()} h ${String(d.getMinutes()).padStart(2, "0")}`;
   return new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(d);
 }
+
+/** Date et heure de création (historique, UI §9.6.3) : « 5 nov., 21 h 14 » ; « Nov 5, 9:14 PM ». */
+export function formatDayTime(epochMs: number, lang: Lang): string {
+  const d = new Date(epochMs);
+  if (lang === "fr") {
+    const month = new Intl.DateTimeFormat("fr", { month: "short" }).format(d);
+    return `${d.getDate()} ${month}, ${formatClock(epochMs, lang)}`;
+  }
+  const date = new Intl.DateTimeFormat("en", { day: "numeric", month: "short" }).format(d);
+  return `${date}, ${formatClock(epochMs, lang)}`;
+}
+
+/** Temps écoulé (historique) : « à l'instant », « il y a 3 min », « il y a 2 h », « il y a 3 jours ». */
+export function formatAgo(ms: number, lang: Lang): string {
+  const x = sp(lang);
+  const min = Math.floor(Math.max(0, ms) / 60_000);
+  if (min < 1) return lang === "fr" ? "à l'instant" : "just now";
+  const [n, fr, en] = min < 60 ? [min, "min", "min"] : min < 1440 ? [Math.floor(min / 60), "h", "h"] : [Math.floor(min / 1440), "jour", "day"];
+  const unit = lang === "fr" ? fr : en;
+  const pl = n > 1 && unit.length > 3 ? "s" : "";
+  return lang === "fr" ? `il y a ${n}${x}${unit}${pl}` : `${n}${x}${unit}${pl} ago`;
+}

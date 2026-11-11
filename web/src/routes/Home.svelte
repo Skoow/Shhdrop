@@ -26,6 +26,7 @@
   import SealBand from "../ui/SealBand.svelte";
   import SectionBg from "../ui/SectionBg.svelte";
   import Vessel from "../ui/Vessel.svelte";
+  import ActiveSharesStrip from "../ui/ActiveSharesStrip.svelte";
   import TabIcon from "../ui/TabIcon.svelte";
   import { announce } from "../ui/announce";
   import Closing from "./home/Closing.svelte";
@@ -177,6 +178,10 @@
         </div>
       {/if}
     </div>
+
+    <!-- « Vos partages actifs » (spec §33.1, UI §9.6.1) : lecture locale seulement, rien sans
+         partage actif. Téléphone : au-dessus du coffre ; ordinateur : sous le coffre. -->
+    {#if !compact}<div class="shares"><ActiveSharesStrip /></div>{/if}
 
     <div class="compose" data-slot="compose" {@attach !children && tilt}>
       {#if !children}
@@ -480,6 +485,13 @@
   }
 
   /* ---------- Le coffre : fenêtre de dépôt ---------- */
+  .shares {
+    order: 3;
+    min-width: 0;
+  }
+  .shares:empty {
+    display: none;
+  }
   .compose {
     order: 3;
     position: relative;
@@ -1042,6 +1054,23 @@
     }
     .compose {
       order: 0;
+    }
+    /* Sous le coffre, dans la colonne de droite ; le texte occupe les deux rangées. */
+    .hero:has(.shares :global([data-active-shares])) {
+      align-content: center;
+    }
+    .hero:has(.shares :global([data-active-shares])) .compose {
+      grid-column: 2;
+      grid-row: 1;
+    }
+    .shares {
+      grid-column: 2;
+      grid-row: 2;
+      align-self: start;
+    }
+    .hero:has(.shares :global([data-active-shares])) .pitch {
+      grid-column: 1;
+      grid-row: 1 / span 2;
     }
     .drop-title {
       font-size: 1.625rem;
