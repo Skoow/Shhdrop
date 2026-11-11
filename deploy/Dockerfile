@@ -24,7 +24,7 @@
 # push par le job repro-docker de la CI, étape engine-pkg ci-dessous). Image glibc
 # (Debian), pas Alpine : cargo mêle le triplet de l'hôte (…-linux-gnu / …-linux-musl) aux noms
 # internes des crates, et un hôte musl donnerait un autre .wasm que la CI (vérifié).
-FROM rust:1.97.0-slim-bookworm@sha256:6d220bf85c74e842a79da63997af8d2e74455c0b8847d8bb3a5888572334991d AS engine
+FROM rust:1.99.1-slim-bookworm@sha256:f2c004e3d2d8b547e8cf7ffbc29205385f4e71d23e53e4e383065db5e9f822cd AS engine
 ENV TZ=UTC LANG=C.UTF-8
 # wasm-bindgen-cli : version exacte de la crate wasm-bindgen (engine/Cargo.lock), verrou compris.
 RUN rustup target add wasm32-unknown-unknown \
@@ -43,7 +43,7 @@ FROM scratch AS engine-pkg
 COPY --from=engine /out/pkg /pkg
 
 # --- Site -------------------------------------------------------------------------------
-FROM node:22.23.4-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202 AS web
+FROM node:26.13.0-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS web
 ENV TZ=UTC LANG=C.UTF-8 NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./

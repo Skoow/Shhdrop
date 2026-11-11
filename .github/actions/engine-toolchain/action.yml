@@ -20,7 +20,7 @@ inputs:
     default: "true"
 outputs:
   channel:
-    description: Version de Rust de engine/rust-toolchain.toml (ex. 1.97.0)
+    description: Version de Rust de engine/rust-toolchain.toml (ex. 1.99.1)
     value: ${{ steps.rust.outputs.channel }}
 runs:
   using: composite

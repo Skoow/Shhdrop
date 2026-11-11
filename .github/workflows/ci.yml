@@ -45,7 +45,7 @@ jobs:
         env:
           CHANNEL: ${{ steps.toolchain.outputs.channel }}
         run: |
-          cargo +"$CHANNEL" install --locked --root "$RUNNER_TEMP/cargo-audit" cargo-audit --version 0.22.2
+          cargo +"$CHANNEL" install --locked --root "$RUNNER_TEMP/cargo-audit" cargo-audit --version 0.23.0
           cd engine && "$RUNNER_TEMP/cargo-audit/bin/cargo-audit" audit --deny warnings
   web:
     runs-on: ubuntu-latest
