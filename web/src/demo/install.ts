@@ -4,6 +4,7 @@
 // remplit les crochets lus par les écrans (app/demo-hooks.ts). Seul stockage : l'état du faux
 // serveur de cet onglet (demo/persist.ts, exception démo), pour survivre à un rechargement.
 import { setDemo } from "../app/demo-hooks";
+import { leaveGuard } from "../app/router.svelte";
 import { demoPrefixed } from "../app/title";
 import { getLang } from "../i18n/i18n.svelte";
 import { SHARE_FRAGMENT, type CaptchaProof } from "../index";
@@ -100,6 +101,8 @@ export async function installDemo(w: Window): Promise<void> {
       const u = new URL(link);
       const ok = u.origin === w.location.origin && (u.pathname === base + "/" || u.pathname === base || (base === "" && u.pathname === "/")) && u.search === "" && SHARE_FRAGMENT.test(u.hash);
       if (!ok) throw new Error("lien_invalide");
+      // Navigation voulue : la garde du bouton Retour (« Lien prêt ») ne la retient pas.
+      leaveGuard?.release();
       w.history.pushState(null, "", base + "/" + u.hash);
       w.dispatchEvent(new PopStateEvent("popstate"));
     },

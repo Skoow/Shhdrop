@@ -111,4 +111,17 @@ describe("garde de sortie (audit I2)", () => {
     g.arm({ confirm: () => false, onleave: vi.fn() });
     expect(f.stack).toHaveLength(3);
   });
+
+  it("release (navigation voulue) : plus de confirmation, aucun retour lancé", () => {
+    const f = fakeWindow();
+    const g = createLeaveGuard(f.w);
+    const confirm = vi.fn(() => false);
+    const off = g.arm({ confirm, onleave: vi.fn() });
+    g.release();
+    f.w.history.pushState(null, "", "/");
+    expect(g.onPop()).toBe(false);
+    off();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(f.pops).toEqual([]);
+  });
 });

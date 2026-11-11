@@ -43,6 +43,10 @@ export function createLeaveGuard(w: HistoryWindow) {
         }
       };
     },
+    /** Navigation voulue par le code (démo « Ouvrir comme destinataire ») : plus de garde, rien n'est retiré. */
+    release(): void {
+      active = null;
+    },
     /** À appeler au début de chaque popstate : vrai si l'événement est absorbé (route inchangée). */
     onPop(): boolean {
       if (skip > 0) {

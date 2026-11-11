@@ -102,11 +102,11 @@ test.describe("fr-FR", () => {
     await capture(page, "seal-progress");
     await expect(page.locator(".sealing")).not.toContainText("palier");
 
-    // Finalisation retardée : « Envoyé » est là, « Scellé » non ; aucun lien nulle part.
+    // Finalisation retardée : « Envoyé » attend le lien (audit M12), « Scellé » aussi ; aucun lien nulle part.
     await expect.poll(() => finalizing, { timeout: 30_000 }).toBe(true);
     await expect(page.getByRole("heading", { name: "Finalisation" })).toBeVisible();
     await expect(stepItem(page, "Chiffré sur cet appareil")).toHaveCount(1);
-    await expect(stepItem(page, "Envoyé")).toHaveCount(1);
+    await expect(stepItem(page, "Envoyé")).toHaveCount(0);
     await expect(stepItem(page, "Scellé")).toHaveCount(0);
     await expect(page.getByText("Finalisation : l'envoi ne peut plus être annulé", { exact: false })).toBeVisible();
     await expect(page.getByRole("button", { name: "Annuler" })).toHaveCount(0);
@@ -325,7 +325,8 @@ test.describe("fr-FR", () => {
         : route.continue(),
     );
     await sendButton(page).click();
-    await expect(page.getByRole("alert")).toHaveText(/^Limite d'envois atteinte\. Réessayez dans 2\smin\.$/, { timeout: 30_000 });
+    // La règle d'abord (audit M14) : refus à la création au-delà de 60 s → quota du jour.
+    await expect(page.getByRole("alert")).toHaveText(/^Limite du jour atteinte\s: 10\spartages par jour depuis votre connexion\. Réessayez dans 2\smin\.$/, { timeout: 30_000 });
     const retry = page.getByRole("button", { name: /^Réessayer dans \d/ });
     await expect(retry).toBeDisabled();
   });

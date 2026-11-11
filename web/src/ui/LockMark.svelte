@@ -115,12 +115,12 @@
     border-radius: 50%;
     color: inherit;
   }
-  /* Cible d'appui de 44 px (audit M21) autour du bouton de 24 px, surtout vers l'extérieur de
-     l'icône ; le dessin ne change pas. */
+  /* Cible d'appui de 44 px (audit M21) : le bouton de 24 px s'agrandit seulement vers
+     l'extérieur de l'icône (droite, bas), jamais sur le bouton d'aperçu ; le dessin ne change pas. */
   .badge :global(.pic-tip)::after {
     content: "";
     position: absolute;
-    inset: -8px -12px -12px -8px;
+    inset: 0 -20px -20px 0;
   }
   .pill {
     display: grid;

@@ -857,9 +857,12 @@
     font-size: var(--fs-small);
   }
   /* Lien discret vers la feuille des offres : texte souligné, cible d'appui de 44 px (::after). */
+  /* Cible d'appui de 44 px de haut (audit M21) : marges intérieures compensées par des marges
+     négatives, la ligne ne bouge pas. */
   .soonlink {
-    position: relative;
-    padding: 0;
+    display: inline-block;
+    padding: 11.5px 0;
+    margin: -11.5px 0;
     border: 0;
     background: none;
     color: var(--text-2);
@@ -868,11 +871,6 @@
     text-decoration-color: var(--line-strong);
     text-underline-offset: 0.2em;
     cursor: pointer;
-  }
-  .soonlink::after {
-    content: "";
-    position: absolute;
-    inset: -13px -4px;
   }
   .soonlink:focus-visible {
     outline: 2px solid var(--accent);

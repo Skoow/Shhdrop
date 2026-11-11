@@ -292,12 +292,7 @@ test.describe("fr-FR", () => {
     await expect(page.locator("[data-locked], [data-paid-space]")).toHaveCount(0);
     const line = page.locator("[data-paid-line]").filter({ visible: true });
     await expect(line).toHaveText("Plus de place et de durée avec Plus et Pro, bientôt");
-    const r = (await line.evaluate((e) => {
-      const b = e.getBoundingClientRect();
-      const a = getComputedStyle(e, "::after");
-      return { h: b.height - parseFloat(a.top) - parseFloat(a.bottom) };
-    }));
-    expect(r.h).toBeGreaterThanOrEqual(44); // cible d'appui (::after)
+    expect((await line.boundingBox())!.height).toBeGreaterThanOrEqual(44); // cible d'appui (audit M21)
     const opts = await options(page, isMobile);
     await expect(opts.getByRole("radio", { name: "12 h" })).toBeChecked();
     if (isMobile) await page.keyboard.press("Escape");
