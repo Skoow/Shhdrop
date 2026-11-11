@@ -11,6 +11,12 @@ describe("readLink (spec §32 : lien à la racine)", () => {
     expect(readLink(`${O}/#m${KEY}`, "m", "/")).toEqual({ kind: "m", link: `${O}/#m${KEY}` });
   });
 
+  it("clé de partage qui commence par « m » (une fois sur 64) : partage, pas gestion ni « incomplet »", () => {
+    const mKey = "m" + KEY.slice(1);
+    expect(readLink(`${O}/#${mKey}`, "s", "/")).toEqual({ kind: "s", link: `${O}/#${mKey}` });
+    expect(readLink(`${O}/#m${mKey}`, "m", "/")).toEqual({ kind: "m", link: `${O}/#m${mKey}` });
+  });
+
   it("sans # ou avec # vide → incomplet", () => {
     expect(readLink(`${O}/`, "s", "/")).toEqual({ kind: "incomplete" });
     expect(readLink(`${O}/#`, "s", "/")).toEqual({ kind: "incomplete" });

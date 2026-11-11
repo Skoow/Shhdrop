@@ -154,6 +154,19 @@ describe("liens : TypeScript = vecteurs = moteur (126 cas)", () => {
     expect(n).toBe(58);
   });
 
+  it("linkForm : genre (partage ou gestion) comme le moteur, quel que soit le PREMIER caractère de la clé (une clé de partage commençant par « m » reste un partage)", () => {
+    const tail = "DEyMzQ1Njc4OTo7PD0-P0BBQkNERUZHSElKS0xNTkA"; // 42 caractères, dernier canonique
+    for (const ch of "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") {
+      for (const [pre, kind] of [["#", "s"], ["#m", "m"]] as const) {
+        const url = `https://x.test/${pre}${ch}${tail}`;
+        const f = P.linkForm(url, "/");
+        expect({ kind: f.kind, key: f.key }, url).toEqual({ kind, key: ch + tail });
+        const p = W.parseLink(utf8(url), "/") as { kind: string };
+        expect(p.kind, url).toBe(kind);
+      }
+    }
+  });
+
   it("linkForm : tout dernier caractère non canonique refusé, comme le moteur (balayage des 64 caractères)", () => {
     const head = "MDEyMzQ1Njc4OTo7PD0-P0BBQkNERUZHSElKS0xNTk";
     for (const ch of "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") {

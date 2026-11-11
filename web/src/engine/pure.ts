@@ -413,9 +413,12 @@ export function linkForm(url: string, base = "/"): LinkForm {
   }
   if (!allowedScheme(u) || u.username !== "" || u.password !== "") throw invalid();
   if (u.pathname !== base && u.pathname + "/" !== base) throw invalid();
-  const key = SHARE_FRAGMENT.test(u.hash) ? u.hash.slice(1) : MANAGE_FRAGMENT.test(u.hash) ? u.hash.slice(2) : null;
-  if (key === null || key.length !== KEY_CHARS || !canonical(key)) throw invalid();
-  return { kind: u.hash.startsWith("#m") ? "m" : "s", origin: u.origin, key };
+  // Le genre vient de la forme entière (longueur), jamais du seul « m » de tête : une clé de
+  // partage commence par « m » une fois sur 64 (« #m » + 42 caractères = partage).
+  const kind = SHARE_FRAGMENT.test(u.hash) ? "s" : MANAGE_FRAGMENT.test(u.hash) ? "m" : null;
+  const key = kind === "s" ? u.hash.slice(1) : kind === "m" ? u.hash.slice(2) : null;
+  if (kind === null || key === null || key.length !== KEY_CHARS || !canonical(key)) throw invalid();
+  return { kind, origin: u.origin, key };
 }
 
 /**
