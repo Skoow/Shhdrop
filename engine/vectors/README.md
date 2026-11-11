@@ -92,3 +92,26 @@ Notes à l'usage des apps :
 
 - **Note (`kind: text`) au scellement** : le moteur refuse au manifeste une note que le lecteur refuserait (UTF-8 strict, au plus 100 000 points de code, `texte_invalide` / `texte_trop_long`, audit M6). Le scelleur garde le verdict du texte qu'il a chiffré (`ElementSealer::check_note`) ; une app passe par `FinalEntry::note(&scelleur, nom, type)` et `FinalEntry::file(…)`, qui prennent aussi la taille, la place et la graine du scelleur. La couche WebAssembly fait la même vérification dans `sealFinal`.
 - **Mot de passe à l'ouverture** : blancs ASCII de bord (espace, tabulation, retour chariot, saut de ligne) retirés avant NFC et Argon2id (`kdf::trim_password`) ; rien d'autre n'est retiré.
+
+# Vecteurs du salon (`salon-v3.json`)
+
+Référence octet pour octet du moteur du salon (`engine/salon`) : clés, trames, messages, texte, pseudonymes, effacement, codes de vérification. **Produit par le moteur Rust** : `engine/salon/tests/vecteurs.rs` l'écrit (`SHH_GEN_SALON=1 cargo test -p shhdrop-salon --test vecteurs`), de façon déterministe, puis le relit. Sans la variable, le test échoue si le fichier n'est plus exactement celui que le moteur produit, et rejoue chaque cas à partir de ses seules entrées. Le site (WebAssembly) et les apps doivent le rejouer. Un changement voulu du format demande un nouveau fichier (`salon-v4.json`) ; régénérer celui-ci n'est permis que pour ajouter des cas, après relecture du diff.
+
+Mêmes conventions que `v2.json` (hex minuscule, JSON à clés triées, 2 espaces, LF final, `{ "error": "<message exact>" }`, règle anti-détecteur de secrets vérifiée avant commit : tout est en hex, y compris les trames, et les messages ne donnent leurs octets qu'en hex). Les entrées « dérivées » viennent de SHA-256 d'une étiquette : bloc i = SHA-256(UTF-8(`shhdrop/vecteurs/salon-v3/` + étiquette) ‖ i sur 4 octets gros-boutistes), blocs mis bout à bout ; les valeurs obtenues sont écrites dans chaque cas.
+
+Octets décrits (`charge`, `bytes`, `in`) : `{"hex"}`, `{"utf8"}`, `{"repeat": {"unit" (hex), "n", "then" (hex, facultatif)}}` ou `{"xorshift32": {"seed", "len"}}` (comme dans `v2.json`). Les textes sont en hex UTF-8 : les invisibles et les caractères de contrôle restent lisibles. Une sortie de texte est `out_hex`, ou `out_len` et `out_sha256` quand elle dépasse 256 octets.
+
+| Clé | Contenu |
+|---|---|
+| `constants` | Tailles (trame 4 140, `O` 4 095, charge 4 093, JSON 3 900), bornes du texte et du pseudonyme, et **`unicode`** : version d'Unicode de chaque table (`unicode-normalization`, `unicode-segmentation`, `unicode-script`, `unicode-security` : leur constante `UNICODE_VERSION` ; liste emoji `emoji-test` 15.0 ; tables écrites à la main 15.1 ; tables `char` de la bibliothèque standard de la chaîne d'outils épinglée). Le test compare ces valeurs aux crates : monter l'une d'elles, c'est relire les cas `texte` et `pseudo` avant de régénérer. |
+| `cles` | `k_lien`, `k_mdp` → `k_acces`, `v_acces`, `k_preuve`, `v_preuve`, `k_trame`, `tag`. |
+| `trames.seal` | Clés, `en_tete` (`volatile`, `regle` 0 à 3), `charge`, `nonce` → `seal.trame_hex` (ou `trop_grand`), puis `read_header` et `open` de la trame obtenue (charge rendue en `charge_hex`). |
+| `trames.reject` | Une trame de `trames.seal` (`from`) altérée (`mutation` : `xor` d'un octet, `truncate`, `append`, `autre_mdp`) → `read_header` (`en_tete_invalide` si l'en-tête est illisible) et `open` (toujours `trame_corrompue`). |
+| `messages.encode` | Enveloppe `{id, t, e, message}` (identifiants et graines en hex ; sur le fil, ils sont en base64url) → `encoded_hex` et `len`, ou erreur ; le test relit l'octet obtenu avec le décodeur et retrouve l'enveloppe. Refus : texte non nettoyé, JSON de plus de 3 900 octets (échappement des guillemets), valeurs hors bornes. |
+| `messages.decode` | Octets → `envelope` (`k: "inconnu"` pour une sorte inconnue, ignorée sans erreur) ou `message_invalide` (clé répétée, champ en trop ou manquant, version, type, UTF-8, octets après l'objet, plus de 4 093 octets…). |
+| `texte` | `nettoyer_texte` : NFC, retraits (inversions de sens U+202E…, contrôles, étiquettes sauf dans un drapeau de la liste emoji 15.0), limites de 2 000 graphèmes et 3 500 octets. |
+| `pseudo` | `verifier_pseudo` et `cle_unicite` (`key_hex`) ; les cas d'un même `same_key_as` donnent la même clé, et seulement eux (ou ceux qui donnent le même pseudonyme). |
+| `effacement` | `etat` : règle, instants, `moi_expediteur`, `vu_par_moi_ms`, `encore_dans_conversation`, `lu_par_tous` → `visible`, `rebours` (`fin_ms`) ou `efface` ; cas nommés (bornes à ± 1 ms, saturation) puis grille complète. |
+| `empreinte` | Clé publique Ed25519 → code de vérification (`code_verification`, 4 groupes de 5 chiffres). |
+
+MLS n'est pas dans le fichier (aléa interne d'OpenMLS) : la même version d'OpenMLS dans le site et les apps garantit l'identité ; un test croisé natif ↔ WebAssembly le prouve. `emoji_valide` n'est pas exposée : elle est couverte par les cas `reaction_*` de `messages.encode`.

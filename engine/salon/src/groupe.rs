@@ -51,6 +51,22 @@ const SUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed2
 const SFRAME: &str = "shhdrop/v2/salon/sframe";
 /// Préfixe du code de vérification (spec v3 §9, point 4).
 const VERIF: &[u8] = b"shhdrop/v2/salon/verif";
+
+/// Code de vérification d'une clé publique Ed25519 (spec v3 §9, point 4) : SHA-256(« shhdrop/v2/salon/verif »
+/// ‖ clé), quatre `u32` gros-boutistes pris modulo 100 000, 5 chiffres chacun, séparés par une espace.
+pub fn code_verification(cle_publique: &[u8; 32]) -> String {
+    let mut entree = VERIF.to_vec();
+    entree.extend_from_slice(cle_publique);
+    let h = sha256(&entree);
+    let groupes: Vec<String> = h[..16]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| format!("{:05}", u32::from_be_bytes(*c) % 100_000))
+        .collect();
+    groupes.join(" ")
+}
+
 /// Credential basique : siège (1 octet) ‖ `nonce_arrivee` (16 octets).
 const TAILLE_CREDENTIAL: usize = 17;
 
@@ -913,16 +929,13 @@ impl Salon {
             .members()
             .find(|m| lire_credential(&m.credential).is_ok_and(|(s, _)| s == siege))
             .ok_or(Error::SiegeInconnu)?;
-        let mut entree = VERIF.to_vec();
-        entree.extend_from_slice(&membre.signature_key);
-        let h = sha256(&entree);
-        let groupes: Vec<String> = h[..16]
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|c| format!("{:05}", u32::from_be_bytes(*c) % 100_000))
-            .collect();
-        Ok(groupes.join(" "))
+        Ok(code_verification(
+            membre
+                .signature_key
+                .as_slice()
+                .try_into()
+                .map_err(|_| Error::MlsInterne)?,
+        ))
     }
 
     /// Sièges des membres actuels, en ordre croissant (vide hors du groupe).

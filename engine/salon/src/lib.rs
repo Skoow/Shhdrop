@@ -17,7 +17,7 @@ mod trame;
 pub use cles::{CleAcces, ClesSalon, cle_acces, cles_salon};
 pub use effacement::{Etat, etat};
 pub use error::{Error, Result};
-pub use groupe::{Evenement, Identite, Salon, nouvelle_identite};
+pub use groupe::{Evenement, Identite, Salon, code_verification, nouvelle_identite};
 pub use message::{
     Enveloppe, Graine, IdMessage, JSON_MAX, Message, RefPiece, SortePiece, decoder, encoder,
     est_volatile,
