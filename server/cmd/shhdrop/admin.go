@@ -34,7 +34,7 @@ func runAdmin(args []string, cfg config.Config, stdin io.Reader, stdout, stderr 
 		return 2
 	}
 	fail := func(err error) int {
-		fmt.Fprintln(stderr, "erreur:", err)
+		fmt.Fprintln(stderr, "erreur:", publicMessage(err)) // jamais une erreur système (audit F3)
 		return 1
 	}
 	if len(args) == 0 {
@@ -155,11 +155,11 @@ var adminKillWait = 3 * time.Second
 // adminDataDir : chemin absolu d'un dossier existant qui contient shares.db.
 func adminDataDir(dir string) (string, error) {
 	if !filepath.IsAbs(dir) {
-		return "", fmt.Errorf("SHH_DATA_DIR doit être un chemin absolu (dossier contenant shares.db) : %q", dir)
+		return "", shownf("SHH_DATA_DIR doit être un chemin absolu (dossier contenant shares.db) : %q", dir)
 	}
 	fi, err := os.Stat(filepath.Join(dir, "shares.db"))
 	if err != nil || !fi.Mode().IsRegular() {
-		return "", fmt.Errorf("SHH_DATA_DIR %s ne contient pas shares.db : mauvais dossier ? (rien n'a été fait)", dir)
+		return "", shownf("SHH_DATA_DIR %s ne contient pas shares.db : mauvais dossier ? (rien n'a été fait)", dir)
 	}
 	return dir, nil
 }

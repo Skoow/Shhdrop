@@ -37,7 +37,7 @@ func staticHandler(dir string) (http.Handler, error) {
 	}
 	if fi, err := root.Stat("index.html"); err != nil || !fi.Mode().IsRegular() {
 		root.Close()
-		return nil, fmt.Errorf("SHH_STATIC_DIR %s : index.html absent", dir)
+		return nil, shownf("SHH_STATIC_DIR %s : index.html absent", dir)
 	}
 	fsys := root.FS()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

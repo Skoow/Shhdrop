@@ -28,34 +28,82 @@ import (
 	"github.com/skoow/shhdrop/server/internal/token"
 )
 
-func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: shhdrop serve|admin")
-		os.Exit(2)
+func main() { os.Exit(runCmd(os.Args, os.Stdout, os.Stderr)) }
+
+// serveFn : serve (variable pour les tests).
+var serveFn = serve
+
+// runCmd : commande args[1]. Rien de ce que le programme ne maîtrise pas n'est recopié sur
+// stderr (audit F3, F4) : ni l'argument reçu (il peut contenir un lien collé par erreur), ni
+// une erreur système (son chemin peut contenir l'identifiant interne d'un partage), voir
+// publicMessage. Les erreurs de configuration (config.FromEnv) ne reprennent que les valeurs
+// données par l'exploitant.
+func runCmd(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprintln(stderr, "usage: shhdrop serve|admin")
+		return 2
 	}
-	switch os.Args[1] {
+	switch args[1] {
 	case "serve":
 		cfg, err := config.FromEnv()
-		if err == nil {
-			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
-			err = serve(ctx, cfg, os.Stdout)
-			stop()
-		}
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "erreur:", err)
-			os.Exit(1)
+			fmt.Fprintln(stderr, "erreur:", err)
+			return 1
 		}
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+		err = serveFn(ctx, cfg, stdout)
+		stop()
+		if err != nil {
+			fmt.Fprintln(stderr, "erreur:", publicMessage(err))
+			return 1
+		}
+		return 0
 	case "admin":
 		cfg, err := config.FromEnv()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "erreur:", err)
-			os.Exit(1)
+			fmt.Fprintln(stderr, "erreur:", err)
+			return 1
 		}
-		os.Exit(runAdmin(os.Args[2:], cfg, os.Stdin, os.Stdout, os.Stderr))
+		return runAdmin(args[2:], cfg, os.Stdin, stdout, stderr)
 	default:
-		fmt.Fprintf(os.Stderr, "commande inconnue: %s\n", os.Args[1])
-		os.Exit(2)
+		fmt.Fprintln(stderr, "commande inconnue ; usage: shhdrop serve|admin")
+		return 2
 	}
+}
+
+// shownError : message écrit pour l'exploitant (règle de configuration, consigne), sûr à
+// afficher : il ne reprend que des valeurs de la configuration, jamais une erreur système.
+type shownError struct{ msg string }
+
+func (e shownError) Error() string { return e.msg }
+
+func shown(msg string) error { return shownError{msg} }
+
+func shownf(format string, a ...any) error { return shownError{fmt.Sprintf(format, a...)} }
+
+// publicMessage : texte d'une erreur pour stderr. Un message écrit pour l'exploitant
+// (shownError, store.ErrNewerSchema, blob.ErrNoAllocate) est rendu tel quel ; toute autre
+// erreur (système, base) est remplacée par un message fixe : son texte peut contenir un
+// chemin de fichier de partage, donc un identifiant interne (spec §9.4, §36).
+func publicMessage(err error) string {
+	var s shownError
+	switch {
+	case errors.As(err, &s):
+		return s.msg
+	case errors.Is(err, store.ErrNewerSchema), errors.Is(err, store.ErrCheckpointBusy), errors.Is(err, blob.ErrNoAllocate):
+		return firstKnown(err).Error()
+	}
+	return "échec (erreur système, détail non affiché : il peut contenir un identifiant de partage)"
+}
+
+// firstKnown : l'erreur connue de publicMessage contenue dans err.
+func firstKnown(err error) error {
+	for _, k := range []error{store.ErrNewerSchema, store.ErrCheckpointBusy, blob.ErrNoAllocate} {
+		if errors.Is(err, k) {
+			return k
+		}
+	}
+	return err
 }
 
 func randomKey() ([]byte, error) {
@@ -97,7 +145,7 @@ func prepareDataDir(dir string) error {
 	db, err1 := os.Stat(filepath.Join(dir, "shares.db"))
 	blobs, err2 := os.Stat(filepath.Join(dir, "blobs"))
 	if err1 != nil || err2 != nil || !db.Mode().IsRegular() || !blobs.IsDir() {
-		return fmt.Errorf("SHH_DATA_DIR %s n'est pas vide et ne contient pas shares.db et blobs/ : refus "+
+		return shownf("SHH_DATA_DIR %s n'est pas vide et ne contient pas shares.db et blobs/ : refus "+
 			"(dossier d'un autre programme ?) ; indiquer un dossier vide ou celui de Shhdrop", dir)
 	}
 	return nil
@@ -118,7 +166,7 @@ func checkStorage(dataDir string, max int64, used int64) error {
 	}
 	avail := free + uint64(used)
 	if avail < storageMargin || uint64(max) > avail-storageMargin {
-		return fmt.Errorf("SHH_STORAGE_MAX (%d octets) dépasse l'espace utilisable de %s "+
+		return shownf("SHH_STORAGE_MAX (%d octets) dépasse l'espace utilisable de %s "+
 			"(%d libres + %d déjà réservés − 1 Gio de marge) : réduire SHH_STORAGE_MAX ou agrandir le disque",
 			max, dataDir, free, used)
 	}
@@ -170,7 +218,7 @@ func newHTTPServer(h http.Handler) *http.Server {
 // Seule sortie sur out : « SHH_LISTENING <hôte:port> » une fois l'écoute ouverte.
 func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if !filepath.IsAbs(cfg.DataDir) {
-		return errors.New("SHH_DATA_DIR doit être un chemin absolu")
+		return shown("SHH_DATA_DIR doit être un chemin absolu")
 	}
 	// Site vérifié avant de toucher au dossier de données.
 	static := placeholder()
