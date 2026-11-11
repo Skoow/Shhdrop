@@ -17,14 +17,13 @@ use core::fmt;
 use core::future::Future;
 use core::ops::{Deref, DerefMut};
 use std::rc::Rc;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
-/// Gros tampon d'octets secrets (lot de 4 Mio au plus), mis à zéro à sa destruction, capacité
-/// comprise, comme `Zeroizing<Vec<u8>>` ; mais d'un seul `fill(0)` (memset) suivi de
-/// [`zeroize::optimization_barrier`], qui interdit au compilateur de retirer l'effacement.
-/// `Zeroizing` écrit octet par octet en volatile : ≈ 5 Go/s en WebAssembly, le quart du
-/// surcoût du moteur sur le site (perf-report.md du 11 novembre). Comme pour `Zeroizing`, ne
-/// pas dépasser la capacité réservée (une réallocation laisserait une copie non effacée).
+/// Gros tampon d'octets secrets (lot de 4 Mio au plus), mis à zéro une seule fois à sa
+/// destruction, capacité comprise, par l'effacement volatile de zeroize (`Vec::zeroize`, comme
+/// `Zeroizing<Vec<u8>>`). Type à part pour porter [`Opened`] et pour qu'aucun chemin n'efface
+/// deux fois le même tampon. Ne pas dépasser la capacité réservée (une réallocation laisserait
+/// une copie non effacée).
 #[derive(Default)]
 pub struct SecretBuf(Vec<u8>);
 
@@ -50,11 +49,8 @@ impl DerefMut for SecretBuf {
 
 impl Drop for SecretBuf {
     fn drop(&mut self) {
-        let v = &mut self.0;
-        v.fill(0);
-        // Capacité au-delà de la longueur : remplie de zéros elle aussi.
-        v.resize(v.capacity(), 0);
-        zeroize::optimization_barrier(v.as_slice());
+        // Écriture volatile (zeroize) : éléments et capacité libre, une seule fois.
+        self.0.zeroize();
     }
 }
 

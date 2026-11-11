@@ -16,3 +16,19 @@ done
 ```
 
 `--ref` construit banc et site depuis cette révision dans un `git worktree` temporaire (supprimé ensuite). Comparer les médianes des tours ; ne pas lancer d'autre charge pendant la mesure.
+
+## Mesurer l'ancien moteur TypeScript (depuis `0d8edb7`)
+
+`--ref` relie le `node_modules` de l'arbre courant au worktree temporaire. Depuis `0d8edb7`, ce `node_modules` n'a plus libsodium : une révision antérieure (moteur TypeScript) ne se construit plus avec `--ref`. On mesure donc l'ancien moteur depuis un worktree permanent qui a ses propres paquets, avec son propre `run.mjs` (identique, sans `--ref`) :
+
+```
+git worktree add --detach /chemin/old a693d33       # dernier commit du moteur TypeScript
+(cd /chemin/old/web && npm ci --ignore-scripts)     # paquets de son package-lock (libsodium compris)
+for i in 1 2 3; do
+  node /chemin/old/web/bench/run.mjs avant-$i.json   # ancien moteur
+  node web/bench/run.mjs apres-$i.json               # arbre courant
+done
+git worktree remove --force /chemin/old
+```
+
+`bench.ts` et `run.mjs` sont les mêmes dans les deux arbres ; seuls `api.ts` et `vite.config.ts` du banc changent avec le moteur.
