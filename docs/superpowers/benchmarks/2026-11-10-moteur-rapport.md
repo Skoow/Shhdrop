@@ -52,3 +52,17 @@ Même méthode, 3 tours alternés contre le même ancien moteur (`a693d33`), sur
 | Poids pour envoyer et ouvrir (octets brotli) | 341 304 | 338 810 | −0,7 % | gagné |
 
 Tours avant / après : chiffrer 221,5 / 218,8 / 231,4 contre 234,6 / 243,9 / 236,8 ; ouvrir 426,1 / 418,6 / 409,3 contre 505,3 / 503,5 / 505,3 ; Argon2id 268 / 252 / 241 contre 235 / 199 / 195 ms. Chaque tour du moteur Rust bat encore chaque tour de l'ancien. La machine était plus chargée que lors de la première mesure (l'ancien moteur y est lui aussi un peu plus lent) ; les écarts restent du même ordre. **Critère toujours tenu.**
+
+### Rust 1.97.0 contre Rust 1.99.1 (même moteur, comparaison directe)
+
+3 tours alternés, `3a75bc1` (Rust 1.97.0, Node 22.23.4) contre `a7164eb` (Rust 1.99.1, Node 26.13.0) :
+
+| Mesure | Rust 1.97.0 | Rust 1.99.1 | Écart |
+|---|---|---|---|
+| Chiffrer (Mio/s) | 232,2 (223,5 / 232,2 / 244,5) | 235,8 (235,8 / 230,3 / 242,1) | +1,5 % (dans le bruit) |
+| Ouvrir (Mio/s) | 498,1 (503,7 / 482,1 / 498,1) | 498,4 (494,6 / 498,4 / 498,8) | 0 % |
+| Argon2id (ms) | 208 (212 / 194 / 208) | 218 (218 / 214 / 219) | **+4,8 % (plus lent)** |
+| Argon2id, premier appel (ms) | 227 | 264 | +16 % (très dispersé : 236 à 313) |
+| Poids (octets brotli) | 339 090 | 338 801 | −0,1 % |
+
+Chiffrer et ouvrir : identiques. Argon2id : environ 10 ms de plus avec Rust 1.99.1, juste sous la marge de 5 % ; les tours se chevauchent à peine. Le moteur reste nettement plus rapide que l'ancien moteur TypeScript (199 à 218 ms contre 241 à 268 ms). Rust 1.99.1 est gardé (dernière version, correctifs du compilateur) ; à remesurer à la prochaine montée de Rust.
