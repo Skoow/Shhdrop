@@ -57,7 +57,7 @@ COPY --from=engine /out/pkg ./src/engine/pkg
 RUN SHH_ENGINE_PREBUILT=1 npm run build && node scripts/check-dist.mjs
 
 # --- Serveur ----------------------------------------------------------------------------
-FROM golang:1.27.3-alpine@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18 AS server
+FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS server
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-mod=readonly
 WORKDIR /src/server
 COPY server/go.mod server/go.sum ./

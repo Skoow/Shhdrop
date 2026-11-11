@@ -37,7 +37,10 @@ jobs:
       - run: make test-engine
       # cargo-audit compilé ici, sans cache (même raison que wasm-bindgen : .github/actions/
       # engine-toolchain), par le Rust épinglé. --deny warnings : un avis « non maintenu »,
-      # « unsound » ou une version retirée (yanked) échoue aussi.
+      # « unsound » ou une version retirée (yanked) échoue aussi. Si un avis tombe : mettre à jour
+      # la dépendance (cargo update -p <crate>, tests). Sans correctif publié, l'ignorer exige une
+      # décision du propriétaire, notée dans engine/.cargo/audit.toml ([advisories] ignore =
+      # ["RUSTSEC-…"], avec la raison et une date de réexamen) ; jamais d'ignore silencieux.
       - name: cargo audit
         env:
           CHANNEL: ${{ steps.toolchain.outputs.channel }}
@@ -72,7 +75,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
+          # Pas de cache Go ici : ces jobs exécutent le code npm, qui pourrait l'empoisonner.
+          cache: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: web/.node-version
@@ -89,7 +93,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
+          # Pas de cache Go ici : ces jobs exécutent le code npm, qui pourrait l'empoisonner.
+          cache: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: web/.node-version
@@ -172,7 +177,8 @@ jobs:
         run: |
           docker build -f deploy/Dockerfile --target engine-pkg --output "type=local,dest=$RUNNER_TEMP/image" .
           grep '  pkg/' sums/SHA256SUMS > "$RUNNER_TEMP/ci.sums"
-          [ "$(wc -l < "$RUNNER_TEMP/ci.sums")" -eq 4 ] || { echo "4 fichiers pkg/ attendus dans SHA256SUMS" >&2; exit 1; }
+          # Liste vide = rien à comparer : échec. Le diff compare ensuite la liste entière.
+          [ -s "$RUNNER_TEMP/ci.sums" ] || { echo "aucun fichier pkg/ dans SHA256SUMS" >&2; exit 1; }
           (cd "$RUNNER_TEMP/image" && find pkg -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$RUNNER_TEMP/image.sums"
           diff "$RUNNER_TEMP/ci.sums" "$RUNNER_TEMP/image.sums"
           echo "pkg de l'image identique à celui de la CI :"; cat "$RUNNER_TEMP/image.sums"

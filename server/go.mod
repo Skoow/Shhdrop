@@ -2,7 +2,7 @@ module github.com/skoow/shhdrop/server
 
 go 1.26.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/altcha-org/altcha-lib-go v1.0.0
