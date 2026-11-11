@@ -20,6 +20,7 @@ use crate::error::{Error, Result};
 use crate::kdf::{hkdf, sha256};
 use crate::keys::{KLien, KMdp, KPreuve, Seed};
 use crate::platform::{Key, NONCE_LEN, Platform, TAG_LEN};
+use core::cell::Cell;
 use hmac::{KeyInit, Mac};
 use std::rc::Rc;
 use subtle::ConstantTimeEq;
@@ -34,9 +35,23 @@ pub const ENVELOPE_LEN: usize = NONCE_LEN + SEED_LEN + TAG_LEN;
 const ENV_AD: &[u8] = b"shhdrop/v2/enveloppe-ad";
 
 /// Clés de contenu d'un paquet : K_contenu (tenue par le fournisseur) et engagement (32 octets).
+/// Construites seulement par [`content_keys`] et [`content_keys_checked`] (champ privé).
 pub struct ContentKeys<P: Platform> {
     pub k_contenu: Key<P>,
     pub engagement: [u8; 32],
+    /// Vrai dès que K_contenu a chiffré un manifeste (`elements::seal_final`) : une K_contenu
+    /// n'en chiffre qu'un, sous un nonce fixe (nonce(B − 1, dernier)).
+    manifest_sealed: Cell<bool>,
+}
+
+impl<P: Platform> ContentKeys<P> {
+    /// Réserve K_contenu pour l'unique manifeste ; `cle_deja_utilisee` la seconde fois.
+    pub(crate) fn use_for_manifest(&self) -> Result<()> {
+        if self.manifest_sealed.replace(true) {
+            return Err(Error::CleDejaUtilisee);
+        }
+        Ok(())
+    }
 }
 
 /// Clés tirées du lien et du mot de passe : K_env (tenue par le fournisseur), K_preuve, V_preuve.
@@ -91,6 +106,7 @@ pub async fn content_keys<P: Platform>(p: &Rc<P>, r: &Seed) -> Result<ContentKey
     Ok(ContentKeys {
         k_contenu,
         engagement,
+        manifest_sealed: Cell::new(false),
     })
 }
 

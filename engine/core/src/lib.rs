@@ -3,6 +3,7 @@
 //! l'aléa et l'AES-GCM sont fournis par la plateforme.
 #![forbid(unsafe_code)]
 
+pub mod elements;
 pub mod encoding;
 pub mod envelope;
 mod error;

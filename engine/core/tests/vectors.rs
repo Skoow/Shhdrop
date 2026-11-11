@@ -1,6 +1,7 @@
 // Rejoue les sections `encoding`, `password`, `link`, `hkdf`, `sha256`, `argon2id`, `access`,
-// `content`, `envelope`, `constants`, `header`, `nonce`, `manifest` (texte JSON exact) et, de
-// `sizing`, `bucketFor`, `segmentCount` et `segmentSize` de engine/vectors/v2.json (produites par l'ancien moteur TypeScript) :
+// `content`, `envelope`, `constants`, `header`, `nonce`, `manifest` (texte JSON exact),
+// `sizing` (toutes ses fonctions), `element`, `manifest` (sealFinal) et `share` (pièces, en-tête,
+// morceau du manifeste, segments assemblés) de engine/vectors/v2.json (produites par l'ancien moteur TypeScript) :
 // chaque cas, sans exception, doit redonner la même sortie ou le même message d'erreur.
 mod support;
 
@@ -650,5 +651,289 @@ fn manifest_json_cases() {
             assert_eq!(m, manifest_of(c), "{}", c["name"]);
         }
         assert_eq!(*manifest::to_json(&m), want, "{}", c["name"]);
+    }
+}
+
+/// Entrée entière d'un cas, ou `None` pour une entrée propre à JavaScript (négative, non
+/// entière) : sans objet en `u64` (README, « Écarts propres à JavaScript »).
+fn input_u64(c: &Value) -> Option<u64> {
+    c["input"].as_u64()
+}
+
+#[test]
+fn sizing_element_cases() {
+    use shhdrop_core::elements::{
+        chunks_for, footprint_for, is_small, reservation_for, segments_for, segments_needed,
+    };
+    let v = vectors();
+    let s = &v["sizing"];
+    let (mut replayed, mut not_applicable) = (0, 0);
+    for (name, f) in [
+        (
+            "segmentsFor",
+            segments_for as fn(u64) -> shhdrop_core::Result<u64>,
+        ),
+        ("chunksFor", chunks_for),
+        ("footprintFor", footprint_for),
+    ] {
+        for c in s[name].as_array().unwrap() {
+            let Some(n) = input_u64(c) else {
+                assert_eq!(c["error"], "taille_invalide", "{c}");
+                not_applicable += 1;
+                continue;
+            };
+            check(c, f(n), |r| r.as_u64().unwrap());
+            replayed += 1;
+        }
+    }
+    for c in s["isSmall"].as_array().unwrap() {
+        let Some(n) = input_u64(c) else {
+            not_applicable += 1; // -1 et 0.5 : impossibles en u64
+            continue;
+        };
+        assert_eq!(is_small(n), c["result"].as_bool().unwrap(), "{c}");
+        replayed += 1;
+    }
+    for c in s["reservationFor"].as_array().unwrap() {
+        let Some(n) = input_u64(c) else {
+            assert_eq!(c["error"], "trop_gros", "{c}");
+            not_applicable += 1;
+            continue;
+        };
+        check(c, reservation_for(n), |r| r.as_u64().unwrap() as u32);
+        replayed += 1;
+    }
+    for c in s["segmentsNeeded"].as_array().unwrap() {
+        let sizes: Vec<u64> = c["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_u64().unwrap())
+            .collect();
+        check(c, segments_needed(&sizes), |r| r.as_u64().unwrap());
+        replayed += 1;
+    }
+    assert_eq!(
+        (replayed, not_applicable),
+        (12 * 3 + 12 + 514 + 11, 2 * 3 + 2 + 2)
+    );
+}
+
+#[test]
+fn element_cases() {
+    use shhdrop_core::elements::{ElementSealer, Piece};
+    let v = vectors();
+    let cases = v["element"].as_array().unwrap();
+    let (mut ok, mut refused, mut not_applicable) = (0, 0, 0);
+    for c in cases {
+        let (Some(size), Some(first)) = (c["size"].as_u64(), c["first"].as_u64()) else {
+            // `first` −1 ou 1.5 : impossible en u64.
+            assert_eq!(c["error"], "trop_gros", "{c}");
+            not_applicable += 1;
+            continue;
+        };
+        // Aléa rejoué : un refus ne tire rien (au-delà des tirages, l'aléa échoue).
+        let draws = c["random"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| unhex(d.as_str().unwrap()))
+            .collect();
+        let p = replay(draws);
+        match (block_on(ElementSealer::new(&p, size, first)), &c["error"]) {
+            (Err(e), Value::String(want)) => {
+                assert_eq!(e.to_string(), *want, "{c}");
+                refused += 1;
+            }
+            (Ok(el), Value::Null) => {
+                assert_eq!(el.k().to_vec(), hexf(c, "k"), "{c}");
+                let want: Vec<Piece> = c["pieces"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|p| Piece {
+                        seg: p["seg"].as_u64().unwrap() as u32,
+                        from: p["from"].as_u64().unwrap() as u32,
+                        chunks: p["chunks"].as_u64().unwrap() as u32,
+                    })
+                    .collect();
+                assert_eq!(el.pieces(), want, "{c}");
+                ok += 1;
+            }
+            (got, _) => panic!("{c} : obtenu {:?}", got.map(|e| e.pieces().to_vec())),
+        }
+    }
+    assert_eq!(ok + refused + not_applicable, cases.len());
+    assert!(ok >= 10 && refused >= 5, "{ok} {refused}");
+    assert_eq!(not_applicable, 2);
+}
+
+/// Entrées de `sealFinal` d'un cas (`manifest`, ou `share.items`).
+fn final_entries(entries: &Value) -> Vec<shhdrop_core::elements::FinalEntry> {
+    use shhdrop_core::elements::{FinalEntry, FinalKind};
+    entries
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| FinalEntry {
+            kind: match e["kind"].as_str().unwrap() {
+                "text" => FinalKind::Text,
+                _ => FinalKind::File(e["clean"].as_str().map(|s| Clean::from_name(s).unwrap())),
+            },
+            name: e["name"].as_str().unwrap().to_owned(),
+            mime: e["mime"].as_str().unwrap().to_owned(),
+            size: e["size"].as_u64().unwrap(),
+            first: e["first"].as_u64().unwrap(),
+            k: Zeroizing::new(key32(e["k"].as_str().unwrap())),
+        })
+        .collect()
+}
+
+#[test]
+fn seal_final_cases() {
+    use shhdrop_core::elements::seal_final;
+    let v = vectors();
+    let cases = v["manifest"].as_array().unwrap();
+    assert_eq!(cases.len(), 16);
+    let p = platform(1);
+    let mut refused = 0;
+    for c in cases {
+        let r = Seed::from_slice(&hexf(c, "r")).unwrap();
+        let keys = block_on(content_keys(&p, &r)).unwrap();
+        let got = block_on(seal_final(
+            &final_entries(&c["entries"]),
+            &keys,
+            c["rights"].as_str(),
+            c["keep_ttl_h"].as_u64(),
+        ));
+        match (&c["error"], got) {
+            (Value::String(e), Err(g)) => {
+                assert_eq!(g.to_string(), *e, "{}", c["name"]);
+                refused += 1;
+            }
+            (Value::Null, Ok(fin)) => {
+                assert_eq!(
+                    u64::from(fin.bucket),
+                    c["bucket"].as_u64().unwrap(),
+                    "{}",
+                    c["name"]
+                );
+                assert_eq!(fin.header.to_vec(), hexf(c, "header"), "{}", c["name"]);
+                assert_eq!(
+                    sha256(&fin.tail).to_vec(),
+                    hexf(c, "tail_sha256"),
+                    "{}",
+                    c["name"]
+                );
+            }
+            (_, got) => panic!("{} : obtenu {:?}", c["name"], got.map(|f| f.bucket)),
+        }
+    }
+    assert_eq!(refused, 7);
+}
+
+/// Clair d'un élément de `share` : texte UTF-8, ou flux xorshift32 (README, « Gros clairs »).
+fn share_plain(item: &Value) -> Vec<u8> {
+    let plain = &item["plain"];
+    if let Some(t) = plain["utf8"].as_str() {
+        return t.as_bytes().to_vec();
+    }
+    let x = &plain["xorshift32"];
+    let (mut s, len) = (
+        x["seed"].as_u64().unwrap() as u32,
+        x["len"].as_u64().unwrap() as usize,
+    );
+    let mut out = Vec::with_capacity(len + 4);
+    while out.len() < len {
+        s ^= s << 13;
+        s ^= s >> 17;
+        s ^= s << 5;
+        out.extend_from_slice(&s.to_le_bytes());
+    }
+    out.truncate(len);
+    out
+}
+
+#[test]
+fn share_segments_cases() {
+    use shhdrop_core::elements::{ElementSealer, seal_final};
+    let v = vectors();
+    let sh = &v["share"];
+    let mut segs: Vec<Vec<u8>> = sh["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| vec![0; s["size"].as_u64().unwrap() as usize])
+        .collect();
+    let bucket = sh["bucket"].as_u64().unwrap() as u32;
+    assert_eq!(segs.len() as u32, format::segment_count(bucket));
+    for item in sh["items"].as_array().unwrap() {
+        let plain = share_plain(item);
+        assert_eq!(sha256(&plain).to_vec(), hexf(item, "plain_sha256"));
+        let p = replay(vec![hexf(item, "k")]);
+        let el = block_on(ElementSealer::new(
+            &p,
+            item["size"].as_u64().unwrap(),
+            item["first"].as_u64().unwrap(),
+        ))
+        .unwrap();
+        let want = item["pieces"].as_array().unwrap();
+        assert_eq!(el.pieces().len(), want.len());
+        for (j, w) in want.iter().enumerate() {
+            let pc = el.pieces()[j];
+            assert_eq!(u64::from(pc.seg), w["seg"].as_u64().unwrap());
+            assert_eq!(u64::from(pc.from), w["from"].as_u64().unwrap());
+            assert_eq!(u64::from(pc.chunks), w["chunks"].as_u64().unwrap());
+            let (lo, hi) = el.range(j).unwrap();
+            let got = block_on(el.piece(j, &plain[lo as usize..hi as usize])).unwrap();
+            assert_eq!(got.len() as u64, w["len"].as_u64().unwrap());
+            assert_eq!(
+                sha256(&got).to_vec(),
+                hexf(w, "sha256"),
+                "{} pièce {j}",
+                item["name"]
+            );
+            if let Some(b) = w["b64u"].as_str() {
+                // Segment 0 : la pièce entière, octet pour octet.
+                assert_eq!(got, unb64u(b).unwrap(), "{} pièce {j}", item["name"]);
+            } else {
+                assert_eq!(got[..64].to_vec(), hexf(w, "first64"));
+                assert_eq!(got[got.len() - 64..].to_vec(), hexf(w, "last64"));
+            }
+            // Assemblage du fichier du serveur (README, `share`).
+            let at = match (pc.seg, pc.from) {
+                (0, 0) => 0,
+                (0, f) => format::HEADER + f as usize * format::CHUNK_CT,
+                (_, f) => f as usize * format::CHUNK_CT,
+            };
+            segs[pc.seg as usize][at..at + got.len()].copy_from_slice(&got);
+        }
+    }
+    // Manifeste final : en-tête et morceau du manifeste octet pour octet.
+    let r = Seed::from_slice(&hexf(sh, "r")).unwrap();
+    let p = platform(1);
+    let keys = block_on(content_keys(&p, &r)).unwrap();
+    let fin = block_on(seal_final(
+        &final_entries(&sh["items"]),
+        &keys,
+        sh["rights"].as_str(),
+        None,
+    ))
+    .unwrap();
+    assert_eq!(fin.bucket, bucket);
+    assert_eq!(fin.header.to_vec(), hexf(sh, "header"));
+    assert_eq!(fin.tail, unb64u(sh["tail"].as_str().unwrap()).unwrap());
+    assert_eq!(sha256(&fin.tail).to_vec(), hexf(sh, "tail_sha256"));
+    segs[0][..format::HEADER].copy_from_slice(&fin.header);
+    let last = segs.last_mut().unwrap();
+    let n = last.len();
+    last[n - format::CHUNK_CT..].copy_from_slice(&fin.tail);
+    for (s, w) in segs.iter().zip(sh["segments"].as_array().unwrap()) {
+        assert_eq!(
+            sha256(s).to_vec(),
+            hexf(w, "sha256_zero_filled"),
+            "segment {}",
+            w["n"]
+        );
     }
 }

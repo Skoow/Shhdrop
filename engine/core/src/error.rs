@@ -42,6 +42,25 @@ pub enum Error {
     TropGros,
     /// Droits de création inconnus, « coffre » sans durée valide, ou durée hors « coffre ».
     DroitsInvalides,
+    /// `elementSealer` : petit élément à cheval sur deux segments, ou élément d'un segment ou plus
+    /// hors d'une frontière de segment.
+    PlaceInvalide,
+    /// Pièce demandée qui n'existe pas (indice hors de `pieces`).
+    SegmentInvalide,
+    /// Pièce déjà chiffrée une fois : jamais deux chiffrements sous la même clé et le même nonce.
+    SegmentDejaProduit,
+    /// Octets lus par l'hôte qui ne font pas exactement la plage demandée (fichier modifié).
+    LectureIncomplete,
+    /// `sealFinal` : aucun élément gardé.
+    Vide,
+    /// Manifeste de plus de MANIFEST_MAX octets, ou de plus de MAX_ITEMS éléments.
+    ManifesteTropGros,
+    /// Note de plus de 4 × TEXT_MAX octets UTF-8.
+    TexteTropLong,
+    /// Deux éléments gardés qui partagent un morceau.
+    Chevauchement,
+    /// K_contenu qui a déjà chiffré un manifeste : une finalisation tire une R neuve.
+    CleDejaUtilisee,
 }
 
 impl Error {
@@ -65,6 +84,15 @@ impl Error {
             Error::TailleNonSure => "taille_invalide",
             Error::TropGros => "trop_gros",
             Error::DroitsInvalides => "droits_invalides",
+            Error::PlaceInvalide => "place_invalide",
+            Error::SegmentInvalide => "segment_invalide",
+            Error::SegmentDejaProduit => "segment_deja_produit",
+            Error::LectureIncomplete => "lecture_incomplete",
+            Error::Vide => "vide",
+            Error::ManifesteTropGros => "manifeste_trop_gros",
+            Error::TexteTropLong => "texte_trop_long",
+            Error::Chevauchement => "chevauchement",
+            Error::CleDejaUtilisee => "cle_deja_utilisee",
         }
     }
 }
@@ -114,5 +142,17 @@ mod tests {
         assert_eq!(Error::TailleNonSure.to_string(), "taille_invalide");
         assert_eq!(Error::TropGros.to_string(), "trop_gros");
         assert_eq!(Error::DroitsInvalides.to_string(), "droits_invalides");
+        assert_eq!(Error::PlaceInvalide.to_string(), "place_invalide");
+        assert_eq!(Error::SegmentInvalide.to_string(), "segment_invalide");
+        assert_eq!(
+            Error::SegmentDejaProduit.to_string(),
+            "segment_deja_produit"
+        );
+        assert_eq!(Error::LectureIncomplete.to_string(), "lecture_incomplete");
+        assert_eq!(Error::Vide.to_string(), "vide");
+        assert_eq!(Error::ManifesteTropGros.to_string(), "manifeste_trop_gros");
+        assert_eq!(Error::TexteTropLong.to_string(), "texte_trop_long");
+        assert_eq!(Error::Chevauchement.to_string(), "chevauchement");
+        assert_eq!(Error::CleDejaUtilisee.to_string(), "cle_deja_utilisee");
     }
 }
