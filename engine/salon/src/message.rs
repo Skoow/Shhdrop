@@ -5,8 +5,8 @@
 //! manquant ni de mauvais type pour une sorte connue (`message_invalide`) ; une sorte inconnue
 //! (appels futurs, autres versions) devient `Message::Inconnu` et ses champs sont ignorés.
 //! Les entiers sont des entiers JSON (`1.0` est refusé) d'au plus 2^53 − 1. Les champs optionnels
-//! (`duree_ms`, `avatar`) sont toujours présents, `null` si absents. Une clé répétée : la
-//! dernière compte (comme `JSON.parse` et `shhdrop_core::manifest`).
+//! (`duree_ms`, `avatar`) sont toujours présents, `null` si absents. Une clé répétée, à tout niveau,
+//! est refusée.
 //!
 //! Les textes, le pseudonyme et le nom doivent **déjà** être sous leur forme nettoyée
 //! (`nettoyer_texte`, `verifier_pseudo`, `nettoyer_nom`) : ni l'encodeur ni le décodeur ne
@@ -28,7 +28,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 const VERSION: u64 = 3;
 const IDS_MAX: usize = 50;
-const COULEURS: u8 = 9;
+const COULEUR_MAX: u8 = 9;
 const PALIER_MAX: u32 = 8000;
 const MIME_MAX: usize = 100;
 const SORTE_MAX: usize = 32;
@@ -202,7 +202,7 @@ fn verifier(e: &Enveloppe) -> Result<()> {
             couleur,
             avatar,
         } => {
-            if *couleur > COULEURS || avatar.as_ref().is_some_and(|a| !palier_valide(a.palier)) {
+            if *couleur > COULEUR_MAX || avatar.as_ref().is_some_and(|a| !palier_valide(a.palier)) {
                 return Err(Error::MessageInvalide);
             }
             match verifier_pseudo(pseudo) {
@@ -394,6 +394,70 @@ pub fn encoder(e: &Enveloppe) -> Result<Zeroizing<Vec<u8>>> {
 
 fn invalide<T>() -> Result<T> {
     Err(Error::MessageInvalide)
+}
+
+/// `Value` lue sans clé répétée (à tout niveau) : une clé répétée est une erreur.
+struct Strict(Value);
+
+impl<'de> serde::Deserialize<'de> for Strict {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> core::result::Result<Self, D::Error> {
+        use serde::de::{self, MapAccess, SeqAccess, Visitor};
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = Strict;
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str("une valeur JSON")
+            }
+            fn visit_bool<E>(self, b: bool) -> core::result::Result<Strict, E> {
+                Ok(Strict(Value::Bool(b)))
+            }
+            fn visit_i64<E>(self, n: i64) -> core::result::Result<Strict, E> {
+                Ok(Strict(Value::from(n)))
+            }
+            fn visit_u64<E>(self, n: u64) -> core::result::Result<Strict, E> {
+                Ok(Strict(Value::from(n)))
+            }
+            fn visit_f64<E: de::Error>(self, n: f64) -> core::result::Result<Strict, E> {
+                serde_json::Number::from_f64(n)
+                    .map(|n| Strict(Value::Number(n)))
+                    .ok_or_else(|| E::custom("nombre"))
+            }
+            fn visit_str<E>(self, s: &str) -> core::result::Result<Strict, E> {
+                Ok(Strict(Value::String(s.to_owned())))
+            }
+            fn visit_string<E>(self, s: String) -> core::result::Result<Strict, E> {
+                Ok(Strict(Value::String(s)))
+            }
+            fn visit_unit<E>(self) -> core::result::Result<Strict, E> {
+                Ok(Strict(Value::Null))
+            }
+            fn visit_seq<A: SeqAccess<'de>>(
+                self,
+                mut a: A,
+            ) -> core::result::Result<Strict, A::Error> {
+                let mut v = Vec::new();
+                while let Some(Strict(x)) = a.next_element()? {
+                    v.push(x);
+                }
+                Ok(Strict(Value::Array(v)))
+            }
+            fn visit_map<A: MapAccess<'de>>(
+                self,
+                mut a: A,
+            ) -> core::result::Result<Strict, A::Error> {
+                let mut m = Map::new();
+                while let Some(k) = a.next_key::<String>()? {
+                    if m.contains_key(&k) {
+                        return Err(de::Error::custom("clé répétée"));
+                    }
+                    let Strict(x) = a.next_value()?;
+                    m.insert(k, x);
+                }
+                Ok(Strict(Value::Object(m)))
+            }
+        }
+        d.deserialize_any(V)
+    }
 }
 
 fn effacer(v: &mut Value) {
@@ -592,7 +656,7 @@ pub fn decoder(octets: &[u8]) -> Result<Enveloppe> {
     if octets.len() > MAX_CHARGE {
         return invalide();
     }
-    let Ok(Value::Object(mut o)) = serde_json::from_slice::<Value>(octets) else {
+    let Ok(Strict(Value::Object(mut o))) = serde_json::from_slice::<Strict>(octets) else {
         return invalide();
     };
     let r = lire(&mut o);
@@ -835,6 +899,40 @@ mod tests {
     }
 
     #[test]
+    fn cle_repetee_refusee() {
+        for ko in [
+            r#"{"v":3,"v":3,"id":"BwcHBwcHBwcHBwcHBwcHBw","t":5,"e":0,"k":"ecrit"}"#,
+            r#"{"v":3,"id":"BwcHBwcHBwcHBwcHBwcHBw","t":5,"e":0,"k":"texte","x":"a","x":"b"}"#,
+            r#"{"v":3,"id":"BwcHBwcHBwcHBwcHBwcHBw","t":5,"e":0,"k":"appel","a":{"b":1,"b":2}}"#,
+            r#"{"v":3,"id":"BwcHBwcHBwcHBwcHBwcHBw","t":5,"e":0,"k":"appel","a":[{"b":1,"b":1}]}"#,
+        ] {
+            assert_eq!(
+                decoder(ko.as_bytes()).unwrap_err(),
+                Error::MessageInvalide,
+                "{ko}"
+            );
+        }
+    }
+
+    #[test]
+    fn reaction_longue_acceptee() {
+        let emoji = "👩🏽\u{200D}❤\u{FE0F}\u{200D}💋\u{200D}👨🏿".to_string();
+        let e = env(Message::Reaction {
+            cible: [1; 16],
+            emoji,
+        });
+        assert_eq!(decoder(&encoder(&e).unwrap()).unwrap(), e);
+        assert_eq!(
+            encoder(&env(Message::Reaction {
+                cible: [1; 16],
+                emoji: "a".into()
+            }))
+            .unwrap_err(),
+            Error::MessageInvalide
+        );
+    }
+
+    #[test]
     fn json_non_utf8_refuse() {
         let mut j = format!("{{{T},\"k\":\"texte\",\"x\":\"a").into_bytes();
         j.extend_from_slice(&[0xFF, 0xFE]);
@@ -915,7 +1013,7 @@ mod tests {
         );
         refuse(r#""k":"recu","ids":"x""#);
         refuse(&format!(r#""k":"recu","ids":[{id},5]"#));
-        // emoji : un graphème, 32 octets
+        // emoji : un élément de la liste emoji 15.0
         refuse(&format!(r#""k":"reaction",{c},"emoji":"👍👍""#));
         refuse(&format!(r#""k":"reaction",{c},"emoji":"""#));
         refuse(&format!(r#""k":"reaction",{c},"emoji":"\u202E""#));

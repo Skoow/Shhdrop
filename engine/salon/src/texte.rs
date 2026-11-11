@@ -1,7 +1,8 @@
 //! Règles de texte, de pseudonyme et de nom de fichier du salon. Les apps doivent faire
 //! exactement la même chose (vecteurs communs) : l'ordre des étapes fait partie du format.
 //!
-//! **Texte** (`nettoyer_texte`) : 1. NFC ; 2. retrait des contrôles (C0, DEL, C1, `\t` et `\r`
+//! **Texte** (`nettoyer_texte`) : 1. NFC ; 2. retrait des caractères « étiquette » U+E0000–E007F (sauf
+//! dans un drapeau d'émoji : U+1F3F4, étiquettes U+E0020–E007E, U+E007F) et des contrôles (C0, DEL, C1, `\t` et `\r`
 //! compris, sauf `\n`) et des inversions de sens U+202A–U+202E et U+2066–U+2069 ; 3. NFC de
 //! nouveau (un caractère retiré entre une lettre et son accent ne doit pas empêcher la
 //! composition ; sans effet sinon) ; 4. comptage : 1 à 2 000 graphèmes (UAX #29, `unicode-segmentation`)
@@ -12,8 +13,9 @@
 //! Unicode (`White_Space`) devient U+0020, regroupées et rognées ; 5. 2 à 24 graphèmes, 8 points de
 //! code au plus par graphème (contre l'empilement de marques) ; 6. seulement lettres, chiffres,
 //! marques, espace et `- _ . '` (l'apostrophe typographique U+2019 devient `'` à l'étape 2), au moins une lettre ou un chiffre ; 7. une seule écriture
-//! (UAX #24 : intersection des `Script_Extension`, comme le contrôle « une seule écriture » d'UTS #39 ;
-//! Han avec hiragana et katakana, avec bopomofo ou avec hangul sont permis comme dans UTS #39) ;
+//! (UAX #24 : intersection des `Script_Extension` de tous les caractères, **plus strict** que le niveau
+//! « Highly Restrictive » d'UTS #39, qui permet d'autres mélanges avec le latin ; seuls Han avec
+//! hiragana et katakana, avec bopomofo ou avec hangul sont permis, comme dans UTS #39) ;
 //! 8. pas d'émoji : les blocs de pictogrammes sont refusés par plages de points de code
 //! (voir `est_pictogramme`), ce qui couvre aussi chiffres entourés, lettres encerclées et drapeaux.
 //! Écarts connus : « lettre » = propriété `Alphabetic` et « chiffre » = propriété `Numeric` de la
@@ -39,10 +41,39 @@ const PSEUDO_BRUT_MAX: usize = 4096;
 const NOM_POINTS: usize = 120;
 const NOM_OCTETS: usize = 255;
 const NOM_EXT_MAX: usize = 16;
-const EMOJI_OCTETS: usize = 32;
+const EMOJI_OCTETS: usize = 64;
 
 fn est_inversion_de_sens(c: char) -> bool {
     matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Retire les caractères « étiquette » U+E0000–U+E007F (texte caché invisible), sauf dans une
+/// séquence de drapeau d'émoji : U+1F3F4, puis une ou plusieurs étiquettes U+E0020–U+E007E, puis
+/// U+E007F. Seule la structure est vérifiée (la liste des drapeaux est celle de l'émetteur).
+fn retirer_etiquettes(s: &str) -> String {
+    let v: Vec<char> = s.chars().collect();
+    let est_etiquette = |c: char| ('\u{E0020}'..='\u{E007E}').contains(&c);
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < v.len() {
+        let c = v[i];
+        if c == '\u{1F3F4}' {
+            let mut j = i + 1;
+            while j < v.len() && est_etiquette(v[j]) {
+                j += 1;
+            }
+            if j > i + 1 && v.get(j) == Some(&'\u{E007F}') {
+                out.extend(&v[i..=j]);
+                i = j + 1;
+                continue;
+            }
+        }
+        if !('\u{E0000}'..='\u{E007F}').contains(&c) {
+            out.push(c);
+        }
+        i += 1;
+    }
+    out
 }
 
 /// Texte d'un message : voir l'en-tête du module.
@@ -52,7 +83,7 @@ pub fn nettoyer_texte(s: &str) -> Result<String> {
         .chars()
         .filter(|&c| (c == '\n' || !c.is_control()) && !est_inversion_de_sens(c))
         .collect();
-    let out: String = sans.nfc().collect();
+    let out: String = retirer_etiquettes(&sans).nfc().collect();
     if out.is_empty() {
         return Err(Error::TexteInvalide);
     }
@@ -158,6 +189,14 @@ pub fn verifier_pseudo(s: &str) -> Result<String> {
         if g.chars().count() > PSEUDO_POINTS_PAR_GRAPHEME {
             return Err(Error::PseudoInvalide);
         }
+        // Une marque doit porter une lettre ou un chiffre (pas une espace, un tiret, un point…).
+        if g.chars().count() > 1
+            && g.chars()
+                .next()
+                .is_some_and(|c| !(c.is_alphabetic() || c.is_numeric()))
+        {
+            return Err(Error::PseudoInvalide);
+        }
         for (i, c) in g.chars().enumerate() {
             if est_pictogramme(c) {
                 return Err(Error::PseudoInvalide);
@@ -185,8 +224,9 @@ pub fn verifier_pseudo(s: &str) -> Result<String> {
 
 /// Clé de comparaison de deux pseudonymes : NFKC, minuscules, sans espaces ni ponctuation
 /// (seuls restent lettres, chiffres et marques). À appeler sur un pseudonyme déjà vérifié.
-/// Ne replie pas les caractères d'écritures différentes qui se ressemblent (« Alice » entier
-/// en cyrillique) : voir le rapport de la tâche 5.
+/// Les sosies sont repliés par le squelette UTS #39 (`confusables.txt`) : « Alice » en latin et
+/// « Аӏісе » entièrement en cyrillique ont la même clé ; « 0 » et « o », « 1 », « l » et « I »
+/// aussi. Les marques restent (« Léa » et « Lea » diffèrent).
 pub fn cle_unicite(pseudo: &str) -> String {
     let bas: String = pseudo.nfkc().collect::<String>().to_lowercase();
     // Squelette UTS #39 (sosies : « А » cyrillique = « A » latin, « 0 » = « O », « 1 » = « l »),
@@ -343,18 +383,11 @@ pub fn nettoyer_nom(raw: &str) -> String {
     }
 }
 
-/// Réaction : exactement un graphème, 32 octets au plus, sans contrôle ni inversion de sens
-/// ni espace seule. (Pas de liste d'émojis : « exactement un graphème », comme la spécification.)
+/// Réaction : exactement une séquence « fully-qualified » de la liste des émojis Unicode 15.0
+/// (`emoji-test.txt`, spec §39.5), rien d'autre. Le plafond d'octets évite la recherche pour
+/// une chaîne démesurée (la plus longue séquence de la liste fait 35 octets).
 pub(crate) fn emoji_valide(s: &str) -> bool {
-    s.len() <= EMOJI_OCTETS
-        && s.graphemes(true).count() == 1
-        && s.nfc().eq(s.chars())
-        && !s.chars().any(|c| {
-            c.is_control()
-                || est_inversion_de_sens(c)
-                || matches!(c, '\u{200E}' | '\u{200F}' | '\u{061C}')
-        })
-        && !s.chars().all(|c| c.is_whitespace())
+    s.len() <= EMOJI_OCTETS && crate::emoji::dans_la_liste(s)
 }
 
 #[cfg(test)]
@@ -578,15 +611,87 @@ mod tests {
 
     #[test]
     fn emoji() {
-        for ok in ["👍", "👍🏽", "❤\u{FE0F}", "👨\u{200D}👩\u{200D}👧", "🇫🇷", "a"]
-        {
+        for ok in [
+            "👍",
+            "👍🏽",
+            "❤\u{FE0F}",
+            "👨\u{200D}👩\u{200D}👧",
+            "🇫🇷",
+            "😀",
+            "🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}",
+            // 35 octets : couple avec cœur, teintes de peau différentes
+            "👩🏽\u{200D}❤\u{FE0F}\u{200D}💋\u{200D}👨🏿",
+            "1\u{FE0F}\u{20E3}",
+        ] {
             assert!(emoji_valide(ok), "{ok:?}");
         }
-        for ko in ["", "👍👍", "ab", " ", "\n", "\u{202E}", "\u{0}"] {
+        assert_eq!("👩🏽\u{200D}❤\u{FE0F}\u{200D}💋\u{200D}👨🏿".len(), 35);
+        for ko in [
+            "",
+            "a",
+            "ab",
+            "👍👍",
+            " ",
+            "\n",
+            "\u{202E}",
+            "\u{0}",
+            "😀\u{200E}",
+            "❤",                    // non qualifié (sans U+FE0F)
+            "👍\u{FE0F}",           // sélecteur en trop
+            "\u{1F3FD}",            // teinte seule
+            "👨\u{200D}",           // ZWJ pendant
+            "🏴\u{E0067}\u{E007F}", // drapeau inventé
+            "1\u{20E3}",
+        ] {
             assert!(!emoji_valide(ko), "{ko:?}");
         }
-        // 32 octets au plus
-        assert!(!emoji_valide(&format!("一{}", "\u{301}".repeat(15)))); // 3 + 30 octets
-        assert!(emoji_valide(&format!("一{}", "\u{301}".repeat(14)))); // 31 octets
+        // plafond d'octets (64) avant la recherche
+        assert!(!emoji_valide(&"👍".repeat(17)));
+    }
+
+    #[test]
+    fn texte_etiquettes_cachees() {
+        // texte caché dans des caractères « étiquette » : retiré
+        let cache = "salut\u{E0068}\u{E0069}\u{E007F}";
+        assert_eq!(nettoyer_texte(cache).unwrap(), "salut");
+        assert_eq!(
+            nettoyer_texte("\u{E0001}\u{E0041}").unwrap_err(),
+            Error::TexteInvalide
+        );
+        // drapeau d'Écosse : séquence complète gardée
+        let ecosse = "🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
+        assert_eq!(nettoyer_texte(ecosse).unwrap(), ecosse);
+        assert_eq!(
+            nettoyer_texte(&format!("a{ecosse}b")).unwrap(),
+            format!("a{ecosse}b")
+        );
+        // séquence non terminée, ou sans base : étiquettes retirées
+        assert_eq!(nettoyer_texte("🏴\u{E0067}\u{E0062}").unwrap(), "🏴");
+        assert_eq!(nettoyer_texte("a\u{E0067}\u{E007F}").unwrap(), "a");
+        // étiquettes cachées après un drapeau valide : retirées
+        assert_eq!(
+            nettoyer_texte(&format!("{ecosse}\u{E0068}")).unwrap(),
+            ecosse
+        );
+        // LRM et RLM restent
+        assert_eq!(
+            nettoyer_texte("a\u{200E}b\u{200F}").unwrap(),
+            "a\u{200E}b\u{200F}"
+        );
+    }
+
+    #[test]
+    fn pseudo_marque_sur_lettre_ou_chiffre() {
+        for ko in [
+            "a \u{301}b",
+            "a-\u{301}b",
+            "ab \u{301}",
+            "a.\u{301}b",
+            "a_\u{301}b",
+        ] {
+            assert!(verifier_pseudo(ko).is_err(), "{ko:?}");
+        }
+        assert_eq!(verifier_pseudo("a\u{301}b").unwrap(), "\u{e1}b");
+        assert!(verifier_pseudo("Zoe\u{308}").is_ok());
     }
 }

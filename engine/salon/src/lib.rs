@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 
 mod cles;
+mod emoji;
 mod error;
 mod message;
 mod stockage;
