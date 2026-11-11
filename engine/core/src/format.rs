@@ -41,7 +41,7 @@ const VERSION: u8 = 2;
 /// Palier canonique : le plus petit palier de capacité ≥ fin des données + 4 + MANIFEST_MAX.
 pub fn bucket_for(data_end: u64) -> Result<u32> {
     if data_end > MAX_SAFE {
-        return Err(Error::TailleDonneesInvalide);
+        return Err(Error::TailleNonSure);
     }
     BUCKETS
         .into_iter()
@@ -54,14 +54,14 @@ pub const fn segment_count(bucket: u32) -> u32 {
     bucket.div_ceil(SEG_CHUNKS)
 }
 
-/// Octets chiffrés du segment `n` (en-tête compris pour le segment 0). Hors palier
-/// (`n ≥ segment_count(bucket)`) : 0 morceau ; l'appelant vérifie `n` avant.
-pub fn segment_size(bucket: u32, n: u32) -> usize {
-    let first = u64::from(n) * u64::from(SEG_CHUNKS);
-    let chunks = u64::from(bucket)
-        .saturating_sub(first)
-        .min(u64::from(SEG_CHUNKS)) as usize;
-    (if n == 0 { HEADER } else { 0 }) + chunks * CHUNK_CT
+/// Octets chiffrés du segment `n` (en-tête compris pour le segment 0) ; `None` hors palier
+/// (`n ≥ segment_count(bucket)`), jamais une taille qu'un segment vide pourrait égaler.
+pub fn segment_size(bucket: u32, n: u32) -> Option<usize> {
+    if n >= segment_count(bucket) {
+        return None;
+    }
+    let chunks = (bucket - n * SEG_CHUNKS).min(SEG_CHUNKS) as usize;
+    Some((if n == 0 { HEADER } else { 0 }) + chunks * CHUNK_CT)
 }
 
 /// En-tête : « SHH2 », version 2, 11 octets nuls, engagement.

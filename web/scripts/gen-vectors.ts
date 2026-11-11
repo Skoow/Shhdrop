@@ -631,9 +631,11 @@ async function manifestCases(): Promise<Json[]> {
   // \u00xx en minuscules), puis des caractères écrits tels quels en UTF-8 : U+007F, U+0080, U+009F,
   // U+00AD, U+200B, U+FEFF, U+FFFD, U+10FFFF ; type et note aussi échappés (Task 6, octets identiques).
   const controls = Array.from({ length: 32 }, (_, i) => String.fromCharCode(i)).join("");
+  // Écrits par leurs numéros : jamais en clair dans ce fichier (invisibles, et un éditeur peut les convertir).
+  const invisibles = String.fromCodePoint(0x7f, 0x80, 0x9f, 0xad, 0x200b, 0xfeff, 0xfffd, 0x10ffff);
   await run("caractères de commande et invisibles", [
     ent(0, { kind: "text", name: `n${controls}"\\/`, mime: "text/plain;x=\"\u0000\"", size: 3, first: 0 }),
-    ent(1, { kind: "file", name: `${controls}\u007f\u0080\u009f­​﻿�\u{10ffff}`, mime: "a/b\u001b", size: 2, first: 1, clean: "protege" }),
+    ent(1, { kind: "file", name: `${controls}${invisibles}`, mime: "a/b" + String.fromCharCode(0x1b), size: 2, first: 1, clean: "protege" }),
   ], { rights: "coffre", keepTtlH: 24 });
   // Manifeste d'exactement MANIFEST_MAX octets, puis un de plus.
   const big = (n: number) => [ent(0, { kind: "file", name: "a".repeat(n), mime: "x", size: 1, first: 0 })];

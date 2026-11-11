@@ -71,13 +71,10 @@ fn paliers_canoniques() {
     assert_eq!(bucket_for(CONTENT_MAX + 1), Err(Error::TropGros));
     assert_eq!(bucket_for(format::MAX_SAFE), Err(Error::TropGros));
     // Au-delà de 2^53 − 1 (Number.isSafeInteger), comme bucketFor : « taille_invalide ».
-    assert_eq!(
-        bucket_for(format::MAX_SAFE + 1),
-        Err(Error::TailleDonneesInvalide)
-    );
-    assert_eq!(bucket_for(u64::MAX), Err(Error::TailleDonneesInvalide));
+    assert_eq!(bucket_for(format::MAX_SAFE + 1), Err(Error::TailleNonSure));
+    assert_eq!(bucket_for(u64::MAX), Err(Error::TailleNonSure));
     assert_eq!(Error::TropGros.to_string(), "trop_gros");
-    assert_eq!(Error::TailleDonneesInvalide.to_string(), "taille_invalide");
+    assert_eq!(Error::TailleNonSure.to_string(), "taille_invalide");
 }
 
 #[test]
@@ -86,21 +83,23 @@ fn segments() {
     assert_eq!(segment_count(80), 2);
     assert_eq!(segment_count(400), 7);
     assert_eq!(segment_count(16385), 257);
-    assert_eq!(segment_size(16385, 256), 65552);
+    assert_eq!(segment_size(16385, 256), Some(65552));
     assert_eq!(segment_count(32769), 513);
-    assert_eq!(segment_size(32769, 512), 65552);
+    assert_eq!(segment_size(32769, 512), Some(65552));
     assert_eq!(HEADER as u64 + 32769 * CHUNK_CT as u64, 2_148_073_536);
-    assert_eq!(segment_size(1600, 0), 48 + 64 * 65552);
-    assert_eq!(segment_size(80, 1), 16 * 65552);
+    assert_eq!(segment_size(1600, 0), Some(48 + 64 * 65552));
+    assert_eq!(segment_size(80, 1), Some(16 * 65552));
     for b in BUCKETS {
         let sum: u64 = (0..segment_count(b))
-            .map(|n| segment_size(b, n) as u64)
+            .map(|n| segment_size(b, n).unwrap() as u64)
             .sum();
         assert_eq!(sum, HEADER as u64 + u64::from(b) * CHUNK_CT as u64);
-        // Hors palier : aucun morceau (jamais de débordement ni de panique).
-        assert_eq!(segment_size(b, segment_count(b)), 0);
+        // Hors palier : None (jamais de débordement ni de panique).
+        assert_eq!(segment_size(b, segment_count(b)), None);
     }
-    assert_eq!(segment_size(16, u32::MAX), 0);
+    assert_eq!(segment_size(16, u32::MAX), None);
+    assert_eq!(segment_size(0, 0), None);
+    assert_eq!(segment_size(u32::MAX, u32::MAX / 64), Some(63 * CHUNK_CT));
     assert_eq!(segment_count(u32::MAX), u32::MAX.div_ceil(64));
 }
 
@@ -262,6 +261,25 @@ fn nombres_comme_json_parse() {
         );
         assert_eq!(open(raw.as_bytes()).unwrap().items[0].size, 0, "{lit}");
     }
+    // Arrondi au plus près, comme JSON.parse (serde_json avec float_roundtrip) : ces écritures
+    // valent un entier sûr ; « 9007199254740991.5 » vaut 2^53, refusé.
+    for (lit, want) in [
+        ("9007199254740991.0000000001", format::MAX_SAFE),
+        ("9007199254740990.9999999999", format::MAX_SAFE),
+        ("9007199254740991.4", format::MAX_SAFE),
+        ("2.00000000000000000001", 2),
+        ("5.9999999999999999999", 6),
+    ] {
+        let raw = format!(
+            r#"{{"v":2,"items":[{{"kind":"file","name":"a","mime":"","size":{lit},"offset":0}}]}}"#
+        );
+        assert_eq!(
+            parse(raw.as_bytes(), format::MAX_SAFE).unwrap().items[0].size,
+            want,
+            "{lit}"
+        );
+    }
+    corrupt(br#"{"v":2,"items":[{"kind":"file","name":"a","mime":"","size":9007199254740991.5,"offset":0}]}"#);
     // Trop grands, non entiers ou infinis (JSON.parse : Infinity) : refusés.
     for lit in [
         "1e400",
@@ -473,17 +491,54 @@ fn demi_paire_isolee() {
     assert_eq!(name_of(r"\udbff").unwrap(), "\u{fffd}");
     assert_eq!(name_of(r"\udc00x").unwrap(), "\u{fffd}x");
     assert_eq!(name_of(r"\udfff\ud800").unwrap(), "\u{fffd}\u{fffd}");
-    // Paire valide échappée : gardée (😀).
-    assert_eq!(name_of(r"😀").unwrap(), "😀");
-    assert_eq!(name_of(r"😀").unwrap(), "😀");
+    // Échappements `\u` + 4 chiffres construits morceau par morceau : jamais écrits en clair
+    // dans ce fichier (un éditeur les convertirait en caractères sans le dire).
+    let b = "\\";
+    let esc = |hex: &str| format!("{b}u{hex}");
+    let (hi, lo, hi_up, lo_up) = (esc("d83d"), esc("de00"), esc("D83D"), esc("DE00"));
+    let smile = char::from_u32(0x1f600).unwrap().to_string();
+    let fffd = char::from_u32(0xfffd).unwrap().to_string();
+    assert!(!hi.contains(&smile) && hi.len() == 6 && lo.len() == 6);
+    // Paire valide échappée : gardée (U+1F600), chiffres en minuscules ou en majuscules.
+    assert_eq!(name_of(&format!("{hi}{lo}")).unwrap(), smile);
+    assert_eq!(name_of(&format!("{hi_up}{lo_up}")).unwrap(), smile);
+    assert_eq!(name_of(&format!("{hi}{lo_up}")).unwrap(), smile);
+    assert_eq!(
+        name_of(&format!("a{hi}{lo}b")).unwrap(),
+        format!("a{smile}b")
+    );
     // Haute suivie d'une paire : la première seule est isolée.
-    assert_eq!(name_of(r"\ud83d😀").unwrap(), "\u{fffd}😀");
+    assert_eq!(
+        name_of(&format!("{hi}{hi}{lo}")).unwrap(),
+        format!("{fffd}{smile}")
+    );
+    // Basse suivie d'une paire.
+    assert_eq!(
+        name_of(&format!("{lo}{hi}{lo}")).unwrap(),
+        format!("{fffd}{smile}")
+    );
+    // Barre oblique inverse échappée puis paire : « \ » puis U+1F600.
+    assert_eq!(
+        name_of(&format!("{b}{b}{hi}{lo}")).unwrap(),
+        format!("{b}{smile}")
+    );
+    // Haute, barre oblique inverse échappée, basse : U+FFFD, « \ », U+FFFD.
+    assert_eq!(
+        name_of(&format!("{hi}{b}{b}{lo}")).unwrap(),
+        format!("{fffd}{b}{fffd}")
+    );
     // Basse puis haute (ordre inversé) : deux isolées.
-    assert_eq!(name_of(r"\ude00\ud83d").unwrap(), "\u{fffd}\u{fffd}");
-    // Haute suivie d'un autre échappement ou d'un caractère brut.
-    assert_eq!(name_of(r"\ud800A").unwrap(), "\u{fffd}A");
-    assert_eq!(name_of(r"\ud800\n").unwrap(), "\u{fffd}\n");
-    assert_eq!(name_of(r"\ud800é").unwrap(), "\u{fffd}é");
+    assert_eq!(
+        name_of(&format!("{lo}{hi}")).unwrap(),
+        format!("{fffd}{fffd}")
+    );
+    // Haute suivie d'un autre échappement (« A » échappé) ou d'un caractère brut.
+    assert_eq!(
+        name_of(&format!("{hi}{}", esc("0041"))).unwrap(),
+        format!("{fffd}A")
+    );
+    assert_eq!(name_of(&format!("{hi}{b}n")).unwrap(), format!("{fffd}\n"));
+    assert_eq!(name_of(&format!("{hi}é")).unwrap(), format!("{fffd}é"));
     // Barre oblique inverse échappée : « \\ud800 » est le texte « \ud800 », pas un échappement.
     assert_eq!(name_of(r"\\ud800").unwrap(), r"\ud800");
     assert_eq!(name_of(r"\\\ud800").unwrap(), "\\\u{fffd}");
@@ -587,6 +642,8 @@ fn entrees_hostiles_sans_panique() {
         x
     };
     let alphabet = br#"{}[]",:\u0123456789abcdefABCDEF-+.eE dD8 ""#;
+    let b = "\\";
+    let (lone, pair) = (format!("{b}ud800"), format!("{b}ud83d{b}ude00"));
     let mut opened = 0;
     for i in 0..4000 {
         let mut raw = base.clone();
@@ -601,8 +658,13 @@ fn entrees_hostiles_sans_panique() {
                 raw[p] ^= 1 << (next() % 8);
             }
             _ => {
+                // Demi-paire isolée ou paire valide échappées (construites, jamais en clair).
                 let p = next() as usize % raw.len();
-                let s = br"\ud800";
+                let s = if next() % 2 == 0 {
+                    lone.as_bytes()
+                } else {
+                    pair.as_bytes()
+                };
                 raw.splice(p..p, s.iter().copied());
             }
         }

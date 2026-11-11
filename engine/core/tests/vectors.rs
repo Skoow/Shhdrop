@@ -583,8 +583,8 @@ fn sizing_cases() {
             c["n"].as_u64().unwrap() as u32,
         );
         assert_eq!(
-            format::segment_size(b, n) as u64,
-            c["result"].as_u64().unwrap(),
+            format::segment_size(b, n).map(|x| x as u64),
+            Some(c["result"].as_u64().unwrap()),
             "{c}"
         );
     }

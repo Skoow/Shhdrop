@@ -359,7 +359,7 @@ fn seed(v: &Value) -> Result<Zeroizing<[u8; 32]>> {
 }
 
 /// Remplace sur place chaque échappement `\uD800`–`\uDFFF` qui ne forme pas une paire valide
-/// (haute `\uD800`–`\uDBFF` suivie de basse `\uDC00`–`\uDFFF`) par `�` (même longueur).
+/// (haute `\uD800`–`\uDBFF` suivie de basse `\uDC00`–`\uDFFF`) par l'échappement de U+FFFD (même longueur).
 /// Un `\\` (barre oblique inverse échappée) est sauté : le `u` qui suit n'est pas un échappement.
 fn replace_lone_surrogates(buf: &mut [u8]) {
     let mut i = 0;
