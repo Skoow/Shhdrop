@@ -135,6 +135,48 @@ export function engineWasm(base: string, demo: boolean): Plugin {
   };
 }
 
+/**
+ * Module WebAssembly du salon (engine/salon-wasm, Task 9 du salon), à part du moteur des partages.
+ * ./source, importé par un module de src/salon/, est remplacé par source.verified.ts (production)
+ * ou source.demo.ts (démo : pas de salon) ; tout autre chemin vers src/salon/source.ts arrête le
+ * build. Production : au premier import du module virtuel virtual:shh-salon (donc seulement si
+ * une page importe src/salon/engine.ts), le .wasm est écrit sous assets/salon-EMPREINTE.wasm ;
+ * son adresse et son empreinte SHA-384 vont dans le script, jamais ses octets (lu par fetch avec
+ * `integrity` au premier besoin du salon). La colle de wasm-bindgen ne lit jamais le .wasm voisin
+ * (chemin par défaut remplacé par une erreur, comme pour le moteur). Contrôle : check-dist.mjs
+ * (cité avec son empreinte, absent du script principal, au plus 400 Ko en brotli).
+ */
+export function salonWasm(base: string, demo: boolean): Plugin {
+  const VIRTUAL = "virtual:shh-salon";
+  const DEFAULT = "new URL('shhdrop_salon_wasm_bg.wasm', import.meta.url)";
+  const here = fileURLToPath(new URL(".", import.meta.url));
+  return {
+    name: "shh-salon",
+    apply: "build",
+    enforce: "pre",
+    resolveId(source, importer) {
+      if (source === VIRTUAL) return "\0" + VIRTUAL;
+      const from = importer?.replace(/\\/g, "/") ?? "";
+      if (/^\.\/source(?:\.ts)?$/.test(source) && from.includes("/src/salon/")) return join(here, demo ? "src/salon/source.demo.ts" : "src/salon/source.verified.ts");
+      return null;
+    },
+    load(id) {
+      if (id.replace(/\\/g, "/").endsWith("/src/salon/source.ts")) this.error("shh-salon : src/salon/source.ts (lecture sans empreinte) n'entre jamais dans un build");
+      if (id !== "\0" + VIRTUAL) return null;
+      if (demo) this.error("shh-salon : pas de module du salon dans la démo");
+      const wasm = readFileSync(join(here, "src/salon/pkg/shhdrop_salon_wasm_bg.wasm"));
+      const fileName = `assets/salon-${createHash("sha256").update(wasm).digest("base64url").slice(0, 8)}.wasm`;
+      this.emitFile({ type: "asset", fileName, source: wasm });
+      return `export const src = ${JSON.stringify(base + fileName)}; export const integrity = ${JSON.stringify(sha384(wasm))};`;
+    },
+    transform(code, id) {
+      if (!id.replace(/\\/g, "/").endsWith("/src/salon/pkg/shhdrop_salon_wasm.js")) return null;
+      if (code.split(DEFAULT).length !== 2) this.error("shh-salon : colle de wasm-bindgen inattendue (chemin par défaut du .wasm)");
+      return { code: code.replace(DEFAULT, '(() => { throw new Error("salon_sans_source"); })()'), map: null };
+    },
+  };
+}
+
 /** Démo : CSP, referrer et robots en tête de <head> ; index.html copié en 404.html (Pages). */
 export function demoMeta(): Plugin {
   let outDir = "";
@@ -214,7 +256,7 @@ export function precompress(): Plugin {
 export default defineConfig(({ mode, command }) => {
   const demo = mode === "demo";
   return {
-    plugins: [svelte(), sri(demo ? DEMO_BASE : "/"), engineWasm(demo ? DEMO_BASE : "/", demo), ...(demo ? [demoMeta()] : [demoGuard(), precompress()])],
+    plugins: [svelte(), sri(demo ? DEMO_BASE : "/"), engineWasm(demo ? DEMO_BASE : "/", demo), salonWasm(demo ? DEMO_BASE : "/", demo), ...(demo ? [demoMeta()] : [demoGuard(), precompress()])],
     base: demo ? DEMO_BASE : "/",
     define: { __SHH_BUILD__: JSON.stringify(buildId(command)) },
     build: {

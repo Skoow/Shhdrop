@@ -23,3 +23,10 @@ declare module "virtual:shh-engine" {
   export const workerIntegrity: string;
   export const wasm: string;
 }
+
+// Module WebAssembly du salon (greffon shh-salon, vite.config.ts), production seulement : adresse
+// et empreinte SRI de assets/salon-EMPREINTE.wasm.
+declare module "virtual:shh-salon" {
+  export const src: string;
+  export const integrity: string;
+}

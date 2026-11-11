@@ -1,5 +1,5 @@
-// Construit le binaire Go, le site (web/dist), la démo (web/dist-demo) et la page d'essai du
-// moteur (ui-e2e/engine-page) une fois avant tous les tests.
+// Construit le binaire Go, le site (web/dist), la démo (web/dist-demo), la page d'essai du
+// moteur (ui-e2e/engine-page) et celle du salon (ui-e2e/salon-page) une fois avant tous les tests.
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -20,4 +20,8 @@ export default function globalSetup(): void {
   execFileSync("npx", ["vite", "build", "-c", config], { cwd: webDir, stdio: "inherit" });
   execFileSync(process.execPath, ["scripts/check-dist.mjs", "ui-e2e/engine-page/dist"], { cwd: webDir, stdio: "inherit" });
   execFileSync("npx", ["vite", "build", "-c", config, "--mode", "demo"], { cwd: webDir, stdio: "inherit" });
+  // Page d'essai du module du salon (salon-moteur.spec.ts), jamais livrée : son script cite
+  // assets/salon-EMPREINTE.wasm avec son empreinte ; check-dist en vérifie aussi le poids brotli.
+  execFileSync("npx", ["vite", "build", "-c", "ui-e2e/salon-page/vite.config.ts"], { cwd: webDir, stdio: "inherit" });
+  execFileSync(process.execPath, ["scripts/check-dist.mjs", "ui-e2e/salon-page/dist"], { cwd: webDir, stdio: "inherit" });
 }

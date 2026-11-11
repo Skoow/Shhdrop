@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build reproductible (spec §28.1) : le site et son moteur WebAssembly (engine/, web/src/engine/pkg)
-# sont construits deux fois, dans deux dossiers absolus différents (chacun avec son propre
+# Build reproductible (spec §28.1) : le site et ses modules WebAssembly (engine/, web/src/engine/pkg,
+# web/src/salon/pkg) sont construits deux fois, dans deux dossiers absolus différents (chacun avec son propre
 # engine/target), et chaque fichier doit avoir la même empreinte. Écrit la liste des empreintes dans
 # le fichier donné en argument (défaut : web/SHA256SUMS.repro, ignoré par git) ; la CI compare
 # ensuite les listes de deux machines.
@@ -33,6 +33,10 @@ build() { # $1 : dossier absolu de la copie (même disposition que le dépôt : 
   # et sa colle JavaScript). Le greffon shh-engine (vite.config.ts) en émet le .wasm dans dist/assets (déjà compté ci-dessus) ; ces
   # empreintes nomment en plus la sortie brute de wasm-bindgen si les deux builds diffèrent.
   (cd "$1/web/src/engine" && find pkg -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+  # Module du salon (web/src/salon/pkg) : aucune page du site ne l'importe encore, il n'est donc
+  # pas dans dist/ ; ses empreintes sont comptées ici, préfixées « salon/pkg/ » (le job
+  # repro-docker de la CI ne compare que « ./ » et « pkg/ », l'image ne le construit pas encore).
+  (cd "$1/web/src" && find salon/pkg -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
 }
 
 build "$tmp/a" >"$tmp/a.sums"

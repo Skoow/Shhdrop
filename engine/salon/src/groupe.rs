@@ -368,8 +368,9 @@ fn partis_effectifs(
 
 impl Salon {
     /// Nouveau participant. `createur` : il crée le groupe MLS (premier membre, seul à pouvoir
-    /// retirer autrui) ; sinon il attend un Welcome (`key_package`, puis `rejoindre`).
-    pub fn creer(identite: Identite, cles: ClesSalon, createur: bool) -> Result<Salon> {
+    /// retirer autrui) ; sinon il attend un Welcome (`key_package`, puis `rejoindre`). Seule
+    /// l'étiquette du salon est lue dans `cles` (l'appelant les garde pour les trames).
+    pub fn creer(identite: Identite, cles: &ClesSalon, createur: bool) -> Result<Salon> {
         let mut salon = Salon {
             fournisseur: Fournisseur::default(),
             tag: *cles.tag(),
@@ -384,7 +385,6 @@ impl Salon {
             commit_en_attente: None,
             dernier_seq: None,
         };
-        drop(cles);
         if createur {
             let mut id = salon.tag.to_vec();
             id.push(salon.identite.siege);
@@ -983,12 +983,12 @@ mod tests {
     /// Sièges 0 (créateur), 1 et 2.
     fn trois() -> (Vec<Salon>, u64) {
         let mut m =
-            vec![Salon::creer(nouvelle_identite(0, [0; 16]).unwrap(), cles(), true).unwrap()];
+            vec![Salon::creer(nouvelle_identite(0, [0; 16]).unwrap(), &cles(), true).unwrap()];
         m[0].remplacer_annonces(0, &[(0, [0; 16])]);
         let mut seq = 0;
         for s in 1..3u8 {
             let mut n =
-                Salon::creer(nouvelle_identite(s, [s; 16]).unwrap(), cles(), false).unwrap();
+                Salon::creer(nouvelle_identite(s, [s; 16]).unwrap(), &cles(), false).unwrap();
             let liste: Vec<(u8, [u8; 16])> = (0..=s).map(|i| (i, [i; 16])).collect();
             n.remplacer_annonces(0, &liste);
             let kp = n.key_package().unwrap();

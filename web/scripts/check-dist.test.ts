@@ -216,6 +216,40 @@ describe("check-dist.mjs, production", () => {
     expect(prod({ "assets/index-a.js": both, "assets/petit-AbCd1234.wasm": small }).filter((p) => p.includes("petit"))).toEqual([]);
   });
 
+  it("module du salon (Task 9) : assets/salon-*.wasm d'au plus 430 Ko en brotli ; cité avec son empreinte comme le moteur", () => {
+    // Octets peu compressibles (xorshift32) : la variante brotli garde presque toute leur taille.
+    const bruit = (n: number) => {
+      const b = Buffer.alloc(n);
+      let x = 1;
+      for (let i = 0; i < n; i++) {
+        x ^= x << 13;
+        x ^= x >>> 17;
+        x ^= x << 5;
+        b[i] = x & 0xff;
+      }
+      return Buffer.concat([Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]), b]);
+    };
+    const prod = (wasm: Buffer) => {
+      const w = "assets/salon-AbCd1234.wasm";
+      const main = `const a="/${w}",i="${sha384(wasm)}";`;
+      const d = site({ "index.html": PROD_INDEX, "assets/index-a.js": main });
+      writeFileSync(join(d, w), wasm);
+      writeFileSync(join(d, w + ".br"), brotliCompressSync(wasm));
+      writeFileSync(join(d, w + ".gz"), gzipSync(wasm));
+      return checkDist(d, false);
+    };
+    expect(prod(bruit(420_000))).toEqual([]);
+    const gros = prod(bruit(440_000));
+    expect(gros).toHaveLength(1);
+    expect(gros[0]).toMatch(/^assets\/salon-AbCd1234\.wasm : \d+ octets en brotli, plus que 430 000 \(module du salon\)$/);
+    // Cité sans son empreinte : refusé comme tout .wasm.
+    const d = site({ "index.html": PROD_INDEX, "assets/index-a.js": 'const a="/assets/salon-AbCd1234.wasm";' });
+    writeFileSync(join(d, "assets/salon-AbCd1234.wasm"), "\0asm");
+    expect(checkDist(d, false)).toEqual([
+      "assets/salon-AbCd1234.wasm : son empreinte SHA-384 n'est pas inscrite dans le script principal (chargement sans contrôle d'intégrité)",
+    ]);
+  });
+
   it("moteur WebAssembly : aucun octet de .wasm en ligne dans le script principal de production (base64 ou tableau)", () => {
     const msg = "assets/index-a.js : octets WebAssembly en ligne dans le script principal : le moteur doit rester dans assets/engine-*.wasm, lu avec son empreinte";
     const b64 = Buffer.from(String.fromCharCode(0, 97, 115, 109, 1, 0, 0, 0, 1, 2, 3), "latin1").toString("base64");

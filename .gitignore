@@ -12,3 +12,4 @@ web/playwright-report/
 SHA256SUMS.repro
 engine/target/
 web/src/engine/pkg/
+web/src/salon/pkg/

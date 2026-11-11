@@ -14,6 +14,15 @@ import { checkSri, sha384 } from "./sri.mjs";
 
 const MARK = "__SHH_DEMO__";
 
+/**
+ * Poids maximal du module WebAssembly du salon, en brotli (plan salon C-1, Global Constraints ;
+ * décision du 11 novembre 2026 : 400 000 → 430 000). Mesuré le 11 novembre 2026 : 422 572 o en
+ * brotli (profil wasm-salon, opt-level "z"), dont OpenMLS et hpke-rs avec `experimental` toujours
+ * actif par openmls_rust_crypto (ML-KEM, X-Wing, P-256/384, k256 compilés), et les tables Unicode
+ * du texte (~96 Ko). Un fournisseur crypto limité à la suite 0x0001 pourrait le réduire plus tard.
+ */
+const SALON_BROTLI_MAX = 430_000;
+
 /** Traces de démo interdites en production (le texte du bandeau, sans ponctuation typographique). */
 const FORBIDDEN_IN_PROD = [
   MARK,
@@ -150,6 +159,13 @@ export function checkDist(dir, demo) {
       if (!/\.wasm$/i.test(f.rel) || f.data.length < 1024) continue;
       const missing = [".br", ".gz"].filter((e) => !byRel.has(f.rel + e));
       if (missing.length) problems.push(`${f.rel} : sans variante ${missing.join(" ni ")} : le moteur serait téléchargé sans compression`);
+    }
+    // Module du salon (Task 9) : à part du moteur (assets/salon-*.wasm, cité avec son empreinte
+    // ci-dessus, jamais en ligne), au plus SALON_BROTLI_MAX octets transférés (variante brotli).
+    for (const f of all) {
+      if (!/^assets\/salon-[^/]+\.wasm$/.test(f.rel)) continue;
+      const br = byRel.get(f.rel + ".br");
+      if (br && br.length > SALON_BROTLI_MAX) problems.push(`${f.rel} : ${br.length} octets en brotli, plus que ${SALON_BROTLI_MAX.toLocaleString("fr-FR").replace(/\s/g, " ")} (module du salon)`);
     }
     if (existsSync(join(dir, "404.html"))) problems.push("404.html : propre à la démo");
     return problems;

@@ -1,9 +1,11 @@
 # Espace de travail du moteur Shhdrop (spécification 2026-11-10-moteur-rust-1-chiffrement).
 # shhdrop-core : moteur sans navigateur, horloge, fichiers ni réseau. Le crate WebAssembly
 # shhdrop-wasm : liaison WebAssembly du site (wasm-bindgen), avec le fournisseur WebCrypto
-# de web/src/engine/provider.ts.
+# de web/src/engine/provider.ts. shhdrop-salon : moteur du salon (MLS, trames, messages) ;
+# shhdrop-salon-wasm : sa liaison WebAssembly, module à part (web/src/salon/), chargé seulement
+# par le salon.
 [workspace]
-members = ["core", "salon", "wasm"]
+members = ["core", "salon", "salon-wasm", "wasm"]
 resolver = "2"
 
 [workspace.package]
@@ -54,3 +56,11 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.aes-gcm]
 opt-level = 3
+
+# Module WebAssembly du salon (web/scripts/build-engine.mjs, crate shhdrop-salon-wasm) : release
+# optimisée pour la taille. Mesuré le 11 novembre (Chromium) : 531 Ko en brotli et 406 ms pour le
+# scénario de 10 membres en opt-level 3 ; 423 Ko et 430 à 445 ms en "z". Profil à part : ni le moteur
+# des partages ni les builds natifs (apps) ne changent.
+[profile.wasm-salon]
+inherits = "release"
+opt-level = "z"

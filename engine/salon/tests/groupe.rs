@@ -74,7 +74,7 @@ impl Reseau {
 
     /// Nouvel arrivant (déjà annoncé) : il reçoit la liste complète à l'accueil.
     fn nouveau(&self, siege: u8, n: [u8; 16]) -> Salon {
-        let mut x = Salon::creer(nouvelle_identite(siege, n).unwrap(), cles(), false).unwrap();
+        let mut x = Salon::creer(nouvelle_identite(siege, n).unwrap(), &cles(), false).unwrap();
         x.remplacer_annonces(0, &self.liste);
         x
     }
@@ -176,7 +176,7 @@ impl Reseau {
 
 /// Créateur seul au siège 0.
 fn createur_seul(id: shhdrop_salon::Identite) -> Reseau {
-    let mut createur = Salon::creer(id, cles(), true).unwrap();
+    let mut createur = Salon::creer(id, &cles(), true).unwrap();
     let liste = vec![(0, nonce(0, 0))];
     createur.remplacer_annonces(0, &liste);
     Reseau {
@@ -382,7 +382,7 @@ fn politique_refuse() {
     // Retrait par un non-créateur : refusé avant tout Commit.
     assert_eq!(r.salon(3).retirer(5), Err(Error::CommitRefuse));
     // Ajout d'un KeyPackage dont le siège n'est pas annoncé (ou d'un autre nonce).
-    let inconnu = Salon::creer(nouvelle_identite(9, nonce(9, 0)).unwrap(), cles(), false).unwrap();
+    let inconnu = Salon::creer(nouvelle_identite(9, nonce(9, 0)).unwrap(), &cles(), false).unwrap();
     let kp = inconnu.key_package().unwrap();
     assert_eq!(r.salon(0).ajouter(&kp), Err(Error::CommitRefuse));
     r.annoncer(9, nonce(9, 1));
@@ -393,7 +393,8 @@ fn politique_refuse() {
 
     // Côté réception : seul le siège 0 a vu l'annonce (nonce 2) ; les autres refusent le Commit
     // sans fusion et continuent entre eux.
-    let kp_nonce = Salon::creer(nouvelle_identite(9, nonce(9, 2)).unwrap(), cles(), false).unwrap();
+    let kp_nonce =
+        Salon::creer(nouvelle_identite(9, nonce(9, 2)).unwrap(), &cles(), false).unwrap();
     let kp2 = kp_nonce.key_package().unwrap();
     r.salon(0).annoncer(9, nonce(9, 2));
     r.seq += 1;
@@ -533,7 +534,8 @@ fn retour_nouvelle_feuille() {
         assert_eq!(r.salon(s).empreinte(3).unwrap(), apres);
     }
     // L'ancien KeyPackage (nonce remplacé) ne peut plus être rajouté.
-    let revenant = Salon::creer(nouvelle_identite(3, nonce(3, 0)).unwrap(), cles(), false).unwrap();
+    let revenant =
+        Salon::creer(nouvelle_identite(3, nonce(3, 0)).unwrap(), &cles(), false).unwrap();
     let vieux_kp = revenant.key_package().unwrap();
     assert_eq!(r.salon(1).ajouter(&vieux_kp), Err(Error::CommitRefuse));
     // Le KeyPackage déjà ajouté, rejoué par le serveur : ni signalé, ni rajouté (il
@@ -592,7 +594,7 @@ fn octets_aleatoires() {
     }
     // Un Welcome ou un KeyPackage hostile pour qui attend d'entrer.
     let mut attente =
-        Salon::creer(nouvelle_identite(9, nonce(9, 5)).unwrap(), cles(), false).unwrap();
+        Salon::creer(nouvelle_identite(9, nonce(9, 5)).unwrap(), &cles(), false).unwrap();
     for _ in 0..200 {
         let n = (a.suivant() % (MAX_CHARGE as u64 + 1)) as usize;
         assert!(attente.rejoindre(&a.octets(n)).is_err());
@@ -728,7 +730,7 @@ fn etats() {
     let mut r = groupe(2);
     assert_eq!(r.salon(0).key_package(), Err(Error::DejaMembre));
     let mut attente =
-        Salon::creer(nouvelle_identite(5, nonce(5, 0)).unwrap(), cles(), false).unwrap();
+        Salon::creer(nouvelle_identite(5, nonce(5, 0)).unwrap(), &cles(), false).unwrap();
     assert_eq!(attente.chiffrer(&env(1)), Err(Error::NonMembre));
     assert_eq!(attente.renouveler(), Err(Error::NonMembre));
     assert_eq!(attente.recevoir(&[0; 10], 1, 0), Err(Error::NonMembre));
@@ -737,7 +739,7 @@ fn etats() {
     // Un Welcome d'un autre salon (autre étiquette) est refusé.
     let autre = cles_salon(&KLien::from_bytes([7; 32]), &KMdp::from_bytes([2; 32]));
     let mut ailleurs =
-        Salon::creer(nouvelle_identite(0, nonce(0, 9)).unwrap(), autre, true).unwrap();
+        Salon::creer(nouvelle_identite(0, nonce(0, 9)).unwrap(), &autre, true).unwrap();
     let kp = attente.key_package().unwrap();
     let liste = [(0, nonce(0, 9)), (5, nonce(5, 0))];
     ailleurs.remplacer_annonces(0, &liste);
@@ -758,7 +760,7 @@ fn etats() {
 #[test]
 fn key_package_recu() {
     let mut r = groupe(3);
-    let attente = Salon::creer(nouvelle_identite(7, nonce(7, 0)).unwrap(), cles(), false).unwrap();
+    let attente = Salon::creer(nouvelle_identite(7, nonce(7, 0)).unwrap(), &cles(), false).unwrap();
     let kp = attente.key_package().unwrap();
     // Pas encore annoncé : ignoré.
     for (i, ev) in r.diffuser(7, &kp) {
@@ -1049,7 +1051,7 @@ fn faux_groupe_refuse() {
     let kp = arrivant.key_package().unwrap();
     r.publier(9, &kp);
     // Le siège 3 crée son propre groupe (identifiant tag ‖ 3) et y ajoute l'arrivant.
-    let mut faux = Salon::creer(nouvelle_identite(3, nonce(3, 0)).unwrap(), cles(), true).unwrap();
+    let mut faux = Salon::creer(nouvelle_identite(3, nonce(3, 0)).unwrap(), &cles(), true).unwrap();
     faux.remplacer_annonces(3, &r.liste);
     assert!(matches!(
         faux.recevoir(&kp, 1, 9),
@@ -1062,12 +1064,14 @@ fn faux_groupe_refuse() {
     assert_eq!(arrivant.rejoindre(&w), Err(Error::MlsInvalide));
     // Faux groupe « du créateur » (siège 0, nonce public) avec une feuille du siège 5 d'un
     // autre nonce que celui annoncé.
-    let mut faux0 = Salon::creer(nouvelle_identite(0, nonce(0, 0)).unwrap(), cles(), true).unwrap();
+    let mut faux0 =
+        Salon::creer(nouvelle_identite(0, nonce(0, 0)).unwrap(), &cles(), true).unwrap();
     let mut liste = r.liste.clone();
     liste.retain(|a| a.0 != 5);
     liste.push((5, nonce(5, 9)));
     faux0.remplacer_annonces(0, &liste);
-    let complice = Salon::creer(nouvelle_identite(5, nonce(5, 9)).unwrap(), cles(), false).unwrap();
+    let complice =
+        Salon::creer(nouvelle_identite(5, nonce(5, 9)).unwrap(), &cles(), false).unwrap();
     let kp5 = complice.key_package().unwrap();
     assert!(matches!(
         faux0.recevoir(&kp5, 1, 5),
@@ -1099,7 +1103,7 @@ fn faux_groupe_refuse() {
 fn rejoindre_sans_liste() {
     let mut r = groupe(3);
     r.annoncer(5, nonce(5, 0));
-    let mut x = Salon::creer(nouvelle_identite(5, nonce(5, 0)).unwrap(), cles(), false).unwrap();
+    let mut x = Salon::creer(nouvelle_identite(5, nonce(5, 0)).unwrap(), &cles(), false).unwrap();
     let kp = x.key_package().unwrap();
     r.publier(5, &kp);
     let c = r.salon(0).ajouter(&kp).unwrap();
