@@ -6,13 +6,16 @@
 mod cles;
 mod emoji;
 mod error;
+mod groupe;
 mod message;
+pub mod politique;
 mod stockage;
 mod texte;
 mod trame;
 
 pub use cles::{CleAcces, ClesSalon, cle_acces, cles_salon};
 pub use error::{Error, Result};
+pub use groupe::{Evenement, Identite, Salon, nouvelle_identite};
 pub use message::{
     Enveloppe, Graine, IdMessage, JSON_MAX, Message, RefPiece, SortePiece, decoder, encoder,
     est_volatile,

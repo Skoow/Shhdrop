@@ -20,6 +20,24 @@ pub enum Error {
     /// En-tête de trame illisible sans clé (taille, marque, bits réservés) : ne sert qu'à
     /// `lire_en_tete` ; `ouvrir` renvoie toujours `TrameCorrompue`.
     EnTeteInvalide,
+    /// Message MLS d'une époque que ce membre n'a plus (plus d'une époque de retard) ou pas
+    /// encore (Commit manqué).
+    EpoquePerdue,
+    /// Commit contraire à la politique d'adhésion : refusé avant fusion, l'état ne change pas.
+    CommitRefuse,
+    /// Ce salon n'est pas (ou plus) membre du groupe MLS.
+    NonMembre,
+    /// Octets MLS illisibles, mal formés, d'un autre groupe ou d'une forme refusée
+    /// (GroupInfo, message en clair, external commit ou proposition externe).
+    MlsInvalide,
+    /// Un Commit de ce membre attend encore son écho du serveur.
+    CommitEnCours,
+    /// Déjà membre du groupe (rejoindre ou KeyPackage demandés deux fois).
+    DejaMembre,
+    /// Aucun membre du groupe n'occupe ce siège.
+    SiegeInconnu,
+    /// Erreur interne d'OpenMLS (aléa, stockage) : jamais causée par une entrée.
+    MlsInterne,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -34,6 +52,14 @@ impl fmt::Display for Error {
             Error::MessageInvalide => "message_invalide",
             Error::TropGrand => "trop_grand",
             Error::EnTeteInvalide => "en_tete_invalide",
+            Error::EpoquePerdue => "epoque_perdue",
+            Error::CommitRefuse => "commit_refuse",
+            Error::NonMembre => "non_membre",
+            Error::MlsInvalide => "mls_invalide",
+            Error::CommitEnCours => "commit_en_cours",
+            Error::DejaMembre => "deja_membre",
+            Error::SiegeInconnu => "siege_inconnu",
+            Error::MlsInterne => "mls_interne",
         })
     }
 }
@@ -53,5 +79,13 @@ mod tests {
         assert_eq!(Error::MessageInvalide.to_string(), "message_invalide");
         assert_eq!(Error::TropGrand.to_string(), "trop_grand");
         assert_eq!(Error::EnTeteInvalide.to_string(), "en_tete_invalide");
+        assert_eq!(Error::EpoquePerdue.to_string(), "epoque_perdue");
+        assert_eq!(Error::CommitRefuse.to_string(), "commit_refuse");
+        assert_eq!(Error::NonMembre.to_string(), "non_membre");
+        assert_eq!(Error::MlsInvalide.to_string(), "mls_invalide");
+        assert_eq!(Error::CommitEnCours.to_string(), "commit_en_cours");
+        assert_eq!(Error::DejaMembre.to_string(), "deja_membre");
+        assert_eq!(Error::SiegeInconnu.to_string(), "siege_inconnu");
+        assert_eq!(Error::MlsInterne.to_string(), "mls_interne");
     }
 }
