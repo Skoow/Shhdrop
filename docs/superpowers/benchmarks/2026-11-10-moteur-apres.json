@@ -1,0 +1,442 @@
+{
+  "commit": "7cad26a",
+  "chromium": "153.0.8010.12",
+  "seal_mib_s": 246.5,
+  "open_mib_s": 509.1,
+  "argon2_ms": 196,
+  "argon2_first_ms": 230,
+  "send_bytes": 339022,
+  "open_bytes": 339022,
+  "note": "Médiane des médianes de 3 tours, alternés dans la même session avec l’ancien moteur TypeScript (a693d33, mesuré depuis un worktree avec ses propres paquets). Chaque tour : même protocole que 2026-11-10-moteur-avant.json (15 passes après échauffement). Détail par tour dans rounds ; tours de l’ancien moteur dans reference_rounds.",
+  "rounds": [
+    {
+      "commit": "7cad26a",
+      "chromium": "153.0.8010.12",
+      "seal_mib_s": 246.5,
+      "open_mib_s": 499.6,
+      "argon2_ms": 205,
+      "argon2_first_ms": 195,
+      "send_bytes": 339022,
+      "open_bytes": 339022,
+      "stats": {
+        "seal_mib_s": {
+          "median": 246.5,
+          "min": 220.2,
+          "iqr": 16.3,
+          "runs": [
+            226.9,
+            246.5,
+            220.2,
+            262,
+            259.3,
+            240.7,
+            246.3,
+            257.1,
+            244.7,
+            267.7,
+            258.8,
+            266.3,
+            244.6,
+            249.9,
+            230
+          ]
+        },
+        "open_mib_s": {
+          "median": 499.6,
+          "min": 399.5,
+          "iqr": 96.9,
+          "runs": [
+            399.5,
+            438.1,
+            474.1,
+            572.5,
+            461.1,
+            476.4,
+            617.2,
+            522,
+            577.9,
+            556.5,
+            476.9,
+            518.8,
+            499.6,
+            442.9,
+            586.9
+          ]
+        },
+        "argon2_ms": {
+          "median": 205,
+          "min": 155,
+          "iqr": 17,
+          "runs": [
+            205,
+            207,
+            250,
+            215,
+            214,
+            212,
+            198,
+            201,
+            194,
+            206,
+            176,
+            155,
+            216,
+            199,
+            161
+          ]
+        }
+      },
+      "files": {
+        "send": [
+          {
+            "file": "/assets/engine-7QN3pHDG.wasm",
+            "br_bytes": 141883
+          },
+          {
+            "file": "/assets/engine-kdf-DSu_6qxP.js",
+            "br_bytes": 3340
+          },
+          {
+            "file": "/assets/index-eRPzjXIX.css",
+            "br_bytes": 29321
+          },
+          {
+            "file": "/assets/index-gXHjTXu2.js",
+            "br_bytes": 162794
+          },
+          {
+            "file": "/assets/pow.worker-CqXgVHIX.js",
+            "br_bytes": 565
+          },
+          {
+            "file": "/index.html",
+            "br_bytes": 1119
+          }
+        ],
+        "open": [
+          {
+            "file": "/assets/engine-7QN3pHDG.wasm",
+            "br_bytes": 141883
+          },
+          {
+            "file": "/assets/engine-kdf-DSu_6qxP.js",
+            "br_bytes": 3340
+          },
+          {
+            "file": "/assets/index-eRPzjXIX.css",
+            "br_bytes": 29321
+          },
+          {
+            "file": "/assets/index-gXHjTXu2.js",
+            "br_bytes": 162794
+          },
+          {
+            "file": "/assets/pow.worker-CqXgVHIX.js",
+            "br_bytes": 565
+          },
+          {
+            "file": "/index.html",
+            "br_bytes": 1119
+          }
+        ]
+      },
+      "note": "Médiane de 15 passes après une passe d'échauffement écartée (min et écart interquartile dans stats). 128 Mio pseudo-aléatoires (xorshift32) chiffrés puis rouverts en mémoire, octets vérifiés hors chrono. Copies comprises dans le temps mesuré : lecture du Blob par tranches de 4 Mio (chiffrement) ; à l'ouverture, une copie de chaque segment de 4 Mio donné au lecteur (il met à zéro ce qu'il reçoit). argon2_ms : médiane de 15 appels avec les paramètres de création, après un premier appel à froid (argon2_first_ms, instanciation comprise). send_bytes/open_bytes : octets brotli de ce que le navigateur charge sur le site construit (web/dist rebâti par ce script), route / pour envoyer, /#<partage> pour ouvrir, plus tout fichier assets/*.js|css|wasm cité de proche en proche par ces scripts (Argon2, Worker de preuve de travail, futur .wasm) ; cadre d'aperçu PDF exclu. Les deux ensembles sont aujourd'hui identiques (un seul bundle)."
+    },
+    {
+      "commit": "7cad26a",
+      "chromium": "153.0.8010.12",
+      "seal_mib_s": 237.8,
+      "open_mib_s": 509.1,
+      "argon2_ms": 196,
+      "argon2_first_ms": 230,
+      "send_bytes": 339022,
+      "open_bytes": 339022,
+      "stats": {
+        "seal_mib_s": {
+          "median": 237.8,
+          "min": 222,
+          "iqr": 9.7,
+          "runs": [
+            243.9,
+            228.4,
+            231.5,
+            222,
+            245.8,
+            236.2,
+            239.1,
+            226,
+            241.2,
+            240,
+            234.6,
+            239.6,
+            237.8,
+            283.3,
+            230.3
+          ]
+        },
+        "open_mib_s": {
+          "median": 509.1,
+          "min": 436.9,
+          "iqr": 52.8,
+          "runs": [
+            493.6,
+            436.9,
+            509.1,
+            512.4,
+            523.3,
+            535.3,
+            480.3,
+            479.4,
+            508.5,
+            548.4,
+            458.9,
+            468.9,
+            545.4,
+            634.6,
+            530
+          ]
+        },
+        "argon2_ms": {
+          "median": 196,
+          "min": 162,
+          "iqr": 10,
+          "runs": [
+            196,
+            189,
+            192,
+            195,
+            195,
+            162,
+            205,
+            206,
+            198,
+            189,
+            199,
+            242,
+            202,
+            204,
+            195
+          ]
+        }
+      },
+      "files": {
+        "send": [
+          {
+            "file": "/assets/engine-7QN3pHDG.wasm",
+            "br_bytes": 141883
+          },
+          {
+            "file": "/assets/engine-kdf-DSu_6qxP.js",
+            "br_bytes": 3340
+          },
+          {
+            "file": "/assets/index-eRPzjXIX.css",
+            "br_bytes": 29321
+          },
+          {
+            "file": "/assets/index-gXHjTXu2.js",
+            "br_bytes": 162794
+          },
+          {
+            "file": "/assets/pow.worker-CqXgVHIX.js",
+            "br_bytes": 565
+          },
+          {
+            "file": "/index.html",
+            "br_bytes": 1119
+          }
+        ],
+        "open": [
+          {
+            "file": "/assets/engine-7QN3pHDG.wasm",
+            "br_bytes": 141883
+          },
+          {
+            "file": "/assets/engine-kdf-DSu_6qxP.js",
+            "br_bytes": 3340
+          },
+          {
+            "file": "/assets/index-eRPzjXIX.css",
+            "br_bytes": 29321
+          },
+          {
+            "file": "/assets/index-gXHjTXu2.js",
+            "br_bytes": 162794
+          },
+          {
+            "file": "/assets/pow.worker-CqXgVHIX.js",
+            "br_bytes": 565
+          },
+          {
+            "file": "/index.html",
+            "br_bytes": 1119
+          }
+        ]
+      },
+      "note": "Médiane de 15 passes après une passe d'échauffement écartée (min et écart interquartile dans stats). 128 Mio pseudo-aléatoires (xorshift32) chiffrés puis rouverts en mémoire, octets vérifiés hors chrono. Copies comprises dans le temps mesuré : lecture du Blob par tranches de 4 Mio (chiffrement) ; à l'ouverture, une copie de chaque segment de 4 Mio donné au lecteur (il met à zéro ce qu'il reçoit). argon2_ms : médiane de 15 appels avec les paramètres de création, après un premier appel à froid (argon2_first_ms, instanciation comprise). send_bytes/open_bytes : octets brotli de ce que le navigateur charge sur le site construit (web/dist rebâti par ce script), route / pour envoyer, /#<partage> pour ouvrir, plus tout fichier assets/*.js|css|wasm cité de proche en proche par ces scripts (Argon2, Worker de preuve de travail, futur .wasm) ; cadre d'aperçu PDF exclu. Les deux ensembles sont aujourd'hui identiques (un seul bundle)."
+    },
+    {
+      "commit": "7cad26a",
+      "chromium": "153.0.8010.12",
+      "seal_mib_s": 247.8,
+      "open_mib_s": 513,
+      "argon2_ms": 189,
+      "argon2_first_ms": 234,
+      "send_bytes": 339022,
+      "open_bytes": 339022,
+      "stats": {
+        "seal_mib_s": {
+          "median": 247.8,
+          "min": 225.6,
+          "iqr": 20.1,
+          "runs": [
+            233.3,
+            247.8,
+            246,
+            249.9,
+            250.7,
+            225.6,
+            258.7,
+            248.9,
+            245.1,
+            270.7,
+            229.5,
+            227.2,
+            229,
+            252.4,
+            253.8
+          ]
+        },
+        "open_mib_s": {
+          "median": 513,
+          "min": 414.2,
+          "iqr": 33.5,
+          "runs": [
+            414.2,
+            525.2,
+            519.5,
+            504.3,
+            461.9,
+            540.3,
+            495.5,
+            528.5,
+            518.4,
+            523.5,
+            454.9,
+            486.1,
+            502,
+            531.8,
+            513
+          ]
+        },
+        "argon2_ms": {
+          "median": 189,
+          "min": 159,
+          "iqr": 20,
+          "runs": [
+            180,
+            189,
+            200,
+            201,
+            201,
+            186,
+            197,
+            203,
+            220,
+            182,
+            186,
+            168,
+            159,
+            161,
+            205
+          ]
+        }
+      },
+      "files": {
+        "send": [
+          {
+            "file": "/assets/engine-7QN3pHDG.wasm",
+            "br_bytes": 141883
+          },
+          {
+            "file": "/assets/engine-kdf-DSu_6qxP.js",
+            "br_bytes": 3340
+          },
+          {
+            "file": "/assets/index-eRPzjXIX.css",
+            "br_bytes": 29321
+          },
+          {
+            "file": "/assets/index-gXHjTXu2.js",
+            "br_bytes": 162794
+          },
+          {
+            "file": "/assets/pow.worker-CqXgVHIX.js",
+            "br_bytes": 565
+          },
+          {
+            "file": "/index.html",
+            "br_bytes": 1119
+          }
+        ],
+        "open": [
+          {
+            "file": "/assets/engine-7QN3pHDG.wasm",
+            "br_bytes": 141883
+          },
+          {
+            "file": "/assets/engine-kdf-DSu_6qxP.js",
+            "br_bytes": 3340
+          },
+          {
+            "file": "/assets/index-eRPzjXIX.css",
+            "br_bytes": 29321
+          },
+          {
+            "file": "/assets/index-gXHjTXu2.js",
+            "br_bytes": 162794
+          },
+          {
+            "file": "/assets/pow.worker-CqXgVHIX.js",
+            "br_bytes": 565
+          },
+          {
+            "file": "/index.html",
+            "br_bytes": 1119
+          }
+        ]
+      },
+      "note": "Médiane de 15 passes après une passe d'échauffement écartée (min et écart interquartile dans stats). 128 Mio pseudo-aléatoires (xorshift32) chiffrés puis rouverts en mémoire, octets vérifiés hors chrono. Copies comprises dans le temps mesuré : lecture du Blob par tranches de 4 Mio (chiffrement) ; à l'ouverture, une copie de chaque segment de 4 Mio donné au lecteur (il met à zéro ce qu'il reçoit). argon2_ms : médiane de 15 appels avec les paramètres de création, après un premier appel à froid (argon2_first_ms, instanciation comprise). send_bytes/open_bytes : octets brotli de ce que le navigateur charge sur le site construit (web/dist rebâti par ce script), route / pour envoyer, /#<partage> pour ouvrir, plus tout fichier assets/*.js|css|wasm cité de proche en proche par ces scripts (Argon2, Worker de preuve de travail, futur .wasm) ; cadre d'aperçu PDF exclu. Les deux ensembles sont aujourd'hui identiques (un seul bundle)."
+    }
+  ],
+  "reference_commit": "a693d33",
+  "reference_rounds": [
+    {
+      "commit": "a693d33",
+      "seal_mib_s": 227.4,
+      "open_mib_s": 433.9,
+      "argon2_ms": 248,
+      "argon2_first_ms": 248,
+      "send_bytes": 341304,
+      "open_bytes": 341304
+    },
+    {
+      "commit": "a693d33",
+      "seal_mib_s": 228.7,
+      "open_mib_s": 413.6,
+      "argon2_ms": 241,
+      "argon2_first_ms": 351,
+      "send_bytes": 341304,
+      "open_bytes": 341304
+    },
+    {
+      "commit": "a693d33",
+      "seal_mib_s": 212.1,
+      "open_mib_s": 407.6,
+      "argon2_ms": 236,
+      "argon2_first_ms": 246,
+      "send_bytes": 341304,
+      "open_bytes": 341304
+    }
+  ]
+}
