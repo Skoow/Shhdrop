@@ -99,13 +99,20 @@ Comme §39.5 : vocal enregistré dans la conversation (10 min au plus), lu sur p
     - un participant absent (coupure, onglet fermé, siège gardé) le **verra à son retour** : il n'est jamais sauté ;
     - quand **le dernier participant** l'a lu, le message **disparaît pour tout le monde, expéditeur compris**, et quitte le serveur (trame et pièce).
     - Un participant qui quitte le salon (« Quitter ») ou en est exclu ne compte plus parmi ceux qui doivent le lire.
-    - **Conséquence serveur (moyen)** : la file de §39.3.2 oublie les trames après 200 trames ou 15 min ; un absent qui revient plus tard perdrait le message. Correction retenue : les trames « instantané » non encore lues par tous sont gardées **en mémoire** jusqu'à la dernière lecture ou la fin du salon, hors de cette file, dans un plafond par salon (2 000 trames, environ 8 Mio, compté dans le budget de 1 Go) ; au-delà, la plus ancienne est oubliée et le retour affiche « Des messages ont pu vous échapper ». Jamais sur disque ; un redémarrage du serveur les perd (dit sur la page d'explication).
+    - **Conséquence serveur (moyen)** : la file de §39.3.2 ne garde que les 200 dernières trames ou 15 min ; un absent qui revient plus tard perdrait le message. Correction proposée (§5.1).
   - **10 minutes** et **1 heure** : comptées **depuis l'envoi**, pour tout le monde, expéditeur compris. Un message que personne n'a lu dans ce délai est effacé sans avoir été lu. Compte à rebours visible dans le message.
 - **Qui la change** : **tout participant**, à tout moment. Chaque changement s'affiche dans la conversation : « Léa a réglé l'effacement des messages sur 10 minutes ». La règle s'applique aux messages envoyés **après** le changement ; un message garde la règle de son envoi (elle voyage avec lui, chiffrée).
 - **« Vu »** au sens de l'effacement : le message a été affiché à l'écran, page visible, au moins 1 seconde (`IntersectionObserver` et `visibilitychange`).
 - **Ce que fait « effacé »** : le message quitte l'écran et la mémoire de la page (URL blob révoquées, pièce oubliée) ; sur le serveur, sa trame quitte la file et sa pièce est effacée du disque dès que la règle le permet pour tous.
 - **Honnêteté, à afficher** : « L'effacement se fait sur les appareils des participants. Une capture d'écran, une photo de l'écran ou une app modifiée peuvent garder un message. »
 - **Choix du propriétaire (11 novembre)** : en « Instantané », un participant absent qui ne revient pas garde le message en attente jusqu'à son retour, son départ, son exclusion ou la fin du salon (24 h au plus) ; l'expéditeur voit « Lu par 2 / 3 » pendant ce temps.
+
+### 5.1 Aucune limite de nombre de messages (décision du propriétaire, 11 novembre)
+
+- On parle **sans limite de nombre de messages**. La seule borne est la **capacité du salon** déjà décidée (§39.1) : 1 Go au total, messages et fichiers ; un message compte 4 140 octets, soit environ **250 000 messages** dans un salon sans fichiers. La cadence anti-abus reste (60 messages par minute et par personne, §39.3.6) : elle freine les robots, pas une conversation.
+- **Abonnements** (plus tard, §39.11, §38.8) : plus de capacité, de durée et de participants pour Plus et Pro, même chiffrement. Pas de salon payant avant l'avis du juriste.
+- **Messages « instantané » en attente** : gardés jusqu'à la dernière lecture ou la fin du salon, sans plafond de nombre, dans la capacité du salon. **Signalement (moyen, choix déjà validé « trames jamais sur disque », §39.3.2)** : en mémoire seule, 200 salons pleins pourraient demander des centaines de Go de mémoire et faire tomber le serveur. Correction proposée : jusqu'à 8 Mio par salon en mémoire ; au-delà, les trames en attente (déjà chiffrées de bout en bout et sous `K_trame`) sont écrites dans un fichier temporaire du salon, chiffré une seconde fois par le serveur avec une clé aléatoire gardée **en mémoire seulement** (un redémarrage rend le fichier illisible, puis il est effacé), effacé trame par trame à la dernière lecture et en entier à la fin du salon, compté dans `SHH_STORAGE_MAX`. Le serveur n'y apprend rien de plus qu'en mémoire.
+
 
 ## 6. Accusés : envoyé, reçu, vu (décision : toujours actifs)
 
