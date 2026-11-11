@@ -39,7 +39,7 @@ Décisions prises le 11 novembre :
 
 - **Service de livraison** (Delivery Service) : il ordonne les trames (numéro `seq`, déjà le cas) ; un seul Commit est accepté par époque (le premier dans l'ordre du serveur ; les autres sont rejetés et refaits par leur auteur).
 - **Service d'authentification** : aucun. Il n'y a pas d'identité à certifier : l'entrée se prouve par le lien et le mot de passe (`K_preuve_s`, §39.2.1), et l'identité d'un participant est sa clé éphémère. **Vérification** possible par un code par participant (§9, point 4).
-- Le serveur ne voit jamais le contenu MLS : chaque message MLS est placé dans l'enveloppe extérieure de taille fixe de §39.2.3 (`K_trame`, 4 140 octets). Un message MLS plus grand (Welcome, Commit d'un grand groupe) est découpé en plusieurs trames de même taille. Le serveur ne distingue donc ni le type (message, Commit, Welcome, accusé, « écrit »), ni l'expéditeur, ni la taille.
+- Le serveur ne voit jamais le contenu MLS : chaque message MLS est placé dans l'enveloppe extérieure de taille fixe de §39.2.3 (`K_trame`, 4 140 octets), dont l'en-tête en clair ne porte que « volatile » et la règle d'effacement (§10). Un message MLS plus grand (Welcome, Commit d'un grand groupe) est découpé en plusieurs trames de même taille. Le serveur ne distingue donc ni le type (message, Commit, Welcome, accusé, « écrit »), ni l'expéditeur, ni la taille.
 
 ### 3.3 Clés du salon gardées de §39.2.1
 
@@ -166,7 +166,11 @@ Choisi sur la page d'explication avant d'entrer (§39.4, règles de forme et d'u
 
 ## 10. Ce que voit le serveur (complète §39.3.8)
 
-Inchangé pour l'essentiel : trames de taille unique, type et expéditeur cachés. Nouveau : rien (accusés, modifications, règles et profils sont des trames ordinaires ; avatars et pièces sont chiffrés). Le rythme des trames par siège reste visible (S34), un peu plus dense à cause des accusés.
+Inchangé : trames de taille unique ; contenu, type de message et expéditeur cachés. **Nouveau (décision du 11 novembre, prise pour que l'effacement ne dépende pas de l'appareil de l'expéditeur)** :
+
+- **En-tête en clair de chaque trame** (authentifié, pas chiffré) : volatile ou non (§5.1) et règle d'effacement (désactivé, instantané, 10 min, 1 h). Le serveur efface lui-même du disque une trame « 10 min » ou « 1 h » à l'échéance, sans attendre personne.
+- **Lectures en « instantané »** : chaque lecteur envoie au serveur « lu » pour la trame (numéro `seq`) ; quand tous les sièges présents à l'envoi l'ont envoyé, ou sont partis, le serveur efface la trame et prévient les présents. **Fuite assumée (moyen)** : le serveur sait qui a lu quelle trame « instantané », et quand ; il ne sait toujours ni ce qu'elle contient, ni qui l'a envoyée. Sans cela, un message resterait sur le disque tant que l'expéditeur est hors ligne.
+- Le rythme des trames par siège reste visible (S34).
 
 ## 11. Cadre légal
 
