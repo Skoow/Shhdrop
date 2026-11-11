@@ -2617,3 +2617,4 @@ Revue complète du dépôt le 10 novembre (serveur, client et chiffrement, perfo
 - **Office** : liens vers d'autres classeurs (`xl/externalLinks/`), source de publipostage, identifiants de révision : gardés (le texte le dit).
 - **Historique du navigateur** : un test prouve que la clé du lien reste dans l'historique de Chromium (§5.3 corrigée ; la page Sécurité le dit dans les deux langues). Pas de test Firefox.
 - **Légal (§17)**, mentions légales à compléter, déclaration ANSSI : inchangés.
+- **Versions installées avant le délai de 7 jours** (11 novembre, à la demande du propriétaire) : vite 8.3.8, @playwright/test 1.65.0, modernc.org/sqlite 1.62.0, golang.org/x/sys 0.50.0, modernc.org/libc 1.81.0, cargo-audit 0.23.0. À revérifier à partir du 18 novembre (avis de sécurité, versions retirées) ; les suivantes attendent 7 jours (Dependabot `cooldown`).
