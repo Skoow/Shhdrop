@@ -36,6 +36,12 @@ pub enum Error {
     /// Le fournisseur n'a pas pu importer une clé ou chiffrer (lot mal formé, poignée inconnue,
     /// échec de WebCrypto) : jamais un échec d'ouverture, qui reste `PaquetCorrompu`.
     ChiffrementEchec,
+    /// `bucketFor` : fin des données au-delà de 2^53 − 1 (`Number.isSafeInteger`).
+    TailleDonneesInvalide,
+    /// Données au-delà du plus grand palier (2 Gio).
+    TropGros,
+    /// Droits de création inconnus, « coffre » sans durée valide, ou durée hors « coffre ».
+    DroitsInvalides,
 }
 
 impl Error {
@@ -56,6 +62,9 @@ impl Error {
             Error::PaquetCorrompu => "paquet_corrompu",
             Error::GraineInvalide => "graine invalide",
             Error::ChiffrementEchec => "chiffrement_echec",
+            Error::TailleDonneesInvalide => "taille_invalide",
+            Error::TropGros => "trop_gros",
+            Error::DroitsInvalides => "droits_invalides",
         }
     }
 }
@@ -102,5 +111,8 @@ mod tests {
         assert_eq!(Error::PaquetCorrompu.to_string(), "paquet_corrompu");
         assert_eq!(Error::GraineInvalide.to_string(), "graine invalide");
         assert_eq!(Error::ChiffrementEchec.to_string(), "chiffrement_echec");
+        assert_eq!(Error::TailleDonneesInvalide.to_string(), "taille_invalide");
+        assert_eq!(Error::TropGros.to_string(), "trop_gros");
+        assert_eq!(Error::DroitsInvalides.to_string(), "droits_invalides");
     }
 }

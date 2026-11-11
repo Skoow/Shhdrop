@@ -1,5 +1,6 @@
 // Rejoue les sections `encoding`, `password`, `link`, `hkdf`, `sha256`, `argon2id`, `access`,
-// `content` et `envelope` de engine/vectors/v2.json (produites par l'ancien moteur TypeScript) :
+// `content`, `envelope`, `constants`, `header`, `nonce`, `manifest` (texte JSON exact) et, de
+// `sizing`, `bucketFor`, `segmentCount` et `segmentSize` de engine/vectors/v2.json (produites par l'ancien moteur TypeScript) :
 // chaque cas, sans exception, doit redonner la même sortie ou le même message d'erreur.
 mod support;
 
@@ -8,6 +9,7 @@ use shhdrop_core::encoding::{b64u, unb64u};
 use shhdrop_core::envelope::{
     access_keys, content_keys, content_keys_checked, open, seal, share_id,
 };
+use shhdrop_core::format;
 use shhdrop_core::kdf::{
     KDF_CREATE, KDF_MAX, KDF_MIN, derive_access, hkdf, password_key, password_key_for_create,
     sha256,
@@ -16,6 +18,7 @@ use shhdrop_core::link::{
     ParsedLink, check_origin, manage_link, parse_link, share_link, share_link_with_password,
     split_password,
 };
+use shhdrop_core::manifest::{self, Clean, Entry, Kind, Manifest, Rights};
 use shhdrop_core::native::RustCrypto;
 use shhdrop_core::password::{generate, is_generated};
 use shhdrop_core::platform::{Key, Platform};
@@ -324,9 +327,9 @@ fn same_key(p: &Rc<RustCrypto>, k: &Key<RustCrypto>, raw: &[u8], what: &str) {
     assert_eq!(probe(k), probe(&r), "{what}");
 }
 
-/// En-tête de 48 octets : « SHH2 », version 2, 11 octets nuls, engagement (format, Task 6).
+/// En-tête de 48 octets : « SHH2 », version 2, 11 octets nuls, engagement.
 fn header(engagement: &[u8; 32]) -> Vec<u8> {
-    [&b"SHH2\x02"[..], &[0; 11], &engagement[..]].concat()
+    format::header(engagement).to_vec()
 }
 
 #[test]
@@ -406,10 +409,10 @@ fn content_cases() {
             };
             assert_eq!(ck.engagement.to_vec(), engagement, "{c}");
             same_key(&p, &ck.k_contenu, &hexf(c, "k_contenu"), "k_contenu");
-            // probe = AES-GCM(K_contenu, nonce(0, faux) = 12 zéros, en-tête, probe_plain).
+            // probe = AES-GCM(K_contenu, nonce(0, faux), en-tête, probe_plain).
             let probe = block_on(ck.k_contenu.seal_batch(
                 &header(&ck.engagement),
-                &[[0; 12]],
+                &[format::nonce(0, false)],
                 &hexf(c, "probe_plain"),
                 16,
             ))
@@ -473,4 +476,179 @@ fn envelope_cases() {
     }
     assert_eq!((sealed, opened), (1, 1));
     assert_eq!(refused, 10);
+}
+
+#[test]
+fn format_constants() {
+    let v = vectors();
+    let c = &v["constants"];
+    let n = |name: &str| c[name].as_u64().unwrap_or_else(|| panic!("{name}"));
+    assert_eq!(n("CHUNK"), format::CHUNK as u64);
+    assert_eq!(n("TAG"), format::TAG as u64);
+    assert_eq!(n("CHUNK_CT"), format::CHUNK_CT as u64);
+    assert_eq!(n("HEADER"), format::HEADER as u64);
+    assert_eq!(n("SEG_CHUNKS"), u64::from(format::SEG_CHUNKS));
+    assert_eq!(n("MANIFEST_MAX"), format::MANIFEST_MAX as u64);
+    assert_eq!(n("CONTENT_MAX"), format::CONTENT_MAX);
+    assert_eq!(n("MAX_ITEMS"), format::MAX_ITEMS as u64);
+    assert_eq!(n("TEXT_MAX"), format::TEXT_MAX as u64);
+    assert_eq!(n("TEXT_BYTES_MAX"), format::TEXT_BYTES_MAX);
+    assert_eq!(n("PREVIEW_MAX"), format::PREVIEW_MAX);
+    let buckets: Vec<u64> = c["BUCKETS"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b.as_u64().unwrap())
+        .collect();
+    assert_eq!(buckets, format::BUCKETS.map(u64::from).to_vec());
+}
+
+#[test]
+fn header_cases() {
+    let v = vectors();
+    let cases = v["header"].as_array().unwrap();
+    let (mut built, mut read, mut refused, mut not_applicable) = (0, 0, 0, 0);
+    for c in cases {
+        match c["fn"].as_str().unwrap() {
+            "header" => {
+                let eng = hexf(c, "engagement");
+                // Engagement de 31 ou 33 octets : impossible en Rust ([u8; 32] par type).
+                let Ok(eng) = <[u8; 32]>::try_from(eng.as_slice()) else {
+                    assert_eq!(c["error"], "engagement invalide", "{c}");
+                    not_applicable += 1;
+                    continue;
+                };
+                assert_eq!(format::header(&eng).to_vec(), hexf(c, "header"), "{c}");
+                built += 1;
+            }
+            "readHeader" => {
+                let got = format::read_header(&hexf(c, "seg0"));
+                check(c, got.map(|(h, e)| (h.to_vec(), e.to_vec())), |_| {
+                    (hexf(c, "header"), hexf(c, "engagement"))
+                });
+                if c["error"].is_null() {
+                    read += 1;
+                } else {
+                    refused += 1;
+                }
+            }
+            other => panic!("fonction inconnue dans les vecteurs : {other}"),
+        }
+    }
+    assert_eq!((built, read, refused, not_applicable), (3, 2, 7, 2));
+}
+
+#[test]
+fn nonce_cases() {
+    let v = vectors();
+    let cases = v["nonce"].as_array().unwrap();
+    assert_eq!(cases.len(), 28);
+    for c in cases {
+        let got = format::nonce(c["index"].as_u64().unwrap(), c["last"].as_bool().unwrap());
+        assert_eq!(got.to_vec(), hexf(c, "nonce"), "{c}");
+    }
+}
+
+#[test]
+fn sizing_cases() {
+    let v = vectors();
+    let s = &v["sizing"];
+    // bucketFor : entrée négative ou non entière impossible en u64 (sans objet, README « Écarts »).
+    let (mut replayed, mut not_applicable) = (0, 0);
+    for c in s["bucketFor"].as_array().unwrap() {
+        let Some(input) = c["input"].as_u64() else {
+            assert_eq!(c["error"], "taille_invalide", "{c}");
+            not_applicable += 1;
+            continue;
+        };
+        check(c, format::bucket_for(input), |r| r.as_u64().unwrap() as u32);
+        replayed += 1;
+    }
+    assert_eq!((replayed, not_applicable), (40, 2));
+    let counts = s["segmentCount"].as_array().unwrap();
+    assert_eq!(counts.len(), format::BUCKETS.len());
+    for c in counts {
+        let b = c["input"].as_u64().unwrap() as u32;
+        assert_eq!(
+            u64::from(format::segment_count(b)),
+            c["result"].as_u64().unwrap(),
+            "{c}"
+        );
+    }
+    let sizes = s["segmentSize"].as_array().unwrap();
+    assert!(sizes.len() >= 30);
+    for c in sizes {
+        let (b, n) = (
+            c["bucket"].as_u64().unwrap() as u32,
+            c["n"].as_u64().unwrap() as u32,
+        );
+        assert_eq!(
+            format::segment_size(b, n) as u64,
+            c["result"].as_u64().unwrap(),
+            "{c}"
+        );
+    }
+}
+
+/// Manifeste attendu d'un cas de `manifest` (entrées de `sealFinal`) : offset = premier morceau
+/// × CHUNK (0 pour un élément vide), `clean` des fichiers seulement.
+fn manifest_of(c: &Value) -> Manifest {
+    let rights = Rights::new(
+        c["rights"].as_str().unwrap_or("enregistrer"),
+        c["keep_ttl_h"].as_u64(),
+    )
+    .unwrap();
+    let items = c["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            let size = e["size"].as_u64().unwrap();
+            let first = e["first"].as_u64().unwrap();
+            Entry {
+                kind: match e["kind"].as_str().unwrap() {
+                    "text" => Kind::Text,
+                    _ => Kind::File,
+                },
+                name: e["name"].as_str().unwrap().to_owned(),
+                mime: e["mime"].as_str().unwrap().to_owned(),
+                size,
+                offset: if size == 0 {
+                    0
+                } else {
+                    first * format::CHUNK as u64
+                },
+                text: None,
+                k: Some(Zeroizing::new(key32(e["k"].as_str().unwrap()))),
+                clean: e["clean"].as_str().map(|s| Clean::from_name(s).unwrap()),
+            }
+        })
+        .collect();
+    Manifest { rights, items }
+}
+
+#[test]
+fn manifest_json_cases() {
+    let v = vectors();
+    let mut cases: Vec<&Value> = v["manifest"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["error"].is_null())
+        .collect();
+    assert_eq!(cases.len(), 9);
+    cases.push(&v["share"]);
+    for c in cases {
+        let want = c["manifest_json"].as_str().unwrap().as_bytes();
+        // Écrit par le moteur Rust : octet pour octet le JSON.stringify de l'ancien moteur.
+        if c.get("entries").is_some() {
+            assert_eq!(*manifest::to_json(&manifest_of(c)), want, "{}", c["name"]);
+        }
+        // Relu puis réécrit : mêmes octets.
+        let m = manifest::parse(want, format::CONTENT_MAX).unwrap();
+        if c.get("entries").is_some() {
+            assert_eq!(m, manifest_of(c), "{}", c["name"]);
+        }
+        assert_eq!(*manifest::to_json(&m), want, "{}", c["name"]);
+    }
 }

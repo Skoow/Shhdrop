@@ -627,6 +627,14 @@ async function manifestCases(): Promise<Json[]> {
     // peut pas porter ni serde_json lire ; ce cas (lu en U+FFFD) relève des tests de la Task 6 (Review Focus 1).
     ent(0, { kind: "file", name: "q\"b\\s/\t\n\b\f\r\u0001\u001f\u007f\u2028\u2029é😀x", mime: "", size: 1, first: 3, clean: "tel_quel" }),
   ], { rights: "enregistrer" });
+  // Chaque caractère de commande U+0000–U+001F (échappé par JSON.stringify : \b \t \n \f \r, sinon
+  // \u00xx en minuscules), puis des caractères écrits tels quels en UTF-8 : U+007F, U+0080, U+009F,
+  // U+00AD, U+200B, U+FEFF, U+FFFD, U+10FFFF ; type et note aussi échappés (Task 6, octets identiques).
+  const controls = Array.from({ length: 32 }, (_, i) => String.fromCharCode(i)).join("");
+  await run("caractères de commande et invisibles", [
+    ent(0, { kind: "text", name: `n${controls}"\\/`, mime: "text/plain;x=\"\u0000\"", size: 3, first: 0 }),
+    ent(1, { kind: "file", name: `${controls}\u007f\u0080\u009f­​﻿�\u{10ffff}`, mime: "a/b\u001b", size: 2, first: 1, clean: "protege" }),
+  ], { rights: "coffre", keepTtlH: 24 });
   // Manifeste d'exactement MANIFEST_MAX octets, puis un de plus.
   const big = (n: number) => [ent(0, { kind: "file", name: "a".repeat(n), mime: "x", size: 1, first: 0 })];
   const r0 = fixed("manifest/r/mesure");

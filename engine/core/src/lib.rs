@@ -6,9 +6,11 @@
 pub mod encoding;
 pub mod envelope;
 mod error;
+pub mod format;
 pub mod kdf;
 mod keys;
 pub mod link;
+pub mod manifest;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;
 pub mod password;
