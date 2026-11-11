@@ -26,6 +26,27 @@ const FORBIDDEN_IN_PROD = [
   `${DEMO_BASE}assets/`, // base de la démo dans un build de production
 ];
 
+/**
+ * Adresses absolues admises dans index.html, pdf-frame.html et le CSS : espaces de noms XML
+ * (SVG en ligne), de simples identifiants qu'aucun navigateur ne télécharge.
+ */
+const ALLOWED_URLS = new Set(["http://www.w3.org/2000/svg", "http://www.w3.org/1999/xlink", "http://www.w3.org/1999/xhtml"]);
+
+/**
+ * Aucune ressource tierce (CLAUDE.md, spec §10) : rend chaque adresse http(s):// absolue, et
+ * chaque adresse « //hôte » sans schéma dans un attribut src, href, action ou dans url(…) /
+ * @import, hors ALLOWED_URLS. La CSP de production (default-src 'self') les bloquerait, pas
+ * celle d'un cadre ou d'une copie servie ailleurs : le contrôle ne dépend pas d'elle.
+ * Une adresse s'arrête aussi à « % » et « & » (xmlns encodé d'une image SVG en ligne du CSS,
+ * &quot; du HTML) : l'hôte, lui, reste toujours dans ce qui est rendu.
+ */
+export function findExternalUrls(text) {
+  const out = [];
+  for (const [url] of text.matchAll(/https?:\/\/[^\s"'`()<>\\%&]*/gi)) if (!ALLOWED_URLS.has(url)) out.push(url);
+  for (const [, url] of text.matchAll(/(?:\b(?:src|href|action|srcset|poster|data)\s*=\s*["']?|url\(\s*["']?|@import\s+["'])(\/\/[^\s"'`()<>\\%&]*)/gi)) out.push(url);
+  return out;
+}
+
 function files(dir) {
   const out = [];
   for (const name of readdirSync(dir)) {
@@ -70,6 +91,13 @@ export function checkDist(dir, demo) {
   // (production et démo). Le cadre PDF (pdf-frame.html) en est exempté pour l'instant : il vit
   // dans une origine opaque, où une empreinte exigerait des en-têtes CORS sur ses deux fichiers.
   problems.push(...checkSri("index.html", index, (rel) => byRel.get(rel) ?? null, demo ? DEMO_BASE : "/"));
+
+  // Aucune ressource tierce (CLAUDE.md) : ni dans les pages (index.html, 404.html de la démo,
+  // pdf-frame.html), ni dans les feuilles de style (polices, images). Production et démo.
+  for (const f of all) {
+    if (!/^(?:index|404|pdf-frame)\.html$|\.css$/.test(f.rel)) continue;
+    for (const url of findExternalUrls(f.data.toString("utf8"))) problems.push(`${f.rel} : adresse externe « ${url} » (aucune ressource tierce)`);
+  }
 
   // Spec §35.1 (Task M2) : aucune statistique, aucun écouteur global d'erreurs, dans tout build.
   for (const f of all) {

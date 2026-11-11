@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { checkDist } from "./check-dist.mjs";
+import { checkDist, findExternalUrls } from "./check-dist.mjs";
 import { addSri, sha384 } from "./sri.mjs";
 import { DEMO_CSP } from "./demo-meta.mjs";
 
@@ -91,6 +91,30 @@ describe("check-dist.mjs, production", () => {
     expect(r.code).toBe(1);
     expect(r.err.trim().split("\n")).toEqual(["check-dist : assets/index-a.js : import() dynamique (2 fois), interdit en production"]);
     expect(run([site({ "index.html": PROD_INDEX, "assets/index-a.js": "const u=import.meta.url;x.reimport(1)" })])).toEqual({ code: 0, err: "" });
+  });
+
+  it("aucune ressource tierce : échoue sur une adresse http(s):// ou //hôte dans index.html, pdf-frame.html ou le CSS, production et démo ; espaces de noms SVG admis", () => {
+    const svg = "a{background:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3C/svg%3E\")}";
+    const svgEnc = "a{background:url(\"data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27%3E%3C/svg%3E\")}";
+    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/a.css": svg + svgEnc }), false)).toEqual([]);
+    const font = "@font-face{src:url(https://fonts.gstatic.com/x.woff2)}";
+    const page = PROD_INDEX.replace("</head>", '<link rel="icon" href="//cdn.example/i.png"></head>');
+    const frame = '<!doctype html><script src="http://cdn.example/pdf.js"></script>';
+    expect(checkDist(site({ "index.html": page, "assets/a.css": font, "pdf-frame.html": frame, "pdf-frame.css": "@import '//x.example/a.css';" }), false)).toEqual([
+      "assets/a.css : adresse externe « https://fonts.gstatic.com/x.woff2 » (aucune ressource tierce)",
+      "index.html : adresse externe « //cdn.example/i.png » (aucune ressource tierce)",
+      "pdf-frame.css : adresse externe « //x.example/a.css » (aucune ressource tierce)",
+      "pdf-frame.html : adresse externe « http://cdn.example/pdf.js » (aucune ressource tierce)",
+    ]);
+    const demo = { "index.html": DEMO_INDEX, "404.html": DEMO_INDEX, "assets/index-a.js": 'const MARK="__SHH_DEMO__";' + DEMO_ENGINE, "assets/a.css": font };
+    expect(checkDist(site(demo), true)).toEqual(["assets/a.css : adresse externe « https://fonts.gstatic.com/x.woff2 » (aucune ressource tierce)"]);
+    // Hors des pages et du CSS (scripts : pdf.js, messages) : non concerné par cette règle.
+    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": 'const u="https://example.org/doc"' }), false)).toEqual([]);
+    // Encodé, majuscules, &quot; : l'hôte reste visible.
+    expect(findExternalUrls("HTTPS://Evil.example/a")).toEqual(["HTTPS://Evil.example/a"]);
+    expect(findExternalUrls("url(&quot;https://evil.example/a&quot;)")).toEqual(["https://evil.example/a"]);
+    expect(findExternalUrls("xmlns=%27http://www.w3.org/2000/svg%27 x=%27https://evil.example/b%27")).toEqual(["https://evil.example/b"]);
+    expect(findExternalUrls('<a href="/x">//commentaire</a> a{b:c} /* // */')).toEqual([]);
   });
 
   it("échoue sur une statistique ou un écouteur global d'erreurs (spec §35.1), démo comprise ; « scrollbar » passe", () => {
