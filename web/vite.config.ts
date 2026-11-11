@@ -144,7 +144,7 @@ export function engineWasm(base: string, demo: boolean): Plugin {
  * son adresse et son empreinte SHA-384 vont dans le script, jamais ses octets (lu par fetch avec
  * `integrity` au premier besoin du salon). La colle de wasm-bindgen ne lit jamais le .wasm voisin
  * (chemin par défaut remplacé par une erreur, comme pour le moteur). Contrôle : check-dist.mjs
- * (cité avec son empreinte, absent du script principal, au plus 400 Ko en brotli).
+ * (cité avec son empreinte, absent du script principal, au plus 430 000 octets en brotli).
  */
 export function salonWasm(base: string, demo: boolean): Plugin {
   const VIRTUAL = "virtual:shh-salon";

@@ -22,7 +22,8 @@
 //!   accepte pas de l'appelant (la forme à nonce donné du moteur sert aux vecteurs seulement).
 #![forbid(unsafe_code)]
 
-use js_sys::{Array, Object, Reflect, Uint8Array};
+use core::cell::RefCell;
+use js_sys::{Array, Function, Object, Reflect, Uint8Array};
 use shhdrop_core::format::MAX_SAFE;
 use shhdrop_core::{KLien, KMdp};
 use shhdrop_salon::{
@@ -71,6 +72,31 @@ export type Annonce = { siege: number; nonce: Uint8Array };
 /** Brut : instants en bigint (web/src/salon/engine.ts rend des nombres). */
 export type EtatEffacementBrut = { etat: "visible" } | { etat: "rebours"; finMs: bigint } | { etat: "efface" };
 "#;
+
+// ---------------------------------------------------------------------------------------------
+// Panique (comme shhdrop-wasm, audit F4)
+// ---------------------------------------------------------------------------------------------
+
+thread_local! {
+    static ON_PANIC: RefCell<Option<Function>> = const { RefCell::new(None) };
+}
+
+/// Fonction JavaScript appelée (sans argument, ni message : rien de ce qui a paniqué ne sort) juste
+/// avant l'arrêt de l'instance sur une panique (un bogue : le moteur ne panique sur aucune entrée).
+/// Sur wasm32, une panique arrête l'instance (`RuntimeError: unreachable`) sans exécuter aucun
+/// `Drop` : la couche TypeScript (web/src/salon/engine.ts) marque alors le module cassé, met sa
+/// mémoire à zéro (clés, état MLS, clés privées) et refuse tout appel suivant (`salon_casse`).
+#[wasm_bindgen(js_name = setPanicHandler)]
+pub fn set_panic_handler(f: Function) {
+    ON_PANIC.with(|h| *h.borrow_mut() = Some(f));
+    std::panic::set_hook(Box::new(|_| {
+        // try_borrow : jamais une seconde panique pendant la première.
+        let f = ON_PANIC.with(|h| h.try_borrow().ok().and_then(|g| g.clone()));
+        if let Some(f) = f {
+            let _ = f.call0(&JsValue::NULL);
+        }
+    }));
+}
 
 // ---------------------------------------------------------------------------------------------
 // Conversions aux frontières
@@ -159,14 +185,13 @@ fn texte(m: &JsValue, k: &str) -> Option<String> {
     get(m, k).as_string()
 }
 
+/// Graine copiée de JavaScript directement dans sa place (`Graine::remplir`), sans tampon de pile.
 fn graine(v: &JsValue) -> Option<Graine> {
-    let mut g = Zeroizing::new([0u8; 32]);
     let a = v.dyn_ref::<Uint8Array>()?;
     if a.length() != 32 {
         return None;
     }
-    a.copy_to(&mut g[..]);
-    Some(Graine::new(*g))
+    Some(Graine::remplir(|g| a.copy_to(&mut g[..])))
 }
 
 fn ids(v: &JsValue) -> Option<Vec<IdMessage>> {

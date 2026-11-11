@@ -152,6 +152,8 @@ test("croisé natif ↔ WebAssembly : Welcome, Commit et messages du moteur nati
     cwd: ENGINE,
     env: { ...process.env, SHH_CROISE_DIR: dir },
     stdio: ["ignore", "inherit", "inherit"],
+    // Groupe de processus à part : en cas d'échec, cargo ET le binaire de test sont arrêtés.
+    detached: true,
   });
   const exit = new Promise<number>((res) => rust.on("exit", (c) => res((fini.code = c ?? 1))));
   try {
@@ -252,7 +254,13 @@ test("croisé natif ↔ WebAssembly : Welcome, Commit et messages du moteur nati
     // Le test Rust a tout vérifié de son côté (messages du module, Commit, clés SFrame, codes).
     expect(await exit).toBe(0);
   } finally {
-    if (fini.code === null) rust.kill();
+    if (fini.code === null && rust.pid !== undefined) {
+      try {
+        process.kill(-rust.pid, "SIGKILL");
+      } catch {
+        // déjà arrêté
+      }
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -45,7 +45,7 @@ fn attendre(dir: &Path, nom: &str) -> Value {
     let debut = Instant::now();
     while !p.exists() {
         assert!(
-            debut.elapsed() < Duration::from_secs(300),
+            debut.elapsed() < Duration::from_secs(120),
             "{nom} jamais écrit"
         );
         std::thread::sleep(Duration::from_millis(20));

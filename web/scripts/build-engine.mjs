@@ -13,8 +13,8 @@
 //   2. wasm-bindgen --target web (sans les sections « name » et « producers » : 70 Ko de noms
 //      de fonctions inutiles au site), version exacte 0.2.130 (celle de la crate wasm-bindgen,
 //      installée par `cargo install wasm-bindgen-cli --version 0.2.130 --locked`).
-//      `--experimental-reset-state-function` (partages seulement) : __wbg_reset_state() refait
-//      une instance neuve du même module après une panique (spec moteur §7 ; web/src/engine/index.ts).
+//      `--experimental-reset-state-function` : __wbg_reset_state() refait une instance neuve du
+//      même module après une panique (spec moteur §7 ; web/src/engine/index.ts, web/src/salon/engine.ts).
 // Les chemins de ~/.cargo (sources des crates, cités par les messages de panique) sont réécrits
 // en /cargo : le .wasm ne porte ni le dossier personnel de qui le construit, ni rien qui change
 // d'une machine à l'autre (build reproductible, web/scripts/repro.sh). L'option passe par
@@ -47,7 +47,7 @@ const FILES = ["shhdrop_wasm.js", "shhdrop_wasm.d.ts", "shhdrop_wasm_bg.wasm", "
 /** Crate, nom de sortie, dossier pkg/ et options propres de wasm-bindgen. */
 const MODULES = [
   { crate: "shhdrop-wasm", profile: "release", name: "shhdrop_wasm", out, extra: ["--experimental-reset-state-function"] },
-  { crate: "shhdrop-salon-wasm", profile: "wasm-salon", name: "shhdrop_salon_wasm", out: join(web, "src", "salon", "pkg"), extra: [] },
+  { crate: "shhdrop-salon-wasm", profile: "wasm-salon", name: "shhdrop_salon_wasm", out: join(web, "src", "salon", "pkg"), extra: ["--experimental-reset-state-function"] },
 ];
 
 function run(cmd, args, cwd, env = process.env) {

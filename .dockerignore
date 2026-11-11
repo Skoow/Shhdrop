@@ -12,6 +12,7 @@ deploy/*
 **/node_modules/
 web/dist/
 web/src/engine/pkg/
+web/src/salon/pkg/
 engine/target/
 web/dist-demo/
 web/test-results/

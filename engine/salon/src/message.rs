@@ -48,6 +48,14 @@ impl Graine {
     pub fn new(octets: [u8; 32]) -> Self {
         Graine(Zeroizing::new(octets))
     }
+    /// Graine remplie en place par `f` (aucune copie intermédiaire du secret faite par
+    /// l'appelant, contrairement à `new`). Les déplacements de la valeur restent des copies
+    /// mémoire que Rust ne permet pas d'effacer.
+    pub fn remplir(f: impl FnOnce(&mut [u8; 32])) -> Self {
+        let mut g = Graine(Zeroizing::new([0u8; 32]));
+        f(&mut g.0);
+        g
+    }
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
@@ -675,6 +683,16 @@ pub fn est_volatile(m: &Message) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn graine_remplie_en_place() {
+        assert_eq!(Graine::remplir(|g| g.fill(7)), Graine::new([7; 32]));
+        assert_eq!(*Graine::remplir(|g| g[31] = 1).as_bytes(), {
+            let mut a = [0u8; 32];
+            a[31] = 1;
+            a
+        });
+    }
 
     fn env(message: Message) -> Enveloppe {
         Enveloppe {
