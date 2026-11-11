@@ -14,9 +14,7 @@ const BINARY = /\.(woff2?|png|jpe?g|gif|ico|webp|avif|mp3|mp4|wasm)$/i;
 /** Seuls fichiers qui contiennent ces mots : la liste elle-même et les tests (non livrés). */
 const SKIP = new Set(["scripts/no-analytics.mjs", "scripts/no-analytics.d.mts"]);
 /** Mots de la liste qui sont aussi des mots courants, dans un fichier donné. */
-const WORDS_OK: Record<string, string[]> = {
-  "src/crypto/wordlist-eff.ts": ["plausible"], // liste de mots EFF (mots de passe), aucun script
-};
+const WORDS_OK: Record<string, string[]> = {};
 
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>

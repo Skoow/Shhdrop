@@ -1,42 +1,42 @@
+// Liens (spec §32), portés de l'ancien transfer/link.test.ts (Task 11) : parseLink, shareLink et
+// manageLink sont ceux du moteur (clé lue et écrite par le moteur, asynchrones) ; les formes, origine
+// et mot de passe du QR code ceux de pure.ts. Mêmes cas, mêmes attentes.
 import { describe, expect, it } from "vitest";
-import { b64u } from "../crypto/encoding";
-import { newKLien, newSGestion, randomBytes } from "../crypto/kdf";
-import type { KLien, SGestion } from "../crypto/types";
-import { MANAGE_FRAGMENT, SHARE_FRAGMENT, SHARE_LINK_SHAPE, SHARE_PW_FRAGMENT, checkOrigin, manageLink, parseLink, shareLink, shareLinkWithPassword, splitPassword } from "./link";
+import { MANAGE_FRAGMENT, SHARE_FRAGMENT, SHARE_LINK_SHAPE, SHARE_PW_FRAGMENT, b64u, checkOrigin, manageLink, newKLien, newSGestion, parseLink, randomBytes, shareLink, shareLinkWithPassword, splitPassword, type KLien, type SGestion } from "./index";
 
 const K = b64u(new Uint8Array(32).fill(1)); // 43 caractères
 
 describe("liens (spec §32 : à la racine, secret après #)", () => {
-  it("aller-retour shareLink → parseLink ; longueur = origine + 45", () => {
+  it("aller-retour shareLink → parseLink ; longueur = origine + 45", async () => {
     const k = newKLien();
-    const link = shareLink("https://shhdrop.example", k);
+    const link = await shareLink("https://shhdrop.example", k);
     expect(link).toBe(`https://shhdrop.example/#${b64u(k)}`);
     expect(link.length).toBe("https://shhdrop.example".length + 45);
     expect(link).toMatch(SHARE_LINK_SHAPE);
-    expect(shareLink("https://shhdrop.app", k)).toHaveLength(64); // « 64 caractères en tout »
-    const p = parseLink(link);
+    expect(await shareLink("https://shhdrop.app", k)).toHaveLength(64); // « 64 caractères en tout »
+    const p = await parseLink(link);
     if (p.kind !== "s") throw new Error("type");
     expect(p).toEqual({ kind: "s", origin: "https://shhdrop.example", kLien: k });
     expect(Object.keys(p)).not.toContain("id"); // l'id se calcule par shareId, jamais lu dans le lien
   });
 
-  it("aller-retour manageLink → parseLink", () => {
+  it("aller-retour manageLink → parseLink", async () => {
     const s = newSGestion();
-    const link = manageLink("http://127.0.0.1:4000", s);
+    const link = await manageLink("http://127.0.0.1:4000", s);
     expect(link).toBe(`http://127.0.0.1:4000/#m${b64u(s)}`);
-    const p = parseLink(link);
+    const p = await parseLink(link);
     if (p.kind !== "m") throw new Error("type");
     expect(p.sGestion).toEqual(s);
     expect(link).not.toMatch(SHARE_LINK_SHAPE);
   });
 
-  it("un secret qui commence par « m » reste un lien de partage (longueurs distinctes)", () => {
+  it("un secret qui commence par « m » reste un lien de partage (longueurs distinctes)", async () => {
     const k = `m${K.slice(1)}`;
-    expect(parseLink(`https://x.test/#${k}`).kind).toBe("s");
-    expect(parseLink(`https://x.test/#m${k}`).kind).toBe("m");
+    expect((await parseLink(`https://x.test/#${k}`)).kind).toBe("s");
+    expect((await parseLink(`https://x.test/#m${k}`)).kind).toBe("m");
   });
 
-  it("formes de fragment pour le routeur", () => {
+  it("formes de fragment pour le routeur", async () => {
     expect(SHARE_FRAGMENT.test(`#${K}`)).toBe(true);
     expect(MANAGE_FRAGMENT.test(`#m${K}`)).toBe(true);
     for (const h of ["", "#", `#${K.slice(1)}`, `#${K}A`, `#m${K.slice(2)}`, `#${K.slice(1)}+`, `#${K} `]) {
@@ -44,7 +44,7 @@ describe("liens (spec §32 : à la racine, secret après #)", () => {
     }
   });
 
-  it("refuse les liens invalides", () => {
+  it("refuse les liens invalides", async () => {
     const bad = [
       "pas une url",
       "https://x/", // sans secret
@@ -65,50 +65,50 @@ describe("liens (spec §32 : à la racine, secret après #)", () => {
       `https://x//#${K}`,
       `https://x/shhdrop/#${K}`, // base de démo hors démo
     ];
-    for (const u of bad) expect(() => parseLink(u), u).toThrow("lien_invalide");
+    for (const u of bad) await expect(parseLink(u), u).rejects.toThrow("lien_invalide");
   });
 
-  it("requête ignorée (?fbclid= ajouté par les messageries) : le secret est dans le fragment", () => {
-    const p = parseLink(`https://x.test/?fbclid=abc&utm=1#${K}`);
+  it("requête ignorée (?fbclid= ajouté par les messageries) : le secret est dans le fragment", async () => {
+    const p = await parseLink(`https://x.test/?fbclid=abc&utm=1#${K}`);
     expect(p.kind === "s" && b64u(p.kLien)).toBe(K);
     expect(p.origin).toBe("https://x.test");
   });
 
-  it("base /shhdrop/ (démo) : chemin exigé, aller-retour", () => {
+  it("base /shhdrop/ (démo) : chemin exigé, aller-retour", async () => {
     const k = newKLien();
-    const link = shareLink("https://skoow.github.io", k, "/shhdrop/");
+    const link = await shareLink("https://skoow.github.io", k, "/shhdrop/");
     expect(link).toBe(`https://skoow.github.io/shhdrop/#${b64u(k)}`);
-    expect(parseLink(link, "/shhdrop/")).toEqual({ kind: "s", origin: "https://skoow.github.io", kLien: k });
-    expect(parseLink(`https://skoow.github.io/shhdrop#${K}`, "/shhdrop/").kind).toBe("s");
+    expect(await parseLink(link, "/shhdrop/")).toEqual({ kind: "s", origin: "https://skoow.github.io", kLien: k });
+    expect((await parseLink(`https://skoow.github.io/shhdrop#${K}`, "/shhdrop/")).kind).toBe("s");
     const s = newSGestion();
-    expect(parseLink(manageLink("https://skoow.github.io", s, "/shhdrop/"), "/shhdrop/")).toEqual({
+    expect(await parseLink(await manageLink("https://skoow.github.io", s, "/shhdrop/"), "/shhdrop/")).toEqual({
       kind: "m",
       origin: "https://skoow.github.io",
       sGestion: s,
     });
     for (const u of [`https://x/#${K}`, `https://x/shhdropx/#${K}`, `https://x/shhdrop/shhdrop/#${K}`, `https://x/shhdrop/s#${K}`])
-      expect(() => parseLink(u, "/shhdrop/"), u).toThrow("lien_invalide");
+      await expect(parseLink(u, "/shhdrop/"), u).rejects.toThrow("lien_invalide");
     for (const b of ["", "Shhdrop/", "/shhdrop", "//", "/a b/"]) {
-      expect(() => parseLink(`https://x/#${K}`, b), b).toThrow("base_invalide");
-      expect(() => shareLink("https://x.test", newKLien(), b), b).toThrow("base_invalide");
+      await expect(parseLink(`https://x/#${K}`, b), b).rejects.toThrow("base_invalide");
+      await expect(shareLink("https://x.test", newKLien(), b), b).rejects.toThrow("base_invalide");
     }
   });
 
-  it("n'accepte http: que pour la boucle locale", () => {
+  it("n'accepte http: que pour la boucle locale", async () => {
     for (const host of ["localhost", "localhost:8080", "127.0.0.1", "127.0.0.1:4000", "[::1]", "[::1]:4000"]) {
-      expect(parseLink(`http://${host}/#${K}`).kind, host).toBe("s");
+      expect((await parseLink(`http://${host}/#${K}`)).kind, host).toBe("s");
     }
     for (const host of ["shhdrop.example", "127.0.0.2", "10.0.0.1", "localhost.example", "[::2]"]) {
-      expect(() => parseLink(`http://${host}/#${K}`), host).toThrow("lien_invalide");
+      await expect(parseLink(`http://${host}/#${K}`), host).rejects.toThrow("lien_invalide");
     }
     for (const proto of ["ftp:", "file:", "javascript:"]) {
-      expect(() => parseLink(`${proto}//x/#${K}`), proto).toThrow("lien_invalide");
+      await expect(parseLink(`${proto}//x/#${K}`), proto).rejects.toThrow("lien_invalide");
     }
   });
 
-  it("anti-motif « domaines voisins » : le lien ne porte ni le mot de passe ni rien d'autre que la clé", () => {
+  it("anti-motif « domaines voisins » : le lien ne porte ni le mot de passe ni rien d'autre que la clé", async () => {
     const k = newKLien();
-    const link = shareLink("https://shhdrop.app", k);
+    const link = await shareLink("https://shhdrop.app", k);
     const password = "Ab3!xY7#";
     expect(link).not.toContain(password);
     expect(link.slice("https://shhdrop.app/#".length)).toBe(b64u(k));
@@ -116,16 +116,16 @@ describe("liens (spec §32 : à la racine, secret après #)", () => {
 });
 
 describe("origine (audit F1)", () => {
-  it("parseLink rend l'origine et refuse les identifiants dans l'URL", () => {
-    expect(parseLink(`https://srv.test:8443/#${K}`).origin).toBe("https://srv.test:8443");
+  it("parseLink rend l'origine et refuse les identifiants dans l'URL", async () => {
+    expect((await parseLink(`https://srv.test:8443/#${K}`)).origin).toBe("https://srv.test:8443");
     for (const u of [`https://user:pw@srv.test/#${K}`, `https://user@srv.test/#${K}`, `https://:pw@srv.test/#${K}`]) {
-      expect(() => parseLink(u), u).toThrow("lien_invalide");
+      await expect(parseLink(u), u).rejects.toThrow("lien_invalide");
     }
   });
-  it("parseLink rend l'origine du lien : à l'appelant de la comparer à la sienne", () => {
-    expect(parseLink(`https://autre.example/#${K}`).origin).toBe("https://autre.example");
+  it("parseLink rend l'origine du lien : à l'appelant de la comparer à la sienne", async () => {
+    expect((await parseLink(`https://autre.example/#${K}`)).origin).toBe("https://autre.example");
   });
-  it("checkOrigin : https (http en boucle locale), sans chemin, requête, fragment ni identifiants", () => {
+  it("checkOrigin : https (http en boucle locale), sans chemin, requête, fragment ni identifiants", async () => {
     for (const o of ["https://srv.test", "https://srv.test:8443", "http://localhost:8080", "http://127.0.0.1:4000", "http://[::1]:4000"]) {
       expect(checkOrigin(o), o).toBe(o);
     }
@@ -145,27 +145,31 @@ describe("origine (audit F1)", () => {
       expect(() => checkOrigin(o), o).toThrow("origine_invalide");
     }
   });
-  it("shareLink et manageLink valident l'origine", () => {
-    expect(() => shareLink("http://srv.test/", randomBytes(32) as KLien)).toThrow("origine_invalide");
-    expect(() => manageLink("https://srv.test/x", randomBytes(32) as SGestion)).toThrow("origine_invalide");
+  it("shareLink et manageLink valident l'origine", async () => {
+    await expect(shareLink("http://srv.test/", randomBytes(32) as KLien)).rejects.toThrow("origine_invalide");
+    await expect(manageLink("https://srv.test/x", randomBytes(32) as SGestion)).rejects.toThrow("origine_invalide");
   });
 });
 
+const QR_K = new Uint8Array(32).fill(7) as unknown as Parameters<typeof shareLink>[1];
+const QR_LINK = await shareLink("https://shhdrop.test", QR_K);
+
 describe("lien + mot de passe du QR code (D41-29)", () => {
-  const k = new Uint8Array(32).fill(7) as unknown as Parameters<typeof shareLink>[1];
-  const link = shareLink("https://shhdrop.test", k);
+  const k = QR_K;
+  const link = QR_LINK;
   const PW = "aC3!cD5?#Fg";
-  it("format : #<K_lien>.<base64url de l'UTF-8 du mot de passe>, aller-retour exact", () => {
+  it("format : #<K_lien>.<base64url de l'UTF-8 du mot de passe>, aller-retour exact", async () => {
     const q = shareLinkWithPassword(link, PW);
     expect(q).toBe(`${link}.YUMzIWNENT8jRmc`);
     expect(new URL(q).hash).toMatch(SHARE_PW_FRAGMENT);
     expect(new URL(q).hash).not.toMatch(SHARE_FRAGMENT);
     expect(splitPassword(q)).toEqual({ href: link, password: PW });
-    expect(parseLink(splitPassword(q).href)).toMatchObject({ kind: "s" });
+    expect(await parseLink(splitPassword(q).href)).toMatchObject({ kind: "s" });
     expect(() => shareLinkWithPassword(link, "")).toThrow();
-    expect(() => shareLinkWithPassword(manageLink("https://shhdrop.test", k as never), PW)).toThrow();
+    const m = await manageLink("https://shhdrop.test", k as never);
+    expect(() => shareLinkWithPassword(m, PW)).toThrow();
   });
-  it("analyse robuste : mot de passe absent, mal formé, non canonique ou UTF-8 invalide → null, le lien simple reste", () => {
+  it("analyse robuste : mot de passe absent, mal formé, non canonique ou UTF-8 invalide → null, le lien simple reste", async () => {
     expect(splitPassword(link)).toEqual({ href: link, password: null });
     for (const bad of [".", ".a", ".!!", ".YUMzIWNENT8jRmc=", ".gA", ".YUMzIWNENT8jRmd", "." + "a".repeat(65), ".YUMz.IWNE"]) {
       expect(splitPassword(link + bad), bad).toEqual({ href: link, password: null });

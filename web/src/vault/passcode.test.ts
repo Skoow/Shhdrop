@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generatePassword } from "../crypto/password";
+import { generatePassword } from "../engine/pure";
 import { BLOCK, CORES_PACKED } from "./blocklist";
 import { PASSCODE_MIN_CHARS, checkPasscode } from "./passcode";
 import { decodeCores } from "./weakpw";

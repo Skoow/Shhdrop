@@ -2,13 +2,9 @@
 
 `v2.json` est la référence octet pour octet du chiffrement de Shhdrop (spécification du moteur Rust, §9). Il a été produit par l'ancien moteur TypeScript (`web/src/crypto`, `web/src/transfer/link.ts`) avant sa suppression. Le moteur Rust (`cargo test`), son build WebAssembly (vitest) et les futures apps doivent redonner chaque sortie à partir des seules entrées du fichier, sans JavaScript.
 
-## Régénérer
+## Référence figée (depuis la Task 11)
 
-```sh
-cd web && GEN_VECTORS=1 npx vitest run src/engine/vectors.test.ts
-```
-
-Sans `GEN_VECTORS`, ce même test refait tous les vecteurs avec l'ancien moteur et exige le fichier au caractère près. Il échoue si le fichier manque ou n'est plus à jour. Deux lancements du générateur donnent le même fichier. Une fois l'ancien moteur supprimé (Task 11), ce fichier ne se régénère plus : il devient une référence figée.
+L'ancien moteur TypeScript a été supprimé (Task 11) : `v2.json` ne se régénère plus et ne change plus. Le générateur (`web/scripts/gen-vectors.ts`, lancé par `GEN_VECTORS=1 npx vitest run src/engine/vectors.test.ts`) et le test qui refaisait chaque vecteur avec l'ancien moteur restent dans l'historique git : du commit `ded5c37` (création) au commit `a693d33` (dernier commit qui les contient, juste avant leur suppression). Un changement voulu du format demandera un nouveau fichier (`v3.json`), produit par le moteur Rust et relu, jamais une modification de celui-ci.
 
 ## Conventions
 
@@ -73,3 +69,7 @@ Fichier du serveur : `segments[n].size`. Pour assembler, on part de zéros, on p
 ## Moteur WebAssembly (`web/src/engine/engine.test.ts`)
 
 Le build WebAssembly, avec le fournisseur WebCrypto du site, rejoue les mêmes sections que `cargo test`. Les nombres y arrivent en nombres JavaScript : les cas « sans objet » en Rust (`-1`, `0.5`, `1.5`, `ops: 2.5`, engagement de 31 ou 33 octets) y sont rejoués et donnent le message de l'ancien moteur. Restent sans objet : la graine R de 31 ou 33 octets (`content`), parce que R n'entre jamais depuis JavaScript (tirée par `newSeed`, déballée par `open`), et l'hôte IDN (comme en Rust). `nonce`, `segmentCount` et `segmentSize` refusent une entrée qui n'est pas un entier sûr (`taille_invalide`) ou un segment hors du palier (`segment_invalide`), là où JavaScript rendait un nombre sans valeur ; `sealFinal` refuse une entrée mal formée ou un nettoyage inconnu (`entree_invalide`).
+
+Depuis la Task 11, la graine `k` d'un élément ne sort plus du moteur : `elementSealer` ne la rend pas, `sealFinal` reçoit le numéro (`sealer`) du scelleur qui la tient, et le manifeste rendu par le lecteur omet `k`. Le test WebAssembly tire donc chaque `k` du vecteur par un scelleur (aléa rejoué) et vérifie la graine par la clé importée (`HKDF(k, « shhdrop/v2/element »)`) ; il compare `opened.manifest` sans ses `k`.
+
+La partie gardée en TypeScript pour le site (`web/src/engine/pure.ts` : constantes, tailles, base64url, origine, forme des liens, mot de passe du QR code, mot de passe généré) est comparée aux vecteurs et au moteur par `web/src/engine/pure.test.ts`.

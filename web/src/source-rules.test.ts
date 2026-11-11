@@ -39,7 +39,7 @@ const NQ = "[^\"'`]";
 // Les directives style:prop (CSSOM) et data-style ne comptent pas.
 const RE_STYLE_ATTR = /<[a-zA-Z][^<>]*?(?<![-\w:.])style(?=\s*[={}/>\s])/;
 const RE_FORBIDDEN_IMPORT = new RegExp(
-  `(?:from\\s*|import\\s*\\(\\s*|import\\s+)${Q}${NQ}*\\/(?:transfer|crypto)(?:\\/${NQ}*|\\.[a-z]+)?${Q}`,
+  `(?:from\\s*|import\\s*\\(\\s*|import\\s+)${Q}${NQ}*\\/(?:transfer|crypto|engine(?!\\/pure(?:\\.[a-z]+)?${Q}))(?:\\/${NQ}*|\\.[a-z]+)?${Q}`,
 );
 const RE_DEMO_IMPORT = new RegExp(
   `(?:from\\s*|import\\s*\\(\\s*|import\\s+)${Q}${NQ}*\\bdemo(?:\\/${NQ}*|\\.[a-z]+)?${Q}\\s*\\)?`,
@@ -68,7 +68,9 @@ describe("règles de sources", () => {
     expect(offenders(RE_STYLE_ATTR, (r) => r.endsWith(".svelte"))).toEqual([]));
   it("pas d'eval ni de new Function", () =>
     expect(offenders(/\beval\s*\(|new\s+Function\b/)).toEqual([]));
-  it("pas d'import de transfer/ ni crypto/ dans les écrans", () =>
+  // Moteur (Task 11) : les écrans n'en voient que la partie sans clé (engine/pure.ts) ; le reste
+  // passe par l'interface publique (index.ts).
+  it("pas d'import de transfer/, crypto/ ni engine/ (hors engine/pure) dans les écrans", () =>
     expect(offenders(RE_FORBIDDEN_IMPORT, inUiDir)).toEqual([]));
   it("pas de fetch( ni XMLHttpRequest dans les écrans", () =>
     expect(offenders(/\bfetch\s*\(|XMLHttpRequest/, inUiDir)).toEqual([]));
@@ -170,9 +172,14 @@ describe("motifs des règles", () => {
       'import { a } from "../transfer.ts"',
       'import("../crypto.js")',
       "import(`../transfer/api.ts`)",
+      'import { a } from "../engine"',
+      'import { a } from "../engine/index"',
+      'import { a } from "../engine/load.ts"',
+      'import("../engine/argon2")',
+      'import { a } from "../engine/pured"',
     ])
       expect(matches(RE_FORBIDDEN_IMPORT, t), t).toBe(true);
-    for (const t of ['import { a } from "../ui/transfer-badge"', 'import { a } from "./transferred"', 'import { a } from "node:crypto"'])
+    for (const t of ['import { a } from "../engine/pure"', 'import { a } from "../engine/pure.ts"', 'import { a } from "../ui/transfer-badge"', 'import { a } from "./transferred"', 'import { a } from "node:crypto"'])
       expect(matches(RE_FORBIDDEN_IMPORT, t), t).toBe(false);
   });
 

@@ -57,47 +57,6 @@ export function sri(base: string): Plugin {
 }
 
 /**
- * Argon2id (libsodium, la moitié du JavaScript) hors du script principal : construit à part en
- * script classique, écrit sous assets/argon2-EMPREINTE.js, chargé à la demande par
- * src/crypto/argon2-run.worker.ts, qui remplace argon2-run.ts dans ce build. L'adresse et
- * l'empreinte SHA-384 sont inscrites dans le script principal (module virtuel) : pas d'import()
- * dynamique (spec §28.3), et le navigateur refuse un fichier dont les octets diffèrent.
- * Production seulement : la CSP de la démo (connect-src 'none') interdit de lire le fichier.
- */
-export function argon2Chunk(base: string): Plugin {
-  const VIRTUAL = "virtual:shh-argon2";
-  const here = fileURLToPath(new URL(".", import.meta.url));
-  let meta = { src: "", integrity: "" };
-  return {
-    name: "shh-argon2",
-    apply: "build",
-    enforce: "pre", // avant la résolution de Vite, pour remplacer ./argon2-run
-    async buildStart() {
-      const out = await build({
-        configFile: false,
-        root: here,
-        logLevel: "warn",
-        build: { write: false, sourcemap: false, lib: { entry: join(here, "src/crypto/argon2.entry.ts"), name: "shhArgon2", formats: ["iife"], fileName: () => "argon2.js" } },
-      });
-      const chunk = (Array.isArray(out) ? out : [out]).flatMap((o) => ("output" in o ? o.output : [])).find((c) => c.type === "chunk");
-      if (!chunk || chunk.type !== "chunk") throw new Error("shh-argon2 : build vide");
-      const code = Buffer.from(chunk.code);
-      const fileName = `assets/argon2-${createHash("sha256").update(code).digest("base64url").slice(0, 8)}.js`;
-      this.emitFile({ type: "asset", fileName, source: code });
-      meta = { src: base + fileName, integrity: sha384(code) };
-    },
-    resolveId(source, importer) {
-      if (source === VIRTUAL) return "\0" + VIRTUAL;
-      if (source === "./argon2-run" && importer?.replace(/\\/g, "/").endsWith("/src/crypto/kdf.ts")) return join(here, "src/crypto/argon2-run.worker.ts");
-      return null;
-    },
-    load(id) {
-      return id === "\0" + VIRTUAL ? `export const src = ${JSON.stringify(meta.src)}; export const integrity = ${JSON.stringify(meta.integrity)};` : null;
-    },
-  };
-}
-
-/**
  * Colle de wasm-bindgen : sans argument, son initialisation lirait le .wasm voisin
  * (`new URL('shhdrop_wasm_bg.wasm', import.meta.url)`), que Vite émettrait ou intégrerait sans
  * empreinte. Nos appels donnent toujours le module compilé : ce chemin est remplacé par une
@@ -117,8 +76,9 @@ export function engineGlue(): Plugin {
 }
 
 /**
- * Moteur WebAssembly (spec moteur §7), sur le modèle de shh-argon2. ./source (load.ts) est
- * remplacé par source.verified.ts (production) ou source.demo.ts (démo).
+ * Moteur WebAssembly (spec moteur §7). ./source, importé par un module de src/engine/, est
+ * remplacé par source.verified.ts (production) ou source.demo.ts (démo) ; tout autre chemin
+ * vers src/engine/source.ts arrête le build (le .wasm y serait lu sans empreinte).
  * Production : le .wasm est écrit sous assets/engine-EMPREINTE.wasm, le script du Worker
  * d'Argon2id (argon2.worker.ts et la colle, construit à part en script classique) sous
  * assets/engine-kdf-EMPREINTE.js ; adresses et empreintes SHA-384 dans le module virtuel
@@ -164,10 +124,12 @@ export function engineWasm(base: string, demo: boolean): Plugin {
     },
     resolveId(source, importer) {
       if (source === VIRTUAL) return "\0" + VIRTUAL;
-      if (source === "./source" && importer?.replace(/\\/g, "/").endsWith("/src/engine/load.ts")) return join(here, demo ? "src/engine/source.demo.ts" : "src/engine/source.verified.ts");
+      const from = importer?.replace(/\\/g, "/") ?? "";
+      if (/^\.\/source(?:\.ts)?$/.test(source) && from.includes("/src/engine/")) return join(here, demo ? "src/engine/source.demo.ts" : "src/engine/source.verified.ts");
       return null;
     },
     load(id) {
+      if (id.replace(/\\/g, "/").endsWith("/src/engine/source.ts")) this.error(`shh-engine : src/engine/source.ts (lecture sans empreinte) n'entre jamais dans un build`);
       return id === "\0" + VIRTUAL ? code : null;
     },
   };
@@ -244,7 +206,7 @@ export function precompress(): Plugin {
 export default defineConfig(({ mode }) => {
   const demo = mode === "demo";
   return {
-    plugins: [svelte(), sri(demo ? DEMO_BASE : "/"), engineWasm(demo ? DEMO_BASE : "/", demo), ...(demo ? [demoMeta()] : [argon2Chunk("/"), demoGuard(), precompress()])],
+    plugins: [svelte(), sri(demo ? DEMO_BASE : "/"), engineWasm(demo ? DEMO_BASE : "/", demo), ...(demo ? [demoMeta()] : [demoGuard(), precompress()])],
     base: demo ? DEMO_BASE : "/",
     define: { __SHH_BUILD__: JSON.stringify(buildId()) },
     build: {

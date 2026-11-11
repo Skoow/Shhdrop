@@ -17,7 +17,6 @@
     "build:demo": "npm run build:engine && vite build --mode demo && vite build -c vite.pdf-frame.config.ts --mode demo"
   },
   "dependencies": {
-    "libsodium-wrappers-sumo": "0.8.4",
     "pdfjs-dist": "6.5.438",
     "svelte": "5.57.3"
   },

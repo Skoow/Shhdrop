@@ -1,6 +1,6 @@
 // Hygiène du lien (UI §12.1, spec §5.3) : le secret du « # » est lu une fois au démarrage de
 // la route, puis retiré de la barre d'adresse et de l'entrée d'historique.
-import { manageLink, parseLink, shareLink, splitPassword } from "../index";
+import { linkForm, splitPassword } from "../engine/pure";
 
 /**
  * Résultat de la lecture. `link` contient le secret : il est passé par valeur au flux
@@ -15,8 +15,10 @@ const INCOMPLETE: LinkState = Object.freeze({ kind: "incomplete" });
 
 /**
  * Lit le lien de l'adresse courante (spec §32 : `${base}#<clé>` ou `${base}#m<clé>`).
- * `parseLink` exige le chemin de la base (« / », ou « /shhdrop/ » en démo) et ignore la
- * requête : nos liens n'en portent jamais, mais les applications ajoutent des paramètres de
+ * Seule la forme est vérifiée (linkForm, mêmes refus que parseLink du moteur) : la clé n'est pas
+ * décodée ici, mais par le moteur au moment de l'utiliser (transfer/client.ts). Le chemin
+ * doit être celui de la base (« / », ou « /shhdrop/ » en démo) ; la requête est
+ * ignorée : nos liens n'en portent jamais, mais les applications ajoutent des paramètres de
  * suivi (`?fbclid=…`) en gardant le fragment. Le lien rendu est remis à la racine de
  * l'origine (`${origin}/#…`), la forme qu'attendent les fonctions du client. Tout échec (pas
  * de « # », clé mal formée, autre chemin, type différent de `expected`) donne « incomplet » :
@@ -24,9 +26,9 @@ const INCOMPLETE: LinkState = Object.freeze({ kind: "incomplete" });
  */
 export function readLink(href: string, expected: "s" | "m", base: string = import.meta.env.BASE_URL): LinkState {
   try {
-    const p = parseLink(href, base);
+    const p = linkForm(href, base);
     if (p.kind !== expected) return INCOMPLETE;
-    return { kind: p.kind, link: p.kind === "s" ? shareLink(p.origin, p.kLien) : manageLink(p.origin, p.sGestion) };
+    return { kind: p.kind, link: `${p.origin}/#${p.kind === "m" ? "m" : ""}${p.key}` };
   } catch {
     return INCOMPLETE;
   }

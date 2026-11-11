@@ -14,13 +14,6 @@ declare module "pdfjs-dist/build/pdf.worker.mjs" {
   export const WorkerMessageHandler: unknown;
 }
 
-// Fichier Argon2id du build de production (greffon shh-argon2, vite.config.ts) : son adresse
-// et son empreinte SRI.
-declare module "virtual:shh-argon2" {
-  export const src: string;
-  export const integrity: string;
-}
-
 // Moteur WebAssembly (greffon shh-engine, vite.config.ts). Production : adresses et empreintes
 // SRI du .wasm et du script du Worker d'Argon2id. Démo : le .wasm en base64 (`wasm`).
 declare module "virtual:shh-engine" {

@@ -94,24 +94,28 @@ export function checkDist(dir, demo) {
       const n = f.data.toString("utf8").match(/(?<![\w$.])import\s*\(/g)?.length ?? 0;
       if (n > 0) problems.push(`${f.rel} : import() dynamique (${n} fois), interdit en production`);
     }
-    // Argon2id (libsodium) vit dans son propre fichier, chargé à la demande avec contrôle
-    // d'intégrité (fetch + integrity, puis Worker ; repli : <script integrity>). Le script
-    // principal ne doit ni contenir libsodium, ni citer un fichier dont il n'a pas l'empreinte.
+    // Moteur WebAssembly (spec moteur §7 ; il remplace libsodium et l'ancien moteur TypeScript,
+    // Task 11) : le .wasm et le script du Worker d'Argon2id (assets/engine-*.js) vivent dans leurs
+    // propres fichiers, chargés à la demande avec contrôle d'intégrité (fetch + integrity, puis
+    // Worker ; repli : calcul dans la page avec le moteur déjà vérifié). Le script principal ne
+    // contient aucun octet du .wasm (magie « \0asm » version 1, en base64 ou en tableau de
+    // nombres), ne cite aucun de ces fichiers sans son empreinte SHA-384, et aucun n'est orphelin.
     const mains = all.filter((f) => /^assets\/index-[^/]+\.js$/.test(f.rel)).map((f) => ({ rel: f.rel, text: f.data.toString("utf8") }));
-    // Moteur WebAssembly (spec moteur §7) : même règle pour tout .wasm cité et pour le script du
-    // Worker d'Argon2id du moteur (assets/engine-*.js) ; aucun octet de .wasm dans le script
-    // principal (magie « \0asm » version 1, en base64 ou en tableau de nombres).
     for (const m of mains) {
-      if (m.text.includes("crypto_pwhash")) problems.push(`${m.rel} : libsodium (crypto_pwhash) dans le script principal : il doit rester dans assets/argon2-*.js`);
       if (m.text.includes("AGFzbQEAAAA") || /\b0,\s*97,\s*115,\s*109,\s*1,\s*0,\s*0,\s*0\b/.test(m.text))
         problems.push(`${m.rel} : octets WebAssembly en ligne dans le script principal : le moteur doit rester dans assets/engine-*.wasm, lu avec son empreinte`);
-      const cited = new Set([...m.text.matchAll(/\/(assets\/(?:(?:argon2|engine)-[A-Za-z0-9_-]+\.js|[A-Za-z0-9._-]+\.wasm))/g)].map((x) => x[1]));
+      const cited = new Set([...m.text.matchAll(/\/(assets\/(?:engine-[A-Za-z0-9_-]+\.js|[A-Za-z0-9._-]+\.wasm))/g)].map((x) => x[1]));
       for (const rel of cited) {
         const data = byRel.get(rel);
         if (!data) problems.push(`${rel} : cité par le script principal, absent du site`);
         else if (!m.text.includes(sha384(data))) problems.push(`${rel} : son empreinte SHA-384 n'est pas inscrite dans le script principal (chargement sans contrôle d'intégrité)`);
       }
     }
+    // Fichier du moteur (.wasm, script du Worker) qu'aucun script principal ne cite : orphelin
+    // (chargé d'ailleurs, sans contrôle d'intégrité, ou inutile). Cité sans empreinte : ci-dessus.
+    for (const f of all)
+      if (/^assets\/(?:[^/]+\.wasm|engine-[^/]+\.js)$/i.test(f.rel) && !mains.some((m) => m.text.includes(`/${f.rel}`)))
+        problems.push(`${f.rel} : orphelin, aucun script principal ne le cite avec son empreinte SHA-384`);
     // Moteur WebAssembly : précompressé comme le texte (vite.config.ts, COMPRESSIBLE ; servi par
     // static.go avec Content-Encoding), sinon 481 Ko seraient lus au lieu de 141 Ko en brotli.
     for (const f of all) {
@@ -124,9 +128,12 @@ export function checkDist(dir, demo) {
   }
 
   if (!all.some((f) => f.data.includes(MARK))) problems.push(`marque ${MARK} absente : ce n'est pas un build de démo`);
-  // Spec moteur §7 : la CSP de la démo (connect-src 'none') interdit de lire un .wasm.
+  // Spec moteur §7 : la CSP de la démo (connect-src 'none') interdit de lire un .wasm ; le moteur
+  // est donc intégré à un script de la démo (base64 du module, magie « \0asm » version 1).
   for (const f of all)
     if (/\.wasm$/i.test(f.rel)) problems.push(`${f.rel} : fichier .wasm dans la démo : sa CSP (connect-src 'none') interdit de le lire, le moteur doit être intégré au script`);
+  if (!all.some((f) => /\.m?js$/.test(f.rel) && f.data.includes("AGFzbQEAAAA")))
+    problems.push("moteur WebAssembly absent des scripts de la démo (base64 « AGFzbQEAAAA ») : elle ne pourrait ni chiffrer ni ouvrir");
   // Les balises de la démo, dans l'ordre, en tout premier dans <head>.
   const head = /<head>\s*([\s\S]*)$/.exec(index);
   let rest = head ? head[1] : "";

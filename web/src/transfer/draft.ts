@@ -5,13 +5,45 @@
 // des seuls éléments gardés (dans l'ordre affiché) et finalise. Le lien n'existe qu'après.
 // Le serveur ne reçoit que K_accès et S_gestion (création), des segments chiffrés, des numéros
 // de segments, et à la fin le sel, Argon2id, V_preuve, E, l'en-tête et le manifeste chiffré.
-import { SEG_CHUNKS, CHUNK_CT, HEADER, TEXT_BYTES_MAX, TEXT_MAX, type Item, type KeepTtl, type Rights } from "../crypto/container";
-import { DATA_CHUNKS, DATA_SEGMENTS, elementSealer, footprintFor, isSmall, reservationFor, sealFinal, segmentsNeeded, type FinalEntry } from "../crypto/elements";
-import { b64u } from "../crypto/encoding";
-import { accessKeys, contentKeys, newSeed, seal, shareId } from "../crypto/envelope";
-import { KDF_CREATE, deriveAccess, newKLien, newSGestion, passwordKeyForCreate, randomBytes } from "../crypto/kdf";
-import type { KLien, SGestion } from "../crypto/types";
-import { isGeneratedPassword } from "../crypto/password";
+import {
+  CHUNK_CT,
+  DATA_CHUNKS,
+  DATA_SEGMENTS,
+  HEADER,
+  KDF_CREATE,
+  SEG_CHUNKS,
+  TEXT_BYTES_MAX,
+  TEXT_MAX,
+  accessKeys,
+  b64u,
+  checkOrigin,
+  contentKeys,
+  deriveAccess,
+  elementSealer,
+  footprintFor,
+  forget,
+  isGeneratedPassword,
+  isSmall,
+  manageLink,
+  newKLien,
+  newSGestion,
+  newSeed,
+  passwordKeyForCreate,
+  randomBytes,
+  reservationFor,
+  seal,
+  sealFinal,
+  segmentsNeeded,
+  shareId,
+  shareLink,
+  type ElementSealer,
+  type FinalEntry,
+  type Item,
+  type KeepTtl,
+  type KLien,
+  type Rights,
+  type SGestion,
+} from "../engine";
 import { MAX_OPENS, TTL_HOURS } from "../limits";
 import * as api from "./api";
 import {
@@ -28,7 +60,6 @@ import {
   type CaptchaProof,
   type CreateOpts,
 } from "./client";
-import { checkOrigin, manageLink, shareLink } from "./link";
 import { readCaptcha, takeCaptcha, type PreparedCaptcha } from "./prepare";
 import { SERVER_STALL_MS, abortError } from "./upload";
 
@@ -80,7 +111,8 @@ type El = {
   acked: number;
   inflight: number;
   error?: unknown;
-  k?: Uint8Array<ArrayBuffer>;
+  /** Scelleur de l'élément : sa graine k reste dans le moteur ; forget() l'oublie. */
+  sealer?: ElementSealer;
   ac: AbortController;
   /** Au moins un PUT parti : ses morceaux peuvent exister sur le serveur. */
   touched: boolean;
@@ -221,8 +253,8 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       e.ac.abort();
       e.ac = new AbortController();
       e.first = -1;
-      e.k?.fill(0);
-      e.k = undefined;
+      e.sealer?.forget();
+      e.sealer = undefined;
       e.acked = e.inflight = e.partsDone = e.reach = 0;
       e.touched = false;
       e.phase = "attente";
@@ -319,7 +351,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       e.chunks = footprintFor(e.data.size);
       e.first = place(e.data.size);
       const sealer = await elementSealer(e.data, e.first);
-      e.k = sealer.k;
+      e.sealer = sealer;
       e.parts = sealer.pieces.length;
       for (const [j, p] of sealer.pieces.entries()) {
         await abortable(Promise.resolve().then(() => hooks.pause?.()), signal);
@@ -407,7 +439,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
     let ok = true;
     try {
       await e.done;
-      e.k?.fill(0);
+      e.sealer?.forget();
       // Rien n'est parti : la place est libre.
       if (voided && !e.touched && voids.includes(voided)) voids.splice(voids.indexOf(voided), 1);
       const cr = created;
@@ -495,7 +527,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       clearInterval(keepTimer);
       for (const e of els.values()) {
         e.ac.abort();
-        e.k?.fill(0);
+        e.sealer?.forget();
       }
       const cr = created;
       created = null;
@@ -605,27 +637,32 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
   }
 
   async function finish(cr: Created, list: { id: string; item: Item }[], f: CreateOpts) {
-    const r = newSeed();
+    // R neuve à chaque finalisation (une ContentKeys par R, jamais recréée : moteur), opaque.
+    const r = await newSeed();
     const salt = randomBytes(16);
-    const wipe: Uint8Array[] = [r];
+    const wipe: Uint8Array[] = [];
+    const engine: ({ free(): void } | undefined)[] = [r];
     try {
       const keys = await contentKeys(r);
+      engine.push(keys);
       const entries: FinalEntry[] = [];
       for (const { id, item } of list) {
         const e = els.get(id)!;
         // Note (D41-36) : un élément comme un fichier, envoyé dès sa validation.
-        if (item.kind === "text") entries.push({ kind: "text", name: item.name, mime: item.mime, size: e.data!.size, first: e.first, k: e.k! });
-        else entries.push({ kind: "file", name: item.name, mime: item.mime, size: e.data!.size, first: e.first, k: e.k!, ...(item.clean ? { clean: item.clean } : {}) });
+        if (item.kind === "text") entries.push({ kind: "text", name: item.name, mime: item.mime, size: e.data!.size, first: e.first, sealer: e.sealer! });
+        else entries.push({ kind: "file", name: item.name, mime: item.mime, size: e.data!.size, first: e.first, sealer: e.sealer!, ...(item.clean ? { clean: item.clean } : {}) });
       }
       const fin = await sealFinal(entries, keys, { rights: f.rights as Rights | undefined, keepTtlH: f.keepTtlH as KeepTtl | undefined });
       throwIfAborted(f.signal);
       const kMdp = await passwordKeyForCreate(f.password, salt);
       wipe.push(kMdp);
       const ak = await accessKeys(cr.kLien, kMdp);
+      engine.push(ak.kEnv);
       kMdp.fill(0);
       wipe.push(ak.kPreuve);
       const envelope = b64u(await seal(ak.kEnv, r, await shareId(cr.kLien), fin.header));
-      r.fill(0);
+      forget(r);
+      forget(ak.kEnv);
       throwIfAborted(f.signal);
       const body: api.DraftFinalizeBody = {
         salt: b64u(salt),
@@ -657,14 +694,15 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       closed = true;
       clearInterval(keepTimer);
       const base = f.base ?? "/";
-      const out = { link: shareLink(origin, cr.kLien, base), manage: manageLink(origin, cr.sGestion, base), expiresInS };
-      for (const e of els.values()) e.k?.fill(0);
+      const out = { link: await shareLink(origin, cr.kLien, base), manage: await manageLink(origin, cr.sGestion, base), expiresInS };
+      for (const e of els.values()) e.sealer?.forget();
       cr.kLien.fill(0);
       cr.sGestion.fill(0);
       created = null;
       return out;
     } finally {
       for (const b of wipe) b.fill(0);
+      for (const x of engine) forget(x);
     }
   }
 }

@@ -4,7 +4,7 @@
 //
 // Règles :
 // - **À la suite, un à la fois** : le lecteur du paquet est déjà sérialisé (une opération à la
-//   fois sur son cache, crypto/container.ts) ; lire en parallèle n'irait pas plus vite et
+//   fois sur son cache, lecteur du moteur, engine/index.ts) ; lire en parallèle n'irait pas plus vite et
 //   lirait plus de segments (budget). La file suit l'ordre des demandes, puis du manifeste.
 // - **Pause sans relecture** : la pause bloque l'écriture de la tranche suivante ; la lecture
 //   s'arrête donc après le segment en cours (déjà reçu), rien n'est relu à la reprise, qui

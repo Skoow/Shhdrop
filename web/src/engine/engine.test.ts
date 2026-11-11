@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { handle, type KdfJob, type KdfReply } from "./argon2.worker";
-import { passwordKey, passwordKeyForCreate } from "./argon2";
+import { WORKER_TIMEOUT_MS, passwordKey, passwordKeyForCreate } from "./argon2";
 import { loadEngine, type Engine, type Wasm } from "./load";
 import type { FinalEntry } from "./pkg/shhdrop_wasm.js";
 import { createProvider, type WebCryptoProvider } from "./provider";
@@ -366,7 +366,8 @@ describe("vecteurs v2.json, moteur WebAssembly et fournisseur WebCrypto", () => 
         refused++;
       } else {
         const el = await W.elementSealer(t.p, c.size, c.first);
-        expect(hex(el.k())).toBe(c.k);
+        // La graine ne sort pas du moteur (décision Task 11) : vérifiée par la clé importée.
+        expect("k" in el).toBe(false);
         expect(el.pieces()).toEqual(c.pieces);
         expect(t.imports.map((i) => hex(i.raw))).toEqual([hex(W.hkdf(unhex(c.k), "shhdrop/v2/element", 32))]);
         ok++;
@@ -378,9 +379,20 @@ describe("vecteurs v2.json, moteur WebAssembly et fournisseur WebCrypto", () => 
     expect(ok).toBeGreaterThanOrEqual(10);
   });
 
-  /** Entrées de sealFinal d'un cas. */
-  const finalEntries = (entries: { kind: string; name: string; mime: string; size: number; first: number; k: string; clean?: string }[]) =>
-    entries.map((e) => ({ ...e, k: unhex(e.k) })) as FinalEntry[];
+  /**
+   * Entrées de sealFinal d'un cas : la graine `k` du vecteur est tirée par un scelleur (aléa
+   * rejoué), que l'entrée désigne par son numéro ; elle n'entre jamais depuis JavaScript.
+   */
+  const finalEntries = async (entries: { kind: string; name: string; mime: string; size: number; first: number; k: string; clean?: string }[]) => {
+    const out: FinalEntry[] = [];
+    for (const { k, ...e } of entries) {
+      const el = await W.elementSealer(testProvider([k]).p, 0, 0);
+      keep.push(el);
+      out.push({ ...e, sealer: el.id } as FinalEntry);
+    }
+    return out;
+  };
+  const keep: { id: number }[] = [];
 
   /** Clair du morceau du manifeste, déchiffré avec la K_contenu copiée à l'import. */
   async function manifestOf(raw: Uint8Array, bucket: number, header: Uint8Array, tail: Uint8Array) {
@@ -397,7 +409,8 @@ describe("vecteurs v2.json, moteur WebAssembly et fournisseur WebCrypto", () => 
     for (const c of V.manifest) {
       const t = testProvider([c.r]);
       const keys = await W.contentKeys(W.newSeed(t.p));
-      const run = () => W.sealFinal(finalEntries(c.entries), keys, c.rights, c.keep_ttl_h);
+      const entries = await finalEntries(c.entries);
+      const run = () => W.sealFinal(entries, keys, c.rights, c.keep_ttl_h);
       if (typeof c.error === "string") {
         expect(await errorOf(run), c.name).toBe(c.error);
         refused++;
@@ -465,7 +478,7 @@ describe("vecteurs v2.json, moteur WebAssembly et fournisseur WebCrypto", () => 
     const seed = W.newSeed(testProvider([sh.r]).p);
     const keys = await W.contentKeys(seed);
     expect(hex(keys.engagement)).toBe(sh.engagement);
-    const fin = await W.sealFinal(finalEntries(sh.items), keys, sh.rights, undefined);
+    const fin = await W.sealFinal(await finalEntries(sh.items), keys, sh.rights, undefined);
     expect(fin.bucket).toBe(sh.bucket);
     expect(hex(fin.header)).toBe(sh.header);
     expect(b64u(fin.tail)).toBe(sh.tail);
@@ -501,7 +514,10 @@ describe("vecteurs v2.json, moteur WebAssembly et fournisseur WebCrypto", () => 
     const fetched: number[] = [];
     const rd = await W.openReader(ck, async (n: number) => (fetched.push(n), segs[n] ?? new Uint8Array()), sh.bucket);
     expect(fetched).toEqual([0, 6, 0]);
-    expect(rd.manifest()).toEqual(sh.opened.manifest);
+    // Manifeste rendu sans les graines `k` (décision Task 11 : le lecteur garde les clés).
+    const want = { ...sh.opened.manifest, items: sh.opened.manifest.items.map(({ k: _k, ...e }: { k?: string }) => e) };
+    expect(rd.manifest()).toEqual(want);
+    expect(rd.manifest().items.some((e) => "k" in e)).toBe(false);
     for (const [i, w] of sh.opened.items.entries()) {
       const got = await rd.item(i);
       expect(got.length).toBe(w.len);
@@ -643,7 +659,8 @@ describe("fournisseur WebCrypto et frontières du moteur", () => {
     const keys = await W.contentKeys(seed);
     expect(await errorOf(() => W.contentKeys(seed)), "jamais recréée depuis la même R").toBe("cle_deja_utilisee");
     expect(await errorOf(() => W.contentKeysChecked(seed, keys.engagement)), "R neuve : pas de clés d'ouverture").toBe("cle_deja_utilisee");
-    const entry: FinalEntry[] = [{ kind: "text", name: "n", mime: "text/plain", size: 1, first: 0, k: new Uint8Array(32) }];
+    const el0 = await W.elementSealer(testProvider([new Uint8Array(32)]).p, 1, 0);
+    const entry: FinalEntry[] = [{ kind: "text", name: "n", mime: "text/plain", size: 1, first: 0, sealer: el0.id }];
     await W.sealFinal(entry, keys, undefined, undefined);
     expect(await errorOf(() => W.sealFinal(entry, keys, undefined, undefined)), "un seul manifeste").toBe("cle_deja_utilisee");
     // R déballée : seulement contentKeysChecked, et ces clés ne chiffrent pas de manifeste.
@@ -672,14 +689,39 @@ describe("fournisseur WebCrypto et frontières du moteur", () => {
     expect(await errorOf(() => el.piece(0, new Uint8Array(9)))).toBe("lecture_incomplete");
     expect(await errorOf(() => el.piece(0, new Uint8Array(10)))).toBe("segment_deja_produit");
     const keys = await W.contentKeys(W.newSeed(testProvider([new Uint8Array(32)]).p));
-    const ok: FinalEntry = { kind: "file", name: "f", mime: "m", size: 1, first: 0, k: new Uint8Array(32) };
-    for (const bad of [{ ...ok, kind: "dossier" }, { ...ok, k: new Uint8Array(31) }, { ...ok, clean: "inconnu" }, { ...ok, name: 3 }])
-      expect(await errorOf(() => W.sealFinal([bad as never], keys, undefined, undefined))).toBe("entree_invalide");
+    const ok: FinalEntry = { kind: "file", name: "f", mime: "m", size: 1, first: 0, sealer: el.id };
+    const gone = await W.elementSealer(testProvider([new Uint8Array(32)]).p, 1, 0);
+    const goneId = gone.id;
+    gone.free(); // scelleur oublié : sa graine aussi
+    for (const bad of [{ ...ok, kind: "dossier" }, { ...ok, sealer: 0 }, { ...ok, sealer: goneId }, { ...ok, sealer: 0.5 }, { ...ok, sealer: undefined }, { ...ok, k: new Uint8Array(32), sealer: undefined }, { ...ok, clean: "inconnu" }, { ...ok, name: 3 }])
+      expect(await errorOf(() => W.sealFinal([bad as never], keys, undefined, undefined)), JSON.stringify(bad)).toBe("entree_invalide");
     expect(await errorOf(() => W.sealFinal([{ ...ok, size: 0.5 }], keys, undefined, undefined))).toBe("taille_invalide");
     expect(await errorOf(() => W.sealFinal([{ ...ok, kind: "text", size: 0.5 }], keys, undefined, undefined))).toBe("texte_trop_long");
     expect(await errorOf(() => W.sealFinal([ok], keys, "coffre", 6.5))).toBe("droits_invalides");
     const ak = await W.accessKeys(createProvider(), new Uint8Array(32), new Uint8Array(32));
     expect(await errorOf(() => W.seal(ak, W.newSeed(createProvider()), new Uint8Array(15), new Uint8Array(48)))).toBe("enveloppe : id ou en-tête invalide");
+  });
+
+  it("hkdf : longueur non entière refusée, jamais tronquée (32,5 ≠ 32)", () => {
+    const ikm = new Uint8Array(32);
+    expect(hex(W.hkdf(ikm, "x", 32))).toHaveLength(64);
+    for (const len of [32.5, 31.9, -32, NaN, Infinity, 2 ** 32 + 32]) expect(() => W.hkdf(ikm, "x", len), String(len)).toThrow("clé ou sel de taille invalide");
+  });
+
+  it("aesImport : poignée numérique hors bornes (négative, non entière, trop grande) oubliée aussitôt, chiffrement_echec", async () => {
+    for (const bad of [-1, 1.5, 2 ** 32, NaN]) {
+      const t = testProvider([new Uint8Array(32)]);
+      const dropped: unknown[] = [];
+      const p: WebCryptoProvider = { ...t.p, aesImport: async () => bad, aesDrop: (h: number) => void dropped.push(h) };
+      expect(await errorOf(() => W.elementSealer(p, 10, 0)), String(bad)).toBe("chiffrement_echec");
+      expect(dropped.length === 1 && Object.is(dropped[0], bad), String(bad)).toBe(true);
+    }
+    // Autre chose qu'un nombre : rien à oublier.
+    const t = testProvider([new Uint8Array(32)]);
+    const dropped: unknown[] = [];
+    const p: WebCryptoProvider = { ...t.p, aesImport: async () => "1" as unknown as number, aesDrop: (h: number) => void dropped.push(h) };
+    expect(await errorOf(() => W.elementSealer(p, 10, 0))).toBe("chiffrement_echec");
+    expect(dropped).toEqual([]);
   });
 
   /** Petit partage (une note) prêt à ouvrir : segments et clés d'ouverture. */
@@ -689,7 +731,7 @@ describe("fournisseur WebCrypto et frontières du moteur", () => {
     const piece = await el.piece(0, utf8("salut"));
     const seed = W.newSeed(t.p);
     const keys = await W.contentKeys(seed);
-    const fin = await W.sealFinal([{ kind: "text", name: "n", mime: "text/plain", size: 5, first: 0, k: el.k() }], keys, undefined, undefined);
+    const fin = await W.sealFinal([{ kind: "text", name: "n", mime: "text/plain", size: 5, first: 0, sealer: el.id }], keys, undefined, undefined);
     const seg = new Uint8Array(W.segmentSize(fin.bucket, 0));
     seg.set(piece, 0);
     seg.set(fin.header, 0);
@@ -800,6 +842,28 @@ describe("Argon2id : Worker neuf par appel (couche TypeScript)", () => {
     const refuse = fakeWorker(() => ({ error: "mot_de_passe_non_genere" }));
     expect(await errorOf(() => passwordKeyForCreate(E, PW, salt, async () => refuse))).toBe("mot_de_passe_non_genere");
     expect(inPage).not.toHaveBeenCalled();
+  });
+});
+
+describe("Argon2id : Worker bloqué ou calcul non transmissible (décisions Task 11)", () => {
+  const PW = "aC3!cD5?#Fg";
+  const salt = new Uint8Array(16).fill(1);
+
+  it("Worker qui ne répond pas : arrêté au délai maximal, calcul dans la page (même clé)", async () => {
+    const want = hex(W.passwordKeyForCreate(utf8(PW), salt));
+    const mute = { onmessage: null, onerror: null, onmessageerror: null, terminated: false, postMessage() {}, terminate() { this.terminated = true; } };
+    const t0 = performance.now();
+    expect(hex(await passwordKeyForCreate(E, PW, salt, async () => mute as unknown as Worker, 50))).toBe(want);
+    expect(mute.terminated).toBe(true);
+    expect(performance.now() - t0).toBeGreaterThanOrEqual(45);
+    expect(WORKER_TIMEOUT_MS).toBe(20_000);
+  });
+
+  it("DataCloneError au postMessage (module non clonable) : Worker arrêté, calcul dans la page", async () => {
+    const want = hex(W.passwordKeyForCreate(utf8(PW), salt));
+    const w = { onmessage: null, onerror: null, onmessageerror: null, terminated: false, postMessage() { throw new DOMException("non clonable", "DataCloneError"); }, terminate() { this.terminated = true; } };
+    expect(hex(await passwordKeyForCreate(E, PW, salt, async () => w as unknown as Worker))).toBe(want);
+    expect(w.terminated).toBe(true);
   });
 });
 

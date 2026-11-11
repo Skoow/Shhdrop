@@ -30,11 +30,11 @@ export { prepareCaptcha, type PreparedCaptcha } from "./transfer/prepare";
 export { createDraft, type Draft, type ElementStatus } from "./transfer/draft";
 export { SERVER_STALL_MS } from "./transfer/upload";
 export { isRiskyName, previewKindOf, safeName as cleanName } from "./transfer/safety";
-export { MANIFEST_MAX, PREVIEW_MAX, type KeepTtl, type Rights } from "./crypto/container";
+export { MANIFEST_MAX, PREVIEW_MAX, type KeepTtl, type Rights } from "./engine";
 // Géométrie publique du paquet (aucune clé) : budget de lecture estimé par la page (flows/read-meter.ts).
-export { CHUNK, SEG_CHUNKS, bucketFor, segmentCount, segmentSize } from "./crypto/container";
+export { CHUNK, SEG_CHUNKS, bucketFor, segmentCount, segmentSize } from "./engine";
 // Place d'un fichier dans un envoi dès l'ajout (segments entiers, spec §41.14) : géométrie seulement.
-export { DATA_SEGMENTS, segmentsFor, segmentsNeeded } from "./crypto/elements";
+export { DATA_SEGMENTS, segmentsFor, segmentsNeeded } from "./engine";
 export {
   CONTENT_MAX,
   MAX_ITEMS,
@@ -49,7 +49,7 @@ export {
   TTL_MAX_HOURS,
   type TtlHours,
 } from "./limits";
-export { PASSWORD_ALPHABET, PASSWORD_LEN, generatePassword, isGeneratedPassword, type GeneratedPassword } from "./crypto/password";
+export { PASSWORD_ALPHABET, PASSWORD_LEN, generatePassword, isGeneratedPassword, type GeneratedPassword } from "./engine";
 export {
   MANAGE_FRAGMENT,
   SHARE_FRAGMENT,
@@ -61,6 +61,6 @@ export {
   shareLinkWithPassword,
   splitPassword,
   type ParsedLink,
-} from "./transfer/link";
-export type { Item, Manifest, ManifestClean, ManifestEntry, ManifestV2 } from "./crypto/container";
-export type { KAcces, KLien, KPreuve, SGestion } from "./crypto/types";
+} from "./engine";
+export type { Item, Manifest, ManifestClean, ManifestEntry, ManifestV2 } from "./engine";
+export type { KAcces, KLien, KPreuve, SGestion } from "./engine";

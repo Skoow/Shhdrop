@@ -1,5 +1,6 @@
+// Partie TypeScript gardée (pure.ts, décision B1 du contrôleur) : cas de l'ancien crypto/password.test.ts.
 import { describe, expect, it, vi } from "vitest";
-import { PASSWORD_ALPHABET, PASSWORD_FAMILIES, PASSWORD_LEN, PASSWORD_SPECIALS, generatePassword, isGeneratedPassword } from "./password";
+import { PASSWORD_ALPHABET, PASSWORD_FAMILIES, PASSWORD_LEN, PASSWORD_SPECIALS, generatePassword, isGeneratedPassword } from "./pure";
 
 const FAMILIES = ["abcdefghkmnpqrtuvwxy", "ACDEFGHJKLMNPQRTUVWXY", "23456789", "!?@#$%&*+-=/()"];
 

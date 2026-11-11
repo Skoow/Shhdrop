@@ -98,7 +98,7 @@ describe("createOptions (UI §9.3)", () => {
 });
 
 describe("mot de passe généré (spec §31)", () => {
-  it("10 caractères de l'alphabet, 4 familles, aucun ambigu (répartition : crypto/password.test.ts)", () => {
+  it("10 caractères de l'alphabet, 4 familles, aucun ambigu (répartition : engine/password.test.ts)", () => {
     for (let i = 0; i < 500; i++) {
       const p = generatePassword();
       expect(p).toHaveLength(11);

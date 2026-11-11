@@ -3,7 +3,7 @@
 // lui-même. Le jeton shown_at, le sel, l'origine et l'instant de réception restent internes
 // (WeakMap) : l'objet rendu est opaque et figé, et un objet forgé par l'appelant est ignoré.
 import * as api from "./api";
-import { checkOrigin } from "./link";
+import { checkOrigin } from "../engine/pure";
 import { senderError } from "./client";
 
 export type PreparedCaptcha = {

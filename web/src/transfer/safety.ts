@@ -1,6 +1,6 @@
 // Réception : nom de fichier nettoyé, aperçu sur liste blanche, types dangereux (spec §12,
 // audit M4). Le manifeste vient de l'expéditeur : son nom et son type MIME sont hostiles.
-import { PREVIEW_MAX, type ManifestEntry } from "../crypto/container";
+import { PREVIEW_MAX, type ManifestEntry } from "../engine/pure";
 
 export type PreviewKind = "image" | "audio" | "video" | "text" | "pdf" | "none";
 

@@ -2,13 +2,6 @@
 
 Le code de Shhdrop est publié sous licence GNU AGPL-3.0 (voir `LICENSE`). Les composants ci-dessous ne sont pas couverts par cette licence : chacun garde la sienne, rappelée dans sa section.
 
-## Liste de mots EFF (grande liste, 7 776 mots)
-
-- Source : https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt (voir https://www.eff.org/dice)
-- Auteur : Electronic Frontier Foundation
-- Licence : Creative Commons Attribution 3.0 (CC-BY 3.0), https://creativecommons.org/licenses/by/3.0/
-- Utilisation : `web/src/crypto/wordlist-eff.ts` (généré), mots seuls, sans les numéros de dés.
-
 ## SecLists, `10k-most-common.txt` et `100k-most-used-passwords-NCSC.txt`
 
 - Source : https://github.com/danielmiessler/SecLists (Passwords/Common-Credentials/10k-most-common.txt et 100k-most-used-passwords-NCSC.txt, 20 000 premières lignes de cette dernière)
@@ -28,10 +21,9 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 
 Versions exactes dans `web/package-lock.json` et `web/tools/svelte-check/package-lock.json`. Licences lues dans le `package.json` de chaque paquet installé (`node_modules`).
 
-Exécution (le bundle ne contient que le code d'exécution de Svelte et libsodium ; le reste de la liste est installé comme dépendance de `svelte`) :
+Exécution (le bundle ne contient que le code d'exécution de Svelte ; le reste de la liste est installé comme dépendance de `svelte`) :
 
 - `svelte` 5.57.3 : MIT, Copyright (c) Svelte contributors
-- `libsodium-wrappers-sumo` 0.8.4 et `libsodium-sumo` 0.8.4 : ISC
 - `pdfjs-dist` 6.5.438 : Apache-2.0, Copyright Mozilla Foundation et contributeurs de pdf.js (https://github.com/mozilla/pdf.js). Seulement dans le cadre PDF isolé (`pdf-frame.js`), non modifié ; texte de la licence : https://www.apache.org/licenses/LICENSE-2.0. Dépendance facultative `@napi-rs/canvas` (MIT) : pour Node seulement, jamais servie.
 - Dépendances de `svelte` (fermeture complète, outils de compilation compris) :
   - MIT : `@jridgewell/remapping` 2.3.5, `@jridgewell/gen-mapping` 0.3.13, `@jridgewell/sourcemap-codec` 1.6.0, `@jridgewell/trace-mapping` 0.3.31, `@jridgewell/resolve-uri` 3.1.2, `@sveltejs/acorn-typescript` 1.0.13, `@types/estree` 1.0.10, `acorn` 8.19.0, `clsx` 2.1.1, `devalue` 5.9.4, `esm-env` 1.2.2, `esrap` 2.4.0, `is-reference` 3.0.3, `locate-character` 3.0.0, `magic-string` 0.30.21, `zimmerframe` 1.1.5
@@ -44,6 +36,47 @@ Construction et tests (hors bundle) :
 - `svelte-check` 4.7.8 : MIT
 - `@fontsource-variable/mona-sans` 5.3.0 et `@fontsource-variable/jetbrains-mono` 5.3.0 : OFL-1.1 (sources des polices ci-dessous ; seuls les `.woff2` copiés sont servis)
 - `@axe-core/playwright` 4.14.0 et `axe-core` 4.14.0 : MPL-2.0
+
+## Moteur WebAssembly (crates Rust compilées dans `assets/engine-*.wasm`)
+
+Versions exactes dans `engine/Cargo.lock` ; liste : `cargo tree -p shhdrop-wasm --target wasm32-unknown-unknown -e normal`. Seules les crates ci-dessous entrent dans le `.wasm` et sa colle JavaScript (les macros procédurales, `proc-macro2`, `quote`, `syn`, `unicode-ident`, `wasm-bindgen-macro*`, `wasm-bindgen-shared` et `bumpalo`, ne servent qu'à la compilation).
+
+- MIT OR Apache-2.0 : `argon2` 0.6.0, `base64ct` 1.8.3, `base64` 0.23.1, `blake2` 0.11.0, `block-buffer` 0.12.1, `cfg-if` 1.0.5, `cmov` 0.5.4, `crypto-common` 0.2.2, `ctutils` 0.4.8, `digest` 0.11.3, `futures-core`, `futures-task` et `futures-util` 0.3.34, `hkdf` 0.13.0, `hmac` 0.13.0, `hybrid-array` 0.4.15, `itoa` 1.0.19, `js-sys` 0.3.107, `pin-project-lite` 0.2.17, `serde_core` 1.0.229, `serde_json` 1.0.154, `sha2` 0.11.1, `typenum` 1.20.1, `wasm-bindgen` 0.2.130, `wasm-bindgen-futures` 0.4.80, `zeroize` 1.9.1 (RustCrypto et projet wasm-bindgen ; textes : https://opensource.org/license/mit, https://www.apache.org/licenses/LICENSE-2.0)
+- MIT : `slab` 0.4.12, `zmij` 1.0.23 ; Unlicense OR MIT : `memchr` 2.8.3 ; Zlib OR Apache-2.0 OR MIT : `tinyvec` 1.13.3
+- (MIT OR Apache-2.0) AND Unicode-3.0 : `unicode-normalization` 0.1.26 (tables Unicode, licence Unicode : https://www.unicode.org/license.txt)
+- BSD-3-Clause : `subtle` 2.6.1 (comparaisons en temps constant), texte de la licence :
+
+```
+Copyright (c) 2016-2017 Isis Agora Lovecruft, Henry de Valence. All rights reserved.
+Copyright (c) 2016-2024 Isis Agora Lovecruft. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+1. Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ## Polices hébergées (SIL Open Font License 1.1)
 

@@ -18,6 +18,8 @@ afterEach(() => {
 
 const esc = (s: string) => s.replace(/'/g, "&#39;");
 const PROD_INDEX = `<!doctype html><html><head>\n<meta charset="utf-8" />\n<script type="module" crossorigin src="/assets/index-a.js"></script>\n</head><body></body></html>`;
+/** Démo : le moteur WebAssembly est intégré à un script (base64 du module, Task 11). */
+const DEMO_ENGINE = 'const wasm="AGFzbQEAAAAB";';
 const DEMO_INDEX = `<!doctype html><html><head>
     <meta http-equiv="Content-Security-Policy" content="${esc(DEMO_CSP)}">
     <meta name="referrer" content="no-referrer">
@@ -98,7 +100,7 @@ describe("check-dist.mjs, production", () => {
       "assets/index-a.js : statistique « sendbeacon » (spec §35.1)",
       "assets/index-a.js : écouteur global d'erreurs « window.onerror = » (spec §35.1)",
     ]);
-    const demo = { "index.html": DEMO_INDEX, "404.html": DEMO_INDEX, "assets/install-a.js": 'const MARK="__SHH_DEMO__";gtag(1)' };
+    const demo = { "index.html": DEMO_INDEX, "404.html": DEMO_INDEX, "assets/install-a.js": 'const MARK="__SHH_DEMO__";gtag(1)' + DEMO_ENGINE };
     expect(checkDist(site(demo), true)).toEqual(["assets/install-a.js : statistique « gtag( » (spec §35.1)"]);
   });
 
@@ -122,17 +124,30 @@ describe("check-dist.mjs, production", () => {
     expect(run([site({ "index.html": `<!doctype html><html><head><script>1</script></head></html>` }, false)]).err).toContain("index.html : script en ligne");
   });
 
-  it("Argon2id hors du script principal (10 novembre) : libsodium absent de index-*.js ; son fichier porte l'empreinte inscrite dans le script", () => {
-    const argon = "self.__shhArgon2id=1";
-    const main = (extra: string) => `const a="/assets/argon2-AbCd1234.js";${extra}`;
-    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": "x.crypto_pwhash(1)" }), false)).toEqual([
-      "assets/index-a.js : libsodium (crypto_pwhash) dans le script principal : il doit rester dans assets/argon2-*.js",
+  it("Argon2id hors du script principal (10 novembre ; moteur WebAssembly depuis la Task 11, libsodium supprimé) : le moteur absent de index-*.js ; ses fichiers portent l'empreinte inscrite dans le script ; aucun orphelin", () => {
+    const wasm = String.fromCharCode(0, 97, 115, 109, 1, 0, 0, 0);
+    const kdf = "self.onmessage=1";
+    const files = { "assets/engine-AbCd1234.wasm": wasm, "assets/engine-kdf-EfGh5678.js": kdf };
+    const main = (extra: string) => `const a="/assets/engine-AbCd1234.wasm",b="/assets/engine-kdf-EfGh5678.js";${extra}`;
+    const hashes = `const i="${sha384(Buffer.from(wasm, "latin1"))}",j="${sha384(Buffer.from(kdf))}";`;
+    // Octets du moteur dans le script principal (comme libsodium autrefois) : refusés.
+    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": `const w="${Buffer.from(wasm + "\x01", "latin1").toString("base64")}"` }), false)).toEqual([
+      "assets/index-a.js : octets WebAssembly en ligne dans le script principal : le moteur doit rester dans assets/engine-*.wasm, lu avec son empreinte",
     ]);
-    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": main("") }), false)).toEqual(["assets/argon2-AbCd1234.js : cité par le script principal, absent du site"]);
-    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": main(""), "assets/argon2-AbCd1234.js": argon }), false)).toEqual([
-      "assets/argon2-AbCd1234.js : son empreinte SHA-384 n'est pas inscrite dans le script principal (chargement sans contrôle d'intégrité)",
+    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": main("") }), false)).toEqual([
+      "assets/engine-AbCd1234.wasm : cité par le script principal, absent du site",
+      "assets/engine-kdf-EfGh5678.js : cité par le script principal, absent du site",
     ]);
-    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": main(`const i="${sha384(Buffer.from(argon))}"`), "assets/argon2-AbCd1234.js": argon }), false)).toEqual([]);
+    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": main(""), ...files }), false)).toEqual([
+      "assets/engine-AbCd1234.wasm : son empreinte SHA-384 n'est pas inscrite dans le script principal (chargement sans contrôle d'intégrité)",
+      "assets/engine-kdf-EfGh5678.js : son empreinte SHA-384 n'est pas inscrite dans le script principal (chargement sans contrôle d'intégrité)",
+    ]);
+    expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": main(hashes), ...files }), false)).toEqual([]);
+    // Fichiers du moteur que le script principal ne cite pas : orphelins.
+    expect(checkDist(site({ "index.html": PROD_INDEX, ...files }), false)).toEqual([
+      "assets/engine-AbCd1234.wasm : orphelin, aucun script principal ne le cite avec son empreinte SHA-384",
+      "assets/engine-kdf-EfGh5678.js : orphelin, aucun script principal ne le cite avec son empreinte SHA-384",
+    ]);
   });
 
   it("moteur WebAssembly (spec moteur §7) : tout .wasm cité par le script principal existe et porte son empreinte, comme le script du Worker", () => {
@@ -162,7 +177,10 @@ describe("check-dist.mjs, production", () => {
   it("moteur WebAssembly : en production, tout .wasm de plus de 1 Kio a ses variantes .br et .gz (servies par static.go), qui redonnent le fichier", () => {
     const wasm = String.fromCharCode(0, 97, 115, 109, 1, 0, 0, 0) + "\x01".repeat(2000);
     const w = "assets/engine-AbCd1234.wasm";
-    const prod = (extra: Record<string, string | Buffer>) => checkDist(site({ "index.html": PROD_INDEX, [w]: wasm, ...(extra as Record<string, string>) }), false);
+    // Le script principal cite les .wasm avec leur empreinte (sinon : orphelins, règle de la Task 11).
+    const small = "\0asm";
+    const main = `const a="/${w}",i="${sha384(Buffer.from(wasm, "latin1"))}";`;
+    const prod = (extra: Record<string, string | Buffer>) => checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": main, [w]: wasm, ...(extra as Record<string, string>) }), false);
     const br = brotliCompressSync(Buffer.from(wasm));
     const gz = gzipSync(Buffer.from(wasm));
     expect(prod({})).toEqual([`${w} : sans variante .br ni .gz : le moteur serait téléchargé sans compression`]);
@@ -170,7 +188,8 @@ describe("check-dist.mjs, production", () => {
     expect(prod({ [w + ".br"]: br, [w + ".gz"]: gz })).toEqual([]);
     expect(prod({ [w + ".br"]: br, [w + ".gz"]: gzipSync(Buffer.from("autre")) })).toEqual([`${w}.gz : ne redonne pas ${w}`]);
     // Petit .wasm (moins de 1 Kio, comme pour le texte : precompress ne le compresse pas) : rien exigé.
-    expect(prod({ "assets/petit-AbCd1234.wasm": "\0asm" }).filter((p) => p.includes("petit"))).toEqual([]);
+    const both = main + `const b="/assets/petit-AbCd1234.wasm",j="${sha384(Buffer.from(small))}";`;
+    expect(prod({ "assets/index-a.js": both, "assets/petit-AbCd1234.wasm": small }).filter((p) => p.includes("petit"))).toEqual([]);
   });
 
   it("moteur WebAssembly : aucun octet de .wasm en ligne dans le script principal de production (base64 ou tableau)", () => {
@@ -192,7 +211,7 @@ describe("check-dist.mjs, production", () => {
 });
 
 describe("check-dist.mjs --demo", () => {
-  const good = () => ({ "index.html": DEMO_INDEX, "404.html": DEMO_INDEX, "assets/install-a.js": 'const MARK="__SHH_DEMO__"' });
+  const good = () => ({ "index.html": DEMO_INDEX, "404.html": DEMO_INDEX, "assets/install-a.js": 'const MARK="__SHH_DEMO__";' + DEMO_ENGINE });
 
   it("passe avec la marque, les balises en tête de <head> et 404.html", () => {
     expect(run(["--demo", site(good())])).toEqual({ code: 0, err: "" });
@@ -229,6 +248,12 @@ describe("check-dist.mjs --demo", () => {
   it("moteur WebAssembly intégré au script (connect-src 'none') : aucun fichier .wasm dans la démo", () => {
     expect(checkDist(site({ ...good(), "assets/engine-AbCd1234.wasm": "x" }), true)).toEqual([
       "assets/engine-AbCd1234.wasm : fichier .wasm dans la démo : sa CSP (connect-src 'none') interdit de le lire, le moteur doit être intégré au script",
+    ]);
+  });
+
+  it("moteur WebAssembly présent dans un script de la démo (Task 11) : sinon elle ne pourrait ni chiffrer ni ouvrir", () => {
+    expect(checkDist(site({ ...good(), "assets/install-a.js": 'const MARK="__SHH_DEMO__"' }), true)).toEqual([
+      "moteur WebAssembly absent des scripts de la démo (base64 « AGFzbQEAAAA ») : elle ne pourrait ni chiffrer ni ouvrir",
     ]);
   });
 

@@ -17,7 +17,7 @@
 // (`restore`) ; aucun secret du client (lien, mot de passe, clé) n'en fait partie.
 // Non simulés : limites par connexion, quotas, place disque, gel. Aucune preuve anti-robot
 // n'est vérifiée (anti-robot désactivé en démo ; `fallback: null`).
-import { BUCKETS, CHUNK_CT, HEADER, SEG_CHUNKS, segmentCount, segmentSize } from "../crypto/container";
+import { BUCKETS, CHUNK_CT, HEADER, SEG_CHUNKS, segmentCount, segmentSize } from "../engine/pure";
 
 export const MARK = "__SHH_DEMO__";
 

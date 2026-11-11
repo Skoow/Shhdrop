@@ -98,7 +98,7 @@ const FR: Record<InfoName, (v: V) => InfoPage> = {
       h: "Détails techniques (pour les experts)",
       list: [
         "Contenu, noms, types et textes : AES-256-GCM (WebCrypto), clés dérivées par HKDF-SHA-256 ; aucune cryptographie maison.",
-        "Mot de passe : Argon2id (libsodium), 64 Mio de mémoire, 3 passes, combiné à la clé du fragment du lien (après #), jamais transmise au serveur.",
+        "Mot de passe : Argon2id (RustCrypto, dans le moteur WebAssembly du site), 64 Mio de mémoire, 3 passes, combiné à la clé du fragment du lien (après #), jamais transmise au serveur.",
         `Ouverture : le serveur vérifie une preuve dérivée de la clé et du mot de passe, sans recevoir ni l'une ni l'autre ; ${v.tries} preuves fausses détruisent le partage.`,
         "Taille : le contenu chiffré occupe des paliers fixes ; le serveur ne connaît que le palier.",
         "Navigateur : en-têtes stricts (Content-Security-Policy, Permissions-Policy) ; aucun script, police ni traceur d'un autre site. Seule exception, la vérification anti-robot de secours (Google reCAPTCHA), chargée après un clic dans un cadre isolé sur un autre site, jamais sur une page qui détient des clés.",
@@ -268,7 +268,7 @@ const EN: Record<InfoName, (v: V) => InfoPage> = {
       h: "Technical details (for experts)",
       list: [
         "Content, names, types and texts: AES-256-GCM (WebCrypto), keys derived with HKDF-SHA-256; no home-made cryptography.",
-        "Password: Argon2id (libsodium), 64 MiB of memory, 3 passes, combined with the key in the link fragment (after #), which is never sent to the server.",
+        "Password: Argon2id (RustCrypto, in the site's WebAssembly engine), 64 MiB of memory, 3 passes, combined with the key in the link fragment (after #), which is never sent to the server.",
         `Opening: the server checks a proof derived from the key and the password, without receiving either; ${v.tries} wrong proofs destroy the share.`,
         "Size: encrypted content fills fixed tiers; the server only knows the tier.",
         "Browser: strict headers (Content-Security-Policy, Permissions-Policy); no script, font or tracker from another site. The one exception is the fallback bot check (Google reCAPTCHA), loaded after a click in an isolated frame on another site, never on a page that holds keys.",

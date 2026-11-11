@@ -5,10 +5,9 @@ import { closeSync, mkdtempSync, openAsBlob, openSync, rmSync, writeSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { utf8 } from "../src/crypto/encoding";
-import type { Item } from "../src/crypto/container";
+import { utf8, type Item } from "../src/engine/pure";
 import { BadPasswordError, NotFoundError, createShare, destroyShare, fetchMeta, openShare, shareStatus } from "../src/transfer/client";
-import { parseLink } from "../src/transfer/link";
+import { parseLink } from "../src/engine";
 import { solveAltcha } from "./altcha";
 import { startServer, type TestServer } from "./server";
 
@@ -59,8 +58,8 @@ describe("création puis ouverture (texte, image 300 Kio, fichier 5 Mio)", () =>
     expect(Date.now() - t0).toBeGreaterThanOrEqual(3000);
     expect(r.expiresInS).toBeGreaterThan(3500);
     expect(r.expiresInS).toBeLessThanOrEqual(3600 + 900);
-    expect(parseLink(r.link).kind).toBe("s");
-    expect(parseLink(r.manage).kind).toBe("m");
+    expect((await parseLink(r.link)).kind).toBe("s");
+    expect((await parseLink(r.manage)).kind).toBe("m");
     // Spec §41.14 : image au segment 0, fichier aux segments 1 et 2 (9 Mio), note (D41-37,
     // élément remis au clic) dans le segment suivant.
     expect(prog.at(-1)).toEqual([4, 4]);

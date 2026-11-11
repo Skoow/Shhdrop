@@ -4,7 +4,7 @@ import type { Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { axe, capture, expect, test } from "./fixtures";
-import { freshPage, goSecurity, sendShare, unlock } from "./open-helpers";
+import { freshPage, goSecurity, pwField, sendShare, unlock } from "./open-helpers";
 import { startPagesServer } from "./pages-server";
 
 const KEY = Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => 255 - i * 3)).toString("base64url");
@@ -339,25 +339,27 @@ test.describe("intégrité des scripts et des styles (spec §28.3)", () => {
   });
 });
 
-test.describe("Argon2id à la demande, hors du fil principal (10 novembre)", () => {
-  test("accueil : libsodium n'est pas chargé ; à l'envoi : fichier vérifié lu une fois, calcul dans un Worker ; l'ouverture donne le même contenu", async ({ page, shh, browser }) => {
+test.describe("Argon2id à la demande, hors du fil principal (10 novembre ; moteur WebAssembly depuis la Task 11)", () => {
+  // Task 11 : libsodium (assets/argon2-*.js) est supprimé ; Argon2id vient du moteur, dans un Worker
+  // dont le script (assets/engine-kdf-*.js) est lu avec son empreinte. Même intention qu'avant.
+  test("accueil : Argon2id n'est pas chargé ; à l'envoi : script du Worker vérifié lu une fois, calcul dans un Worker ; l'ouverture donne le même contenu", async ({ page, shh, browser }) => {
     test.setTimeout(120_000);
-    const argon: string[] = [];
+    const kdf: string[] = [];
     const workers: string[] = [];
     const watch = (p: Page) => {
-      p.on("request", (r) => void (/\/assets\/argon2-[^/]+\.js$/.test(r.url()) && argon.push(r.url())));
+      p.on("request", (r) => void (/\/assets\/engine-kdf-[^/]+\.js$/.test(r.url()) && kdf.push(r.url())));
       p.on("worker", (w) => workers.push(w.url()));
     };
     watch(page);
     await page.goto(shh.origin + "/");
     await expect(page.locator("main h1").first()).toBeVisible();
     await page.waitForLoadState("networkidle");
-    expect(argon).toEqual([]);
+    expect(kdf).toEqual([]);
     const s = await freshPage(browser);
     watch(s.page);
     const sent = await sendShare(s.page, shh.origin + "/", { text: "Argon2id dans un Worker" });
     await s.ctx.close();
-    expect(argon.length).toBe(1);
+    expect(kdf.length).toBe(1);
     expect(workers.filter((u) => u.startsWith("blob:")).length).toBe(1);
     await page.goto(sent.link);
     await unlock(page, sent.password);
@@ -365,7 +367,7 @@ test.describe("Argon2id à la demande, hors du fil principal (10 novembre)", () 
     expect(workers.filter((u) => u.startsWith("blob:")).length).toBe(2);
   });
 
-  test("repli : sans Worker depuis un Blob, le même fichier vérifié est chargé dans la page et l'ouverture marche", async ({ page, shh, browser }) => {
+  test("repli : sans Worker depuis un Blob, le calcul se fait dans la page avec le moteur vérifié et l'ouverture marche", async ({ page, shh, browser }) => {
     test.setTimeout(120_000);
     const s = await freshPage(browser);
     const sent = await sendShare(s.page, shh.origin + "/", { text: "repli sans Worker" });
@@ -377,11 +379,52 @@ test.describe("Argon2id à la demande, hors du fil principal (10 novembre)", () 
         return new Real(url, o);
       } as unknown as typeof Worker;
     });
+    const wasm: string[] = [];
+    const workers: string[] = [];
+    page.on("request", (r) => void (new URL(r.url()).pathname.endsWith(".wasm") && wasm.push(new URL(r.url()).pathname)));
+    page.on("worker", (w) => workers.push(w.url()));
     await page.goto(sent.link);
     await unlock(page, sent.password);
     // unlock() a vu « Contenu » : la clé dérivée est la bonne (sinon, « mot de passe incorrect »).
-    expect(await page.evaluate(() => [...document.scripts].filter((x) => /argon2-/.test(x.src)).map((x) => x.integrity.slice(0, 7)))).toEqual(["sha384-"]);
+    // Le moteur vérifié (un seul .wasm, lu avec son empreinte) a fait le calcul : aucun Worker,
+    // aucun script ajouté à la page.
+    expect(workers.filter((u) => u.startsWith("blob:"))).toEqual([]);
+    expect(wasm).toHaveLength(1);
+    expect(await page.evaluate(() => [...document.scripts].filter((x) => /argon2-|engine-kdf-/.test(x.src)).length)).toBe(0);
   });
+});
+
+test("vrai parcours d'ouverture (Task 11) : .wasm modifié d'un octet en route : aucun déchiffrement, message réseau ; Réessayer sans piège ouvre le partage", async ({ page, shh, browser, browserName }) => {
+  test.skip(browserName !== "chromium", "chemin de production vérifié sous Chromium");
+  test.setTimeout(120_000);
+  const s = await freshPage(browser);
+  const sent = await sendShare(s.page, shh.origin + "/", { text: "moteur modifié en route" });
+  await s.ctx.close();
+  let trapped = 0;
+  const trap = async (route: import("@playwright/test").Route) => {
+    const res = await route.fetch();
+    const body = await res.body();
+    body[body.length >> 1] ^= 1; // un seul bit d'un seul octet
+    trapped++;
+    await route.fulfill({ response: res, body });
+  };
+  await page.route("**/assets/engine-*.wasm", trap);
+  const api: string[] = [];
+  page.on("request", (r) => void (new URL(r.url()).pathname.startsWith("/api/") && api.push(new URL(r.url()).pathname)));
+  await page.goto(sent.link);
+  await expect(page.getByRole("heading", { name: "Vous êtes hors ligne." })).toBeVisible({ timeout: 30_000 });
+  // Lu au moins une fois (l'écran peut relire le fichier, chaque lecture est refusée de même).
+  expect(trapped).toBeGreaterThanOrEqual(1);
+  // Le moteur refusé n'a rien dérivé : aucune requête au serveur (meta demande K_accès), rien d'ouvert.
+  expect(api).toEqual([]);
+  await expect(pwField(page)).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Contenu", exact: true })).toHaveCount(0);
+  await page.unroute("**/assets/engine-*.wasm", trap);
+  await page.getByRole("button", { name: "Réessayer" }).click();
+  // unlock() a vu « Contenu » : la clé dérivée est la bonne, le partage est ouvert.
+  await unlock(page, sent.password);
+  // Les refus du navigateur (empreinte) ne comptent pas comme des violations de la CSP du site.
+  shh.cspViolations.length = 0;
 });
 
 test("Trusted Types (10 novembre) : une chaîne brute donnée à innerHTML ou à new Worker est refusée ; seules deux politiques existent", async ({ page, shh, browserName }) => {
@@ -409,8 +452,8 @@ test("Trusted Types (10 novembre) : une chaîne brute donnée à innerHTML ou à
   shh.cspViolations.length = 0;
 });
 
-// Moteur WebAssembly (spec moteur §7, Task 10) : chargement vérifié. Le site n'appelle pas encore
-// le moteur (Task 11) : la page d'essai ui-e2e/engine-page/ (construite par global-setup.ts avec
+// Moteur WebAssembly (spec moteur §7, Task 10) : chargement vérifié, éprouvé ici isolément (le site
+// l'utilise depuis la Task 11, test précédent) : la page d'essai ui-e2e/engine-page/ (construite par global-setup.ts avec
 // les greffons du site, jamais livrée) appelle loadEngine() et l'Argon2id du moteur, servie par le
 // vrai serveur Go (CSP et Trusted Types de production) ou comme par GitHub Pages (démo).
 const ENGINE_PAGE = fileURLToPath(new URL("./engine-page/dist", import.meta.url));

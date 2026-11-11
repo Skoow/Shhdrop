@@ -30,6 +30,16 @@ async function load(): Promise<Engine> {
   return { wasm: exports, provider: createProvider(), module, start: startWorker };
 }
 
+/**
+ * Instance neuve du même module, après une panique (index.ts) : les objets de l'ancienne
+ * instance deviennent inutilisables (la colle les refuse), et un fournisseur neuf remplace
+ * l'ancien (ses clés ne servent plus à rien).
+ */
+export function resetEngine(e: Engine): void {
+  e.wasm.__wbg_reset_state();
+  e.provider = createProvider();
+}
+
 let loading: Promise<Engine> | undefined;
 
 /** Le moteur, chargé une seule fois ; un échec (réseau) laisse réessayer au besoin suivant. */

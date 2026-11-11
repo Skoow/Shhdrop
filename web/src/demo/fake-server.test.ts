@@ -3,8 +3,7 @@
 // et ses requêtes subissent le contrôle du test « le serveur ne voit rien ».
 import { describe, expect, it, vi } from "vitest";
 import { findIn, needle } from "../../e2e/scan";
-import { b64u, utf8 } from "../crypto/encoding";
-import { CHUNK_CT, HEADER, segmentSize } from "../crypto/container";
+import { CHUNK_CT, HEADER, b64u, segmentSize, utf8 } from "../engine/pure";
 import {
   BadPasswordError,
   GrantInvalidError,
@@ -85,7 +84,7 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     expect(await shareStatus(r.manage, ORIGIN, net)).toMatchObject({ opensUsed: 1, maxOpens: 2, state: "ready" });
 
     // Aucun repère en clair, ni K_lien, dans les URL, en-têtes et corps reçus par le faux serveur.
-    const p = parseLink(r.link);
+    const p = await parseLink(r.link);
     if (p.kind !== "s") throw new Error("lien de partage attendu");
     const secrets = [needle("kLien", p.kLien), needle("texte", MARKER), needle("nom", NAME), needle("mot de passe", PW)];
     const hits: string[] = [];

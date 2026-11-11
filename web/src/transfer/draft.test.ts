@@ -3,9 +3,7 @@
 // seuls éléments gardés, abandon, et « le serveur ne voit rien ».
 import { describe, expect, it } from "vitest";
 import { findIn, needle } from "../../e2e/scan";
-import { CHUNK_CT, HEADER, SEG_CHUNKS } from "../crypto/container";
-import { SEG_PLAIN } from "../crypto/elements";
-import { utf8 } from "../crypto/encoding";
+import { CHUNK_CT, HEADER, SEG_CHUNKS, SEG_PLAIN, utf8 } from "../engine/pure";
 import { createFakeServer } from "../demo/fake-server";
 import { openShare, type CaptchaProof, type Item } from "../index";
 import { createDraft } from "./draft";

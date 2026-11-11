@@ -5,6 +5,8 @@
 //   2. wasm-bindgen --target web (sans les sections « name » et « producers » : 70 Ko de noms
 //      de fonctions inutiles au site), version exacte 0.2.130 (celle de la crate wasm-bindgen,
 //      installée par `cargo install wasm-bindgen-cli --version 0.2.130 --locked`).
+//      `--experimental-reset-state-function` : __wbg_reset_state() refait une instance neuve
+//      du même module après une panique (spec moteur §7 ; web/src/engine/index.ts).
 // Les chemins de ~/.cargo (sources des crates, cités par les messages de panique) sont réécrits
 // en /cargo : le .wasm ne porte ni le dossier personnel de qui le construit, ni rien qui change
 // d'une machine à l'autre (build reproductible, web/scripts/repro.sh).
@@ -47,6 +49,6 @@ run("cargo", ["build", "--release", "--target", "wasm32-unknown-unknown", "-p", 
 rmSync(out, { recursive: true, force: true });
 run(
   "wasm-bindgen",
-  ["--target", "web", "--remove-name-section", "--remove-producers-section", "--out-dir", out, "--out-name", "shhdrop_wasm", join(engine, "target", "wasm32-unknown-unknown", "release", "shhdrop_wasm.wasm")],
+  ["--target", "web", "--remove-name-section", "--remove-producers-section", "--experimental-reset-state-function", "--out-dir", out, "--out-name", "shhdrop_wasm", join(engine, "target", "wasm32-unknown-unknown", "release", "shhdrop_wasm.wasm")],
   engine,
 );

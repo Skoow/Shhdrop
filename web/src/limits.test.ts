@@ -1,7 +1,7 @@
 // Les chiffres affichés (limits.ts) sont ceux que le serveur impose : on les lit dans le code Go.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { BUCKETS, CHUNK, MANIFEST_MAX } from "./crypto/container";
+import { BUCKETS, CHUNK, MANIFEST_MAX } from "./engine/pure";
 import { UPLOAD_WINDOW_MS } from "./flows/send.svelte";
 import { CONTENT_MAX, MAX_ITEMS, MAX_OPENS, PW_TRIES, TTL_HOURS, TTL_MAX_HOURS } from "./limits";
 

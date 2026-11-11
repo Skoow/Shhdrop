@@ -1,5 +1,6 @@
+// Partie TypeScript gardée (pure.ts) : cas de l'ancien crypto/encoding.test.ts.
 import { describe, expect, it } from "vitest";
-import { b64u, concat, unb64u, utf8 } from "./encoding";
+import { b64u, concat, unb64u, utf8 } from "./pure";
 
 describe("base64url", () => {
   it("aller-retour sur vide, [0] et 32 octets aléatoires", () => {

@@ -2,11 +2,9 @@
 // (X-Shh-Access, X-Shh-Manage) ou dans le corps, en base64url sans bourrage, jamais dans
 // l'URL. Aucun chemin ne porte d'identifiant (spec §29.8, §32) : le partage est désigné par
 // un jeton signé du serveur, par K_accès ou par S_gestion ; l'id dérivé du lien ne sort pas. `fetch` est injectable (tests : capture des requêtes, coupures simulées).
-// Les secrets ont des types marqués (crypto/types) : K_lien ne peut pas être envoyé (audit M1).
+// Les secrets ont des types marqués (engine/pure.ts) : K_lien ne peut pas être envoyé (audit M1).
 // Module interne : l'interface publique est src/index.ts, sans ce module.
-import { b64u, unb64u } from "../crypto/encoding";
-import type { KAcces, KPreuve, SGestion } from "../crypto/types";
-import { checkOrigin } from "./link";
+import { b64u, checkOrigin, unb64u, type KAcces, type KPreuve, type SGestion } from "../engine/pure";
 import { fetchUploader, xhrUploader, type Uploader } from "./upload";
 
 export type Net = {

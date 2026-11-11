@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cores, decodeCores, encodeCores, normalizeForList, patternReason, weakReason } from "./weakpw";
-import { generatePassword } from "../crypto/password";
+import { generatePassword } from "../engine/pure";
 
 const none = { block: new Set<string>(), cores: new Set<string>() };
 

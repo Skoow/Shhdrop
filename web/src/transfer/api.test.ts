@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BadResponse, HttpError, captcha, create, ctx, destroy, done, finalize, getSegment, meta, putSegment, retryAfterHeader, status, unlock, watch, type FinalizeBody } from "./api";
-import type { KAcces, KPreuve } from "../crypto/types";
-import type { SGestion } from "../crypto/types";
+import type { KAcces, KPreuve, SGestion } from "../engine/pure";
 
 const FIN: FinalizeBody = {
   salt: "s".repeat(22),

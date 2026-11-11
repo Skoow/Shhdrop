@@ -1,16 +1,40 @@
 // Correspondance des erreurs du client (serveur simulé) et effacement des clés.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { b64u, concat, unb64u, utf8 } from "../crypto/encoding";
-import { CHUNK, sealStream, segmentSize, type Item, type SealOpts } from "../crypto/container";
-import { accessKeys, contentKeys, newSeed, seal, shareId } from "../crypto/envelope";
-import { KDF_MIN, deriveAccess, passwordKey } from "../crypto/kdf";
-import type { KLien, SGestion } from "../crypto/types";
+import { b64u, concat, unb64u, utf8 } from "../engine/pure";
+import { CHUNK, CHUNK_CT, HEADER, KDF_MIN, SEG_CHUNKS, accessKeys, bucketFor, chunksFor, contentKeys, deriveAccess, loadEngine, manageLink, newSeed, parseLink, passwordKey, seal, segmentCount, segmentSize, shareId, shareLink, type Item, type KeepTtl, type KLien, type KMdp, type Rights, type SGestion } from "../engine";
 
 /** Octroi d'ouverture factice (54 caractères base64url, spec §41.4). */
 const GRANT0 = "G".repeat(54);
-const captured = vi.hoisted(() => ({ buffers: [] as Uint8Array<ArrayBuffer>[], hkdf: [] as string[], kMdp: [] as Uint8Array<ArrayBuffer>[] }));
-vi.mock("../crypto/kdf", async (orig) => {
-  const m = await orig<typeof import("../crypto/kdf")>();
+// Copies JavaScript des secrets que le client tient (K_lien, S_gestion, K_accès, K_mdp, K_preuve,
+// aléa) : le test vérifie qu'elles sont mises à zéro. K_contenu, K_env, R et les graines des
+// éléments restent dans le moteur (poignées opaques) : aucune copie JavaScript à effacer.
+const captured = vi.hoisted(() => ({ buffers: [] as Uint8Array<ArrayBuffer>[], kMdp: [] as Uint8Array<ArrayBuffer>[] }));
+// Fournisseur WebCrypto : les tirages de 32 octets (graine R, graine k d'un élément) et les clés
+// brutes passées à aesImport (K_contenu, K_env, clé d'un élément) sont des copies JavaScript que
+// le moteur efface après usage : capturées aussi.
+vi.mock("../engine/provider", async (orig) => {
+  const m = await orig<typeof import("../engine/provider")>();
+  return {
+    ...m,
+    createProvider: () => {
+      const p = m.createProvider();
+      return {
+        ...p,
+        random: (n: number) => {
+          const b = p.random(n);
+          if (n === 32) captured.buffers.push(b as Uint8Array<ArrayBuffer>);
+          return b;
+        },
+        aesImport: (raw: Uint8Array) => {
+          captured.buffers.push(raw as Uint8Array<ArrayBuffer>);
+          return p.aesImport(raw);
+        },
+      };
+    },
+  };
+});
+vi.mock("../engine", async (orig) => {
+  const m = await orig<typeof import("../engine")>();
   return {
     ...m,
     randomBytes: (n: number) => {
@@ -28,16 +52,14 @@ vi.mock("../crypto/kdf", async (orig) => {
       captured.buffers.push(b);
       return b;
     },
-    deriveAccess: async (k: import("../crypto/types").KLien) => {
+    deriveAccess: async (k: import("../engine").KLien) => {
       const r = await m.deriveAccess(k);
       captured.buffers.push(r.kAcces);
       return r;
     },
-    // Sorties de HKDF : K_accès, id, K_contenu brute, K_maître, K_env brute, K_preuve.
-    hkdf: async (ikm: Uint8Array<ArrayBuffer>, info: string, len?: number) => {
-      const r = await m.hkdf(ikm, info, len);
-      captured.buffers.push(r);
-      captured.hkdf.push(info);
+    accessKeys: async (...a: Parameters<typeof m.accessKeys>) => {
+      const r = await m.accessKeys(...a);
+      captured.buffers.push(r.kPreuve);
       return r;
     },
     passwordKeyForCreate: async (...a: Parameters<typeof m.passwordKeyForCreate>) => {
@@ -71,14 +93,13 @@ import {
   type CaptchaCtx,
   type CaptchaProof,
 } from "./client";
-import { manageLink, parseLink, shareLink } from "./link";
 import { prepareCaptcha } from "./prepare";
 import { SERVER_STALL_MS } from "./upload";
 
 const ORIGIN = "https://srv.test";
 const KLIEN = () => new Uint8Array(32).fill(1) as KLien;
-const LINK = shareLink(ORIGIN, new Uint8Array(32).fill(1) as KLien);
-const MANAGE = manageLink(ORIGIN, new Uint8Array(32).fill(2) as SGestion);
+const LINK = await shareLink(ORIGIN, new Uint8Array(32).fill(1) as KLien);
+const MANAGE = await manageLink(ORIGIN, new Uint8Array(32).fill(2) as SGestion);
 const PW = "Kq7!mP2#x?a"; // forme d'un mot de passe généré (D41-15)
 
 type Reply = Response | "net";
@@ -88,19 +109,68 @@ const SALT = new Uint8Array(16).fill(3);
 const META = { expires_in_s: 3000, salt: b64u(SALT), kdf: { ops: 3, mem: 67108864 }, bucket: 16, segments: 1, opens_left: 2 };
 const ENV0 = b64u(new Uint8Array(60)); // enveloppe quelconque (jamais déballée : paquet invalide)
 
-// Paquet v2 tel que createShare le produirait pour LINK et PW (K_lien = 1…1, sel = SALT) :
-// segments (bourrage laissé à zéro, jamais lu) et enveloppe E, en base64url.
+// Paquet v2 (un élément par entrée, chacun sous sa clé, spec §41.14) pour LINK et PW (K_lien =
+// 1…1, sel = SALT) : segments (morceaux non utilisés laissés à zéro, jamais lus) et enveloppe E.
+// Placement comme l'ancien paquet de ces tests : fichiers bout à bout (à la frontière de morceau),
+// puis notes au début du dernier segment du palier (lues avec le manifeste, sans requête de plus).
+// Les morceaux des éléments sont chiffrés ici par WebCrypto (graine k tirée ici, HKDF et nonces du
+// moteur), pour placer un petit élément à cheval sur deux segments comme l'ancien paquet ; le
+// manifeste, l'en-tête, R et E viennent du moteur.
+type SealOpts = { rights?: Rights; keepTtlH?: KeepTtl };
 let kMdpPW: Uint8Array<ArrayBuffer> | undefined;
+const ELEMENT_AD = utf8("shhdrop/v2/element-ad");
 async function pack(items: Item[], o?: SealOpts, idOverride?: Uint8Array<ArrayBuffer>) {
   kMdpPW ??= new Uint8Array(await passwordKey(PW, SALT, KDF_MIN));
-  const r = newSeed();
-  const s = await sealStream(items, await contentKeys(r), o);
+  const E = await loadEngine();
+  const W = E.wasm;
+  const data = await Promise.all(items.map(async (it) => (it.data instanceof Uint8Array ? it.data : new Uint8Array(await it.data.arrayBuffer()))));
+  const first: number[] = [];
+  let next = 0;
+  for (const [i, it] of items.entries()) {
+    if (it.kind !== "file") continue;
+    first[i] = next;
+    next += chunksFor(data[i]!.length);
+  }
+  const texts = items.map((it, i) => (it.kind === "text" ? i : -1)).filter((i) => i >= 0);
+  const textChunks = texts.reduce((n, i) => n + chunksFor(data[i]!.length), 0);
+  const b0 = bucketFor((next + textChunks) * CHUNK);
+  next = Math.max(next, (segmentCount(b0) - 1) * SEG_CHUNKS);
+  for (const i of texts) {
+    first[i] = next;
+    next += chunksFor(data[i]!.length);
+  }
+  const chunks = new Map<number, Uint8Array>();
+  const sealers: number[] = [];
+  for (const [i, d] of data.entries()) {
+    const k = crypto.getRandomValues(new Uint8Array(32));
+    const key = await crypto.subtle.importKey("raw", W.hkdf(k, "shhdrop/v2/element", 32) as Uint8Array<ArrayBuffer>, "AES-GCM", false, ["encrypt"]);
+    for (let c = 0; c < chunksFor(d.length); c++) {
+      const plain = new Uint8Array(CHUNK);
+      plain.set(d.subarray(c * CHUNK, (c + 1) * CHUNK));
+      const iv = W.nonce(first[i]! + c, false) as Uint8Array<ArrayBuffer>;
+      chunks.set(first[i]! + c, new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: ELEMENT_AD }, key, plain)));
+    }
+    // Scelleur du moteur qui tient la même graine k (aléa rejoué) : sealFinal la reprend.
+    const el = await W.elementSealer({ ...E.provider, random: () => new Uint8Array(k) }, 0, 0);
+    keepSealers.push(el);
+    sealers.push(el.id);
+  }
+  const r = await newSeed();
+  const keys = await contentKeys(r);
+  const entries = items.map((it, i) => ({ kind: it.kind, name: it.name, mime: it.mime, size: data[i]!.length, first: first[i]!, sealer: sealers[i]!, ...(it.kind === "file" && it.clean ? { clean: it.clean } : {}) }));
+  const fin = await W.sealFinal(entries, keys, o?.rights, o?.keepTtlH);
+  const bucket = fin.bucket;
   const segs: Uint8Array<ArrayBuffer>[] = [];
-  for (let n = 0; n < s.segmentCount; n++) segs.push(s.toSend.includes(n) ? await s.segment(n) : new Uint8Array(segmentSize(s.bucket, n)));
-  const { kEnv } = await accessKeys(KLIEN(), new Uint8Array(kMdpPW) as import("../crypto/types").KMdp);
-  const envelope = b64u(await seal(kEnv, r, idOverride ?? (await shareId(KLIEN())), s.header));
-  return { segs, envelope, bucket: s.bucket, segments: s.segmentCount, header: s.header, r };
+  for (let n = 0; n < segmentCount(bucket); n++) segs.push(new Uint8Array(segmentSize(bucket, n)));
+  const at = (i: number) => (i < SEG_CHUNKS ? HEADER : 0) + (i % SEG_CHUNKS) * CHUNK_CT;
+  for (const [i, ct] of chunks) segs[Math.floor(i / SEG_CHUNKS)]!.set(ct, at(i));
+  segs[0]!.set(fin.header, 0);
+  segs[Math.floor((bucket - 1) / SEG_CHUNKS)]!.set(fin.tail, at(bucket - 1));
+  const { kEnv } = await accessKeys(KLIEN(), new Uint8Array(kMdpPW) as KMdp);
+  const envelope = b64u(await seal(kEnv, r, idOverride ?? (await shareId(KLIEN())), fin.header));
+  return { segs, envelope, bucket, segments: segmentCount(bucket), header: fin.header as Uint8Array<ArrayBuffer>, r };
 }
+const keepSealers: unknown[] = [];
 type Pack = Awaited<ReturnType<typeof pack>>;
 const packRoute = (pk: Pack, bad?: (n: number, seg: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>): Route => (_, p) => {
   if (p.endsWith("/meta")) return j(200, { ...META, bucket: pk.bucket, segments: pk.segments });
@@ -697,7 +767,8 @@ describe("createShare : annulation (signal)", () => {
   });
   afterEach(() => vi.useRealTimers());
   // Au moins K_lien, S_gestion, K_accès (et, dès l'envoi, graine et clé brute de l'élément ;
-  // au succès, R, K_contenu brute, K_mdp, K_maître, K_env brute, K_preuve) : tous à zéro.
+  // au succès, R, K_contenu brute, K_mdp, K_env brute, K_preuve) : toutes les copies JavaScript à
+  // zéro. K_maître ne sort plus du moteur (aucune copie JavaScript) : 10 au succès, plus 11.
   const wiped = (min = 3) => {
     const s = captured.buffers.filter((b) => b.length === 32);
     expect(s.length).toBeGreaterThanOrEqual(min);
@@ -777,7 +848,7 @@ describe("createShare : annulation (signal)", () => {
     const r = await drive(createShare(ORIGIN, SMALL, base(s)));
     expect(r.expiresInS).toBe(3600);
     expect(s.destroys).toEqual([]);
-    wiped(11);
+    wiped(10);
   });
 });
 
@@ -1175,7 +1246,7 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
     vi.useRealTimers();
     expect(r.link).toMatch(/^https:\/\/srv\.test\/#[A-Za-z0-9_-]{43}$/);
     expect(r.manage).toMatch(/^https:\/\/srv\.test\/#m[A-Za-z0-9_-]{43}$/);
-    const lk = parseLink(r.link);
+    const lk = await parseLink(r.link);
     expect(lk.kind === "s" && b64u((await deriveAccess(lk.kLien)).kAcces)).toBe(s.creates[0]!.access);
     expect(r.manage.slice(r.manage.indexOf("#m") + 2)).toBe(s.creates[0]!.manage);
     const segs = serverFile(400, sent, fin);
@@ -1232,7 +1303,7 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
   }, 60_000);
 
   it("mot de passe généré de 8 caractères accepté ; saisi de 8 caractères refusé avant toute requête", async () => {
-    const { generatePassword } = await import("../crypto/password");
+    const { generatePassword } = await import("../engine/pure");
     const s = sender({ segments: 1 });
     await drive(createShare(ORIGIN, SMALL, { ...base(s), password: generatePassword() }));
     expect(s.finals).toHaveLength(1);
@@ -1321,7 +1392,7 @@ describe("openShare v2 : enveloppe, engagement, rejeu", () => {
     const pk = await pack(items);
     const forged = new Uint8Array(pk.header);
     forged[40]! ^= 1;
-    const { kEnv } = await accessKeys(KLIEN(), new Uint8Array(kMdpPW!) as import("../crypto/types").KMdp);
+    const { kEnv } = await accessKeys(KLIEN(), new Uint8Array(kMdpPW!) as KMdp);
     const envelope = b64u(await seal(kEnv, pk.r, await shareId(KLIEN()), forged));
     const seg0 = new Uint8Array(pk.segs[0]!);
     seg0.set(forged, 0);

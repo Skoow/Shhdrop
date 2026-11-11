@@ -6,29 +6,40 @@
 // noms et le contenu ne sortent jamais.
 import {
   BUCKETS,
+  DATA_SEGMENTS,
+  KDF_CREATE,
+  accessKeys,
+  b64u,
+  checkKdfParams,
+  checkOrigin,
+  contentKeysChecked,
+  deriveAccess,
+  forget,
+  open,
   openStream,
+  parseLink,
+  passwordKey,
   readHeader,
   segmentCount,
   segmentSize,
+  segmentsNeeded,
+  shareId,
+  unb64u,
+  type GeneratedPassword,
   type Item,
   type KeepTtl,
+  type KLien,
   type Manifest,
+  type ParsedLink,
   type Rights,
-} from "../crypto/container";
-import { b64u, unb64u } from "../crypto/encoding";
-import { accessKeys, contentKeysChecked, open, shareId } from "../crypto/envelope";
-import { checkKdfParams, deriveAccess, KDF_CREATE, passwordKey } from "../crypto/kdf";
-import type { GeneratedPassword } from "../crypto/password";
-import type { KLien } from "../crypto/types";
+} from "../engine";
 import { MAX_OPENS, TTL_HOURS, type TtlHours } from "../limits";
 import * as api from "./api";
-import { checkOrigin, parseLink, type ParsedLink } from "./link";
 import { type PreparedCaptcha } from "./prepare";
 import { isRiskyName, previewKindOf, safeName, type PreviewKind } from "./safety";
 import { lowMemory } from "../app/env";
 import { abortError } from "./upload";
 import { createDraft } from "./draft";
-import { DATA_SEGMENTS, segmentsNeeded } from "../crypto/elements";
 
 export type { Net } from "./api";
 export type { PreparedCaptcha } from "./prepare";
@@ -176,9 +187,9 @@ export async function guarded<T>(f: () => Promise<T>, map: (e: unknown) => unkno
  * K_accès, K_preuve ou S_gestion à un autre serveur (audit F1) → Error("lien_invalide").
  * Une origine attendue mal formée → Error("origine_invalide").
  */
-function parseFor(link: string, expectedOrigin: string): ParsedLink {
+async function parseFor(link: string, expectedOrigin: string): Promise<ParsedLink> {
   const origin = checkOrigin(expectedOrigin);
-  const p = parseAtBase(link);
+  const p = await parseAtBase(link);
   if (p.origin !== origin) throw new Error("lien_invalide");
   return p;
 }
@@ -194,9 +205,9 @@ function appBase(): string {
   return typeof b === "string" && b !== "" ? b : "/";
 }
 
-function parseAtBase(link: string): ParsedLink {
+async function parseAtBase(link: string): Promise<ParsedLink> {
   try {
-    return parseLink(link);
+    return await parseLink(link);
   } catch (e) {
     const base = appBase();
     if (base === "/") throw e;
@@ -206,8 +217,8 @@ function parseAtBase(link: string): ParsedLink {
 
 type ShareLink = Extract<ParsedLink, { kind: "s" }>;
 
-function parseShare(link: string, expectedOrigin: string): ShareLink {
-  const p = parseFor(link, expectedOrigin);
+async function parseShare(link: string, expectedOrigin: string): Promise<ShareLink> {
+  const p = await parseFor(link, expectedOrigin);
   if (p.kind !== "s") throw new Error("lien_invalide");
   return p;
 }
@@ -399,7 +410,7 @@ export async function fetchMeta(
   net?: api.Net,
   grant?: string,
 ): Promise<{ expiresInS: number; opensLeft: number }> {
-  const p = parseShare(link, expectedOrigin);
+  const p = await parseShare(link, expectedOrigin);
   return guarded(async () => {
     const { kAcces } = await deriveAccess(p.kLien);
     try {
@@ -417,7 +428,7 @@ export async function fetchMeta(
  * un autre onglet s'il détient un octroi pour ce partage.
  */
 export async function grantTag(link: string, expectedOrigin: string): Promise<string> {
-  const p = parseShare(link, expectedOrigin);
+  const p = await parseShare(link, expectedOrigin);
   const { kAcces } = await deriveAccess(p.kLien);
   p.kLien.fill(0);
   try {
@@ -543,7 +554,7 @@ export async function openShare(
   const o: OpenOpts = typeof progressOrOpts === "function" ? { onProgress: progressOrOpts } : (progressOrOpts ?? {});
   const onProgress = o.onProgress;
   const grant = o.grant;
-  const p = parseShare(link, expectedOrigin);
+  const p = await parseShare(link, expectedOrigin);
   // Avant toute requête et toute dérivation (coûteuse) : un champ vide n'est pas un mot de passe.
   if (password === "") throw new Error("mot_de_passe_requis");
   const idBytes = await shareId(p.kLien); // données authentifiées seulement, jamais envoyé
@@ -565,12 +576,13 @@ export async function openShare(
       u = await api.unlock(c, kAcces, keys.kPreuve, grant);
     } catch (e) {
       zero();
+      forget(keys?.kEnv);
       throw e;
     } finally {
       p.kLien.fill(0); // plus utile : K_accès, K_env et K_preuve sont dérivées
     }
     const kPreuve = keys.kPreuve;
-    const kEnv = keys.kEnv;
+    const kEnv = keys.kEnv; // K_env : poignée du moteur, oubliée dès R déballée
     let wiped = false;
     let destroying = false; // destroy() en cours ou réussi ici
 
@@ -596,13 +608,17 @@ export async function openShare(
       // En-tête en clair du segment 0 → R = open(K_env, E, id, en-tête) → engagement vérifié
       // contre R → K_contenu (spec §29.2). Le segment 0 lu ici sert ensuite au lecteur.
       let seg0: Uint8Array<ArrayBuffer> | null = await get(0);
-      const { header, engagement } = readHeader(seg0);
-      const r = await open(kEnv, u.envelope, idBytes, header);
+      const { header, engagement } = await readHeader(seg0);
       let content: Awaited<ReturnType<typeof contentKeysChecked>>;
       try {
-        content = await contentKeysChecked(r, engagement);
+        const r = await open(kEnv, u.envelope, idBytes, header);
+        try {
+          content = await contentKeysChecked(r, engagement);
+        } finally {
+          forget(r);
+        }
       } finally {
-        r.fill(0);
+        forget(kEnv);
       }
       const fetchSegment = async (n: number) => {
         if (n === 0 && seg0 !== null) {
@@ -668,6 +684,7 @@ export async function openShare(
       };
     } catch (e) {
       zero();
+      forget(kEnv);
       await done().catch(() => undefined);
       throw e;
     }
@@ -715,7 +732,7 @@ export async function collectToBlob(open: Opened, i: number, foldBytes = FOLD_BY
  * gestion (S_gestion seul). Erreurs : voir readerError.
  */
 export async function destroyShare(link: string, expectedOrigin: string, opts: { password?: string } & api.Net = {}): Promise<void> {
-  const p = parseFor(link, expectedOrigin);
+  const p = await parseFor(link, expectedOrigin);
   if (p.kind === "s" && (opts.password === undefined || opts.password === "")) throw new Error("mot_de_passe_requis");
   const c = api.ctx(p.origin, opts);
   await guarded(async () => {
@@ -729,6 +746,7 @@ export async function destroyShare(link: string, expectedOrigin: string, opts: {
     } finally {
       kAcces.fill(0);
       keys?.kPreuve.fill(0);
+      forget(keys?.kEnv);
       p.kLien.fill(0);
     }
   }, destroyError);
@@ -739,7 +757,7 @@ export async function shareStatus(
   expectedOrigin: string,
   net?: api.Net,
 ): Promise<{ opensUsed: number; maxOpens: number; expiresInS: number; state: string }> {
-  const p = parseFor(manage, expectedOrigin);
+  const p = await parseFor(manage, expectedOrigin);
   if (p.kind !== "m") throw new Error("lien_invalide");
   return guarded(() => api.status(api.ctx(p.origin, net), p.sGestion), destroyError);
 }

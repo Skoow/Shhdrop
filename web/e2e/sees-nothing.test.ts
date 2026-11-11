@@ -6,32 +6,50 @@
 // octets des segments, ni l'identifiant interne, le sel ou les vérificateurs ne doivent
 // rester dans un fichier du dossier de données. Spec §32 : l'id dérivé du lien (HKDF de
 // K_lien) ne sort jamais du navigateur ; il est fouillé comme un secret.
-import { hkdfSync } from "node:crypto";
+import { createHash, createHmac, hkdfSync } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { b64u, concat, unb64u, utf8 } from "../src/crypto/encoding";
-import { accessKeys, shareId } from "../src/crypto/envelope";
-import { generatePassword } from "../src/crypto/password";
-import { deriveAccess, passwordKey, sha256 } from "../src/crypto/kdf";
-import type { KAcces, KLien, KPreuve, SGestion } from "../src/crypto/types";
+import { b64u, concat, generatePassword, unb64u, utf8, type KAcces, type KLien, type KMdp, type KPreuve, type SGestion } from "../src/engine/pure";
 
-// Graines R tirées par createShare (copie : createShare les met à zéro après l'enveloppe).
-const seeds = vi.hoisted(() => [] as Uint8Array<ArrayBuffer>[]);
-vi.mock("../src/crypto/envelope", async (orig) => {
-  const m = await orig<typeof import("../src/crypto/envelope")>();
+// Graines R tirées par createShare : R ne sort jamais du moteur (poignée opaque) ; le moteur la
+// tire par le fournisseur (random(32), aléa de crypto.getRandomValues), qui en garde ici une copie
+// pendant newSeed seulement (le moteur efface le tableau qu'il reçoit, après l'avoir recopié).
+const seeds = vi.hoisted(() => ({ list: [] as Uint8Array<ArrayBuffer>[], on: false }));
+vi.mock("../src/engine/provider", async (orig) => {
+  const m = await orig<typeof import("../src/engine/provider")>();
   return {
     ...m,
-    newSeed: () => {
-      const r = m.newSeed();
-      seeds.push(new Uint8Array(r));
-      return r;
+    createProvider: () => {
+      const p = m.createProvider();
+      return {
+        ...p,
+        random: (n: number) => {
+          const b = p.random(n);
+          if (seeds.on && n === 32) seeds.list.push(new Uint8Array(b));
+          return b;
+        },
+      };
     },
   };
 });
+vi.mock("../src/engine/index", async (orig) => {
+  const m = await orig<typeof import("../src/engine/index")>();
+  return {
+    ...m,
+    newSeed: async () => {
+      seeds.on = true;
+      try {
+        return await m.newSeed();
+      } finally {
+        seeds.on = false;
+      }
+    },
+  };
+});
+import { accessKeys, deriveAccess, parseLink, passwordKey, shareId } from "../src/engine";
 import * as api from "../src/transfer/api";
 import { createShare, destroyShare, openShare, shareStatus } from "../src/transfer/client";
-import { parseLink } from "../src/transfer/link";
 import { solveAltcha } from "./altcha";
 import { capturingFetch, findIn, needle, scanDir, scanProcessMemory, type Captured, type Needle } from "./scan";
 import { startServer, type TestServer } from "./server";
@@ -41,6 +59,7 @@ const NAME = "nom-repere-91c2.pdf";
 const PASSWORD = "Rp4#Wx8?T%Q"; // repère de la forme générée (D41-15 : plus de mot de passe saisi)
 const MIB = 1048576;
 const GENERATED = generatePassword();
+const sha256 = async (b: Uint8Array) => new Uint8Array(createHash("sha256").update(b).digest());
 const hk = (ikm: Uint8Array, info: string) => new Uint8Array(hkdfSync("sha256", ikm, new Uint8Array(0), info, 32));
 // Sous-chaînes de 8 caractères des noms et du texte saisis : aucune ne doit apparaître.
 const windows = (label: string, s: string) => Array.from({ length: s.length - 7 }, (_, i) => needle(`${label}[${i}]`, s.slice(i, i + 8)));
@@ -84,7 +103,7 @@ describe("le serveur ne voit rien", () => {
       // Droits « coffre » + durée de garde : écrits dans le manifeste chiffré, jamais en clair.
       { ttlHours: 1, maxOpens: 2, password: PASSWORD, rights: "coffre", keepTtlH: 12, solveCaptcha: solveAltcha, fetch },
     );
-    const p = parseLink(r.link);
+    const p = await parseLink(r.link);
     if (p.kind !== "s") throw new Error("lien de partage attendu");
     kLien = p.kLien;
     id = await shareId(kLien);
@@ -96,7 +115,7 @@ describe("le serveur ne voit rien", () => {
     expect(handle).not.toBe(b64u(id));
     manage = r.manage;
     kAcces = (await deriveAccess(kLien)).kAcces;
-    const g = parseLink(manage);
+    const g = await parseLink(manage);
     if (g.kind !== "m") throw new Error("lien de gestion attendu");
     sGestion = g.sGestion;
     // Hors journal des requêtes (fetch global) : le sel et les paramètres tels que le serveur les rend.
@@ -104,7 +123,7 @@ describe("le serveur ne voit rien", () => {
     salt = unb64u(m.salt);
     expect(m.bucket).toBe(400);
     kMdp = await passwordKey(PASSWORD, salt, m.kdf);
-    kPreuve = (await accessKeys(kLien, kMdp as import("../src/crypto/types").KMdp)).kPreuve;
+    kPreuve = (await accessKeys(kLien, kMdp as KMdp)).kPreuve;
     const o = await openShare(r.link, PASSWORD, srv.origin, undefined, { fetch });
     expect(o.manifest.items[0]!.text).toBe(`texte ${MARKER} texte`);
     expect(o.manifest.items[1]!.name).toBe(NAME);
@@ -117,6 +136,12 @@ describe("le serveur ne voit rien", () => {
     const unlockRes = log.find((x) => x.url.endsWith("/unlock"))!;
     envelope = unb64u((JSON.parse(unlockRes.response.toString("utf8")) as { envelope: string }).envelope);
     const blobFile = readFileSync(join(srv.dataDir, "blobs", handle));
+    // La copie capturée est bien R : son engagement HMAC(R, « shhdrop/v2/engagement ») est celui
+    // de l'en-tête stocké (octets 16 à 48 du segment 0). Sinon les aiguilles R et K_contenu ne
+    // chercheraient rien.
+    expect(seeds.list).toHaveLength(1);
+    const engagement = createHmac("sha256", seeds.list[0]!).update("shhdrop/v2/engagement").digest();
+    expect(Buffer.from(blobFile.subarray(16, 48)).equals(engagement), "R capturée = R du partage").toBe(true);
     const segOff = (n: number) => 48 + n * 64 * 65552;
     fillCopy = blobFile.subarray(segOff(3), segOff(6));
     // Second partage (une seule ouverture) : lu puis détruit par Opened.destroy("report"), qui
@@ -128,7 +153,7 @@ describe("le serveur ne voit rien", () => {
       solveCaptcha: solveAltcha,
       fetch,
     });
-    const p2 = parseLink(r2.link);
+    const p2 = await parseLink(r2.link);
     if (p2.kind !== "s") throw new Error("lien de partage attendu");
     kLien2 = p2.kLien;
     id2 = await shareId(kLien2);
@@ -140,8 +165,8 @@ describe("le serveur ne voit rien", () => {
     await o2.destroy("report");
     await o2.done(); // 410 « gone » attendu et toléré : le partage est déjà effacé
     o2.wipe();
-    expect(seeds).toHaveLength(2);
-    const seed1 = seeds[0]!, seed2 = seeds[1]!;
+    expect(seeds.list).toHaveLength(2);
+    const seed1 = seeds.list[0]!, seed2 = seeds.list[1]!;
     const kMaitre = hk(concat(kLien, kMdp), "shhdrop/v2/maitre");
     secrets = [
       needle("R", seed1),
@@ -383,7 +408,7 @@ describe("le serveur ne voit rien : repères de requête, base minimale (spec §
     await dbSnapshot("pendant la lecture");
     // Identifiant repère dans des routes inconnues ; motif repère refusé (400, partage intact).
     for (const path of [`/api/${R.id}`, `/api/shares/${R.idLong}`, `/API/${R.id}`, `/api/shares/segments/${R.id}`]) await marked(srv.origin + path);
-    const p = parseLink(r.link);
+    const p = await parseLink(r.link);
     if (p.kind !== "s") throw new Error("lien de partage attendu");
     const kA = (await deriveAccess(p.kLien)).kAcces;
     const bad = await marked(srv.origin + "/api/shares/destroy", {

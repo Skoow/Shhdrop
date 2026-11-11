@@ -85,6 +85,9 @@ extern "C" {
     ) -> core::result::Result<JsValue, JsValue>;
     #[wasm_bindgen(method, catch, js_name = aesDrop)]
     fn aes_drop(this: &Provider, h: u32) -> core::result::Result<JsValue, JsValue>;
+    /// Même fonction, pour une poignée rendue hors des bornes (oubliée aussitôt).
+    #[wasm_bindgen(method, catch, js_name = aesDrop)]
+    fn aes_drop_value(this: &Provider, h: &JsValue) -> core::result::Result<JsValue, JsValue>;
 }
 
 /// Plateforme du site : le fournisseur JavaScript. Aucun état côté Rust (la table des
@@ -167,10 +170,20 @@ impl Platform for Web {
         };
         // La copie JavaScript est effacée une fois l'import fini (WebCrypto la lit d'abord).
         raw.fill(0, 0, 32);
-        got.and_then(|v| v.as_f64())
-            .filter(|h| h.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(h))
-            .map(|h| h as u32)
-            .ok_or(Error::ChiffrementEchec)
+        let got = got.ok_or(Error::ChiffrementEchec)?;
+        let h = got
+            .as_f64()
+            .filter(|h| h.fract() == 0.0 && (0.0..=f64::from(u32::MAX)).contains(h));
+        match h {
+            Some(h) => Ok(h as u32),
+            None => {
+                // Poignée numérique hors bornes : la clé a pu entrer dans la table ; oubliée.
+                if got.as_f64().is_some() {
+                    let _ = self.0.aes_drop_value(&got);
+                }
+                Err(Error::ChiffrementEchec)
+            }
+        }
     }
 
     async fn aes_seal_batch(
@@ -239,6 +252,32 @@ impl Platform for Web {
         // Une exception de l'hôte ne traverse pas le moteur (Drop) : ignorée.
         let _ = self.0.aes_drop(k.raw());
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Panique (spec §7 : convertie en « paquet corrompu »)
+// ---------------------------------------------------------------------------------------------
+
+thread_local! {
+    static ON_PANIC: RefCell<Option<Function>> = const { RefCell::new(None) };
+}
+
+/// Fonction JavaScript appelée (sans argument, ni message : rien de ce qui a paniqué ne sort) juste
+/// avant l'arrêt de l'instance sur une panique (un bogue : le moteur ne panique sur aucune entrée).
+/// Sur wasm32, une panique arrête l'instance (`RuntimeError: unreachable`) ; dans une opération
+/// asynchrone, cet arrêt n'atteint pas la promesse de l'appelant. La couche TypeScript
+/// (web/src/engine/index.ts) rejette alors ses opérations en cours par `paquet_corrompu` et
+/// refait une instance neuve au prochain appel.
+#[wasm_bindgen(js_name = setPanicHandler)]
+pub fn set_panic_handler(f: Function) {
+    ON_PANIC.with(|h| *h.borrow_mut() = Some(f));
+    std::panic::set_hook(Box::new(|_| {
+        // try_borrow : jamais une seconde panique pendant la première.
+        let f = ON_PANIC.with(|h| h.try_borrow().ok().and_then(|g| g.clone()));
+        if let Some(f) = f {
+            let _ = f.call0(&JsValue::NULL);
+        }
+    }));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -506,12 +545,13 @@ pub fn sha256(data: &Uint8Array) -> Uint8Array {
 /// HKDF-SHA-256 à sel vide (vecteurs communs, §9) : longueurs du moteur (16, 32) et celle de
 /// la RFC 5869 A.3 (42). Ne rend qu'une fonction d'octets que JavaScript détient déjà.
 #[wasm_bindgen]
-pub fn hkdf(ikm: &Uint8Array, info: &str, len: u32) -> core::result::Result<Uint8Array, JsValue> {
+pub fn hkdf(ikm: &Uint8Array, info: &str, len: f64) -> core::result::Result<Uint8Array, JsValue> {
     let ikm = secret(ikm);
-    Ok(match len {
-        16 => Uint8Array::from(&kdf::hkdf::<16>(&ikm, info)[..]),
-        32 => Uint8Array::from(&kdf::hkdf::<32>(&ikm, info)[..]),
-        42 => Uint8Array::from(&kdf::hkdf::<42>(&ikm, info)[..]),
+    // Longueur en f64 : wasm-bindgen tronquerait 32,5 en 32 (refusée ici).
+    Ok(match uint(len) {
+        Some(16) => Uint8Array::from(&kdf::hkdf::<16>(&ikm, info)[..]),
+        Some(32) => Uint8Array::from(&kdf::hkdf::<32>(&ikm, info)[..]),
+        Some(42) => Uint8Array::from(&kdf::hkdf::<42>(&ikm, info)[..]),
         _ => return Err(js_err(Error::TailleInvalide)),
     })
 }
@@ -828,21 +868,49 @@ pub fn segments_needed(sizes: Vec<f64>) -> core::result::Result<f64, JsValue> {
 }
 
 /// Scelleur d'un élément (clé neuve) : l'hôte lit `range(j)` du fichier et le passe à
-/// `piece(j, octets)`.
+/// `piece(j, octets)`. Sa graine k ne sort jamais du moteur : `sealFinal` la retrouve par
+/// `id`, tant que le scelleur existe (`free()` l'oublie).
 #[wasm_bindgen]
-pub struct JsElementSealer(Rc<ElementSealer<Web>>);
+pub struct JsElementSealer {
+    el: Rc<ElementSealer<Web>>,
+    id: u32,
+}
+
+thread_local! {
+    /// Scelleurs vivants, par numéro (jamais réutilisé) ; tenus faiblement : `free()` (ou le
+    /// ramasse-miettes) les retire, et leur graine est effacée avec eux.
+    static SEALERS: RefCell<Vec<(u32, std::rc::Weak<ElementSealer<Web>>)>> = const { RefCell::new(Vec::new()) };
+    static NEXT_SEALER: Cell<u32> = const { Cell::new(1) };
+}
+
+fn sealer_by_id(id: u32) -> Option<Rc<ElementSealer<Web>>> {
+    SEALERS.with(|m| {
+        m.borrow()
+            .iter()
+            .find(|(i, _)| *i == id)
+            .and_then(|(_, w)| w.upgrade())
+    })
+}
+
+impl Drop for JsElementSealer {
+    fn drop(&mut self) {
+        let id = self.id;
+        SEALERS.with(|m| m.borrow_mut().retain(|(i, _)| *i != id));
+    }
+}
 
 #[wasm_bindgen]
 impl JsElementSealer {
-    /// Graine de la clé (32 octets) : n'entre que dans le manifeste chiffré.
-    pub fn k(&self) -> Uint8Array {
-        Uint8Array::from(&self.0.k()[..])
+    /// Numéro du scelleur, donné à `sealFinal` à la place de la graine.
+    #[wasm_bindgen(getter)]
+    pub fn id(&self) -> u32 {
+        self.id
     }
 
     /// Plages à envoyer : `[{ seg, from, chunks }]`.
     #[wasm_bindgen(unchecked_return_type = "{ seg: number; from: number; chunks: number }[]")]
     pub fn pieces(&self) -> Array {
-        self.0
+        self.el
             .pieces()
             .iter()
             .map(|p| {
@@ -858,7 +926,7 @@ impl JsElementSealer {
     /// Octets `[lo, hi)` du fichier à lire pour la pièce `j` ; `segment_invalide`.
     #[wasm_bindgen(unchecked_return_type = "[number, number]")]
     pub fn range(&self, j: f64) -> core::result::Result<Array, JsValue> {
-        let (lo, hi) = self.0.range(index(j)).map_err(js_err)?;
+        let (lo, hi) = self.el.range(index(j)).map_err(js_err)?;
         Ok([lo as f64, hi as f64]
             .into_iter()
             .map(JsValue::from_f64)
@@ -869,7 +937,7 @@ impl JsElementSealer {
     /// (recopiés et effacés par le moteur ; l'appelant efface les siens).
     #[wasm_bindgen(unchecked_return_type = "Promise<Uint8Array>")]
     pub fn piece(&self, j: f64, plain: &Uint8Array) -> Promise {
-        let (el, j, plain) = (Rc::clone(&self.0), index(j), secret(plain));
+        let (el, j, plain) = (Rc::clone(&self.el), index(j), secret(plain));
         future_to_promise(async move {
             let ct = el.piece(j, &plain).await.map_err(js_err)?;
             Ok(bytes(&ct))
@@ -886,15 +954,21 @@ pub fn element_sealer(provider: &Provider, size: f64, first: f64) -> Promise {
     let p = Rc::new(Web(provider.clone()));
     let (size, first) = (n64(size), n64(first));
     future_to_promise(async move {
-        let el = ElementSealer::new(&p, size, first).await.map_err(js_err)?;
-        Ok(JsElementSealer(Rc::new(el)).into())
+        let el = Rc::new(ElementSealer::new(&p, size, first).await.map_err(js_err)?);
+        let id = NEXT_SEALER.with(|n| {
+            let id = n.get();
+            n.set(id.wrapping_add(1).max(1));
+            id
+        });
+        SEALERS.with(|m| m.borrow_mut().push((id, Rc::downgrade(&el))));
+        Ok(JsElementSealer { el, id }.into())
     })
 }
 
 #[wasm_bindgen(typescript_custom_section)]
 const TS_FINAL: &str = r#"
-/** Élément gardé (sealFinal) ; `clean` seulement pour un fichier. */
-export type FinalEntry = { kind: "text" | "file"; name: string; mime: string; size: number; first: number; k: Uint8Array; clean?: string };
+/** Élément gardé (sealFinal) : `sealer`, numéro (`id`) du scelleur qui l'a chiffré, dont le moteur reprend la graine ; `clean` seulement pour un fichier. */
+export type FinalEntry = { kind: "text" | "file"; name: string; mime: string; size: number; first: number; sealer: number; clean?: string };
 "#;
 
 const BAD_ENTRY: &str = "entree_invalide";
@@ -918,13 +992,14 @@ fn final_entry(v: &JsValue) -> core::result::Result<FinalEntry, JsValue> {
         }
         _ => return Err(js_msg(BAD_ENTRY)),
     };
-    let k = get(v, "k")
-        .dyn_into::<Uint8Array>()
+    // Graine reprise du scelleur vivant (jamais lue depuis JavaScript).
+    let key = num("sealer")
         .ok()
-        .filter(|a| a.length() == 32)
+        .and_then(uint)
+        .and_then(|i| u32::try_from(i).ok())
+        .and_then(sealer_by_id)
+        .map(|el| el.k())
         .ok_or_else(|| js_msg(BAD_ENTRY))?;
-    let mut key = Zeroizing::new([0u8; 32]);
-    k.copy_to(&mut *key);
     Ok(FinalEntry {
         kind,
         name: text("name")?,
@@ -1018,10 +1093,10 @@ pub struct JsReader {
 
 #[wasm_bindgen(typescript_custom_section)]
 const TS_MANIFEST: &str = r#"
-/** Manifeste authentifié ; une note porte son texte. */
+/** Manifeste authentifié, sans les graines `k` (le lecteur garde les clés) ; une note porte son texte. */
 export type OpenedManifest = {
   v: 2; rights: "voir" | "enregistrer" | "coffre"; keep_ttl_h?: 1 | 6 | 12 | 24;
-  items: { kind: "text" | "file"; name: string; mime: string; size: number; offset: number; k: string; clean?: string; text?: string }[];
+  items: { kind: "text" | "file"; name: string; mime: string; size: number; offset: number; clean?: string; text?: string }[];
 };
 "#;
 
@@ -1042,10 +1117,7 @@ fn manifest_js(m: &Manifest) -> Object {
             set(&i, "mime", &e.mime.as_str().into());
             set(&i, "size", &JsValue::from_f64(e.size as f64));
             set(&i, "offset", &JsValue::from_f64(e.offset as f64));
-            if let Some(k) = &e.k {
-                let k = Zeroizing::new(encoding::b64u(&k[..]));
-                set(&i, "k", &JsString::from(k.as_str()).into());
-            }
+            // Graine `k` omise : le lecteur tient les clés des éléments (jamais rendue à JS).
             if let Some(c) = e.clean {
                 set(&i, "clean", &c.name().into());
             }

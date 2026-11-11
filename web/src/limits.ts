@@ -1,7 +1,7 @@
 // Constantes uniques des chiffres affichés par les écrans (benchmark M5) : les textes (fr.ts,
 // en.ts) n'écrivent jamais ces nombres en dur, ils les reçoivent d'ici. Les mêmes valeurs
 // sont imposées par le serveur ; limits.test.ts les compare au code Go.
-import { CONTENT_MAX, MAX_ITEMS, PREVIEW_MAX, TEXT_MAX } from "./crypto/container";
+import { CONTENT_MAX, MAX_ITEMS, PREVIEW_MAX, TEXT_MAX } from "./engine/pure";
 
 /** CONTENT_MAX : exactement 2 Gio de données (spec §29.3) ; TEXT_MAX en points de code. */
 export { CONTENT_MAX, MAX_ITEMS, PREVIEW_MAX, TEXT_MAX };

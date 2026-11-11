@@ -1,6 +1,6 @@
 // Audit M4 : nom et type MIME du manifeste rendus bruts.
 import { describe, expect, it } from "vitest";
-import type { ManifestEntry } from "../crypto/container";
+import type { ManifestEntry } from "../engine/pure";
 import { isRiskyName, previewKindOf, safeName } from "./safety";
 
 const file = (name: string, mime: string, size = 10): ManifestEntry => ({ kind: "file", name, mime, size, offset: 0 });

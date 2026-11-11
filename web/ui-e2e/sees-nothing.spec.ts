@@ -4,8 +4,7 @@
 // ensuite, en octets bruts et en base64url / base64 : chaque requête du navigateur (URL,
 // en-têtes, corps), les réponses, stdout/stderr du serveur et le dossier de données. Ni le
 // contenu, ni les noms, ni le mot de passe, ni K_lien, ni l'id dérivé du lien ne doivent y être.
-import { shareId } from "../src/crypto/envelope";
-import type { KLien } from "../src/crypto/types";
+import { shareId, type KLien } from "../src/engine";
 import { findIn, needle, scanDir, type Needle } from "../e2e/scan";
 import { expect, test } from "./fixtures";
 import { addText, openFilePicker, readyHeading, sendButton } from "./send-helpers";

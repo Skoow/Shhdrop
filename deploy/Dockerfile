@@ -32,7 +32,7 @@ WORKDIR /src/engine
 COPY engine/ ./
 RUN RUSTFLAGS="--remap-path-prefix=$CARGO_HOME=/cargo" \
     cargo build --release --target wasm32-unknown-unknown -p shhdrop-wasm --locked \
- && wasm-bindgen --target web --remove-name-section --remove-producers-section \
+ && wasm-bindgen --target web --remove-name-section --remove-producers-section --experimental-reset-state-function \
     --out-dir /out/pkg --out-name shhdrop_wasm target/wasm32-unknown-unknown/release/shhdrop_wasm.wasm
 
 # --- Site -------------------------------------------------------------------------------

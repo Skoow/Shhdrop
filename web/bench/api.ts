@@ -2,10 +2,9 @@
 // vite.config.ts si le chargement du moteur change). bench.ts ne connaît que l'interface neutre
 // ci-dessous ; tout l'assemblage propre au moteur actuel (pièces, segments, en-tête, manifeste)
 // vit ici.
-import { CHUNK_CT, HEADER, SEG_CHUNKS, openStream, segmentSize } from "../src/crypto/container";
-import { elementSealer, sealFinal } from "../src/crypto/elements";
-import { contentKeys, newSeed, type ContentKeys } from "../src/crypto/envelope";
-import { KDF_CREATE, passwordKey } from "../src/crypto/kdf";
+// Moteur Rust (WebAssembly) depuis la Task 11 : mêmes fonctions, par web/src/engine (la graine
+// de l'élément reste dans le moteur : sealFinal reçoit le scelleur).
+import { CHUNK_CT, HEADER, KDF_CREATE, SEG_CHUNKS, contentKeys, elementSealer, newSeed, openStream, passwordKey, sealFinal, segmentSize, type ContentKeys } from "../src/engine";
 
 /** Paquet chiffré en mémoire : un seul élément (le Blob donné), prêt à être rouvert. */
 export type Packet = { readonly size: number; bucket: number; keys: ContentKeys; segments: Map<number, Uint8Array<ArrayBuffer>> };
@@ -29,8 +28,8 @@ export async function sealPacket(data: Blob): Promise<Packet> {
       s.set(b, pre + p.from * CHUNK_CT - (p.seg === 0 && p.from === 0 ? HEADER : 0));
     }
   }
-  const keys = await contentKeys(newSeed());
-  const fin = await sealFinal([{ kind: "file", name: "bench.bin", mime: "application/octet-stream", size: data.size, first: 0, k: el.k }], keys, {});
+  const keys = await contentKeys(await newSeed());
+  const fin = await sealFinal([{ kind: "file", name: "bench.bin", mime: "application/octet-stream", size: data.size, first: 0, sealer: el }], keys, {});
   const n = Math.floor((fin.bucket - 1) / SEG_CHUNKS);
   let last = segments.get(n);
   if (!last) segments.set(n, (last = new Uint8Array(segmentSize(fin.bucket, n))));
