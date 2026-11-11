@@ -1,8 +1,11 @@
 // Hygiène du lien (UI §12.1), navigateur intégré (S4), navigateur non pris en charge (UI §9.11),
 // dépôt de fichier neutralisé hors du composeur (UI §9.2.2).
 import type { Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { axe, capture, expect, test } from "./fixtures";
 import { freshPage, goSecurity, sendShare, unlock } from "./open-helpers";
+import { startPagesServer } from "./pages-server";
 
 const KEY = Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => 255 - i * 3)).toString("base64url");
 const KEY2 = Buffer.from(Uint8Array.from({ length: 32 }, (_, i) => i * 5)).toString("base64url");
@@ -404,4 +407,128 @@ test("Trusted Types (10 novembre) : une chaîne brute donnée à innerHTML ou à
   expect(r).toEqual({ html: "TypeError", worker: "TypeError", policy: "TypeError" });
   // Les refus ci-dessus sont voulus : ils ne comptent pas comme des violations du site.
   shh.cspViolations.length = 0;
+});
+
+// Moteur WebAssembly (spec moteur §7, Task 10) : chargement vérifié. Le site n'appelle pas encore
+// le moteur (Task 11) : la page d'essai ui-e2e/engine-page/ (construite par global-setup.ts avec
+// les greffons du site, jamais livrée) appelle loadEngine() et l'Argon2id du moteur, servie par le
+// vrai serveur Go (CSP et Trusted Types de production) ou comme par GitHub Pages (démo).
+const ENGINE_PAGE = fileURLToPath(new URL("./engine-page/dist", import.meta.url));
+const ENGINE_PAGE_DEMO = fileURLToPath(new URL("./engine-page/dist-demo", import.meta.url));
+const KDF = (JSON.parse(readFileSync(fileURLToPath(new URL("../../engine/vectors/v2.json", import.meta.url)), "utf8")).argon2id as { fn: string; salt: string; password: string; key: string }[]).find(
+  (v) => v.fn === "passwordKeyForCreate" && v.password === "aC3!cD5?#Fg" && v.salt === "101112131415161718191a1b1c1d1e1f",
+)!;
+
+/** Requêtes de .wasm et du script du Worker, Workers créés et Workers arrêtés (événement close). */
+function watchEngine(page: Page) {
+  const seen = { wasm: [] as string[], script: [] as string[], workers: [] as string[], closed: 0 };
+  page.on("request", (r) => {
+    const p = new URL(r.url()).pathname;
+    if (p.endsWith(".wasm")) seen.wasm.push(p);
+    if (/\/assets\/engine-[^/]+\.js$/.test(p)) seen.script.push(p);
+  });
+  page.on("worker", (w) => {
+    seen.workers.push(w.url());
+    w.on("close", () => seen.closed++);
+  });
+  return seen;
+}
+
+const kdf = async (page: Page) => {
+  await page.locator("#kdf").click();
+  await expect(page.locator("#out")).not.toHaveText("…", { timeout: 60_000 });
+  return page.locator("#out").textContent();
+};
+
+test.describe("moteur WebAssembly : chargement vérifié (spec moteur §7)", () => {
+  test("accueil : aucun .wasm, aucun Worker", async ({ page, shh }) => {
+    const seen = watchEngine(page);
+    await page.goto(shh.origin + "/");
+    await expect(page.locator("main h1").first()).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    expect(seen).toEqual({ wasm: [], script: [], workers: [], closed: 0 });
+  });
+
+  test.describe("page d'essai, serveur de production", () => {
+    test.use({ shhServer: { env: { SHH_STATIC_DIR: ENGINE_PAGE } } });
+
+    test("Argon2id dans un Worker blob: neuf par appel, arrêté après ; le .wasm et le script du Worker lus une fois", async ({ page, shh, browserName }) => {
+      test.skip(browserName !== "chromium", "chemin de production vérifié sous Chromium");
+      test.setTimeout(120_000);
+      const seen = watchEngine(page);
+      await page.goto(shh.origin + "/");
+      expect(await kdf(page)).toBe(`cle ${KDF.key}`);
+      expect(await kdf(page)).toBe(`cle ${KDF.key}`);
+      expect(seen.wasm).toHaveLength(1);
+      expect(seen.wasm[0]).toMatch(/^\/assets\/engine-[A-Za-z0-9_-]{8}\.wasm$/);
+      expect(seen.script).toHaveLength(1);
+      expect(seen.workers).toHaveLength(2);
+      for (const u of seen.workers) expect(u.startsWith(`blob:${shh.origin}/`)).toBe(true);
+      // Chaque Worker est arrêté après son calcul : ses 64 Mio sont rendus.
+      await expect.poll(() => seen.closed).toBe(2);
+    });
+
+    test("un .wasm modifié d'un octet en route : refusé, erreur réseau, aucun moteur ni calcul ; un nouvel essai sans piège marche", async ({ page, shh, browserName }) => {
+      test.skip(browserName !== "chromium", "chemin de production vérifié sous Chromium");
+      test.setTimeout(120_000);
+      const seen = watchEngine(page);
+      const trap = async (route: import("@playwright/test").Route) => {
+        const res = await route.fetch();
+        const body = await res.body();
+        body[body.length >> 1] ^= 1; // un seul bit d'un seul octet
+        await route.fulfill({ response: res, body });
+      };
+      await page.route("**/assets/engine-*.wasm", trap);
+      await page.goto(shh.origin + "/");
+      expect(await kdf(page)).toBe("erreur reseau");
+      expect(seen.workers).toEqual([]);
+      expect(seen.script).toEqual([]);
+      // Aucun moteur partiel gardé : l'essai suivant relit le fichier, cette fois intact.
+      await page.unroute("**/assets/engine-*.wasm", trap);
+      expect(await kdf(page)).toBe(`cle ${KDF.key}`);
+      expect(seen.wasm).toHaveLength(2);
+    });
+
+    test("script du Worker modifié en route, ou Worker blob: impossible : il ne s'exécute pas ; calcul dans la page avec le moteur vérifié", async ({ page, shh, browserName }) => {
+      test.skip(browserName !== "chromium", "chemin de production vérifié sous Chromium");
+      test.setTimeout(120_000);
+      const seen = watchEngine(page);
+      await page.route("**/assets/engine-*.js", async (route) => {
+        const res = await route.fetch();
+        await route.fulfill({ response: res, body: Buffer.concat([await res.body(), Buffer.from("\n;self.__piege=1")]) });
+      });
+      await page.goto(shh.origin + "/");
+      expect(await kdf(page)).toBe(`cle ${KDF.key}`);
+      expect(seen.script).toHaveLength(1);
+      expect(seen.workers).toEqual([]);
+      await page.unrouteAll();
+      await page.addInitScript(() => {
+        const Real = window.Worker;
+        window.Worker = function (url: string | URL, o?: WorkerOptions) {
+          if (String(url).startsWith("blob:")) throw new DOMException("refusé", "SecurityError");
+          return new Real(url, o);
+        } as unknown as typeof Worker;
+      });
+      await page.reload();
+      expect(await kdf(page)).toBe(`cle ${KDF.key}`);
+      expect(seen.workers).toEqual([]);
+    });
+  });
+
+  test("démo (GitHub Pages, connect-src 'none') : moteur intégré au script, aucun .wasm lu, Argon2id dans la page", async ({ page, browserName }) => {
+    test.skip(browserName !== "chromium", "vérifié sous Chromium");
+    test.setTimeout(120_000);
+    const refused: string[] = [];
+    page.on("console", (m) => void (m.text().includes("Refused to") && refused.push(m.text())));
+    const pages = await startPagesServer(ENGINE_PAGE_DEMO);
+    try {
+      const seen = watchEngine(page);
+      await page.goto(`${pages.origin}/shhdrop/`);
+      expect(await kdf(page)).toBe(`cle ${KDF.key}`);
+      expect(seen).toEqual({ wasm: [], script: [], workers: [], closed: 0 });
+      expect(refused).toEqual([]);
+    } finally {
+      await pages.close();
+    }
+  });
 });

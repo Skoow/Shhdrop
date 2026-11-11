@@ -20,3 +20,13 @@ declare module "virtual:shh-argon2" {
   export const src: string;
   export const integrity: string;
 }
+
+// Moteur WebAssembly (greffon shh-engine, vite.config.ts). Production : adresses et empreintes
+// SRI du .wasm et du script du Worker d'Argon2id. Démo : le .wasm en base64 (`wasm`).
+declare module "virtual:shh-engine" {
+  export const src: string;
+  export const integrity: string;
+  export const workerSrc: string;
+  export const workerIntegrity: string;
+  export const wasm: string;
+}

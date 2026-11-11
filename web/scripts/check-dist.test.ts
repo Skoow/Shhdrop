@@ -134,6 +134,43 @@ describe("check-dist.mjs, production", () => {
     expect(checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": main(`const i="${sha384(Buffer.from(argon))}"`), "assets/argon2-AbCd1234.js": argon }), false)).toEqual([]);
   });
 
+  it("moteur WebAssembly (spec moteur §7) : tout .wasm cité par le script principal existe et porte son empreinte, comme le script du Worker", () => {
+    // Octets d'un module WebAssembly vide (magie « \0asm », version 1), écrits sans échappement.
+    const wasm = String.fromCharCode(0, 97, 115, 109, 1, 0, 0, 0);
+    const prod = (main: string, extra: Record<string, string> = {}) => checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": main, ...extra }), false);
+    const cite = 'const s="/assets/engine-AbCd1234.wasm";';
+    expect(prod(cite)).toEqual(["assets/engine-AbCd1234.wasm : cité par le script principal, absent du site"]);
+    expect(prod(cite, { "assets/engine-AbCd1234.wasm": wasm })).toEqual([
+      "assets/engine-AbCd1234.wasm : son empreinte SHA-384 n'est pas inscrite dans le script principal (chargement sans contrôle d'intégrité)",
+    ]);
+    expect(prod(cite + `const i="${sha384(Buffer.from(wasm, "latin1"))}";`, { "assets/engine-AbCd1234.wasm": wasm })).toEqual([]);
+    // Cité deux fois : un seul signalement.
+    expect(prod(cite + cite, { "assets/engine-AbCd1234.wasm": wasm })).toHaveLength(1);
+    // N'importe quel .wasm (un fichier émis par Vite sans notre greffon, par exemple).
+    expect(prod('const s="/assets/shhdrop_wasm_bg-Zz9.wasm";', { "assets/shhdrop_wasm_bg-Zz9.wasm": wasm })).toEqual([
+      "assets/shhdrop_wasm_bg-Zz9.wasm : son empreinte SHA-384 n'est pas inscrite dans le script principal (chargement sans contrôle d'intégrité)",
+    ]);
+    // Script du Worker d'Argon2id du moteur : même règle.
+    const w = "self.onmessage=1";
+    expect(prod('const w="/assets/engine-kdf-AbCd1234.js";', { "assets/engine-kdf-AbCd1234.js": w })).toEqual([
+      "assets/engine-kdf-AbCd1234.js : son empreinte SHA-384 n'est pas inscrite dans le script principal (chargement sans contrôle d'intégrité)",
+    ]);
+    expect(prod(`const w="/assets/engine-kdf-AbCd1234.js";const i="${sha384(Buffer.from(w))}";`, { "assets/engine-kdf-AbCd1234.js": w })).toEqual([]);
+  });
+
+  it("moteur WebAssembly : aucun octet de .wasm en ligne dans le script principal de production (base64 ou tableau)", () => {
+    const msg = "assets/index-a.js : octets WebAssembly en ligne dans le script principal : le moteur doit rester dans assets/engine-*.wasm, lu avec son empreinte";
+    const b64 = Buffer.from(String.fromCharCode(0, 97, 115, 109, 1, 0, 0, 0, 1, 2, 3), "latin1").toString("base64");
+    expect(b64.startsWith("AGFzbQEAAAA")).toBe(true);
+    const prod = (main: string) => checkDist(site({ "index.html": PROD_INDEX, "assets/index-a.js": main }), false);
+    expect(prod(`const w="${b64}"`)).toEqual([msg]);
+    expect(prod(`const w="data:application/wasm;base64,${b64}"`)).toEqual([msg]);
+    expect(prod("const w=new Uint8Array([0,97,115,109,1,0,0,0,1])")).toEqual([msg]);
+    expect(prod("const w=new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])")).toEqual([msg]);
+    // Un texte ordinaire qui contient « asm » passe.
+    expect(prod('const s="wasm-unsafe-eval asm.js"')).toEqual([]);
+  });
+
   it("échoue si le build manque", () => {
     expect(run([join(tmpdir(), "absent-check-dist")]).code).toBe(1);
   });
@@ -172,6 +209,12 @@ describe("check-dist.mjs --demo", () => {
     const { "404.html": _, ...no404 } = good();
     expect(checkDist(site(no404), true)).toEqual(["404.html absent (adresses profondes sur Pages)"]);
     expect(checkDist(site({ ...good(), "404.html": "autre" }), true)).toEqual(["404.html différent de index.html"]);
+  });
+
+  it("moteur WebAssembly intégré au script (connect-src 'none') : aucun fichier .wasm dans la démo", () => {
+    expect(checkDist(site({ ...good(), "assets/engine-AbCd1234.wasm": "x" }), true)).toEqual([
+      "assets/engine-AbCd1234.wasm : fichier .wasm dans la démo : sa CSP (connect-src 'none') interdit de le lire, le moteur doit être intégré au script",
+    ]);
   });
 
   it("échoue si une ressource est hors de la base /shhdrop/", () => {

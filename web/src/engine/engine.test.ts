@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { handle, type KdfJob } from "./argon2.worker";
+import { handle, type KdfJob, type KdfReply } from "./argon2.worker";
 import { passwordKey, passwordKeyForCreate } from "./argon2";
 import { loadEngine, type Engine, type Wasm } from "./load";
 import type { FinalEntry } from "./pkg/shhdrop_wasm.js";
@@ -776,4 +776,47 @@ describe("Argon2id : Worker neuf par appel (couche TypeScript)", () => {
     expect(await errorOf(() => passwordKey(E, PW, salt, { ops: 2, mem: 67108864 }, start))).toBe("paramètres KDF trop faibles");
     expect(workers.at(-1)!.terminated).toBe(true);
   });
+
+  it("sans `start` explicite : celui du moteur (chargement vérifié, Task 10)", async () => {
+    const want = hex(W.passwordKeyForCreate(utf8(PW), salt));
+    let n = 0;
+    const engine: Engine = { ...E, start: async () => (n++, fakeWorker((job) => handle(job))) };
+    expect(hex(await passwordKeyForCreate(engine, PW, salt))).toBe(want);
+    expect(n).toBe(1);
+  });
+
+  it("repli dans la page, avec le moteur déjà vérifié, si le Worker ne se crée pas ou ne démarre pas ; jamais sur un refus du moteur", async () => {
+    const want = hex(W.passwordKeyForCreate(utf8(PW), salt));
+    const inPage = vi.spyOn(W, "passwordKeyForCreate");
+    // Worker impossible à créer (CSP ancienne, script du Worker refusé : Error("reseau")…).
+    expect(hex(await passwordKeyForCreate(E, PW, salt, () => Promise.reject(new Error("reseau"))))).toBe(want);
+    // Script du Worker qui ne démarre pas (événement error).
+    const dead = fakeWorker(null);
+    expect(hex(await passwordKeyForCreate(E, PW, salt, async () => dead))).toBe(want);
+    expect((dead as unknown as { terminated: boolean }).terminated).toBe(true);
+    expect(inPage).toHaveBeenCalledTimes(2);
+    // Refus du moteur dans le Worker : rendu tel quel, pas de second calcul dans la page.
+    inPage.mockClear();
+    const refuse = fakeWorker(() => ({ error: "mot_de_passe_non_genere" }));
+    expect(await errorOf(() => passwordKeyForCreate(E, PW, salt, async () => refuse))).toBe("mot_de_passe_non_genere");
+    expect(inPage).not.toHaveBeenCalled();
+  });
 });
+
+/** Faux Worker : `reply` répond au travail ; null : le script ne démarre pas (événement error). */
+function fakeWorker(reply: ((job: KdfJob) => KdfReply) | null): Worker {
+  const w = {
+    onmessage: null as ((e: MessageEvent) => void) | null,
+    onerror: null as ((e: { preventDefault(): void }) => void) | null,
+    onmessageerror: null,
+    terminated: false,
+    postMessage(job: KdfJob) {
+      const copy = structuredClone(job);
+      setTimeout(() => (reply ? w.onmessage?.({ data: structuredClone(reply(copy)) } as MessageEvent) : w.onerror?.({ preventDefault() {} })), 0);
+    },
+    terminate() {
+      w.terminated = true;
+    },
+  };
+  return w as unknown as Worker;
+}

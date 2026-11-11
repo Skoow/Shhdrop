@@ -1,13 +1,14 @@
 // Chargement du moteur WebAssembly (spec moteur §7), une seule fois, au premier besoin : la page
-// d'accueil n'en a pas besoin. Le .wasm est compilé une fois (WebAssembly.Module) : la page
-// l'instancie ici, et chaque calcul d'Argon2id l'instancie dans un Worker neuf (argon2.ts).
-//
-// Task 10 : `wasmBytes` lira le fichier par fetch(src, { integrity, credentials: "omit",
-// redirect: "error" }) avec l'adresse et l'empreinte SHA-384 du module virtuel shh-engine ; la
-// démo l'aura dans son script. Rien d'autre ne change ici.
+// d'accueil n'en a pas besoin. Les octets viennent de ./source, remplacé au build (greffon
+// shh-engine, vite.config.ts) : production, fichier lu avec son empreinte SHA-384
+// (source.verified.ts) ; démo, intégré au script (source.demo.ts). Tout échec de lecture est
+// Error("reseau") et ne laisse aucun moteur : l'appel suivant recommence. Le .wasm est compilé
+// une fois (WebAssembly.Module) : la page l'instancie ici, et chaque calcul d'Argon2id
+// l'instancie dans un Worker neuf (argon2.ts, `start`).
 import init, * as wasm from "./pkg/shhdrop_wasm.js";
-import wasmUrl from "./pkg/shhdrop_wasm_bg.wasm?url";
+import type { StartWorker } from "./argon2";
 import { createProvider, type WebCryptoProvider } from "./provider";
+import { startWorker, wasmBytes } from "./source";
 
 /** Fonctions et classes du moteur (engine/wasm/src/lib.rs). */
 export type Wasm = Omit<typeof wasm, "default" | "initSync">;
@@ -18,24 +19,15 @@ export type Engine = {
   provider: WebCryptoProvider;
   /** Module compilé, pour les Workers d'Argon2id. */
   module: WebAssembly.Module;
+  /** Crée le Worker d'Argon2id (production) ; absent : calcul dans la page (démo, tests). */
+  start?: StartWorker;
 };
-
-async function wasmBytes(): Promise<ArrayBuffer> {
-  let res: Response;
-  try {
-    res = await fetch(wasmUrl, { credentials: "omit", redirect: "error" });
-  } catch {
-    throw new Error("reseau");
-  }
-  if (!res.ok) throw new Error("reseau");
-  return res.arrayBuffer();
-}
 
 async function load(): Promise<Engine> {
   const module = await WebAssembly.compile(await wasmBytes());
   await init({ module_or_path: module });
   const { default: _init, initSync: _sync, ...exports } = wasm;
-  return { wasm: exports, provider: createProvider(), module };
+  return { wasm: exports, provider: createProvider(), module, start: startWorker };
 }
 
 let loading: Promise<Engine> | undefined;

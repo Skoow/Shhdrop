@@ -1,4 +1,5 @@
-// Construit le binaire Go, le site (web/dist) et la démo (web/dist-demo) une fois avant tous les tests.
+// Construit le binaire Go, le site (web/dist), la démo (web/dist-demo) et la page d'essai du
+// moteur (ui-e2e/engine-page) une fois avant tous les tests.
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -11,4 +12,12 @@ export default function globalSetup(): void {
   execFileSync("go", ["build", "-tags", "e2etime", "-o", "shhdrop-e2etime", "./cmd/shhdrop"], { cwd: serverDir, stdio: "inherit" });
   execFileSync("npm", ["run", "build"], { cwd: webDir, stdio: "inherit" });
   execFileSync("npm", ["run", "build:demo"], { cwd: webDir, stdio: "inherit" });
+  // Page d'essai du moteur (hygiene.spec.ts), jamais livrée : production puis démo. Celle de
+  // production doit passer check-dist comme le site : son script principal cite vraiment le
+  // .wasm et le script du Worker, avec leurs empreintes (la démo d'essai n'a pas la marque de
+  // démo du site : son absence de .wasm est vérifiée par hygiene.spec.ts).
+  const config = "ui-e2e/engine-page/vite.config.ts";
+  execFileSync("npx", ["vite", "build", "-c", config], { cwd: webDir, stdio: "inherit" });
+  execFileSync(process.execPath, ["scripts/check-dist.mjs", "ui-e2e/engine-page/dist"], { cwd: webDir, stdio: "inherit" });
+  execFileSync("npx", ["vite", "build", "-c", config, "--mode", "demo"], { cwd: webDir, stdio: "inherit" });
 }

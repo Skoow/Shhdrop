@@ -98,9 +98,15 @@ export function checkDist(dir, demo) {
     // d'intégrité (fetch + integrity, puis Worker ; repli : <script integrity>). Le script
     // principal ne doit ni contenir libsodium, ni citer un fichier dont il n'a pas l'empreinte.
     const mains = all.filter((f) => /^assets\/index-[^/]+\.js$/.test(f.rel)).map((f) => ({ rel: f.rel, text: f.data.toString("utf8") }));
+    // Moteur WebAssembly (spec moteur §7) : même règle pour tout .wasm cité et pour le script du
+    // Worker d'Argon2id du moteur (assets/engine-*.js) ; aucun octet de .wasm dans le script
+    // principal (magie « \0asm » version 1, en base64 ou en tableau de nombres).
     for (const m of mains) {
       if (m.text.includes("crypto_pwhash")) problems.push(`${m.rel} : libsodium (crypto_pwhash) dans le script principal : il doit rester dans assets/argon2-*.js`);
-      for (const [, rel] of m.text.matchAll(/\/(assets\/argon2-[A-Za-z0-9_-]+\.js)/g)) {
+      if (m.text.includes("AGFzbQEAAAA") || /\b0,\s*97,\s*115,\s*109,\s*1,\s*0,\s*0,\s*0\b/.test(m.text))
+        problems.push(`${m.rel} : octets WebAssembly en ligne dans le script principal : le moteur doit rester dans assets/engine-*.wasm, lu avec son empreinte`);
+      const cited = new Set([...m.text.matchAll(/\/(assets\/(?:(?:argon2|engine)-[A-Za-z0-9_-]+\.js|[A-Za-z0-9._-]+\.wasm))/g)].map((x) => x[1]));
+      for (const rel of cited) {
         const data = byRel.get(rel);
         if (!data) problems.push(`${rel} : cité par le script principal, absent du site`);
         else if (!m.text.includes(sha384(data))) problems.push(`${rel} : son empreinte SHA-384 n'est pas inscrite dans le script principal (chargement sans contrôle d'intégrité)`);
@@ -111,6 +117,9 @@ export function checkDist(dir, demo) {
   }
 
   if (!all.some((f) => f.data.includes(MARK))) problems.push(`marque ${MARK} absente : ce n'est pas un build de démo`);
+  // Spec moteur §7 : la CSP de la démo (connect-src 'none') interdit de lire un .wasm.
+  for (const f of all)
+    if (/\.wasm$/i.test(f.rel)) problems.push(`${f.rel} : fichier .wasm dans la démo : sa CSP (connect-src 'none') interdit de le lire, le moteur doit être intégré au script`);
   // Les balises de la démo, dans l'ordre, en tout premier dans <head>.
   const head = /<head>\s*([\s\S]*)$/.exec(index);
   let rest = head ? head[1] : "";

@@ -97,6 +97,82 @@ export function argon2Chunk(base: string): Plugin {
   };
 }
 
+/**
+ * Colle de wasm-bindgen : sans argument, son initialisation lirait le .wasm voisin
+ * (`new URL('shhdrop_wasm_bg.wasm', import.meta.url)`), que Vite émettrait ou intégrerait sans
+ * empreinte. Nos appels donnent toujours le module compilé : ce chemin est remplacé par une
+ * erreur. Le build échoue si la colle change de forme (contrôle : scripts/check-dist.mjs).
+ */
+export function engineGlue(): Plugin {
+  const DEFAULT = "new URL('shhdrop_wasm_bg.wasm', import.meta.url)";
+  return {
+    name: "shh-engine-glue",
+    enforce: "pre",
+    transform(code, id) {
+      if (!id.replace(/\\/g, "/").endsWith("/src/engine/pkg/shhdrop_wasm.js")) return null;
+      if (code.split(DEFAULT).length !== 2) this.error("shh-engine : colle de wasm-bindgen inattendue (chemin par défaut du .wasm)");
+      return { code: code.replace(DEFAULT, '(() => { throw new Error("moteur_sans_source"); })()'), map: null };
+    },
+  };
+}
+
+/**
+ * Moteur WebAssembly (spec moteur §7), sur le modèle de shh-argon2. ./source (load.ts) est
+ * remplacé par source.verified.ts (production) ou source.demo.ts (démo).
+ * Production : le .wasm est écrit sous assets/engine-EMPREINTE.wasm, le script du Worker
+ * d'Argon2id (argon2.worker.ts et la colle, construit à part en script classique) sous
+ * assets/engine-kdf-EMPREINTE.js ; adresses et empreintes SHA-384 dans le module virtuel
+ * virtual:shh-engine, donc dans le script principal, jamais les octets du .wasm.
+ * Démo : sa CSP (connect-src 'none') interdit de lire un fichier : le module virtuel contient
+ * le .wasm en base64, couvert par l'empreinte de index.html ; aucun fichier émis.
+ */
+export function engineWasm(base: string, demo: boolean): Plugin {
+  const VIRTUAL = "virtual:shh-engine";
+  const here = fileURLToPath(new URL(".", import.meta.url));
+  const name = (prefix: string, data: Buffer, ext: string) => `assets/${prefix}-${createHash("sha256").update(data).digest("base64url").slice(0, 8)}.${ext}`;
+  let code = "";
+  return {
+    ...engineGlue(),
+    name: "shh-engine",
+    apply: "build",
+    enforce: "pre", // avant la résolution de Vite, pour remplacer ./source
+    async buildStart() {
+      const wasm = readFileSync(join(here, "src/engine/pkg/shhdrop_wasm_bg.wasm"));
+      if (demo) {
+        code = `export const wasm = ${JSON.stringify(wasm.toString("base64"))};`;
+        return;
+      }
+      const out = await build({
+        configFile: false,
+        root: here,
+        logLevel: "warn",
+        plugins: [engineGlue()],
+        build: { write: false, sourcemap: false, lib: { entry: join(here, "src/engine/argon2.worker.ts"), name: "shhEngineKdf", formats: ["iife"], fileName: () => "kdf.js" } },
+      });
+      const outputs = (Array.isArray(out) ? out : [out]).flatMap((o) => ("output" in o ? o.output : []));
+      const chunk = outputs.find((c) => c.type === "chunk");
+      if (!chunk || chunk.type !== "chunk" || outputs.length !== 1) throw new Error("shh-engine : build du Worker inattendu");
+      const worker = Buffer.from(chunk.code);
+      const wasmName = name("engine", wasm, "wasm");
+      const workerName = name("engine-kdf", worker, "js");
+      this.emitFile({ type: "asset", fileName: wasmName, source: wasm });
+      this.emitFile({ type: "asset", fileName: workerName, source: worker });
+      const meta = { src: base + wasmName, integrity: sha384(wasm), workerSrc: base + workerName, workerIntegrity: sha384(worker) };
+      code = Object.entries(meta)
+        .map(([k, v]) => `export const ${k} = ${JSON.stringify(v)};`)
+        .join(" ");
+    },
+    resolveId(source, importer) {
+      if (source === VIRTUAL) return "\0" + VIRTUAL;
+      if (source === "./source" && importer?.replace(/\\/g, "/").endsWith("/src/engine/load.ts")) return join(here, demo ? "src/engine/source.demo.ts" : "src/engine/source.verified.ts");
+      return null;
+    },
+    load(id) {
+      return id === "\0" + VIRTUAL ? code : null;
+    },
+  };
+}
+
 /** Démo : CSP, referrer et robots en tête de <head> ; index.html copié en 404.html (Pages). */
 export function demoMeta(): Plugin {
   let outDir = "";
@@ -167,7 +243,7 @@ export function precompress(): Plugin {
 export default defineConfig(({ mode }) => {
   const demo = mode === "demo";
   return {
-    plugins: [svelte(), sri(demo ? DEMO_BASE : "/"), ...(demo ? [demoMeta()] : [argon2Chunk("/"), demoGuard(), precompress()])],
+    plugins: [svelte(), sri(demo ? DEMO_BASE : "/"), engineWasm(demo ? DEMO_BASE : "/", demo), ...(demo ? [demoMeta()] : [argon2Chunk("/"), demoGuard(), precompress()])],
     base: demo ? DEMO_BASE : "/",
     define: { __SHH_BUILD__: JSON.stringify(buildId()) },
     build: {
