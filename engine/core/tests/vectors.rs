@@ -1023,8 +1023,8 @@ fn share_opened_cases() {
         assert_eq!(sha256(&got).to_vec(), hexf(w, "sha256"));
         assert_eq!(got, share_plain(item), "élément {i}");
         let streamed = core::cell::RefCell::new(Vec::new());
-        block_on(rd.stream_item(i, async |c: Vec<u8>| {
-            streamed.borrow_mut().extend_from_slice(&c);
+        block_on(rd.stream_item(i, async |c: &[u8]| {
+            streamed.borrow_mut().extend_from_slice(c);
             Ok(())
         }))
         .unwrap();

@@ -764,6 +764,59 @@ describe("fournisseur WebCrypto et frontières du moteur", () => {
     expect(await rd.item(0).then(() => "réussi")).toBe("réussi"); // une note ne relit rien
     expect(await errorOf(() => W.openReader(ck, async () => seg, 17))).toBe("paquet_corrompu");
   });
+
+  it("lots sans copie superflue : tampon d'entrée effacé ; flux, morceaux entiers donnés tels quels, le reste effacé", async () => {
+    const t = testProvider([new Uint8Array(32).fill(1), new Uint8Array(32).fill(2), new Uint8Array(12)]);
+    const inputs: Uint8Array[] = [];
+    const opened: ArrayBuffer[] = [];
+    const p: WebCryptoProvider = {
+      ...t.p,
+      async aesSealBatch(h, ad, n, plain, chunk) {
+        inputs.push(plain);
+        return t.real.aesSealBatch(h, ad, n, plain, chunk);
+      },
+      async aesOpenBatch(h, ad, n, ct, chunkCt) {
+        inputs.push(ct);
+        const r = await t.real.aesOpenBatch(h, ad, n, ct, chunkCt);
+        opened.push(...r);
+        return r;
+      },
+    };
+    const size = 2 * 65536 + 100; // deux morceaux entiers, puis un bord
+    const data = new Uint8Array(size).map((_, i) => (i * 7 + 3) & 255);
+    const el = await W.elementSealer(p, size, 0);
+    const piece = await el.piece(0, data);
+    expect(inputs[0]!.every((b) => b === 0), "clair du lot effacé dès l'appel fini").toBe(true);
+    const seed = W.newSeed(p);
+    const keys = await W.contentKeys(seed);
+    const fin = await W.sealFinal([{ kind: "file", name: "f", mime: "application/octet-stream", size, first: 0, sealer: el.id }], keys, undefined, undefined);
+    const seg = new Uint8Array(W.segmentSize(fin.bucket, 0));
+    seg.set(piece, 0);
+    seg.set(fin.header, 0);
+    seg.set(fin.tail, seg.length - fin.tail.length);
+    const ak = await W.accessKeys(p, new Uint8Array(32), new Uint8Array(32));
+    const e = await W.seal(ak, seed, new Uint8Array(16), fin.header);
+    const ck = await W.contentKeysChecked(await W.open(ak, e, new Uint8Array(16), fin.header), keys.engagement);
+    const rd = await W.openReader(ck, async () => new Uint8Array(seg), fin.bucket);
+    opened.length = 0;
+    const parts: Uint8Array[] = [];
+    await rd.streamItem(0, (c: Uint8Array) => void parts.push(c));
+    expect(hex(new Uint8Array(Buffer.concat(parts)))).toBe(hex(data));
+    expect(parts.map((c) => c.length)).toEqual([65536, 65536, 100]);
+    expect(opened.length, "un seul lot de trois morceaux").toBe(3);
+    expect(parts[0]!.buffer, "morceau entier : le tampon de WebCrypto, sans copie").toBe(opened[0]);
+    expect(parts[1]!.buffer).toBe(opened[1]);
+    expect(parts[2]!.buffer, "bord : copie de la tranche").not.toBe(opened[2]);
+    expect(new Uint8Array(opened[2]!).every((b) => b === 0), "morceau du bord effacé après sa copie").toBe(true);
+    // L'aperçu recopie tout : chaque tampon de WebCrypto est effacé.
+    opened.length = 0;
+    expect(hex(await rd.item(0))).toBe(hex(data));
+    expect(opened.length).toBe(3);
+    expect(opened.every((b) => new Uint8Array(b).every((x) => x === 0)), "clairs de l'aperçu effacés").toBe(true);
+    rd.free();
+    ck.free();
+    ak.free();
+  });
 });
 
 // ------------------------------------------------------------------------------- Argon2id

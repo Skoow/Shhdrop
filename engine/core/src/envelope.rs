@@ -19,7 +19,7 @@
 use crate::error::{Error, Result};
 use crate::kdf::{hkdf, sha256};
 use crate::keys::{KLien, KMdp, KPreuve, Seed};
-use crate::platform::{Key, NONCE_LEN, Platform, TAG_LEN};
+use crate::platform::{Key, NONCE_LEN, Opened, Platform, TAG_LEN};
 use core::cell::Cell;
 use hmac::{KeyInit, Mac};
 use std::rc::Rc;
@@ -189,6 +189,8 @@ pub async fn open<P: Platform>(k_env: &Key<P>, e: &[u8], id: &[u8], header: &[u8
         return Err(Error::PaquetCorrompu);
     }
     let mut r = Zeroizing::new([0u8; SEED_LEN]);
-    r.copy_from_slice(&pt);
+    if !pt.copy_out(0, &mut *r) {
+        return Err(Error::PaquetCorrompu);
+    }
     Ok(Seed::from_bytes(*r))
 }

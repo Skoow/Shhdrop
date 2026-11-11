@@ -3,9 +3,13 @@
 // - Clés importées non extractibles ; la table poignée → CryptoKey vit ici, jamais dans le
 //   moteur. Une clé n'entre dans la table qu'au retour de importKey : un import abandonné ne
 //   laisse rien à oublier. Les poignées ne sont jamais réutilisées.
-// - Les octets reçus du moteur sont des copies JavaScript à nous (le moteur efface lui-même la
-//   clé brute, l'aléa et le clair après usage) ; les morceaux d'un lot sont chiffrés ou
-//   déchiffrés en parallèle (Promise.all), comme l'ancien moteur.
+// - Les octets reçus du moteur sont des copies JavaScript (le moteur efface lui-même la clé
+//   brute, l'aléa et le clair après usage). Le clair ou le chiffré d'un lot n'est valide que
+//   pendant l'appel synchrone : le moteur réutilise ce tampon. Tous les encrypt et decrypt sont
+//   donc lancés avant la première attente (WebCrypto copie ses entrées à l'appel) ; les
+//   morceaux d'un lot sont traités en parallèle (Promise.all), comme l'ancien moteur.
+// - Les ArrayBuffers rendus d'un lot ouvert restent au moteur : il donne les morceaux entiers
+//   au puits de streamItem sans copie et efface les autres.
 // - Un lot refusé (un seul tag faux) ne rend rien : les clairs déjà obtenus sont effacés.
 import type { Provider } from "./pkg/shhdrop_wasm.js";
 

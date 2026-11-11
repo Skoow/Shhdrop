@@ -15,8 +15,87 @@
 use crate::error::{Error, Result};
 use core::fmt;
 use core::future::Future;
+use core::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use zeroize::Zeroizing;
+
+/// Gros tampon d'octets secrets (lot de 4 Mio au plus), mis à zéro à sa destruction, capacité
+/// comprise, comme `Zeroizing<Vec<u8>>` ; mais d'un seul `fill(0)` (memset) suivi de
+/// [`zeroize::optimization_barrier`], qui interdit au compilateur de retirer l'effacement.
+/// `Zeroizing` écrit octet par octet en volatile : ≈ 5 Go/s en WebAssembly, le quart du
+/// surcoût du moteur sur le site (perf-report.md du 11 novembre). Comme pour `Zeroizing`, ne
+/// pas dépasser la capacité réservée (une réallocation laisserait une copie non effacée).
+#[derive(Default)]
+pub struct SecretBuf(Vec<u8>);
+
+impl SecretBuf {
+    /// Prend possession de `v` (il sera effacé à la destruction).
+    pub fn new(v: Vec<u8>) -> Self {
+        Self(v)
+    }
+}
+
+impl Deref for SecretBuf {
+    type Target = Vec<u8>;
+    fn deref(&self) -> &Vec<u8> {
+        &self.0
+    }
+}
+
+impl DerefMut for SecretBuf {
+    fn deref_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.0
+    }
+}
+
+impl Drop for SecretBuf {
+    fn drop(&mut self) {
+        let v = &mut self.0;
+        v.fill(0);
+        // Capacité au-delà de la longueur : remplie de zéros elle aussi.
+        v.resize(v.capacity(), 0);
+        zeroize::optimization_barrier(v.as_slice());
+    }
+}
+
+/// Clair d'un lot ouvert, tenu par la plateforme et mis à zéro à sa destruction. Natif :
+/// [`SecretBuf`]. Site : les tampons rendus par WebCrypto, gardés en JavaScript, que le lecteur
+/// livre sans copie au puits de `stream_item` (l'aller-retour par la mémoire WebAssembly coûtait
+/// le tiers du temps d'ouverture, perf-report.md du 11 novembre).
+pub trait Opened {
+    /// Longueur du clair.
+    fn len(&self) -> usize;
+    /// Vrai pour un lot vide.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    /// Copie le clair `[at, at + out.len())` dans `out` ; faux hors des bornes.
+    fn copy_out(&self, at: usize, out: &mut [u8]) -> bool;
+}
+
+impl Opened for SecretBuf {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+    fn copy_out(&self, at: usize, out: &mut [u8]) -> bool {
+        match at
+            .checked_add(out.len())
+            .and_then(|end| self.0.get(at..end))
+        {
+            Some(s) => {
+                out.copy_from_slice(s);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+impl fmt::Debug for SecretBuf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SecretBuf({} octets)", self.0.len())
+    }
+}
 
 /// Taille du tag AES-GCM (128 bits), ajouté à chaque morceau chiffré.
 pub const TAG_LEN: usize = 16;
@@ -48,6 +127,9 @@ impl KeyHandle {
 ///
 /// Le moteur n'appelle ces fonctions qu'à travers [`Key`] ; un fournisseur les implémente.
 pub trait Platform {
+    /// Clair d'un lot ouvert (voir [`Opened`]).
+    type Opened: Opened;
+
     /// Remplit `out` d'aléa cryptographique ; `aleatoire_indisponible` si la source échoue.
     fn random(&self, out: &mut [u8]) -> Result<()>;
 
@@ -74,7 +156,7 @@ pub trait Platform {
         nonces: &[[u8; NONCE_LEN]],
         cipher: &[u8],
         chunk_ct: usize,
-    ) -> impl Future<Output = Result<Zeroizing<Vec<u8>>>>;
+    ) -> impl Future<Output = Result<Self::Opened>>;
 
     /// Oublie la clé (le fournisseur natif la met à zéro). Appelée par `Key` à sa destruction.
     fn aes_drop(&self, k: KeyHandle);
@@ -137,7 +219,7 @@ impl<P: Platform> Key<P> {
         nonces: &[[u8; NONCE_LEN]],
         cipher: &[u8],
         chunk_ct: usize,
-    ) -> Result<Zeroizing<Vec<u8>>> {
+    ) -> Result<P::Opened> {
         let pt = self
             .p
             .aes_open_batch(self.h, ad, nonces, cipher, chunk_ct)

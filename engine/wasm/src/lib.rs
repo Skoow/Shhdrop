@@ -25,8 +25,8 @@ use shhdrop_core::format::{self, MAX_SAFE};
 use shhdrop_core::kdf::{self, KDF_CREATE, KDF_MAX, KDF_MIN};
 use shhdrop_core::link::{self, ParsedLink};
 use shhdrop_core::manifest::{Clean, Kind, Manifest};
-use shhdrop_core::platform::{KeyHandle, NONCE_LEN, Platform, TAG_LEN};
-use shhdrop_core::reader::{Reader, Segments};
+use shhdrop_core::platform::{KeyHandle, NONCE_LEN, Opened, Platform, SecretBuf, TAG_LEN};
+use shhdrop_core::reader::{Part, Reader, Segments};
 use shhdrop_core::{Error, KLien, KMdp, Result, SGestion, Seed, encoding, password};
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
@@ -45,7 +45,12 @@ export interface Provider {
   random(n: number): Uint8Array;
   /** Importe une clé AES-256-GCM non extractible ; rend sa poignée (jamais réutilisée). */
   aesImport(raw: Uint8Array): Promise<number>;
-  /** Chiffre nonces.length / 12 morceaux de `chunk` octets ; un ArrayBuffer par morceau. */
+  /**
+   * Chiffre nonces.length / 12 morceaux de `chunk` octets ; un ArrayBuffer par morceau.
+   * `plain` et `cipher` (ci-dessous) ne sont valides que pendant l'appel synchrone : le moteur
+   * réutilise et efface ce tableau dès le retour. Les lire avant toute attente (WebCrypto en
+   * prend copie à l'appel de encrypt et decrypt), ne jamais les garder.
+   */
   aesSealBatch(h: number, ad: Uint8Array, nonces: Uint8Array, plain: Uint8Array, chunk: number): Promise<ArrayBuffer[]>;
   /** Déchiffre nonces.length / 12 morceaux de `chunkCt` octets ; rejet si un seul tag est faux. */
   aesOpenBatch(h: number, ad: Uint8Array, nonces: Uint8Array, cipher: Uint8Array, chunkCt: number): Promise<ArrayBuffer[]>;
@@ -105,12 +110,56 @@ fn js_copy(b: &[u8]) -> Uint8Array {
     Uint8Array::from(b)
 }
 
-/// Recopie les morceaux rendus par le fournisseur (un ArrayBuffer de `len` octets chacun)
-/// dans `out`, puis les met à zéro s'ils contiennent du clair (`wipe`). Faux si la forme ne
-/// tient pas le contrat ; tous les tampons reçus sont alors effacés quand même.
-fn take_chunks(v: &JsValue, count: usize, len: usize, out: &mut Vec<u8>, wipe: bool) -> bool {
+/// Taille du tampon d'entrée : le plus grand lot du moteur (64 morceaux chiffrés de 64 Kio).
+const STAGE_LEN: u32 = 64 * (65_536 + TAG_LEN as u32);
+
+thread_local! {
+    /// Tampon JavaScript réutilisé pour le clair ou le chiffré d'un lot donné au fournisseur :
+    /// évite d'allouer 4 Mio par lot (mesuré : la moitié du surcoût du moteur, perf-report.md).
+    /// Le fournisseur ne le lit que pendant son appel synchrone (contrat de `Provider`).
+    static STAGE: RefCell<Option<Uint8Array>> = const { RefCell::new(None) };
+}
+
+/// Appelle `f` avec une copie JavaScript de `b` dans le tampon d'entrée (ou, s'il est pris ou
+/// trop petit, dans un tableau neuf), puis met ce tableau à zéro s'il porte du clair (`wipe`).
+/// Aucune attente entre la copie, l'appel et l'effacement : le tampon n'est jamais vu par deux
+/// lots à la fois.
+fn staged<T>(b: &[u8], wipe: bool, f: impl FnOnce(&Uint8Array) -> T) -> T {
+    let len = u32::try_from(b.len()).ok().filter(|&n| n <= STAGE_LEN);
+    // Pris du tampon pendant l'appel : un appel imbriqué en ferait un neuf.
+    let buf = len.map(|_| {
+        STAGE
+            .with(|s| s.borrow_mut().take())
+            .unwrap_or_else(|| Uint8Array::new_with_length(STAGE_LEN))
+    });
+    let view = match (&buf, len) {
+        (Some(buf), Some(n)) => {
+            let v = buf.subarray(0, n);
+            v.copy_from(b);
+            v
+        }
+        _ => js_copy(b),
+    };
+    let r = f(&view);
+    if wipe {
+        view.fill(0, 0, view.length());
+    }
+    if let Some(buf) = buf {
+        STAGE.with(|s| *s.borrow_mut() = Some(buf));
+    }
+    r
+}
+
+/// Morceaux rendus par le fournisseur : un ArrayBuffer de `len` octets chacun, `count` en tout.
+/// `Err` (avec les tampons reçus, pour que l'appelant efface du clair) si la forme ne tient pas
+/// le contrat.
+fn chunk_parts(
+    v: &JsValue,
+    count: usize,
+    len: usize,
+) -> core::result::Result<Vec<Uint8Array>, Vec<Uint8Array>> {
     let Some(arr) = v.dyn_ref::<Array>() else {
-        return false;
+        return Err(Vec::new());
     };
     let parts: Vec<Uint8Array> = arr
         .iter()
@@ -119,26 +168,77 @@ fn take_chunks(v: &JsValue, count: usize, len: usize, out: &mut Vec<u8>, wipe: b
         .collect();
     let ok = parts.len() == count
         && arr.length() as usize == count
-        && parts.iter().all(|p| p.length() as usize == len)
-        && count
-            .checked_mul(len)
-            .is_some_and(|n| out.try_reserve_exact(n).is_ok());
-    if ok {
-        for p in &parts {
-            let start = out.len();
-            out.resize(start + len, 0);
-            p.copy_to(&mut out[start..]);
+        && parts.iter().all(|p| p.length() as usize == len);
+    if ok { Ok(parts) } else { Err(parts) }
+}
+
+/// Clair d'un lot ouvert, gardé en JavaScript (les ArrayBuffers de WebCrypto) : le puits de
+/// `streamItem` reçoit un morceau entier tel quel, sans copie ; le reste est mis à zéro à la
+/// destruction du lot (ou recopié, pour le manifeste, une note ou un aperçu).
+pub struct JsOpened {
+    parts: Vec<Uint8Array>,
+    chunk: usize,
+    /// Morceaux donnés au puits : à lui désormais, ni relus ni effacés ici.
+    given: Vec<Cell<bool>>,
+}
+
+impl JsOpened {
+    /// Octets `[at, at + len)`, dans un seul morceau, pour le puits : le morceau lui-même s'il
+    /// est entier (donné une fois), sinon une copie de la tranche. `None` hors des bornes.
+    fn give(&self, at: usize, len: usize) -> Option<Uint8Array> {
+        let (c, off) = (at / self.chunk, at % self.chunk);
+        let (p, given) = (self.parts.get(c)?, self.given.get(c)?);
+        let end = off.checked_add(len).filter(|&e| e <= self.chunk)?;
+        if given.get() {
+            return None;
+        }
+        if off == 0 && len == self.chunk {
+            given.set(true);
+            return Some(p.clone());
+        }
+        Some(p.slice(off as u32, end as u32))
+    }
+}
+
+impl Opened for JsOpened {
+    fn len(&self) -> usize {
+        self.parts.len() * self.chunk
+    }
+
+    fn copy_out(&self, at: usize, out: &mut [u8]) -> bool {
+        let Some(end) = at.checked_add(out.len()).filter(|&e| e <= self.len()) else {
+            return false;
+        };
+        let (mut pos, mut done) = (at, 0);
+        while pos < end {
+            let (c, off) = (pos / self.chunk, pos % self.chunk);
+            if self.given[c].get() {
+                return false;
+            }
+            let n = (self.chunk - off).min(end - pos);
+            self.parts[c]
+                .subarray(off as u32, (off + n) as u32)
+                .copy_to(&mut out[done..done + n]);
+            pos += n;
+            done += n;
+        }
+        true
+    }
+}
+
+impl Drop for JsOpened {
+    fn drop(&mut self) {
+        for (p, given) in self.parts.iter().zip(&self.given) {
+            if !given.get() {
+                p.fill(0, 0, p.length());
+            }
         }
     }
-    if wipe {
-        for p in &parts {
-            p.fill(0, 0, p.length());
-        }
-    }
-    ok
 }
 
 impl Platform for Web {
+    type Opened = JsOpened;
+
     fn random(&self, out: &mut [u8]) -> Result<()> {
         let n = u32::try_from(out.len()).map_err(|_| Error::AleatoireIndisponible)?;
         // Une exception JavaScript (getRandomValues qui lève) devient une erreur : jamais un
@@ -198,22 +298,25 @@ impl Platform for Web {
         if chunk == 0 || nonces.len().checked_mul(chunk) != Some(plain.len()) {
             return Err(Error::ChiffrementEchec);
         }
-        let plain_js = js_copy(plain);
-        let got = match self.0.aes_seal_batch(
-            k.raw(),
-            &js_copy(ad),
-            &js_copy(nonces.as_flattened()),
-            &plain_js,
-            chunk32,
-        ) {
+        let (ad, nonces_js) = (js_copy(ad), js_copy(nonces.as_flattened()));
+        // Le clair n'est lu que pendant l'appel (WebCrypto en prend copie) ; effacé aussitôt.
+        let call = staged(plain, true, |p| {
+            self.0.aes_seal_batch(k.raw(), &ad, &nonces_js, p, chunk32)
+        });
+        let got = match call {
             Ok(v) => settle(v).await.ok(),
             Err(_) => None,
         };
-        plain_js.fill(0, 0, plain_js.length());
         let got = got.ok_or(Error::ChiffrementEchec)?;
+        let parts = chunk_parts(&got, nonces.len(), chunk + TAG_LEN)
+            .map_err(|_| Error::ChiffrementEchec)?;
         let mut out = Vec::new();
-        if !take_chunks(&got, nonces.len(), chunk + TAG_LEN, &mut out, false) {
-            return Err(Error::ChiffrementEchec);
+        out.try_reserve_exact(plain.len() + nonces.len() * TAG_LEN)
+            .map_err(|_| Error::ChiffrementEchec)?;
+        for p in &parts {
+            let start = out.len();
+            out.resize(start + chunk + TAG_LEN, 0);
+            p.copy_to(&mut out[start..]);
         }
         Ok(out)
     }
@@ -225,27 +328,35 @@ impl Platform for Web {
         nonces: &[[u8; NONCE_LEN]],
         cipher: &[u8],
         chunk_ct: usize,
-    ) -> Result<Zeroizing<Vec<u8>>> {
+    ) -> Result<JsOpened> {
         let ct32 = u32::try_from(chunk_ct).map_err(|_| Error::PaquetCorrompu)?;
         if chunk_ct <= TAG_LEN || nonces.len().checked_mul(chunk_ct) != Some(cipher.len()) {
             return Err(Error::PaquetCorrompu);
         }
-        let got = match self.0.aes_open_batch(
-            k.raw(),
-            &js_copy(ad),
-            &js_copy(nonces.as_flattened()),
-            &js_copy(cipher),
-            ct32,
-        ) {
+        let (ad, nonces_js) = (js_copy(ad), js_copy(nonces.as_flattened()));
+        let call = staged(cipher, false, |c| {
+            self.0.aes_open_batch(k.raw(), &ad, &nonces_js, c, ct32)
+        });
+        let got = match call {
             Ok(v) => settle(v).await.ok(),
             Err(_) => None,
         };
         let got = got.ok_or(Error::PaquetCorrompu)?;
-        let mut out = Zeroizing::new(Vec::new());
-        if !take_chunks(&got, nonces.len(), chunk_ct - TAG_LEN, &mut out, true) {
-            return Err(Error::PaquetCorrompu);
+        let chunk = chunk_ct - TAG_LEN;
+        match chunk_parts(&got, nonces.len(), chunk) {
+            Ok(parts) => Ok(JsOpened {
+                given: parts.iter().map(|_| Cell::new(false)).collect(),
+                parts,
+                chunk,
+            }),
+            Err(parts) => {
+                // Forme refusée : le clair reçu est effacé quand même.
+                for p in &parts {
+                    p.fill(0, 0, p.length());
+                }
+                Err(Error::PaquetCorrompu)
+            }
         }
-        Ok(out)
     }
 
     fn aes_drop(&self, k: KeyHandle) {
@@ -937,7 +1048,11 @@ impl JsElementSealer {
     /// (recopiés et effacés par le moteur ; l'appelant efface les siens).
     #[wasm_bindgen(unchecked_return_type = "Promise<Uint8Array>")]
     pub fn piece(&self, j: f64, plain: &Uint8Array) -> Promise {
-        let (el, j, plain) = (Rc::clone(&self.el), index(j), secret(plain));
+        let (el, j, plain) = (
+            Rc::clone(&self.el),
+            index(j),
+            SecretBuf::new(plain.to_vec()),
+        );
         future_to_promise(async move {
             let ct = el.piece(j, &plain).await.map_err(js_err)?;
             Ok(bytes(&ct))
@@ -1161,9 +1276,14 @@ impl JsReader {
         let (rd, host, i) = (Rc::clone(&self.rd), Rc::clone(&self.host), index(i));
         future_to_promise(async move {
             let h = Rc::clone(&host);
-            rd.stream_item(i, async |c: Vec<u8>| {
-                let c = Zeroizing::new(c);
-                call(&sink, &bytes(&c), &h).await.map(drop)
+            rd.stream_parts(i, async |p: Part<'_, JsOpened>| {
+                let c = match p {
+                    Part::Text(t) => bytes(t),
+                    Part::Plain { batch, at, len } => {
+                        batch.give(at, len).ok_or(Error::PaquetCorrompu)?.into()
+                    }
+                };
+                call(&sink, &c, &h).await.map(drop)
             })
             .await
             .map_err(|e| fail(&host, e))?;

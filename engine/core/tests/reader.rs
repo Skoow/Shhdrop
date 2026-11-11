@@ -367,9 +367,9 @@ fn open_all(
 
 fn streamed<S: Segments>(r: &Reader<R, S>, i: usize) -> Result<Vec<u8>> {
     let out = RefCell::new(Vec::new());
-    run(r.stream_item(i, async |part: Vec<u8>| {
+    run(r.stream_item(i, async |part: &[u8]| {
         assert!(!part.is_empty() && part.len() <= CHUNK);
-        out.borrow_mut().extend_from_slice(&part);
+        out.borrow_mut().extend_from_slice(part);
         Ok(())
     }))?;
     Ok(out.into_inner())
@@ -444,7 +444,7 @@ fn aller_retour_manifeste_et_copies() {
         Some(Error::ElementInexistant)
     );
     assert_eq!(
-        run(r.stream_item(3, async |_: Vec<u8>| Ok(()))).err(),
+        run(r.stream_item(3, async |_: &[u8]| Ok(()))).err(),
         Some(Error::ElementInexistant)
     );
     assert_eq!(Error::ElementInexistant.to_string(), "element_inexistant");
@@ -491,8 +491,8 @@ fn stream_item_morceaux_dans_l_ordre() {
     let srv = Server::new(s.built.segs.clone());
     let r = open(&s.p, &srv, 160, &s.built.keys).unwrap();
     let parts = RefCell::new(Vec::new());
-    run(r.stream_item(2, async |part: Vec<u8>| {
-        parts.borrow_mut().push(part);
+    run(r.stream_item(2, async |part: &[u8]| {
+        parts.borrow_mut().push(part.to_vec());
         Ok(())
     }))
     .unwrap();
@@ -504,7 +504,7 @@ fn stream_item_morceaux_dans_l_ordre() {
     assert_eq!(streamed(&r, 0).unwrap(), TEXTE.as_bytes());
     // Erreur du puits : rendue telle quelle, rien de plus n'est livré.
     let n = Cell::new(0);
-    let err = run(r.stream_item(2, async |_: Vec<u8>| {
+    let err = run(r.stream_item(2, async |_: &[u8]| {
         n.set(n.get() + 1);
         if n.get() == 3 {
             return Err(Error::LectureIncomplete);
@@ -821,7 +821,7 @@ fn palier_1_note_vide_seulement() {
     assert_eq!(r.manifest().items[0].text.as_deref(), Some(""));
     assert_eq!(run(r.item(0)).unwrap(), b"");
     let calls = Cell::new(0);
-    run(r.stream_item(0, async |_: Vec<u8>| {
+    run(r.stream_item(0, async |_: &[u8]| {
         calls.set(calls.get() + 1);
         Ok(())
     }))
@@ -891,8 +891,8 @@ fn element_de_plus_de_200_mio_apercu_refuse() {
     assert_eq!(srv.calls(), [0, 62]);
     // stream_item n'a pas cette limite : il livre le segment 0 puis bute sur le segment 1.
     let got = RefCell::new(Vec::new());
-    let err = run(r.stream_item(0, async |c: Vec<u8>| {
-        got.borrow_mut().extend_from_slice(&c);
+    let err = run(r.stream_item(0, async |c: &[u8]| {
+        got.borrow_mut().extend_from_slice(c);
         Ok(())
     }));
     assert_eq!(err, Err(Error::PaquetCorrompu));
@@ -972,9 +972,9 @@ fn operations_simultanees_serialisees() {
         Box::pin(r.item(0)),
         Box::pin(r.item(1)),
         Box::pin(async {
-            r.stream_item(2, async |c: Vec<u8>| {
+            r.stream_item(2, async |c: &[u8]| {
                 srv.events.borrow_mut().push("sink".into());
-                stream.borrow_mut().extend_from_slice(&c);
+                stream.borrow_mut().extend_from_slice(c);
                 Ok(())
             })
             .await
@@ -1013,9 +1013,9 @@ fn wipe_pendant_une_lecture() {
     assert_eq!(run(f).unwrap(), s.b);
     // wipe depuis le puits, à chaque morceau : aucune panique, lecture complète.
     let out = RefCell::new(Vec::new());
-    run(r.stream_item(2, async |c: Vec<u8>| {
+    run(r.stream_item(2, async |c: &[u8]| {
         r.wipe();
-        out.borrow_mut().extend_from_slice(&c);
+        out.borrow_mut().extend_from_slice(c);
         Ok(())
     }))
     .unwrap();

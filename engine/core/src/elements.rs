@@ -196,15 +196,25 @@ impl<P: Platform> ElementSealer<P> {
         }
         let g0 = u64::from(p.seg) * SEG + u64::from(p.from);
         let chunks = p.chunks as usize;
-        // Au plus 64 morceaux (4 Mio) ; clair mis à zéro à la destruction.
-        let mut buf = Zeroizing::new(vec![0u8; chunks * CHUNK]);
-        buf[..plain.len()].copy_from_slice(plain);
         let nonces: Vec<_> = (0..u64::from(p.chunks))
             .map(|c| nonce(g0 + c, false))
             .collect();
+        // Pièce pleine : chiffrée telle quelle. Sinon, complétée de zéros jusqu'à la fin de son
+        // dernier morceau, dans une copie (au plus 4 Mio) mise à zéro à la destruction.
+        let padded;
+        let full = if plain.len() == chunks * CHUNK {
+            plain
+        } else {
+            padded = {
+                let mut b = Zeroizing::new(vec![0u8; chunks * CHUNK]);
+                b[..plain.len()].copy_from_slice(plain);
+                b
+            };
+            &padded[..]
+        };
         let ct = self
             .key
-            .seal_batch(ELEMENT_AD, &nonces, &buf, CHUNK)
+            .seal_batch(ELEMENT_AD, &nonces, full, CHUNK)
             .await?;
         if g0 != 0 {
             return Ok(ct);

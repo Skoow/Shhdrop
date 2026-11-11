@@ -325,6 +325,8 @@ struct Spy {
 }
 
 impl Platform for Spy {
+    type Opened = shhdrop_core::platform::SecretBuf;
+
     fn random(&self, out: &mut [u8]) -> Result<()> {
         self.inner.random(out)
     }
@@ -350,7 +352,7 @@ impl Platform for Spy {
         nonces: &[[u8; NONCE_LEN]],
         cipher: &[u8],
         chunk_ct: usize,
-    ) -> Result<Zeroizing<Vec<u8>>> {
+    ) -> Result<shhdrop_core::platform::SecretBuf> {
         self.inner
             .aes_open_batch(k, ad, nonces, cipher, chunk_ct)
             .await

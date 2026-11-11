@@ -28,7 +28,7 @@ use crate::format::{
 };
 use crate::kdf::hkdf;
 use crate::manifest::{self, Kind, Manifest};
-use crate::platform::{Key, Platform};
+use crate::platform::{Key, Opened, Platform, SecretBuf};
 use core::cell::{Cell, RefCell};
 use core::fmt;
 use core::future::Future;
@@ -49,7 +49,7 @@ pub trait Segments {
 const SEG: u64 = SEG_CHUNKS as u64;
 const C: u64 = CHUNK as u64;
 
-type Cached = Rc<Zeroizing<Vec<u8>>>;
+type Cached = Rc<SecretBuf>;
 
 /// Lecteur d'un paquet ouvert. Les clés des éléments sont oubliées chez le fournisseur, et le
 /// segment en cache mis à zéro, à sa destruction.
@@ -72,7 +72,7 @@ struct Source<S> {
 
 impl<S: Segments> Source<S> {
     fn wipe(&self) {
-        // Le `Zeroizing` met le segment à zéro quand le dernier `Rc` disparaît.
+        // Le `SecretBuf` met le segment à zéro quand le dernier `Rc` disparaît.
         self.cache.borrow_mut().take();
     }
 
@@ -85,7 +85,7 @@ impl<S: Segments> Source<S> {
         self.wipe();
         // Hors palier (n ≥ segment_count) : None, jamais une taille qu'un segment vide égalerait.
         let want = segment_size(self.bucket, n).ok_or(Error::PaquetCorrompu)?;
-        let data = Zeroizing::new(self.src.fetch(n).await?);
+        let data = SecretBuf::new(self.src.fetch(n).await?);
         if data.len() != want {
             return Err(Error::PaquetCorrompu);
         }
@@ -101,7 +101,7 @@ impl<S: Segments> Source<S> {
         count: u64,
         key: &Key<P>,
         ad: &[u8],
-    ) -> Result<Zeroizing<Vec<u8>>> {
+    ) -> Result<P::Opened> {
         let last = u64::from(self.bucket) - 1;
         let n = g / SEG;
         if count == 0 || g + count - 1 > last || (g + count - 1) / SEG != n {
@@ -116,15 +116,16 @@ impl<S: Segments> Source<S> {
         key.open_batch(ad, &nonces, ct, CHUNK_CT).await
     }
 
-    /// Passe à `out`, dans l'ordre, les tranches du clair `[a, a + len)`, une par morceau ;
-    /// déchiffrement par lots d'un segment au plus.
+    /// Passe à `out`, dans l'ordre, les tranches du clair `[a, a + len)`, une par morceau :
+    /// `(lot, début dans le lot, longueur)`, jamais à cheval sur deux morceaux ; déchiffrement
+    /// par lots d'un segment au plus.
     async fn range<P: Platform>(
         &self,
         a: u64,
         len: u64,
         key: &Key<P>,
         ad: &[u8],
-        out: &mut impl AsyncFnMut(&[u8]) -> Result<()>,
+        out: &mut impl AsyncFnMut(&P::Opened, usize, usize) -> Result<()>,
     ) -> Result<()> {
         let end = a.checked_add(len).ok_or(Error::PaquetCorrompu)?;
         let mut pos = a;
@@ -137,11 +138,29 @@ impl<S: Segments> Source<S> {
             while pos < end && pos < hi * C {
                 let lo = (pos - base) as usize;
                 let take = (C - pos % C).min(end - pos) as usize;
-                out(&pt[lo..lo + take]).await?;
+                out(&pt, lo, take).await?;
                 pos += take as u64;
             }
         }
         Ok(())
+    }
+}
+
+/// Tranche du clair livrée par [`Reader::stream_parts`] : texte d'une note, ou `len` octets
+/// du lot `batch` à partir de `at` (dans un seul morceau).
+pub enum Part<'a, O> {
+    Text(&'a [u8]),
+    Plain { batch: &'a O, at: usize, len: usize },
+}
+
+/// Ajoute la tranche `[at, at + n)` de `b` à `out` (capacité réservée d'avance par l'appelant).
+fn append<O: Opened>(out: &mut Vec<u8>, b: &O, at: usize, n: usize) -> Result<()> {
+    let start = out.len();
+    out.resize(start + n, 0);
+    if b.copy_out(at, &mut out[start..]) {
+        Ok(())
+    } else {
+        Err(Error::PaquetCorrompu)
     }
 }
 
@@ -171,7 +190,12 @@ impl<P: Platform, S: Segments> Reader<P, S> {
         // 2. Longueur du manifeste (4 derniers octets du dernier morceau), puis le manifeste :
         //    MANIFEST_MAX + 4 = CHUNK, il est donc tout entier dans ce morceau.
         let last = u64::from(bucket) - 1;
-        let pt = src.chunks(last, 1, &keys.k_contenu, &hdr).await?;
+        let lot = src.chunks(last, 1, &keys.k_contenu, &hdr).await?;
+        let mut pt = SecretBuf::new(vec![0u8; CHUNK]);
+        if !lot.copy_out(0, &mut pt) {
+            return Err(Error::PaquetCorrompu);
+        }
+        drop(lot);
         let mut len = [0u8; 4];
         len.copy_from_slice(&pt[CHUNK - 4..]);
         let mlen = u32::from_be_bytes(len) as usize;
@@ -213,10 +237,7 @@ impl<P: Platform, S: Segments> Reader<P, S> {
                 e.size,
                 key,
                 ELEMENT_AD,
-                &mut async |part: &[u8]| {
-                    raw.extend_from_slice(part);
-                    Ok(())
-                },
+                &mut async |b: &P::Opened, at: usize, n: usize| append(&mut raw, b, at, n),
             )
             .await?;
             // UTF-8 strict ; un BOM initial est gardé (TextDecoder, ignoreBOM : true).
@@ -280,31 +301,50 @@ impl<P: Platform, S: Segments> Reader<P, S> {
                 e.size,
                 key,
                 ELEMENT_AD,
-                &mut async |part: &[u8]| {
-                    res.extend_from_slice(part);
-                    Ok(())
-                },
+                &mut async |b: &P::Opened, at: usize, n: usize| append(&mut res, b, at, n),
             )
             .await?;
         Ok(core::mem::take(&mut *res))
     }
 
-    /// Déchiffre l'élément `i` morceau par morceau et passe chaque tranche (≤ 64 Kio, copie que
-    /// le puits garde) à `sink`, dans l'ordre. En cas d'erreur (paquet_corrompu, ou erreur du
-    /// réseau ou du puits, rendue telle quelle), ce qui a déjà été livré doit être jeté par
+    /// Déchiffre l'élément `i` morceau par morceau et passe chaque tranche (≤ 64 Kio, prêtée :
+    /// le puits copie ce qu'il garde, le moteur efface la sienne) à `sink`, dans l'ordre. En cas
+    /// d'erreur (paquet_corrompu, ou erreur du réseau ou du puits, rendue telle quelle), ce qui
+    /// a déjà été livré doit être jeté par
     /// l'appelant. Une note vide ne livre rien. Le puits ne doit pas attendre une autre
     /// opération du même lecteur (elle attendrait la fin de celle-ci : blocage, comme avant).
     pub async fn stream_item(
         &self,
         i: usize,
-        mut sink: impl AsyncFnMut(Vec<u8>) -> Result<()>,
+        mut sink: impl AsyncFnMut(&[u8]) -> Result<()>,
+    ) -> Result<()> {
+        let mut buf = SecretBuf::new(vec![0u8; CHUNK]);
+        self.stream_parts(i, async |p: Part<'_, P::Opened>| match p {
+            Part::Text(t) => sink(t).await,
+            Part::Plain { batch, at, len } => {
+                if !batch.copy_out(at, &mut buf[..len]) {
+                    return Err(Error::PaquetCorrompu);
+                }
+                sink(&buf[..len]).await
+            }
+        })
+        .await
+    }
+
+    /// Comme [`Self::stream_item`], mais chaque tranche est passée telle que la plateforme la
+    /// tient (`Part::Plain`), sans copie : le site la livre à JavaScript sans passer par la
+    /// mémoire WebAssembly. Une note passe son texte (`Part::Text`).
+    pub async fn stream_parts(
+        &self,
+        i: usize,
+        mut sink: impl AsyncFnMut(Part<'_, P::Opened>) -> Result<()>,
     ) -> Result<()> {
         let _turn = self.queue.turn().await;
         let (e, key) = self.entry(i)?;
         if e.kind == Kind::Text {
             let t = e.text.as_deref().unwrap_or_default();
             if !t.is_empty() {
-                sink(t.as_bytes().to_vec()).await?;
+                sink(Part::Text(t.as_bytes())).await?;
             }
             return Ok(());
         }
@@ -314,7 +354,9 @@ impl<P: Platform, S: Segments> Reader<P, S> {
                 e.size,
                 key,
                 ELEMENT_AD,
-                &mut async |part: &[u8]| sink(part.to_vec()).await,
+                &mut async |batch: &P::Opened, at: usize, len: usize| {
+                    sink(Part::Plain { batch, at, len }).await
+                },
             )
             .await
     }

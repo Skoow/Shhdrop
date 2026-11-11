@@ -4,7 +4,7 @@
 //! L'aléa vient du constructeur : générateur déterministe dans les tests ; pour les apps, le
 //! générateur du système (crate `getrandom`) sera branché avec elles, pas maintenant.
 use crate::error::{Error, Result};
-use crate::platform::{KeyHandle, NONCE_LEN, Platform, TAG_LEN};
+use crate::platform::{KeyHandle, NONCE_LEN, Platform, SecretBuf, TAG_LEN};
 use aes_gcm::aead::{AeadInOut, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce, Tag};
 use core::cell::{Cell, RefCell};
@@ -47,6 +47,8 @@ fn fits(total: usize, count: usize, len: usize) -> bool {
 }
 
 impl Platform for RustCrypto {
+    type Opened = SecretBuf;
+
     fn random(&self, out: &mut [u8]) -> Result<()> {
         (self.rng.borrow_mut())(out)
     }
@@ -103,16 +105,16 @@ impl Platform for RustCrypto {
         nonces: &[[u8; NONCE_LEN]],
         cipher: &[u8],
         chunk_ct: usize,
-    ) -> Result<Zeroizing<Vec<u8>>> {
+    ) -> Result<SecretBuf> {
         let keys = self.keys.borrow();
         let aes = keys.get(&k.raw()).ok_or(Error::PaquetCorrompu)?;
         if chunk_ct <= TAG_LEN || !fits(cipher.len(), nonces.len(), chunk_ct) {
             return Err(Error::PaquetCorrompu);
         }
         let chunk = chunk_ct - TAG_LEN;
-        // Zeroizing : un clair partiel (lot refusé au morceau i) est effacé à la destruction.
+        // SecretBuf : un clair partiel (lot refusé au morceau i) est effacé à la destruction.
         // Capacité réservée d'avance : aucune réallocation ne laisse de copie non effacée.
-        let mut out = Zeroizing::new(Vec::new());
+        let mut out = SecretBuf::default();
         out.try_reserve_exact(cipher.len() - nonces.len() * TAG_LEN)
             .map_err(|_| Error::PaquetCorrompu)?;
         for (nonce, piece) in nonces.iter().zip(cipher.chunks_exact(chunk_ct)) {
