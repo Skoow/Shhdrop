@@ -98,18 +98,22 @@ func (s *Service) awaitKill(name string) error {
 	return ErrNotFound
 }
 
-// pollKillsLocked (serveur, sous gone.mu) : coupe chaque partage détaché demandé et efface la
-// demande. Une demande qui ne désigne aucun partage détaché d'ici est laissée : la commande la
-// retire à la fin de son attente. La demande killAll (wipe) coupe tous les partages détachés
-// et est toujours effacée, même s'il n'y en a aucun : la commande sait ainsi que c'est fait.
-func (s *Service) pollKillsLocked() error {
+// readKills lit le dossier des demandes (hors de gone.mu : lecture de disque) ; nil s'il
+// n'existe pas.
+func (s *Service) readKills() ([]os.DirEntry, error) {
 	es, err := os.ReadDir(s.killDir())
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+		return nil, nil
 	}
-	if err != nil {
-		return err
-	}
+	return es, err
+}
+
+// pollKillsLocked (serveur, sous gone.mu, avec les demandes lues par readKills) : coupe chaque
+// partage détaché demandé et efface la demande. Une demande qui ne désigne aucun partage
+// détaché d'ici est laissée : la commande la retire à la fin de son attente. La demande
+// killAll (wipe) coupe tous les partages détachés et est toujours effacée, même s'il n'y en a
+// aucun : la commande sait ainsi que c'est fait.
+func (s *Service) pollKillsLocked(es []os.DirEntry) error {
 	for _, e := range es {
 		if e.Name() == killAll {
 			for id, d := range s.gone.dead {

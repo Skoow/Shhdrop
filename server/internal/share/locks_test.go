@@ -241,3 +241,66 @@ func TestUploadLifeCoversUploadWindow(t *testing.T) {
 		t.Fatalf("vie maximale d'un envoi %d s, limits.UploadLife %d s", longest, life)
 	}
 }
+
+// Optimisation (audit du 11 novembre) : la lecture de la ligne et l'ouverture du fichier d'un
+// segment se font hors du verrou global des disparitions (gone.mu) : une ouverture lente
+// (disque chargé) ne retient ni les autres lectures ni les surveillances. Un partage retiré
+// pendant cette ouverture n'est pas servi (revérification sous le verrou).
+func TestSlowSegmentOpenDoesNotBlockOthers(t *testing.T) {
+	s, _ := newSvc(t)
+	ka, kb := newKeys(), newKeys()
+	a := ready(t, s, ka, 80, 24, 2)
+	b := ready(t, s, kb, 80, 24, 2)
+	oa, _, _ := s.Unlock(a, ka.acces, ka.preuve)
+	ob, _, _ := s.Unlock(b, kb.acces, kb.preuve)
+	entered, release := make(chan struct{}), make(chan struct{})
+	orig := openBlob
+	openBlob = func(bl *blob.Store, id string, off, n int64) (*blob.Section, error) {
+		if id == a {
+			close(entered)
+			<-release
+		}
+		return orig(bl, id, off, n)
+	}
+	t.Cleanup(func() { openBlob = orig })
+	res := make(chan error, 1)
+	go func() {
+		seg, err := s.OpenSegment(a, 0, oa)
+		if seg != nil {
+			seg.Close()
+		}
+		res <- err
+	}()
+	<-entered
+	done := make(chan error, 1)
+	go func() {
+		seg, err := s.OpenSegment(b, 0, ob)
+		if seg != nil {
+			seg.Close()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("lecture d'un autre partage retenue par une ouverture lente")
+	}
+	if s.WatchCount() != 0 {
+		t.Fatal("surveillances")
+	}
+	// Retiré pendant l'ouverture lente : jamais servi.
+	if err := s.DestroyManaged(ka.gestion); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-res; !errors.Is(err, ErrGone) {
+		t.Fatal("segment d'un partage retiré servi :", err)
+	}
+	if n := heldFDs(t, s, a); n > 0 {
+		t.Fatal("descripteur encore ouvert", n)
+	}
+}

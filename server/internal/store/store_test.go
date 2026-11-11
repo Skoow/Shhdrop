@@ -2,11 +2,11 @@ package store
 
 import (
 	"bytes"
-	"errors"
-	"strconv"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )

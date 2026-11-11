@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/skoow/shhdrop/server/internal/blob"
 )
 
 // Disparition pendant un téléchargement (spec §41.8, D41-10 ; §36 S60, S61).
@@ -77,6 +79,9 @@ type goneState struct {
 	// retiring : partages dont le fichier est en cours de suppression hors de mu (retire) ;
 	// présence seulement, le temps d'une suppression. Ils passent déjà pour disparus.
 	retiring []string
+	// epoch : augmenté à chaque retrait et à chaque coupure de flux ; une ouverture de segment
+	// faite hors de mu (openOnce) se refait sous mu s'il a changé entre-temps.
+	epoch uint64
 }
 
 // retiringLocked : le partage id est en cours de retrait (retire). Sous mu.
@@ -110,6 +115,9 @@ func (g *goneState) init() {
 		g.grants = map[openKey]*grantEntry{}
 	}
 }
+
+// openBlob : ouverture d'un segment (variable pour tester les verrous tenus pendant ce temps).
+var openBlob = func(b *blob.Store, id string, off, n int64) (*blob.Section, error) { return b.Open(id, off, n) }
 
 // Segment : un segment lu en flux ; la lecture s'arrête dès la révocation de son ouverture.
 type Segment struct {
@@ -161,50 +169,50 @@ func (s *Service) OpenSegmentCtx(parent context.Context, id string, n, openN int
 	return nil, ErrGone
 }
 
-// openOnce : une tentative sous gone.mu. retire : le partage est échu (échéance, 5 essais,
-// purge) et doit d'abord être retiré, à l'heure event.
+// openOnce : une tentative. retire : le partage est échu (échéance, 5 essais, purge) et doit
+// d'abord être retiré, à l'heure event.
+//
+// La ligne est lue et le fichier ouvert hors de gone.mu, que prennent toutes les lectures et
+// les surveillances (optimisation du 11 novembre : une ouverture lente ne les retient plus).
+// gone.epoch, relu sous le verrou, dit si un retrait ou une coupure a eu lieu entre-temps :
+// alors tout est refait sous le verrou, comme avant (jamais un partage retiré servi depuis un
+// fichier ouvert juste avant son retrait).
 func (s *Service) openOnce(parent context.Context, id string, n, openN int) (seg *Segment, retire bool, event int64, err error) {
 	now := s.now()
 	k := openKey{id, openN}
 	s.gone.mu.Lock()
-	defer s.gone.unlock()
 	s.gone.init()
 	if d := s.gone.dead[id]; d != nil {
+		defer s.gone.unlock()
 		seg, err := s.serveDetachedLocked(parent, id, d, k, n, now)
 		return seg, false, 0, err
 	}
 	if s.gone.retiringLocked(id) {
+		s.gone.unlock()
 		return nil, false, 0, ErrGone // en cours de retrait, sans droit de finir
 	}
-	var bucket, issued, failed int
-	var state string
-	var doneMask int64
-	var exp sql.NullInt64
-	err = s.DB.QueryRow(`SELECT bucket, state, opens_issued, done_mask, failed_attempts, expires_at FROM shares WHERE id=?`, id).
-		Scan(&bucket, &state, &issued, &doneMask, &failed, &exp)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return nil, false, 0, ErrGone
-	case err != nil:
-		return nil, false, 0, err
-	case state == "uploading" || openN > issued:
-		return nil, false, 0, ErrNotFound
-	case doneMask&(int64(1)<<(openN-1)) != 0:
-		return nil, false, 0, ErrGone
+	ep := s.gone.epoch
+	s.gone.unlock()
+
+	sec, bucket, size, retire, event, err := s.openRow(id, n, openN, now)
+	if sec == nil {
+		return nil, retire, event, err
 	}
-	if due, ev := s.dueAt(id, state, exp, failed, now); due {
-		return nil, true, ev, nil
-	}
-	if n < 0 || n >= SegmentCount(bucket) {
-		return nil, false, 0, ErrBadSegment
-	}
-	size := int64(SegmentSize(bucket, n))
-	sec, err := s.Blobs.Open(id, segOffset(bucket, n), size)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, false, 0, ErrGone // effacé hors de ce processus (administrateur)
-	}
-	if err != nil {
-		return nil, false, 0, err
+	s.gone.mu.Lock()
+	defer s.gone.unlock()
+	if s.gone.epoch != ep {
+		// Retrait ou coupure pendant l'ouverture : tout est refait sous le verrou.
+		sec.Close()
+		if d := s.gone.dead[id]; d != nil {
+			seg, err := s.serveDetachedLocked(parent, id, d, k, n, now)
+			return seg, false, 0, err
+		}
+		if s.gone.retiringLocked(id) {
+			return nil, false, 0, ErrGone
+		}
+		if sec, bucket, size, retire, event, err = s.openRow(id, n, openN, now); sec == nil {
+			return nil, retire, event, err
+		}
 	}
 	// Compté après l'ouverture réussie : une erreur du serveur ne consomme pas le budget.
 	if !s.budget.charge(k, size, s.budgetLocked(k, bucket), now) {
@@ -212,6 +220,42 @@ func (s *Service) openOnce(parent context.Context, id string, n, openN int) (seg
 		return nil, false, 0, ErrBudget
 	}
 	return s.startLocked(parent, k, sec, size, func() { sec.Close() }, nil), false, 0, nil
+}
+
+// openRow lit la ligne du partage id, vérifie l'ouverture openN et le segment n, puis ouvre le
+// segment. sec == nil : refus (err) ou partage échu à retirer (retire, event).
+func (s *Service) openRow(id string, n, openN int, now int64) (sec *blob.Section, bucket int, size int64, retire bool, event int64, err error) {
+	var issued, failed int
+	var state string
+	var doneMask int64
+	var exp sql.NullInt64
+	err = s.DB.QueryRow(`SELECT bucket, state, opens_issued, done_mask, failed_attempts, expires_at FROM shares WHERE id=?`, id).
+		Scan(&bucket, &state, &issued, &doneMask, &failed, &exp)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, 0, 0, false, 0, ErrGone
+	case err != nil:
+		return nil, 0, 0, false, 0, err
+	case state == "uploading" || openN > issued:
+		return nil, 0, 0, false, 0, ErrNotFound
+	case doneMask&(int64(1)<<(openN-1)) != 0:
+		return nil, 0, 0, false, 0, ErrGone
+	}
+	if due, ev := s.dueAt(id, state, exp, failed, now); due {
+		return nil, 0, 0, true, ev, nil
+	}
+	if n < 0 || n >= SegmentCount(bucket) {
+		return nil, 0, 0, false, 0, ErrBadSegment
+	}
+	size = int64(SegmentSize(bucket, n))
+	sec, err = openBlob(s.Blobs, id, segOffset(bucket, n), size)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, 0, 0, false, 0, ErrGone // effacé hors de ce processus (administrateur)
+	}
+	if err != nil {
+		return nil, 0, 0, false, 0, err
+	}
+	return sec, bucket, size, false, 0, nil
 }
 
 // serveDetachedLocked sert un segment d'un partage disparu à une ouverture qui garde le droit.
@@ -356,6 +400,7 @@ func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 		s.revokeAllLocked(id)
 	}
 	s.gone.retiring = append(s.gone.retiring, id)
+	s.gone.epoch++
 	s.gone.unlock()
 
 	ok, err := s.destroy(id) // hors de gone.mu
@@ -382,6 +427,7 @@ func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 
 // revokeAllLocked coupe tous les flux du partage (aucune grâce).
 func (s *Service) revokeAllLocked(id string) {
+	s.gone.epoch++
 	for n := 1; n <= maxOpenN; n++ {
 		s.streams.Revoke(ShareKey(id, n))
 	}
@@ -467,11 +513,15 @@ func (s *Service) WatchCount() int {
 // surveillances prévenues, sans grâce. Coupe aussi les partages détachés que la commande a
 // demandé de couper (kill.go). À appeler chaque seconde (janitor.Watch).
 func (s *Service) PollRemoved() error {
+	// Toujours lu (un dossier, le plus souvent absent) : la demande « tout couper » de wipe
+	// est confirmée même sans descripteur détaché (revue B5). Lu hors de gone.mu.
+	kills, err := s.readKills()
+	if err != nil {
+		return err
+	}
 	s.gone.mu.Lock()
 	s.gone.init()
-	// Toujours lu (un dossier, le plus souvent absent) : la demande « tout couper » de wipe
-	// est confirmée même sans descripteur détaché (revue B5).
-	if err := s.pollKillsLocked(); err != nil {
+	if err := s.pollKillsLocked(kills); err != nil {
 		s.gone.unlock()
 		return err
 	}

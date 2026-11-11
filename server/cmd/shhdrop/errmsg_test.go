@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
-	"io"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"strings"
 	"testing"
