@@ -267,8 +267,13 @@ impl<P: Platform, S: Segments> Reader<P, S> {
             return Err(Error::TropGrosPourApercu);
         }
         // Capacité exacte : aucune réallocation ne laisse de copie non effacée ; mis à zéro en
-        // cas d'erreur.
-        let mut res = Zeroizing::new(Vec::with_capacity(e.size as usize));
+        // cas d'erreur. Mémoire refusée (WebAssembly : 4 Gio au plus) : une erreur, pas un
+        // arrêt du processus ; `stream_item` lit l'élément sans tout garder.
+        let mut res = Zeroizing::new(Vec::new());
+        usize::try_from(e.size)
+            .ok()
+            .and_then(|n| res.try_reserve_exact(n).ok())
+            .ok_or(Error::TropGrosPourApercu)?;
         self.src
             .range(
                 e.offset,

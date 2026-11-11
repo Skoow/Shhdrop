@@ -10,3 +10,4 @@ web/test-results/
 web/playwright-report/
 SHA256SUMS.repro
 engine/target/
+web/src/engine/pkg/

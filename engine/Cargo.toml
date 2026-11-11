@@ -1,6 +1,7 @@
 # Espace de travail du moteur Shhdrop (spécification 2026-11-10-moteur-rust-1-chiffrement).
 # shhdrop-core : moteur sans navigateur, horloge, fichiers ni réseau. Le crate WebAssembly
-# shhdrop-wasm : liaison WebAssembly du site ; n'expose encore qu'Argon2id (mesure, Task 4).
+# shhdrop-wasm : liaison WebAssembly du site (wasm-bindgen), avec le fournisseur WebCrypto
+# de web/src/engine/provider.ts.
 [workspace]
 members = ["core", "wasm"]
 resolver = "2"

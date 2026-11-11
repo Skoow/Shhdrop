@@ -12,4 +12,10 @@ crate-type = ["cdylib"]
 
 [dependencies]
 shhdrop-core = { path = "../core" }
+# Versions exactes, publiées ensemble : wasm-bindgen-cli 0.2.130 exige wasm-bindgen 0.2.130,
+# js-sys 0.3.107 et wasm-bindgen-futures 0.4.80 (même dépôt, même version de publication).
 wasm-bindgen = "=0.2.130"
+# Promesses de WebCrypto (fournisseur) et objets JS (Uint8Array, Array, Reflect).
+js-sys = "=0.3.107"
+wasm-bindgen-futures = "=0.4.80"
+zeroize = { version = "1.9", default-features = false, features = ["alloc"] }

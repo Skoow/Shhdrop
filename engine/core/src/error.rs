@@ -63,7 +63,8 @@ pub enum Error {
     CleDejaUtilisee,
     /// Lecteur : indice d'élément hors du manifeste.
     ElementInexistant,
-    /// Lecteur : aperçu (`item`) d'un fichier de plus de PREVIEW_MAX octets ; `stream_item` le lit.
+    /// Lecteur : aperçu (`item`) d'un fichier de plus de PREVIEW_MAX octets, ou dont la mémoire est
+    /// refusée ; `stream_item` le lit.
     TropGrosPourApercu,
 }
 
