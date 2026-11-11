@@ -9,8 +9,23 @@
 //! `recevoir` rend `CommitPerdu` : l'appelant rejoue son intention (ajout, retrait,
 //! renouvellement). Les Commits plus anciens que l'époque courante sont ignorés.
 //!
+//! Notre Commit gagnant revient en `CommitAccepte { welcome }` : le Welcome d'un ajout n'est
+//! rendu qu'à ce moment, jamais avec le Commit.
+//!
 //! **Politique** (`politique.rs`) : vérifiée avant fusion sur chaque Commit reçu, sur nos
 //! propres Commits à leur création et de nouveau à leur écho (les annonces ont pu changer).
+//!
+//! **Annonces du serveur (contrat de l'appelant)** : la politique dépend de ce que le serveur
+//! a annoncé ; deux membres qui n'en savent pas autant divergent (l'un fusionne, l'autre
+//! refuse et reste en arrière). L'appelant doit donc donner à `remplacer_annonces` la liste
+//! complète `(siège, nonce_arrivee)` reçue à l'accueil du WebSocket (et à chaque
+//! reconnexion) **avant tout `recevoir`**, puis chaque 0x02 / 0x0A à `annoncer` et chaque
+//! 0x03 / 0x09 à `marquer_parti`, dans l'ordre `seq`, avant les trames qui les suivent.
+//!
+//! **Membres fantômes (risque accepté, décision du 11 novembre)** : un serveur malveillant
+//! peut annoncer un siège pour un KeyPackage à lui ; le membre désigné l'ajoutera, et ce
+//! « membre » lira la suite. MLS ne peut pas l'empêcher sans service d'authentification ;
+//! seuls les codes de vérification (`empreinte`, comparés hors du salon) le révèlent.
 //!
 //! **Siège du créateur** : porté par l'identifiant du groupe MLS (`tag_salon` ‖ siège), fixé
 //! à la création et authentifié par MLS (contexte du groupe) chez tous les membres.
@@ -89,14 +104,21 @@ pub fn nouvelle_identite(siege: u8, nonce_arrivee: [u8; 16]) -> Result<Identite>
 pub enum Evenement {
     /// Message applicatif ; `de_siege` vient de la credential (authentifiée) de l'expéditeur.
     Message { de_siege: u8, enveloppe: Enveloppe },
-    /// Commit fusionné (le nôtre à son écho, ou celui d'un autre) : sièges ajoutés et retirés
+    /// Commit d'un autre membre fusionné : sièges ajoutés et retirés
     /// (un retour après rechargement figure dans les deux listes).
     Membres { ajoutes: Vec<u8>, retires: Vec<u8> },
     /// Notre Commit en attente a perdu (un autre Commit de l'époque est passé avant, ou la
     /// politique le refuse à son écho) : l'appelant rejoue son intention.
     CommitPerdu,
+    /// Notre Commit en attente est revenu le premier de son époque et a été fusionné ; pour
+    /// un ajout, le Welcome à envoyer maintenant à l'arrivant.
+    CommitAccepte { welcome: Option<Vec<u8>> },
+    /// KeyPackage d'un arrivant annoncé (valide, suite 0x0001, siège et nonce annoncés, pas
+    /// déjà dans le groupe) : à passer à `ajouter` par le membre désigné.
+    KeyPackage { octets: Vec<u8> },
     /// Rien à faire : écho de notre message, Commit perdant d'une époque passée, rejeu (`seq`
-    /// déjà vu), Welcome ou KeyPackage destinés à d'autres, proposition (jamais gardée).
+    /// déjà vu), Welcome destiné à d'autres, KeyPackage périmé ou non annoncé, proposition
+    /// (jamais gardée).
     Ignore,
 }
 
@@ -109,8 +131,12 @@ pub struct Salon {
     createur_siege: u8,
     /// Dernière annonce `(siège, nonce_arrivee)` du serveur pour chaque siège.
     annonces: Vec<(u8, [u8; 16])>,
-    /// Octets de notre Commit en attente de son écho.
-    commit_en_attente: Option<Vec<u8>>,
+    /// Sièges que le serveur a dits partis (0x03) ou exclus (0x09), non repris depuis.
+    partis: Vec<u8>,
+    /// Une liste complète des sièges occupés a été donnée (`remplacer_annonces`).
+    liste_complete: bool,
+    /// Octets de notre Commit en attente de son écho, et le Welcome qu'il rendra s'il gagne.
+    commit_en_attente: Option<(Vec<u8>, Option<Vec<u8>>)>,
     dernier_seq: Option<u64>,
 }
 
@@ -204,8 +230,8 @@ fn changements(groupe: &MlsGroup, commit: &StagedCommit, auteur: LeafNodeIndex) 
                     .member_at(r.removed())
                     .and_then(|m| lire_credential(&m.credential).ok());
                 match siege {
-                    Some((s, _)) => {
-                        ch.retraits.push(s);
+                    Some(c) => {
+                        ch.retraits.push(c);
                         retirees.push(r.removed());
                     }
                     None => ch.interdit = true,
@@ -239,8 +265,47 @@ fn changements(groupe: &MlsGroup, commit: &StagedCommit, auteur: LeafNodeIndex) 
 fn membres_de(ch: &Changements) -> Evenement {
     Evenement::Membres {
         ajoutes: ch.ajouts.iter().map(|a| a.0).collect(),
-        retires: ch.retraits.clone(),
+        retires: ch.retraits.iter().map(|r| r.0).collect(),
     }
+}
+
+/// Feuilles du siège `siege` (indices et credentials) et sièges des autres feuilles.
+type Prevision = (Vec<LeafNodeIndex>, Vec<(u8, [u8; 16])>, Vec<u8>);
+
+fn prevoir(groupe: &MlsGroup, siege: u8) -> Result<Prevision> {
+    let (mut indices, mut retraits, mut restants) = (Vec::new(), Vec::new(), Vec::new());
+    for m in groupe.members() {
+        let c = lire_credential(&m.credential)?;
+        if c.0 == siege {
+            indices.push(m.index);
+            retraits.push(c);
+        } else {
+            restants.push(c.0);
+        }
+    }
+    Ok((indices, retraits, restants))
+}
+
+/// Sièges partis ou exclus : marqués (0x03, 0x09) ou, après une liste complète du serveur,
+/// présents dans l'arbre mais absents des annonces.
+fn partis_effectifs(
+    groupe: &MlsGroup,
+    partis: &[u8],
+    annonces: &[(u8, [u8; 16])],
+    liste_complete: bool,
+) -> Vec<u8> {
+    let mut p = partis.to_vec();
+    if liste_complete {
+        for m in groupe.members() {
+            if let Ok((s, _)) = lire_credential(&m.credential)
+                && !annonces.iter().any(|a| a.0 == s)
+                && !p.contains(&s)
+            {
+                p.push(s);
+            }
+        }
+    }
+    p
 }
 
 impl Salon {
@@ -254,6 +319,8 @@ impl Salon {
             identite,
             groupe: None,
             annonces: Vec::new(),
+            partis: Vec::new(),
+            liste_complete: false,
             commit_en_attente: None,
             dernier_seq: None,
         };
@@ -330,11 +397,57 @@ impl Salon {
     }
 
     /// Enregistre une arrivée annoncée par le serveur (0x02) ou une reprise de siège (0x0A) :
-    /// remplace l'annonce précédente du même siège. À appeler dans l'ordre `seq`, comme
-    /// `recevoir`, pour que tous les membres appliquent la même politique.
+    /// remplace l'annonce précédente du même siège (qui n'est plus « parti »). À appeler dans
+    /// l'ordre `seq`, avant le `recevoir` des trames suivantes, pour que tous les membres
+    /// appliquent la même politique.
     pub fn annoncer(&mut self, siege: u8, nonce_arrivee: [u8; 16]) {
+        self.partis.retain(|&p| p != siege);
         self.annonces.retain(|a| a.0 != siege);
         self.annonces.push((siege, nonce_arrivee));
+    }
+
+    /// Liste complète des sièges occupés et de leur `nonce_arrivee`, donnée par le serveur à
+    /// l'accueil du WebSocket (et à chaque reconnexion) avant toute trame : remplace toutes les
+    /// annonces connues. Un siège présent dans l'arbre MLS mais absent de cette liste compte
+    /// ensuite comme parti (retirable par tout membre), jusqu'à sa prochaine annonce.
+    pub fn remplacer_annonces(&mut self, liste: &[(u8, [u8; 16])]) {
+        self.annonces.clear();
+        for &(siege, nonce) in liste {
+            self.annoncer(siege, nonce);
+        }
+        self.partis.clear();
+        self.liste_complete = true;
+    }
+
+    /// Siège annoncé parti (0x03) ou exclu (0x09) par le serveur, dans l'ordre `seq` : tout
+    /// membre peut alors en retirer la feuille ; son annonce est oubliée (une nouvelle arrivée
+    /// sur ce siège sera annoncée de nouveau).
+    pub fn marquer_parti(&mut self, siege: u8) {
+        self.annonces.retain(|a| a.0 != siege);
+        if !self.partis.contains(&siege) {
+            self.partis.push(siege);
+        }
+    }
+
+    /// KeyPackage reçu dans le flux : signalé seulement s'il peut être ajouté.
+    fn key_package_recu(&self, kp: KeyPackageIn, octets: &[u8]) -> Result<Evenement> {
+        let kp = kp
+            .validate(self.fournisseur.crypto(), ProtocolVersion::Mls10)
+            .map_err(|_| Error::MlsInvalide)?;
+        if kp.ciphersuite() != SUITE {
+            return Err(Error::MlsInvalide);
+        }
+        let arrivee = lire_credential(kp.leaf_node().credential())?;
+        let deja = self
+            .groupe_actif()?
+            .members()
+            .any(|m| lire_credential(&m.credential).is_ok_and(|c| c == arrivee));
+        if !self.annonces.contains(&arrivee) || deja {
+            return Ok(Evenement::Ignore);
+        }
+        Ok(Evenement::KeyPackage {
+            octets: octets.to_vec(),
+        })
     }
 
     /// Groupe actif, sans Commit en attente : seul état où l'on peut faire un Commit.
@@ -387,6 +500,7 @@ impl Salon {
                 self.createur_siege,
                 self.identite.siege,
                 &self.annonces,
+                &partis_effectifs(groupe, &self.partis, &self.annonces, self.liste_complete),
             )?;
             let commit = serialiser(paquet.commit())?;
             let welcome = paquet
@@ -400,7 +514,7 @@ impl Salon {
         })();
         match verdict {
             Ok((commit, welcome)) => {
-                self.commit_en_attente = Some(commit.clone());
+                self.commit_en_attente = Some((commit.clone(), welcome.clone()));
                 Ok((commit, welcome))
             }
             Err(e) => {
@@ -412,11 +526,12 @@ impl Salon {
         }
     }
 
-    /// Ajoute l'arrivant dont voici le KeyPackage : rend (Commit, Welcome). Si son siège a
-    /// déjà une feuille (retour après rechargement), le même Commit la retire. **Le Welcome
-    /// n'est à envoyer qu'après l'écho du Commit** (`recevoir` → `Membres`) : si le Commit
-    /// perd (`CommitPerdu`), ce Welcome mènerait l'arrivant sur une branche morte.
-    pub fn ajouter(&mut self, key_package: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+    /// Ajoute l'arrivant dont voici le KeyPackage (reçu en `Evenement::KeyPackage`) : rend le
+    /// Commit seul. Si son siège a déjà une feuille (retour après rechargement), le même Commit
+    /// la retire. Le Welcome est gardé ici et rendu par `recevoir` à l'écho gagnant du Commit
+    /// (`CommitAccepte { welcome }`) ; si le Commit perd (`CommitPerdu`), il est jeté : il
+    /// mènerait l'arrivant sur une branche morte.
+    pub fn ajouter(&mut self, key_package: &[u8]) -> Result<Vec<u8>> {
         self.groupe_libre()?;
         let MlsMessageBodyIn::KeyPackage(kp) = lire_mls(key_package)? else {
             return Err(Error::MlsInvalide);
@@ -429,19 +544,10 @@ impl Salon {
         }
         let (siege, nonce) = lire_credential(kp.leaf_node().credential())?;
         let groupe = self.groupe.as_ref().ok_or(Error::NonMembre)?;
-        let mut retraits = Vec::new();
-        let mut restants = Vec::new();
-        for m in groupe.members() {
-            let (s, _) = lire_credential(&m.credential)?;
-            if s == siege {
-                retraits.push(m.index);
-            } else {
-                restants.push(s);
-            }
-        }
+        let (indices, retraits, restants) = prevoir(groupe, siege)?;
         let prevu = Changements {
             ajouts: vec![(siege, nonce)],
-            retraits: vec![siege; retraits.len()],
+            retraits,
             restants,
             interdit: false,
         };
@@ -450,25 +556,17 @@ impl Salon {
             self.createur_siege,
             self.identite.siege,
             &self.annonces,
+            &partis_effectifs(groupe, &self.partis, &self.annonces, self.liste_complete),
         )?;
-        let (commit, welcome) = self.commit(Some(kp), retraits)?;
-        Ok((commit, welcome.ok_or(Error::MlsInterne)?))
+        Ok(self.commit(Some(kp), indices)?.0)
     }
 
-    /// Retire toutes les feuilles du siège (réservé au créateur, politique).
+    /// Retire toutes les feuilles du siège : réservé au créateur, sauf siège parti ou exclu.
     pub fn retirer(&mut self, siege: u8) -> Result<Vec<u8>> {
-        let groupe = &*self.groupe_libre()?;
-        let mut retraits = Vec::new();
-        let mut restants = Vec::new();
-        for m in groupe.members() {
-            let (s, _) = lire_credential(&m.credential)?;
-            if s == siege {
-                retraits.push(m.index);
-            } else {
-                restants.push(s);
-            }
-        }
-        if retraits.is_empty() {
+        self.groupe_libre()?;
+        let groupe = self.groupe.as_ref().ok_or(Error::NonMembre)?;
+        let (indices, retraits, restants) = prevoir(groupe, siege)?;
+        if indices.is_empty() {
             return Err(Error::SiegeInconnu);
         }
         // MLS ne laisse pas l'auteur se retirer lui-même par son propre Commit.
@@ -477,7 +575,7 @@ impl Salon {
         }
         let prevu = Changements {
             ajouts: vec![],
-            retraits: vec![siege; retraits.len()],
+            retraits,
             restants,
             interdit: false,
         };
@@ -486,8 +584,9 @@ impl Salon {
             self.createur_siege,
             self.identite.siege,
             &self.annonces,
+            &partis_effectifs(groupe, &self.partis, &self.annonces, self.liste_complete),
         )?;
-        Ok(self.commit(None, retraits)?.0)
+        Ok(self.commit(None, indices)?.0)
     }
 
     /// Renouvellement (self-update) : nouvelles clés de feuille et de chemin.
@@ -527,14 +626,13 @@ impl Salon {
         if mls.len() > MAX_CHARGE {
             return Err(Error::TropGrand);
         }
-        if self.commit_en_attente.as_deref() == Some(mls) {
+        if self.commit_en_attente.as_ref().is_some_and(|c| c.0 == mls) {
             return self.confirmer_commit();
         }
         let protocole = match lire_mls(mls)? {
             MlsMessageBodyIn::PrivateMessage(p) => ProtocolMessage::from(p),
-            MlsMessageBodyIn::Welcome(_) | MlsMessageBodyIn::KeyPackage(_) => {
-                return Ok(Evenement::Ignore);
-            }
+            MlsMessageBodyIn::Welcome(_) => return Ok(Evenement::Ignore),
+            MlsMessageBodyIn::KeyPackage(kp) => return self.key_package_recu(kp, mls),
             // Message en clair (dont external commit et proposition externe) et GroupInfo :
             // jamais acceptés.
             _ => return Err(Error::MlsInvalide),
@@ -580,7 +678,13 @@ impl Salon {
             }
             ProcessedMessageContent::StagedCommitMessage(sc) => {
                 let ch = changements(groupe, &sc, auteur);
-                politique::verifier(&ch, self.createur_siege, de_siege, &self.annonces)?;
+                politique::verifier(
+                    &ch,
+                    self.createur_siege,
+                    de_siege,
+                    &self.annonces,
+                    &partis_effectifs(groupe, &self.partis, &self.annonces, self.liste_complete),
+                )?;
                 let perdu = self.commit_en_attente.take().is_some();
                 if perdu {
                     groupe
@@ -604,7 +708,7 @@ impl Salon {
     /// Écho de notre Commit : la politique est revérifiée (annonces reçues entre-temps), puis
     /// fusion ; sinon il est abandonné comme un Commit perdu.
     fn confirmer_commit(&mut self) -> Result<Evenement> {
-        self.commit_en_attente = None;
+        let welcome = self.commit_en_attente.take().and_then(|c| c.1);
         let groupe = self.groupe.as_mut().ok_or(Error::NonMembre)?;
         let Some(sc) = groupe.pending_commit() else {
             return Err(Error::MlsInterne);
@@ -615,6 +719,7 @@ impl Salon {
             self.createur_siege,
             self.identite.siege,
             &self.annonces,
+            &partis_effectifs(groupe, &self.partis, &self.annonces, self.liste_complete),
         )
         .is_err()
         {
@@ -626,7 +731,7 @@ impl Salon {
         groupe
             .merge_pending_commit(&self.fournisseur)
             .map_err(|_| Error::MlsInterne)?;
-        Ok(membres_de(&ch))
+        Ok(Evenement::CommitAccepte { welcome })
     }
 
     fn groupe_actif(&self) -> Result<&MlsGroup> {
@@ -727,12 +832,16 @@ mod tests {
             for x in m.iter_mut() {
                 x.annoncer(s, [s; 16]);
             }
-            let (c, w) = m[0].ajouter(&kp).unwrap();
+            let c = m[0].ajouter(&kp).unwrap();
             seq += 1;
+            let mut welcome = None;
             for x in m.iter_mut() {
-                assert!(matches!(x.recevoir(&c, seq), Ok(Evenement::Membres { .. })));
+                match x.recevoir(&c, seq) {
+                    Ok(Evenement::CommitAccepte { welcome: w }) => welcome = w,
+                    ev => assert!(matches!(ev, Ok(Evenement::Membres { .. })), "{ev:?}"),
+                }
             }
-            n.rejoindre(&w).unwrap();
+            n.rejoindre(&welcome.unwrap()).unwrap();
             m.push(n);
         }
         (m, seq)
