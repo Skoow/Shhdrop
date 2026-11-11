@@ -3,7 +3,7 @@
 # shhdrop-wasm : liaison WebAssembly du site (wasm-bindgen), avec le fournisseur WebCrypto
 # de web/src/engine/provider.ts.
 [workspace]
-members = ["core", "wasm"]
+members = ["core", "salon", "wasm"]
 resolver = "2"
 
 [workspace.package]
@@ -37,4 +37,20 @@ opt-level = 3
 [profile.dev.package.polyval]
 opt-level = 3
 [profile.dev.package.sha2]
+opt-level = 3
+
+# OpenMLS (suite 0x0001) en mode debug : HPKE, X25519, Ed25519, AES-GCM et SHA-256 sans
+# optimisation rendent les tests du salon (groupes de 10 membres) très lents. Les vérifications
+# de débordement et les debug_assert! restent actives.
+[profile.dev.package.openmls]
+opt-level = 3
+[profile.dev.package.openmls_rust_crypto]
+opt-level = 3
+[profile.dev.package.hpke-rs]
+opt-level = 3
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+[profile.dev.package.ed25519-dalek]
+opt-level = 3
+[profile.dev.package.aes-gcm]
 opt-level = 3

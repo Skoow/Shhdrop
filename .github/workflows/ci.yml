@@ -37,7 +37,7 @@ jobs:
         uses: ./.github/actions/engine-toolchain
         with:
           wasm-bindgen: "false"
-      # cargo fmt --check, cargo clippy -D warnings (hôte, puis shhdrop-wasm en wasm32), cargo test.
+      # cargo fmt --check, cargo clippy -D warnings (hôte, puis shhdrop-wasm et shhdrop-salon en wasm32), cargo test.
       - run: make test-engine
       # cargo-audit compilé ici, sans cache (même raison que wasm-bindgen : .github/actions/
       # engine-toolchain), par le Rust épinglé. --deny warnings : un avis « non maintenu »,

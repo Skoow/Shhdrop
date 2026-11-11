@@ -1,0 +1,24 @@
+[package]
+name = "shhdrop-salon"
+version = "0.1.0"
+description = "Moteur du salon Shhdrop : clés, enveloppe de taille fixe, groupe MLS, formats des messages"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# OpenMLS épinglé (versions exactes) : suite 0x0001 seulement, fournisseur RustCrypto.
+openmls = "=0.9.2"
+openmls_rust_crypto = "=0.6.0"
+openmls_basic_credential = "=0.6.0"
+openmls_traits = "=0.6.0"
+zeroize = { version = "1.9", default-features = false, features = ["alloc"] }
+
+# Navigateur seulement : la feature `js` d'openmls et l'aléa de getrandom ne sont jamais activés
+# en natif (vérifié par `cargo tree -e features`). getrandom 0.2 (rand_core 0.6) et 0.4
+# (rand_core 0.10) coexistent dans l'arbre d'OpenMLS.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+openmls = { version = "=0.9.2", features = ["js"] }
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }

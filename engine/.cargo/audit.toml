@@ -1,0 +1,19 @@
+# Exceptions de `cargo audit --deny warnings` (job engine de la CI). Chacune est une décision à
+# réexaminer à la date indiquée : retirer l'entrée dès qu'un correctif est publié et épinglé.
+# Dépendances de `shhdrop-salon` (OpenMLS 0.9.2 + openmls_rust_crypto 0.6.0), état au 11 novembre 2026.
+[advisories]
+ignore = [
+    # crypto-bigint 0.5.5 (variabilité de temps). Tiré par p256/p384 d'openmls_rust_crypto ; la
+    # suite 0x0001 du salon (X25519, Ed25519, AES-128-GCM, SHA-256) n'exécute jamais P-256 ni
+    # P-384 : le code est compilé, pas appelé. Correctif (>= 0.7.6) hors de portée d'OpenMLS 0.9.2.
+    # Réexamen : à la prochaine version d'OpenMLS, et au plus tard le 11 décembre 2026.
+    "RUSTSEC-2026-0387",
+    # libcrux-kem 0.0.9 (deux avis de panique). Présent dans Cargo.lock seulement comme
+    # dépendance de dev de hpke-rs-libcrux : `cargo tree -e all --all-features --target all`
+    # ne l'atteint pas, il n'est compilé nulle part. Réexamen : même date.
+    "RUSTSEC-2026-0330",
+    "RUSTSEC-2026-0331",
+    # proc-macro-error2 2.0.1 (non maintenu). Macro procédurale tirée par hax-lib-macros (libcrux) :
+    # exécutée à la compilation seulement, absente du .wasm et des binaires. Réexamen : même date.
+    "RUSTSEC-2026-0173",
+]
