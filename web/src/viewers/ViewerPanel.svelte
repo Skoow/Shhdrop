@@ -21,6 +21,7 @@
   import AudioViewer from "./AudioViewer.svelte";
   import { revoke, trackUrl } from "./blobs";
   import ImageViewer from "./ImageViewer.svelte";
+  import { previewable } from "../media/dimensions";
   import TextViewer from "./TextViewer.svelte";
   import VideoViewer from "./VideoViewer.svelte";
 
@@ -61,7 +62,8 @@
   }
 
   // Chargement de l'élément montré ; le précédent est abandonné, son URL révoquée.
-  type Phase = "loading" | "shown" | "undecodable" | "error";
+  // noPreview : image de plus de 50 mégapixels ou aux dimensions introuvables (media/dimensions).
+  type Phase = "loading" | "shown" | "undecodable" | "noPreview" | "error";
   let phase = $state<Phase>("loading");
   let got = $state(0);
   let url = $state<string | null>(null);
@@ -82,7 +84,13 @@
     let mine: string | null = null;
     // Hors suivi : la lecture touche à l'état du parent (compteurs), qui ne doit pas relancer cet effet.
     untrack(() => load(c.i, (d) => (got = d), ctl.signal)).then(
-      (blob) => {
+      async (blob) => {
+        if (ctl.signal.aborted) return;
+        // Bombe de décompression : dimensions lues dans l'en-tête, jamais décodée au-delà de la borne.
+        if (c.kind === "image" && !(await previewable(blob))) {
+          if (!ctl.signal.aborted) phase = "noPreview";
+          return;
+        }
         if (ctl.signal.aborted) return;
         if (c.kind === "pdf") pdf = blob;
         else {
@@ -167,6 +175,8 @@
         </div>
       {:else if phase === "error"}
         <p class="msg" role="alert">{t("content.interrupted")}</p>
+      {:else if phase === "noPreview"}
+        <p class="msg" role="alert">{viewOnly ? t("content.notViewable") : t("content.undecodable")}</p>
       {:else if phase === "undecodable"}
         <!-- Format que ce navigateur ne décode pas (retours CLEAN4) : le format, et quel navigateur essayer. -->
         {@const other = otherBrowser(cur.name)}

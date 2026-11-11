@@ -7,7 +7,7 @@
 // - une gigue de 0,5 à 4 s avant chaque requête, et les partages relus l'un après l'autre.
 // Reste visible au serveur, en direct : une même connexion interroge plusieurs partages (§18.18).
 import { LimitError, NotFoundError } from "../index";
-import { effectiveState, isActive, type History, type HistoryEntry } from "./store";
+import { effectiveState, isActive, type History, type HistoryEntry, type Patch } from "./store";
 
 export const REFRESH_MIN_MS = 5 * 60_000;
 export const JITTER_MIN_MS = 500;
@@ -36,6 +36,26 @@ function errorOf(e: unknown): { error: PollError; retryAfterS?: number } {
   return { error: "serveur" };
 }
 const notFound = (e: unknown) => e instanceof NotFoundError || (e instanceof Error && e.message === "lien_invalide");
+
+/** Relecture réussie à l'heure `t` : ouvertures (changement noté entre deux relectures), échéance, état. */
+export function statusPatch(cur: HistoryEntry, s: Status, t: number): Patch {
+  const opens = s.opensUsed > cur.opensUsed ? [...cur.opens, { count: s.opensUsed, between: [cur.lastSeenAt, t] as [number, number] }] : cur.opens;
+  return {
+    opensUsed: s.opensUsed,
+    maxOpens: Math.max(1, s.maxOpens),
+    expiresAt: t + Math.max(0, s.expiresInS) * 1000,
+    state: s.state === "draining" ? "draining" : "ready",
+    opens,
+    lastSeenAt: t,
+  };
+}
+/** Partage absent du serveur à l'heure `t` : expiré si l'échéance est passée, sinon terminé. */
+export function missingPatch(e: HistoryEntry, t: number): Patch {
+  const expired = t >= e.expiresAt;
+  return { state: expired ? "expired" : "gone", endedAt: expired ? e.expiresAt : t, lastSeenAt: t };
+}
+/** Détruit depuis cet appareil à l'heure `t`. */
+export const destroyedPatch = (t: number): Patch => ({ state: "gone", destroyedHere: true, endedAt: t, lastSeenAt: t });
 
 export function pollHistory(h: Pick<History, "get" | "list" | "update">, deps: PollDeps) {
   // Dernière requête arrivée au serveur (réussie, 429, 5xx) : compte dans les 5 min.
@@ -67,8 +87,7 @@ export function pollHistory(h: Pick<History, "get" | "list" | "update">, deps: P
       const t = deps.now();
       if (notFound(err)) {
         attempted.set(id, t);
-        const expired = t >= e.expiresAt;
-        const entry = await h.update(id, { state: expired ? "expired" : "gone", endedAt: expired ? e.expiresAt : t, lastSeenAt: t });
+        const entry = await h.update(id, missingPatch(e, t));
         return entry ? { kind: "updated", entry } : { kind: "skipped", reason: "missing" };
       }
       const m = errorOf(err);
@@ -81,15 +100,7 @@ export function pollHistory(h: Pick<History, "get" | "list" | "update">, deps: P
     attempted.set(id, t);
     const cur = (await h.get(id)) ?? e;
     if (effectiveState(cur, t) === "gone") return { kind: "skipped", reason: "ended" }; // détruit pendant la relecture
-    const opens = s.opensUsed > cur.opensUsed ? [...cur.opens, { count: s.opensUsed, between: [cur.lastSeenAt, t] as [number, number] }] : cur.opens;
-    const entry = await h.update(id, {
-      opensUsed: s.opensUsed,
-      maxOpens: Math.max(1, s.maxOpens),
-      expiresAt: t + Math.max(0, s.expiresInS) * 1000,
-      state: s.state === "draining" ? "draining" : "ready",
-      opens,
-      lastSeenAt: t,
-    });
+    const entry = await h.update(id, statusPatch(cur, s, t));
     return entry ? { kind: "updated", entry } : { kind: "skipped", reason: "missing" };
   }
 
@@ -127,7 +138,7 @@ export function pollHistory(h: Pick<History, "get" | "list" | "update">, deps: P
         if (!(err instanceof NotFoundError)) return { kind: "error", error: errorOf(err).error };
       }
       const t = deps.now();
-      const entry = await h.update(id, { state: "gone", destroyedHere: true, endedAt: t, lastSeenAt: t });
+      const entry = await h.update(id, destroyedPatch(t));
       return { kind: "destroyed", entry: entry ?? undefined };
     },
   };

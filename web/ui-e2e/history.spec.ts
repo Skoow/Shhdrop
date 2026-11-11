@@ -223,6 +223,25 @@ test.describe("fr-FR", () => {
     await expect(page.locator("[data-history-empty]")).toBeVisible();
   });
 
+  test("lien de gestion #m… : relecture puis « Supprimer maintenant » → l'entrée de l'historique passe à « Détruit » (test d'intrusion du 11 novembre)", async ({ page, shh, isMobile }) => {
+    test.setTimeout(150_000);
+    const sent = await sendShare(page, shh.origin + "/", { text: "Bonjour", isMobile });
+    await expect.poll(async () => (await rawDb(page)).count).toBe(1);
+    await finish(page);
+    await page.goto(sent.manage);
+    await expect(page.getByRole("heading", { level: 1, name: "Suivi du partage" })).toBeVisible();
+    await expect(page.locator("[data-read-at]")).toBeVisible({ timeout: 15_000 });
+    await page.getByRole("button", { name: "Supprimer maintenant" }).click();
+    await page.getByRole("button", { name: "Supprimer", exact: true }).filter({ visible: true }).last().click();
+    await expect(page.getByRole("heading", { level: 1, name: "Supprimé" })).toBeVisible({ timeout: 15_000 });
+    await page.goto(shh.origin + "/envois");
+    await expect(card(page)).toHaveCount(1);
+    await expect(card(page).locator("[data-state-chip]")).toHaveText("Détruit");
+    await expect(page.locator("[data-counts]")).toHaveText("0 actif · 1 terminé");
+    // Aucune entrée nouvelle : toujours un seul enregistrement.
+    expect((await rawDb(page)).count).toBe(1);
+  });
+
   test("bascule désactivée sur « Lien prêt » : aucune entrée, aucune bande ; /envois dit « désactivé » et propose de l'activer", async ({ page, shh, isMobile }) => {
     test.setTimeout(120_000);
     await sendShare(page, shh.origin + "/", { text: "Rien à garder", isMobile });

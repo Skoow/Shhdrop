@@ -6,6 +6,7 @@
   import { tick, untrack } from "svelte";
   import type { LinkState } from "../app/link";
   import { followLink, href } from "../app/router.svelte";
+  import { syncManaged, type ManagedResult } from "../history/live.svelte";
   import { formatClock, formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { LimitError, NotFoundError, destroyShare, shareStatus } from "../index";
@@ -28,6 +29,12 @@
 
   const got = untrack(() => take());
   let secret: string | null = got?.kind === "m" ? got.link : null;
+  // Historique local (test d'intrusion du 11 novembre) : relectures et destruction reportées
+  // sur l'entrée du même partage si elle existe (syncManaged : aucune entrée créée).
+  let managed = secret;
+  const sync = (r: ManagedResult) => {
+    if (managed !== null) void syncManaged(managed, r);
+  };
 
   type Status = { opensUsed: number; maxOpens: number; expiresInS: number; state: string };
   let status = $state.raw<Status | null>(null);
@@ -50,12 +57,16 @@
       readAt = Date.now();
       if (total === 0) total = s.expiresInS;
       status = s;
+      sync({ kind: "status", status: s });
       error = "";
       reads++;
       phase = "ready";
     } catch (e) {
       if (over()) return;
-      if (e instanceof NotFoundError || (e instanceof Error && e.message === "lien_invalide")) return gone();
+      if (e instanceof NotFoundError || (e instanceof Error && e.message === "lien_invalide")) {
+        if (e instanceof NotFoundError) sync({ kind: "missing" }); // lien mal formé : aucun partage désigné
+        return gone();
+      }
       if (e instanceof LimitError) {
         pausedUntil = Date.now() + e.retryAfterS * 1000;
         error = t("manage.limit", { duration: formatDuration(e.retryAfterS, lang) });
@@ -69,6 +80,7 @@
   let logo: Logo | undefined = $state();
   async function gone() {
     secret = null;
+    managed = null;
     phase = "gone";
     await tick();
     arrive(goneTitle);
@@ -90,6 +102,7 @@
         return;
       }
     }
+    sync({ kind: "destroyed" });
     // Après la réponse du serveur seulement (UI §7.4).
     if (card && typeof card.animate === "function") {
       await card.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 240, fill: "forwards" }).finished.catch(() => undefined);

@@ -196,7 +196,7 @@
                 {#if l.soon}
                   <span class="off">{l.label} <span class="soon">{t("foot.soon")}</span></span>
                 {:else if busy}
-                  <!-- Envoi en cours : lien désactivé (hors du clavier, sans effet au clic, CSS pointer-events). -->
+                  <!-- Envoi en cours : lien aria-disabled, raison lue (foot-busy), toujours atteignable au clavier (audit M22) ; clic et Entrée sans effet (preventDefault), pointeur neutralisé en CSS. -->
                   <a class="fl" href={l.url ?? href(l.path ?? "/")} {...off} onclick={(e) => e.preventDefault()}>{l.report && chrome.report ? t("content.report") : l.label}</a>
                 {:else if l.report && chrome.report}
                   <!-- Partage ouvert : la confirmation de signalement de CE partage (même action qu'avant). -->

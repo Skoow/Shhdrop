@@ -370,7 +370,7 @@
         {/if}
       </div>
       {#if s.pausing}<p class="why" role="status">{t("seal.pausing")}</p>{/if}
-      {#if phase === "upload" && !s.canPause && !s.pausing}<p id="pause-why" class="why">{t("seal.pause.refused")}</p>{/if}
+      {#if phase === "upload" && !s.canPause && !s.pausing}<p id="pause-why" class="why">{t("seal.pause.refused", { h: UPLOAD_WINDOW_MS / 3600_000 })}</p>{/if}
     {/if}
 
     <!-- « Gardez cet onglet ouvert » seulement tant que l'envoi tourne (faible de l'audit). -->

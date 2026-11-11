@@ -13,6 +13,8 @@ vi.mock("../index", async (orig) => ({
   shareStatus: (...a: unknown[]) => status(...a),
   destroyShare: (...a: unknown[]) => destroy(...a),
 }));
+const sync = vi.fn();
+vi.mock("../history/live.svelte", () => ({ syncManaged: (...a: unknown[]) => sync(...a) }));
 const { default: Manage } = await import("./Manage.svelte");
 
 const LINK = "https://x.test/#m" + "B".repeat(43);
@@ -34,6 +36,7 @@ afterEach(() => {
   vi.useRealTimers();
   status.mockReset();
   destroy.mockReset();
+  sync.mockReset();
 });
 const show = () => {
   app = mount(Manage as never, { target: document.body, props: { take: () => ({ kind: "m", link: LINK }) } }) as Record<string, unknown>;
@@ -76,5 +79,45 @@ describe("Manage", () => {
     late(S);
     await settle();
     expect(document.querySelector("h1")!.textContent).toBe("Supprimé");
+  });
+
+  it("historique local : relecture, destruction et partage absent reportés sur l'entrée du même lien", async () => {
+    status.mockResolvedValueOnce(S);
+    show();
+    await settle();
+    expect(sync).toHaveBeenLastCalledWith(LINK, { kind: "status", status: S });
+    destroy.mockResolvedValue(undefined);
+    button("Supprimer maintenant").click();
+    await settle();
+    [...document.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "Supprimer").at(-1)!.click();
+    await settle();
+    await new Promise((r) => setTimeout(r, 50));
+    await settle();
+    expect(sync).toHaveBeenLastCalledWith(LINK, { kind: "destroyed" });
+  });
+
+  it("historique local : partage introuvable à la relecture → « absent » ; échec réseau → rien", async () => {
+    status.mockRejectedValueOnce(new Error("reseau"));
+    show();
+    await settle();
+    expect(sync).not.toHaveBeenCalled();
+    const { NotFoundError } = await import("../index");
+    status.mockRejectedValueOnce(new NotFoundError());
+    button("Actualiser").click();
+    await settle();
+    expect(sync).toHaveBeenLastCalledWith(LINK, { kind: "missing" });
+  });
+
+  it("destruction refusée (réseau) : l'historique n'est pas touché", async () => {
+    status.mockResolvedValueOnce(S);
+    show();
+    await settle();
+    sync.mockReset();
+    destroy.mockRejectedValue(new Error("reseau"));
+    button("Supprimer maintenant").click();
+    await settle();
+    [...document.querySelectorAll("button")].filter((b) => b.textContent?.trim() === "Supprimer").at(-1)!.click();
+    await settle();
+    expect(sync).not.toHaveBeenCalled();
   });
 });

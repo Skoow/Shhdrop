@@ -4,6 +4,7 @@ import { en } from "./en";
 import { fr } from "./fr";
 import { formatBytes, formatDuration, formatRate, plural } from "./format";
 import { detectLang, getLang, LANGS, setLang, t } from "./i18n.svelte";
+import { UPLOAD_WINDOW_MS } from "../flows/send.svelte";
 
 const NNBSP = " ";
 
@@ -12,6 +13,20 @@ describe("dictionnaires", () => {
     expect(Object.keys(en).sort()).toEqual(Object.keys(fr).sort());
     for (const [k, v] of Object.entries(fr)) expect(v.trim(), `fr ${k}`).not.toBe("");
     for (const [k, v] of Object.entries(en)) expect(v.trim(), `en ${k}`).not.toBe("");
+  });
+
+  it("fenêtre d'envoi : durée tirée de UPLOAD_WINDOW_MS, jamais écrite en dur (test d'intrusion du 11 novembre)", () => {
+    const h = UPLOAD_WINDOW_MS / 3600_000;
+    for (const k of ["seal.pause.refused", "seal.tooSlow"] as const)
+      for (const [lang, d] of [["fr", fr], ["en", en]] as const) {
+        expect(d[k], `${lang} ${k}`).toContain("{h}");
+        expect(/\d/u.test(d[k]), `${lang} ${k}`).toBe(false);
+      }
+    setLang("fr");
+    expect(t("seal.pause.refused", { h })).toBe(`Pause impossible${NNBSP}: l'envoi doit finir avant la limite de 6${NNBSP}h.`);
+    setLang("en");
+    expect(t("seal.pause.refused", { h })).toBe("Can't pause: the upload must finish before the 6\u00a0h limit.");
+    setLang("fr");
   });
 
   it("aucune promesse plus forte que le modèle de menaces (spec §2, §18)", () => {

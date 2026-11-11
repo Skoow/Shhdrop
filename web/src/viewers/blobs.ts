@@ -4,9 +4,6 @@
 // à la fin (Terminer, destruction, sortie de page) ; une image l'est dès son chargement.
 import type { PreviewKind } from "../index";
 
-/** Images affichées automatiquement jusqu'à 20 Mio ; au-delà, sur demande (« Afficher »). */
-export const AUTO_IMAGE_MAX = 20 * 1048576;
-
 /**
  * Types sûrs par visionneuse. SVG absent : jamais affiché (scan de sécurité du 7 novembre),
  * comme HTML et XML. Un type de vidéo ou d'audio inconnu prend le type par défaut de la

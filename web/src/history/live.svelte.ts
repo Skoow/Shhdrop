@@ -5,8 +5,8 @@
 // relectures passent par `refreshShare` (poll.ts : visible, 5 min, gigue).
 import { getDemo } from "../app/demo-hooks";
 import { destroyShare, shareStatus } from "../index";
-import { pollHistory, type PollError, type Poller, type RefreshResult } from "./poll";
-import { idbBackend, memoryBackend, openHistory, type Backend, type History, type HistoryEntry, type NewEntry } from "./store";
+import { destroyedPatch, missingPatch, pollHistory, statusPatch, type PollError, type Poller, type RefreshResult, type Status } from "./poll";
+import { effectiveState, idbBackend, memoryBackend, openHistory, type Backend, type History, type HistoryEntry, type NewEntry } from "./store";
 
 export type ShareInfo = {
   busy?: boolean;
@@ -148,9 +148,40 @@ export async function setHistoryEnabled(v: boolean): Promise<void> {
 export async function markDestroyed(id: string): Promise<void> {
   const h = await store();
   if (!h) return;
-  const t = Date.now();
-  await h.update(id, { state: "gone", destroyedHere: true, endedAt: t, lastSeenAt: t }).catch(() => undefined);
+  await h.update(id, destroyedPatch(Date.now())).catch(() => undefined);
   await reload(h).catch(() => undefined);
+}
+
+export type ManagedResult = { kind: "status"; status: Status } | { kind: "missing" } | { kind: "destroyed" };
+/** Secret de gestion d'un lien `…#m<S_gestion>` (la base du chemin peut différer : démo). */
+const secretOf = (manage: string) => manage.slice(manage.lastIndexOf("#m"));
+
+/**
+ * Vue de gestion `#m…` (test d'intrusion du 11 novembre) : reporte une relecture ou une
+ * destruction sur l'entrée d'historique du même partage, si elle existe. Aucune requête,
+ * aucune entrée créée, et aucun historique créé s'il n'y en a pas encore (peek).
+ */
+export function syncManaged(manage: string, r: ManagedResult): Promise<void> {
+  // L'une après l'autre : une relecture encore en cours n'écrase pas une destruction qui suit.
+  return (syncing = syncing.then(() => syncOne(manage, r)));
+}
+let syncing: Promise<void> = Promise.resolve();
+async function syncOne(manage: string, r: ManagedResult): Promise<void> {
+  try {
+    const h = await peek();
+    if (!h || h === "absent") return;
+    const key = secretOf(manage);
+    const e = (await h.list()).find((x) => secretOf(x.manage) === key);
+    if (!e) return;
+    const t = Date.now();
+    const cur = effectiveState(e, t);
+    if (r.kind !== "destroyed" && (cur === "gone" || cur === "expired")) return; // fin déjà notée
+    await h.update(e.id, r.kind === "status" ? statusPatch(e, r.status, t) : r.kind === "missing" ? missingPatch(e, t) : destroyedPatch(t));
+    delete shares.info[e.id];
+    await reload(h);
+  } catch {
+    // Historique illisible : la vue de gestion marche sans lui.
+  }
 }
 
 function apply(id: string, r: RefreshResult): void {
