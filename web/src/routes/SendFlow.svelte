@@ -110,7 +110,11 @@
   }
 
   function start(state: SendState) {
-    if (sender && view !== "compose") return; // double envoi : un seul parcours à la fois
+    // Double envoi : un seul parcours à la fois. Le garde porte sur `sender` (posé tout de suite),
+    // pas sur `view` : l'écran change après la transition de vue, plus tard sous WebKit, et un
+    // second clic lançait alors une seconde finalisation (refusée, « transfert interrompu »).
+    // `sender` repasse à null à chaque retour au composeur (exit, reset, forget).
+    if (sender) return;
     note = "";
     const ids = state.ids;
     const d = draft;

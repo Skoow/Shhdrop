@@ -257,6 +257,30 @@ test.describe("fr-FR", () => {
     expect(m.creates()).toBe(1);
   });
 
+  test("double clic pendant le changement d'écran animé : une seule finalisation", async ({ page, shh }) => {
+    test.setTimeout(90_000);
+    // WebKit met l'écran à jour plus tard (View Transitions) : le second clic arrivait encore sur
+    // le composeur et lançait une seconde finalisation, refusée (404) → « transfert interrompu ».
+    // Reproduit partout : transition factice dont la mise à jour de l'écran n'arrive qu'après
+    // 300 ms (WebKit n'appelle le rappel qu'après avoir peint l'état d'avant), sans calque qui
+    // capterait le second clic.
+    await page.addInitScript(() => {
+      (document as Document & { startViewTransition: unknown }).startViewTransition = (cb: () => void) => {
+        const done = new Promise<void>((ok) => setTimeout(() => (cb(), ok()), 300));
+        return { finished: done, updateCallbackDone: done, ready: done, skipTransition() {} };
+      };
+    });
+    let finalizes = 0;
+    page.on("request", (r) => {
+      if (r.method() === "POST" && new URL(r.url()).pathname === "/api/shares/finalize") finalizes++;
+    });
+    await page.goto(shh.origin + "/");
+    await addText(page, "double");
+    await sendButton(page).dblclick();
+    await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
+    expect(finalizes).toBe(1);
+  });
+
   test("partage disparu pendant l'envoi (404 aux PUT) → « Le transfert a été interrompu »", async ({ page, shh }) => {
     test.setTimeout(90_000);
     await page.goto(shh.origin + "/");
