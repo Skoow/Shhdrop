@@ -2,7 +2,7 @@
 //! exactement la même chose (vecteurs communs) : l'ordre des étapes fait partie du format.
 //!
 //! **Texte** (`nettoyer_texte`) : 1. NFC ; 2. retrait des caractères « étiquette » U+E0000–E007F (sauf
-//! dans un drapeau d'émoji : U+1F3F4, étiquettes U+E0020–E007E, U+E007F) et des contrôles (C0, DEL, C1, `\t` et `\r`
+//! dans un drapeau de la liste emoji 15.0 : U+1F3F4, étiquettes U+E0020–E007E, U+E007F) et des contrôles (C0, DEL, C1, `\t` et `\r`
 //! compris, sauf `\n`) et des inversions de sens U+202A–U+202E et U+2066–U+2069 ; 3. NFC de
 //! nouveau (un caractère retiré entre une lettre et son accent ne doit pas empêcher la
 //! composition ; sans effet sinon) ; 4. comptage : 1 à 2 000 graphèmes (UAX #29, `unicode-segmentation`)
@@ -49,7 +49,9 @@ fn est_inversion_de_sens(c: char) -> bool {
 
 /// Retire les caractères « étiquette » U+E0000–U+E007F (texte caché invisible), sauf dans une
 /// séquence de drapeau d'émoji : U+1F3F4, puis une ou plusieurs étiquettes U+E0020–U+E007E, puis
-/// U+E007F. Seule la structure est vérifiée (la liste des drapeaux est celle de l'émetteur).
+/// U+E007F **et** que la séquence entière est dans la liste des émojis « fully-qualified »
+/// d'Unicode 15.0 (`EMOJIS` : Angleterre, Écosse, Pays de Galles). Sinon les étiquettes sont retirées
+/// et le drapeau noir reste : aucun texte ne peut se cacher dans une séquence de drapeau.
 fn retirer_etiquettes(s: &str) -> String {
     let v: Vec<char> = s.chars().collect();
     let est_etiquette = |c: char| ('\u{E0020}'..='\u{E007E}').contains(&c);
@@ -62,7 +64,10 @@ fn retirer_etiquettes(s: &str) -> String {
             while j < v.len() && est_etiquette(v[j]) {
                 j += 1;
             }
-            if j > i + 1 && v.get(j) == Some(&'\u{E007F}') {
+            if j > i + 1
+                && v.get(j) == Some(&'\u{E007F}')
+                && crate::emoji::dans_la_liste(&v[i..=j].iter().collect::<String>())
+            {
                 out.extend(&v[i..=j]);
                 i = j + 1;
                 continue;
@@ -673,6 +678,37 @@ mod tests {
             nettoyer_texte(&format!("{ecosse}\u{E0068}")).unwrap(),
             ecosse
         );
+        // Angleterre et Pays de Galles : gardés (dans la liste emoji 15.0)
+        for sub in ["gbeng", "gbwls"] {
+            let d: String = sub
+                .chars()
+                .map(|c| char::from_u32(0xE0000 + c as u32).unwrap())
+                .collect();
+            let f = format!("🏴{d}\u{E007F}");
+            assert_eq!(nettoyer_texte(&f).unwrap(), f, "{sub}");
+        }
+        // structure valide mais hors de la liste : étiquettes retirées, le drapeau noir reste
+        let tags = |s: &str| -> String {
+            s.chars()
+                .map(|c| char::from_u32(0xE0000 + c as u32).unwrap())
+                .collect()
+        };
+        assert_eq!(
+            nettoyer_texte(&format!("🏴{}\u{E007F}", tags("hello"))).unwrap(),
+            "🏴"
+        );
+        assert_eq!(
+            nettoyer_texte(&format!("🏴{}\u{E007F}", tags(&"a".repeat(100)))).unwrap(),
+            "🏴"
+        );
+        assert_eq!(
+            nettoyer_texte(&format!("x🏴{}\u{E007F}y", tags("gbxxx"))).unwrap(),
+            "x🏴y"
+        );
+        assert_eq!(
+            nettoyer_texte(&format!("🏴{}", tags("gbsct"))).unwrap(),
+            "🏴"
+        ); // non terminée
         // LRM et RLM restent
         assert_eq!(
             nettoyer_texte("a\u{200E}b\u{200F}").unwrap(),
