@@ -265,7 +265,7 @@ test.describe("fr-FR", () => {
     // 300 ms (WebKit n'appelle le rappel qu'après avoir peint l'état d'avant), sans calque qui
     // capterait le second clic.
     await page.addInitScript(() => {
-      (document as Document & { startViewTransition: unknown }).startViewTransition = (cb: () => void) => {
+      (document as unknown as Record<string, unknown>).startViewTransition = (cb: () => void) => {
         const done = new Promise<void>((ok) => setTimeout(() => (cb(), ok()), 300));
         return { finished: done, updateCallbackDone: done, ready: done, skipTransition() {} };
       };
