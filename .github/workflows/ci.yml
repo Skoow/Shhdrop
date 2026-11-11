@@ -118,6 +118,8 @@ jobs:
       - uses: ./.github/actions/engine-toolchain
       - run: cd web && npm ci --ignore-scripts
       - run: cd web && npx playwright install --with-deps chromium webkit
+        # Miroir apt bloqué (11 novembre : 2 h d'attente) : échec rapide plutôt que blocage.
+        timeout-minutes: 15
       - run: make test-ui
       - name: Captures
         if: always()
