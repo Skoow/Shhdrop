@@ -68,8 +68,8 @@ Aucune adresse IP sur disque ; comparaisons de secrets en temps constant ; 5 ess
 
 ## 6. Décisions du propriétaire (11 novembre, réponse au rapport)
 
-1. Vignette EXIF des photos : retirée (inchangé).
-2. PDF : informations du document (Info, XMP) retirées comme pour les autres fichiers ; rien n'est modifié à l'intérieur (pages, images intégrées, polices). Miniatures de pages (/Thumb) : retirées, comme la vignette EXIF (aperçu généré qui peut montrer une ancienne version) — choix signalé au propriétaire, réversible.
+1. Photos : la vignette est GARDÉE, y compris la vignette EXIF des téléphones (correction du propriétaire, même jour) ; le reste des métadonnées (position, appareil, dates…) est retiré.
+2. PDF : seules les informations visibles dans les propriétés du fichier sont retirées (dictionnaire Info et sa copie XMP) ; rien d'autre n'est modifié à l'intérieur : pages, images intégrées, polices, miniatures de pages (/Thumb) (correction du propriétaire, même jour).
 3. Option « copie chiffrée dans l'app du destinataire » : retirée de l'interface pour l'instant.
 4. Quota à minuit : corrigé.
 5. Blancs ASCII en début et fin du mot de passe : retirés dans le moteur avant le calcul (site et apps identiques).
