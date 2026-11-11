@@ -164,13 +164,24 @@ export function bucketFor(dataEnd: number): number {
   throw new Error("trop_gros");
 }
 
-export function segmentCount(bucket: number): number {
-  return Math.ceil(bucket / SEG_CHUNKS);
+/** Palier ou numéro de segment : entier de 0 à 2^32 − 1 (u32 du moteur), sinon taille_invalide. */
+function u32(x: number): number {
+  if (!Number.isSafeInteger(x) || x < 0 || x > 0xffff_ffff) throw new Error("taille_invalide");
+  return x === 0 ? 0 : x; // −0 → 0, comme le moteur
 }
 
+/** Segments d'un palier ; taille_invalide hors des entiers de 0 à 2^32 − 1 (comme le moteur). */
+export function segmentCount(bucket: number): number {
+  return Math.ceil(u32(bucket) / SEG_CHUNKS);
+}
+
+/** Octets chiffrés du segment `n` (en-tête compris pour le segment 0) ; taille_invalide, segment_invalide hors du palier. */
 export function segmentSize(bucket: number, n: number): number {
-  const chunks = Math.min(SEG_CHUNKS, bucket - n * SEG_CHUNKS);
-  return (n === 0 ? HEADER : 0) + chunks * CHUNK_CT;
+  const b = u32(bucket);
+  const k = u32(n);
+  if (k >= segmentCount(b)) throw new Error("segment_invalide");
+  const chunks = Math.min(SEG_CHUNKS, b - k * SEG_CHUNKS);
+  return (k === 0 ? HEADER : 0) + chunks * CHUNK_CT;
 }
 
 /** Clair d'un segment de transport : 64 morceaux de 64 Kio (4 Mio). */

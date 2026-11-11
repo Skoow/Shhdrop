@@ -55,8 +55,10 @@ pub enum Error {
     Vide,
     /// Manifeste de plus de MANIFEST_MAX octets, ou de plus de MAX_ITEMS éléments.
     ManifesteTropGros,
-    /// Note de plus de 4 × TEXT_MAX octets UTF-8.
+    /// Note de plus de 4 × TEXT_MAX octets UTF-8, ou de plus de TEXT_MAX points de code.
     TexteTropLong,
+    /// Note qui n'est pas de l'UTF-8 strict, ou dont le scelleur n'a pas chiffré le texte.
+    TexteInvalide,
     /// Deux éléments gardés qui partagent un morceau.
     Chevauchement,
     /// K_contenu qui a déjà chiffré un manifeste : une finalisation tire une R neuve.
@@ -96,6 +98,7 @@ impl Error {
             Error::Vide => "vide",
             Error::ManifesteTropGros => "manifeste_trop_gros",
             Error::TexteTropLong => "texte_trop_long",
+            Error::TexteInvalide => "texte_invalide",
             Error::Chevauchement => "chevauchement",
             Error::CleDejaUtilisee => "cle_deja_utilisee",
             Error::ElementInexistant => "element_inexistant",
@@ -159,6 +162,7 @@ mod tests {
         assert_eq!(Error::Vide.to_string(), "vide");
         assert_eq!(Error::ManifesteTropGros.to_string(), "manifeste_trop_gros");
         assert_eq!(Error::TexteTropLong.to_string(), "texte_trop_long");
+        assert_eq!(Error::TexteInvalide.to_string(), "texte_invalide");
         assert_eq!(Error::Chevauchement.to_string(), "chevauchement");
         assert_eq!(Error::CleDejaUtilisee.to_string(), "cle_deja_utilisee");
         assert_eq!(Error::ElementInexistant.to_string(), "element_inexistant");

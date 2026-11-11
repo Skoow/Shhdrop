@@ -809,3 +809,53 @@ fn debug_sans_secret() {
     let dbg = format!("{e:?}");
     assert!(!dbg.contains("secret-nom") && !dbg.contains("171"), "{dbg}");
 }
+
+/// Audit M6 : une note que le lecteur refuserait (plus de TEXT_MAX points de code, octets non
+/// UTF-8) est refusée au scellement, avant le manifeste ; les notes limites passent.
+#[test]
+fn note_verifiee_au_scellement() {
+    use shhdrop_core::format::{TEXT_BYTES_MAX, TEXT_MAX};
+    let p = platform(7);
+    let note = |raw: &[u8]| {
+        let (el, _) = upload(&p, raw, 0);
+        FinalEntry::note(&el, "n".into(), "text/plain".into()).map(|e| (e, el))
+    };
+    // Acceptées : vide, 100 000 points de code ASCII, 100 000 points de code de 4 octets
+    // (400 000 octets), BOM initial.
+    for raw in [
+        Vec::new(),
+        vec![b'a'; TEXT_MAX],
+        "😀".repeat(TEXT_MAX).into_bytes(),
+        "\u{feff}é".as_bytes().to_vec(),
+    ] {
+        let (e, el) = note(&raw).unwrap();
+        assert_eq!(
+            (e.size, e.first, e.kind),
+            (raw.len() as u64, 0, FinalKind::Text)
+        );
+        assert_eq!(*e.k, *el.k());
+        let fin = block_on(seal_final(&[e], &keys(&p), None, None)).unwrap();
+        assert_eq!(fin.tail.len(), CHUNK_CT);
+    }
+    // Refusées : un point de code de trop, octets non UTF-8, demi-paire UTF-16 codée en UTF-8.
+    assert_eq!(
+        note(&vec![b'a'; TEXT_MAX + 1]).err(),
+        Some(Error::TexteTropLong)
+    );
+    assert_eq!(note(b"ab\xffcd").err(), Some(Error::TexteInvalide));
+    assert_eq!(note(b"\xed\xa0\x80").err(), Some(Error::TexteInvalide));
+    assert_eq!(note(b"\xc3").err(), Some(Error::TexteInvalide));
+    // Plus de TEXT_BYTES_MAX octets : refusée sans rien lire.
+    let big = sealer(&p, TEXT_BYTES_MAX + 1, 0).unwrap();
+    assert_eq!(big.check_note(), Err(Error::TexteTropLong));
+    // Pièce pas encore chiffrée, ou lue de mauvaise taille : le moteur n'a pas vu le texte.
+    let el = sealer(&p, 3, 0).unwrap();
+    assert_eq!(el.check_note(), Err(Error::TexteInvalide));
+    assert_eq!(block_on(el.piece(0, b"ab")), Err(Error::LectureIncomplete));
+    assert_eq!(el.check_note(), Err(Error::TexteInvalide));
+    // Un fichier n'est pas vérifié : octets libres.
+    let (el, _) = upload(&p, b"\xff\xfe", 0);
+    let f = FinalEntry::file(&el, None, "f".into(), "x/y".into());
+    assert_eq!((f.size, f.first, f.kind), (2, 0, FinalKind::File(None)));
+    assert!(block_on(seal_final(&[f], &keys(&p), None, None)).is_ok());
+}

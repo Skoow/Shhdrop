@@ -16,7 +16,7 @@
 import { passwordKey as kdfOpen, passwordKeyForCreate as kdfCreate } from "./argon2";
 import { loadEngine, resetEngine, type Engine } from "./load";
 import type { JsAccessKeys, JsContentKeys, JsElementSealer, JsReader, JsSeed } from "./pkg/shhdrop_wasm.js";
-import { type KAcces, type KdfParams, type KeepTtl, type KLien, type KMdp, type KPreuve, type Manifest, type ManifestClean, type Piece, type Rights, type SGestion, utf8 } from "./pure";
+import { type KAcces, type KdfParams, type KeepTtl, type KLien, type KMdp, type KPreuve, type Manifest, type ManifestClean, type Piece, PREVIEW_MAX, type Rights, type SGestion, utf8 } from "./pure";
 
 export * from "./pure";
 export { loadEngine } from "./load";
@@ -224,6 +224,37 @@ export type ContainerReader = {
 };
 
 /**
+ * Copie de l'élément i pour l'aperçu, assemblée en JavaScript à partir de streamItem : la copie
+ * entière n'existe qu'une fois (jamais aussi dans la mémoire du moteur, qui ne garde pas ses
+ * pages). Mêmes refus que le lecteur : element_inexistant, trop_gros_pour_apercu au-delà de
+ * PREVIEW_MAX (fichier) ou si la mémoire est refusée, paquet_corrompu.
+ */
+async function collect(rd: JsReader, manifest: Manifest, i: number): Promise<Uint8Array<ArrayBuffer>> {
+  const e = Number.isInteger(i) ? manifest.items[i] : undefined;
+  if (e?.kind === "file" && e.size > PREVIEW_MAX) throw new Error("trop_gros_pour_apercu");
+  let out: Uint8Array<ArrayBuffer>;
+  try {
+    out = new Uint8Array(e?.size ?? 0);
+  } catch {
+    throw new Error("trop_gros_pour_apercu");
+  }
+  let at = 0;
+  try {
+    await rd.streamItem(i, (c: Uint8Array) => {
+      if (c.length > out.length - at) throw corrupt();
+      out.set(c, at);
+      at += c.length;
+      c.fill(0); // tranche donnée au puits (morceau entier : le tampon de WebCrypto lui-même)
+    });
+    if (at !== out.length) throw corrupt();
+    return out;
+  } catch (x) {
+    out.fill(0);
+    throw x;
+  }
+}
+
+/**
  * Ouvre un paquet en flux (`keys` : contentKeysChecked) : en-tête, engagement, palier et
  * manifeste vérifiés par le moteur. Les rejets de `fetchSegment` et de `sink` sont rendus tels
  * quels ; un défaut du paquet est paquet_corrompu.
@@ -237,7 +268,7 @@ export async function openStream(fetchSegment: (n: number) => Promise<Uint8Array
   };
   return {
     manifest,
-    item: (i) => call(() => (alive(), rd.item(i) as Promise<Uint8Array<ArrayBuffer>>), openFault),
+    item: (i) => call(() => (alive(), collect(rd, manifest, i)), openFault),
     streamItem: (i, sink) => call(() => (alive(), rd.streamItem(i, sink as (c: Uint8Array) => Promise<void> | void)), openFault),
     wipe: () => {
       if (freed) return;

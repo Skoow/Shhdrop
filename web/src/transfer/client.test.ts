@@ -8,7 +8,7 @@ const GRANT0 = "G".repeat(54);
 // Copies JavaScript des secrets que le client tient (K_lien, S_gestion, K_accès, K_mdp, K_preuve,
 // aléa) : le test vérifie qu'elles sont mises à zéro. K_contenu, K_env, R et les graines des
 // éléments restent dans le moteur (poignées opaques) : aucune copie JavaScript à effacer.
-const captured = vi.hoisted(() => ({ buffers: [] as Uint8Array<ArrayBuffer>[], kMdp: [] as Uint8Array<ArrayBuffer>[] }));
+const captured = vi.hoisted(() => ({ buffers: [] as Uint8Array<ArrayBuffer>[], kMdp: [] as Uint8Array<ArrayBuffer>[], kLien: [] as Uint8Array[], ids: [] as Uint8Array[] }));
 // Fournisseur WebCrypto : les tirages de 32 octets (graine R, graine k d'un élément) et les clés
 // brutes passées à aesImport (K_contenu, K_env, clé d'un élément) sont des copies JavaScript que
 // le moteur efface après usage : capturées aussi.
@@ -51,6 +51,16 @@ vi.mock("../engine", async (orig) => {
       const b = m.newSGestion();
       captured.buffers.push(b);
       return b;
+    },
+    parseLink: async (...a: Parameters<typeof m.parseLink>) => {
+      const r = await m.parseLink(...a);
+      if (r.kind === "s") captured.kLien.push(r.kLien);
+      return r;
+    },
+    shareId: async (k: import("../engine").KLien) => {
+      const r = await m.shareId(k);
+      captured.ids.push(r);
+      return r;
     },
     deriveAccess: async (k: import("../engine").KLien) => {
       const r = await m.deriveAccess(k);
@@ -284,6 +294,23 @@ describe("openShare : correspondance des erreurs", () => {
     expect(await reject(openShare(LINK, "", ORIGIN, undefined, s.net))).toEqual(new Error("mot_de_passe_requis"));
     expect(s.calls).toEqual([]);
     expect(captured.buffers.length).toBe(before); // aucune dérivation de clé non plus
+  });
+  it("mot de passe vide ou fait de blancs : K_lien effacée quand même (audit F3)", async () => {
+    for (const pw of ["", " ", "\t\r\n "]) {
+      const s = server(() => undefined);
+      const n = captured.kLien.length;
+      expect(await reject(openShare(LINK, pw, ORIGIN, undefined, s.net)), JSON.stringify(pw)).toEqual(new Error("mot_de_passe_requis"));
+      expect(s.calls).toEqual([]);
+      expect(captured.kLien.length).toBe(n + 1);
+      expect(captured.kLien.at(-1)!.every((b) => b === 0)).toBe(true);
+    }
+  });
+  it("échec au premier appel au serveur : K_lien et id effacés (audit F3)", async () => {
+    const s = server(() => j(404, { error: "not_found" }));
+    expect(await reject(openShare(LINK, PW, ORIGIN, undefined, s.net))).toBeInstanceOf(NotFoundError);
+    expect(captured.kLien.at(-1)!.every((b) => b === 0)).toBe(true);
+    expect(captured.ids.at(-1)!.length).toBe(16);
+    expect(captured.ids.at(-1)!.every((b) => b === 0)).toBe(true);
   });
 });
 

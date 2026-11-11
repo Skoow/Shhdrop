@@ -1,5 +1,6 @@
 //! Dérivations (spec §29.2 du site) : HKDF-SHA-256 à sel vide, SHA-256, K_accès et V_accès,
-//! K_mdp = Argon2id (v0x13, 3 passes, 64 Mio, 1 fil, 32 octets) sur le mot de passe NFC.
+//! K_mdp = Argon2id (v0x13, 3 passes, 64 Mio, 1 fil, 32 octets) sur le mot de passe NFC, sans
+//! ses blancs ASCII de bord.
 //! Remplace `web/src/crypto/kdf.ts`, avec les mêmes messages d'erreur.
 use crate::error::{Error, Result};
 use crate::keys::{KAcces, KLien, KMdp};
@@ -98,11 +99,21 @@ pub fn argon2id(pw: &[u8], salt: &[u8], ops: u32, mem: u32) -> Result<Zeroizing<
     Ok(out)
 }
 
+/// Blancs ASCII retirés en début et en fin du mot de passe saisi (décision du propriétaire du
+/// 11 novembre, D42-21) : espace, tabulation, retour chariot, saut de ligne. Un mot de passe
+/// collé avec un blanc en bord n'est pas un essai raté. Les blancs intérieurs et les blancs non
+/// ASCII (espace insécable…) sont gardés ; un mot de passe généré n'en a aucun.
+pub fn trim_password(pw: &str) -> &str {
+    pw.trim_matches([' ', '\t', '\r', '\n'])
+}
+
 /// K_mdp = Argon2id(mot de passe NFC, sel) pour OUVRIR un partage (paramètres lus sur le
-/// serveur, bornés par `check_kdf_params`). Tout mot de passe non vide est accepté : il a été
-/// choisi à la création.
+/// serveur, bornés par `check_kdf_params`). Blancs ASCII en bord retirés d'abord
+/// ([`trim_password`]), puis tout mot de passe non vide est accepté : il a été choisi à la
+/// création.
 pub fn password_key(pw: &str, salt: &[u8], ops: u32, mem: u32) -> Result<KMdp> {
     use unicode_normalization::UnicodeNormalization;
+    let pw = trim_password(pw);
     if pw.is_empty() {
         return Err(Error::MotDePasseVide);
     }
@@ -279,6 +290,33 @@ mod tests {
         assert_eq!(
             err(pk("", &[0; 3], KdfParams { ops: 0, mem: 0 })),
             "mot_de_passe_vide"
+        );
+    }
+
+    /// Décision du propriétaire (11 novembre) : un mot de passe collé avec un blanc ASCII en
+    /// bord (espace, tabulation, retour chariot, saut de ligne) donne la même clé que sans.
+    #[test]
+    fn password_key_ignore_les_blancs_ascii_en_bord() {
+        let k = pk("aC3!cD5?#Fg", &SALT, KDF_MIN).unwrap();
+        for pw in [" aC3!cD5?#Fg", "aC3!cD5?#Fg\n", "\t aC3!cD5?#Fg \r\n"] {
+            assert_eq!(pk(pw, &SALT, KDF_MIN).unwrap(), k, "{pw:?}");
+        }
+        // Blancs intérieurs, blancs non ASCII (espace insécable, espace fine) : gardés.
+        for pw in ["aC3! cD5?#Fg", "\u{a0}aC3!cD5?#Fg", "aC3!cD5?#Fg\u{202f}"] {
+            assert_ne!(pk(pw, &SALT, KDF_MIN).unwrap(), k, "{pw:?}");
+        }
+        // Rien que des blancs : même refus que le vide, avant le sel et les paramètres.
+        for pw in [" ", "\n", " \t\r\n "] {
+            assert_eq!(
+                err(pk(pw, &[0; 3], KdfParams { ops: 0, mem: 0 })),
+                "mot_de_passe_vide",
+                "{pw:?}"
+            );
+        }
+        // Création : la forme exacte reste exigée (un mot de passe généré n'a aucun blanc).
+        assert_eq!(
+            err(password_key_for_create(" aC3!cD5?#Fg", &SALT)),
+            "mot_de_passe_non_genere"
         );
     }
 

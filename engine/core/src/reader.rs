@@ -146,6 +146,32 @@ impl<S: Segments> Source<S> {
     }
 }
 
+/// Attend tous les futurs ensemble (aucune dépendance à un exécuteur) et rend leurs résultats
+/// dans l'ordre. Chaque futur est sondé jusqu'à sa fin, jamais après ; tous vont à leur terme
+/// (un échec n'en abandonne aucun en cours).
+async fn join_all<F: Future>(fs: impl IntoIterator<Item = F>) -> Vec<F::Output> {
+    let mut fs: Vec<Pin<Box<F>>> = fs.into_iter().map(Box::pin).collect();
+    let mut out: Vec<Option<F::Output>> = fs.iter().map(|_| None).collect();
+    core::future::poll_fn(|cx| {
+        let mut pending = false;
+        for (f, o) in fs.iter_mut().zip(out.iter_mut()) {
+            if o.is_none() {
+                match f.as_mut().poll(cx) {
+                    Poll::Ready(v) => *o = Some(v),
+                    Poll::Pending => pending = true,
+                }
+            }
+        }
+        if pending {
+            Poll::Pending
+        } else {
+            Poll::Ready(())
+        }
+    })
+    .await;
+    out.into_iter().flatten().collect()
+}
+
 /// Tranche du clair livrée par [`Reader::stream_parts`] : texte d'une note, ou `len` octets
 /// du lot `batch` à partir de `at` (dans un seul morceau).
 pub enum Part<'a, O> {
@@ -218,12 +244,21 @@ impl<P: Platform, S: Segments> Reader<P, S> {
             return Err(Error::PaquetCorrompu);
         }
 
-        // 4. Clés des éléments ; ancien format (sans `k`) refusé.
-        let mut el_keys = Vec::with_capacity(manifest.items.len());
+        // 4. Clés des éléments ; ancien format (sans `k`) refusé avant tout import. Les imports
+        //    (jusqu'à MAX_ITEMS, asynchrones chez le fournisseur) sont lancés ensemble ; en cas
+        //    d'échec, les clés déjà importées sont oubliées à leur destruction.
+        let mut seeds = Vec::with_capacity(manifest.items.len());
         for e in &manifest.items {
-            let k = e.k.as_ref().ok_or(Error::PaquetCorrompu)?;
-            el_keys.push(Key::import(p, hkdf::<32>(&**k, "shhdrop/v2/element")).await?);
+            seeds.push(e.k.as_ref().ok_or(Error::PaquetCorrompu)?);
         }
+        let el_keys = join_all(
+            seeds
+                .into_iter()
+                .map(|k| Key::import(p, hkdf::<32>(&**k, "shhdrop/v2/element"))),
+        )
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>>>()?;
 
         // 5. Notes : texte déchiffré et authentifié dès l'ouverture.
         for (e, key) in manifest.items.iter_mut().zip(&el_keys) {

@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { handle, type KdfJob, type KdfReply } from "./argon2.worker";
 import { WORKER_TIMEOUT_MS, passwordKey, passwordKeyForCreate } from "./argon2";
+import { openStream } from "./index";
 import { loadEngine, type Engine, type Wasm } from "./load";
 import type { FinalEntry } from "./pkg/shhdrop_wasm.js";
 import { createProvider, type WebCryptoProvider } from "./provider";
@@ -518,8 +519,11 @@ describe("vecteurs v2.json, moteur WebAssembly et fournisseur WebCrypto", () => 
     const want = { ...sh.opened.manifest, items: sh.opened.manifest.items.map(({ k: _k, ...e }: { k?: string }) => e) };
     expect(rd.manifest()).toEqual(want);
     expect(rd.manifest().items.some((e) => "k" in e)).toBe(false);
+    // Aperçu (item) : assemblé par la couche TypeScript à partir de streamItem (le moteur ne
+    // garde plus de copie entière d'un élément).
+    const tr = await openStream(async (n: number) => segs[n] ?? new Uint8Array(), sh.bucket, ck);
     for (const [i, w] of sh.opened.items.entries()) {
-      const got = await rd.item(i);
+      const got = await tr.item(i);
       expect(got.length).toBe(w.len);
       expect(sha(got)).toBe(w.sha256);
       expect(hex(got) === hex(plains[i]!), `élément ${i}`).toBe(true);
@@ -531,6 +535,7 @@ describe("vecteurs v2.json, moteur WebAssembly et fournisseur WebCrypto", () => 
     const held = t.real.held();
     expect(held).toBeGreaterThan(0);
     rd.free();
+    tr.free();
     ck.free();
     ak.free();
     expect(t.real.held(), "toutes les clés oubliées").toBe(0);
@@ -661,6 +666,8 @@ describe("fournisseur WebCrypto et frontières du moteur", () => {
     expect(await errorOf(() => W.contentKeysChecked(seed, keys.engagement)), "R neuve : pas de clés d'ouverture").toBe("cle_deja_utilisee");
     const el0 = await W.elementSealer(testProvider([new Uint8Array(32)]).p, 1, 0);
     const entry: FinalEntry[] = [{ kind: "text", name: "n", mime: "text/plain", size: 1, first: 0, sealer: el0.id }];
+    expect(await errorOf(() => W.sealFinal(entry, keys, undefined, undefined)), "note pas encore chiffrée (audit M6)").toBe("texte_invalide");
+    await el0.piece(0, utf8("a"));
     await W.sealFinal(entry, keys, undefined, undefined);
     expect(await errorOf(() => W.sealFinal(entry, keys, undefined, undefined)), "un seul manifeste").toBe("cle_deja_utilisee");
     // R déballée : seulement contentKeysChecked, et ces clés ne chiffrent pas de manifeste.
@@ -749,20 +756,106 @@ describe("fournisseur WebCrypto et frontières du moteur", () => {
     expect(await W.openReader(ck, () => { throw net; }, bucket).catch((e: unknown) => e)).toBe(net);
     expect(await errorOf(() => W.openReader(ck, async () => new Uint8Array(10), bucket))).toBe("paquet_corrompu");
     let fail = false;
-    const rd = await W.openReader(ck, async () => {
+    const fetch = async () => {
       if (fail) throw net;
       return seg;
-    }, bucket);
+    };
+    const rd = await W.openReader(ck, fetch, bucket);
+    const tr = await openStream(fetch, bucket, ck);
     expect(rd.manifest().items[0]!.text).toBe("salut");
     const sinkErr = new Error("disque plein");
     expect(await rd.streamItem(0, async () => { throw sinkErr; }).catch((e: unknown) => e)).toBe(sinkErr);
     rd.wipe();
-    expect(new TextDecoder().decode(await rd.item(0))).toBe("salut");
-    expect(await errorOf(() => rd.item(1))).toBe("element_inexistant");
-    expect(await errorOf(() => rd.item(0.5))).toBe("element_inexistant");
+    expect("item" in rd, "aperçu retiré de la liaison (audit : jusqu'à 200 Mio dans le moteur)").toBe(false);
+    expect(new TextDecoder().decode(await tr.item(0))).toBe("salut");
+    for (const i of [1, 0.5, -1, NaN]) expect(await errorOf(() => tr.item(i)), String(i)).toBe("element_inexistant");
     fail = true;
-    expect(await rd.item(0).then(() => "réussi")).toBe("réussi"); // une note ne relit rien
+    expect(await tr.item(0).then(() => "réussi")).toBe("réussi"); // une note ne relit rien
     expect(await errorOf(() => W.openReader(ck, async () => seg, 17))).toBe("paquet_corrompu");
+  });
+
+  it("ouverture : clés des éléments importées ensemble ; un import refusé n'en laisse aucune chez le fournisseur", async () => {
+    const real = createProvider();
+    let armed = false;
+    let failAt = -1;
+    let n = 0;
+    let waiting = 0;
+    let most = 0;
+    const slow: WebCryptoProvider = {
+      ...real,
+      async aesImport(raw: Uint8Array) {
+        if (!armed) return real.aesImport(raw);
+        const i = n++;
+        waiting++;
+        most = Math.max(most, waiting);
+        await new Promise((r) => setTimeout(r, 5));
+        waiting--;
+        if (i === failAt) {
+          raw.fill(0);
+          throw new Error("import refusé");
+        }
+        return real.aesImport(raw);
+      },
+    };
+    const notes = ["un", "deux", "trois"].map(utf8);
+    const els = [];
+    for (const [i, note] of notes.entries()) {
+      const el = await W.elementSealer(slow, note.length, i);
+      els.push({ el, piece: await el.piece(0, note) });
+    }
+    const seed = W.newSeed(slow);
+    const keys = await W.contentKeys(seed);
+    const fin = await W.sealFinal(els.map(({ el }, i) => ({ kind: "text", name: `n${i}`, mime: "text/plain", size: notes[i]!.length, first: i, sealer: el.id })), keys, undefined, undefined);
+    const seg = new Uint8Array(W.segmentSize(fin.bucket, 0));
+    for (const [i, { piece }] of els.entries()) seg.set(piece, i === 0 ? 0 : 48 + i * 65552);
+    seg.set(fin.header, 0);
+    seg.set(fin.tail, seg.length - fin.tail.length);
+    const ak = await W.accessKeys(slow, new Uint8Array(32), new Uint8Array(32));
+    const e = await W.seal(ak, seed, new Uint8Array(16), fin.header);
+    const ck = await W.contentKeysChecked(await W.open(ak, e, new Uint8Array(16), fin.header), keys.engagement);
+    for (const x of els) x.el.free();
+    keys.free();
+    ak.free();
+    const base = real.held(); // K_contenu de ck
+    armed = true;
+    const rd = await W.openReader(ck, async () => seg, fin.bucket);
+    expect(rd.manifest().items.map((x) => x.text)).toEqual(["un", "deux", "trois"]);
+    expect(most, "trois imports en attente en même temps").toBe(3);
+    expect(real.held()).toBe(base + 3);
+    rd.free();
+    expect(real.held()).toBe(base);
+    // Deuxième import refusé : paquet_corrompu, et les deux autres clés sont oubliées.
+    n = 0;
+    failAt = 1;
+    expect(await errorOf(() => W.openReader(ck, async () => seg, fin.bucket))).toBe("chiffrement_echec");
+    expect(real.held()).toBe(base);
+    ck.free();
+    expect(real.held()).toBe(0);
+  });
+
+  it("aperçu (item, couche TypeScript) : fichier de plus de PREVIEW_MAX refusé sans rien télécharger", async () => {
+    const t = testProvider([new Uint8Array(32).fill(1), new Uint8Array(32).fill(2), new Uint8Array(12)]);
+    const el = await W.elementSealer(t.p, 0, 0);
+    const seed = W.newSeed(t.p);
+    const keys = await W.contentKeys(seed);
+    const size = 200 * 1048576 + 1;
+    const fin = await W.sealFinal([{ kind: "file", name: "f", mime: "x/y", size, first: 0, sealer: el.id }], keys, undefined, undefined);
+    const last = W.segmentCount(fin.bucket) - 1;
+    const ak = await W.accessKeys(t.p, new Uint8Array(32), new Uint8Array(32));
+    const e = await W.seal(ak, seed, new Uint8Array(16), fin.header);
+    const ck = await W.contentKeysChecked(await W.open(ak, e, new Uint8Array(16), fin.header), keys.engagement);
+    const fetched: number[] = [];
+    const rd = await openStream(async (n: number) => {
+      fetched.push(n);
+      const s = new Uint8Array(W.segmentSize(fin.bucket, n));
+      if (n === 0) s.set(fin.header, 0);
+      if (n === last) s.set(fin.tail, s.length - fin.tail.length);
+      return s;
+    }, fin.bucket, ck);
+    expect(fetched).toEqual([0, last]);
+    expect(await errorOf(() => rd.item(0))).toBe("trop_gros_pour_apercu");
+    expect(fetched).toEqual([0, last]);
+    rd.free();
   });
 
   it("lots sans copie superflue : tampon d'entrée effacé ; flux, morceaux entiers donnés tels quels, le reste effacé", async () => {
@@ -810,7 +903,9 @@ describe("fournisseur WebCrypto et frontières du moteur", () => {
     expect(new Uint8Array(opened[2]!).every((b) => b === 0), "morceau du bord effacé après sa copie").toBe(true);
     // L'aperçu recopie tout : chaque tampon de WebCrypto est effacé.
     opened.length = 0;
-    expect(hex(await rd.item(0))).toBe(hex(data));
+    const tr = await openStream(async () => new Uint8Array(seg), fin.bucket, ck);
+    opened.length = 0;
+    expect(hex(await tr.item(0))).toBe(hex(data));
     expect(opened.length).toBe(3);
     expect(opened.every((b) => new Uint8Array(b).every((x) => x === 0)), "clairs de l'aperçu effacés").toBe(true);
     rd.free();

@@ -557,9 +557,29 @@ export async function openShare(
   const onProgress = o.onProgress;
   const grant = o.grant;
   const p = await parseShare(link, expectedOrigin);
-  // Avant toute requête et toute dérivation (coûteuse) : un champ vide n'est pas un mot de passe.
-  if (password === "") throw new Error("mot_de_passe_requis");
-  const idBytes = await shareId(p.kLien); // données authentifiées seulement, jamais envoyé
+  // K_lien et id effacés sur tous les chemins, y compris un refus avant toute requête (audit
+  // F3) ; K_lien n'est plus utile une fois K_accès, K_env et K_preuve dérivées.
+  let idBytes: Uint8Array<ArrayBuffer> | undefined;
+  try {
+    // Avant toute requête et toute dérivation (coûteuse) : un champ vide, ou fait seulement des
+    // blancs que le moteur retire en bord (D42-21), n'est pas un mot de passe.
+    if (/^[ \t\r\n]*$/.test(password)) throw new Error("mot_de_passe_requis");
+    idBytes = await shareId(p.kLien); // données authentifiées seulement, jamais envoyé
+    return await openWith(p, idBytes, password, onProgress, grant, net);
+  } finally {
+    p.kLien.fill(0);
+    idBytes?.fill(0);
+  }
+}
+
+async function openWith(
+  p: ShareLink,
+  idBytes: Uint8Array<ArrayBuffer>,
+  password: string,
+  onProgress: ((d: number, t: number) => void) | undefined,
+  grant: string | undefined,
+  net: api.Net | undefined,
+): Promise<Opened> {
   const c = api.ctx(p.origin, net);
   return guarded(async () => {
     const { kAcces } = await deriveAccess(p.kLien);

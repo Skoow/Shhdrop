@@ -3,7 +3,7 @@
 // RuntimeError et par l'appel du gestionnaire que le moteur appelle sur une panique.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as F from "./index";
-import { loadEngine } from "./load";
+import { engineMemory, loadEngine } from "./load";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -71,6 +71,46 @@ describe("panique du moteur (spec moteur §7)", () => {
     const reset = vi.spyOn(e.wasm, "__wbg_reset_state");
     expect((await F.deriveAccess(new Uint8Array(32).fill(1) as F.KLien)).kAcces.length).toBe(32);
     expect(reset).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("note vérifiée par le moteur au scellement (audit M6)", () => {
+  it("UTF-8 strict et TEXT_MAX points de code, comme le lecteur ; un fichier n'est pas vérifié", async () => {
+    const seal = async (raw: Uint8Array, kind: "text" | "file" = "text") => {
+      const el = await F.elementSealer(new Blob([raw as Uint8Array<ArrayBuffer>]), 0);
+      for (const j of el.pieces.keys()) await el.piece(j);
+      return errorOf(F.sealFinal([{ kind, name: "n", mime: "text/plain", size: raw.length, first: 0, sealer: el }], await F.contentKeys(await F.newSeed()), {}));
+    };
+    const enc = (s: string) => new TextEncoder().encode(s);
+    expect(await seal(new Uint8Array())).toBe(null);
+    expect(await seal(enc("a".repeat(F.TEXT_MAX)))).toBe(null);
+    expect(await seal(enc("😀".repeat(F.TEXT_MAX)))).toBe(null); // 400 000 octets
+    expect(await seal(enc("a".repeat(F.TEXT_MAX + 1)))).toBe("texte_trop_long");
+    expect(await seal(new Uint8Array([0x61, 0xff]))).toBe("texte_invalide");
+    expect(await seal(new Uint8Array([0xed, 0xa0, 0x80]))).toBe("texte_invalide");
+    expect(await seal(new Uint8Array([0x61, 0xff]), "file")).toBe(null);
+    // Pièce jamais chiffrée : le moteur n'a pas vu le texte.
+    const el = await F.elementSealer(new Blob([enc("salut")]), 0);
+    expect(await errorOf(F.sealFinal([{ kind: "text", name: "n", mime: "text/plain", size: 5, first: 0, sealer: el }], await F.contentKeys(await F.newSeed()), {}))).toBe("texte_invalide");
+  });
+});
+
+describe("mémoire après une panique (audit F4)", () => {
+  it("la mémoire de l'instance arrêtée est mise à zéro avant l'instance neuve", async () => {
+    const e = await loadEngine();
+    await F.shareId(new Uint8Array(32).fill(9) as F.KLien);
+    const old = engineMemory(e);
+    const bytes = new Uint8Array(old.buffer);
+    bytes.fill(0xa5, bytes.length - 64); // témoin
+    expect(bytes.some((b) => b !== 0)).toBe(true);
+    vi.spyOn(e.wasm, "shareId").mockImplementationOnce(() => {
+      throw new WebAssembly.RuntimeError("unreachable");
+    });
+    expect(await errorOf(F.shareId(new Uint8Array(32) as F.KLien))).toBe("paquet_corrompu");
+    vi.restoreAllMocks();
+    expect((await F.shareId(new Uint8Array(32) as F.KLien)).length).toBe(16);
+    expect(engineMemory(e)).not.toBe(old);
+    expect(new Uint8Array(old.buffer).every((b) => b === 0)).toBe(true);
   });
 });
 

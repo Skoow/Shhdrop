@@ -36,8 +36,17 @@ async function load(): Promise<Engine> {
  * l'ancien (ses clés ne servent plus à rien).
  */
 export function resetEngine(e: Engine): void {
+  // Audit F4 : les secrets que l'instance arrêtée tenait (graines, clés, clairs en cours) ne
+  // restent pas dans sa mémoire jusqu'au ramasse-miettes : elle est mise à zéro avant d'être
+  // remplacée. Aucun appel n'y entre plus (index.ts : `broken`, objets périmés refusés).
+  new Uint8Array(engineMemory(e).buffer).fill(0);
   e.wasm.__wbg_reset_state();
   e.provider = createProvider();
+}
+
+/** Mémoire de l'instance en cours (initSync rend l'instance déjà faite, sans en créer). */
+export function engineMemory(e: Engine): WebAssembly.Memory {
+  return wasm.initSync({ module: e.module }).memory;
 }
 
 let loading: Promise<Engine> | undefined;

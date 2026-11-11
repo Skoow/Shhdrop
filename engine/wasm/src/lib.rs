@@ -1108,26 +1108,32 @@ fn final_entry(v: &JsValue) -> core::result::Result<FinalEntry, JsValue> {
         _ => return Err(js_msg(BAD_ENTRY)),
     };
     // Graine reprise du scelleur vivant (jamais lue depuis JavaScript).
-    let key = num("sealer")
+    let el = num("sealer")
         .ok()
         .and_then(uint)
         .and_then(|i| u32::try_from(i).ok())
         .and_then(sealer_by_id)
-        .map(|el| el.k())
         .ok_or_else(|| js_msg(BAD_ENTRY))?;
+    let size = n64(num("size")?);
+    // Note : texte vu par le scelleur, que le lecteur acceptera (audit M6 : UTF-8 strict, au
+    // plus TEXT_MAX points de code) ; au-delà de TEXT_BYTES_MAX, `seal_final` la refuse.
+    if kind == FinalKind::Text && size <= format::TEXT_BYTES_MAX {
+        el.check_note().map_err(js_err)?;
+    }
     Ok(FinalEntry {
         kind,
         name: text("name")?,
         mime: text("mime")?,
-        size: n64(num("size")?),
+        size,
         first: n64(num("first")?),
-        k: key,
+        k: el.k(),
     })
 }
 
 /// Manifeste final : `{ bucket, header, tail }`. Refus de l'ancien moteur (`vide`,
 /// `droits_invalides`, `manifeste_trop_gros`, `texte_trop_long`, `trop_gros`,
-/// `chevauchement`, `cle_deja_utilisee`) ; clés d'ouverture refusées (`cle_deja_utilisee`).
+/// `chevauchement`, `cle_deja_utilisee`) ; clés d'ouverture refusées (`cle_deja_utilisee`) ;
+/// note que le lecteur refuserait (`texte_invalide`, `texte_trop_long`, audit M6).
 #[wasm_bindgen(
     js_name = sealFinal,
     unchecked_return_type = "Promise<{ bucket: number; header: Uint8Array; tail: Uint8Array }>"
@@ -1252,16 +1258,6 @@ impl JsReader {
     #[wasm_bindgen(unchecked_return_type = "OpenedManifest")]
     pub fn manifest(&self) -> Object {
         manifest_js(self.rd.manifest())
-    }
-
-    /// Copie de l'élément `i` pour l'aperçu ; `trop_gros_pour_apercu` au-delà de PREVIEW_MAX.
-    #[wasm_bindgen(unchecked_return_type = "Promise<Uint8Array>")]
-    pub fn item(&self, i: f64) -> Promise {
-        let (rd, host, i) = (Rc::clone(&self.rd), Rc::clone(&self.host), index(i));
-        future_to_promise(async move {
-            let b = Zeroizing::new(rd.item(i).await.map_err(|e| fail(&host, e))?);
-            Ok(bytes(&b))
-        })
     }
 
     /// Passe l'élément `i` à `sink`, tranche par tranche (≤ 64 Kio, copie que `sink` garde).

@@ -16,7 +16,7 @@ use crate::envelope::ContentKeys;
 use crate::error::{Error, Result};
 use crate::format::{
     BUCKETS, CHUNK, CHUNK_CT, HEADER, MANIFEST_MAX, MAX_ITEMS, MAX_SAFE, SEG_CHUNKS,
-    TEXT_BYTES_MAX, bucket_for, header, nonce,
+    TEXT_BYTES_MAX, TEXT_MAX, bucket_for, header, nonce,
 };
 use crate::kdf::hkdf;
 use crate::manifest::{self, Clean, Entry, Kind, Manifest, Rights};
@@ -112,6 +112,20 @@ pub struct ElementSealer<P: Platform> {
     first: u64,
     pieces: Vec<Piece>,
     produced: Vec<Cell<bool>>,
+    /// Élément d'au plus TEXT_BYTES_MAX octets (une seule pièce) : verdict de `check_text` sur
+    /// le clair chiffré par `piece`, pour `check_note` (audit M6). `None` tant que la pièce n'a
+    /// pas été chiffrée.
+    note: Cell<Option<Result<()>>>,
+}
+
+/// Texte d'une note tel que le lecteur l'accepte : UTF-8 strict (un BOM initial est gardé) et
+/// au plus TEXT_MAX points de code. Sinon `texte_invalide` ou `texte_trop_long`.
+pub fn check_text(raw: &[u8]) -> Result<()> {
+    let text = core::str::from_utf8(raw).map_err(|_| Error::TexteInvalide)?;
+    if text.chars().count() > TEXT_MAX {
+        return Err(Error::TexteTropLong);
+    }
+    Ok(())
 }
 
 impl<P: Platform> ElementSealer<P> {
@@ -156,7 +170,34 @@ impl<P: Platform> ElementSealer<P> {
             first,
             produced: pieces.iter().map(|_| Cell::new(false)).collect(),
             pieces,
+            note: Cell::new(None),
         })
+    }
+
+    /// Taille de l'élément, en octets.
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// Premier morceau de l'élément dans le paquet.
+    pub fn first(&self) -> u64 {
+        self.first
+    }
+
+    /// L'élément peut-il entrer dans le manifeste comme une note (audit M6) ? Le lecteur refuse
+    /// tout le partage pour une note de plus de TEXT_MAX points de code ou qui n'est pas de
+    /// l'UTF-8 strict : elle est refusée ici, avant le manifeste. `texte_trop_long` au-delà de
+    /// TEXT_BYTES_MAX octets ; `texte_invalide` tant que la pièce n'a pas été chiffrée (le moteur
+    /// ne peut rien dire d'un texte qu'il n'a pas vu) ; sinon le verdict de [`check_text`] sur
+    /// le clair chiffré. Une note vide est acceptée.
+    pub fn check_note(&self) -> Result<()> {
+        if self.size > TEXT_BYTES_MAX {
+            return Err(Error::TexteTropLong);
+        }
+        if self.size == 0 {
+            return Ok(());
+        }
+        self.note.get().unwrap_or(Err(Error::TexteInvalide))
     }
 
     /// Graine de la clé (32 octets) : n'entre que dans le manifeste chiffré, si l'élément est
@@ -194,6 +235,9 @@ impl<P: Platform> ElementSealer<P> {
         if plain.len() as u64 != hi - lo {
             return Err(Error::LectureIncomplete);
         }
+        // Au plus TEXT_BYTES_MAX octets : une seule pièce, qui porte tout l'élément. Le verdict
+        // n'est gardé qu'une fois la pièce chiffrée (un échec du fournisseur ne le pose pas).
+        let note = (self.size <= TEXT_BYTES_MAX).then(|| check_text(plain));
         let g0 = u64::from(p.seg) * SEG + u64::from(p.from);
         let chunks = p.chunks as usize;
         let nonces: Vec<_> = (0..u64::from(p.chunks))
@@ -216,6 +260,9 @@ impl<P: Platform> ElementSealer<P> {
             .key
             .seal_batch(ELEMENT_AD, &nonces, full, CHUNK)
             .await?;
+        if note.is_some() {
+            self.note.set(note);
+        }
         if g0 != 0 {
             return Ok(ct);
         }
@@ -254,6 +301,42 @@ pub struct FinalEntry {
     /// Premier morceau.
     pub first: u64,
     pub k: Zeroizing<[u8; 32]>,
+}
+
+impl FinalEntry {
+    /// Note chiffrée par `el` : taille, place et graine prises du scelleur, texte vérifié par
+    /// [`ElementSealer::check_note`] (`texte_trop_long`, `texte_invalide`). Chemin à suivre par
+    /// une app : une entrée écrite champ par champ ne porte aucune de ces garanties.
+    pub fn note<P: Platform>(el: &ElementSealer<P>, name: String, mime: String) -> Result<Self> {
+        el.check_note()?;
+        Ok(Self::from_sealer(el, FinalKind::Text, name, mime))
+    }
+
+    /// Fichier chiffré par `el` : taille, place et graine prises du scelleur.
+    pub fn file<P: Platform>(
+        el: &ElementSealer<P>,
+        clean: Option<Clean>,
+        name: String,
+        mime: String,
+    ) -> Self {
+        Self::from_sealer(el, FinalKind::File(clean), name, mime)
+    }
+
+    fn from_sealer<P: Platform>(
+        el: &ElementSealer<P>,
+        kind: FinalKind,
+        name: String,
+        mime: String,
+    ) -> Self {
+        Self {
+            kind,
+            name,
+            mime,
+            size: el.size,
+            first: el.first,
+            k: el.k(),
+        }
+    }
 }
 
 impl Drop for FinalEntry {

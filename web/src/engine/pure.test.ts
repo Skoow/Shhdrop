@@ -84,6 +84,23 @@ describe("géométrie : TypeScript = vecteurs = moteur", () => {
     expect(n).toBeGreaterThan(50);
   });
 
+  it("segmentCount, segmentSize : entrées hostiles refusées comme le moteur (audit F2)", () => {
+    const bad = [-1, -0.5, 0.5, 1.5, NaN, Infinity, -Infinity, 2 ** 32, 2 ** 53, Number.MAX_SAFE_INTEGER, -(2 ** 31), 1e300];
+    const good = [0, -0, 1, 16, 63, 64, 65, 400, 32_769, 2 ** 32 - 1];
+    let n = 0;
+    for (const b of [...bad, ...good]) {
+      expect(out(() => P.segmentCount(b)), `segmentCount(${b})`).toEqual(out(() => W.segmentCount(b)));
+      for (const k of [...bad, ...good, 6, 7, 512, 513, 67_108_863, 67_108_864]) {
+        expect(out(() => P.segmentSize(b, k)), `segmentSize(${b}, ${k})`).toEqual(out(() => W.segmentSize(b, k)));
+        n++;
+      }
+    }
+    expect(out(() => P.segmentSize(16, 1))).toEqual({ error: "segment_invalide" });
+    expect(out(() => P.segmentSize(0.5, 0))).toEqual({ error: "taille_invalide" });
+    expect(out(() => P.segmentCount(-1))).toEqual({ error: "taille_invalide" });
+    expect(n).toBeGreaterThan(400);
+  });
+
   it("segmentSize de chaque segment de chaque palier : même valeur", () => {
     for (const b of P.BUCKETS) for (let k = 0; k < P.segmentCount(b); k++) expect(P.segmentSize(b, k), `${b}/${k}`).toBe(W.segmentSize(b, k));
   });
