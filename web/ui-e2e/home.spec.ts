@@ -236,6 +236,10 @@ test.describe("fr-FR", () => {
       if (browserName !== "chromium") {
         await expect(cam.getByRole("button", { name: fallback })).toBeVisible();
         await page.keyboard.press("Escape");
+        // L'événement « close » (qui remet `open` à faux) arrive après la fermeture visible : sans
+        // attente, WebKit rouvrait puis refermait la boîte et le tour suivant ne trouvait rien.
+        await expect(cam).toBeHidden();
+        await page.waitForTimeout(100);
         continue;
       }
       const chooser = page.waitForEvent("filechooser");
@@ -244,6 +248,8 @@ test.describe("fr-FR", () => {
       expect(fc.isMultiple()).toBe(false);
       expect(await fc.element().getAttribute("accept")).toBe(accept);
       expect(await fc.element().getAttribute("capture")).toBe("environment");
+      await expect(cam).toBeHidden();
+      await page.waitForTimeout(100);
     }
     await page.getByRole("button", { name: "Commencer" }).first().click();
     const chooser = page.waitForEvent("filechooser");

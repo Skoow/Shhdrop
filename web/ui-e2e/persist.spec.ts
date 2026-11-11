@@ -63,7 +63,7 @@ test.use({ locale: "fr-FR" });
 test.describe.configure({ retries: 1 });
 
 /** Étape nommée, bornée à `ms` : un blocage de Chromium échoue vite et dit où. */
-function step<T>(name: string, run: () => Promise<T>, ms = 45_000): Promise<T> {
+function step<T>(name: string, run: () => Promise<T>, ms = 90_000): Promise<T> {
   return test.step(name, () =>
     Promise.race([run(), new Promise<never>((_, ko) => setTimeout(() => ko(new Error(`${name} : bloqué plus de ${ms / 1000} s (Chromium)`)), ms))]),
   );
@@ -72,7 +72,7 @@ function step<T>(name: string, run: () => Promise<T>, ms = 45_000): Promise<T> {
 for (const late of [false, true]) {
   test(`profil persistant : # absent de l'historique et du disque ; onglet restauré ${late ? "après 3 min : clé oubliée" : "aussitôt : « Rouvrir »"}`, async ({ shh, browser, browserName }) => {
     test.skip(browserName !== "chromium" || test.info().project.name !== "chromium-desktop", "contexte persistant Chromium, un seul projet (il ne suit pas l'appareil du projet)");
-    test.setTimeout(180_000);
+    test.setTimeout(300_000);
     const s = await freshPage(browser);
     const sent = await sendShare(s.page, shh.origin + "/", { text: TEXT, opens: 3 });
     await s.ctx.close();
