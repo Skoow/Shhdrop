@@ -4,5 +4,7 @@
 #![forbid(unsafe_code)]
 
 mod error;
+mod stockage;
 
 pub use error::{Error, Result};
+pub use stockage::{Fournisseur, Stockage};

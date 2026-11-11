@@ -1,21 +1,20 @@
 //! Test de fumée : deux membres échangent un message par les API OpenMLS directes (suite 0x0001,
-//! PURE_CIPHERTEXT, arbre dans le Welcome). Le stockage en mémoire d'OpenMLS est provisoire ; la
-//! Task 2 le remplace par un stockage qui efface.
+//! PURE_CIPHERTEXT, arbre dans le Welcome), avec le stockage en mémoire qui efface les secrets.
 use openmls::prelude::tls_codec::{Deserialize as _, Serialize as _};
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
-use openmls_rust_crypto::OpenMlsRustCrypto;
+use shhdrop_salon::Fournisseur;
 
 const SUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
 struct Membre {
-    fournisseur: OpenMlsRustCrypto,
+    fournisseur: Fournisseur,
     signataire: SignatureKeyPair,
     identifiants: CredentialWithKey,
 }
 
 fn membre(nom: &[u8]) -> Membre {
-    let fournisseur = OpenMlsRustCrypto::default();
+    let fournisseur = Fournisseur::default();
     let signataire = SignatureKeyPair::new(SUITE.signature_algorithm()).unwrap();
     signataire.store(fournisseur.storage()).unwrap();
     let identifiants = CredentialWithKey {
