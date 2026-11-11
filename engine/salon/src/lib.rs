@@ -6,7 +6,9 @@
 mod cles;
 mod error;
 mod stockage;
+mod trame;
 
 pub use cles::{CleAcces, ClesSalon, cle_acces, cles_salon};
 pub use error::{Error, Result};
 pub use stockage::{Fournisseur, Stockage};
+pub use trame::{EnTete, MAX_CHARGE, Regle, TAILLE_O, TAILLE_TRAME, lire_en_tete, ouvrir, sceller};

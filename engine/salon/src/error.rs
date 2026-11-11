@@ -9,6 +9,11 @@ pub enum Error {
     TrameCorrompue,
     /// Texte vide après nettoyage ou pseudonyme hors des règles.
     TexteInvalide,
+    /// Charge supérieure à `MAX_CHARGE` octets (à l'envoi : l'appelant connaît la cause).
+    TropGrand,
+    /// En-tête de trame illisible sans clé (taille, marque, bits réservés) : ne sert qu'à
+    /// `lire_en_tete` ; `ouvrir` renvoie toujours `TrameCorrompue`.
+    EnTeteInvalide,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -18,6 +23,8 @@ impl fmt::Display for Error {
         f.write_str(match self {
             Error::TrameCorrompue => "trame_corrompue",
             Error::TexteInvalide => "texte_invalide",
+            Error::TropGrand => "trop_grand",
+            Error::EnTeteInvalide => "en_tete_invalide",
         })
     }
 }
@@ -32,5 +39,7 @@ mod tests {
     fn display_snake_case() {
         assert_eq!(Error::TrameCorrompue.to_string(), "trame_corrompue");
         assert_eq!(Error::TexteInvalide.to_string(), "texte_invalide");
+        assert_eq!(Error::TropGrand.to_string(), "trop_grand");
+        assert_eq!(Error::EnTeteInvalide.to_string(), "en_tete_invalide");
     }
 }

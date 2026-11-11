@@ -59,6 +59,14 @@ impl ClesSalon {
     }
 }
 
+#[cfg(test)]
+impl ClesSalon {
+    /// Tests seulement : même `K_trame` mais autre étiquette de salon.
+    pub(crate) fn tag_pour_test(&mut self, tag: [u8; 16]) {
+        self.tag = tag;
+    }
+}
+
 impl core::fmt::Debug for ClesSalon {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("ClesSalon(…)")
