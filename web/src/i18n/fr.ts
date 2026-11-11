@@ -143,7 +143,6 @@ export const fr = {
   "compose.col.actions": "Actions",
   "options.download.label": "Autoriser le téléchargement",
   "options.download.hint": "Sans téléchargement, une capture d'écran reste possible.",
-  "options.vault": "Garder une copie chiffrée dans l'app du destinataire (jusqu'à l'expiration)",
   "options.download.warn.one": "{n}\u202félément ne pourra pas être ouvert sans téléchargement.",
   "options.download.warn.other": "{n}\u202féléments ne pourront pas être ouverts sans téléchargement.",
   "compose.cannotOpen": "Ne pourra pas être ouvert sans téléchargement",
@@ -314,7 +313,7 @@ export const fr = {
   "ready.delete.confirm": "Supprimer ce partage pour tout le monde\u202f? Le lien ne mènera plus à rien.",
   "ready.never": "Ce lien et ce mot de passe ne seront plus jamais affichés.",
   "ready.active": "Actif",
-  "ready.selfdestruct": "S'efface tout seul\u202f: après {opens}, ou au bout de {ttl}.",
+  "ready.selfdestruct": "S'efface tout seul\u202f: après {opens}, ou à cette heure ({ttl} après l'envoi, arrondies au quart d'heure supérieur).",
   "ready.opens.one": "{n}\u202fouverture",
   "ready.opens.other": "{n}\u202fouvertures",
   "ready.link.title": "Lien",
@@ -353,7 +352,7 @@ export const fr = {
     "Déverrouiller utilise une ouverture. Si le téléchargement échoue ensuite, cette ouverture est perdue.",
   "open.badPw.one": "Mot de passe incorrect · {n}\u202fessai restant",
   "open.badPw.other": "Mot de passe incorrect · {n}\u202fessais restants",
-  "open.lastTry": "Au prochain échec, le partage sera détruit.",
+  "open.lastTry": "Mot de passe incorrect · dernier essai\u202f: au prochain échec, le partage sera détruit.",
   "open.destroyedByPw": "Mot de passe incorrect. Le partage a été détruit.",
 
   "content.undecodable.fmt": "Ce navigateur ne sait pas lire le format {fmt}. Enregistrez le fichier, ou ouvrez le lien dans {browser}.",
@@ -369,9 +368,9 @@ export const fr = {
     "Le partage sera détruit immédiatement pour tout le monde. Shhdrop ne peut pas voir le contenu et ne garde aucune trace de votre signalement. Pour un contenu illégal, vous pouvez aussi le signaler aux autorités (en France\u202f: PHAROS, internet-signalement.gouv.fr).",
 
   "invalid": "Ce lien n'existe pas ou n'est plus disponible.",
-  "incomplete": "Ce lien est incomplet. Rouvrez-le depuis le message d'origine.",
+  "incomplete": "Lien incomplet",
   "incomplete.hint":
-    "Il manque une partie du lien\u202f: il a peut-être été coupé lors d'un copier-coller, ou sa partie secrète a été retirée de la barre d'adresse après une première visite. Rien n'a été demandé au serveur.",
+    "Rouvrez-le depuis le message d'origine. Il manque une partie du lien\u202f: il a peut-être été coupé lors d'un copier-coller, ou sa partie secrète a été retirée de la barre d'adresse après une première visite. Rien n'a été demandé au serveur.",
   "unsupported":
     "Ce navigateur ne permet pas de chiffrer en sécurité. Utilisez une version récente de Safari, Chrome, Firefox ou Edge.",
 
@@ -382,6 +381,8 @@ export const fr = {
     "Ce partage a été détruit. Il a été effacé du serveur. Ce que vous avez déjà enregistré sur cet appareil n'est pas concerné.",
 
   "err.limit": "Limite d'envois atteinte. Réessayez dans {duration}.",
+  "err.limit.day": "Limite du jour atteinte\u202f: {n}\u202fpartages par jour depuis votre connexion. Réessayez dans {duration}.",
+  "err.limit.pending": "Un autre envoi est déjà en préparation depuis votre connexion, dans un autre onglet par exemple ({n}\u202fau plus à la fois). Terminez-le ou fermez-le, puis réessayez dans {duration}.",
   "err.full": "Le service est plein pour le moment. Réessayez plus tard.",
   "err.interrupted": "Le transfert a été interrompu (le serveur a peut-être redémarré). Réessayez.",
   "err.network": "Connexion impossible. Vérifiez votre réseau et réessayez.",
@@ -396,10 +397,8 @@ export const fr = {
   "open.title": "Un partage chiffré vous attend",
   "open.loading": "Lecture du partage…",
   "open.available": "Disponible encore",
-  "open.oneOpen.one":
-    "Ce partage peut être ouvert encore {n}\u00a0fois. Ouvrir ce partage compte une ouverture. Recharger la page ou l'ouvrir dans un autre onglet de ce navigateur n'en compte pas d'autre pendant 30\u00a0minutes.",
-  "open.oneOpen.other":
-    "Ce partage peut être ouvert encore {n}\u00a0fois. Ouvrir ce partage compte une ouverture. Recharger la page ou l'ouvrir dans un autre onglet de ce navigateur n'en compte pas d'autre pendant 30\u00a0minutes.",
+  "open.oneOpen.one": "Dernière ouverture possible\u202f; recharger ensuite n'en compte pas d'autre pendant 30\u00a0min.",
+  "open.oneOpen.other": "Ouvrir compte 1\u00a0ouverture sur les {n}\u00a0restantes\u202f; recharger ensuite n'en compte pas d'autre pendant 30\u00a0min.",
   // Rechargement et autres onglets (spec §41.4, UI §9.7.1)
   "open.reopen.title": "Rouvrir ce partage",
   "open.reopen.body":
@@ -445,7 +444,8 @@ export const fr = {
   "content.memory": "Cet appareil risque de manquer de mémoire pour un fichier de cette taille.",
   "content.copied": "Texte copié",
   "content.destroy": "Détruire ce partage",
-  "content.lastOpen": "Vous êtes la dernière personne à ouvrir ce partage. Il sera supprimé quand vous quitterez cette page. Vous pouvez aussi le détruire maintenant.",
+  "content.lastOpen": "Vous êtes la dernière personne à pouvoir ouvrir ce partage. Quand vous quitterez cette page, il sera effacé du serveur au plus tard 30\u202fmin après votre départ\u202f; d'ici là, cet onglet peut le rouvrir. Vous pouvez aussi le détruire maintenant.",
+  "content.lastOpen.top": "Dernière ouverture\u202f: effacé du serveur au plus tard 30\u202fmin après votre départ.",
   "content.opensLeft.one": "Ce lien peut encore être ouvert {n}\u202ffois.",
   "content.opensLeft.other": "Ce lien peut encore être ouvert {n}\u202ffois.",
   "content.destroy.confirm": "Détruire ce partage pour tout le monde\u202f? C'est immédiat et définitif.",
@@ -529,6 +529,7 @@ export const fr = {
   "paid.soon.body": "Ce n'est pas encore en vente\u202f: rien ne vous est demandé aujourd'hui.",
   "paid.upsell": "Avec Plus\u202f: jusqu'à {size} par partage et {days}.",
   "paid.upsell.more": "En savoir plus",
+  "paid.line": "Plus de place et de durée avec Plus et Pro, bientôt",
 
   "gone.title.expired": "Ce partage a expiré.",
   "gone.title.removed": "Ce partage a été supprimé.",
@@ -679,8 +680,10 @@ export const fr = {
   "compose.uncleaned.one": "{n}\u202ffichier n'a pas pu être nettoyé",
   "compose.uncleaned.other": "{n}\u202ffichiers n'ont pas pu être nettoyés",
   "settings.files": "Fichiers",
-  "settings.clean": "Nettoyer automatiquement les fichiers",
-  "settings.clean.hint": "Vos fichiers contiennent souvent des informations cachées\u202f: lieu et appareil d'une photo ou d'une vidéo, auteur et dates d'un document, titre et logiciel d'un son. Activé, Shhdrop les retire sur votre appareil, avant le chiffrement, sans toucher à ce qu'on voit ou entend. Désactivé (par défaut)\u202f: les fichiers partent tels quels, et chacun peut être nettoyé depuis son menu. Les photos et vidéos prises ici n'en contiennent jamais. Réglage oublié à la fermeture de l'onglet.",
+  "settings.clean": "Nettoyage automatique",
+  "settings.clean.hint": "Retire de vos fichiers, sur cet appareil et avant le chiffrement, les informations cachées (lieu, appareil, auteur, dates). Désactivé par défaut\u202f: chaque fichier peut aussi être nettoyé depuis son menu.",
+  "settings.clean.more": "En savoir plus",
+  "settings.clean.more.body": "Sont retirés\u202f: le lieu et l'appareil d'une photo ou d'une vidéo, l'auteur et les dates d'un document, le titre et le logiciel d'un son. Rien de ce qu'on voit ou entend ne change\u202f; une photo garde sa vignette d'aperçu, un PDF ne perd que ses propriétés de document. Les photos et vidéos prises ici n'en contiennent jamais. Le réglage est oublié à la fermeture de l'onglet.",
   "settings.about": "À propos",
   "settings.about.body": "Shhdrop chiffre sur votre appareil avant l'envoi. Sans compte, sans traceur, code source public.",
   "confirm.title": "Confirmation",

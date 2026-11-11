@@ -1,16 +1,16 @@
 <script lang="ts">
   // Options de l'envoi (UI §9.3, benchmark M4) : durée et ouvertures (phrase « S'efface dans
   // 12 h ou après 1 ouverture… » sur ordinateur), mot de passe, destinataire (interrupteur
-  // « Autoriser le téléchargement », sous-option du coffre), estimation du temps d'envoi.
+  // « Autoriser le téléchargement » ; plus de sous-option du coffre, décision du propriétaire du
+// 11 novembre), estimation du temps d'envoi.
   // `compact` : feuille du téléphone, une ligne d'aide au plus par réglage.
-  // Choix payants (D41-16) : visibles mais verrouillés, au bleu de leur offre ; le nom « Plus » ou « Pro » n'est plus écrit (retours CLEAN2) : bulle au survol, lecteurs d'écran, et feuille d'information à l'appui ; un appui
-  // ouvre la feuille d'information (onpaid), jamais un achat. Ils ne changent aucune option.
+  // Choix payants : plus aucun ici (décision du propriétaire du 11 novembre, audit M17) ; une
+  // seule ligne discrète dans l'en-tête du composeur ouvre la feuille d'information.
   import { MAX_OPENS, PW_TRIES, TTL_HOURS } from "../index";
-  import { PAID, type PaidTier } from "../limits";
   import type { Options } from "../flows/options.svelte";
   import { formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
-  import { Lock, ShieldAlert, TriangleAlert } from "../ui/Icon";
+  import { ShieldAlert, TriangleAlert } from "../ui/Icon";
   import PassphraseField from "../ui/PassphraseField.svelte";
   import Segmented from "../ui/Segmented.svelte";
   import Switch from "../ui/Switch.svelte";
@@ -19,18 +19,14 @@
     options: Options;
     /** Éléments qui ne pourront pas être ouverts sans téléchargement (spec §34). */
     unviewable: string[];
-    /** Sous-option du coffre affichée ici (téléphone ou app installée, jamais en démo). */
-    vaultShown: boolean;
     compact?: boolean;
-    /** Appui sur un choix payant verrouillé : ouvre la feuille d'information de la formule. */
-    onpaid?: (tier: PaidTier) => void;
     /**
      * Ordinateur large : « controls » (réglages, colonne du milieu) et « summary » (phrase et
      * estimation, colonne de l'envoi) ; « all » ailleurs.
      */
     part?: "all" | "controls" | "summary";
   };
-  let { options, unviewable, vaultShown, compact = false, onpaid, part = "all" }: Props = $props();
+  let { options, unviewable, compact = false, part = "all" }: Props = $props();
 
   const lang = $derived(getLang());
   const ttlLabel = (h: number) => formatDuration(h * 3600, lang);
@@ -38,8 +34,6 @@
   const opensOptions = Array.from({ length: MAX_OPENS }, (_, i) => ({ value: i + 1, label: String(i + 1) }));
   // Une seule durée quand les deux s'arrondissent pareil (« environ 1 s », pas « 1 s à 1 s »).
   const opensText = $derived(t("options.opens.count", { n: options.maxOpens }));
-  // Nom accessible = texte visible (WCAG 2.5.3) ; « avec Plus, bientôt disponible » en description.
-  const lockedId = $props.id();
 
   // Phrase coupée autour des valeurs pour les mettre en avant, sans HTML dans les textes.
   const parts = $derived.by(() => {
@@ -67,40 +61,17 @@
 {:else}
 <section class={["opts", { compact, dense: part === "controls" }]} aria-labelledby={compact ? undefined : "opts-title"} aria-label={compact ? t("options.title") : undefined}>
   {#if !compact}<h2 id="opts-title" class="h">{t("options.title")}</h2>{/if}
-  {#if onpaid}
-    <span id="{lockedId}-plus" class="sr-only">{t("paid.locked", { tier: t("paid.badge.plus") })}</span>
-    <span id="{lockedId}-pro" class="sr-only">{t("paid.locked", { tier: t("paid.badge.pro") })}</span>
-  {/if}
 
   <div class="block">
     {#if part === "all"}{@render summary()}{/if}
     <div class="ctl">
       <span class="cl" aria-hidden="true">{t("options.ttl.label")}</span>
       <Segmented label={t("options.ttl.label")} options={ttlOptions} bind:value={() => options.ttlHours, (v) => (options.ttlHours = v)} />
-      {#if onpaid}
-        <div class="locks" data-locked="ttl">
-          {#each PAID.plus.ttlDays as d (d)}
-            {@const label = t("paid.days", { n: d })}
-            <button type="button" class="lk num" title={t("paid.badge.plus")} aria-describedby="{lockedId}-plus" onclick={() => onpaid("plus")}><Lock size={14} strokeWidth={2} aria-hidden="true" />{label}</button>
-          {/each}
-        </div>
-      {/if}
       <p class="hint">{t("options.ttl.hint")}</p>
-      {#if onpaid}
-        <button type="button" class="lkrow" data-locked="first-open" title={t("paid.badge.plus")} aria-describedby="{lockedId}-plus" onclick={() => onpaid("plus")}>
-          <Lock size={16} strokeWidth={2} aria-hidden="true" /><span class="lkt">{t("paid.firstOpen")}</span>
-        </button>
-      {/if}
     </div>
     <div class="ctl">
       <span class="cl" aria-hidden="true">{t("options.opens.label")}</span>
       <Segmented label={t("options.opens.label")} options={opensOptions} columns={5} bind:value={() => options.maxOpens, (v) => (options.maxOpens = v)} />
-      {#if onpaid && PAID.pro.opens > MAX_OPENS}
-        {@const label = t("paid.opens", { n: PAID.pro.opens })}
-        <div class="locks" data-locked="opens">
-          <button type="button" class="lk num pro" title={t("paid.badge.pro")} aria-describedby="{lockedId}-pro" onclick={() => onpaid("pro")}><Lock size={14} strokeWidth={2} aria-hidden="true" />{label}</button>
-        </div>
-      {/if}
       <p class="hint">{t("options.opens.hint")}</p>
     </div>
   </div>
@@ -115,9 +86,6 @@
     <h3 class="h3" id="rights-title">{t("options.rights.label")}</h3>
     <div class="rights">
       <Switch label={t("options.download.label")} hint={t("options.download.hint")} checked={options.allowDownload} onchange={(v) => (options.allowDownload = v)} />
-      {#if options.allowDownload && vaultShown}
-        <Switch sub label={t("options.vault")} checked={options.keepVault} onchange={(v) => (options.keepVault = v)} />
-      {/if}
     </div>
     {#if !options.allowDownload && unviewable.length > 0}
       <div class="warn" role="status">
@@ -248,69 +216,7 @@
     text-underline-offset: 3px;
     cursor: pointer;
   }
-  /* Choix payants verrouillés (D41-16) : lisibles, jamais confondus avec un choix actif. */
-  .locks {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--sp-1);
-  }
-  /* Chaque verrou au bleu de SON offre (Plus ciel, Pro profond). */
-  .lk,
-  .lkrow {
-    --tc: var(--plus);
-    --tc-tint: var(--plus-tint);
-    --tc-line: var(--plus-line);
-  }
-  .lk.pro {
-    --tc: var(--pro);
-    --tc-tint: var(--pro-tint);
-    --tc-line: var(--pro-line);
-  }
-  .lk,
-  .lkrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 44px;
-    padding: 0 var(--sp-3);
-    border: 1px dashed var(--tc-line);
-    border-radius: var(--r-sm);
-    background: transparent;
-    /* Texte en blanc (retours OPT) ; cadenas et pointillés restent bleus. */
-    color: var(--text);
-    font: inherit;
-    font-size: var(--fs-small);
-    font-weight: 560;
-    cursor: pointer;
-  }
-  .lkrow {
-    width: 100%;
-    margin-top: 2px;
-    text-align: start;
-  }
-  .lkt {
-    flex: 1;
-    min-width: 0;
-  }
-  /* Plus et Pro en bleu (retours UI4, BLUE), pointillés compris : jamais le vert de l'action. */
-  .lk :global(svg),
-  .lkrow :global(svg) {
-    flex: none;
-    color: var(--tc);
-  }
-  @media (hover: hover) {
-    .lk:hover,
-    .lkrow:hover {
-      background: var(--tc-tint);
-      border-color: var(--tc);
-    }
-  }
   @media (forced-colors: active) {
-    .lk,
-    .lkrow {
-      border: 1px solid CanvasText;
-    }
     .warn {
       border: 1px solid CanvasText;
     }

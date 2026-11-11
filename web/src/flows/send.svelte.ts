@@ -90,6 +90,13 @@ export function createSender(deps: SendDeps) {
   let retryAfterS = $state<number | undefined>();
   let retryAt = $state<number | undefined>();
   let failedItem = $state<number | undefined>();
+  /**
+   * Règle derrière une LimitError (audit M14 ; le serveur répond « limit » dans tous les cas) :
+   * à la création, 60 s au plus → trop d'envois en préparation à la fois (2 par connexion, un
+   * autre onglet par exemple) ou trop de requêtes ; plus → quota du jour (jusqu'à minuit UTC) ;
+   * pendant l'envoi → débit ou octets du jour.
+   */
+  let limitKind = $state<"en_cours" | "jour" | "envoi" | undefined>();
   let captchaLocal = $state(false);
   let createdOnServer = $state(false);
   let createdAt = $state<number | undefined>();
@@ -162,7 +169,7 @@ export function createSender(deps: SendDeps) {
     segments = { done: 0, total: 0 };
     retry = undefined;
     error = undefined;
-    retryAfterS = retryAt = failedItem = undefined;
+    retryAfterS = retryAt = failedItem = limitKind = undefined;
     captchaLocal = false;
     createdOnServer = false;
     createdAt = undefined;
@@ -184,6 +191,7 @@ export function createSender(deps: SendDeps) {
     if (e instanceof LimitError) {
       code = "limite";
       retryAfterS = e.retryAfterS;
+      limitKind = createdOnServer ? "envoi" : e.retryAfterS <= 60 ? "en_cours" : "jour";
       retryAt = now() + e.retryAfterS * 1000;
     } else if (e instanceof NotFoundError) code = "interrompu";
     else if (e instanceof DOMException && (e.name === "NotReadableError" || e.name === "NotFoundError")) {
@@ -406,6 +414,9 @@ export function createSender(deps: SendDeps) {
     },
     get retryAfterS() {
       return retryAfterS;
+    },
+    get limitKind() {
+      return limitKind;
     },
     /** Secondes avant que Réessayer se réactive après une LimitError. */
     get retryWaitS() {

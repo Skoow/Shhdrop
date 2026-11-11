@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { currentTab, tabBarVisible, TABS } from "./tabbar";
+import { currentTab, tabBarVisible, tabBarUseful, TABS } from "./tabbar";
 
 const base = { supported: true, sending: false, composing: false };
 
 describe("barre d'onglets (téléphone)", () => {
-  it("visible sur l'accueil, Sécurité, Confidentialité et la 404", () => {
-    for (const route of ["home", "securite", "confidentialite", "notfound"] as const) expect(tabBarVisible({ ...base, route })).toBe(true);
+  it("décision du propriétaire du 11 novembre (audit M18) : masquée tant qu'un seul onglet fonctionne", () => {
+    expect(TABS.filter((t) => !t.soon)).toHaveLength(1);
+    expect(tabBarUseful(TABS)).toBe(false);
+    for (const route of ["home", "securite", "confidentialite", "notfound"] as const) expect(tabBarVisible({ ...base, route })).toBe(false);
+    expect(tabBarUseful([{ id: "send", soon: false }, { id: "shares", soon: false }, { id: "chat", soon: true }])).toBe(true);
+  });
+  it("une fois utile : visible sur l'accueil, Sécurité, Confidentialité et la 404", () => {
+    for (const route of ["home", "securite", "confidentialite", "notfound"] as const) expect(tabBarVisible({ ...base, route }, true)).toBe(true);
   });
   it("masquée chez le destinataire (ouverture, contenu) et sur la gestion", () => {
     expect(tabBarVisible({ ...base, route: "open" })).toBe(false);

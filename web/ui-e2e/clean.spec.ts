@@ -158,7 +158,7 @@ test("réglage « Nettoyer automatiquement les fichiers » désactivé par défa
   const sw = cleanSwitch(page);
   // Désactivé par défaut (décision du propriétaire, CLEAN4) ; l'explication est sous le réglage.
   await expect(sw).toHaveAttribute("aria-checked", "false");
-  await expect(sw).toHaveAccessibleDescription(/informations cachées.*Désactivé \(par défaut\)/);
+  await expect(sw).toHaveAccessibleDescription(/informations cachées.*Désactivé par défaut/); // deux phrases (audit M19)
   await (await openFilePicker(page)).setFiles({ name: "IMG_GPS.jpg", mimeType: "image/jpeg", buffer: FX("iphone-like.jpg") });
   await expect(lock(page, "IMG_GPS")).toHaveAccessibleName(detail("Fichier tel quel (non modifié)"));
   await expect(row(page, "IMG_GPS").locator("[data-clean]")).toHaveCount(0);

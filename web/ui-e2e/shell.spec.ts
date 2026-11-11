@@ -45,7 +45,7 @@ test("pied de page (UI5) : Produit, Confiance, Légal ; langue, nettoyage, À pr
   // Langue : boutons du pied (pas de liste déroulante), nettoyage automatique, À propos.
   await expect(foot.getByRole("combobox")).toHaveCount(0);
   await expect(foot.getByRole("group", { name: "Langue" }).getByRole("button")).toHaveText(["Français", "English"]);
-  await expect(foot.getByRole("switch", { name: "Nettoyer automatiquement les fichiers" })).toBeVisible();
+  await expect(foot.getByRole("switch", { name: "Nettoyage automatique" })).toBeVisible();
   await expect(foot.getByText("Shhdrop chiffre sur votre appareil avant l'envoi.", { exact: false })).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(600); // fin des apparitions au défilement

@@ -9,6 +9,7 @@
   import { claimScreenTitle, type TitleScreen } from "../app/title";
   import { getLang } from "../i18n/i18n.svelte";
   import { announce } from "./announce";
+  import { arrive } from "./arrive";
   import Logo from "./Logo.svelte";
 
   type Props = {
@@ -31,7 +32,7 @@
   let heading: HTMLHeadingElement | undefined = $state();
   $effect(() => {
     if (!heading) return;
-    heading.focus({ preventScroll: true });
+    arrive(heading);
     announce(heading.textContent ?? "");
   });
   $effect(() => {

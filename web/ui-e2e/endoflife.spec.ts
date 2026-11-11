@@ -26,7 +26,10 @@ test("Détruire (dernière ouverture permise) : pied séparé par un filet, conf
   expect(await eol.evaluate((e) => getComputedStyle(e).borderTopStyle)).toBe("solid");
   const destroy = page.getByRole("button", { name: "Détruire ce partage", exact: true });
   await expect(destroy).toHaveClass(/ghost/);
-  await expect(page.getByText("Vous êtes la dernière personne à ouvrir ce partage. Il sera supprimé quand vous quitterez cette page. Vous pouvez aussi le détruire maintenant.")).toBeVisible();
+  // Texte exact (audit I5) : effacé au plus tard 30 min après le départ (D41-28 : 3 min, sauf réouverture par l'octroi).
+  await expect(page.getByText("Vous êtes la dernière personne à pouvoir ouvrir ce partage. Quand vous quitterez cette page, il sera effacé du serveur au plus tard 30\u202fmin après votre départ\u202f; d'ici là, cet onglet peut le rouvrir. Vous pouvez aussi le détruire maintenant.")).toBeVisible();
+  // Dit aussi en haut de la page (audit I5).
+  await expect(page.locator("[data-last-top]")).toHaveText("Dernière ouverture\u202f: effacé du serveur au plus tard 30\u202fmin après votre départ.");
 
   let release!: () => void;
   const held = new Promise<void>((r) => (release = r));

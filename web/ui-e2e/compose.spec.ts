@@ -283,28 +283,28 @@ test.describe("fr-FR", () => {
     await expect(send(page)).toBeEnabled();
   });
 
-  test("limites gratuites en clair ; choix payants verrouillés (badge Plus) → feuille honnête « Bientôt disponible » (D41-16)", async ({ page, shh, isMobile }) => {
+  // Décision du propriétaire du 11 novembre (audit M17) : une seule ligne discrète remplace les
+  // huit choix verrouillés ; la feuille d'information dit « Bientôt disponible » en tête.
+  test("limites gratuites en clair ; une ligne discrète Plus et Pro → feuille honnête, « Bientôt disponible » en tête (D41-16)", async ({ page, shh, isMobile }) => {
     await open(page, shh.origin);
     await browse(page, [f("contrat.pdf")]);
     await expect(page.locator("[data-free]")).toHaveText("Gratuit\u202f: 2\u202fGo · 24\u202fh maximum");
+    await expect(page.locator("[data-locked], [data-paid-space]")).toHaveCount(0);
+    const line = page.locator("[data-paid-line]").filter({ visible: true });
+    await expect(line).toHaveText("Plus de place et de durée avec Plus et Pro, bientôt");
+    const r = (await line.evaluate((e) => {
+      const b = e.getBoundingClientRect();
+      const a = getComputedStyle(e, "::after");
+      return { h: b.height - parseFloat(a.top) - parseFloat(a.bottom) };
+    }));
+    expect(r.h).toBeGreaterThanOrEqual(44); // cible d'appui (::after)
     const opts = await options(page, isMobile);
-    const locked = opts.locator("[data-locked] button, button[data-locked]");
-    await expect(locked).toHaveCount(5);
-    // Nom de l'offre en bulle au survol, plus de badge écrit (retours CLEAN2).
-    await expect(opts.locator(".badge")).toHaveCount(0);
-    expect(await locked.evaluateAll((bs) => bs.map((b) => b.getAttribute("title")))).toEqual(["Plus", "Plus", "Plus", "Plus", "Pro"]);
-    // Retours OPT : espaces Plus et Pro en pastilles à côté de la jauge, unité « Go » comprise.
-    await expect(page.locator(".top [data-paid-space] button")).toHaveText([/^10\sGo · Plus$/, /^50\sGo · Pro$/]);
-    for (const b of await locked.all()) {
-      const r = (await b.boundingBox())!;
-      expect(r.height).toBeGreaterThanOrEqual(43.5);
-    }
     await expect(opts.getByRole("radio", { name: "12 h" })).toBeChecked();
-    await opts.getByRole("button", { name: "7\u202fjours", exact: true }).click();
-    await expect(opts.getByRole("button", { name: "7\u202fjours", exact: true })).toHaveAccessibleDescription("Avec Plus, bientôt disponible.");
+    if (isMobile) await page.keyboard.press("Escape");
+    await line.click();
     const sheet = page.getByRole("dialog", { name: "Shhdrop Plus" });
     await expect(sheet).toBeVisible();
-    await expect(sheet).toContainText("Bientôt disponible.");
+    await expect(sheet.locator("[data-paid] > *").first()).toContainText("Bientôt disponible.");
     await expect(sheet).toContainText(/7\s€\s?par mois, TTC/);
     await expect(sheet).toContainText(/ou 70\s€ par an/);
     await expect(sheet.locator("form, input, a[href]")).toHaveCount(0);
@@ -313,16 +313,9 @@ test.describe("fr-FR", () => {
     await capture(page, "compose-paid-sheet");
     await sheet.getByRole("button", { name: "Compris" }).click();
     await expect(sheet).toBeHidden();
-    await expect(opts.getByRole("radio", { name: "12 h" })).toBeChecked(); // rien n'a changé
-    if (!isMobile) await capture(page, "compose-locked-options");
-    else {
-      await settle(page);
-      await capture(page, "compose-locked-options");
-      await page.keyboard.press("Escape");
-    }
   });
 
-  test("options : 12 h et 1 ouverture par défaut, flèches, phrase à jour ; téléchargement (interrupteur), coffre sur téléphone seulement", async ({ page, shh, isMobile }) => {
+  test("options : 12 h et 1 ouverture par défaut, flèches, phrase à jour ; téléchargement (interrupteur), plus de coffre (décision du 11 novembre)", async ({ page, shh, isMobile }) => {
     await open(page, shh.origin);
     await browse(page, [f("plage-nuit.jpg")]);
     let opts = await options(page, isMobile);
@@ -342,7 +335,7 @@ test.describe("fr-FR", () => {
     await expect(dl).toHaveAttribute("aria-checked", "true");
     await expect(dl).toHaveAccessibleDescription("Sans téléchargement, une capture d'écran reste possible.");
     const vault = opts.getByRole("switch", { name: /^Garder une copie chiffrée dans l'app du destinataire/ });
-    await expect(vault).toHaveCount(isMobile ? 1 : 0);
+    await expect(vault).toHaveCount(0);
     await dl.click();
     await expect(dl).toHaveAttribute("aria-checked", "false");
     await expect(vault).toHaveCount(0);
@@ -510,13 +503,13 @@ test.describe("fr-FR", () => {
       expect(await page.locator(".top .fill").evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(255, 138, 128)");
       await expect(send(page)).toBeDisabled();
       await expect(page.locator("#send-reason")).toHaveText("Le total dépasse 2 Go. Supprimez des éléments.");
-      // Retours OPT : plus de ligne « Avec Plus » en doublon, les pastilles 10 Go et 50 Go sont à côté de la jauge.
+      // Plus de ligne « Avec Plus » en doublon : la ligne discrète de l'en-tête suffit (audit M17).
       await expect(page.locator(".top [data-upsell]")).toHaveCount(0);
       await expect(page.getByRole("dialog")).toHaveCount(0);
       await page.waitForTimeout(6500);
       await capture(page, "compose-limit-size");
-      await page.locator(".top [data-paid-space]").getByRole("button", { name: /^50\sGo · Pro$/ }).click();
-      await expect(page.getByRole("dialog", { name: "Shhdrop Pro" })).toBeVisible();
+      await page.locator("[data-paid-line]").filter({ visible: true }).click();
+      await expect(page.getByRole("dialog", { name: "Shhdrop Plus" })).toBeVisible();
       await page.keyboard.press("Escape");
     } finally {
       rmSync(dir, { recursive: true, force: true });

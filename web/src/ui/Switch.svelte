@@ -1,7 +1,8 @@
 <script lang="ts">
   // Interrupteur (role="switch") : un vrai bouton, nommé par son libellé, décrit par sa ligne
   // d'aide. Pas une case à cocher (aucune case sur l'écran d'envoi, benchmark M1).
-  // `disabled` : non cliquable (bouton désactivé) ; `reason` : id de l'élément qui dit pourquoi.
+  // `disabled` : sans effet (aria-disabled, gardé au clavier pour que sa raison se lise, audit M22) ;
+  // `reason` : id de l'élément qui dit pourquoi.
   type Props = { label: string; hint?: string; checked: boolean; onchange: (v: boolean) => void; sub?: boolean; disabled?: boolean; reason?: string };
   let { label, hint, checked, onchange, sub = false, disabled = false, reason }: Props = $props();
   const uid = $props.id();
@@ -15,8 +16,10 @@
     aria-checked={checked}
     aria-labelledby="{uid}-l"
     aria-describedby={[hint ? `${uid}-h` : "", disabled && reason ? reason : ""].filter(Boolean).join(" ") || undefined}
-    {disabled}
-    onclick={() => onchange(!checked)}
+    aria-disabled={disabled ? "true" : undefined}
+    onclick={() => {
+      if (!disabled) onchange(!checked);
+    }}
   >
     <span class="txt">
       <span class="l" id="{uid}-l">{label}</span>
@@ -52,11 +55,11 @@
   .tg:active {
     transform: scale(0.985);
   }
-  .tg:disabled {
+  .tg[aria-disabled="true"] {
     cursor: not-allowed;
     opacity: 0.55;
   }
-  .tg:disabled:active {
+  .tg[aria-disabled="true"]:active {
     transform: none;
   }
   .sub .tg {

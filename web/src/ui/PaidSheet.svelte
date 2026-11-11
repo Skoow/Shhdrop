@@ -28,6 +28,8 @@
 
 <Sheet bind:open title={t("paid.title", { tier: name })}>
   <div class="paid" data-paid={tier}>
+    <!-- « Bientôt » en tête (audit M17) : rien n'est en vente aujourd'hui, dit avant tout le reste. -->
+    <p class="soon"><Clock size={16} strokeWidth={2} aria-hidden="true" /><span><b>{t("paid.soon")}</b> {t("paid.soon.body")}</span></p>
     <p class="lead">{t("paid.lead")}</p>
     <!-- Retours UI5 : la taille dite « par partage », dans la comparaison des offres (plus de chiffre seul en grand). -->
     <OffersTable highlight={tier} />
@@ -36,7 +38,6 @@
       {#each lines as l, i (i)}<li><Check size={16} strokeWidth={2.2} aria-hidden="true" /><span class="num">{l}</span></li>{/each}
     </ul>
     <PriceCards tiers={[tier]} />
-    <p class="soon"><Clock size={16} strokeWidth={2} aria-hidden="true" /><span><b>{t("paid.soon")}</b> {t("paid.soon.body")}</span></p>
     <Button variant="secondary" onpress={() => void (open = false)}>{t("common.understood")}</Button>
   </div>
 </Sheet>

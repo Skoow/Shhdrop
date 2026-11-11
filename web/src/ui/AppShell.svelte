@@ -8,7 +8,7 @@
   import type { Lang } from "../i18n/format";
   import { getLang, LANGS, setLang, t } from "../i18n/i18n.svelte";
   import Aurora from "./Aurora.svelte";
-  import { ChevronLeft } from "./Icon";
+  import { ChevronDown, ChevronLeft } from "./Icon";
   import LiveRegion from "./LiveRegion.svelte";
   import Logo from "./Logo.svelte";
   import Switch from "./Switch.svelte";
@@ -68,8 +68,10 @@
   function pick(l: Lang) {
     if (!busy) setLang(l);
   }
-  // Lien désactivé pendant l'envoi : annoncé comme tel, avec sa raison, et hors du parcours clavier.
-  const off = $derived(busy ? { "aria-disabled": "true" as const, "aria-describedby": "foot-busy", tabindex: -1 } : {});
+  // Lien désactivé pendant l'envoi : annoncé comme tel, avec sa raison, et GARDÉ dans le parcours
+  // clavier comme la langue et le nettoyage (audit M22 : sur « Lien prêt », Tab sautait les liens
+  // mais pas les boutons ; un élément désactivé reste trouvable, sa raison se lit).
+  const off = $derived(busy ? { "aria-disabled": "true" as const, "aria-describedby": "foot-busy" } : {});
 
   const here = (name: string) => (router.current.name === name ? "page" : undefined);
 
@@ -226,7 +228,12 @@
       </section>
       <section class="pref" aria-labelledby="foot-files">
         <p class="ch" id="foot-files">{t("settings.files")}</p>
+        <!-- Nom court, deux phrases en description ; le détail se déplie (audit M19). -->
         <Switch label={t("settings.clean")} hint={t("settings.clean.hint")} checked={fileSettings.autoClean} disabled={busy} reason="foot-busy" onchange={(v) => (fileSettings.autoClean = v)} />
+        <details class="more" data-clean-more>
+          <summary>{t("settings.clean.more")}<ChevronDown size={16} strokeWidth={2} aria-hidden="true" /></summary>
+          <p>{t("settings.clean.more.body")}</p>
+        </details>
       </section>
       <section class="pref" aria-labelledby="foot-about">
         <p class="ch" id="foot-about">{t("settings.about")}</p>
@@ -469,6 +476,7 @@
     font-size: var(--fs-small);
   }
   .fl {
+    position: relative;
     margin: 0;
     padding: 0;
     border: 0;
@@ -481,6 +489,12 @@
     transition:
       color var(--dur-fast) var(--ease-out),
       translate var(--dur-base) var(--ease-out);
+  }
+  /* Cible d'appui de 44 px (audit M21) : 40 px dessinés, 2 px de plus de chaque côté, invisibles. */
+  .fl::after {
+    content: "";
+    position: absolute;
+    inset: -2px 0;
   }
   .fl:hover,
   .fl:focus-visible {
@@ -599,6 +613,47 @@
   }
   .lang[aria-disabled="true"][aria-pressed="false"] {
     background: transparent;
+  }
+  /* « En savoir plus » du nettoyage : lien discret, cible de 44 px, chevron qui tourne. */
+  .more summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 44px;
+    color: var(--text-2);
+    font-size: var(--fs-small);
+    text-decoration: underline;
+    text-decoration-color: var(--line-strong);
+    text-underline-offset: 0.2em;
+    cursor: pointer;
+    list-style: none;
+  }
+  .more summary::-webkit-details-marker {
+    display: none;
+  }
+  .more summary :global(svg) {
+    transition: transform var(--dur-fast) var(--ease-out);
+  }
+  .more[open] summary :global(svg) {
+    transform: rotate(180deg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .more summary :global(svg) {
+      transition: none;
+    }
+  }
+  .more summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+  .more p {
+    margin: 0;
+    max-width: 60ch;
+    color: var(--text-2);
+    font-size: var(--fs-small);
+    line-height: var(--lh-small);
+    text-wrap: pretty;
   }
   .about {
     margin: 0;

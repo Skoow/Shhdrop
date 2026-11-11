@@ -42,8 +42,8 @@ test("mauvais mot de passe deux fois → « 3 essais restants », bon → conten
 
   // M9 : le geste irréversible annoncé avant, relié au bouton ; textes de confiance.
   // Ruling 5 : ouvertures restantes lues par fetchMeta (partage à 3 ouvertures).
-  const cost =
-    "Ce partage peut être ouvert encore 3\u00a0fois. Ouvrir ce partage compte une ouverture. Recharger la page ou l'ouvrir dans un autre onglet de ce navigateur n'en compte pas d'autre pendant 30\u00a0minutes.";
+  // Une ligne (audit M20).
+  const cost = "Ouvrir compte 1\u00a0ouverture sur les 3\u00a0restantes\u202f; recharger ensuite n'en compte pas d'autre pendant 30\u00a0min.";
   await expect(page.getByText(cost)).toBeVisible();
   await expect(unlockButton(page)).toHaveAccessibleDescription(cost);
   await expect(page.getByText("Le serveur ne reçoit que des données chiffrées, jamais la clé.")).toBeVisible();
@@ -114,9 +114,10 @@ test("cinq mauvais mots de passe → « Le partage a été détruit. », partage
   for (let k = PW_TRIES - 1; k >= 1; k--) {
     await pwField(page).fill("faux-" + k);
     await unlockButton(page).click();
-    await expect(page.locator("#open-err").getByText(new RegExp(`Mot de passe incorrect · ${k}\\s(essai|essais) restants?`))).toBeVisible({ timeout: 20_000 });
+    if (k > 1) await expect(page.locator("#open-err").getByText(new RegExp(`Mot de passe incorrect · ${k}\\s(essai|essais) restants?`))).toBeVisible({ timeout: 20_000 });
   }
-  await expect(page.getByText("Au prochain échec, le partage sera détruit.")).toBeVisible();
+  // Dernier essai : une seule ligne d'erreur (audit M20).
+  await expect(page.locator("#open-err p")).toHaveText(["Mot de passe incorrect · dernier essai\u202f: au prochain échec, le partage sera détruit."]);
   await pwField(page).fill("faux-0");
   await unlockButton(page).click();
   await expect(page.getByRole("heading", { name: "Mot de passe incorrect. Le partage a été détruit." })).toBeVisible({ timeout: 20_000 });
@@ -128,7 +129,7 @@ test("clé mal formée (« # » abîmé) → « Lien incomplet », aucune requê
   const api = apiPaths(page);
   // 43 caractères, mais encodage non canonique (bits de bourrage) : parseLink refuse localement.
   await page.goto(`${shh.origin}/#${"A".repeat(42)}B`);
-  await expect(page.getByRole("heading", { name: "Ce lien est incomplet. Rouvrez-le depuis le message d'origine." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Lien incomplet", exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
   expect(api).toEqual([]);
   expect(await axe(page)).toEqual([]);
@@ -138,13 +139,13 @@ test("lien coupé (fragment de 20 à 44 caractères qui n'est pas une clé) → 
   const api = apiPaths(page);
   for (const frag of ["Lr97TWFReo303xtSXonjjKhgrah", `m${"A".repeat(30)}`, "A".repeat(44)]) {
     await page.goto(`${shh.origin}/#${frag}`);
-    await expect(page.getByRole("heading", { name: "Ce lien est incomplet. Rouvrez-le depuis le message d'origine." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Lien incomplet", exact: true })).toBeVisible();
     await expect(page.getByText("Il manque une partie du lien", { exact: false })).toBeVisible();
     await expect.poll(() => page.evaluate(() => location.hash)).toBe("");
   }
   // Une ancre courte reste l'accueil.
   await page.goto(`${shh.origin}/#contenu`);
-  await expect(page.getByRole("heading", { name: "Ce lien est incomplet. Rouvrez-le depuis le message d'origine." })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Lien incomplet", exact: true })).toHaveCount(0);
   expect(api).toEqual([]);
   await page.goto(`${shh.origin}/#Lr97TWFReo303xtSXonjjKhgrah`);
   await expect(page.getByText("Il manque une partie du lien", { exact: false })).toBeVisible();

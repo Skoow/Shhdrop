@@ -109,7 +109,7 @@ for (const late of [false, true]) {
         expect(back.url()).toBe(shh.origin + "/");
         if (late) {
           // Entrée effacée et plus de « # » (retiré par replaceState) : la clé est perdue.
-          await expect(back.getByRole("heading", { name: "Ce lien est incomplet. Rouvrez-le depuis le message d'origine." })).toBeVisible();
+          await expect(back.getByRole("heading", { name: "Lien incomplet", exact: true })).toBeVisible();
           expect(await back.evaluate(() => sessionStorage.getItem("shh.og"))).toBeNull();
         } else if (onDisk.some((f) => f.includes("Session Storage"))) {
           await expect(back.getByRole("heading", { name: "Rouvrir ce partage" })).toBeVisible();
@@ -118,7 +118,7 @@ for (const late of [false, true]) {
           // rien à rendre à l'onglet restauré, la clé est perdue comme dans le cas « late ».
           // Comportement du navigateur, pas de l'application (test instable sinon) : noté.
           test.info().annotations.push({ type: "sessionStorage non écrit par Chromium", description: "restauration sans entrée" });
-          await expect(back.getByRole("heading", { name: "Ce lien est incomplet. Rouvrez-le depuis le message d'origine." })).toBeVisible();
+          await expect(back.getByRole("heading", { name: "Lien incomplet", exact: true })).toBeVisible();
         }
       }
       await step("fermeture finale", () => ctx.close());

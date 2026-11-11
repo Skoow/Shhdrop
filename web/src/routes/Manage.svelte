@@ -10,6 +10,7 @@
   import { getLang, t } from "../i18n/i18n.svelte";
   import { LimitError, NotFoundError, destroyShare, shareStatus } from "../index";
   import { announce } from "../ui/announce";
+  import { arrive } from "../ui/arrive";
   import Button from "../ui/Button.svelte";
   import Deadline from "../ui/Deadline.svelte";
   import { RefreshCw, Trash2 } from "../ui/Icon";
@@ -70,7 +71,7 @@
     secret = null;
     phase = "gone";
     await tick();
-    goneTitle?.focus({ preventScroll: true });
+    arrive(goneTitle);
     announce(t("manage.gone"));
     await logo?.erase();
   }

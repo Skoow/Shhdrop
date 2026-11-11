@@ -117,8 +117,8 @@
   {:else if router.current.name === "home" || router.current.name === "envoyer"}
     <!-- Accueil, puis composeur dès le premier élément (UI §9.1, §9.2) ; « /envoyer » : composeur
          même vide (retours DROP). Un seul SendFlow pour les deux : passer de l'un à l'autre garde
-         la liste. Coffre : jamais en démo (spec §27.6). -->
-    <SendFlow vaultAllowed={demo === null} sendPage={router.current.name === "envoyer"} onbusy={(b) => (sending = b)} />
+         la liste. -->
+    <SendFlow sendPage={router.current.name === "envoyer"} onbusy={(b) => (sending = b)} />
   {:else if router.current.name === "open"}
     {#key linkGen}<Open take={takeShare} />{/key}
   {:else if router.current.name === "manage"}

@@ -6,6 +6,7 @@
   import { tick } from "svelte";
   import { setProgressTitle, setScreenTitle } from "../app/title";
   import { UPLOAD_WINDOW_MS, type Sender, type Step } from "../flows/send.svelte";
+  import { CREATES_PER_DAY, PENDING_MAX } from "../limits";
   import type { Category } from "../flows/kinds";
   import { formatBytes, formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
@@ -189,8 +190,13 @@
         return t("err.send.network");
       case "interrompu":
         return t("err.interrupted");
-      case "limite":
-        return t("err.limit", { duration: formatDuration(s.retryAfterS ?? 60, lang, { coarse: true }) });
+      case "limite": {
+        // La règle d'abord, puis l'attente (audit M14).
+        const duration = formatDuration(s.retryAfterS ?? 60, lang, { coarse: true });
+        if (s.limitKind === "jour") return t("err.limit.day", { duration, n: CREATES_PER_DAY });
+        if (s.limitKind === "en_cours") return t("err.limit.pending", { duration, n: PENDING_MAX });
+        return t("err.limit", { duration });
+      }
       case "plein":
         return t("err.full");
       case "gele":
@@ -272,7 +278,7 @@
 
   <div class="info">
     <div class="phase">
-      <h2 id="seal-title" class={["title", { pulse: indeterminate }]} tabindex="-1" bind:this={heading}>{title}</h2>
+      <h1 id="seal-title" class={["title", { pulse: indeterminate }]} tabindex="-1" bind:this={heading}>{title}</h1>
       {#if sub}<p class="sub">{sub}</p>{/if}
     </div>
 
@@ -367,7 +373,8 @@
       {#if phase === "upload" && !s.canPause && !s.pausing}<p id="pause-why" class="why">{t("seal.pause.refused")}</p>{/if}
     {/if}
 
-    <p class="foot"><CircleHelp size={18} strokeWidth={1.75} aria-hidden="true" /><span>{t("seal.padding")} {t("seal.keepOpen")}</span></p>
+    <!-- « Gardez cet onglet ouvert » seulement tant que l'envoi tourne (faible de l'audit). -->
+    <p class="foot"><CircleHelp size={18} strokeWidth={1.75} aria-hidden="true" /><span>{t("seal.padding")}{#if phase !== "error" && phase !== "cancelled" && phase !== "sealed"}{" "}{t("seal.keepOpen")}{/if}</span></p>
   </div>
 </section>
 {/if}

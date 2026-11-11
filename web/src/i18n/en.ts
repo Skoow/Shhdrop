@@ -142,7 +142,6 @@ export const en = {
   "compose.col.actions": "Actions",
   "options.download.label": "Allow download",
   "options.download.hint": "Without download, a screenshot is still possible.",
-  "options.vault": "Keep an encrypted copy in the recipient's app (until expiry)",
   "options.download.warn.one": "{n}\u00a0item can't be opened without download.",
   "options.download.warn.other": "{n}\u00a0items can't be opened without download.",
   "compose.cannotOpen": "Can't be opened without download",
@@ -313,7 +312,7 @@ export const en = {
   "ready.delete.confirm": "Delete this share for everyone? The link will lead nowhere.",
   "ready.never": "This link and this password will never be shown again.",
   "ready.active": "Active",
-  "ready.selfdestruct": "Erases itself: after {opens}, or after {ttl}.",
+  "ready.selfdestruct": "Erases itself: after {opens}, or at that time ({ttl} after sending, rounded up to the next quarter hour).",
   "ready.opens.one": "{n} open",
   "ready.opens.other": "{n} opens",
   "ready.link.title": "Link",
@@ -350,7 +349,7 @@ export const en = {
   "open.cost": "Unlocking uses one open. If the download then fails, that open is lost.",
   "open.badPw.one": "Wrong password · {n}\u00a0attempt left",
   "open.badPw.other": "Wrong password · {n}\u00a0attempts left",
-  "open.lastTry": "One more failure and the share will be destroyed.",
+  "open.lastTry": "Wrong password · last attempt: one more failure and the share will be destroyed.",
   "open.destroyedByPw": "Wrong password. The share has been destroyed.",
 
   "content.undecodable.fmt": "This browser can't play the {fmt} format. Save the file, or open the link in {browser}.",
@@ -366,9 +365,9 @@ export const en = {
     "The share will be destroyed immediately for everyone. Shhdrop cannot see the content and keeps no trace of your report. For illegal content, you can also report it to the authorities (in France: PHAROS, internet-signalement.gouv.fr).",
 
   "invalid": "This link does not exist or is no longer available.",
-  "incomplete": "This link is incomplete. Reopen it from the original message.",
+  "incomplete": "Incomplete link",
   "incomplete.hint":
-    "Part of the link is missing: it may have been cut off when copied, or its secret part was removed from the address bar after a first visit. Nothing was requested from the server.",
+    "Reopen it from the original message. Part of the link is missing: it may have been cut off when copied, or its secret part was removed from the address bar after a first visit. Nothing was requested from the server.",
   "unsupported":
     "This browser cannot encrypt safely. Use a recent version of Safari, Chrome, Firefox or Edge.",
 
@@ -379,6 +378,8 @@ export const en = {
     "This share has been destroyed. It has been erased from the server. Anything you already saved on this device is not affected.",
 
   "err.limit": "Upload limit reached. Try again in {duration}.",
+  "err.limit.day": "Daily limit reached: {n}\u00a0shares per day from your connection. Try again in {duration}.",
+  "err.limit.pending": "Another upload is already being prepared from your connection, in another tab for example ({n}\u00a0at most at a time). Finish or close it, then try again in {duration}.",
   "err.full": "The service is full right now. Try again later.",
   "err.interrupted": "The transfer was interrupted (the server may have restarted). Try again.",
   "err.network": "Can't connect. Check your network and try again.",
@@ -393,10 +394,8 @@ export const en = {
   "open.title": "An encrypted share is waiting for you",
   "open.loading": "Reading the share…",
   "open.available": "Available for",
-  "open.oneOpen.one":
-    "This share can be opened {n}\u00a0more time. Opening it counts as one open. Reloading the page or opening it in another tab of this browser does not count another one for 30\u00a0minutes.",
-  "open.oneOpen.other":
-    "This share can be opened {n}\u00a0more times. Opening it counts as one open. Reloading the page or opening it in another tab of this browser does not count another one for 30\u00a0minutes.",
+  "open.oneOpen.one": "Last open left; reloading afterwards does not count another one for 30\u00a0min.",
+  "open.oneOpen.other": "Opening uses 1\u00a0of the {n}\u00a0opens left; reloading afterwards does not count another one for 30\u00a0min.",
   // Reload and other tabs (spec §41.4, UI §9.7.1)
   "open.reopen.title": "Reopen this share",
   "open.reopen.body": "You already unlocked this share. Enter the password to reopen it: this does not count another open.",
@@ -440,7 +439,8 @@ export const en = {
   "content.memory": "This device may run out of memory for a file this size.",
   "content.copied": "Text copied",
   "content.destroy": "Destroy this share",
-  "content.lastOpen": "You are the last person allowed to open this share. It will be deleted when you leave this page. You can also destroy it now.",
+  "content.lastOpen": "You are the last person allowed to open this share. When you leave this page, it will be erased from the server at most 30\u00a0min after you leave; until then, this tab can reopen it. You can also destroy it now.",
+  "content.lastOpen.top": "Last opening: erased from the server at most 30\u00a0min after you leave.",
   "content.opensLeft.one": "This link can be opened {n}\u00a0more time.",
   "content.opensLeft.other": "This link can be opened {n}\u00a0more times.",
   "content.destroy.confirm": "Destroy this share for everyone? It is immediate and final.",
@@ -524,6 +524,7 @@ export const en = {
   "paid.soon.body": "It's not on sale yet: nothing is asked of you today.",
   "paid.upsell": "With Plus: up to {size} per share and {days}.",
   "paid.upsell.more": "Learn more",
+  "paid.line": "More space and time with Plus and Pro, coming soon",
 
   "gone.title.expired": "This share has expired.",
   "gone.title.removed": "This share has been deleted.",
@@ -674,8 +675,10 @@ export const en = {
   "compose.uncleaned.one": "{n}\u00a0file couldn't be cleaned",
   "compose.uncleaned.other": "{n}\u00a0files couldn't be cleaned",
   "settings.files": "Files",
-  "settings.clean": "Clean files automatically",
-  "settings.clean.hint": "Your files often hold hidden information: where and with what device a photo or video was taken, a document's author and dates, an audio file's title and software. On, Shhdrop removes it on your device, before encryption, without changing what you see or hear. Off (default): files are sent as is, and each one can be cleaned from its menu. Photos and videos taken here never contain any. Forgotten when the tab closes.",
+  "settings.clean": "Automatic cleaning",
+  "settings.clean.hint": "Removes hidden information (location, device, author, dates) from your files, on this device and before encryption. Off by default: each file can also be cleaned from its menu.",
+  "settings.clean.more": "Learn more",
+  "settings.clean.more.body": "Removed: where and with what device a photo or video was taken, a document's author and dates, an audio file's title and software. Nothing you see or hear changes; a photo keeps its preview thumbnail, a PDF only loses its document properties. Photos and videos taken here never contain any. The setting is forgotten when the tab closes.",
   "settings.about": "About",
   "settings.about.body": "Shhdrop encrypts on your device before sending. No account, no tracker, public source code.",
   "confirm.title": "Confirmation",

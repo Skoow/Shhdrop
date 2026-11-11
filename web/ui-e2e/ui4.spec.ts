@@ -63,25 +63,18 @@ test("destinataire, ouverture non dernière : « Ce lien peut encore être ouver
   await page.screenshot({ path: `${SHOTS}content-not-last-${w(isMobile)}.png`, fullPage: true });
 });
 
-test("Lien prêt : échéance en deux lignes ; options : Plus et Pro en bleu, texte blanc", async ({ page, shh, isMobile }) => {
+test("Lien prêt : échéance en deux lignes", async ({ page, shh, isMobile }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(shh.origin + "/");
   await addText(page, "Le code de la porte est 4471.");
-  // Options : verrous Plus en bleu (pointillés compris), jamais le vert de l'action.
-  if (isMobile) await page.getByRole("button", { name: /^Options · / }).click();
-  const lk = page.locator("[data-locked] button, button[data-locked]").filter({ visible: true }).first();
-  await expect(lk).toBeVisible();
-  expect(await lk.evaluate((e) => [getComputedStyle(e).color, getComputedStyle(e).borderTopStyle, getComputedStyle(e).borderTopColor])).toEqual(["rgb(233, 236, 242)", "dashed", "rgb(31, 168, 230)"]); // texte blanc, pointillés bleu Plus (retours OPT, BLUE)
-  expect(await lk.locator("svg").evaluate((e) => getComputedStyle(e).color)).toBe("rgb(62, 193, 245)");
-  await settle(page);
-  await page.screenshot({ path: `${SHOTS}options-plus-${w(isMobile)}.png`, fullPage: !isMobile });
-  if (isMobile) await page.keyboard.press("Escape");
   await sendButton(page).filter({ visible: true }).click();
   await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
   const dl = page.locator("[data-deadline]");
   await expect(dl.locator(".ends")).toHaveText(/^Se termine le \d+\s\S+ à \d+\sh\s\d{2}$/);
-  await expect(dl.locator(".left")).toHaveText(/^\d+\sh(\s\d{2}\smin)?$/);
+  // Heure de fin seule (audit M16) ; l'arrondi est dit dans la phrase.
+  await expect(dl.locator(".left")).toHaveCount(0);
+  await expect(page.getByText(/arrondies au quart d'heure supérieur/)).toBeVisible();
   await settle(page);
   await page.screenshot({ path: `${SHOTS}ready-deadline-${w(isMobile)}.png` });
 });

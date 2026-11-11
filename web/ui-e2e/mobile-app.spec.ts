@@ -79,13 +79,11 @@ test.describe("téléphone façon app", () => {
     expect(await page.evaluate(() => navigator.serviceWorker?.controller ?? null)).toBeNull();
   });
 
-  test("accueil : onglets en bas (sans Réglages), langue dans le pied, comparatif en cartes, ni rebond ni défilement horizontal", async ({ page, shh }) => {
+  test("accueil : pas de barre d'onglets tant qu'un seul onglet fonctionne (décision du 11 novembre), langue dans le pied, comparatif en cartes, ni rebond ni défilement horizontal", async ({ page, shh }) => {
     await page.goto(shh.origin + "/");
-    const nav = tabbar(page);
-    await expect(nav).toBeVisible();
-    expect(await inViewport(page, nav)).toBe(true);
-    await expect(nav.getByRole("link", { name: "Envoyer" })).toHaveAttribute("aria-current", "page");
-    for (const n of [/^Mes partages/, /^Salon/]) await expect(nav.getByRole("button", { name: n })).toHaveAttribute("aria-disabled", "true");
+    // Mes partages et Salon sont « bientôt » : une barre à un seul onglet utile n'aide personne (audit M18).
+    await expect(tabbar(page)).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.classList.contains("has-tabbar"))).toBe(false);
     expect(await smallTargets(page, "body")).toEqual([]);
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).overscrollBehaviorY)).toBe("none");
     expect(await noHScroll(page)).toBe(true);
@@ -98,7 +96,6 @@ test.describe("téléphone façon app", () => {
     // 11 novembre) : la langue se change dans le pied de page.
     const banner = page.getByRole("banner");
     await expect(banner.getByRole("button", { name: /English|Français|Réglages/ })).toHaveCount(0);
-    await expect(nav.getByRole("button", { name: "Réglages" })).toHaveCount(0);
     await shot(page, "accueil");
 
     // Pied de page : langue, Sécurité, Confidentialité.
@@ -109,8 +106,7 @@ test.describe("téléphone façon app", () => {
     await switchLang(page, "Français");
     await footLink(page, "Sécurité").click();
     await expect(page).toHaveURL(/\/securite$/);
-    // Plus d'onglet Réglages : aucun onglet n'est courant sur une page d'information.
-    await expect(nav.locator('[aria-current="page"]')).toHaveCount(0);
+    await expect(tabbar(page)).toHaveCount(0);
     // En-tête natif : retour en haut à gauche.
     const back = page.getByRole("banner").getByRole("button", { name: "Retour" });
     await expect(back).toBeVisible();

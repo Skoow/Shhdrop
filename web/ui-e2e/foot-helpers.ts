@@ -14,8 +14,8 @@ export async function switchLang(page: Page, to: "English" | "Français") {
   await b.click();
 }
 
-/** Interrupteur « Nettoyer automatiquement les fichiers » du pied. */
-export const cleanSwitch = (page: Page) => foot(page).getByRole("switch", { name: /^(Nettoyer automatiquement les fichiers|Clean files automatically)$/ });
+/** Interrupteur « Nettoyage automatique » du pied. */
+export const cleanSwitch = (page: Page) => foot(page).getByRole("switch", { name: /^(Nettoyage automatique|Automatic cleaning)$/ });
 
 /** Lien du pied de page (Sécurité, Confidentialité…). */
 export const footLink = (page: Page, name: string | RegExp) => foot(page).getByRole("link", { name, exact: typeof name === "string" ? true : undefined });

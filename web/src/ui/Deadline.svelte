@@ -7,15 +7,16 @@
   import { getLang } from "../i18n/i18n.svelte";
   import Countdown from "./Countdown.svelte";
 
-  type Props = { expiresInS: number; lead?: string; now?: () => number; onexpire?: () => void };
-  let { expiresInS, lead, now, onexpire }: Props = $props();
+  /** `countdown` faux : l'heure de fin seule (« Lien prêt », audit M16 : l'heure est arrondie au quart d'heure). */
+  type Props = { expiresInS: number; lead?: string; now?: () => number; onexpire?: () => void; countdown?: boolean };
+  let { expiresInS, lead, now, onexpire, countdown = true }: Props = $props();
   // Fixée à l'arrivée de l'échéance (Date.now() lu une fois par valeur reçue).
   const ends = $derived(formatEndsAt(Date.now() + Math.max(0, expiresInS) * 1000, getLang()));
 </script>
 
 <span class="deadline" data-deadline>
   <span class="ends num">{ends}</span>
-  <span class="left num">{lead ? `${lead} ` : ""}<Countdown {expiresInS} {now} {onexpire} /></span>
+  {#if countdown}<span class="left num">{lead ? `${lead} ` : ""}<Countdown {expiresInS} {now} {onexpire} /></span>{/if}
 </span>
 
 <style>

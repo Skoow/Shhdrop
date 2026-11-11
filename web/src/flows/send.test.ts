@@ -318,6 +318,21 @@ describe("createSender : erreurs (UI §9.4.6)", () => {
     await flush();
     expect(t.s.error).toBe("limite");
     expect(t.s.retryAfterS).toBe(120);
+    expect(t.s.limitKind).toBe("jour"); // refus à la création, jusqu'à minuit UTC : quota du jour
+  });
+
+  it("audit M14 : la règle derrière la limite — en cours (≤ 60 s à la création), du jour, pendant l'envoi", async () => {
+    const t = setup();
+    void t.s.start(ITEMS, OPTS);
+    t.last().reject(new LimitError(60));
+    await flush();
+    expect(t.s.limitKind).toBe("en_cours"); // 2 envois en préparation au plus (autre onglet)
+    const u = setup();
+    void u.s.start(ITEMS, OPTS);
+    await toUpload(u);
+    u.last().reject(new LimitError(30000));
+    await flush();
+    expect(u.s.limitKind).toBe("envoi");
   });
 
   it("bad_request, repli désactivé : 2 essais (le second sans pré-calcul) puis captcha", async () => {

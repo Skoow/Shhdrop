@@ -66,23 +66,15 @@ test("Votre envoi : un seul tableau, sous-en-têtes de catégorie, icône au bor
   const before = await page.locator("[data-row]").first().evaluate((li) => li.querySelector("[data-clean]")!.getBoundingClientRect().right <= li.querySelector(".nm")!.getBoundingClientRect().left);
   expect(before).toBe(true);
 
-  // Pastilles d'espace : le nom de l'offre n'est plus écrit (retours CLEAN2), mais reste dans le nom
-  // accessible et en bulle au survol.
-  const pills = page.locator("[data-paid-space] button");
-  await expect(pills.nth(0)).toHaveAccessibleName(/^10\sGo · Plus$/);
-  await expect(pills.nth(1)).toHaveAccessibleName(/^50\sGo · Pro$/);
-  await expect(pills.nth(0).locator(".pv")).toHaveText(/^10\sGo$/);
-  await expect(pills.nth(0)).toHaveAttribute("title", "Plus");
-  await expect(pills.nth(1)).toHaveAttribute("title", "Pro");
+  // Plus de pastilles d'espace ni de choix verrouillés (décision du 11 novembre, audit M17).
+  await expect(page.locator("[data-paid-space], [data-locked]")).toHaveCount(0);
   await shot(page, "composeur", isMobile);
 
   // Options : plus aucun badge écrit ; le nom de l'offre en bulle au survol (title).
   if (isMobile) await page.getByRole("button", { name: /^Options · / }).click();
   const opts = page.locator(".opts").filter({ visible: true });
-  await expect(opts.locator('[data-locked="first-open"]')).toBeVisible();
+  await expect(opts.getByRole("radiogroup", { name: "Durée" })).toBeVisible();
   await expect(opts.locator(".badge")).toHaveCount(0);
-  await expect(opts.locator('[data-locked="first-open"]')).toHaveAttribute("title", "Plus");
-  await expect(opts.locator('[data-locked="opens"] button')).toHaveAttribute("title", "Pro");
   await settle(page);
   expect(await axe(page)).toEqual([]);
   await shot(page, "options", isMobile);

@@ -7,7 +7,7 @@
   import { MediaQuery } from "svelte/reactivity";
   import { chrome } from "../app/chrome.svelte";
   import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, TTL_MAX_HOURS, generatePassword, type ElementStatus, type Item, type KeepTtl } from "../index";
-  import { PAID, type PaidTier } from "../limits";
+  import type { PaidTier } from "../limits";
   import { blockKey, canClean, createComposer, type AddReport, type ComposeItem, type Source } from "../flows/compose.svelte";
   import { rowStatus, toDraftList } from "../flows/preupload";
   import { fileSettings } from "../flows/settings.svelte";
@@ -22,7 +22,7 @@
   import CapacityGauge from "../ui/CapacityGauge.svelte";
   import CategoryGroup from "../ui/CategoryGroup.svelte";
   import { navigate } from "../app/router.svelte";
-  import { ChevronDown, Eye, Lock, Pencil, Plus, RefreshCw, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from "../ui/Icon";
+  import { ChevronDown, Eye, Pencil, Plus, RefreshCw, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from "../ui/Icon";
   import NamesTip from "../ui/NamesTip.svelte";
   import { composePreview } from "../ui/itemView";
   import { safeBlobType } from "../viewers/blobs";
@@ -45,8 +45,6 @@
   type Props = {
     /** Envoi (Task 17). Sans lui : avis « Envoi : prochaine étape ». */
     onsend?: (state: SendState) => void;
-    /** Droit « coffre » proposé (spec §27 : jamais en démo). */
-    vaultAllowed?: boolean;
     /** Faux pendant un envoi (composeur caché) : ni collage ni dépôt n'ajoutent rien (S9). */
     active?: boolean;
     /**
@@ -62,7 +60,7 @@
     /** Page d'envoi « /envoyer » (retours DROP) : composeur affiché même vide, grand cadre de dépôt au centre. */
     sendPage?: boolean;
   };
-  let { onsend, vaultAllowed = false, active = true, onitems, uploadOf, uploadVersion = 0, onretry, removing = 0, sendPage = false }: Props = $props();
+  let { onsend, active = true, onitems, uploadOf, uploadVersion = 0, onretry, removing = 0, sendPage = false }: Props = $props();
 
   let online = $state(typeof navigator === "undefined" || navigator.onLine !== false);
 
@@ -81,13 +79,11 @@
     autoClean: () => fileSettings.autoClean,
   });
   // Téléphone (< 760 px) : une vraie app (lignes compactes, menu « … », barre collée, options
-  // en feuille). Ordinateur : deux colonnes. Le coffre (spec §27) : téléphone ou app installée.
+  // en feuille). Ordinateur : deux colonnes. Coffre chez le destinataire (spec §27) : retiré de
+  // l'interface tant que les apps n'existent pas (décision du propriétaire du 11 novembre).
   const narrowMq = new MediaQuery("max-width: 759px");
-  const coarseMq = new MediaQuery("pointer: coarse");
-  const standaloneMq = new MediaQuery("display-mode: standalone");
   const narrow = $derived(narrowMq.current);
-  const vaultShown = $derived(vaultAllowed && (coarseMq.current || standaloneMq.current));
-  const options = createOptions({ generate: generatePassword, vaultAllowed: () => vaultShown });
+  const options = createOptions({ generate: generatePassword });
   // Formules payantes (D41-16) : feuille d'information seulement, rien n'est en vente.
   let paidOpen = $state(false);
   let paidTier = $state<PaidTier>("plus");
@@ -216,8 +212,8 @@
         // la saisie partirait dans l'autre champ.
         const at = document.activeElement;
         if (at && (at === titleEl || at === editorEl)) return;
-        // Nouvelle note vide : le titre d'abord ; sinon le contenu, curseur à la fin.
-        if (!id && text === "") return void titleEl?.focus();
+        // Toujours le contenu, curseur à la fin : c'est ce qu'on vient écrire ; le titre est
+        // facultatif (faible de l'audit du 11 novembre).
         editorEl?.focus();
         editorEl?.setSelectionRange(editorText.length, editorText.length);
       }),
@@ -550,19 +546,11 @@
             </Button>
           </div>
         {/if}
-        <p class="free num" data-free>{freeText}</p>
+        <!-- Limites du gratuit, puis UNE ligne discrète pour les offres (décision du propriétaire du
+             11 novembre, audit M17) : la feuille d'information s'ouvre sur place (la liste reste). -->
+        <p class="free num"><span data-free>{freeText}</span><span aria-hidden="true">{" · "}</span><button type="button" class="soonlink" data-paid-line aria-haspopup="dialog" onclick={() => showPaid("plus")}>{t("paid.line")}</button></p>
         <div class="cap">
           <div class="capg"><CapacityGauge bytes={composer.totalBytes + removing} count={composer.count} head /></div>
-          <!-- Espaces des offres (retours OPT) : verrouillés, à côté de la jauge ; un appui ouvre la feuille d'information. -->
-          <div class="caps" data-paid-space>
-            {#each ["plus", "pro"] as const as tier (tier)}
-              {@const name = t(`paid.badge.${tier}`)}
-              <span id="cap-{tier}" class="sr-only">{t("paid.locked", { tier: name })}</span>
-              <button type="button" class="cpill num" data-tier={tier} title={name} aria-describedby="cap-{tier}" onclick={() => showPaid(tier)}
-                ><span class="pv"><Lock size={13} strokeWidth={2} aria-hidden="true" /><span>{formatBytes(PAID[tier].bytes, lang)}</span></span><span class="sr-only">{" · "}{name}</span></button
-              >
-            {/each}
-          </div>
         </div>
         {#if removing > 0}<p class="removing" role="status">{t("compose.up.removing")}</p>{/if}
       </div>
@@ -660,10 +648,10 @@
       <!-- Ordinateur : colonne collée, défilement propre, pied collé : le bouton reste visible. -->
       <div class="side">
         <div class="side-scroll">
-          <Options {options} {unviewable} {vaultShown} part="controls" onpaid={showPaid} />
+          <Options {options} {unviewable} part="controls" />
         </div>
         <div class="sendbar foot">
-          <Options {options} {unviewable} {vaultShown} part="summary" />
+          <Options {options} {unviewable} part="summary" />
           <Button variant="primary" lock disabled={reasonText !== ""} aria-describedby={reasonText ? "send-reason" : undefined} onpress={send}>{t("options.submit")}</Button>
           {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{:else if uncleaned > 0}<p class="unclean-sum" data-unclean-sum>{t("compose.uncleaned", { n: uncleaned })}</p>{/if}
         </div>
@@ -720,7 +708,7 @@
 
 <Sheet bind:open={optionsOpen} title={t("options.title")}>
   <div class="opt-sheet">
-    <Options {options} {unviewable} {vaultShown} compact onpaid={showPaid} />
+    <Options {options} {unviewable} compact />
     <Button variant="primary" onpress={() => void (optionsOpen = false)}>{t("compose.move.done")}</Button>
   </div>
 </Sheet>
@@ -861,78 +849,40 @@
     flex: 1 1 220px;
     min-width: 0;
   }
-  .caps {
-    display: flex;
-    flex: none;
-    gap: 6px;
-  }
-  /* Pastilles Plus et Pro : pointillés, cadenas et nom de l'offre au bleu de SON offre (Plus
-     ciel, Pro profond), taille en blanc. Cible d'appui de 44 px (bouton), visuel compact de
-     32 px (.pv). */
-  .cpill {
-    --tc: var(--plus);
-    --tc-tint: var(--plus-tint);
-    --tc-line: var(--plus-line);
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--text);
-    font: inherit;
-    font-size: var(--fs-small);
-    font-weight: 600;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-  .cpill[data-tier="pro"] {
-    --tc: var(--pro);
-    --tc-tint: var(--pro-tint);
-    --tc-line: var(--pro-line);
-  }
-  .pv {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    min-height: 32px;
-    padding: 0 10px;
-    border: 1px dashed var(--tc-line);
-    border-radius: var(--r-pill);
-  }
-  .cpill:focus-visible {
-    outline: none;
-  }
-  .cpill:focus-visible .pv {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-  /* Le nom de l'offre n'est plus écrit (retours CLEAN2) : bleu de l'offre, bulle au survol
-     (title), lecteurs d'écran (« 10 Go · Plus ») et feuille d'information à l'appui. */
-  .cpill :global(svg) {
-    flex: none;
-    color: var(--tc);
-  }
-  @media (hover: hover) {
-    .cpill:hover .pv {
-      background: var(--tc-tint);
-      border-color: var(--tc);
-    }
-  }
-  @media (forced-colors: active) {
-    .pv {
-      border: 1px solid CanvasText;
-    }
-    .cpill:focus-visible .pv {
-      outline-color: CanvasText;
-    }
-  }
   /* Limites gratuites, dites en clair sous le titre (D41-16). */
   .free {
     grid-column: 1 / -1;
     margin: -6px 0 0;
     color: var(--text-3);
     font-size: var(--fs-small);
+  }
+  /* Lien discret vers la feuille des offres : texte souligné, cible d'appui de 44 px (::after). */
+  .soonlink {
+    position: relative;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-2);
+    font: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--line-strong);
+    text-underline-offset: 0.2em;
+    cursor: pointer;
+  }
+  .soonlink::after {
+    content: "";
+    position: absolute;
+    inset: -13px -4px;
+  }
+  .soonlink:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+  @media (hover: hover) {
+    .soonlink:hover {
+      color: var(--text);
+    }
   }
 
   /* Zone de dépôt : un clic ouvre le sélecteur ; on peut aussi déposer n'importe où sur la page. */

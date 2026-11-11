@@ -96,11 +96,11 @@ test.describe("fr-FR", () => {
     await expect(f).toBeAttached();
     const reason = f.locator("[data-foot-busy]");
     await expect(reason).toContainText("désactivés pendant l'envoi");
-    // Liens : désactivés, décrits par la raison, hors du clavier ; un clic ne quitte pas la page.
+    // Liens : désactivés, décrits par la raison, gardés au clavier (audit M22) ; un clic ne quitte pas la page.
     const sec = footLink(page, "Sécurité");
     await expect(sec).toHaveAttribute("aria-disabled", "true");
     await expect(sec).toHaveAccessibleDescription(/désactivés pendant l'envoi/);
-    await expect(sec).toHaveAttribute("tabindex", "-1");
+    await expect(sec).not.toHaveAttribute("tabindex", "-1");
     await expect(footLink(page, /^Code source/)).toHaveAttribute("aria-disabled", "true");
     await expect(f.getByRole("link", { name: "Shhdrop, accueil" })).toHaveAttribute("aria-disabled", "true");
     for (const l of await f.getByRole("link").all()) await expect(l).toHaveAttribute("aria-disabled", "true");
@@ -112,8 +112,10 @@ test.describe("fr-FR", () => {
     await expect(en).toHaveAccessibleDescription(/désactivés pendant l'envoi/);
     await en.click({ force: true });
     await expect(page.locator("html")).toHaveAttribute("lang", "fr");
-    // Nettoyage automatique : interrupteur désactivé.
+    // Nettoyage automatique : interrupteur désactivé (aria-disabled), un appui ne change rien.
     await expect(cleanSwitch(page)).toBeDisabled();
+    await cleanSwitch(page).click({ force: true });
+    await expect(cleanSwitch(page)).toHaveAttribute("aria-checked", "false");
     await expect(cleanSwitch(page)).toHaveAccessibleDescription(/désactivés pendant l'envoi/);
     // Toujours en cours d'envoi (aucun écran quitté).
     await expect(page.getByRole("heading", { name: "Chiffrement et envoi" })).toBeVisible();

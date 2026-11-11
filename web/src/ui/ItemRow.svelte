@@ -448,6 +448,7 @@
     color: var(--text-3);
   }
   .retry {
+    position: relative;
     font: inherit;
     color: inherit;
     text-decoration: underline;
@@ -455,6 +456,12 @@
     border: 0;
     padding: 0;
     cursor: pointer;
+  }
+  /* Cible d'appui de 44 px de haut (audit M21) sans rien changer au dessin. */
+  .retry::after {
+    content: "";
+    position: absolute;
+    inset: -13px -4px;
   }
   /* 2ᵉ ligne (type, taille…) alignée sur le début du nom, après l'emplacement du bouclier
      (15 px + 6 px, .cslot) : retours CLEAN3. */

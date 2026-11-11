@@ -181,7 +181,7 @@ const FR: Record<InfoName, (v: V) => InfoPage> = {
         h: "Depuis le partage",
         list: [
           "Ouvrez le partage avec son lien et son mot de passe.",
-          "Touchez « Signaler », en haut à droite du contenu, puis confirmez.",
+          "Le partage ouvert, touchez « Signaler ce partage » en bas de la page, dans le pied (colonne « Confiance »), puis confirmez.",
           "Le partage est détruit aussitôt pour tout le monde : les téléchargements en cours sont coupés, aucune ouverture ne reste possible.",
         ],
       },
@@ -351,7 +351,7 @@ const EN: Record<InfoName, (v: V) => InfoPage> = {
         h: "From the share",
         list: [
           "Open the share with its link and password.",
-          "Tap “Report”, at the top right of the content, then confirm.",
+          "With the share open, tap “Report this share” at the bottom of the page, in the footer (“Trust” column), then confirm.",
           "The share is destroyed at once for everyone: downloads in progress are cut, no open remains possible.",
         ],
       },

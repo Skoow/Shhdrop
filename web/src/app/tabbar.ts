@@ -16,8 +16,17 @@ export const TABS: readonly { id: TabId; soon: boolean }[] = [
 
 const ROOTS: ReadonlySet<Route["name"]> = new Set(["home", "securite", "confidentialite", "conditions", "mentions", "signaler", "offres", "notfound"]);
 
-export function tabBarVisible(o: { supported: boolean; route: Route["name"]; sending: boolean; composing: boolean }): boolean {
-  return o.supported && !o.sending && !o.composing && ROOTS.has(o.route);
+/** Une barre d'onglets n'a de sens qu'avec au moins deux onglets qui fonctionnent. */
+export function tabBarUseful(tabs: readonly { id?: TabId; soon: boolean }[]): boolean {
+  return tabs.filter((t) => !t.soon).length >= 2;
+}
+
+/**
+ * Masquée tant qu'un seul onglet fonctionne (décision du propriétaire du 11 novembre, audit
+ * M18 : Mes partages et Salon sont « bientôt ») ; `useful` : forcé par les tests.
+ */
+export function tabBarVisible(o: { supported: boolean; route: Route["name"]; sending: boolean; composing: boolean }, useful = tabBarUseful(TABS)): boolean {
+  return useful && o.supported && !o.sending && !o.composing && ROOTS.has(o.route);
 }
 
 /** Onglet courant : Envoyer sur l'accueil ; aucun ailleurs (plus d'onglet Réglages : langue,

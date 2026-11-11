@@ -17,7 +17,7 @@ test("dernière ouverture : recharger garde le partage ; fermer la page le suppr
   await s.ctx.close();
   await page.goto(sent.link);
   await unlock(page, sent.password);
-  await expect(page.getByText("Il sera supprimé quand vous quitterez cette page.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Quand vous quitterez cette page, il sera effacé du serveur au plus tard 30\u202fmin après votre départ", { exact: false })).toBeVisible();
 
   // Rechargement : « je pars » part au pagehide (requête keepalive, que Playwright ne voit pas
   // toujours pendant un déchargement), la réouverture par l'octroi l'annule.

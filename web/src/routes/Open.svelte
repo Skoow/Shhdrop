@@ -23,6 +23,7 @@
   import { createGone } from "../flows/gone.svelte";
   import GoneScreen from "../ui/GoneScreen.svelte";
   import { revokeAll } from "../viewers/blobs";
+  import { arrive } from "../ui/arrive";
   import Content from "./Content.svelte";
   import Ended from "./Ended.svelte";
   import ErrorPage from "./ErrorPage.svelte";
@@ -140,7 +141,8 @@
   const errorText = $derived.by(() => {
     switch (r.error) {
       case "bad_password":
-        return t("open.badPw", { n: r.attemptsLeft ?? 0 });
+        // Dernier essai : une seule ligne qui dit tout (audit M20).
+        return r.attemptsLeft === 1 ? t("open.lastTry") : t("open.badPw", { n: r.attemptsLeft ?? 0 });
       case "password_required":
         return t("open.pwRequired");
       case "grant_invalid":
@@ -189,6 +191,10 @@
   $effect(() => {
     if (!title) return;
     untrack(() => title?.focus({ preventScroll: true }));
+  });
+  // Détruit après le dernier essai : même titre, autre écran ; on remonte le montrer (audit I4).
+  $effect(() => {
+    if (r.state === "destroyed_by_password") untrack(() => arrive(title));
   });
 </script>
 
@@ -285,7 +291,6 @@
         {#if errorText}
           <div id="open-err" class="err" role="alert">
             <p>{errorText}</p>
-            {#if r.error === "bad_password" && r.attemptsLeft === 1}<p>{t("open.lastTry")}</p>{/if}
           </div>
         {/if}
         <p id="open-tries" class="small">{t("open.tries", { n: PW_TRIES })}</p>
@@ -671,6 +676,12 @@
     }
     .title {
       font-size: var(--fs-h1);
+    }
+    /* Détruit (5 essais, faible de l'audit) : l'illustration au-dessus du titre, qui garde la
+       largeur de l'écran au lieu de s'écraser à côté. */
+    .capsule[data-state="destroyed"]:not(.spent) {
+      flex-direction: column;
+      align-items: flex-start;
     }
   }
   @media (forced-colors: active) {

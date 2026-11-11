@@ -6,6 +6,7 @@
   import { followLink, href } from "../app/router.svelte";
   import { t } from "../i18n/i18n.svelte";
   import { announce } from "../ui/announce";
+  import { arrive } from "../ui/arrive";
   import DestroyReceipt from "../ui/DestroyReceipt.svelte";
   import Logo from "../ui/Logo.svelte";
 
@@ -16,7 +17,7 @@
   let logo: Logo | undefined = $state();
   $effect(() => {
     if (!title) return;
-    title.focus({ preventScroll: true });
+    arrive(title);
     announce(title.textContent ?? "");
     if (kind === "destroyed") void logo?.erase();
   });

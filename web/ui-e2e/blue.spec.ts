@@ -12,23 +12,28 @@ const PLUS = "rgb(62, 193, 245)";
 const PRO = "rgb(92, 128, 255)";
 const color = (e: Element) => getComputedStyle(e).color;
 
-test("composeur et options : Plus en bleu ciel, Pro en bleu profond ; captures", async ({ page, shh, isMobile }) => {
+// Décision du propriétaire du 11 novembre (audit M17) : plus aucun verrou ni pastille Plus ou Pro
+// dans le composeur ; une seule ligne discrète ouvre la feuille d'information (« bientôt » en tête).
+test("composeur et options : aucun choix payant verrouillé ; une ligne discrète ouvre la feuille ; captures", async ({ page, shh, isMobile }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 900 });
   await page.goto(shh.origin + "/");
   await addText(page, "Le code de la porte est 4471.");
-  const pills = page.locator("[data-paid-space] button");
-  expect(await pills.nth(0).locator("svg").evaluate(color)).toBe(PLUS);
-  expect(await pills.nth(1).locator("svg").evaluate(color)).toBe(PRO);
+  await expect(page.locator("[data-paid-space], [data-locked]")).toHaveCount(0);
+  const line = page.locator("[data-paid-line]").filter({ visible: true });
+  await expect(line).toHaveText("Plus de place et de durée avec Plus et Pro, bientôt");
   await settle(page);
   await page.screenshot({ path: `${SHOTS}compose-top-${w(isMobile)}.png` });
   if (isMobile) await page.getByRole("button", { name: /^Options · / }).click();
   const opts = page.locator(".opts").filter({ visible: true });
-  expect(await opts.locator('[data-locked="ttl"] button').first().locator("svg").evaluate(color)).toBe(PLUS);
-  expect(await opts.locator('[data-locked="opens"] button svg').evaluate(color)).toBe(PRO);
+  await expect(opts.getByText(/jours|première ouverture|Jusqu'à 50/)).toHaveCount(0);
   await settle(page);
   expect(await axe(page)).toEqual([]);
   await page.screenshot({ path: `${SHOTS}options-${w(isMobile)}.png` });
+  if (isMobile) await page.keyboard.press("Escape");
+  await line.click();
+  const sheet = page.getByRole("dialog", { name: "Shhdrop Plus" });
+  await expect(sheet.locator("[data-paid] > *").first()).toContainText("Bientôt disponible.");
 });
 
 test("Offres : cartes et colonnes au bleu de leur offre ; feuille Pro en bleu Pro ; capture", async ({ page, shh, isMobile }) => {

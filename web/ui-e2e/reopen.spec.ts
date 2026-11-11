@@ -8,7 +8,7 @@ import { freshPage, noteRow, pwField, sendShare, settle, unlock } from "./open-h
 const TEXT = "Le code du portail est 2208.";
 const reopenTitle = (p: Page) => p.getByRole("heading", { name: "Rouvrir ce partage" });
 const reopenButton = (p: Page) => p.getByRole("button", { name: /^(Rouvrir|Déchiffrement)/ });
-const incomplete = (p: Page) => p.getByRole("heading", { name: "Ce lien est incomplet. Rouvrez-le depuis le message d'origine." });
+const incomplete = (p: Page) => p.getByRole("heading", { name: "Lien incomplet", exact: true });
 
 async function reopen(page: Page, password: string): Promise<void> {
   await expect(reopenTitle(page)).toBeVisible();
@@ -29,7 +29,7 @@ test("recharger rouvre sans consommer (1 / 3 avant et après), dix fois ; le onz
   acceptUnload(page);
 
   await page.goto(sent.link);
-  await expect(page.getByText("Ce partage peut être ouvert encore 3 fois.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Ouvrir compte 1\u00a0ouverture sur les 3\u00a0restantes", { exact: false })).toBeVisible();
   await unlock(page, sent.password);
   expect((await shareStatus(sent.manage, shh.origin)).opensUsed).toBe(1);
   // Seule entrée de l'onglet : shh.og, sans mot de passe.
@@ -68,7 +68,7 @@ test("recharger rouvre sans consommer (1 / 3 avant et après), dix fois ; le onz
   await expect(page.getByText("Trop de rechargements : une nouvelle ouverture sera comptée.")).toBeVisible({ timeout: 20_000 });
   expect(await page.evaluate(() => sessionStorage.getItem("shh.og"))).toBeNull();
   expect((await shareStatus(sent.manage, shh.origin)).opensUsed).toBe(1);
-  await expect(page.getByText("Ce partage peut être ouvert encore 2 fois.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Ouvrir compte 1\u00a0ouverture sur les 2\u00a0restantes", { exact: false })).toBeVisible();
 
   // Nouvelle ouverture (comptée) : le pied dit combien d'ouvertures restent (plus de bouton
   // « Terminer et effacer », retours UI4).
@@ -102,7 +102,7 @@ test("deuxième onglet : avec le premier ouvert, même ouverture ; sans premier 
   // la consommation, et le déverrouillage en compte une.
   const c = await freshPage(browser);
   await c.page.goto(sent.link);
-  await expect(c.page.getByText("Ce partage peut être ouvert encore 2 fois. Ouvrir ce partage compte une ouverture.", { exact: false })).toBeVisible();
+  await expect(c.page.getByText("Ouvrir compte 1\u00a0ouverture sur les 2\u00a0restantes", { exact: false })).toBeVisible();
   await expect(c.page.getByText(other)).toHaveCount(0);
   await unlock(c.page, sent.password);
   expect((await shareStatus(sent.manage, shh.origin)).opensUsed).toBe(2);

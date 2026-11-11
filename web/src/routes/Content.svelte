@@ -25,7 +25,7 @@
   import { copyText } from "../ui/clipboard";
   import DownloadBar from "../ui/DownloadBar.svelte";
   import { formatOf } from "../ui/formats";
-  import { Download, Eye, Pause, Play, Square, Trash2 } from "../ui/Icon";
+  import { Clock, Download, Eye, Pause, Play, Square, Trash2 } from "../ui/Icon";
   import { chrome } from "../app/chrome.svelte";
   import IconButton from "../ui/IconButton.svelte";
   import InlineConfirm from "../ui/InlineConfirm.svelte";
@@ -386,6 +386,10 @@
         : t("content.summary", { n: entries.length, size: formatBytes(totalBytes, lang), time: formatDuration(transferSeconds(totalBytes, rate), lang) })}
     </p>
   </header>
+  <!-- Dernière ouverture : dit aussi en haut (audit I5), le détail et « Détruire » restent en bas. -->
+  {#if lastOpen && !closer.closed}
+    <p class="notice" data-last-top><Clock size={18} aria-hidden="true" /> <span>{t("content.lastOpen.top")}</span></p>
+  {/if}
   {#if viewOnly}
     <p class="notice"><Eye size={18} aria-hidden="true" /> <span>{t("content.viewOnly")}</span></p>
   {:else}

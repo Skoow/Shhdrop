@@ -20,10 +20,14 @@ export const PW_TRIES = 5;
 export const STRIP_MAX = 50 * 1048576;
 /** Longueur maximale d'un nom, en points de code (UI §9.2.4, même borne que cleanName). */
 export const NAME_MAX = 120;
+/** Partages créés par jour et par connexion (spec §24 ; limits.CreatesPer64 du serveur). */
+export const CREATES_PER_DAY = 10;
+/** Envois en préparation (non finalisés) à la fois par connexion (spec §29.5 ; limits.PendingPer64). */
+export const PENDING_MAX = 2;
 
 /**
- * Formules payantes (spec §38.8.1, prix proposés de §38.8.2, TTC, en euros) : montrées dans le
- * composeur comme des choix verrouillés, avec « Bientôt disponible » (D41-16) ; rien n'est en
+ * Formules payantes (spec §38.8.1, prix proposés de §38.8.2, TTC, en euros) : présentées par une
+ * seule ligne discrète du composeur et une feuille « Bientôt disponible » (décision du 11 novembre) ; rien n'est en
  * vente tant que les Tasks P1 à P3 ne sont pas faites. Le nombre d'éléments n'en fait pas
  * partie : MAX_ITEMS vaut pour toutes (D41-17). Aucune n'apporte de sécurité de plus (§38.9.0).
  * Ouvertures : Plus garde celles du gratuit, Pro va jusqu'à 50 (D41-36, retours OPT).

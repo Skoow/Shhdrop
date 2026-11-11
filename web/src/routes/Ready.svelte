@@ -12,6 +12,7 @@
   import { getLang, t } from "../i18n/i18n.svelte";
   import { NotFoundError, destroyShare, shareLinkWithPassword } from "../index";
   import { announce } from "../ui/announce";
+  import { arrive } from "../ui/arrive";
   import Button from "../ui/Button.svelte";
   import { copyText } from "../ui/clipboard";
   import CopyField from "../ui/CopyField.svelte";
@@ -142,7 +143,7 @@
     deleted = true;
     onforget();
     await tick();
-    goneTitle?.focus({ preventScroll: true });
+    arrive(goneTitle);
     announce(t("ready.deleted"));
     await logo?.erase();
   }
@@ -152,7 +153,7 @@
   <section class="gone" aria-labelledby="gone-title">
     <div class="gone-logo"><Logo bind:this={logo} /></div>
     <span class="mini dashed" aria-hidden="true"></span>
-    <h2 id="gone-title" class="title" tabindex="-1" bind:this={goneTitle}>{t("ready.deleted")}</h2>
+    <h1 id="gone-title" class="title" tabindex="-1" bind:this={goneTitle}>{t("ready.deleted")}</h1>
     <p class="lede">{t("ready.deleted.body")}</p>
     <Button variant="primary" onpress={onnew}>{t("ready.new")}</Button>
   </section>
@@ -162,11 +163,13 @@
       <header class="hd" data-fan>
         <span class="mini" aria-hidden="true" data-capsule><Lock size={22} strokeWidth={1.9} /></span>
         <div class="hd-tx">
-          <h2 id="ready-title" class="title" tabindex="-1" data-large-title bind:this={heading}>{t("ready.title")}</h2>
+          <!-- Titre de niveau 1 : le composeur (et son h1) est masqué pendant cet écran. -->
+          <h1 id="ready-title" class="title" tabindex="-1" data-large-title bind:this={heading}>{t("ready.title")}</h1>
           <p class="meta num">{summary}</p>
           <p class="active num"><span class="dot" aria-hidden="true"></span>{t("ready.active")}</p>
-          <!-- Retours UI4 : date et heure exactes de fin, puis le décompte vivant. -->
-          <p class="when"><Deadline expiresInS={result?.expiresInS ?? 0} /></p>
+          <!-- Heure de fin seule (audit M16) : le serveur l'arrondit au quart d'heure supérieur ;
+               un décompte « 12 h 12 min » à côté de « 12 h » semblait faux. La phrase dit l'arrondi. -->
+          <p class="when"><Deadline expiresInS={result?.expiresInS ?? 0} countdown={false} /></p>
           <p class="self">{selfDestruct}</p>
         </div>
       </header>
