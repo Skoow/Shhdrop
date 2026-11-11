@@ -5,7 +5,7 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "engines": {
-    "node": ">=26.13.0"
+    "node": ">=22.2.0"
   },
   "scripts": {
     "build:engine": "node scripts/build-engine.mjs",
