@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { STRIP_MAX } from "../limits";
 import { ascii, u16be, u32be, u32le } from "./bytes";
 import { crc32 } from "./crc32";
-import { readOrientation } from "./exif";
+import { keptTiff, readOrientation, readThumbnail } from "./exif";
 import { EMPTY_XMP } from "./heif";
 import { children, topLevel } from "./isobmff";
 import { stripMetadata, type StripResult } from "./strip";
@@ -16,7 +16,7 @@ const MIME: Record<string, string> = { jpg: "image/jpeg", png: "image/png", webp
 const mimeOf = (n: string) => MIME[n.split(".").pop()!]!;
 const FIXTURES = ["iphone-like.jpg", "progressive.jpg", "meta.png", "meta.webp", "simple.webp", "meta.gif", "meta.heic", "meta.avif"];
 
-const MARKERS = ["ReperMake", "ReperModel", "ReperXMP", "ReperIPTC", "ReperCOM", "ReperSecond", "ReperMotion", "ReperThumb", "ReperGIF", "ReperAuteur", "ReperTitre", "ReperDescription", "ReperUUID", "ReperDOT", "ReperLogiciel", "ReperMPF", "ReperJFXX", "ReperApres", "ReperInconnu", "2001:02:03"];
+const MARKERS = ["ReperMake", "ReperModel", "ReperXMP", "ReperIPTC", "ReperCOM", "ReperSecond", "ReperMotion", "ReperGIF", "ReperAuteur", "ReperTitre", "ReperDescription", "ReperUUID", "ReperDOT", "ReperLogiciel", "ReperMPF", "ReperJFXX", "ReperApres", "ReperInconnu", "2001:02:03"];
 const be = (...v: number[]) => v.flatMap((n) => [n >>> 24, (n >> 16) & 255, (n >> 8) & 255, n & 255]);
 const le = (...v: number[]) => v.flatMap((n) => [n & 255, (n >> 8) & 255, (n >> 16) & 255, n >>> 24]);
 /** Repères : ASCII, UTF-16 BE et LE, rationnels EXIF de la latitude repère (12/1, 34/1, 56/1). */
@@ -41,6 +41,19 @@ const found = (b: Uint8Array) => needles().filter((n) => indexOf(b, n) >= 0).map
 async function clean(name: string, bytes: Uint8Array = fx(name)): Promise<{ r: StripResult; out: Uint8Array<ArrayBuffer> }> {
   const r = await stripMetadata(new Blob([bytes as Uint8Array<ArrayBuffer>]), mimeOf(name), name);
   return { r, out: r.state === "nettoye" ? new Uint8Array(await r.data.arrayBuffer()) : new Uint8Array(0) };
+}
+
+/** Étiquettes de chaque IFD d'un TIFF (IFD0, IFD1…), dans l'ordre. */
+function tiffTags(t: Uint8Array): number[][] {
+  const le = t[0] === 0x49;
+  const v = new DataView(t.buffer, t.byteOffset, t.byteLength);
+  const out: number[][] = [];
+  for (let ifd = v.getUint32(4, le); ifd !== 0 && out.length < 4; ) {
+    const n = v.getUint16(ifd, le);
+    out.push(Array.from({ length: n }, (_, i) => v.getUint16(ifd + 2 + i * 12, le)));
+    ifd = v.getUint32(ifd + 2 + n * 12, le);
+  }
+  return out;
 }
 
 /** Segments JPEG jusqu'au premier SOS : [marqueur, contenu]. */
@@ -74,7 +87,7 @@ describe("nettoyage des images (spec §35.2)", () => {
     expect(again.out).toEqual(out);
   });
 
-  it("JPEG : orientation seule, ICC dans l'ordre, JFIF et APP14 gardés, flux identique, rien après EOI", async () => {
+  it("JPEG : orientation et vignette EXIF seules, ICC dans l'ordre, JFIF et APP14 gardés, flux identique, rien après EOI", async () => {
     const src = fx("iphone-like.jpg");
     const { out } = await clean("iphone-like.jpg");
     const segs = jpegSegments(out);
@@ -83,8 +96,12 @@ describe("nettoyage des images (spec §35.2)", () => {
     expect(ascii(exif, 0, 6)).toBe("Exif\0\0");
     const tiff = exif.subarray(6);
     expect(readOrientation(tiff)).toBe(6);
-    expect(u16be(tiff, 8)).toBe(1); // une seule entrée
-    expect(u32be(tiff, 8 + 2 + 12)).toBe(0); // aucun IFD1, donc aucune vignette
+    expect(u16be(tiff, 8)).toBe(1); // une seule entrée dans l'IFD0 : l'orientation
+    // IFD1 : la vignette seule (décision du propriétaire du 11 novembre), octet pour octet.
+    expect(tiffTags(tiff)).toEqual([[0x0112], [0x0103, 0x0201, 0x0202]]);
+    const srcTiff = jpegSegments(src).find(([m, d]) => m === 0xe1 && ascii(d, 0, 6) === "Exif\0\0")![1].subarray(6);
+    expect(readThumbnail(tiff)).toEqual(readThumbnail(srcTiff));
+    expect(foundAv(readThumbnail(tiff)!, ["ReperThumb"])).toEqual(["ReperThumb"]);
     const icc = jpegSegments(src).filter(([m, d]) => m === 0xe2 && ascii(d, 0, 12) === "ICC_PROFILE\0");
     expect(segs.filter(([m]) => m === 0xe2)).toEqual(icc);
     // Données compressées : la fin de l'image principale, octet pour octet, puis EOI en dernier.
@@ -145,14 +162,14 @@ describe("nettoyage des images (spec §35.2)", () => {
     const { out } = await clean("meta.webp");
     expect(u32le(out, 4)).toBe(out.length - 8);
     expect(ascii(out, 12, 4)).toBe("VP8X");
-    expect(out[20]).toBe(0x20 | 0x10 | 0x02); // ICC, alpha, animation ; ni EXIF ni XMP
+    expect(out[20]).toBe(0x20 | 0x10 | 0x08 | 0x02); // ICC, alpha, EXIF (vignette seule), animation ; pas de XMP
     const types: string[] = [];
     for (let o = 12; o < out.length; ) {
       types.push(ascii(out, o, 4));
       const n = u32le(out, o + 4);
       o += 8 + n + (n % 2);
     }
-    expect(types).toEqual(["VP8X", "ICCP", "ANIM", "ANMF", "ANMF"]);
+    expect(types).toEqual(["VP8X", "ICCP", "ANIM", "ANMF", "ANMF", "EXIF"]);
     expect((await clean("simple.webp")).out).toEqual(fx("simple.webp"));
     const bad = fx("meta.webp").slice();
     bad.set(le(out.length * 4), 4);
@@ -290,3 +307,47 @@ describe("EXIF illisible (revue du 10 novembre)", () => {
     expect(indexOf(out, new TextEncoder().encode("Exif\0\0"))).toBe(-1);
   });
 });
+
+describe("vignette EXIF gardée (décision du propriétaire du 11 novembre)", () => {
+  const exifOf = (b: Uint8Array) => jpegSegments(b).find(([m, d]) => m === 0xe1 && ascii(d, 0, 6) === "Exif\0\0")![1].subarray(6);
+  it("aucune étiquette sensible ne survit (appareil, dates, logiciel, GPS, pointeurs EXIF et GPS) ; la vignette est identique", () => {
+    const src = exifOf(fx("iphone-like.jpg"));
+    expect(tiffTags(src).flat()).toEqual(expect.arrayContaining([0x010f, 0x0110, 0x0132, 0x0131, 0x8769, 0x8825]));
+    const kept = keptTiff(src, 6)!;
+    const tags = tiffTags(kept).flat();
+    expect(tags.sort()).toEqual([0x0103, 0x0112, 0x0201, 0x0202]);
+    expect(found(kept)).toEqual([]); // ni repère ni latitude (rationnels 12/1, 34/1, 56/1)
+    expect(readThumbnail(kept)).toEqual(readThumbnail(src));
+    // Sans orientation utile : IFD0 vide, IFD1 avec la vignette.
+    const bare = keptTiff(src, 1)!;
+    expect(tiffTags(bare)).toEqual([[], [0x0103, 0x0201, 0x0202]]);
+    expect(readThumbnail(bare)).toEqual(readThumbnail(src));
+    // Relu : identique (le nettoyage d'un fichier déjà nettoyé ne change rien).
+    expect(keptTiff(bare, 1)).toEqual(bare);
+  });
+  it("vignette qui porte elle-même des métadonnées (APP1, commentaire) : retirée ; place trop petite : retirée", () => {
+    const thumbWithExif = new Uint8Array([0xff, 0xd8, 0xff, 0xe1, 0, 8, ...[..."ReperX"].map((c) => c.charCodeAt(0)), 0xff, 0xd9]);
+    const t = keptTiff(fakeTiff(thumbWithExif), null);
+    expect(t).toBeNull();
+    const ok = new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 0, 3, 0, 0xff, 0xd9]);
+    expect(readThumbnail(keptTiff(fakeTiff(ok), null)!)).toEqual(ok);
+    expect(keptTiff(fakeTiff(ok), null, 40)).toBeNull();
+    expect(readOrientation(keptTiff(fakeTiff(ok), 3, 40)!)).toBe(3);
+  });
+});
+
+/** TIFF gros-boutiste : IFD0 vide → IFD1 (position, longueur) → vignette. */
+function fakeTiff(thumb: Uint8Array): Uint8Array {
+  const at = 8 + 6 + 2 + 24 + 4;
+  const b = new Uint8Array(at + thumb.length);
+  const v = new DataView(b.buffer);
+  b.set([0x4d, 0x4d, 0, 42, 0, 0, 0, 8]);
+  v.setUint16(8, 0);
+  v.setUint32(10, 14);
+  v.setUint16(14, 2);
+  v.setUint16(16, 0x0201); v.setUint16(18, 4); v.setUint32(20, 1); v.setUint32(24, at);
+  v.setUint16(28, 0x0202); v.setUint16(30, 4); v.setUint32(32, 1); v.setUint32(36, thumb.length);
+  v.setUint32(40, 0);
+  b.set(thumb, at);
+  return b;
+}

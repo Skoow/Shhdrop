@@ -16,7 +16,7 @@ test.use({ locale: "fr-FR" });
 
 const FX = (n: string) => readFileSync(fileURLToPath(new URL(`../src/media/fixtures/${n}`, import.meta.url)));
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-9a/", import.meta.url));
-const MARKERS = /ReperMake|ReperModel|ReperXMP|ReperThumb|ReperSecond|ReperMotion|2001:02:03/;
+const MARKERS = /ReperMake|ReperModel|ReperXMP|ReperSecond|ReperMotion|2001:02:03/;
 const row = (page: Page, name: string) => page.locator("[data-row]").filter({ hasText: name });
 /** Bouton du cadenas de la ligne : son nom porte les deux lignes de la bulle (D41-34). */
 const lock = (page: Page, name: string) => row(page, name).locator("[data-lock] button");
@@ -56,7 +56,7 @@ test("photo avec GPS : « Nettoyé » à l'ajout, le destinataire reçoit la pho
   const r = row(s.page, "IMG_GPS");
   // D41-34 : étincelle à côté du type ; le détail dans la bulle du cadenas (2ᵉ ligne).
   await expect(r.locator('[data-clean="nettoye"]')).toBeVisible();
-  await expect(lock(s.page, "IMG_GPS")).toHaveAccessibleName(detail("Nettoyé : position, appareil et dates retirés"));
+  await expect(lock(s.page, "IMG_GPS")).toHaveAccessibleName(detail("Nettoyé : position, appareil et dates retirés, vignette d'aperçu gardée"));
   await s.ctx.close();
   const s2 = await freshPage(browser);
   const sent = await sendShare(s2.page, shh.origin + "/", { files: [photo], clean: true });
@@ -99,7 +99,7 @@ test("états à l'écran (D41-34) : nettoyé (photo, PDF), nettoyage impossible 
   await expect(fail("abime")).toBeVisible();
   await expect(lock(page, "abime")).toHaveAccessibleName(detail("Nettoyage impossible : structure du fichier inattendue"));
   // PDF (D41-31) : informations cachées retirées ; signé → nettoyage impossible, laissé intact.
-  await expect(lock(page, "devis")).toHaveAccessibleName(detail("Nettoyé : auteur, logiciel, dates et miniatures retirés"));
+  await expect(lock(page, "devis")).toHaveAccessibleName(detail("Nettoyé : propriétés du document retirées (auteur, logiciel, dates)"));
   await expect(fail("signe")).toBeVisible();
   await expect(lock(page, "signe")).toHaveAccessibleName(detail("Nettoyage impossible : fichier signé ou protégé"));
   // Image d'un format que le nettoyage ne lit pas (décision du 10 novembre) : pastille ambre.

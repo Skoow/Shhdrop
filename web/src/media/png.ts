@@ -1,9 +1,9 @@
 // PNG (spec §35.2) : reconstruction bloc par bloc, CRC vérifiés. Retirés : textes (tEXt,
-// zTXt, iTXt, XMP compris), tIME, eXIf (réécrit avec la seule orientation si elle ≠ 1), tout
+// zTXt, iTXt, XMP compris), tIME, eXIf (réécrit avec la seule orientation si elle ≠ 1 et la vignette IFD1 intacte), tout
 // bloc auxiliaire inconnu. Bloc critique inconnu ou CRC faux : échec.
 import { Malformed, ascii, concat, slice, startsWith, u32be } from "./bytes";
 import { crc32 } from "./crc32";
-import { isLittle, orientationTiff, orientationToKeep } from "./exif";
+import { keptTiff, orientationToKeep } from "./exif";
 
 const SIG = "\x89PNG\r\n\x1a\n";
 const CRITICAL = new Set(["IHDR", "PLTE", "IDAT", "IEND"]);
@@ -40,8 +40,8 @@ export function cleanPng(b: Uint8Array): Uint8Array<ArrayBuffer> {
       if (type === "IEND") break; // rien après IEND
     } else if (KEPT.has(type)) out.push(all);
     else if (type === "eXIf") {
-      const orient = orientationToKeep(data);
-      if (orient !== null && orient !== 1) out.push(chunk("eXIf", orientationTiff(orient, isLittle(data))));
+      const kept = keptTiff(data, orientationToKeep(data));
+      if (kept) out.push(chunk("eXIf", kept));
     }
     o += 12 + len;
   }

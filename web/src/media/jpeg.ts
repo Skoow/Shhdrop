@@ -1,10 +1,11 @@
 // JPEG (spec §35.2) : reconstruction segment par segment. Gardés : SOI, APP0 JFIF, APP2 ICC
 // (tous les morceaux, dans l'ordre), APP14 Adobe, tables, SOFn, SOS et données compressées
-// octet pour octet, EOI. APP1 EXIF réécrit avec la seule orientation (boutisme d'origine, sans
-// IFD1). Tout le reste est retiré, y compris ce qui suit le premier EOI (images secondaires
+// octet pour octet, EOI. APP1 EXIF réécrit avec la seule orientation (boutisme d'origine) et
+// la vignette de l'IFD1 intacte (décision du propriétaire du 11 novembre, exif.ts:keptTiff).
+// Tout le reste est retiré, y compris ce qui suit le premier EOI (images secondaires
 // MPF, cartes de gain et de profondeur, vidéo des photos animées).
 import { Malformed, concat, slice, startsWith, u16be, u8 } from "./bytes";
-import { isLittle, orientationTiff, orientationToKeep } from "./exif";
+import { keptTiff, orientationToKeep } from "./exif";
 
 const EXIF_ID = "Exif\0\0";
 /** Tables et trames gardées : DQT, DHT, DAC, DRI, DNL, SOF0 à SOF15 (sauf DHT, JPG, DAC). */
@@ -71,8 +72,8 @@ export function cleanJpeg(b: Uint8Array): Uint8Array<ArrayBuffer> {
       if (startsWith(body, 0, EXIF_ID) && !exifDone) {
         exifDone = true;
         const tiff = body.subarray(EXIF_ID.length);
-        const orient = orientationToKeep(tiff);
-        if (orient !== null && orient !== 1) out.push(segment(0xe1, concat([new TextEncoder().encode(EXIF_ID), orientationTiff(orient, isLittle(tiff))])));
+        const kept = keptTiff(tiff, orientationToKeep(tiff), 0xffff - 2 - EXIF_ID.length);
+        if (kept) out.push(segment(0xe1, concat([new TextEncoder().encode(EXIF_ID), kept])));
       }
       // XMP, XMP étendu, second EXIF : retirés
     } else if (m === 0xe2) {

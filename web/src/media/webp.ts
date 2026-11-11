@@ -1,8 +1,8 @@
 // WebP (spec §35.2) : reconstruction des blocs RIFF. Gardés : VP8, VP8L, VP8X, ALPH, ICCP,
-// ANIM, ANMF. EXIF réécrit avec la seule orientation si elle ≠ 1 ; XMP et blocs inconnus
+// ANIM, ANMF. EXIF réécrit avec la seule orientation si elle ≠ 1 et la vignette IFD1 intacte ; XMP et blocs inconnus
 // retirés ; drapeaux de VP8X et taille RIFF corrigés. Taille RIFF incohérente : échec.
 import { Malformed, ascii, concat, slice, startsWith, u32le } from "./bytes";
-import { isLittle, orientationTiff, orientationToKeep } from "./exif";
+import { keptTiff, orientationToKeep } from "./exif";
 
 const KEPT = new Set(["VP8 ", "VP8L", "VP8X", "ALPH", "ICCP", "ANIM", "ANMF"]);
 const F_EXIF = 0x08;
@@ -40,9 +40,9 @@ export function cleanWebp(b: Uint8Array): Uint8Array<ArrayBuffer> {
     } else if (type === "EXIF" && !exif) {
       let tiff = all.subarray(8, 8 + len);
       if (startsWith(tiff, 0, "Exif\0\0")) tiff = tiff.subarray(6);
-      const orient = orientationToKeep(tiff);
-      if (orient !== null && orient !== 1) {
-        parts.push(chunk("EXIF", orientationTiff(orient, isLittle(tiff))));
+      const kept = keptTiff(tiff, orientationToKeep(tiff));
+      if (kept) {
+        parts.push(chunk("EXIF", kept));
         exif = true;
       }
     }

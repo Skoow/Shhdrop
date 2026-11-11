@@ -1,7 +1,10 @@
 // Nettoyage des PDF (spec §35.2, Task 9b), neutralisation en place à longueur constante :
-// le dictionnaire /Info de chaque révision (chaîne des /Prev, tables xref classiques et flux
-// xref), tout flux /Type /Metadata (XMP) et les miniatures /Thumb des pages deviennent
-// « N G obj null … endobj » : aucun octet ne bouge, les tables xref restent justes. Refus :
+// seules les propriétés du document, celles que montrent les détails du fichier, sont retirées
+// (décision du propriétaire, 11 novembre) : le dictionnaire /Info de chaque révision (chaîne
+// des /Prev, tables xref classiques et flux xref) et le XMP du document (/Metadata du
+// catalogue, qui en porte la copie) deviennent « N G obj null … endobj » : aucun octet ne
+// bouge, les tables xref restent justes. Rien d'autre n'est touché : pages (et leur XMP),
+// miniatures de pages /Thumb, images intégrées, polices, annotations. Refus :
 // /Encrypt ou signature (/ByteRange) → protégé ; /Info dans un flux d'objets, xref illisible,
 // objet qui ne commence pas là où la table l'annonce → `Malformed` (→ `echec`).
 // Images intégrées : jamais modifiées (décision du propriétaire, 10 novembre).
@@ -398,7 +401,8 @@ async function analyse(file: Blob): Promise<PdfResult> {
   };
   const visit = (v: PdfVal, k: number): boolean => {
     if (signed(v)) return true;
-    if (isDict(v) && nameOf(v.get("Type")) === "Page" && isRef(v.get("Thumb"))) add(v.get("Thumb") as Ref, k, "thumb");
+    // XMP du document : celui du catalogue seulement (pas celui d'une page ou d'une image).
+    if (isDict(v) && nameOf(v.get("Type")) === "Catalog" && isRef(v.get("Metadata"))) add(v.get("Metadata") as Ref, k, "xmp");
     return false;
   };
   for (const [k, s] of list.entries()) {
@@ -425,7 +429,6 @@ async function analyse(file: Blob): Promise<PdfResult> {
     if (visit(o.value, k)) return { state: "protege" };
     if (!isDict(o.value)) continue;
     const type = nameOf(o.value.get("Type"));
-    if (type === "Metadata") targets.set(off, { off, n, g, k });
     if (type === "ObjStm" && o.stream) {
       const data = await streamBytes(src, o, await lengthOf(o, k), budget);
       const c: Ctx = { b: data, eof: true };

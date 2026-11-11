@@ -103,7 +103,7 @@ test("composeur : bouclier de nettoyage avant le nom avec sa bulle, pastille cad
   const sz = await row("plage-nuit.jpg").locator(".nm").boundingBox();
   expect(sh!.x + sh!.width).toBeLessThanOrEqual(sz!.x);
   expect(Math.abs(sh!.y + sh!.height / 2 - (sz!.y + sz!.height / 2))).toBeLessThanOrEqual(1.5);
-  await expect(done.getByRole("button")).toHaveAccessibleName(/^Nettoyé\s: position, appareil et dates retirés$/);
+  await expect(done.getByRole("button")).toHaveAccessibleName(/^Nettoyé\s: position, appareil et dates retirés, vignette d'aperçu gardée$/);
   await expect(fail.getByRole("button")).toHaveAccessibleName(/^Nettoyage impossible\s: structure du fichier inattendue$/);
   expect(await done.locator(".sh").evaluate((e) => getComputedStyle(e).fill)).not.toBe(await fail.locator(".sh").evaluate((e) => getComputedStyle(e).fill));
   await expect(page.locator('[data-up]:not([data-up="pret"])')).toHaveCount(0, { timeout: 30_000 });
@@ -112,7 +112,7 @@ test("composeur : bouclier de nettoyage avant le nom avec sa bulle, pastille cad
   for (const n of ["plage-nuit.jpg", "abime.jpg", "archive.zip"]) await insideIcon(row(n), "[data-lock] .pill");
   expect(await axe(page)).toEqual([]);
   await openTip(page, done.getByRole("button"), isMobile);
-  await expect(page.getByRole("tooltip").filter({ visible: true })).toHaveText(/^Nettoyé\s: position, appareil et dates retirés$/);
+  await expect(page.getByRole("tooltip").filter({ visible: true })).toHaveText(/^Nettoyé\s: position, appareil et dates retirés, vignette d'aperçu gardée$/);
   await page.screenshot({ path: `${SHOTS}composeur-${w(isMobile)}.png` });
 });
 
@@ -130,8 +130,8 @@ test("destinataire : nettoyage dit par le manifeste (2ᵉ ligne du cadenas, bouc
   const row = (n: string) => page.locator("li.row").filter({ hasText: n });
   const jpg = row("foret-brume.jpg");
   await expect(jpg).toBeVisible();
-  await expect(jpg.locator("[data-lock] button")).toHaveAccessibleName(/\. Nettoyé avant l'envoi\s: position, appareil et dates retirés$/);
-  await expect(jpg.locator('[data-clean="nettoye"] button')).toHaveAccessibleName(/^Nettoyé avant l'envoi\s: position, appareil et dates retirés$/);
+  await expect(jpg.locator("[data-lock] button")).toHaveAccessibleName(/\. Nettoyé avant l'envoi\s: position, appareil et dates retirés, vignette d'aperçu gardée$/);
+  await expect(jpg.locator('[data-clean="nettoye"] button')).toHaveAccessibleName(/^Nettoyé avant l'envoi\s: position, appareil et dates retirés, vignette d'aperçu gardée$/);
   await expect(row("archive.zip").locator("[data-lock] button")).toHaveAccessibleName(/\. Fichier tel quel$/);
   await expect(row("archive.zip").locator("[data-clean]")).toHaveCount(0);
   // Un texte n'a rien à nettoyer : une seule ligne.
@@ -145,6 +145,6 @@ test("destinataire : nettoyage dit par le manifeste (2ᵉ ligne du cadenas, bouc
   expect(await axe(page)).toEqual([]);
   await openTip(page, jpg.locator("[data-lock] button"), isMobile);
   const tip = page.getByRole("tooltip").filter({ visible: true });
-  await expect(tip.locator(".l2")).toHaveText(/^Nettoyé avant l'envoi\s: position, appareil et dates retirés$/);
+  await expect(tip.locator(".l2")).toHaveText(/^Nettoyé avant l'envoi\s: position, appareil et dates retirés, vignette d'aperçu gardée$/);
   await page.screenshot({ path: `${SHOTS}destinataire-${w(isMobile)}.png` });
 });

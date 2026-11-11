@@ -1,12 +1,13 @@
 // HEIC / HEIF / AVIF (spec §35.2, Q-MD2) : nettoyage en place, à longueur constante (aucun
 // octet ne bouge, donc `iloc` reste juste). Données de l'élément `Exif` : EXIF vide valide
-// (18 octets) puis zéros ; élément XMP : paquet XMP vide puis espaces ; propriété `udes`
+// (18 octets ; avec la seule vignette IFD1 intacte s'il y en a une, décision du propriétaire du
+// 11 novembre ; l'orientation de HEIF n'est pas dans l'EXIF) puis zéros ; élément XMP : paquet XMP vide puis espaces ; propriété `udes`
 // (titre, description, mots-clés) et boîtes hors liste renommées `free` et mises à zéro ;
 // contenu des `free`/`skip` mis à zéro. L'orientation de HEIF est dans `irot`/`imir` (gardés).
 // `iloc` méthode 2, extent hors fichier ou partagé avec une image, `moov` (suites d'images,
 // pas encore traitées), protection (`ipro`) : échec.
 import { Malformed, ascii, concat, u16be, u32be, uNbe, u8 } from "./bytes";
-import { emptyTiff } from "./exif";
+import { emptyTiff, keptTiff } from "./exif";
 import { children, fullBox, topLevel, type Box } from "./isobmff";
 import type { Patch } from "./patch";
 
@@ -22,6 +23,22 @@ const FREE = [0x66, 0x72, 0x65, 0x65];
 export const EMPTY_XMP = '<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/"/><?xpacket end="w"?>';
 
 type Extent = { at: number; len: number };
+
+/**
+ * TIFF gardé de l'élément Exif (vignette IFD1 seule, keptTiff), sinon TIFF vide. Les données
+ * commencent par la position (4 octets, gros-boutiste) de l'en-tête TIFF après elles.
+ */
+async function heifExifKept(blob: Blob, extents: readonly Extent[], total: number): Promise<Uint8Array> {
+  const data = new Uint8Array(total);
+  let o = 0;
+  for (const e of extents) {
+    data.set(new Uint8Array(await blob.slice(e.at, e.at + e.len).arrayBuffer()), o);
+    o += e.len;
+  }
+  const skip = total >= 4 ? u32be(data, 0) : total;
+  const kept = 4 + skip < total ? keptTiff(data.subarray(4 + skip), null, total - 4) : null;
+  return kept ?? emptyTiff();
+}
 type Item = { id: number; type: string; contentType: string };
 
 function cstring(b: Uint8Array, o: number, end: number): { s: string; next: number } {
@@ -180,7 +197,7 @@ export async function cleanHeif(blob: Blob): Promise<Patch[]> {
       total += e.len;
     }
     if (total > PATCH_MAX) throw new Malformed("heif_trop_de_correctifs");
-    const want = t.type === "Exif" ? fill(total, concat([new Uint8Array(4), emptyTiff()]), 0) : fill(total, new TextEncoder().encode(EMPTY_XMP), 0x20);
+    const want = t.type === "Exif" ? fill(total, concat([new Uint8Array(4), await heifExifKept(blob, loc.extents, total)]), 0) : fill(total, new TextEncoder().encode(EMPTY_XMP), 0x20);
     let o = 0;
     for (const e of loc.extents) {
       const cur = new Uint8Array(await blob.slice(e.at, e.at + e.len).arrayBuffer());

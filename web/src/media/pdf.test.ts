@@ -15,7 +15,10 @@ const DECODERS = "pdfjs-dist/image_decoders/pdf.image_decoders.mjs";
 type Jpeg = { parse(b: Uint8Array): void; width: number; height: number; getData(o: { width: number; height: number; forceRGB: boolean }): Uint8ClampedArray };
 const { JpegImage } = (await import(/* @vite-ignore */ DECODERS)) as { JpegImage: new () => Jpeg };
 const fx = (n: string) => new Uint8Array(readFileSync(new URL(`./fixtures/${n}`, import.meta.url)));
-const MARKERS = ["ReperAuteur", "ReperAncien", "ReperCreateur", "ReperLogiciel", "ReperXMP", "ReperXMPPage", "ReperThumb", "ReperModel", "20010203", "FEFF005200650070"];
+/** Propriétés du document (/Info des révisions, XMP du catalogue) : retirées. */
+const MARKERS = ["ReperAuteur", "ReperAncien", "ReperCreateur", "ReperLogiciel", "20010203", "FEFF005200650070"];
+/** Contenu du document (miniature de page, XMP d'une page) : jamais touché (décision du 11 novembre). */
+const KEPT = ["ReperThumb", "ReperXMPPage", "ReperModel"];
 const latin1 = (b: Uint8Array) => new TextDecoder("latin1").decode(b);
 
 async function clean(name: string, bytes: Uint8Array = fx(name)): Promise<{ r: StripResult; out: Uint8Array }> {
@@ -40,7 +43,7 @@ function classicEntries(s: string): [number, number][] {
 }
 
 describe("PDF (spec §35.2)", () => {
-  it("meta.pdf : /Info des deux révisions, XMP du catalogue et de la page, miniature → null ; même longueur ; xref toujours juste", async () => {
+  it("meta.pdf : /Info des deux révisions et XMP du catalogue → null ; miniature et XMP de la page gardés ; même longueur ; xref toujours juste", async () => {
     const src = fx("meta.pdf");
     const { r, out } = await clean("meta.pdf");
     expect(r.state).toBe("nettoye");
@@ -48,15 +51,19 @@ describe("PDF (spec §35.2)", () => {
     expect(r.family).toBe("pdf");
     expect(found(src, MARKERS)).toEqual(MARKERS);
     expect(found(out, MARKERS)).toEqual([]);
+    expect(found(out, KEPT)).toEqual(KEPT);
+    // XMP du catalogue (objet 6) : seuls ses repères propres disparaissent ; celui de la page (8) reste.
+    expect(latin1(out)).toMatch(/\n6 0 obj null +endobj\n/u);
     expect(out.length).toBe(src.length);
     const s = latin1(out);
     const entries = classicEntries(s);
     expect(entries.length).toBe(10);
     for (const [n, off] of entries) expect(s.slice(off, off + `${n} 0 obj`.length), `objet ${n}`).toBe(`${n} 0 obj`);
-    for (const n of [6, 7, 8, 9, 10]) expect(s).toMatch(new RegExp(`\\n${n} 0 obj null +endobj\\n`, "u"));
-    // Tout le reste octet pour octet : pages, contenu, police, trailers (/ID compris).
+    for (const n of [6, 9, 10]) expect(s).toMatch(new RegExp(`\\n${n} 0 obj null +endobj\\n`, "u"));
+    for (const n of [7, 8]) expect(s).not.toMatch(new RegExp(`\\n${n} 0 obj null`, "u"));
+    // Tout le reste octet pour octet : pages, miniature, contenu, police, trailers (/ID compris).
     const diff = [...src].flatMap((b, i) => (b === out[i] ? [] : [i]));
-    const neutral = entries.filter(([n]) => n >= 6).map(([n, off]) => [off, s.indexOf("endobj", off)] as const);
+    const neutral = entries.filter(([n]) => [6, 9, 10].includes(n)).map(([n, off]) => [off, s.indexOf("endobj", off)] as const);
     expect(diff.every((i) => neutral.some(([a, b]) => i > a && i < b))).toBe(true);
     expect(s).toContain("(Bonjour Shhdrop) Tj");
     expect(s.match(/\/ID \[<0123456789ABCDEF/gu)?.length).toBe(2);
@@ -65,7 +72,7 @@ describe("PDF (spec §35.2)", () => {
   it("flux xref (prédicteur PNG 12) : /Info et XMP neutralisés ; /Info dans un flux d'objets → echec", async () => {
     const { r, out } = await clean("xref-stream.pdf");
     expect(r.state).toBe("nettoye");
-    expect(found(out, MARKERS)).toEqual([]);
+    expect(found(out, [...MARKERS, "ReperXMP", "ReperModel"])).toEqual([]); // XMP du catalogue
     expect(out.length).toBe(fx("xref-stream.pdf").length);
     expect(latin1(out)).toMatch(/\n7 0 obj null +endobj/u);
     expect((await clean("objstm-info.pdf")).r).toEqual({ state: "echec", reason: "malformed:pdf_info_objstm" });

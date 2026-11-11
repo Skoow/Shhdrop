@@ -54,8 +54,9 @@ async function run(file: Blob, mime: string, fmt: Format, opts: StripOpts): Prom
     if ((await cleanHeif(data)).length > 0) return { state: "echec", reason: "verification" };
     return { state: "nettoye", data, family: "image" };
   }
-  // PDF (D41-31) : seules les informations cachées (/Info, XMP /Metadata, miniatures /Thumb)
-  // deviennent « null » à longueur constante ; pages et texte intacts ; résultat relu.
+  // PDF (D41-31, décision du propriétaire du 11 novembre) : seules les propriétés du document
+  // (/Info et le XMP du catalogue) deviennent « null » à longueur constante ; pages, miniatures,
+  // images, polices et texte intacts ; résultat relu.
   if (fmt === "pdf") {
     const r = await cleanPdf(file);
     if (r.state === "protege") return { state: "protege", reason: "pdf" };
