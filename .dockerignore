@@ -1,8 +1,9 @@
 # Contexte de build de deploy/Dockerfile (docker build -f deploy/Dockerfile .) :
-# tout est exclu, sauf les sources du serveur, du site et de shhcheck.
+# tout est exclu, sauf les sources du serveur, du site, du moteur et de shhcheck.
 *
 !server/
 !web/
+!engine/
 !deploy/
 deploy/*
 !deploy/shhcheck/
@@ -10,6 +11,8 @@ deploy/*
 # Jamais dans l'image : dépendances installées, sorties de build, binaires, bases, captures.
 **/node_modules/
 web/dist/
+web/src/engine/pkg/
+engine/target/
 web/dist-demo/
 web/test-results/
 web/playwright-report/

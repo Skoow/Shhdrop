@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build reproductible (spec §28.1) : le site est construit deux fois, dans deux dossiers absolus
-# différents, et chaque fichier doit avoir la même empreinte. Écrit la liste des empreintes dans
+# Build reproductible (spec §28.1) : le site et son moteur WebAssembly (engine/, web/src/engine/pkg)
+# sont construits deux fois, dans deux dossiers absolus différents (chacun avec son propre
+# engine/target), et chaque fichier doit avoir la même empreinte. Écrit la liste des empreintes dans
 # le fichier donné en argument (défaut : web/SHA256SUMS.repro, ignoré par git) ; la CI compare
 # ensuite les listes de deux machines.
 #   web/scripts/repro.sh [fichier de sortie]
@@ -10,6 +11,7 @@ umask 022
 export TZ=UTC LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 web="$(cd "$(dirname "$0")/.." && pwd)"
+repo="$(cd "$web/.." && pwd)"
 out="${1:-$web/SHA256SUMS.repro}"
 # Même identifiant de version dans les deux copies (elles n'ont pas de dossier .git).
 SHH_BUILD_ID="${SHH_BUILD_ID:-$(git -C "$web" rev-parse --short=7 HEAD)}"
@@ -19,13 +21,16 @@ export SHH_BUILD_ID SOURCE_DATE_EPOCH
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-build() { # $1 : dossier absolu de la copie
+build() { # $1 : dossier absolu de la copie (même disposition que le dépôt : web/ et engine/)
   mkdir -p "$1"
-  # Les sources suivies par git, telles qu'elles sont sur le disque ; ni dist ni node_modules.
-  (cd "$web" && git ls-files -z | tar --null -T - -cf - 2>/dev/null) | tar -xf - -C "$1"
-  ln -s "$web/node_modules" "$1/node_modules"
-  (cd "$1" && npm run build >"$1.log" 2>&1) || { cat "$1.log" >&2; exit 1; }
-  (cd "$1/dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+  # Les sources suivies par git, telles qu'elles sont sur le disque ; ni dist, ni node_modules,
+  # ni engine/target, ni web/src/engine/pkg.
+  (cd "$repo" && git ls-files -z -- web engine | tar --null -T - -cf - 2>/dev/null) | tar -xf - -C "$1"
+  ln -s "$web/node_modules" "$1/web/node_modules"
+  (cd "$1/web" && npm run build >"$1.log" 2>&1) || { cat "$1.log" >&2; exit 1; }
+  (cd "$1/web/dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
+  # Moteur (pas encore dans dist avant la Task 10) : le .wasm et sa colle.
+  (cd "$1/web/src/engine" && find pkg -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
 }
 
 build "$tmp/a" >"$tmp/a.sums"

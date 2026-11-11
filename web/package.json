@@ -14,7 +14,7 @@
     "test": "npm run build:engine && tsc --noEmit && vitest run src scripts",
     "test:e2e": "vitest run e2e --testTimeout=120000 --hookTimeout=120000",
     "test:ui": "playwright test",
-    "build:demo": "vite build --mode demo && vite build -c vite.pdf-frame.config.ts --mode demo"
+    "build:demo": "npm run build:engine && vite build --mode demo && vite build -c vite.pdf-frame.config.ts --mode demo"
   },
   "dependencies": {
     "libsodium-wrappers-sumo": "0.8.4",

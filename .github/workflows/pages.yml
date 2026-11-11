@@ -30,6 +30,8 @@ jobs:
           node-version-file: web/.node-version
           cache: npm
           cache-dependency-path: web/package-lock.json
+      # Moteur WebAssembly (npm run build:demo commence par npm run build:engine).
+      - uses: ./.github/actions/engine-toolchain
       # Build de démo (UI §14.3) : faux serveur en mémoire, CSP meta, base /shhdrop/, 404.html.
       - run: npm ci --ignore-scripts
         working-directory: web

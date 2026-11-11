@@ -1,0 +1,36 @@
+# Chaîne d'outils du moteur WebAssembly (engine/, web/scripts/build-engine.mjs), pour tout job
+# qui construit ou teste le site (npm test, npm run build, npm run build:demo, npm run check) :
+# - Rust à la version exacte de engine/rust-toolchain.toml, cible wasm32-unknown-unknown, par le
+#   rustup déjà présent sur l'exécuteur (aucune action tierce) ;
+# - wasm-bindgen-cli 0.2.130 (même version que la crate wasm-bindgen de engine/Cargo.lock),
+#   compilé une fois par `cargo install --locked` puis gardé en cache (clé : version et image).
+name: engine-toolchain
+description: Rust épinglé (cible wasm32) et wasm-bindgen-cli 0.2.130
+runs:
+  using: composite
+  steps:
+    - name: Rust de engine/rust-toolchain.toml
+      shell: bash
+      run: |
+        channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' engine/rust-toolchain.toml)"
+        [ -n "$channel" ] || { echo "channel absent de engine/rust-toolchain.toml" >&2; exit 1; }
+        rustup toolchain install "$channel" --profile minimal --target wasm32-unknown-unknown --no-self-update
+        (cd engine && rustc --version | grep -q "^rustc $channel ") || { echo "rustc $channel attendu dans engine/" >&2; exit 1; }
+    # Image de l'exécuteur (ubuntu24…) dans la clé : un binaire lié à une glibc plus récente ne
+    # revient pas sur une image plus ancienne. ImageOS est une variable du système de l'exécuteur,
+    # absente du contexte `env` des expressions : relue ici.
+    - id: image
+      shell: bash
+      run: echo "os=${ImageOS:-inconnu}" >> "$GITHUB_OUTPUT"
+    - name: Cache de wasm-bindgen-cli
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cargo/bin/wasm-bindgen
+        key: wasm-bindgen-cli-0.2.130-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.os }}
+    - name: wasm-bindgen-cli 0.2.130
+      shell: bash
+      run: |
+        if [ "$(wasm-bindgen --version 2>/dev/null)" != "wasm-bindgen 0.2.130" ]; then
+          cargo install --locked wasm-bindgen-cli --version 0.2.130
+        fi
+        wasm-bindgen --version
