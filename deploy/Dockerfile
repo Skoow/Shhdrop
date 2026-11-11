@@ -1,7 +1,11 @@
 # Image du serveur Shhdrop : binaire Go statique + site construit (web/dist).
 # Contexte : la racine du dépôt.
 #
-#   docker build -f deploy/Dockerfile -t shhdrop:local .
+#   docker build -f deploy/Dockerfile --build-arg SHH_BUILD_ID=$(git rev-parse --short=7 HEAD) -t shhdrop:local .
+#
+# SHH_BUILD_ID est obligatoire : le contexte n'a pas de dossier .git (.dockerignore), et le
+# numéro de version du site (pied de page) doit être celui du build public pour que les
+# empreintes de dist/ soient les mêmes que celles de la CI (spec §28, audit du 11 novembre, I6).
 #
 # Images de base épinglées par empreinte (index multi-architecture), relevées le
 # 10 novembre 2026 sur registry-1.docker.io et mirror.gcr.io. À chaque montée de version :
@@ -45,6 +49,11 @@ COPY --from=engine /out/pkg /pkg
 # --- Site -------------------------------------------------------------------------------
 FROM node:26.13.0-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS web
 ENV TZ=UTC LANG=C.UTF-8 NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false
+# Hash court du commit construit, 7 à 40 chiffres hexadécimaux minuscules : sans lui, l'image
+# s'arrête ici (vite.config.ts, buildId, refuse aussi un build sans identifiant).
+ARG SHH_BUILD_ID
+RUN test -n "$SHH_BUILD_ID" || { echo "SHH_BUILD_ID manquant : --build-arg SHH_BUILD_ID=\$(git rev-parse --short=7 HEAD)" >&2; exit 1; } \
+ && printf '%s' "$SHH_BUILD_ID" | grep -Eqx '[0-9a-f]{7,40}' || { echo "SHH_BUILD_ID invalide : 7 à 40 chiffres hexadécimaux minuscules" >&2; exit 1; }
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 # --ignore-scripts : aucun script d'installation d'une dépendance n'est exécuté.
@@ -53,8 +62,15 @@ COPY web/ ./
 # Moteur construit à l'étape précédente ; build:engine vérifie seulement sa présence.
 COPY --from=engine /out/pkg ./src/engine/pkg
 # check-dist.mjs : le build de production est conforme (variantes .br et .gz exactes,
-# aucun code de démo, aucune ressource tierce). Un écart arrête le build de l'image.
+# aucun code de démo, aucune adresse http(s):// externe dans index.html, le CSS et
+# pdf-frame.html). Un écart arrête le build de l'image.
 RUN SHH_ENGINE_PREBUILT=1 npm run build && node scripts/check-dist.mjs
+
+# Le site seul, pour la CI (job repro-docker), qui compare chaque fichier aux empreintes de ses
+# propres builds (même SHH_BUILD_ID) ; n'entre pas dans l'image :
+#   docker build -f deploy/Dockerfile --build-arg SHH_BUILD_ID=… --target web-dist --output type=local,dest=<dossier> .
+FROM scratch AS web-dist
+COPY --from=web /src/web/dist /dist
 
 # --- Serveur ----------------------------------------------------------------------------
 FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS server

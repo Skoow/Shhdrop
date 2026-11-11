@@ -157,10 +157,14 @@ export function demoMeta(): Plugin {
 
 /**
  * Version du site affichée dans le pied de page (retours UI5) : hash court du commit, sans
- * secret. SHH_BUILD_ID (CI) sinon `git rev-parse --short=7 HEAD` ; toute autre forme → « dev ».
- * Même commit, même valeur : la construction reste reproductible (spec §28).
+ * secret. SHH_BUILD_ID (CI, image Docker) sinon `git rev-parse --short=7 HEAD` ; 7 à 40 chiffres
+ * hexadécimaux, ramenés à 7. Même commit, même valeur : la construction reste reproductible
+ * (spec §28).
+ * Build (`vite build`, production comme démo) : sans identifiant valide, le build ÉCHOUE (audit du
+ * 11 novembre, I6 : une image marquée « dev » ne pourrait jamais correspondre au build public).
+ * « dev » seulement pour `vite dev` et les tests (command « serve »).
  */
-export function buildId(): string {
+export function buildId(command: "build" | "serve"): string {
   let id = process.env.SHH_BUILD_ID ?? "";
   if (id === "") {
     try {
@@ -169,7 +173,11 @@ export function buildId(): string {
       id = "";
     }
   }
-  return /^[0-9a-f]{7,12}$/.test(id) ? id.slice(0, 7) : "dev";
+  if (/^[0-9a-f]{7,40}$/.test(id)) return id.slice(0, 7);
+  if (command === "serve") return "dev";
+  throw new Error(
+    `identifiant de build absent ou invalide (« ${id} ») : donner SHH_BUILD_ID=$(git rev-parse --short=7 HEAD), 7 à 40 chiffres hexadécimaux minuscules, ou construire depuis un dépôt git`,
+  );
 }
 
 /** Types précompressés : texte, et le moteur WebAssembly (spec moteur §7 ; les images et polices le
@@ -203,12 +211,12 @@ export function precompress(): Plugin {
   };
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   const demo = mode === "demo";
   return {
     plugins: [svelte(), sri(demo ? DEMO_BASE : "/"), engineWasm(demo ? DEMO_BASE : "/", demo), ...(demo ? [demoMeta()] : [demoGuard(), precompress()])],
     base: demo ? DEMO_BASE : "/",
-    define: { __SHH_BUILD__: JSON.stringify(buildId()) },
+    define: { __SHH_BUILD__: JSON.stringify(buildId(command)) },
     build: {
       outDir: demo ? "dist-demo" : "dist",
       assetsInlineLimit: 0,
