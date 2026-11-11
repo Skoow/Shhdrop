@@ -20,7 +20,7 @@ async function share(browser: import("@playwright/test").Browser, origin: string
   return sent;
 }
 
-test("groupes et ordre de l'envoi ; texte, image, audio, vidéo ; pièges jamais affichés ; HEVC illisible ; axe ; captures", async ({ page, shh, browser }) => {
+test("groupes et ordre de l'envoi ; texte, image, audio, vidéo ; pièges jamais affichés ; HEVC illisible ; axe ; captures", async ({ page, shh, browser, browserName }) => {
   test.setTimeout(180_000);
   const sent = await share(browser, shh.origin);
 
@@ -79,8 +79,12 @@ test("groupes et ordre de l'envoi ; texte, image, audio, vidéo ; pièges jamais
   await page.keyboard.press("ArrowRight");
   await expect(viewer.getByRole("heading", { name: "hevc.mov" })).toBeVisible();
   // Le format et le navigateur à essayer (retours CLEAN4) : MOV, souvent en HEVC → Safari.
-  await expect(viewer.getByText("Ce navigateur ne sait pas lire le format MOV. Enregistrez le fichier, ou ouvrez le lien dans Safari.")).toBeVisible({ timeout: 20_000 });
-  await expect(viewer.locator("video")).toHaveCount(0);
+  // Chromium seulement : le vrai Safari lit le HEVC, et le WebKit des tests (Linux) en lit les
+  // informations sans l'afficher ni signaler d'erreur — cas couvert par no-preview.spec.ts.
+  if (browserName === "chromium") {
+    await expect(viewer.getByText("Ce navigateur ne sait pas lire le format MOV. Enregistrez le fichier, ou ouvrez le lien dans Safari.")).toBeVisible({ timeout: 20_000 });
+    await expect(viewer.locator("video")).toHaveCount(0);
+  }
   await expect(viewer.getByRole("button", { name: "Télécharger hevc.mov" })).toBeVisible();
   await page.keyboard.press("Escape");
 

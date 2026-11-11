@@ -61,7 +61,7 @@ test("vidéos et sons nettoyés : lisibles, même durée, mêmes dimensions", as
     checked++;
     const after = await probe(out, mime, kind);
     expect(after, name).not.toBeNull();
-    expect(Math.abs(after![0] - before[0]), name).toBeLessThanOrEqual(0.1);
+    expect(Math.abs(after![0] - before[0]), `${name} : durée avant ${before[0]} s, après ${after![0]} s`).toBeLessThanOrEqual(0.1);
     expect(after!.slice(1), name).toEqual(before.slice(1));
   }
   expect(checked).toBeGreaterThanOrEqual(6);

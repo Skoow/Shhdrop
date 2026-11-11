@@ -215,7 +215,7 @@ test.describe("fr-FR", () => {
     expect((await chooser).isMultiple()).toBe(true);
   });
 
-  test("Photo ou vidéo : caméra dans la page ; sans caméra, repli sur le sélecteur filtré (capture) ; les fichiers choisis ouvrent le composeur", async ({ page, shh, isMobile }) => {
+  test("Photo ou vidéo : caméra dans la page ; sans caméra, repli sur le sélecteur filtré (capture) ; les fichiers choisis ouvrent le composeur", async ({ page, shh, isMobile, browserName }) => {
     test.skip(isMobile, "téléphone : feuille « Ajouter » (capture.spec.ts)");
     // Aucune caméra ici : la page le dit et propose le sélecteur (fausse caméra : capture.spec.ts).
     // Sur le prototype : WebKit ignore l'affectation sur l'objet navigator.mediaDevices, et sa
@@ -231,6 +231,13 @@ test.describe("fr-FR", () => {
       const cam = page.locator("dialog[data-capture]");
       if (mode === "Vidéo") await cam.getByRole("button", { name: "Vidéo", exact: true }).click();
       await expect(cam.getByRole("alert")).toContainText("Aucune caméra ni aucun micro utilisable");
+      // Le WebKit des tests n'émet pas « filechooser » pour un champ <input capture> : le repli
+      // vers le sélecteur n'y est vérifié que sous Chromium.
+      if (browserName !== "chromium") {
+        await expect(cam.getByRole("button", { name: fallback })).toBeVisible();
+        await page.keyboard.press("Escape");
+        continue;
+      }
       const chooser = page.waitForEvent("filechooser");
       await cam.getByRole("button", { name: fallback }).click();
       const fc = await chooser;

@@ -231,14 +231,18 @@ for (const [what, path, frag] of [
     await page.goto(`${shh.origin}${path}${frag}`);
     await expect.poll(() => hash(page)).toBe("");
     expect(page.url()).toBe(`${shh.origin}${path}`);
-    await goSecurity(page);
-    await expect(page).toHaveURL(`${shh.origin}/securite`);
+    // Vers une AUTRE page : depuis /securite, un lien vers /securite même n'ajoute pas toujours
+    // d'entrée d'historique (WebKit), et Retour sortait alors du site (about:blank).
+    const next = path === "/securite" ? "/confidentialite" : "/securite";
+    if (next === "/securite") await goSecurity(page);
+    else await page.getByRole("contentinfo").getByRole("link", { name: "Confidentialité", exact: true }).click();
+    await expect(page).toHaveURL(`${shh.origin}${next}`);
     await page.goBack();
     await expect(page).toHaveURL(`${shh.origin}${path}`);
     expect(await hash(page)).toBe("");
     await page.goForward();
-    await expect(page).toHaveURL(`${shh.origin}/securite`);
-    expectOnlyOwnEntries(await walkHistory(page, [KEY]), shh.origin, [path, "/securite"]);
+    await expect(page).toHaveURL(`${shh.origin}${next}`);
+    expectOnlyOwnEntries(await walkHistory(page, [KEY]), shh.origin, [path, next]);
   });
 }
 

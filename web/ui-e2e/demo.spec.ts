@@ -282,7 +282,8 @@ test.describe("fr-FR : envoi (Tasks 17–18)", () => {
     await addText(page, "Le code de la porte est 4471.");
     await addFile(page, "releve.bin", 2 * 1048576);
     await sendButton(page).click();
-    await expect(page.getByRole("heading", { name: "Préparation des clés" }).or(page.getByRole("heading", { name: "Vérification anti-robot" }))).toBeVisible();
+    // Les étapes peuvent défiler très vite (démo locale) : n'importe quel écran du parcours d'envoi.
+    await expect(page.getByRole("heading", { name: /^(Préparation des clés|Vérification anti-robot|Chiffrement et envoi|Finalisation|Lien prêt)$/ }).first()).toBeVisible();
     await expect(page).toHaveTitle(/^Démo · /);
     await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
     await expect(page).toHaveTitle("Démo · Lien prêt · Shhdrop");

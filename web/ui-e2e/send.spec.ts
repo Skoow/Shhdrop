@@ -19,8 +19,11 @@ function manageFrom(page: Page, origin: string): { link: () => string | undefine
   page.on("request", (r: Request) => {
     if (r.method() === "POST" && new URL(r.url()).pathname === "/api/shares") {
       n++;
-      const m = r.headers()["x-shh-manage"];
-      if (m) link = `${origin}/#m${m}`;
+      // allHeaders() : headers() peut omettre des en-têtes posés par la page (doc Playwright).
+      void r.allHeaders().then((h) => {
+        const m = h["x-shh-manage"];
+        if (m) link = `${origin}/#m${m}`;
+      });
     }
   });
   return { link: () => link, creates: () => n };
@@ -206,7 +209,7 @@ test.describe("fr-FR", () => {
     await expect(page.locator("[data-row]")).toHaveCount(2);
     await expect(sendButton(page)).toBeVisible();
     await expect(page.getByRole("list", { name: "Étapes confirmées" })).toHaveCount(0);
-    expect(m.link()).toBeDefined();
+    await expect.poll(() => m.link()).toBeDefined();
     // Spec §41.14 : le brouillon reste (les éléments sont toujours là) ; vider la liste l'efface.
     expect(await gone(m.link()!, shh.origin)).toBe(false);
     for (const name of ["doc.bin", "Note"]) {
