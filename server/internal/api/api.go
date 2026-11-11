@@ -47,9 +47,18 @@ const (
 const (
 	dlTotal, dlPer64, dlPer48 = 256, 16, 64
 	ulTotal, ulPer64, ulPer48 = 64, 8, 32
-	// Échéance d'un transfert : xferBase + taille / xferMinRate. Un lecteur plus lent que
-	// 32 Kio/s est coupé (segment de 4 Mio : 138 s au lieu des 300 s du serveur).
-	xferBase    = 10 * time.Second
+	// Par envoi (jeton d'envoi) et par ouverture (partage, n° d'ouverture) : audit I3, M4.
+	// Le site envoie un segment à la fois par brouillon (web/src/transfer/draft.ts, pump) et
+	// lit un segment à la fois par ouverture (client.ts, lecture en flux du moteur) : 4 laissent
+	// la place d'un nouvel essai pendant qu'une requête coupée finit côté serveur. Une même
+	// ouverture ou un même envoi ne prend donc jamais toutes les places d'une connexion.
+	ulPerUpload, dlPerOpen = 4, 4
+	// Débit minimal d'un transfert (audit I3, M4), mesuré en continu : au moins xferMinRate ×
+	// xferWindow octets (160 Kio) par tranche de xferWindow, sinon la connexion est coupée et
+	// rend sa place. L'ancienne échéance absolue (138 s par segment de 4 Mio) laissait un client
+	// qui envoie 1 octet tenir sa place jusqu'au bout. Un segment de 4 Mio prend au plus
+	// 4 Mio / 32 Kio/s + 5 s ≈ 133 s, comme avant.
+	xferWindow  = 5 * time.Second
 	xferMinRate = 32 << 10 // octets par seconde
 	slotRetry   = 5 * time.Second
 	// budgetRetry : Retry-After d'une ouverture qui a lu tout son budget (share.ReadBudget).
@@ -63,17 +72,18 @@ const (
 	reportsAlert = 5
 )
 
-// transfers : places et échéances des segments (réglables par les tests).
+// transfers : places et débit minimal des segments (réglables par les tests).
 type transfers struct {
-	dl, ul  *limits.Slots
-	base    time.Duration
-	minRate int64 // octets par seconde
-	// now : départ des échéances de transfert (nil : time.Now ; remplacé par les tests pour
-	// fixer l'instant où l'échéance commence, après avoir constaté la place prise).
+	dl, ul         *limits.Slots
+	perOpen, perUp *limits.Keyed
+	window         time.Duration // tranche de mesure du débit
+	minRate        int64         // octets par seconde
+	// now : horloge du débit minimal (nil : time.Now ; remplacée par les tests pour fixer
+	// l'instant où la première tranche commence, après avoir constaté la place prise).
 	now func() time.Time
 }
 
-// start : instant de départ d'une échéance de transfert.
+// start : instant présent pour le débit minimal.
 func (t transfers) start() time.Time {
 	if t.now != nil {
 		return t.now()
@@ -83,12 +93,108 @@ func (t transfers) start() time.Time {
 
 func defaultTransfers() transfers {
 	return transfers{dl: limits.NewSlots(dlTotal, dlPer64, dlPer48), ul: limits.NewSlots(ulTotal, ulPer64, ulPer48),
-		base: xferBase, minRate: xferMinRate}
+		perOpen: limits.NewKeyed(dlPerOpen), perUp: limits.NewKeyed(ulPerUpload),
+		window: xferWindow, minRate: xferMinRate}
 }
 
-// deadline : durée accordée pour transférer size octets.
-func (t transfers) deadline(size int64) time.Duration {
-	return t.base + time.Duration(size)*time.Second/time.Duration(t.minRate)
+// perWindow : octets exigés par tranche (au moins 1).
+func (t transfers) perWindow() int64 {
+	return max(1, t.minRate*int64(t.window)/int64(time.Second))
+}
+
+// pacer : débit minimal d'un transfert. Chaque tranche de window doit transférer au moins min
+// octets : l'échéance de la connexion (lecture ou écriture) est repoussée d'une tranche à
+// chaque fois que min octets sont passés ; sinon elle tombe et la connexion est coupée.
+// stop pose une échéance définitive (révocation), que plus rien ne repousse.
+type pacer struct {
+	set    func(time.Time) error
+	now    func() time.Time
+	window time.Duration
+	min    int64
+
+	mu      sync.Mutex
+	got     int64
+	stopped bool
+}
+
+func newPacer(set func(time.Time) error, x transfers) *pacer {
+	return &pacer{set: set, now: x.start, window: x.window, min: x.perWindow()}
+}
+
+// arm ouvre la première tranche. Hors connexion réelle (tests en mémoire) : sans effet.
+func (p *pacer) arm() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.setLocked(p.now().Add(p.window))
+}
+
+func (p *pacer) setLocked(t time.Time) error {
+	if err := p.set(t); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	return nil
+}
+
+// add compte n octets transférés ; min octets atteints : nouvelle tranche.
+func (p *pacer) add(n int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped {
+		return nil
+	}
+	if p.got += int64(n); p.got < p.min {
+		return nil
+	}
+	p.got = 0
+	return p.setLocked(p.now().Add(p.window))
+}
+
+// stop : échéance définitive t (dans le passé : coupure immédiate).
+func (p *pacer) stop(t time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stopped = true
+	p.setLocked(t)
+}
+
+// paceReader : lecture du corps sous débit minimal.
+type paceReader struct {
+	r io.Reader
+	p *pacer
+}
+
+func (r paceReader) Read(b []byte) (int, error) {
+	n, err := r.r.Read(b)
+	if n > 0 {
+		if e := r.p.add(n); e != nil && err == nil {
+			err = e
+		}
+	}
+	return n, err
+}
+
+// paceWriter : écriture de la réponse sous débit minimal, par morceaux d'au plus min octets
+// (un Write plus long devrait sinon finir dans une seule tranche, au-delà du débit minimal).
+type paceWriter struct {
+	w io.Writer
+	p *pacer
+}
+
+func (w paceWriter) Write(b []byte) (int, error) {
+	total := 0
+	for len(b) > 0 {
+		k := int(min(int64(len(b)), w.p.min))
+		n, err := w.w.Write(b[:k])
+		total += n
+		if err != nil {
+			return total, err
+		}
+		if err := w.p.add(n); err != nil {
+			return total, err
+		}
+		b = b[k:]
+	}
+	return total, nil
 }
 
 var b64 = base64.RawURLEncoding.Strict()
@@ -347,6 +453,22 @@ func (s *server) slot(w http.ResponseWriter, r *http.Request, sl *limits.Slots) 
 	return release, err == nil
 }
 
+// xferSlot : place de la clé key (envoi ou ouverture, dans per), puis slot. Un refus par clé
+// (429) ne prend aucune place du serveur.
+func (s *server) xferSlot(w http.ResponseWriter, r *http.Request, per *limits.Keyed, key string, sl *limits.Slots) (release func(), ok bool) {
+	relKey, err := per.Acquire(key)
+	if err != nil {
+		writeLimit(w, slotRetry)
+		return nil, false
+	}
+	rel, ok := s.slot(w, r, sl)
+	if !ok {
+		relKey()
+		return nil, false
+	}
+	return func() { rel(); relKey() }, true
+}
+
 // fail traduit une erreur du service ; toute erreur inattendue → 500 sans détail.
 func fail(w http.ResponseWriter, err error) {
 	var bp *share.BadPassword
@@ -450,8 +572,9 @@ func readJSONMax(w http.ResponseWriter, r *http.Request, v any, max int64) error
 var errKeys = errors.New("clés JSON invalides")
 
 // strictKeys lit une valeur JSON et vérifie que chaque clé d'objet est exactement le nom
-// JSON (balise `json`) d'un champ du type attendu, et n'apparaît qu'une fois. Les types
-// des valeurs sont vérifiés ensuite par Decode.
+// JSON (balise `json`) d'un champ du type attendu, et n'apparaît qu'une fois, et qu'un tableau
+// de taille fixe a exactement ce nombre d'éléments. Les types des valeurs sont vérifiés
+// ensuite par Decode.
 func strictKeys(dec *json.Decoder, t reflect.Type) error {
 	for t != nil && t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -488,10 +611,19 @@ func strictKeys(dec *json.Decoder, t reflect.Type) error {
 		if t == nil || (t.Kind() != reflect.Slice && t.Kind() != reflect.Array) {
 			return errKeys
 		}
+		n := 0
 		for dec.More() {
+			// Tableau de taille fixe ([2]int) : encoding/json ignore les éléments en trop et
+			// complète par des zéros (audit F7) ; exactement t.Len() éléments ici.
+			if n++; t.Kind() == reflect.Array && n > t.Len() {
+				return errKeys
+			}
 			if err := strictKeys(dec, t.Elem()); err != nil {
 				return err
 			}
+		}
+		if t.Kind() == reflect.Array && n != t.Len() {
+			return errKeys
 		}
 		_, err = dec.Token() // ']'
 		return err

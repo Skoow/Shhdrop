@@ -160,7 +160,8 @@ func TestDraftReceivedBytesQuota(t *testing.T) {
 		return e.do(req{method: "PUT", path: "/api/shares/segments/1", body: make([]byte, seg), hdr: auth(c.UploadToken)})
 	}
 	expect(t, putSeg(), 204, "")
-	if _, err := e.srv.lim.Receive(c.ID, 6<<30-2*int64(seg)+1); err != nil {
+	// Octets comptés en données utiles (audit F1), morceau du manifeste non compté.
+	if _, err := e.srv.lim.Receive(c.ID, 6<<30-2*share.PayloadBytes(int64(seg))+limits.ManifestChunk+1); err != nil {
 		t.Fatal(err)
 	}
 	expect(t, e.do(req{method: "POST", path: "/api/shares/erase", body: mustJSON(map[string]int{"from": 1, "to": 2}), hdr: auth(c.UploadToken)}), 204, "")

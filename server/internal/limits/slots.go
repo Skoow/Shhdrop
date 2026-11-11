@@ -68,3 +68,53 @@ func (s *Slots) Len() int {
 	defer s.mu.Unlock()
 	return s.n
 }
+
+// Keyed borne les transferts simultanés d'une même clé (audit I3, M4) : un envoi (id interne)
+// ou une ouverture (id interne et numéro). En mémoire seulement ; une clé sans transfert en
+// cours est oubliée aussitôt.
+type Keyed struct {
+	max int
+
+	mu sync.Mutex
+	n  map[string]int
+}
+
+// NewKeyed : max > 0.
+func NewKeyed(max int) *Keyed {
+	if max <= 0 {
+		panic("limits : places par clé ≤ 0")
+	}
+	return &Keyed{max: max, n: map[string]int{}}
+}
+
+// Acquire prend une place pour key ou refuse sans attendre (ErrTooMany). release rend la
+// place ; l'appeler une seule fois.
+func (k *Keyed) Acquire(key string) (release func(), err error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.n[key] >= k.max {
+		return nil, ErrTooMany
+	}
+	k.n[key]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			k.mu.Lock()
+			defer k.mu.Unlock()
+			if k.n[key]--; k.n[key] == 0 {
+				delete(k.n, key)
+			}
+		})
+	}, nil
+}
+
+// Len : places prises au total (tests).
+func (k *Keyed) Len() int {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	t := 0
+	for _, v := range k.n {
+		t += v
+	}
+	return t
+}

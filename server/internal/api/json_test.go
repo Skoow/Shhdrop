@@ -1,0 +1,68 @@
+package api
+
+import (
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+type voidBody struct {
+	Void [][2]int `json:"void"`
+	N    *int     `json:"n"`
+}
+
+func decodeBody(body string) (voidBody, error) {
+	var v voidBody
+	r := httptest.NewRequest("POST", "/", strings.NewReader(body))
+	err := readJSON(httptest.NewRecorder(), r, &v)
+	return v, err
+}
+
+// Audit F7 : un tableau de taille fixe ([2]int) n'accepte que ce nombre d'éléments ;
+// encoding/json ignorait le 3ᵉ (« [[0,5,999]] » accepté comme [0,5]) et complétait un tableau
+// trop court par des zéros.
+func TestReadJSONFixedArrays(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		ok   bool
+	}{
+		{name: "paire", body: `{"void":[[0,5]]}`, ok: true},
+		{name: "plusieurs paires", body: `{"void":[[0,5],[7,9]]}`, ok: true},
+		{name: "liste vide", body: `{"void":[]}`, ok: true},
+		{name: "trois éléments", body: `{"void":[[0,5,999]]}`},
+		{name: "un élément", body: `{"void":[[0]]}`},
+		{name: "paire vide", body: `{"void":[[]]}`},
+		{name: "objet dans la paire", body: `{"void":[[0,{"a":1}]]}`},
+		{name: "clé inconnue", body: `{"x":1}`},
+		{name: "clé en double", body: `{"n":1,"n":2}`},
+		{name: "casse différente", body: `{"N":1}`},
+		{name: "deux objets", body: `{"n":1}{"n":2}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, err := decodeBody(tt.body)
+			if (err == nil) != tt.ok {
+				t.Fatalf("readJSON(%s) : err = %v, attendu ok = %v (%v)", tt.body, err, tt.ok, v)
+			}
+		})
+	}
+}
+
+// Fuzz : readJSON (strictKeys puis Decode) ne panique jamais, et tout corps accepté se
+// relit à l'identique.
+func FuzzReadJSON(f *testing.F) {
+	for _, s := range []string{`{"void":[[0,5]]}`, `{"void":[[0,5,999]]}`, `{"n":1}`, `{"n":1,"n":2}`,
+		`[`, `{"void":[[`, `{"void":null}`, `{"void":[[1e400,2]]}`, ``, `null`} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, body string) {
+		v, err := decodeBody(body)
+		if err != nil {
+			return
+		}
+		for _, p := range v.Void {
+			_ = p[1]
+		}
+	})
+}

@@ -187,16 +187,17 @@ func TestSegmentConcurrencyCap(t *testing.T) {
 	})
 }
 
-// Audit E1 : un client plus lent que le débit minimal est coupé à l'échéance et rend sa
-// place, sans attendre le WriteTimeout de 300 s ; il ne reçoit jamais un segment complet.
+// Audit E1 : un client plus lent que le débit minimal est coupé à la fin de la première
+// tranche (1 s ici, débit exigé inatteignable) et rend sa place, sans attendre le
+// WriteTimeout de 300 s ; il ne reçoit jamais un segment complet.
 //
-// Déterministe : l'échéance (1 s) ne part qu'une fois la place du client lent constatée.
+// Déterministe : la tranche (1 s) ne part qu'une fois la place du client lent constatée.
 // Avant, le test devait voir le refus 429 dans la seconde de l'échéance, ce qui échouait sur
 // une machine chargée (« place prise par le client lent »).
 func TestSlowReaderCutOff(t *testing.T) {
 	x := defaultTransfers()
 	x.dl = limits.NewSlots(1, 1, 1)
-	x.base, x.minRate = time.Second, 1<<40
+	x.window, x.minRate = time.Second, 1<<40
 	// Le prochain départ d'échéance (celui du GET lent) attend release, place prise.
 	var hold atomic.Bool
 	armed, release := make(chan struct{}), make(chan struct{})
@@ -290,12 +291,164 @@ func TestDownloadBudget(t *testing.T) {
 	expect(t, e.do(req{method: "GET", path: seg(1), hdr: auth(dl2)}), 200, "")
 }
 
-func TestTransferDeadline(t *testing.T) {
-	x := defaultTransfers()
-	if got := x.deadline(maxSegmentLen); got < 130*time.Second || got > 140*time.Second {
-		t.Fatalf("échéance d'un segment de 4 Mio : %v", got)
+// slowPUT ouvre un PUT de segment qui annonce le plus grand segment et n'envoie que first.
+func slowPUT(t *testing.T, srv *httptest.Server, tok, clientIP, first string) net.Conn {
+	t.Helper()
+	cn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := x.deadline(0); got != xferBase {
-		t.Fatal(got)
+	t.Cleanup(func() { cn.Close() })
+	fmt.Fprintf(cn, "PUT /api/shares/segments/1 HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer %s\r\nX-Shh-Client-IP: %s\r\nContent-Length: %d\r\n\r\n%s",
+		tok, clientIP, maxSegmentLen, first)
+	return cn
+}
+
+// putSeg envoie le segment n en entier (jeton d'envoi tok) et rend le code de réponse.
+func putSeg(t *testing.T, srv *httptest.Server, tok string, n int, body []byte, clientIP string) int {
+	t.Helper()
+	r, _ := http.NewRequest("PUT", fmt.Sprintf("%s/api/shares/segments/%d", srv.URL, n), strings.NewReader(string(body)))
+	r.Header.Set("Authorization", "Bearer "+tok)
+	r.Header.Set("X-Shh-Client-IP", clientIP)
+	resp, err := srv.Client().Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// Audit I3 (reproduction devenue test) : 64 PUT lents (1 octet sur 4 Mio annoncés) depuis 8
+// adresses IPv4, 2 envois chacune, prenaient toutes les places d'envoi pendant 138 s (échéance
+// absolue) ; un envoi honnête recevait 503. Avec le débit minimal mesuré par tranche, ils sont
+// coupés dès la première tranche trop lente et rendent leur place.
+func TestSlowPUTsCutByMinRate(t *testing.T) {
+	x := defaultTransfers()
+	x.window = time.Second
+	e := newEnvFull(t, false, nil, nil, x)
+	var toks []string
+	for i := 0; i < 8; i++ {
+		for j := 0; j < 2; j++ {
+			c := e.create(t, fmt.Sprintf("198.51.100.%d:1000", 10+i), newKeys(), 80, 1)
+			toks = append(toks, c.UploadToken)
+		}
+	}
+	honest := e.create(t, "203.0.113.9:1000", newKeys(), 80, 1)
+	srv := prodServer(t, e.h)
+	for i := 0; i < 64; i++ {
+		slowPUT(t, srv, toks[i/4], fmt.Sprintf("198.51.100.%d", i/8), "x")
+	}
+	waitFor(t, "places prises par les PUT lents", func() bool { return e.srv.xfer.ul.Len() >= 48 })
+	waitFor(t, "PUT lents coupés", func() bool { return e.srv.xfer.ul.Len() == 0 })
+	if code := putSeg(t, srv, honest.UploadToken, 1, make([]byte, share.SegmentSize(80, 1)), "203.0.113.9"); code != 204 {
+		t.Fatal("envoi honnête refusé :", code)
+	}
+}
+
+// Audit I3 : un PUT qui envoie sans cesse, mais moins que le débit minimal sur chaque tranche,
+// est coupé (l'ancienne échéance absolue le laissait tenir 138 s).
+func TestTricklePUTCut(t *testing.T) {
+	x := defaultTransfers()
+	x.window, x.minRate = 500*time.Millisecond, 64<<10
+	e := newEnvFull(t, false, nil, nil, x)
+	c := e.create(t, "", newKeys(), 80, 1)
+	srv := prodServer(t, e.h)
+	cn := slowPUT(t, srv, c.UploadToken, "198.51.100.1", "x")
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(20 * time.Millisecond):
+				if _, err := cn.Write([]byte("xxxxxxxxxx")); err != nil { // 500 o/s
+					return
+				}
+			}
+		}
+	}()
+	waitFor(t, "place prise", func() bool { return e.srv.xfer.ul.Len() == 1 })
+	waitFor(t, "PUT au compte-gouttes coupé", func() bool { return e.srv.xfer.ul.Len() == 0 })
+}
+
+// Audit I3 : 4 PUT simultanés au plus par envoi (jeton), quelle que soit l'adresse ; le
+// suivant reçoit 429 sans prendre de place du serveur.
+func TestPUTsPerUpload(t *testing.T) {
+	e := newEnv(t, false, nil)
+	c := e.create(t, "", newKeys(), 80, 1)
+	srv := prodServer(t, e.h)
+	for i := 0; i < ulPerUpload; i++ {
+		slowPUT(t, srv, c.UploadToken, fmt.Sprintf("198.51.100.%d", i), "x")
+	}
+	waitFor(t, "places prises", func() bool { return e.srv.xfer.ul.Len() == ulPerUpload })
+	if code := putSeg(t, srv, c.UploadToken, 0, make([]byte, share.SegmentSize(80, 0)), "198.51.100.200"); code != 429 {
+		t.Fatal("5ᵉ PUT du même envoi :", code)
+	}
+	if n := e.srv.xfer.ul.Len(); n != ulPerUpload {
+		t.Fatal("place du serveur prise par un PUT refusé :", n)
+	}
+	other := e.create(t, "198.51.100.77:1", newKeys(), 80, 1)
+	if code := putSeg(t, srv, other.UploadToken, 1, make([]byte, share.SegmentSize(80, 1)), "198.51.100.77"); code != 204 {
+		t.Fatal("autre envoi refusé :", code)
+	}
+}
+
+// Audit M4 : 4 GET simultanés au plus par ouverture (partage, n° d'ouverture) ; le client du
+// site n'en fait qu'un à la fois (web/src/transfer/client.ts, lecture en flux du moteur).
+func TestGETsPerOpen(t *testing.T) {
+	e := newEnv(t, false, nil)
+	ids, toks := e.tokens(t, 80, 2)
+	srv := prodServer(t, e.h)
+	for i := 0; i < dlPerOpen; i++ { // segment 1 (1 Mio) : 4 lectures tiennent dans le budget
+		slowGET(t, srv, ids[0], 1, toks[0], fmt.Sprintf("198.51.100.%d", i))
+	}
+	waitFor(t, "places prises", func() bool { return e.srv.xfer.dl.Len() == dlPerOpen })
+	if resp, _ := getSeg(t, srv, ids[0], 1, toks[0], "198.51.100.200"); resp.StatusCode != 429 {
+		t.Fatal("5ᵉ GET de la même ouverture :", resp.Status)
+	}
+	if resp, b := getSeg(t, srv, ids[1], 1, toks[1], "198.51.100.200"); resp.StatusCode != 200 || len(b) != share.SegmentSize(80, 1) {
+		t.Fatal("autre ouverture refusée :", resp.Status)
+	}
+}
+
+// Audit M4 : un lecteur qui lit sans cesse, mais moins que le débit minimal sur chaque
+// tranche, est coupé (l'ancienne échéance absolue le laissait tenir 138 s par segment).
+func TestTrickleGETCut(t *testing.T) {
+	x := defaultTransfers()
+	x.window, x.minRate = 500*time.Millisecond, 64<<10
+	e := newEnvFull(t, false, nil, nil, x)
+	ids, toks := e.tokens(t, 80, 1)
+	srv := prodServer(t, e.h)
+	cn := slowGET(t, srv, ids[0], 0, toks[0], "198.51.100.1")
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		b := make([]byte, 10)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(20 * time.Millisecond):
+				if _, err := cn.Read(b); err != nil {
+					return
+				}
+			}
+		}
+	}()
+	waitFor(t, "place prise", func() bool { return e.srv.xfer.dl.Len() == 1 })
+	waitFor(t, "GET au compte-gouttes coupé", func() bool { return e.srv.xfer.dl.Len() == 0 })
+}
+
+// Débit minimal par défaut : 32 Kio/s mesurés par tranches de 5 s (160 Kio par tranche).
+func TestTransferMinRate(t *testing.T) {
+	x := defaultTransfers()
+	if x.window != 5*time.Second || x.perWindow() != 160<<10 {
+		t.Fatal(x.window, x.perWindow())
+	}
+	x.window, x.minRate = 10*time.Millisecond, 1
+	if x.perWindow() != 1 {
+		t.Fatal("tranche minimale d'un octet", x.perWindow())
 	}
 }

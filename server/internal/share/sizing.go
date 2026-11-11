@@ -52,3 +52,18 @@ func ContentBytes(bucket int) int64 { return int64(bucket-1) * 65536 }
 
 // ValidBucket : b est un palier gratuit (spec §41.2).
 func ValidBucket(b int) bool { return validBucket(b) }
+
+// PayloadBytes : données utiles portées par n octets chiffrés reçus (unité des quotas, audit
+// F1) : 64 Kio par morceau chiffré entier, l'en-tête de 48 octets du segment 0 ne compte pas.
+// Un reste plus long que l'en-tête (corps mal formé, refusé ensuite) compte pour un morceau :
+// un corps refusé n'est jamais gratuit.
+func PayloadBytes(n int64) int64 {
+	if n <= 0 {
+		return 0
+	}
+	k := n / ChunkCT
+	if n%ChunkCT > Header {
+		k++
+	}
+	return k * 65536
+}

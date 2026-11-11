@@ -124,7 +124,7 @@ func (s *server) create(w http.ResponseWriter, r *http.Request) {
 	}
 	id, segs, err := s.svc.Create(req)
 	if errors.Is(err, share.ErrConflict) {
-		s.lim.FinishUpload(req.ID) // le quota reste débité
+		s.lim.FinishUpload(req.ID, ip) // le quota reste débité
 		s.cap.RecordCreate(ip)
 		fail(w, errBadRequest)
 		return
@@ -168,27 +168,34 @@ func (s *server) putSegment(w http.ResponseWriter, r *http.Request) {
 		fail(w, errBadRequest)
 		return
 	}
-	release, ok := s.slot(w, r, s.xfer.ul)
+	release, ok := s.xferSlot(w, r, s.xfer.perUp, id, s.xfer.ul)
 	if !ok {
 		return
 	}
 	defer release()
-	// Échéance de lecture du corps proportionnelle au plus grand segment possible.
-	if err := http.NewResponseController(w).SetReadDeadline(s.xfer.start().Add(s.xfer.deadline(maxSegmentLen))); err != nil &&
-		!errors.Is(err, http.ErrNotSupported) {
+	// Débit minimal mesuré par tranche (audit I3) : un client trop lent est coupé et rend sa place.
+	rc := http.NewResponseController(w)
+	p := newPacer(rc.SetReadDeadline, s.xfer)
+	if err := p.arm(); err != nil {
 		fail(w, err)
 		return
 	}
-	body, err := readBody(http.MaxBytesReader(w, r.Body, maxSegmentLen), r.ContentLength)
+	buf := segBufs.Get().(*[]byte)
+	defer segBufs.Put(buf)
+	k, err := readBody(paceReader{http.MaxBytesReader(w, r.Body, maxSegmentLen), p}, r.ContentLength, *buf)
+	// Octets reçus comptés au quota du jour, en données utiles (audit F1), même si le segment
+	// est effacé ensuite (§41.14) ou si le corps est incomplet (coupé, trop lent) : sinon un
+	// client pourrait tenir des places sans jamais rien payer.
+	retry, qerr := s.lim.Receive(id, share.PayloadBytes(int64(k)))
 	if err != nil {
 		fail(w, errBadRequest)
 		return
 	}
-	// Octets reçus comptés au quota du jour, même si le segment est effacé ensuite (§41.14).
-	if retry, err := s.lim.Receive(id, int64(len(body))); err != nil {
+	if qerr != nil {
 		writeLimit(w, retry)
 		return
 	}
+	body := (*buf)[:k]
 	// ?from=c : plage de morceaux d'un segment de brouillon (audit H-2, petits éléments
 	// empaquetés) ; sans : segment entier.
 	if f := r.URL.Query(); f.Has("from") {
@@ -210,20 +217,34 @@ func (s *server) putSegment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// readBody lit le corps d'un segment. Longueur annoncée (Content-Length, déjà plafonnée par
-// l'appelant) : un seul tampon de cette taille, sans les copies de croissance d'io.ReadAll
-// (revue B8) ; un corps plus court est une erreur, et net/http ne livre jamais plus que
-// l'annonce. Longueur inconnue (envoi par blocs) : io.ReadAll, borné par le lecteur reçu.
-func readBody(r io.Reader, announced int64) ([]byte, error) {
-	if announced < 0 {
-		return io.ReadAll(r)
+// readBody lit le corps d'un segment dans buf (maxSegmentLen octets, repris de segBufs : pas
+// de tampon de 4 Mio alloué par envoi, revue B8) et rend sa longueur. Longueur annoncée
+// (Content-Length, déjà plafonnée par l'appelant) : un corps plus court est une erreur, et
+// net/http ne livre jamais plus que l'annonce. Longueur inconnue (envoi par blocs) : borné
+// par le lecteur reçu (MaxBytesReader), un octet de plus est une erreur. En cas d'erreur, la
+// longueur rendue est celle des octets déjà lus.
+func readBody(r io.Reader, announced int64, buf []byte) (int, error) {
+	if announced >= 0 {
+		return io.ReadFull(r, buf[:announced])
 	}
-	body := make([]byte, announced)
-	if _, err := io.ReadFull(r, body); err != nil {
-		return nil, err
+	n, err := io.ReadFull(r, buf)
+	switch {
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		return n, nil
+	case err != nil:
+		return n, err
 	}
-	return body, nil
+	var one [1]byte
+	if _, err := io.ReadFull(r, one[:]); !errors.Is(err, io.EOF) {
+		return n, errBadRequest
+	}
+	return n, nil
 }
+
+// segBufs : tampons des segments reçus (un par envoi en cours, ulTotal au plus). Le contenu
+// est du chiffré, écrit tel quel : un tampon repris n'a pas à être effacé ; seuls les octets
+// lus pour la requête en cours sont utilisés.
+var segBufs = sync.Pool{New: func() any { b := make([]byte, maxSegmentLen); return &b }}
 
 func (s *server) finalize(w http.ResponseWriter, r *http.Request) {
 	id, _, err := s.checkToken(r, token.Upload)
@@ -288,7 +309,8 @@ func (s *server) finalize(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	s.lim.FinishUpload(id)
+	// Un envoi commencé la veille compte dans les quotas du jour où il finit (audit M5).
+	s.lim.FinishUpload(id, ipOf(r))
 	writeJSON(w, http.StatusOK, map[string]int64{"expires_in_s": secs(left)})
 }
 
@@ -385,7 +407,7 @@ func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	release, ok := s.slot(w, r, s.xfer.dl)
+	release, ok := s.xferSlot(w, r, s.xfer.perOpen, id+"|"+strconv.Itoa(openN), s.xfer.dl)
 	if !ok {
 		return
 	}
@@ -396,20 +418,21 @@ func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer sec.Close()
-	// Révocation (signalement, administrateur, exclusion ; spec §41.8) : la connexion est
-	// coupée tout de suite, même si l'écriture attend un client lent (échéance dans le passé).
-	// La lecture du segment s'arrête aussi à la tranche suivante (share.ctxReader).
+	// Débit minimal mesuré par tranche (audit M4, remplace le WriteTimeout de 300 s) : un
+	// client trop lent est coupé et rend sa place. Absent des tests en mémoire (ErrNotSupported).
 	rc := http.NewResponseController(w)
+	p := newPacer(rc.SetWriteDeadline, s.xfer)
+	// Révocation (signalement, administrateur, exclusion ; spec §41.8) : la connexion est
+	// coupée tout de suite, même si l'écriture attend un client lent (échéance dans le passé,
+	// que le débit minimal ne repousse plus). La lecture du segment s'arrête aussi à la tranche
+	// suivante (share.ctxReader).
 	stop := context.AfterFunc(sec.Context(), func() {
 		if errors.Is(context.Cause(sec.Context()), share.ErrRevoked) {
-			rc.SetWriteDeadline(time.Unix(1, 0))
+			p.stop(time.Unix(1, 0))
 		}
 	})
 	defer stop()
-	// Échéance propre à la requête (remplace le WriteTimeout de 300 s) : un client trop
-	// lent est coupé et rend sa place. Absente des tests en mémoire (ErrNotSupported).
-	if err := rc.SetWriteDeadline(s.xfer.start().Add(s.xfer.deadline(sec.Size()))); err != nil &&
-		!errors.Is(err, http.ErrNotSupported) {
+	if err := p.arm(); err != nil {
 		fail(w, err)
 		return
 	}
@@ -418,10 +441,10 @@ func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	// En flux depuis le fichier (audit E1). Une copie incomplète (client coupé, échéance,
 	// erreur de lecture) coupe la connexion : une réponse tronquée ne passe pas pour complète.
-	// Tampon de 256 Kio repris d'une réserve (revue B8) ; struct{ io.Writer } masque le
-	// ReadFrom de la réponse, qui recopierait sinon par tranches de 32 Kio.
+	// Tampon de 256 Kio repris d'une réserve (revue B8) ; paceWriter masque le ReadFrom de la
+	// réponse, qui recopierait sinon par tranches de 32 Kio.
 	buf := copyBufs.Get().(*[]byte)
-	k, err := io.CopyBuffer(struct{ io.Writer }{w}, sec, *buf)
+	k, err := io.CopyBuffer(paceWriter{w, p}, sec, *buf)
 	copyBufs.Put(buf)
 	if err != nil || k != sec.Size() {
 		panic(http.ErrAbortHandler)

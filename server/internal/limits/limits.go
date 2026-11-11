@@ -4,7 +4,9 @@
 // données pseudonymisées, jamais écrites sur disque. À minuit UTC, un nouveau secret
 // aléatoire est tiré et tous les compteurs sont effacés, sauf ceux des envois encore en
 // cours (rotateLocked) : ils restent comptés sous leur clé de la veille, et le secret de la
-// veille reste en mémoire tant qu'un de ces envois vit (UploadLife au plus).
+// veille reste en mémoire tant qu'un de ces envois vit (UploadLife au plus). Un tel envoi
+// finalisé passe dans les quotas du jour, sous la clé du jour de l'adresse qui le finalise
+// (FinishUpload, audit M5).
 package limits
 
 import (
@@ -307,8 +309,9 @@ func (l *Limiter) BeginUpload(ip netip.Addr, id string, bytes int64) (retryAfter
 }
 
 // endLocked retire l'envoi id des envois en cours ; refund rend sa réservation ; abandoned
-// compte ses octets comme abandonnés.
-func (l *Limiter) endLocked(id string, refund, abandoned bool) {
+// compte ses octets comme abandonnés. finisher (FinishUpload d'un envoi de la veille) :
+// adresse qui le finalise, dont la clé du jour reçoit sa création et ses octets.
+func (l *Limiter) endLocked(id string, refund, abandoned bool, finisher *netip.Addr) {
 	l.rotateLocked(l.now())
 	u, ok := l.uploads[id]
 	if !ok {
@@ -321,8 +324,24 @@ func (l *Limiter) endLocked(id string, refund, abandoned bool) {
 		// La création et la réservation non remplie sont rendues ; les octets reçus, jamais.
 		decr(l.count64, u.k64)
 		decr(l.count48, u.k48)
-		l.bytes64[u.k64] -= u.counted() - u.recv
-		l.bytes48[u.k48] -= u.counted() - u.recv
+		l.bytes64[u.k64] -= u.counted() - u.paid()
+		l.bytes48[u.k48] -= u.counted() - u.paid()
+	}
+	if u.old && finisher != nil {
+		// Envoi de la veille finalisé aujourd'hui (audit M5, décision du propriétaire du
+		// 11 novembre) : sa création et ses octets passent de la clé de la veille, bientôt
+		// oubliée, à la clé du jour de l'adresse qui le finalise. Sans cela, il sortait de
+		// tout quota à minuit (10 Gio au lieu de 6 dans la journée). Aucune adresse gardée :
+		// la clé du jour est recalculée ici, comme à chaque requête.
+		decr(l.count64, u.k64)
+		decr(l.count48, u.k48)
+		l.bytes64[u.k64] -= u.counted()
+		l.bytes48[u.k48] -= u.counted()
+		k64, k48 := l.keyLocked(*finisher)
+		l.count64[k64]++
+		l.count48[k48]++
+		l.bytes64[k64] += u.counted()
+		l.bytes48[k48] += u.counted()
 	}
 	if abandoned {
 		l.aband64[u.k64] += u.counted()
@@ -333,9 +352,19 @@ func (l *Limiter) endLocked(id string, refund, abandoned bool) {
 	}
 }
 
+// ManifestChunk : données utiles du morceau du manifeste (64 Kio). Les quotas comptent les
+// données utiles d'un palier sans ce morceau (share.ContentBytes) ; un envoi classique le
+// transmet pourtant avec le dernier segment. Il n'est pas compté dans les octets reçus
+// (audit F1 : sinon un partage plein coûtait plus que sa réservation, et le 3ᵉ partage
+// plein de la journée était refusé).
+const ManifestChunk = 65536
+
+// paid : octets reçus comptés au quota (le morceau du manifeste en moins).
+func (u upload) paid() int64 { return max(0, u.recv-ManifestChunk) }
+
 // counted : octets comptés au quota pour un envoi : sa réservation (création, grow), ou
 // ses octets reçus s'ils la dépassent (segments effacés et renvoyés compris).
-func (u upload) counted() int64 { return max(u.bytes, u.recv) }
+func (u upload) counted() int64 { return max(u.bytes, u.paid()) }
 
 // debitLocked ajoute d au compte de u (d ≤ 0 : rend) ; refuse un débit au-delà du jour.
 func (l *Limiter) debitLocked(id string, u upload, next upload, now time.Time) (time.Duration, error) {
@@ -349,7 +378,8 @@ func (l *Limiter) debitLocked(id string, u upload, next upload, now time.Time) (
 	return 0, nil
 }
 
-// Receive compte n octets reçus pour l'envoi id (spec §41.14) : au-delà de sa réservation,
+// Receive compte n octets reçus (données utiles, share.PayloadBytes) pour l'envoi id (spec
+// §41.14) ; le morceau du manifeste n'est pas compté (ManifestChunk). Au-delà de sa réservation,
 // débités au quota du jour (refus ErrQuota, délai jusqu'à minuit UTC). Un segment effacé
 // reste compté. Un envoi de la veille reste compté sous sa clé de la veille. Un id inconnu
 // (redémarrage, envoi plus vieux qu'UploadLife) est ignoré.
@@ -391,27 +421,30 @@ func (l *Limiter) Reserve(id string, bytes int64) (time.Duration, error) {
 	return l.debitLocked(id, u, next, now)
 }
 
-// FinishUpload : l'envoi id est finalisé ; sa création et ses octets restent comptés.
-func (l *Limiter) FinishUpload(id string) {
+// FinishUpload : l'envoi id est finalisé par ip ; sa création et ses octets restent comptés.
+// Un envoi de la veille passe dans les quotas du jour, sous la clé du jour de ip (audit M5).
+func (l *Limiter) FinishUpload(id string, ip netip.Addr) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.endLocked(id, false, false)
+	l.endLocked(id, false, false, &ip)
 }
 
 // CancelUpload : la création a échoué (place pleine, conflit…) ; rien n'est compté.
 func (l *Limiter) CancelUpload(id string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.endLocked(id, true, false)
+	l.endLocked(id, true, false, nil)
 }
 
 // AbandonUpload : l'envoi id a été effacé sans finalize (abandon, échéance) ; sa création et
 // sa réservation sont rendues, ses octets reçus restent comptés (spec §41.14), et tous
-// comptent comme abandonnés. Un id inconnu (serveur redémarré) est ignoré.
+// comptent comme abandonnés. Un id inconnu (serveur redémarré) est ignoré. Limite : un envoi
+// de la veille abandonné aujourd'hui n'a pas d'adresse (balayage) ; ses octets restent sous
+// la clé de la veille, oubliée avec lui.
 func (l *Limiter) AbandonUpload(id string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.endLocked(id, true, true)
+	l.endLocked(id, true, true, nil)
 }
 
 // AllowRequest : 60 requêtes par minute (fenêtre fixe) et par connexion.

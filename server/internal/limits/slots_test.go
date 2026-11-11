@@ -73,3 +73,37 @@ func TestNewSlotsRejectsZero(t *testing.T) {
 	}()
 	NewSlots(0, 1, 1)
 }
+
+func TestKeyed(t *testing.T) {
+	k := NewKeyed(2)
+	r1, err1 := k.Acquire("a")
+	r2, err2 := k.Acquire("a")
+	if err1 != nil || err2 != nil {
+		t.Fatal(err1, err2)
+	}
+	if _, err := k.Acquire("a"); !errors.Is(err, ErrTooMany) {
+		t.Fatal("3ᵉ place de la même clé accordée", err)
+	}
+	rb, err := k.Acquire("b")
+	if err != nil {
+		t.Fatal("autre clé refusée", err)
+	}
+	r1()
+	r1() // une seule fois
+	if k.Len() != 2 {
+		t.Fatal(k.Len())
+	}
+	r3, err := k.Acquire("a")
+	if err != nil {
+		t.Fatal("place rendue non réutilisable", err)
+	}
+	r2()
+	r3()
+	rb()
+	k.mu.Lock()
+	n := len(k.n)
+	k.mu.Unlock()
+	if n != 0 || k.Len() != 0 {
+		t.Fatal("clé gardée sans transfert", n)
+	}
+}

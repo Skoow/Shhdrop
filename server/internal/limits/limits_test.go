@@ -328,7 +328,7 @@ func (l *Limiter) AllowCreate(ip netip.Addr, bytes int64) (bool, time.Duration) 
 	if err != nil {
 		return false, ra
 	}
-	l.FinishUpload(id)
+	l.FinishUpload(id, ip)
 	return true, 0
 }
 
@@ -376,7 +376,7 @@ func TestUploadQuotas(t *testing.T) {
 		if ra, err := l.BeginUpload(ip("1.2.3.4"), "p3", 1); !errors.Is(err, ErrQuota) || ra != time.Minute {
 			t.Fatal(ra, err)
 		}
-		l.FinishUpload("p1")
+		l.FinishUpload("p1", ip("1.2.3.4"))
 		if _, err := l.BeginUpload(ip("1.2.3.4"), "p3", 1); err != nil {
 			t.Fatal("place libérée par la finalisation", err)
 		}
@@ -412,7 +412,7 @@ func TestUploadQuotas(t *testing.T) {
 			if _, err := l.BeginUpload(ip("1.2.3.4"), id, 2*gib); err != nil {
 				t.Fatal(i, err)
 			}
-			l.FinishUpload(id)
+			l.FinishUpload(id, ip("1.2.3.4"))
 		}
 		if ra, err := l.BeginUpload(ip("1.2.3.4"), "b3", 2*gib); !errors.Is(err, ErrQuota) || ra <= 0 {
 			t.Fatal("4ᵉ partage de 2 Gio accepté", ra, err)
@@ -422,7 +422,7 @@ func TestUploadQuotas(t *testing.T) {
 			if _, err := l.BeginUpload(ip("5.6.7.8"), id, gib); err != nil {
 				t.Fatal(i, err)
 			}
-			l.FinishUpload(id)
+			l.FinishUpload(id, ip("1.2.3.4"))
 		}
 		if _, err := l.BeginUpload(ip("5.6.7.8"), "c6", gib); !errors.Is(err, ErrQuota) {
 			t.Fatal("7ᵉ partage de 1 Gio accepté", err)
@@ -463,7 +463,7 @@ func TestUploadQuotas(t *testing.T) {
 		if ra, err := l.BeginUpload(ip("1.2.3.4"), "m3", 1); !errors.Is(err, ErrQuota) || ra != pendingRetry {
 			t.Fatal("3ᵉ envoi en cours accepté après minuit", ra, err)
 		}
-		l.FinishUpload("m1") // toujours connu après minuit : sa place est rendue
+		l.FinishUpload("m1", ip("1.2.3.4")) // toujours connu après minuit : sa place est rendue
 		if _, err := l.BeginUpload(ip("1.2.3.4"), "m3", 1); err != nil {
 			t.Fatal(err)
 		}
@@ -486,7 +486,7 @@ func TestMidnightCarriesInFlightUploads(t *testing.T) {
 		if _, err := l.BeginUpload(ip("2001:db8:1:1::1"), "fini", 4*gib); err != nil {
 			t.Fatal(err)
 		}
-		l.FinishUpload("fini") // terminé la veille : oublié à minuit
+		l.FinishUpload("fini", ip("1.2.3.4")) // terminé la veille : oublié à minuit
 		now = now.Add(2 * time.Minute)
 		if _, err := l.Reserve("a", 4*gib); err != nil {
 			t.Fatal("grow d'un envoi de la veille", err)
@@ -498,7 +498,7 @@ func TestMidnightCarriesInFlightUploads(t *testing.T) {
 		if _, err := l.BeginUpload(ip("2001:db8:1:2::1"), "c", 6*gib); err != nil {
 			t.Fatal(err)
 		}
-		l.FinishUpload("c")
+		l.FinishUpload("c", ip("1.2.3.4"))
 		if _, err := l.BeginUpload(ip("2001:db8:1:3::1"), "d", 3*gib); !errors.Is(err, ErrQuota) {
 			t.Fatal("/48 : 4 Gio de la veille + 6 Gio + 3 Gio acceptés", err)
 		}
@@ -508,7 +508,8 @@ func TestMidnightCarriesInFlightUploads(t *testing.T) {
 		if _, err := l.Receive("a", 6*gib); err != nil {
 			t.Fatal(err)
 		}
-		if ra, err := l.Receive("a", 1); !errors.Is(err, ErrQuota) || ra <= 0 {
+		// Le morceau du manifeste (64 Kio) n'est pas compté (audit F1).
+		if ra, err := l.Receive("a", ManifestChunk+1); !errors.Is(err, ErrQuota) || ra <= 0 {
 			t.Fatal("octets reçus par un envoi de la veille non comptés", ra, err)
 		}
 	})
@@ -530,16 +531,25 @@ func TestMidnightCarriesInFlightUploads(t *testing.T) {
 		if l.prev == nil {
 			t.Fatal("secret de la veille jeté alors qu'un envoi de la veille vit encore")
 		}
-		l.FinishUpload("b")
+		l.FinishUpload("b", ip("1.2.3.4"))
 		if l.prev != nil {
 			t.Fatal("secret de la veille gardé sans envoi de la veille")
 		}
+		// Audit M5 (décision du propriétaire, 11 novembre ; attente changée) : b, fini
+		// aujourd'hui, compte dans les quotas du jour sous la clé du jour (création et octets,
+		// par connexion et par bloc : 4 entrées) ; plus rien sous la clé de la veille.
 		if n := len(l.count64) + len(l.count48) + len(l.bytes64) + len(l.bytes48) + len(l.uploads) +
-			len(l.pend64) + len(l.pend48) + len(l.aband64) + len(l.aband48); n != 0 {
-			t.Fatal("compteurs de la veille non vidés", n)
+			len(l.pend64) + len(l.pend48) + len(l.aband64) + len(l.aband48); n != 4 {
+			t.Fatal("compteurs après le report", n)
 		}
-		// L'envoi b, terminé, ne compte plus : le jour repart de zéro.
-		if _, err := l.BeginUpload(ip("1.2.3.4"), "c", 6*gib); err != nil {
+		k64, _ := l.Key(ip("1.2.3.4"))
+		if l.count64[k64] != 1 || l.bytes64[k64] != 2*gib {
+			t.Fatal("envoi b non compté sous la clé du jour", l.count64[k64], l.bytes64[k64])
+		}
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "c", 6*gib); !errors.Is(err, ErrQuota) {
+			t.Fatal("2 Gio finis aujourd'hui + 6 Gio acceptés", err)
+		}
+		if _, err := l.BeginUpload(ip("1.2.3.4"), "c", 4*gib); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -549,7 +559,7 @@ func TestMidnightCarriesInFlightUploads(t *testing.T) {
 		if _, err := l.BeginUpload(ip("1.2.3.4"), "a", gib); err != nil {
 			t.Fatal(err)
 		}
-		l.FinishUpload("a")
+		l.FinishUpload("a", ip("1.2.3.4"))
 		now = now.Add(2 * time.Minute)
 		l.Key(ip("1.2.3.4"))
 		if l.prev != nil {
@@ -575,7 +585,7 @@ func TestMidnightCarriesInFlightUploads(t *testing.T) {
 		if l.prev != nil || len(l.uploads) != 1 || len(l.pend64) != 1 || len(l.bytes64) != 1 {
 			t.Fatal("secret ou compteurs de la veille gardés", len(l.uploads), len(l.pend64), len(l.bytes64))
 		}
-		l.FinishUpload("a") // oublié : ignoré
+		l.FinishUpload("a", ip("1.2.3.4")) // oublié : ignoré
 	})
 	t.Run("deux minuits : un envoi de l'avant-veille n'est pas gardé", func(t *testing.T) {
 		now := eve
@@ -621,7 +631,7 @@ func TestCountersEmptyAfterRotation(t *testing.T) {
 		}
 	}
 	l.AbandonUpload("id-0")
-	l.FinishUpload("id-1")
+	l.FinishUpload("id-1", ip("1.2.3.4"))
 	if m, d := lens(); m == 0 || d == 0 {
 		t.Fatal("compteurs non remplis", m, d)
 	}
@@ -635,8 +645,10 @@ func TestCountersEmptyAfterRotation(t *testing.T) {
 	if m, d := lens(); m != 0 || d != 7 || l.prev == nil {
 		t.Fatal("minuit UTC", m, d)
 	}
-	l.FinishUpload("id-2")
-	if m, d := lens(); m != 0 || d != 0 || l.prev != nil {
+	l.FinishUpload("id-2", ip("198.51.100.9"))
+	// Audit M5 : fini aujourd'hui, id-2 compte sous la clé du jour (création et octets, par
+	// connexion et par bloc : 4 entrées), jusqu'au prochain minuit ; le secret de la veille est jeté.
+	if m, d := lens(); m != 0 || d != 4 || l.prev != nil {
 		t.Fatal("après le dernier envoi de la veille", m, d)
 	}
 	s := NewSlots(3, 2, 3)
@@ -702,11 +714,12 @@ func TestReserveDebitsQuota(t *testing.T) {
 	if _, err := l.Receive("a", 2*gib); err != nil { // 6 Gio reçus : +1 Gio
 		t.Fatal(err)
 	}
-	if _, err := l.Receive("a", 1); !errors.Is(err, ErrQuota) {
+	// Le morceau du manifeste n'est pas compté (audit F1) : 64 Kio de plus passent, pas au-delà.
+	if _, err := l.Receive("a", ManifestChunk+1); !errors.Is(err, ErrQuota) {
 		t.Fatal(err)
 	}
 	l.AbandonUpload("a") // tout a été reçu : rien à rendre
-	if _, err := l.BeginUpload(ip("1.2.3.4"), "b", 1); !errors.Is(err, ErrQuota) {
+	if _, err := l.BeginUpload(ip("1.2.3.4"), "b", ManifestChunk+1); !errors.Is(err, ErrQuota) {
 		t.Fatal("quota rendu à tort", err)
 	}
 	// Réservation non remplie, abandonnée : rendue.
@@ -722,5 +735,97 @@ func TestReserveDebitsQuota(t *testing.T) {
 	l.AbandonUpload("c")
 	if _, err := l.BeginUpload(ip("5.6.7.8"), "d", 5*gib); err != nil {
 		t.Fatal("réservation non remplie non rendue", err)
+	}
+}
+
+// Audit M5 (décision du propriétaire, 11 novembre) : un envoi commencé la veille et finalisé
+// après minuit compte dans les quotas du jour où il se termine (création et octets), sous la
+// clé du jour de l'adresse qui le finalise ; aucune adresse n'est gardée.
+func TestMidnightFinishedUploadCountsToday(t *testing.T) {
+	now := time.Date(2026, 11, 4, 23, 59, 0, 0, time.UTC)
+	l := newLim(&now)
+	a := ip("1.2.3.4")
+	small := int64(399) * 65536
+	for _, id := range []string{"a", "b"} {
+		if _, err := l.BeginUpload(a, id, small); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now = now.Add(2 * time.Minute) // après minuit
+	for _, id := range []string{"a", "b"} {
+		if _, err := l.Reserve(id, 2<<30); err != nil {
+			t.Fatal("reserve", err)
+		}
+		l.FinishUpload(id, a)
+	}
+	if l.prev != nil {
+		t.Fatal("secret de la veille gardé après le dernier envoi reporté")
+	}
+	got := 0
+	for i := 0; i < 3; i++ {
+		id := string(rune('c' + i))
+		if _, err := l.BeginUpload(a, id, 2<<30); err == nil {
+			got++
+			l.FinishUpload(id, a)
+		}
+	}
+	if got != 1 {
+		t.Fatalf("partages de 2 Gio acceptés après 4 Gio reportés : %d, attendu 1 (6 Gio par jour)", got)
+	}
+	// Créations reportées aussi : 2 reportées + 1 = 3 ; il en reste 7.
+	for i := 0; i < CreatesPer64-3; i++ {
+		if ok, _ := l.AllowCreate(a, 0); !ok {
+			t.Fatal("création", i)
+		}
+	}
+	if ok, _ := l.AllowCreate(a, 0); ok {
+		t.Fatal("créations reportées non comptées")
+	}
+}
+
+// Deux envois de la veille sous la même clé : le premier fini passe au jour sans rester
+// compté sous la clé de la veille (pas de double compte tant que le second vit).
+func TestMidnightFinishNoDoubleCount(t *testing.T) {
+	now := time.Date(2026, 11, 4, 23, 59, 0, 0, time.UTC)
+	l := newLim(&now)
+	a := ip("1.2.3.4")
+	for _, id := range []string{"a", "b"} {
+		if _, err := l.BeginUpload(a, id, 2<<30); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now = now.Add(2 * time.Minute)
+	l.FinishUpload("a", a)
+	// Comptés : a (2 Gio, jour) + b (2 Gio, veille) = 4 Gio ; 2 Gio restent.
+	if _, err := l.BeginUpload(a, "c", 2<<30); err != nil {
+		t.Fatal("double compte de l'envoi fini", err)
+	}
+	if _, err := l.BeginUpload(ip("1.2.3.5"), "d", 1); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Audit F1 : un partage plein (palier de 32 769 morceaux) envoie le morceau du manifeste en
+// plus de ses 2 Gio de données : il n'est pas compté, et trois partages pleins tiennent dans
+// les 6 Gio du jour (spec §24, §41.2).
+func TestFullBucketThreePerDay(t *testing.T) {
+	now := t0
+	l := newLim(&now)
+	a := ip("1.2.3.5")
+	const bucket = 32769
+	content := int64(bucket-1) * 65536
+	payload := int64(bucket) * 65536 // morceaux reçus, manifeste compris, en données utiles
+	for i := 0; i < 3; i++ {
+		id := fmt.Sprint("x", i)
+		if _, err := l.BeginUpload(a, id, content); err != nil {
+			t.Fatal(i, err)
+		}
+		if _, err := l.Receive(id, payload); err != nil {
+			t.Fatal("partage plein refusé", i, err)
+		}
+		l.FinishUpload(id, a)
+	}
+	if _, err := l.BeginUpload(a, "x3", 1); !errors.Is(err, ErrQuota) {
+		t.Fatal("4ᵉ partage accepté", err)
 	}
 }
