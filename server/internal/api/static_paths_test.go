@@ -36,11 +36,13 @@ func TestPdfFrameCORP(t *testing.T) {
 // Le cadre PDF a sa propre CSP, fermée (revue du 10 novembre) : il ne charge que son script
 // et sa feuille de style, dessine des <canvas> (images blob: et data:), et n'ouvre aucune
 // connexion, aucun cadre, aucun Worker, aucun WebAssembly (pdf.js y tourne sur le fil
-// principal, useWasm: false). Seule la page de l'application peut l'embarquer.
+// principal, useWasm: false). Seule la page de l'application peut l'embarquer. sandbox
+// allow-scripts (audit du 11 novembre) : origine opaque même ouvert directement, hors du cadre
+// sandbox de l'application (mêmes droits que l'attribut sandbox="allow-scripts" de PdfViewer).
 func TestPdfFrameCSP(t *testing.T) {
 	e := newEnv(t, false, nil)
 	const want = "default-src 'none'; script-src 'self'; style-src 'self'; img-src blob: data:; " +
-		"connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'"
+		"connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'; sandbox allow-scripts"
 	csp := get(e, "/pdf-frame.html")["Content-Security-Policy"]
 	if len(csp) != 1 || csp[0] != want {
 		t.Fatalf("/pdf-frame.html : CSP = %v\nattendu %s", csp, want)

@@ -60,6 +60,8 @@
 # en toutes lettres pour que les délais et protocoles ci-dessus s'y appliquent aussi (la
 # redirection automatique de Caddy crée un serveur à part, avec ses réglages par défaut).
 http://{$SHH_DOMAIN} {
+	# « Server: Caddy » retiré (voir le bloc du site ci-dessous).
+	header -Server
 	redir https://{host}{uri} 308
 }
 
@@ -81,12 +83,21 @@ http://{$SHH_DOMAIN} {
 		max_size 5MiB
 	}
 
-	# « Via: 1.1 Caddy » : ajouté par Caddy aux réponses relayées, retiré. Tous les en-têtes
-	# de sécurité (CSP, HSTS, etc.) viennent du serveur Go (server/internal/api/headers.go) :
-	# ne pas les répéter ici, ils seraient en double.
-	# Les réponses que Caddy fabrique lui-même (308 du port 80, 413, 502 si le serveur Go est
-	# arrêté) sont vides, portent « Server: Caddy » et aucun de ces en-têtes.
+	# « Via: 1.1 Caddy » : ajouté par Caddy aux réponses relayées, retiré. « Server: Caddy » :
+	# Caddy le retire déjà des réponses relayées (le serveur Go n'en envoie pas), mais le pose
+	# sur celles qu'il fabrique lui-même (308 du port 80, 413, 502 si le serveur Go est arrêté) :
+	# retiré ici, sur le port 80 et dans handle_errors (audit du 11 novembre : rien ne dit quel
+	# logiciel répond). Tous les en-têtes de sécurité (CSP, HSTS, etc.) viennent du serveur Go
+	# (server/internal/api/headers.go) : ne pas les répéter ici, ils seraient en double.
+	# Les réponses que Caddy fabrique lui-même sont vides et ne portent aucun de ces en-têtes.
 	header -Via
+	header -Server
+
+	# 413 de request_body, 502 du proxy : la réponse d'erreur, sans « Server » ; rien n'est
+	# écrit dans le corps (vide, comme sans ce bloc).
+	handle_errors {
+		header -Server
+	}
 
 	reverse_proxy {$SHH_UPSTREAM:127.0.0.1:8080} {
 		# LIGNE CRITIQUE (audit de sécurité F3) : REMPLACE toute valeur envoyée par le

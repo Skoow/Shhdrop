@@ -17,8 +17,10 @@
 # Limites, dites aussi dans le README :
 #   - le retour arrière ne concerne que l'image ; Caddyfile et compose.yaml viennent de la
 #     copie du dépôt (pour les ramener en arrière : git, puis relancer ce script) ;
-#   - la vérification de la spec §28.7 (cosign, release.json, verify-site.mjs) n'existe pas
-#     encore dans le dépôt : ce script ne la fait pas, et le rappelle à chaque installation.
+#   - la vérification de provenance de la spec §28.7 n'est pas faite : web/scripts/
+#     release-manifest.mjs et verify-site.mjs existent, mais ni release.yml ni signature cosign
+#     (aucun release.json signé à vérifier) ; ce script ne la fait pas, et le rappelle à chaque
+#     installation (README, §3 et §9).
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -124,7 +126,7 @@ install_version() {
 	exec 9>.deploy.lock
 	flock -n 9 || die "une autre installation est en cours"
 	preflight
-	echo "RAPPEL : vérification de provenance (spec §28.7 : cosign, release.json, verify-site.mjs) NON faite, elle n'existe pas encore."
+	echo "RAPPEL : vérification de provenance (spec §28.7) NON faite : aucun release.json signé (cosign) à vérifier ; verify-site.mjs se lance à la main, depuis un autre poste (README, §3)."
 	# Image absente : téléchargée par empreinte (le contenu est donc vérifié par Docker).
 	docker image inspect "$SHH_IMAGE_REPO@$new" >/dev/null 2>&1 || docker pull "$SHH_IMAGE_REPO@$new"
 

@@ -7,7 +7,8 @@
 #      d'autre ne porte l'adresse ni ne décrit le navigateur vers le serveur ;
 #   3. /api fonctionne à travers Caddy avec SHH_BEHIND_PROXY=1, et la limite de débit ne se
 #      contourne pas en changeant l'en-tête ;
-#   4. les en-têtes du serveur Go arrivent une seule fois, les octets ne changent pas ;
+#   4. les en-têtes du serveur Go arrivent une seule fois, les octets ne changent pas ; aucune
+#      réponse, même fabriquée par Caddy (308, 413, 502), ne porte « Server » ni « Via » ;
 #   5. TLS 1.3, échange de clés X25519MLKEM768, redirection HTTP vers HTTPS ;
 #   6. aucune adresse de client dans ce que Caddy et le serveur écrivent (fichiers, sorties).
 #
@@ -229,7 +230,8 @@ seg=$(code c -X PUT --data-binary "@$cli/segment.bin" "$A/api/shares/segments/0"
 check "via Caddy : PUT d'un segment entier (4 195 376 octets) sans jeton → refus du serveur Go, pas 413 (reçu $seg)" \
 	bash -c "[ '$seg' != 413 ] && [ '$seg' -ge 400 ] && [ '$seg' -lt 500 ]"
 check "via Caddy : PUT de 6 Mio → 413" \
-	test "$(code c -X PUT --data-binary "@$cli/trop.bin" "$A/api/shares/segments/0")" = 413
+	test "$(c -X PUT --data-binary "@$cli/trop.bin" -D "$cli/h-413" -o "$cli/b-413" -w '%{http_code}' "$A/api/shares/segments/0")" = 413
+check "413 de Caddy : ni Server, ni Via, corps vide" bash -c "! grep -qiE '^(server|via):' '$cli/h-413' && test ! -s '$cli/b-413'"
 
 # Limite de débit (60 requêtes par minute et par adresse) : 130 requêtes d'un même client qui
 # change X-Shh-Client-IP à chaque fois. Si l'en-tête du client passait, aucune ne serait refusée.
@@ -298,6 +300,9 @@ check "TLS 1.2 refusé" bash -c "! curl -sS --noproxy '*' --max-time 10 --cacert
 loc=$(curl -sS --noproxy '*' --max-time 10 --interface "$client" -o /dev/null -w '%{http_code} %{redirect_url}' \
 	-H "Host: $name" "http://127.0.0.1:$p_http/abc")
 check "HTTP → HTTPS : « $loc »" test "$loc" = "308 https://$name/abc"
+curl -sS --noproxy '*' --max-time 10 --interface "$client" -o /dev/null -D "$cli/h-308" \
+	-H "Host: $name" "http://127.0.0.1:$p_http/abc"
+check "308 de Caddy : ni Server, ni Via" bash -c "! grep -qiE '^(server|via):' '$cli/h-308'"
 
 # --- 6. Rien d'écrit avec l'adresse du client -----------------------------------------------
 # Erreurs provoquées depuis l'adresse repère : HTTP en clair sur le port TLS, TLS 1.2, nom
@@ -311,7 +316,8 @@ c --max-time 1 --limit-rate 1k -o /dev/null "$A/$asset" 2>/dev/null || true
 # et tous les en-têtes de la requête.
 kill "${pids[0]}" && wait "${pids[0]}" 2>/dev/null || true
 check "serveur Go arrêté : 502 de Caddy" \
-	test "$(code c -H 'User-Agent: UA-REPERE' -H 'Cookie: c=REPERE' "$A/api/captcha")" = 502
+	test "$(c -H 'User-Agent: UA-REPERE' -H 'Cookie: c=REPERE' -D "$cli/h-502" -o "$cli/b-502" -w '%{http_code}' "$A/api/captcha")" = 502
+check "502 de Caddy : ni Server, ni Via, corps vide" bash -c "! grep -qiE '^(server|via):' '$cli/h-502' && test ! -s '$cli/b-502'"
 sleep 1
 for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
 wait 2>/dev/null || true
