@@ -71,8 +71,8 @@ export async function sendShare(
   await sendButton(page).click();
   await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
   const read = async (l: ReturnType<Page["locator"]>) => (await l.locator(".sr-only").first().textContent()) ?? "";
-  const link = await read(page.getByRole("group", { name: "Lien" }));
-  const password = await read(page.getByRole("group", { name: "Mot de passe" }));
+  const link = await read(page.getByRole("group", { name: "Lien", exact: true }));
+  const password = await read(page.getByRole("group", { name: "Mot de passe", exact: true }));
   const manage = await read(page.locator(".manage"));
   expect(link).toMatch(/#[A-Za-z0-9_-]{43}$/);
   return { link, password, manage };

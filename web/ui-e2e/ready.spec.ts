@@ -17,8 +17,8 @@ async function toReady(page: Page, context: BrowserContext, origin: string, text
   await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
 }
 const clip = (page: Page) => readClipboard(page);
-const linkCard = (page: Page) => page.getByRole("group", { name: "Lien" });
-const pwCard = (page: Page) => page.getByRole("group", { name: "Mot de passe" });
+const linkCard = (page: Page) => page.getByRole("group", { name: "Lien", exact: true });
+const pwCard = (page: Page) => page.getByRole("group", { name: "Mot de passe", exact: true });
 /** Valeur complète d'un CopyField (texte pour lecteur d'écran). */
 const valueOf = (page: Page, card: ReturnType<typeof linkCard>) => card.locator(".sr-only").first().textContent().then((s) => s ?? "");
 
@@ -213,7 +213,7 @@ test.describe("fr-FR", () => {
     expect(runs.length).toBeGreaterThanOrEqual(3);
     for (const d of runs) expect(d).toBeLessThanOrEqual(640);
     // Boutons cliquables pendant l'animation : la copie répond tout de suite.
-    await page.getByRole("group", { name: "Lien" }).getByRole("button", { name: /^Copier/ }).click();
+    await page.getByRole("group", { name: "Lien", exact: true }).getByRole("button", { name: /^Copier/ }).click();
 
     // Seconde page au premier plan : sinon l'onglet est en arrière-plan, requestAnimationFrame
     // y est suspendu et Playwright ne voit jamais un bouton « stable » (S11, téléphone).

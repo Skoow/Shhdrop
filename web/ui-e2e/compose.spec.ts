@@ -10,6 +10,15 @@ import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
 import { axe, capture, expect, readClipboard, test } from "./fixtures";
 import { openFilePicker, pickInAddSheet, enterComposer } from "./send-helpers";
+import { MIMES } from "../src/media/capture";
+
+/** Le navigateur testé sait-il enregistrer un vocal ? Sinon le site masque « Vocal » (media/capture.ts, captureSupport). */
+async function canVoice(page: Page): Promise<boolean> {
+  return page.evaluate(
+    (list) => typeof MediaRecorder !== "undefined" && typeof navigator.mediaDevices?.getUserMedia === "function" && list.some((m) => MediaRecorder.isTypeSupported(m)),
+    MIMES.voice.map(([m]) => m),
+  );
+}
 
 const FILES = fileURLToPath(new URL("./files/", import.meta.url));
 const f = (name: string) => join(FILES, name);
@@ -155,7 +164,8 @@ test.describe("fr-FR", () => {
       // Ordinateur : une seule présentation (ni grille ni tableau) ; « Créer sur place » sans Photo ni Vidéo.
       await expect(page.locator(".groups .grid, .groups table, .groups .tile")).toHaveCount(0);
       // Même liste d'actions que la feuille du téléphone ; la zone de dépôt tient lieu de « Fichiers ».
-      await expect(page.getByRole("group", { name: "Créer sur place" }).getByRole("button")).toHaveText(["Photo ou vidéo", "Vocal", "Note"]);
+      const made = (await canVoice(page)) ? ["Photo ou vidéo", "Vocal", "Note"] : ["Photo ou vidéo", "Note"];
+      await expect(page.getByRole("group", { name: "Créer sur place" }).getByRole("button")).toHaveText(made);
       await expect(page.getByRole("button", { name: /^Déposez des fichiers n'importe où sur la page/ })).toBeVisible();
       // Exigence du propriétaire : tout tient dans l'écran, sans défilement de page ; le bouton
       // d'envoi est entièrement visible (1440 × 900 puis 1920 × 1080).
@@ -633,8 +643,9 @@ test.describe("fr-FR", () => {
       await page.getByRole("button", { name: "Ajouter", exact: true }).click();
       const sheet = page.getByRole("dialog", { name: "Ajouter" });
       const labels = await sheet.locator("[data-add] .lb").allTextContents();
-      expect(labels).toEqual(["Photo ou vidéo", "Vocal", "Note", "Fichiers"]);
-      await expect(sheet.locator("[data-add=voice]")).toContainText("Micro seulement, 30\u202fmin\u202fmaximum");
+      const voice = await canVoice(page);
+      expect(labels).toEqual(voice ? ["Photo ou vidéo", "Vocal", "Note", "Fichiers"] : ["Photo ou vidéo", "Note", "Fichiers"]);
+      if (voice) await expect(sheet.locator("[data-add=voice]")).toContainText("Micro seulement, 30\u202fmin\u202fmaximum");
       for (const b of await sheet.locator("[data-add]").all()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(56);
       await capture(page, "add-sheet");
       // « Fichiers » : tout type, plusieurs.

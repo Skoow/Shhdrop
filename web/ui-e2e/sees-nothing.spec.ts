@@ -43,8 +43,8 @@ test.describe("fr-FR", () => {
     await sendButton(page).click();
     await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
 
-    const link = (await page.getByRole("group", { name: "Lien" }).locator(".sr-only").first().textContent()) ?? "";
-    const password = (await page.getByRole("group", { name: "Mot de passe" }).locator(".sr-only").first().textContent()) ?? "";
+    const link = (await page.getByRole("group", { name: "Lien", exact: true }).locator(".sr-only").first().textContent()) ?? "";
+    const password = (await page.getByRole("group", { name: "Mot de passe", exact: true }).locator(".sr-only").first().textContent()) ?? "";
     expect(link).toMatch(/#[A-Za-z0-9_-]{43}$/);
     expect(password.length).toBeGreaterThanOrEqual(8);
     const kLien = new Uint8Array(Buffer.from(link.slice(link.indexOf("#") + 1), "base64url"));

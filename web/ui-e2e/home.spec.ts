@@ -218,8 +218,11 @@ test.describe("fr-FR", () => {
   test("Photo ou vidéo : caméra dans la page ; sans caméra, repli sur le sélecteur filtré (capture) ; les fichiers choisis ouvrent le composeur", async ({ page, shh, isMobile }) => {
     test.skip(isMobile, "téléphone : feuille « Ajouter » (capture.spec.ts)");
     // Aucune caméra ici : la page le dit et propose le sélecteur (fausse caméra : capture.spec.ts).
+    // Sur le prototype : WebKit ignore l'affectation sur l'objet navigator.mediaDevices, et sa
+    // vraie caméra répondait alors « accès refusé ».
     await page.addInitScript(() => {
-      if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("aucune", "NotFoundError"));
+      if (typeof MediaDevices !== "undefined")
+        Object.defineProperty(MediaDevices.prototype, "getUserMedia", { configurable: true, value: () => Promise.reject(new DOMException("aucune", "NotFoundError")) });
     });
     await page.goto(shh.origin + "/");
     await page.waitForTimeout(900);

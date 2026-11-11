@@ -92,7 +92,8 @@ test.describe("fr-FR", () => {
     await expect(page).toHaveURL(`${demo.url}securite`);
     await expect(page.getByRole("note")).toHaveText(BANNER_FR); // sur toutes les pages
     // Téléphone : en-tête natif, « Retour » à la place du logo ; ordinateur : le logo.
-    const logo = page.getByRole("link", { name: "Shhdrop, accueil" });
+    // Celui de l'en-tête : le pied de page a aussi un logo (même nom).
+    const logo = page.getByRole("banner").getByRole("link", { name: "Shhdrop, accueil" });
     if (await logo.isVisible()) await logo.click();
     else await page.getByRole("banner").getByRole("button", { name: "Retour" }).click();
     await expect(page).toHaveURL(demo.url);
@@ -285,13 +286,13 @@ test.describe("fr-FR : envoi (Tasks 17–18)", () => {
     await expect(page).toHaveTitle(/^Démo · /);
     await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
     await expect(page).toHaveTitle("Démo · Lien prêt · Shhdrop");
-    const link = (await page.getByRole("group", { name: "Lien" }).locator(".sr-only").first().textContent()) ?? "";
+    const link = (await page.getByRole("group", { name: "Lien", exact: true }).locator(".sr-only").first().textContent()) ?? "";
     expect(link).toMatch(new RegExp(`^${demo.origin.replace(/\./g, "\\.")}/shhdrop/#[A-Za-z0-9_-]{43}$`));
     const manage = (await page.locator(".manage .sr-only").first().textContent()) ?? "";
     expect(manage).toMatch(/\/shhdrop\/#m[A-Za-z0-9_-]{43}$/);
     expect(await storage(page)).toBe(0);
     await capture(page, "demo-ready");
-    const password = (await page.getByRole("group", { name: "Mot de passe" }).locator(".sr-only").first().textContent()) ?? "";
+    const password = (await page.getByRole("group", { name: "Mot de passe", exact: true }).locator(".sr-only").first().textContent()) ?? "";
     // Même onglet (le faux serveur vit dans la page) : ouverture complète, puis destruction.
     await page.getByRole("button", { name: "Ouvrir comme destinataire (démo)" }).click();
     await expect(readyHeading(page)).toHaveCount(0);
@@ -333,7 +334,7 @@ test.describe("fr-FR : envoi (Tasks 17–18)", () => {
     await addText(page, "À supprimer.");
     await sendButton(page).click();
     await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
-    const link = (await page.getByRole("group", { name: "Lien" }).locator(".sr-only").first().textContent()) ?? "";
+    const link = (await page.getByRole("group", { name: "Lien", exact: true }).locator(".sr-only").first().textContent()) ?? "";
     await page.getByRole("button", { name: "Supprimer ce partage" }).click();
     await page.getByRole("button", { name: "Supprimer", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Partage supprimé" })).toBeVisible({ timeout: 20_000 });
