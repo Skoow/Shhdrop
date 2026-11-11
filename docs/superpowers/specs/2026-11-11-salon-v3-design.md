@@ -9,7 +9,7 @@ Demande : « une conversation type WhatsApp, Signal, Telegram, où l'on peut tou
 
 Décisions prises le 11 novembre :
 
-1. **Chiffrement de groupe : MLS** (norme RFC 9420) par la bibliothèque Rust **OpenMLS**, dans le moteur commun (site en WebAssembly, apps en natif). Remplace les « clés d'expéditeur » de §39.2, qui reposaient sur libsodium, retiré du site (D42-21). Sous réserve de l'essai en cours (poids, vitesse, sûreté, §3.6).
+1. **Chiffrement de groupe : MLS** (norme RFC 9420) par la bibliothèque Rust **OpenMLS**, dans le moteur commun (site en WebAssembly, apps en natif). Remplace les « clés d'expéditeur » de §39.2, qui reposaient sur libsodium, retiré du site (D42-21). Essai concluant, avec réserves (poids, vitesse, sûreté : résultat en §3.6).
 2. **Photo de profil** : sans compte, avatar par défaut (initiale sur la couleur du participant) ou photo choisie pour ce salon seulement ; avec compte, photo gardée dans le compte, chiffrée.
 3. **Effacement des messages** : règle du salon, modifiable par **tout participant**, chaque changement affiché dans la conversation (§5).
 4. **« Vu »** : toujours activé pour tous (§6).
@@ -61,7 +61,7 @@ Le moteur Rust porte tout le protocole du salon (groupe MLS, enveloppe, découpa
 
 ### 3.6 Résultat de l'essai (11 novembre) : utilisable, avec réserves
 
-- **Bibliothèque** : `openmls` **=0.9.2** (22 octobre), `openmls_rust_crypto`, `openmls_basic_credential`, `openmls_traits` 0.6.0 ; licence MIT ; Phoenix R&D et CE Labs ; audit SRLabs de 2026 (8 constats corrigés ; **rapport à lire avant le code**) ; utilisée par Wire (sur un fork) et XMTP. Compile vers WebAssembly sans réglage particulier (feature `js` sur la cible wasm seulement, jamais en natif). AES-GCM d'OpenMLS = celui de RustCrypto, dans le module du salon : les traits d'OpenMLS sont synchrones et WebCrypto est asynchrone, un fournisseur WebCrypto est impossible (Ruling 1, voir §6 de la spec principale). (11 novembre, C-1)
+- **Bibliothèque** : `openmls` **=0.9.2** (22 octobre), `openmls_rust_crypto`, `openmls_basic_credential`, `openmls_traits` 0.6.0 ; licence MIT ; Phoenix R&D et CE Labs ; audit SRLabs de 2026 (8 constats corrigés ; **rapport à lire avant le code**) ; utilisée par Wire (sur un fork) et XMTP. Compile vers WebAssembly sans réglage particulier (feature `js` sur la cible wasm seulement, jamais en natif). AES-GCM d'OpenMLS = celui de RustCrypto, dans le module du salon : les traits d'OpenMLS sont synchrones et WebCrypto est asynchrone, un fournisseur WebCrypto est impossible (Ruling 1 : choix pris sur délégation du propriétaire (11 novembre) ; CLAUDE.md à amender par le propriétaire (« sauf le module du salon : OpenMLS sur RustCrypto »)). (11 novembre, C-1)
 - **Suite** : MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519 (0x0001). Message MLS dans `O` de la trame de 4 140 o sous `K_trame` (§3.2) ; Commit, Welcome et KeyPackage tiennent dans les 4 093 o utiles pour 10 membres (au plus 2 551 o mesurés) : pas de découpage nécessaire en V1, mais le format le garde possible.
 - **Temps mesurés dans Chromium, 10 membres** : chiffrer ou déchiffrer un message ~0,2 ms ; ajout d'un membre ~2 ms ; scénario complet (9 ajouts, 900 réceptions, retrait, renouvellement) ~0,3 s. Natif : apps en opt-level 3 (20 à 40 fois plus lent sinon).
   - **Mesure finale (C-1, 11 novembre, profil opt-level "z")** : 10 membres, 9 arrivées et 100 messages scellés puis ouverts : 410 à 444 ms dans Chromium (limite du test : 2 s), contre 406 ms en opt-level 3. Message MLS dans la trame de 4 140 octets sans découpage. Test croisé natif ↔ wasm (Welcome, Commit d'ajout, renouvellement, messages, réaction, pièce, profil) octet pour octet. (11 novembre, C-1)
@@ -96,6 +96,8 @@ Le moteur Rust porte tout le protocole du salon (groupe MLS, enveloppe, découpa
 
 **Risques résiduels**
 - **Membres fantômes** : un serveur malveillant peut faire ajouter un faux membre, et un membre malveillant peut construire pour un nouveau venu un **faux groupe**, qui peut aussi omettre des membres. Seuls les **codes de vérification** (§9, point 4) les révèlent (Ruling 19) ; aucun service d'authentification.
+- **Clés volées** (remplace le risque 21 de la spec principale) : un attaquant qui a volé les clés d'un membre peut lire jusqu'à ce que ce membre soit retiré ou qu'un nouveau Commit renouvelle sa feuille ; ensuite la confidentialité est rétablie (sécurité après compromission de MLS).
+- Un texte fait d'une seule marque combinante ou de U+2800 est accepté (cercle pointillé ou case vide affichés) : gêne, pas un problème de sécurité.
 - Un Commit qui échoue chez une partie du groupe est inhérent à MLS : ce membre est en retard (`epoque_perdue`).
 - Les tampons temporaires d'OpenMLS ne sont **pas** effacés ; notre stockage efface ses valeurs (postcard, à l'écrasement, à la suppression et à la destruction). Le texte des messages (`String`) n'est pas effacé non plus : « secrets » vise les clés.
 
@@ -112,7 +114,9 @@ Le moteur Rust porte tout le protocole du salon (groupe MLS, enveloppe, découpa
 3. `encore_dans_conversation` = « n'a pas quitté depuis qu'il l'a vu » (contrat de l'appelant).
 4. L'interface utilise `nettoyerTexte`, `verifierPseudo`, `cleUnicite` et `nettoyerNom` du moteur, jamais `safeName` ni `Intl.Segmenter`.
 5. L'appelant met à zéro ce que le module lui rend : `K_accès_s` et `K_preuve_s` (envoyés au serveur), graines `r` des enveloppes lues, clé SFrame (Ruling 26).
-6. Appeler `casser()` avant la remise à zéro de la mémoire (défensif) ; après une panique (`salon_casse`), recharger le module et rejoindre avec une nouvelle identité.
+6. `rejoindre(&mut self, welcome)` s'appelle sur la **même poignée `Salon`** que celle qui a produit le KeyPackage (OpenMLS y garde les clés privées) (Ruling 15).
+7. « Salon en attente » : tant que le Welcome n'est pas arrivé, l'appelant garde **toutes les trames** (avec `seq` et siège attesté) et les passe à `recevoir` après `rejoindre` (exigence C-2 et C-3).
+8. Appeler `casser()` avant la remise à zéro de la mémoire (défensif) ; après une panique (`salon_casse`), recharger le module et rejoindre avec une nouvelle identité.
 
 ## 4. Messages
 

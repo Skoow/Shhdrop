@@ -160,8 +160,8 @@ Navigateur expéditeur ──(chiffré)──► Caddy ──► Serveur Shhdrop
 | Base | **SQLite** via `modernc.org/sqlite` (Go pur), `secure_delete=ON`, WAL vidé chaque minute | Un fichier, rien à administrer |
 | Fichiers | Un fichier par partage, taille réservée, écriture à position fixe ; derrière une interface interchangeable | Bornage strict ; passage possible à un stockage externe |
 | Site | **TypeScript + Svelte + Vite**, PWA sans service worker | Léger ; aucune persistance de code piégé |
-| Crypto navigateur | **WebCrypto** (AES-256-GCM, HKDF-SHA-256, HMAC, SHA-256) + **libsodium.js** (Argon2id ; → §39.2 : aussi X25519, Ed25519, HMAC-SHA-256 et XChaCha20-Poly1305 pour le salon) | Standards reconnus, aucune crypto maison |
-| Crypto du salon (11 novembre, C-1) | **OpenMLS =0.9.2** sur RustCrypto (`openmls_rust_crypto`), dans un second module wasm, avec **son propre AES-GCM RustCrypto** : WebCrypto est asynchrone et les traits d'OpenMLS sont synchrones, un fournisseur WebCrypto est impossible (Ruling 1). `chacha20poly1305` pour l'enveloppe des trames ; `postcard` pour le stockage MLS qui efface ses valeurs. Le reste du site garde le moteur des partages (D42-21) | Aucune crypto maison ; voir spec salon v3 §3 |
+| Crypto navigateur (réécrit le 11 novembre, C-1) | **Partages** : moteur Rust (RustCrypto : HKDF, SHA-256, HMAC, Argon2id) en WebAssembly + **WebCrypto** (AES-256-GCM, nombres aléatoires), D42-21. libsodium.js est retiré. **Salon** : second module wasm qui embarque **OpenMLS =0.9.2 sur RustCrypto** (voir la ligne suivante) | Standards reconnus, aucune crypto maison |
+| Crypto du salon (11 novembre, C-1) | **OpenMLS =0.9.2** sur RustCrypto (`openmls_rust_crypto`), dans un second module wasm, avec **son propre AES-GCM RustCrypto** : WebCrypto est asynchrone et les traits d'OpenMLS sont synchrones, un fournisseur WebCrypto est impossible (Ruling 1 : choix pris sur délégation du propriétaire (11 novembre) ; CLAUDE.md à amender par le propriétaire (« sauf le module du salon : OpenMLS sur RustCrypto »)). `chacha20poly1305` pour l'enveloppe des trames ; `postcard` pour le stockage MLS qui efface ses valeurs. Le reste du site garde le moteur des partages (D42-21) | Aucune crypto maison ; voir spec salon v3 §3 |
 
 > Note (11 novembre, C-1) : la ligne « Crypto navigateur » ci-dessus date d'avant D42-21 ; libsodium.js est retiré (D42-21), et la mention « §39.2 : X25519, Ed25519… pour le salon » est remplacée par la ligne du salon.
 | PDF | **pdf.js** dans une zone isolée | Lecture des PDF sur le site sans exécuter leur code |
@@ -592,7 +592,7 @@ Héberger hors UE **ne soustrait pas un exploitant résidant en France** au droi
 18. **Compte facultatif** (§37) : au repos, rien ne relie un compte à ses partages ; **en direct**, un serveur compromis peut les relier par l'adresse IP et l'heure (écriture du coffre de compte, relectures de l'historique), malgré l'écriture différée. Un appareil neuf ne peut pas détecter qu'on lui ressert un ancien coffre de compte. Le texte « nous ne pouvons pas le lire » vaut tant que le code servi n'est pas piégé (point 2).
 19. **Offre payante** (§38) : le vendeur officiel connaît l'identité du payeur et l'empreinte de son pass ; au repos, on voit qu'un partage est Plus, pas qui l'a payé ; l'adresse IP à l'émission et à l'usage des jetons reste visible en direct.
 20. **Salon : qui parle avec qui** (§39) : en direct, le serveur voit les adresses des membres d'un même salon et l'heure de leurs envois ; jamais sur disque.
-21. **Salon : membres** (§39.2.4) : chacun peut copier ce qu'il voit ; un pseudonyme ne prouve rien ; un attaquant actif qui a volé la clé d'identité d'un membre présent peut lire tant que ce membre reste.
+21. **Salon : membres** (§39.2.4) : chacun peut copier ce qu'il voit ; un pseudonyme ne prouve rien ; un attaquant actif qui a volé la clé d'identité d'un membre présent peut lire tant que ce membre reste. **(11 novembre, C-1) Remplacé (v3 §3) : en MLS, voir les risques résiduels de la spec salon v3 §3.6.1 (clés volées : lecture possible jusqu'au retrait du membre et à un nouveau Commit).**
 22. **Salon : coupures** (§39.3.2) : la file du serveur est courte (200 trames, 15 min) ; un téléphone mis en veille peut manquer des messages, et l'écran le dit.
 23. **Envoi direct** (§40.1, plus tard et optionnel) : l'expéditeur doit rester en ligne ; en connexion directe, les pairs voient leurs adresses IP ; par le relais, notre machine voit les deux adresses et le volume, sans rien stocker.
 
@@ -1893,6 +1893,8 @@ Cette section amende §3 (« Plus tard » : le salon était noté V2 au registre
 
 #### 39.2.1 Clés du salon
 
+> Gardé par la spec salon v3 §3.3 (clés du salon inchangées). (11 novembre, C-1)
+
 | Élément | Création | Où il vit |
 |---|---|---|
 | `K_lien` | 32 octets aléatoires | après `#c` ; jamais envoyé |
@@ -1910,6 +1912,8 @@ Toutes les étiquettes commencent par `shhdrop/v2/salon/` : séparation de domai
 
 #### 39.2.2 Clés de chaque participant (éphémères, mémoire de la page seulement)
 
+> Remplacé (v3 §3) : identité éphémère MLS (Ed25519). (11 novembre, C-1)
+
 - **Identité** `IK` : paire Ed25519 (`crypto_sign_keypair`), tirée à l'entrée, valable jusqu'à la sortie. Sa clé publique (32 octets) est l'identifiant du participant dans les trames.
 - **Clé de réception** `RK_e` : paire X25519 (`crypto_box_keypair`), **remplacée à chaque époque** du participant ; l'ancienne partie secrète est gardée 10 min (clés d'expéditeur encore en route), puis effacée (`sodium.memzero`).
 - **Chaîne d'expéditeur** pour l'époque `e` : `CK_0` = 32 octets aléatoires ; pour le message `i` : `MK_i` = HMAC-SHA-256(`CK_i`, 0x01), `CK_{i+1}` = HMAC-SHA-256(`CK_i`, 0x02) (`crypto_auth_hmacsha256`, construction KDF_CK du Double Ratchet de Signal) ; `CK_i` et `MK_i` effacés dès l'usage.
@@ -1918,6 +1922,8 @@ Toutes les étiquettes commencent par `shhdrop/v2/salon/` : séparation de domai
 - **Messages reçus en désordre ou perdus** : le serveur ordonne tout (numéro `seq`), donc seule une perte crée un trou ; au plus 2 000 clés sautées gardées par chaîne, 15 min au plus, puis effacées. Une distribution manquée → trame « demande de clé » ; l'expéditeur rescelle son état courant (`CK_i` et `i`) pour ce seul membre.
 
 #### 39.2.3 Format des trames (taille unique)
+
+> Remplacé (v3 §3.2.1) : trame « SHC3 » de 4 140 octets. (11 novembre, C-1)
 
 > **Remplacé (11 novembre)** par le format SHC3 de la spec du salon v3 (`2026-11-11-salon-v3-design.md` §3.2.1) ; le texte ci-dessous est gardé pour mémoire.
 
@@ -1928,6 +1934,8 @@ Toutes les étiquettes commencent par `shhdrop/v2/salon/` : séparation de domai
 - `M` (JSON strict, clés exactes, comme §8) : `{ "k": "texte" | "piece" | "reaction" | "reponse" | "retrait" | "ecrit" | "lu" | "effacer_lu", "id": 16 octets aléatoires (base64url 22), … }` ; champs par sorte en §39.5. Textes : NFC, contrôles C0/C1 retirés sauf `\n`, caractères d'inversion de sens (U+202A–U+202E, U+2066–U+2069) retirés ; affichage en nœuds texte seulement (`dir="auto"`, jamais `{@html}`).
 
 #### 39.2.4 Époques et renouvellement
+
+> Remplacé (v3 §3.1) : Commits MLS ; renouvellement toutes les 100 messages et toutes les heures. (11 novembre, C-1)
 
 - Chaque expéditeur ouvre une **nouvelle époque** (nouvelle `CK_0`, nouvelle `RK_e`, annonce et distribution) : à son arrivée ; à **chaque arrivée ou départ** d'un autre membre (le partant ne lit plus rien de nouveau, l'arrivant ne lit rien d'ancien) ; après **100 messages** dans l'époque ; **60 min** après le début de l'époque.
 - **FS** : voler l'état d'un appareil à l'instant t ne donne pas les messages d'avant t (clés effacées, cliquet à sens unique), sauf ceux encore affichés dans la page et les clés sautées (15 min au plus).
@@ -1943,6 +1951,8 @@ Toutes les étiquettes commencent par `shhdrop/v2/salon/` : séparation de domai
 - **Ce que le renouvellement signifie pour les utilisateurs (décision du propriétaire, 7 novembre)** : le changement d'époque est un **changement de clés**, pas une limite. Il n'a **aucun effet** sur le nombre de messages ni sur la durée de la conversation : un salon de 24 h fonctionne normalement jusqu'au bout. Seule la capacité du salon (1 Go au total, messages et fichiers, §39.1) et sa durée de vie choisie le bornent. Les participants ne voient rien de ce changement. Phrase de la page d'explication (§39.4) : « Votre salon change de clés de chiffrement toutes les 100 messages, toutes les heures et à chaque arrivée ou départ. C'est automatique et invisible : cela ne limite ni le nombre de messages, ni la durée de la conversation. »
 
 #### 39.2.5 Pièces jointes
+
+> Remplacé (v3 §3.4) : inchangé sur le fond, la graine `R` voyage dans un message MLS. (11 novembre, C-1)
 
 - Chaque fichier, vocal ou photo est un **paquet SHH2 d'un seul élément** (§29.3, `container.ts` inchangé) sous une graine `R` aléatoire propre ; nettoyé avant (§35.2, mêmes états `echec` / `protege` et mêmes choix).
 - Le message `piece` porte `R` (32 octets), l'identifiant de la pièce tiré par le serveur, le palier, et pour l'affichage avant téléchargement le nom, le type et la taille ; après téléchargement, le manifeste du paquet (authentifié) fait foi : nom, type ou taille différents → « Fichier corrompu », rien n'est affiché. Noms par `safeName`, aperçu par `previewKind`, avertissement par `isRiskyFile` (§12), comme un partage.
