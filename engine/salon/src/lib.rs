@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 
 mod cles;
+mod effacement;
 mod emoji;
 mod error;
 mod groupe;
@@ -14,6 +15,7 @@ mod texte;
 mod trame;
 
 pub use cles::{CleAcces, ClesSalon, cle_acces, cles_salon};
+pub use effacement::{Etat, etat};
 pub use error::{Error, Result};
 pub use groupe::{Evenement, Identite, Salon, nouvelle_identite};
 pub use message::{
