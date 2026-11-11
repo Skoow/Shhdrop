@@ -1,6 +1,6 @@
 # Salon v3 : une vraie messagerie éphémère — conception
 
-Date : 11 novembre 2026 · Statut : **brouillon à valider par le propriétaire**
+Date : 11 novembre 2026 · Statut : **brouillon à valider par le propriétaire** (essai OpenMLS fait le 11 novembre, §3.6)
 Amende la spécification générale `2026-11-03-shhdrop-design.md` §39 (salon, v2.8 et v2.9), D41-1 à D41-26 pour le salon, §37 (compte) et D42-20/D42-21 (moteur Rust commun). Tout ce qui n'est pas changé ici reste valable : lien `#c…`, mot de passe, sièges, WebSocket toujours par notre serveur, relais en mémoire seulement, pièces jointes chiffrées sur disque, budget de 1 Go, exclusion, limites, routes (§39.1, §39.3, §39.4, §39.13).
 
 ## 1. Demande et décisions du propriétaire (11 novembre)
@@ -53,9 +53,19 @@ Inchangé (§39.2.5) : chaque pièce est un paquet SHH2 d'un élément sous une 
 
 Le moteur Rust porte tout le protocole du salon (groupe MLS, enveloppe, découpage, formats des messages, règles d'effacement côté appareil), pour que le site et les apps soient identiques. Vecteurs de test communs `engine/vectors/salon-v3.json` (déterministes : aléa injecté en test seulement).
 
-### 3.6 À confirmer par l'essai (en cours)
+### 3.6 Résultat de l'essai (11 novembre) : utilisable, avec réserves
 
-Version stable d'OpenMLS publiée depuis 7 jours au moins, licence, audits et avis RustSec ; compilation vers WebAssembly avec le fournisseur RustCrypto ; poids ajouté (chargé seulement à l'ouverture d'un salon, jamais sur les pages de partage) ; temps des opérations pour 10 membres ; tout en mémoire sans stockage persistant ; effacement des secrets. Si l'essai échoue, retour vers le propriétaire avant toute autre solution.
+- **Bibliothèque** : `openmls` **=0.9.2** (22 octobre), `openmls_rust_crypto`, `openmls_basic_credential`, `openmls_traits` 0.6.0 ; licence MIT ; Phoenix R&D et CE Labs ; audit SRLabs de 2026 (8 constats corrigés ; **rapport à lire avant le code**) ; utilisée par Wire (sur un fork) et XMTP. Compile vers WebAssembly sans réglage particulier (feature `js` sur la cible wasm seulement, jamais en natif).
+- **Suite** : MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519 (0x0001). Message MLS dans `O` de la trame de 4 140 o sous `K_trame` (§3.2) ; Commit, Welcome et KeyPackage tiennent dans 4 096 o pour 10 membres (au plus 2 551 o mesurés) : pas de découpage nécessaire en V1, mais le format le garde possible.
+- **Temps mesurés dans Chromium, 10 membres** : chiffrer ou déchiffrer un message ~0,2 ms ; ajout d'un membre ~2 ms ; scénario complet (9 ajouts, 900 réceptions, retrait, renouvellement) ~0,3 s. Natif : apps en opt-level 3 (20 à 40 fois plus lent sinon).
+- **Poids** : ~359 Ko brotli, dans un **module wasm à part**, chargé seulement sur les pages du salon. Les pages de partage gardent le moteur actuel (141 Ko).
+- **Règles retenues** : arbre dans le Welcome, aucun GroupInfo publié, **external commits refusés** ; premier Commit de l'époque dans l'ordre du serveur gagne, les autres sont rejoués ; ajouts faits par le membre en ligne de plus petit siège ; si personne n'est en ligne, l'arrivant attend (« En attente d'un participant en ligne ») ; chaque Commit reçu est vérifié avant fusion (seul le créateur retire autrui, chaque ajout est lié à un siège par son `nonce_arrivée` signé) ; `max_past_epochs(1)` (un message envoyé juste avant un Commit reste lisible ; perte de confidentialité persistante limitée à une époque).
+- **Réserves (à corriger dans C-1)** :
+  - **Élevée, mémoire** : le stockage en mémoire fourni par OpenMLS garde des copies des secrets sans les effacer → stockage en mémoire écrit par nous, valeurs effacées à l'écrasement et à la suppression (code d'adaptation, relu).
+  - **Élevée, suivi** : environ un avis de sécurité par mois en 2026 (corrigés en 0.9.1 et 0.9.2), WebAssembly non testé dans leur CI → tests du salon dans Chromium en CI, taille des messages entrants bornée, suivi des avis, mises à jour après 7 jours.
+  - **Moyenne, chaîne** : 136 crates (doublons RustCrypto, courbes P-256/P-384/k256 inutilisées), trois crates de moins de 7 jours à épingler plus anciennes, `cargo audit` avec exceptions justifiées (crypto-bigint compilé mais jamais exécuté par notre suite).
+  - **Moyenne, rechargement** : l'état MLS vit en mémoire ; après un rechargement, le participant revient avec une nouvelle feuille (retrait de l'ancienne, nouvel ajout) et sa place, son pseudonyme et sa couleur par la preuve de membre (D41-26). Il ne relit pas les messages d'avant son retour, sauf les messages « instantané » qui l'attendent (§5) : ils sont alors renvoyés automatiquement par l'appareil de l'expéditeur sous la nouvelle époque (si l'expéditeur n'est pas en ligne, ils attendent son retour ; s'il a quitté le salon, ils sont perdus pour ce participant, avec la notice « Des messages ont pu vous échapper »).
+- **Amendements** : §39.2 (clés d'expéditeur) remplacé ; §6 et CLAUDE.md citent RustCrypto : OpenMLS repose sur RustCrypto, aucune crypto maison ; vecteurs communs complétés par les vecteurs officiels d'interopérabilité MLS.
 
 ## 4. Messages
 
@@ -82,13 +92,20 @@ Comme §39.5 : vocal enregistré dans la conversation (10 min au plus), lu sur p
 - **Durée de vie du salon** : choisie à la création (1, 6, 12 ou 24 h), inchangée. À la fin, tout s'efface.
 - **Règle d'effacement des messages**, une par salon, 4 choix :
   - **Désactivé** (par défaut) : un message reste jusqu'à la fin du salon.
-  - **Instantané** : pour chaque personne, un message qu'elle a vu s'efface de son écran **dès qu'elle quitte la conversation** (fermer l'app ou l'onglet, changer d'app, changer d'onglet ou d'écran dans l'app) ; si elle reste dans la conversation, il s'efface **1 minute** après qu'elle l'a vu, avec un compte à rebours dans le message. Le message n'est retiré du serveur que lorsque **chaque participant présent à l'envoi l'a vu** (ou est parti). Chez l'expéditeur, le message reste avec « Vu par 2 / 3 » jusqu'à ce que tous l'aient vu, puis suit la même règle.
+  - **Instantané** (précisé par le propriétaire le 11 novembre) :
+    - pour chaque lecteur, un message qu'il a vu s'efface de son écran **dès qu'il quitte la conversation** (fermer l'app ou l'onglet, changer d'app, changer d'onglet ou d'écran dans l'app) ; s'il reste dans la conversation, il s'efface **1 minute** après qu'il l'a vu, avec un compte à rebours dans le message ;
+    - au-dessus du message, le **nombre de personnes qui l'ont lu** (« Lu par 2 / 3 ») ;
+    - seuls **l'expéditeur et ceux qui ne l'ont pas encore lu** le voient encore ;
+    - un participant absent (coupure, onglet fermé, siège gardé) le **verra à son retour** : il n'est jamais sauté ;
+    - quand **le dernier participant** l'a lu, le message **disparaît pour tout le monde, expéditeur compris**, et quitte le serveur (trame et pièce).
+    - Un participant qui quitte le salon (« Quitter ») ou en est exclu ne compte plus parmi ceux qui doivent le lire.
+    - **Conséquence serveur (moyen)** : la file de §39.3.2 oublie les trames après 200 trames ou 15 min ; un absent qui revient plus tard perdrait le message. Correction retenue : les trames « instantané » non encore lues par tous sont gardées **en mémoire** jusqu'à la dernière lecture ou la fin du salon, hors de cette file, dans un plafond par salon (2 000 trames, environ 8 Mio, compté dans le budget de 1 Go) ; au-delà, la plus ancienne est oubliée et le retour affiche « Des messages ont pu vous échapper ». Jamais sur disque ; un redémarrage du serveur les perd (dit sur la page d'explication).
   - **10 minutes** et **1 heure** : comptées **depuis l'envoi**, pour tout le monde, expéditeur compris. Un message que personne n'a lu dans ce délai est effacé sans avoir été lu. Compte à rebours visible dans le message.
 - **Qui la change** : **tout participant**, à tout moment. Chaque changement s'affiche dans la conversation : « Léa a réglé l'effacement des messages sur 10 minutes ». La règle s'applique aux messages envoyés **après** le changement ; un message garde la règle de son envoi (elle voyage avec lui, chiffrée).
 - **« Vu »** au sens de l'effacement : le message a été affiché à l'écran, page visible, au moins 1 seconde (`IntersectionObserver` et `visibilitychange`).
 - **Ce que fait « effacé »** : le message quitte l'écran et la mémoire de la page (URL blob révoquées, pièce oubliée) ; sur le serveur, sa trame quitte la file et sa pièce est effacée du disque dès que la règle le permet pour tous.
 - **Honnêteté, à afficher** : « L'effacement se fait sur les appareils des participants. Une capture d'écran, une photo de l'écran ou une app modifiée peuvent garder un message. »
-- **Signalement (moyen)** : en « Instantané », un participant hors ligne qui ne revient jamais bloque l'effacement côté serveur jusqu'à son départ ou la fin du salon (au plus 24 h). Correction proposée : un participant absent depuis plus de 10 min ne bloque plus (son siège reste, mais le message est retiré du serveur ; il ne le recevra pas).
+- **Choix du propriétaire (11 novembre)** : en « Instantané », un participant absent qui ne revient pas garde le message en attente jusqu'à son retour, son départ, son exclusion ou la fin du salon (24 h au plus) ; l'expéditeur voit « Lu par 2 / 3 » pendant ce temps.
 
 ## 6. Accusés : envoyé, reçu, vu (décision : toujours actifs)
 
@@ -123,7 +140,7 @@ Rien n'est codé maintenant. Contraintes posées dès aujourd'hui pour ne rien b
 3. Mentions `@pseudo`, mises en évidence chez la personne citée.
 4. **Code de vérification** par participant (empreinte de sa clé, 4 groupes de 5 chiffres) à comparer de vive voix : prouve que personne ne s'est glissé dans la conversation.
 5. Galerie des photos et vidéos du salon ; lecture des vocaux 1× / 1,5× / 2×.
-6. Bouton « Aller en bas » avec le nombre de messages non lus ; séparateur « Nouveaux messages ».
+6. Flèche vers le bas (icône seule, nom accessible « Aller aux derniers messages ») avec une pastille du nombre de non-lus ; séparateur « Nouveaux messages ».
 7. Brouillon gardé en mémoire de la page quand on change d'écran.
 8. Reprise automatique après une coupure (déjà prévue), notice si des messages ont pu manquer.
 9. Titre de l'onglet « (3) Shhdrop » sans contenu (déjà prévu).
