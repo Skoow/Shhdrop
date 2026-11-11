@@ -3,8 +3,10 @@
 //! réseau : l'aléa vient de la plateforme (getrandom).
 #![forbid(unsafe_code)]
 
+mod cles;
 mod error;
 mod stockage;
 
+pub use cles::{CleAcces, ClesSalon, cle_acces, cles_salon};
 pub use error::{Error, Result};
 pub use stockage::{Fournisseur, Stockage};
