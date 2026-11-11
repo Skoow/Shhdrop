@@ -31,7 +31,8 @@ export function clock(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 }
 
-const MIMES = {
+/** Formats essayés, dans l'ordre ; exporté pour que les tests d'interface sachent ce que le navigateur testé permet. */
+export const MIMES = {
   // Voix : Opus d'abord (meilleure qualité au même débit), AAC ensuite (Safari ancien).
   // Pas d'Ogg : strip-capture ne sait pas l'effacer, et tout navigateur qui fait de l'Ogg Opus fait aussi du WebM Opus.
   voice: [

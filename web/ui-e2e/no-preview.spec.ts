@@ -44,3 +44,25 @@ test("FLAC et MKV : « Voir » et lecture dans la page (Chromium), même sans ty
   await page.getByRole("button", { name: "Voir film.mkv" }).click();
   await expect.poll(() => viewer.locator("video").evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
 });
+
+test("lecteur bloqué (ni lecture ni erreur, WebKit sans décodeur) : après 10 s, format et Télécharger", async ({ page, shh, browser }) => {
+  test.setTimeout(120_000);
+  const s = await freshPage(browser);
+  const sent = await sendShare(s.page, shh.origin + "/", { files: [{ name: "film.mov", mimeType: "video/quicktime", buffer: FX("phone.mov") }] });
+  await s.ctx.close();
+  // Le navigateur ne charge jamais rien et ne signale aucune erreur (readyState reste à 0).
+  await page.addInitScript(() => {
+    Object.defineProperty(HTMLMediaElement.prototype, "readyState", { configurable: true, get: () => 0 });
+    Object.defineProperty(HTMLMediaElement.prototype, "error", { configurable: true, get: () => null });
+    // Les événements de média ne remontent pas mais passent par la phase de capture : arrêtés à window.
+    for (const t of ["loadedmetadata", "loadeddata", "canplay", "error"]) addEventListener(t, (e) => e.stopImmediatePropagation(), true);
+  });
+  await page.goto(sent.link);
+  await unlock(page, sent.password);
+  await page.getByRole("button", { name: "Voir film.mov" }).click();
+  const viewer = page.getByRole("dialog");
+  await expect(viewer.locator("video")).toHaveCount(1);
+  await expect(viewer.getByText(/^Ce navigateur ne sait pas lire le format MOV\./)).toBeVisible({ timeout: 20_000 });
+  await expect(viewer.locator("video")).toHaveCount(0);
+  await expect(viewer.getByRole("button", { name: "Télécharger film.mov" })).toBeVisible();
+});

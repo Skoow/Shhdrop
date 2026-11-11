@@ -2,6 +2,8 @@
   // Vidéo reçue (UI §9.8, spec §12) : affichée après le téléchargement complet,
   // <video controls playsinline>. « Voir seulement » : ni téléchargement, ni image dans
   // l'image, ni menu contextuel (dissuasion, spec §34).
+  import { stallGuard } from "./stall";
+
   type Props = { url: string; label: string; viewOnly: boolean; onerror: () => void };
   let { url, label, viewOnly, onerror }: Props = $props();
 </script>
@@ -17,6 +19,7 @@
   disablepictureinpicture={viewOnly || undefined}
   class={[viewOnly && "guarded"]}
   onerror={onerror}
+  use:stallGuard={{ onstall: onerror }}
   oncontextmenu={viewOnly ? (e) => e.preventDefault() : undefined}
 ></video>
 
