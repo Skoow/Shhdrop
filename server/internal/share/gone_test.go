@@ -360,3 +360,62 @@ func TestWatch(t *testing.T) {
 		t.Fatal("abonnements restants", n)
 	}
 }
+
+// Audit F2 : un signalement après l'échéance ou une destruction coupe aussi les lectures en
+// grâce (spec §41.8 : « signalement : aucune grâce »). Réponse inchangée (introuvable, comme
+// tout partage disparu) ; il exige K_accès et K_preuve, comme un signalement ordinaire.
+func TestReportCutsGraceReads(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		end  func(t *testing.T, s *Service, c *clock, k keys, id string)
+	}{
+		{"échu, pas encore balayé", func(t *testing.T, s *Service, c *clock, _ keys, _ string) {
+			setClock(c, at(11, 15, 30))
+		}},
+		{"échu et balayé (descripteur détaché)", func(t *testing.T, s *Service, c *clock, _ keys, id string) {
+			setClock(c, at(11, 15, 30))
+			if _, err := s.Sweep(); err != nil {
+				t.Fatal(err)
+			}
+			gone(t, s, id)
+		}},
+		{"détruit par l'expéditeur", func(t *testing.T, s *Service, _ *clock, k keys, _ string) {
+			if err := s.DestroyManaged(k.gestion); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, c := newSvc(t)
+			k := newKeys()
+			id := ready(t, s, k, gb, 1, 2) // expires_at = 11:15
+			o1, _, _ := s.Unlock(id, k.acces, k.preuve)
+			setClock(c, at(11, 14, 0))
+			mustRead(t, s, id, 0, o1)
+			seg, err := s.OpenSegment(id, 1, o1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer seg.Close()
+			tc.end(t, s, c, k, id)
+			// Mauvaise preuve : rien n'est coupé.
+			if err := s.DestroyWithProof(k.acces, rnd(32), true); !errors.Is(err, ErrNotFound) {
+				t.Fatal(err)
+			}
+			if seg.Context().Err() != nil {
+				t.Fatal("flux coupé sans la bonne preuve")
+			}
+			if err := s.DestroyWithProof(k.acces, k.preuve, true); !errors.Is(err, ErrNotFound) {
+				t.Fatal("réponse :", err)
+			}
+			if seg.Context().Err() == nil {
+				t.Fatal("flux en grâce non coupé par le signalement")
+			}
+			seg.Close()
+			mustGone(t, s, id, 2, o1)
+			if n := heldFDs(t, s, id); n > 0 {
+				t.Fatal("descripteur encore ouvert", n)
+			}
+		})
+	}
+}

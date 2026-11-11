@@ -102,3 +102,41 @@ func TestCutAllDetached(t *testing.T) {
 		}
 	})
 }
+
+// Audit F9 : un envoi en cours effacé par « shhdrop admin destroy » ou « wipe » (autre
+// processus : ligne et fichier retirés hors du serveur) est oublié au balayage suivant
+// (échéances en mémoire) et signalé à OnAbandon (place d'envoi en cours rendue aux quotas).
+// Un envoi en cours de création (échéance posée, ligne pas encore écrite) n'est pas touché.
+func TestSweepForgetsUploadsRemovedElsewhere(t *testing.T) {
+	s, _ := newSvc(t)
+	var abandoned []string
+	s.OnAbandon = func(id string, _ int) { abandoned = append(abandoned, id) }
+	id, _, err := s.createAny(newKeys().req(80, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep, _, err := s.createAny(newKeys().req(80, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(filepath.Join(s.Blobs.Dir, id))
+	if _, err := s.DB.Exec(`DELETE FROM shares WHERE id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	s.mem.mu.Lock()
+	_, still := s.mem.up[id]
+	_, kept := s.mem.up[keep]
+	s.mem.mu.Unlock()
+	if still || !kept {
+		t.Fatal("échéance d'envoi : oubliée", !still, "gardée pour l'envoi vivant", kept)
+	}
+	if len(abandoned) != 1 || abandoned[0] != id {
+		t.Fatal("OnAbandon :", abandoned)
+	}
+	if _, err := s.Sweep(); err != nil || len(abandoned) != 1 {
+		t.Fatal("signalé deux fois", abandoned, err)
+	}
+}

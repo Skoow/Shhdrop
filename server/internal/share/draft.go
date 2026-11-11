@@ -45,6 +45,9 @@ func (s *Service) PutChunks(id string, n, from int, body []byte) error {
 	mu := s.uploadLock(id)
 	mu.RLock()
 	defer mu.RUnlock()
+	if s.sealed(id) {
+		return ErrBusy // finalisation en cours (audit F6)
+	}
 	bucket, _, err := s.draftRow(id)
 	if err != nil {
 		return err

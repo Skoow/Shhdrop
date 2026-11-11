@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -445,5 +446,68 @@ func TestFinalizeDraftVoidValidation(t *testing.T) {
 	r.Void = [][2]int{{0, 1}}
 	if err := ValidateFinalize(r); !errors.Is(err, ErrBadRequest) {
 		t.Fatal("void hors brouillon", err)
+	}
+}
+
+// Audit F6 : pendant une finalisation (bourrage écrit hors du verrou de l'envoi), un segment ou
+// une plage de morceaux du même envoi est refusé (ErrBusy) : sinon l'aléa du bourrage pouvait
+// écraser des données reçues au même moment, ou l'inverse.
+func TestPutRefusedDuringFinalize(t *testing.T) {
+	for _, draft := range []bool{false, true} {
+		t.Run(map[bool]string{false: "classique", true: "brouillon"}[draft], func(t *testing.T) {
+			s, _ := newSvc(t)
+			id, _, err := s.createAny(newKeys().req(160, 1, 1))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, n := range []int{0, 2} {
+				if err := s.PutSegment(id, n, segBody(160, n, 1)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			started, release := make(chan struct{}), make(chan struct{})
+			var once sync.Once
+			orig := fillWrite
+			fillWrite = func(s *Service, id string, off int64, b []byte) error {
+				once.Do(func() { close(started); <-release })
+				return orig(s, id, off, b)
+			}
+			t.Cleanup(func() { fillWrite = orig })
+			r := fin(id)
+			if draft {
+				r = draftFin(id, 160)
+			} else {
+				r.FillFrom, r.FillTo = 1, 2
+			}
+			done := make(chan error, 1)
+			go func() { _, err := s.Finalize(id, r); done <- err }()
+			<-started
+			if err := s.PutSegment(id, 1, segBody(160, 1, 9)); !errors.Is(err, ErrBusy) {
+				t.Error("segment accepté pendant la finalisation :", err)
+			}
+			if err := s.PutChunks(id, 1, 3, bytes.Repeat([]byte{9}, ChunkCT)); !errors.Is(err, ErrBusy) {
+				t.Error("morceaux acceptés pendant la finalisation :", err)
+			}
+			close(release)
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// Audit F6 : une finalisation refusée (envoi incomplet) rend la main : les segments manquants
+// sont de nouveau acceptés.
+func TestPutAcceptedAfterFailedFinalize(t *testing.T) {
+	s, _ := newSvc(t)
+	id, _, err := s.createAny(newKeys().req(160, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Finalize(id, fin(id)); !errors.Is(err, ErrIncomplete) {
+		t.Fatal(err)
+	}
+	if err := s.PutSegment(id, 0, segBody(160, 0, 1)); err != nil {
+		t.Fatal(err)
 	}
 }

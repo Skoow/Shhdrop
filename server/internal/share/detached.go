@@ -48,6 +48,7 @@ func (a *activity) activeAt(now int64) bool {
 type detached struct {
 	f        *os.File
 	accessV  []byte // V_accès, pour qu'une destruction par l'administrateur le coupe (kill.go)
+	proofV   []byte // V_preuve, pour qu'un signalement le coupe (cutReported, audit F2)
 	bucket   int
 	graceEnd int64
 	opens    map[int]bool // ouvertures qui gardent le droit de finir
@@ -323,8 +324,9 @@ func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 	}
 	var bucket, issued int
 	var doneMask int64
-	var accessV []byte
-	err := s.DB.QueryRow(`SELECT bucket, opens_issued, done_mask, access_v FROM shares WHERE id=?`, id).Scan(&bucket, &issued, &doneMask, &accessV)
+	var accessV, proofV []byte
+	err := s.DB.QueryRow(`SELECT bucket, opens_issued, done_mask, access_v, proof_v FROM shares WHERE id=?`, id).
+		Scan(&bucket, &issued, &doneMask, &accessV, &proofV)
 	if err != nil {
 		s.gone.unlock()
 		if errors.Is(err, sql.ErrNoRows) {
@@ -347,7 +349,7 @@ func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 			return false, err
 		}
 		if f != nil {
-			s.gone.dead[id] = &detached{f: f, accessV: accessV, bucket: bucket, graceEnd: event + graceWindow, opens: allowed}
+			s.gone.dead[id] = &detached{f: f, accessV: accessV, proofV: proofV, bucket: bucket, graceEnd: event + graceWindow, opens: allowed}
 		}
 	}
 	if !grace {

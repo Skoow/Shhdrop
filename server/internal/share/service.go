@@ -6,6 +6,7 @@
 package share
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -17,6 +18,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -112,7 +114,9 @@ type Config struct {
 	StorageMax int64  // octets réservables au total ; > 0
 	FrozenFile string // chemin absolu du fichier de gel ; obligatoire
 	// OnAbandon (facultatif) : appelé quand un envoi est effacé sans avoir été finalisé
-	// (quotas d'octets abandonnés, spec §29.5). Ne doit pas bloquer.
+	// (quotas d'octets abandonnés, spec §29.5), avec bucket = 0 si la ligne a disparu hors
+	// de ce processus (sweepOrphanUploads). Ne doit pas bloquer ; un même id peut être
+	// signalé deux fois (effacement et balayage simultanés) : l'appelé l'ignore alors.
 	OnAbandon func(id string, bucket int)
 	// KillWait (commande d'administration seulement) : attente de la coupure, par le serveur
 	// en marche, d'un partage déjà détaché (DestroyAdmin, kill.go) ; 0 : aucune demande.
@@ -181,6 +185,9 @@ type Service struct {
 	finalizing struct {
 		mu  sync.Mutex
 		ids map[string]struct{}
+		// sealing : envois dont un Finalize écrit le bourrage (hors du verrou de l'envoi) ;
+		// leurs segments sont refusés (ErrBusy) jusqu'à la fin du Finalize (audit F6).
+		sealing map[string]struct{}
 	}
 }
 
@@ -532,6 +539,9 @@ func (s *Service) PutSegment(id string, n int, body []byte) error {
 	mu := s.uploadLock(id)
 	mu.RLock()
 	defer mu.RUnlock()
+	if s.sealed(id) {
+		return ErrBusy // finalisation en cours (audit F6)
+	}
 	if !s.uploadOpen(id, s.now()) {
 		return ErrNotFound
 	}
@@ -598,6 +608,7 @@ func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 		return 0, ErrBusy // aucune lecture ni écriture : réponse immédiate
 	}
 	defer s.releaseFinalize(id)
+	s.seal(id)
 	if !s.uploadOpen(id, s.now()) {
 		return 0, ErrNotFound
 	}
@@ -700,7 +711,32 @@ func (s *Service) claimFinalize(id string) bool {
 func (s *Service) releaseFinalize(id string) {
 	s.finalizing.mu.Lock()
 	delete(s.finalizing.ids, id)
+	delete(s.finalizing.sealing, id)
 	s.finalizing.mu.Unlock()
+}
+
+// seal (Finalize, claimFinalize déjà pris) : plus aucun segment de l'envoi id n'est accepté
+// jusqu'à releaseFinalize (audit F6), puis attente des écritures déjà en vol (verrou exclusif
+// de l'envoi pris et rendu) : le bourrage, écrit ensuite hors de ce verrou, ne croise plus
+// aucune écriture de segment.
+func (s *Service) seal(id string) {
+	s.finalizing.mu.Lock()
+	if s.finalizing.sealing == nil {
+		s.finalizing.sealing = map[string]struct{}{}
+	}
+	s.finalizing.sealing[id] = struct{}{}
+	s.finalizing.mu.Unlock()
+	mu := s.uploadLock(id)
+	mu.Lock()
+	mu.Unlock() // barrière : les écritures en vol (RLock) sont finies
+}
+
+// sealed : un Finalize de l'envoi id est en cours (à lire sous le verrou de l'envoi en lecture).
+func (s *Service) sealed(id string) bool {
+	s.finalizing.mu.Lock()
+	defer s.finalizing.mu.Unlock()
+	_, ok := s.finalizing.sealing[id]
+	return ok
 }
 
 // fullMask : tous les segments marqués reçus.
@@ -969,6 +1005,11 @@ func (s *Service) DestroyWithProof(kAcces, kPreuve []byte, report bool) error {
 	var proofV []byte
 	err := s.DB.QueryRow(`SELECT id, proof_v, state FROM shares WHERE access_v=?2 AND `+alive, now, v).Scan(&id, &proofV, &state)
 	if err != nil {
+		if report && errors.Is(err, sql.ErrNoRows) {
+			if err := s.cutReported(v, kPreuve); err != nil {
+				return err
+			}
+		}
 		return notFound(err)
 	}
 	if !s.aliveUpload(id, state, now) {
@@ -983,6 +1024,11 @@ func (s *Service) DestroyWithProof(kAcces, kPreuve []byte, report bool) error {
 		return notFound(err)
 	}
 	if failed >= maxAttempts {
+		if report {
+			if err := s.cutReported(v, kPreuve); err != nil {
+				return err
+			}
+		}
 		return ErrNotFound
 	}
 	if match(kPreuve, proofV) { // proof_v NULL (envoi en cours) : jamais juste
@@ -992,6 +1038,34 @@ func (s *Service) DestroyWithProof(kAcces, kPreuve []byte, report bool) error {
 		return err
 	}
 	return ErrNotFound
+}
+
+// cutReported : signalement d'un partage déjà disparu pour les nouvelles ouvertures (échu non
+// encore balayé, 5 essais faux, ou retiré avec des ouvertures qui finissent sur un descripteur
+// détaché) : ses lectures en grâce sont coupées, sans grâce (spec §41.8, audit F2), si K_preuve
+// est juste. Aucun essai n'est compté (le partage n'ouvre plus rien) ; l'appelant répond
+// « introuvable », comme pour tout partage disparu.
+func (s *Service) cutReported(v, kPreuve []byte) error {
+	var id string
+	var proofV []byte
+	err := s.DB.QueryRow(`SELECT id, proof_v FROM shares WHERE access_v=?`, v).Scan(&id, &proofV)
+	switch {
+	case err == nil && match(kPreuve, proofV):
+		if _, err := s.retire(id, false, s.now()); err != nil {
+			return err
+		}
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
+		return err
+	}
+	s.gone.mu.Lock()
+	defer s.gone.unlock()
+	s.gone.init()
+	for id, d := range s.gone.dead {
+		if bytes.Equal(d.accessV, v) && match(kPreuve, d.proofV) {
+			s.killLocked(id, d)
+		}
+	}
+	return nil
 }
 
 // DestroyManaged : destruction par l'expéditeur (S_gestion), partage trouvé par V_gestion.
@@ -1101,7 +1175,7 @@ func (s *Service) Sweep() (int, error) {
 		return 0, err
 	}
 	removed := 0
-	errs := []error{gerr}
+	errs := []error{gerr, s.sweepOrphanUploads()}
 	for _, id := range ids {
 		ok, err := s.sweepOne(id, now)
 		if err != nil {
@@ -1111,6 +1185,59 @@ func (s *Service) Sweep() (int, error) {
 		}
 	}
 	return removed, errors.Join(errs...)
+}
+
+// sweepOrphanUploads oublie les envois en cours connus de la mémoire dont la ligne a disparu
+// hors de ce processus (« shhdrop admin destroy » ou « wipe », audit F9) et les signale à
+// OnAbandon : sans cela, leur échéance restait en mémoire et leur place d'envoi en cours
+// restait prise dans les quotas jusqu'à minuit. Sous createMu : Create pose l'échéance et
+// écrit la ligne sous ce verrou, un envoi en cours de création n'est donc jamais pris pour
+// disparu. Un envoi finalisé garde sa ligne ; un envoi effacé ici est déjà oublié.
+func (s *Service) sweepOrphanUploads() error {
+	s.createMu.Lock()
+	s.mem.mu.Lock()
+	ids := make([]any, 0, len(s.mem.up))
+	for id := range s.mem.up {
+		ids = append(ids, id)
+	}
+	s.mem.mu.Unlock()
+	present := map[string]bool{}
+	for i := 0; i < len(ids); i += 500 {
+		part := ids[i:min(i+500, len(ids))]
+		rs, err := s.DB.Query(`SELECT id FROM shares WHERE id IN (?`+strings.Repeat(",?", len(part)-1)+`)`, part...)
+		if err != nil {
+			s.createMu.Unlock()
+			return err
+		}
+		for rs.Next() {
+			var id string
+			if err := rs.Scan(&id); err != nil {
+				rs.Close()
+				s.createMu.Unlock()
+				return err
+			}
+			present[id] = true
+		}
+		rs.Close()
+		if err := rs.Err(); err != nil {
+			s.createMu.Unlock()
+			return err
+		}
+	}
+	var gone []string
+	for _, x := range ids {
+		if id := x.(string); !present[id] {
+			s.forget(id)
+			gone = append(gone, id)
+		}
+	}
+	s.createMu.Unlock()
+	if s.OnAbandon != nil {
+		for _, id := range gone {
+			s.OnAbandon(id, 0) // palier inconnu : la ligne a disparu
+		}
+	}
+	return nil
 }
 
 // sweepOne revérifie l'échéance sous le verrou de l'envoi : aucun Finalize ni PutSegment du
