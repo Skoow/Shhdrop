@@ -16,6 +16,7 @@ pub mod manifest;
 pub mod native;
 pub mod password;
 pub mod platform;
+pub mod reader;
 mod whatwg;
 
 pub use error::{Error, Result};

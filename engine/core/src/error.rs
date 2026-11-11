@@ -61,6 +61,10 @@ pub enum Error {
     Chevauchement,
     /// K_contenu qui a déjà chiffré un manifeste : une finalisation tire une R neuve.
     CleDejaUtilisee,
+    /// Lecteur : indice d'élément hors du manifeste.
+    ElementInexistant,
+    /// Lecteur : aperçu (`item`) d'un fichier de plus de PREVIEW_MAX octets ; `stream_item` le lit.
+    TropGrosPourApercu,
 }
 
 impl Error {
@@ -93,6 +97,8 @@ impl Error {
             Error::TexteTropLong => "texte_trop_long",
             Error::Chevauchement => "chevauchement",
             Error::CleDejaUtilisee => "cle_deja_utilisee",
+            Error::ElementInexistant => "element_inexistant",
+            Error::TropGrosPourApercu => "trop_gros_pour_apercu",
         }
     }
 }
@@ -154,5 +160,10 @@ mod tests {
         assert_eq!(Error::TexteTropLong.to_string(), "texte_trop_long");
         assert_eq!(Error::Chevauchement.to_string(), "chevauchement");
         assert_eq!(Error::CleDejaUtilisee.to_string(), "cle_deja_utilisee");
+        assert_eq!(Error::ElementInexistant.to_string(), "element_inexistant");
+        assert_eq!(
+            Error::TropGrosPourApercu.to_string(),
+            "trop_gros_pour_apercu"
+        );
     }
 }

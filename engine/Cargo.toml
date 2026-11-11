@@ -22,3 +22,18 @@ codegen-units = 1
 opt-level = 3
 [profile.dev.package.blake2]
 opt-level = 3
+
+# AES-GCM du fournisseur natif et SHA-256 en mode debug : ≈ 2,5 Mio/s sans optimisation (le code
+# générique d'aes-gcm est instancié dans shhdrop-core), trop lent pour les tests d'ouverture
+# (vecteur de 9 Mio, 400 altérations). Les vérifications de débordement et les debug_assert!
+# restent actives (overflow-checks et debug-assertions ne dépendent pas d'opt-level).
+[profile.dev.package.shhdrop-core]
+opt-level = 3
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.ghash]
+opt-level = 3
+[profile.dev.package.polyval]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3

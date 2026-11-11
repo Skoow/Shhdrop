@@ -23,6 +23,7 @@ use shhdrop_core::manifest::{self, Clean, Entry, Kind, Manifest, Rights};
 use shhdrop_core::native::RustCrypto;
 use shhdrop_core::password::{generate, is_generated};
 use shhdrop_core::platform::{Key, Platform};
+use shhdrop_core::reader::{Reader, Segments};
 use shhdrop_core::{Error, KLien, KMdp, SGestion, Seed};
 use std::rc::Rc;
 use support::{block_on, platform, replay, unhex};
@@ -856,8 +857,14 @@ fn share_plain(item: &Value) -> Vec<u8> {
 
 #[test]
 fn share_segments_cases() {
+    share_server_files(&vectors());
+}
+
+/// Fichier du serveur du vecteur `share`, refait par le moteur Rust avec l'aléa du vecteur :
+/// chaque pièce, l'en-tête, le morceau du manifeste et chaque segment assemblé sont comparés
+/// aux octets de l'ancien moteur (empreintes, et octets complets pour le segment 0 et `tail`).
+fn share_server_files(v: &Value) -> Vec<Vec<u8>> {
     use shhdrop_core::elements::{ElementSealer, seal_final};
-    let v = vectors();
     let sh = &v["share"];
     let mut segs: Vec<Vec<u8>> = sh["segments"]
         .as_array()
@@ -935,5 +942,92 @@ fn share_segments_cases() {
             "segment {}",
             w["n"]
         );
+    }
+    segs
+}
+
+/// Segments du serveur (vecteur `share`), sans réseau.
+struct ShareFiles(Vec<Vec<u8>>, core::cell::RefCell<Vec<u32>>);
+
+impl Segments for &ShareFiles {
+    async fn fetch(&self, n: u32) -> Result<Vec<u8>, Error> {
+        self.1.borrow_mut().push(n);
+        Ok(self.0.get(n as usize).cloned().unwrap_or_default())
+    }
+}
+
+/// Review Focus 2 : le partage de l'ancien moteur (octets vérifiés ci-dessus) s'ouvre avec le
+/// lecteur Rust par le chemin complet (lien → Argon2id → enveloppe → engagement → manifeste),
+/// et redonne le manifeste et chaque clair de `share.opened`.
+#[test]
+fn share_opened_cases() {
+    let v = vectors();
+    let sh = &v["share"];
+    let files = ShareFiles(share_server_files(&v), Default::default());
+    let ParsedLink::Share { origin, k_lien } =
+        parse_link(sh["link"].as_str().unwrap(), "/").unwrap()
+    else {
+        panic!("lien de partage attendu");
+    };
+    assert_eq!(origin, sh["origin"].as_str().unwrap());
+    let k_mdp = password_key(
+        sh["password"].as_str().unwrap(),
+        &hexf(sh, "salt"),
+        sh["kdf_ops"].as_u64().unwrap() as u32,
+        sh["kdf_mem"].as_u64().unwrap() as u32,
+    )
+    .unwrap();
+    let p = platform(1);
+    let ak = block_on(access_keys(&p, &k_lien, &k_mdp)).unwrap();
+    assert_eq!(ak.v_preuve.to_vec(), hexf(sh, "v_preuve"));
+    let (hdr, engagement) = format::read_header(&files.0[0]).unwrap();
+    let r = block_on(open(
+        &ak.k_env,
+        &hexf(sh, "envelope"),
+        &share_id(&k_lien),
+        &hdr,
+    ))
+    .unwrap();
+    assert_eq!(r.as_bytes().to_vec(), hexf(sh, "r"));
+    let keys = block_on(content_keys_checked(&p, &r, &engagement)).unwrap();
+    let bucket = sh["bucket"].as_u64().unwrap() as u32;
+    let rd = block_on(Reader::open(&p, &files, bucket, &keys)).unwrap();
+    // En-tête (0), manifeste (6), note (0).
+    assert_eq!(*files.1.borrow(), [0, 6, 0]);
+    let want = &sh["opened"]["manifest"];
+    let m = rd.manifest();
+    assert_eq!(want["v"], 2);
+    assert_eq!(m.rights.name(), want["rights"].as_str().unwrap());
+    assert_eq!(m.rights.keep_ttl_h(), None);
+    assert!(want.get("keep_ttl_h").is_none());
+    let wi = want["items"].as_array().unwrap();
+    assert_eq!(m.items.len(), wi.len());
+    for (e, w) in m.items.iter().zip(wi) {
+        assert_eq!(e.kind.name(), w["kind"].as_str().unwrap());
+        assert_eq!(e.name, w["name"].as_str().unwrap());
+        assert_eq!(e.mime, w["mime"].as_str().unwrap());
+        assert_eq!(e.size, w["size"].as_u64().unwrap());
+        assert_eq!(e.offset, w["offset"].as_u64().unwrap());
+        assert_eq!(e.text.as_deref(), w["text"].as_str());
+        assert_eq!(b64u(&**e.k.as_ref().unwrap()), w["k"].as_str().unwrap());
+        assert_eq!(e.clean.map(Clean::name), w["clean"].as_str());
+    }
+    let opened = sh["opened"]["items"].as_array().unwrap();
+    for (i, (w, item)) in opened
+        .iter()
+        .zip(sh["items"].as_array().unwrap())
+        .enumerate()
+    {
+        let got = block_on(rd.item(i)).unwrap();
+        assert_eq!(got.len() as u64, w["len"].as_u64().unwrap());
+        assert_eq!(sha256(&got).to_vec(), hexf(w, "sha256"));
+        assert_eq!(got, share_plain(item), "élément {i}");
+        let streamed = core::cell::RefCell::new(Vec::new());
+        block_on(rd.stream_item(i, async |c: Vec<u8>| {
+            streamed.borrow_mut().extend_from_slice(&c);
+            Ok(())
+        }))
+        .unwrap();
+        assert_eq!(streamed.into_inner(), got, "flux de l'élément {i}");
     }
 }
