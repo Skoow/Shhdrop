@@ -48,6 +48,10 @@
     },
   });
 
+  // Démontage (autre route, nouveau lien collé) : un déverrouillage ou une lecture encore en
+  // cours n'aboutit plus à rien, et rien ne continue de tourner (audit M2).
+  $effect(() => () => r.dispose());
+
   // ---------- Garde de sortie (ruling 3) ----------
   // Le « # » est retiré de l'adresse dès la lecture : recharger ou fermer l'écran verrouillé
   // perdrait le lien sans bruit. Confirmation du navigateur tant que le lien est tenu ici

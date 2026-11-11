@@ -100,3 +100,24 @@ describe("avertissement mémoire (UI §9.2.5, spec §18.7 ; revue du 10 novembre
     expect(needsMemoryWarning([], false, IOS)).toBe(false);
   });
 });
+
+describe("audit (faible) : URL du repli révoquées à la fin de lecture", () => {
+  it("l'URL d'un téléchargement du repli est suivie : revokeAll la révoque sans attendre 60 s", async () => {
+    const { liveUrls, revokeAll } = await import("./blobs");
+    revokeAll();
+    const create = vi.spyOn(URL, "createObjectURL").mockImplementation(() => "blob:x-1");
+    const revoked = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    try {
+      const sink = blobDownloads({ click: () => undefined, now: () => 0, sleep: async () => undefined })("a.bin");
+      await sink.write(new Uint8Array([1, 2]));
+      await sink.close();
+      expect(liveUrls()).toBe(1);
+      revokeAll();
+      expect(revoked).toHaveBeenCalledWith("blob:x-1");
+      expect(liveUrls()).toBe(0);
+    } finally {
+      create.mockRestore();
+      revoked.mockRestore();
+    }
+  });
+});

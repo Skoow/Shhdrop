@@ -167,7 +167,24 @@
   const dirPicker = typeof w?.showDirectoryPicker === "function" ? w.showDirectoryPicker.bind(w) : undefined;
   const series = blobDownloads({ click: clickDownload, now: () => performance.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) });
   const blobTarget = async (name: string) => series(name);
-  const single: Target = savePicker ? (name: string) => pickFile(savePicker, name) : blobTarget;
+  /**
+   * Un fichier : avec « Enregistrer sous » (Chrome), le sélecteur s'ouvre AU CLIC, même si un
+   * autre fichier est en cours (audit M3) : le navigateur le refuse hors d'un appui récent. Le
+   * fichier choisi attend son tour dans la file ; un clic sans effet (déjà en file) n'ouvre rien.
+   */
+  function saveOne(i: number) {
+    if (disabled) return;
+    if (!savePicker) return dl.start([i], blobTarget);
+    if (!dl.canStart(i)) return;
+    let picked: Promise<ItemSink | null> | null = pickFile(savePicker, fileName(i));
+    picked.catch(() => undefined);
+    // Nouvel essai après un échec : un nouveau sélecteur (le premier fichier a été supprimé).
+    dl.start([i], (name: string) => {
+      const p = picked ?? pickFile(savePicker, name);
+      picked = null;
+      return p;
+    });
+  }
 
   const named = (e: unknown, n: string) => typeof e === "object" && e !== null && (e as { name?: unknown }).name === n;
   /** Plusieurs fichiers : un dossier choisi une fois, sinon des téléchargements à la suite. */
@@ -438,7 +455,7 @@
             {viewOnly}
             {disabled}
             onview={() => openViewer(i)}
-            ondownload={() => !disabled && dl.start([i], single)}
+            ondownload={() => saveOne(i)}
             onpause={() => dl.pause([i])}
             onresume={() => dl.resume([i])}
             onstop={() => dl.stop([i])}
@@ -473,7 +490,7 @@
     </footer>
   {/if}
 </div>
-<ViewerPanel items={viewItems} bind:at={viewAt} {viewOnly} load={loadPreview} held={dl.readerHeld} ondownload={(i) => dl.start([i], single)} onclose={() => undefined} />
+<ViewerPanel items={viewItems} bind:at={viewAt} {viewOnly} load={loadPreview} held={dl.readerHeld} ondownload={(i) => saveOne(i)} onclose={() => undefined} />
 <ReportSheet bind:open={reportOpen} onconfirm={() => destroy(true)} />
 
 <style>

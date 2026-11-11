@@ -64,7 +64,7 @@ export type AddReport = {
   duplicates: string[];
 };
 
-export const BLOCK_REASONS = ["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "nettoyage", "hors_ligne"] as const;
+export const BLOCK_REASONS = ["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "nettoyage", "nettoyage_en_cours", "hors_ligne"] as const;
 export type BlockReason = (typeof BLOCK_REASONS)[number];
 export function blockKey(r: BlockReason) {
   return `compose.block.${r}` as const;
@@ -531,6 +531,8 @@ export function createComposer(deps: ComposeDeps = {}) {
     if (items.some((i) => i.kind === "text" && codePoints(i.text ?? "") > TEXT_MAX)) return "texte_trop_long";
     if (manifestBytes > MANIFEST_MAX) return "manifeste";
     if (pending > 0) return "nettoyage";
+    // « Nettoyer » à la demande en cours (audit I1) : son contenu va remplacer celui déjà envoyé.
+    if (cleaning.size > 0) return "nettoyage_en_cours";
     if (!online()) return "hors_ligne";
     return null;
   }

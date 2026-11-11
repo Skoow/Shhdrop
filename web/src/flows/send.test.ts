@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LimitError, NotFoundError, SERVER_STALL_MS, type CaptchaCtx, type CaptchaProof, type CreateOpts, type Item } from "../index";
+import { markElementFailure } from "../transfer/draft";
 import { PAUSE_MAX_MS, STALL_MS, UPLOAD_WINDOW_MS, createSender, type SendDeps, type Step } from "./send.svelte";
 
 type Res = { link: string; manage: string; expiresInS: number };
@@ -101,7 +102,7 @@ describe("createSender : phases (UI §9.4.1)", () => {
     expect(t.createShare).toHaveBeenCalledTimes(1);
   });
 
-  it("étapes : chiffré (tous les octets partis), envoyé (dernier segment acquitté), scellé (résolution) ; une par étape, dans l'ordre", async () => {
+  it("étapes : chiffré (tous les octets partis), puis envoyé et scellé à la résolution seulement (audit M12) ; une par étape, dans l'ordre", async () => {
     const t = setup();
     void t.s.start(ITEMS, OPTS);
     const o = await toUpload(t, 2, 200);
@@ -112,7 +113,7 @@ describe("createSender : phases (UI §9.4.1)", () => {
     o.onBytes!(200, 200);
     expect(t.s.steps).toEqual(["chiffre"]);
     o.onProgress!(2, 2);
-    expect(t.s.steps).toEqual(["chiffre", "envoye"]);
+    expect(t.s.steps).toEqual(["chiffre"]); // tout est sur le serveur, mais aucun lien n'existe encore
     t.last().resolve(RES);
     await flush();
     expect(t.s.steps).toEqual(["chiffre", "envoye", "scelle"]);
@@ -335,6 +336,32 @@ describe("createSender : erreurs (UI §9.4.6)", () => {
     expect(t.createShare).toHaveBeenCalledTimes(2);
     expect(t.s.error).toBe("captcha");
     expect(take).toHaveBeenCalledTimes(1);
+  });
+
+  it("audit M1 : bad_request d'un élément (PUT refusé) : pas d'essai anti-robot, erreur dite, ligne désignée", async () => {
+    const t = setup();
+    void t.s.start(ITEMS, OPTS);
+    t.calls[0]!.reject(markElementFailure(0, new Error("bad_request")));
+    await flush();
+    expect(t.createShare).toHaveBeenCalledTimes(1);
+    expect(t.s.error).toBe("element");
+    expect(t.s.failedItem).toBe(0);
+    // Réessayer : un nouvel appel complet (le brouillon relance l'élément, transfer/draft.ts).
+    void t.s.retry();
+    expect(t.createShare).toHaveBeenCalledTimes(2);
+  });
+
+  it("audit M1 : erreur réseau d'un élément : « reseau », ligne désignée ; fichier illisible : « fichier_modifie »", async () => {
+    const t = setup();
+    void t.s.start(ITEMS, OPTS);
+    t.calls[0]!.reject(markElementFailure(0, new Error("reseau")));
+    await flush();
+    expect(t.s.error).toBe("reseau");
+    expect(t.s.failedItem).toBe(0);
+    void t.s.retry();
+    t.calls[1]!.reject(markElementFailure(0, new DOMException("x", "NotReadableError")));
+    await flush();
+    expect(t.s.error).toBe("fichier_modifie");
   });
 
   it("bad_request, repli actif : 3 essais, le dernier en mode fallback", async () => {

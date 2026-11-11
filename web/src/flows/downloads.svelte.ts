@@ -24,7 +24,8 @@ import type { ReadMeter } from "./read-meter";
 import type { Tracker } from "./gone.svelte";
 
 export type RowState = "idle" | "queued" | "downloading" | "paused" | "done" | "failed";
-export type FailReason = "network" | "budget" | "limit" | "disk_full" | "write" | "gone";
+/** `activation` : le sélecteur d'enregistrement a été refusé faute d'appui récent (il faut appuyer à nouveau). */
+export type FailReason = "network" | "budget" | "limit" | "disk_full" | "write" | "gone" | "activation";
 
 export type Row = {
   readonly state: RowState;
@@ -90,6 +91,8 @@ export function classify(e: unknown): { reason: FailReason; retryable: boolean; 
   if (n === "ReadBudgetError") return { reason: "budget", retryable: false, keepPartial: false };
   if (n === "NotFoundError" || n === "GoneError") return { reason: "gone", retryable: false, keepPartial: false };
   if (n === "LimitError" || n === "ServerError") return { reason: "limit", retryable: true, keepPartial: true };
+  // « Enregistrer sous » ouvert hors d'un appui (élément arrivé à son tour dans la file, audit M3).
+  if (n === "SecurityError" || n === "NotAllowedError") return { reason: "activation", retryable: true, keepPartial: false };
   if (n === "QuotaExceededError") return { reason: "disk_full", retryable: true, keepPartial: false };
   if (isNetwork(e)) return { reason: "network", retryable: true, keepPartial: true };
   return { reason: "write", retryable: true, keepPartial: false };
@@ -372,6 +375,11 @@ export function createDownloads(totals: readonly number[], deps: DownloadDeps) {
     /** Lecture en cours, en pause, ou en attente : garde de sortie de page. */
     get busy(): boolean {
       return active !== null || queue.some((i) => rows[i]?.state === "queued") || rows.some((r) => r.state === "paused");
+    },
+    /** Un appui sur « Enregistrer » lancerait vraiment l'élément (ni en file, ni en cours, ni en pause). */
+    canStart(i: number): boolean {
+      const r = rows[i];
+      return !closed && !!r && (r.state === "idle" || r.state === "done" || (r.state === "failed" && r.retryable));
     },
     /** Demande le téléchargement de ces éléments (ordre du manifeste), vers `target`. */
     start(items: readonly number[], target: Target = null) {

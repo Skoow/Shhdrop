@@ -126,6 +126,12 @@ export type Receiver = {
    * plus aucune référence au contenu déchiffré, octroi effacé de l'onglet.
    */
   forget(): void;
+  /**
+   * Écran démonté (autre route, nouveau lien) : un calcul ou une lecture en cours n'aboutit plus
+   * à rien ; minuteries arrêtées. L'entrée de l'onglet n'est gardée que si le contenu était
+   * affiché (spec §41.4) ; sinon, comme forget.
+   */
+  dispose(): void;
 };
 
 const isCode = (e: unknown, code: string) => e instanceof Error && e.message === code;
@@ -197,6 +203,8 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
   let expiresAt = 0;
   let limitedUntil = 0;
   let inflight = false;
+  /** Écran quitté (forget) : un déverrouillage qui aboutit ensuite est effacé, jamais gardé (audit M2). */
+  let disposed = false;
 
   const s = $state({
     state: "meta" as ReceiveState,
@@ -280,7 +288,7 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
         }
       }
       const m = grant === null ? await d.fetchMeta(l, d.origin) : await d.fetchMeta(l, d.origin, grant);
-      if (secret === null) return; // déjà terminé pendant l'attente
+      if (secret === null || disposed) return; // déjà terminé pendant l'attente
       expiresAt = d.now() + m.expiresInS * 1000;
       s.expiresInS = m.expiresInS;
       s.opensLeft = m.opensLeft;
@@ -288,6 +296,7 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
       else if (reloaded && grant !== null) s.state = "reopen";
       else s.state = "locked";
     } catch (e) {
+      if (disposed) return;
       if (e instanceof NotFoundError || isCode(e, "lien_invalide") || isCode(e, "origine_invalide")) end("invalid");
       else if (e instanceof LimitError) {
         s.retryAfterS = e.retryAfterS;
@@ -382,9 +391,25 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
       if (s.state === "error") await loadMeta();
     },
     forget() {
+      disposed = true;
       secret = null;
       opened = undefined;
       drop();
+      guard.stop();
+    },
+    dispose() {
+      // Contenu déjà affiché : son entrée d'onglet reste (spec §41.4 : un retour ou un
+      // rechargement rouvre la même ouverture le temps de son octroi), mais plus rien ne tourne
+      // ici (renouvellement, réponses aux autres onglets). Sinon : comme forget (audit M2).
+      if (s.state !== "open") return this.forget();
+      disposed = true;
+      secret = null;
+      opened = undefined;
+      held = null;
+      stopRegrant();
+      stopAnswer();
+      stopRegrant = stopAnswer = () => undefined;
+      guard.stop();
     },
     async unlock(password: string) {
       // Garde synchrone, avant tout await : un double appui ne fait qu'un appel.
@@ -403,11 +428,18 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
         const l = secret;
         const o = grant === null ? await d.openShare(l, password, d.origin) : await d.openShare(l, password, d.origin, grant);
         secret = null; // les clés utiles sont dans Opened ; le lien ne sert plus
+        const tag = disposed ? null : await tagP;
+        if (disposed) {
+          // Plus personne ne regarde : clés effacées, rien n'est gardé dans l'onglet.
+          void o.done().catch(() => undefined);
+          return;
+        }
         // L'octroi n'est écrit qu'après un déverrouillage réussi (jamais le mot de passe).
-        keep(o, keyOf(l), await tagP);
+        keep(o, keyOf(l), tag);
         opened = o;
         s.state = "open";
       } catch (e) {
+        if (disposed) return;
         if (e instanceof BadPasswordError) {
           s.attemptsLeft = e.attemptsLeft;
           s.error = "bad_password";

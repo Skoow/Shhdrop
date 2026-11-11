@@ -5,6 +5,7 @@ import {
   LimitError,
   NotFoundError,
   SERVER_STALL_MS,
+  failedElement,
   type CaptchaCtx,
   type CaptchaProof,
   type CreateOpts,
@@ -26,7 +27,8 @@ export const PAUSE_MIN_LEFT_MS = 15 * 60_000;
 const TICK_MS = 250;
 
 export type Phase = "idle" | "keys" | "captcha" | "fallback" | "upload" | "paused" | "offline" | "finalize" | "sealed" | "cancelled" | "error";
-export type SendError = "reseau" | "interrompu" | "limite" | "plein" | "gele" | "captcha" | "fichier_modifie" | "inattendu";
+/** `element` : un élément n'a pas pu être envoyé (refus du serveur), sa ligne est `failedItem`. */
+export type SendError = "reseau" | "interrompu" | "limite" | "plein" | "gele" | "captcha" | "fichier_modifie" | "element" | "inattendu";
 /** Coches sous la capsule (benchmark M3) : chacune seulement après un progrès réel. */
 export type Step = "chiffre" | "envoye" | "scelle";
 
@@ -172,6 +174,13 @@ export function createSender(deps: SendDeps) {
 
   async function fail(e: unknown, id: number) {
     let code: SendError = "inattendu";
+    // Échec d'un élément (audit M1) : sa ligne ; un refus du serveur (bad_request…) n'est pas un
+    // échec anti-robot, c'est « element ».
+    const line = failedElement(e);
+    if (line !== undefined) {
+      failedItem = line;
+      if (!(e instanceof LimitError || e instanceof NotFoundError || e instanceof DOMException || ["reseau", "full", "frozen"].includes(errMsg(e)))) code = "element";
+    }
     if (e instanceof LimitError) {
       code = "limite";
       retryAfterS = e.retryAfterS;
@@ -179,7 +188,7 @@ export function createSender(deps: SendDeps) {
     } else if (e instanceof NotFoundError) code = "interrompu";
     else if (e instanceof DOMException && (e.name === "NotReadableError" || e.name === "NotFoundError")) {
       code = "fichier_modifie";
-      const i = await unreadable(items);
+      const i = line ?? (await unreadable(items));
       if (id !== run) return;
       failedItem = i;
     } else if (errMsg(e) === "reseau") code = "reseau";
@@ -253,9 +262,9 @@ export function createSender(deps: SendDeps) {
               if (phase === "keys" || phase === "captcha" || phase === "fallback") phase = "upload";
             } else backOnline();
             // n = 0 : texte seul, rien à envoyer (spec §41.14) : finalisation tout de suite.
+            // « Envoyé » attend le lien (audit M12) : rien n'est partagé avant la finalisation.
             if (done === n) {
               step("chiffre");
-              step("envoye");
               if (phase === "upload" || phase === "offline") phase = "finalize";
             }
           },
@@ -299,7 +308,7 @@ export function createSender(deps: SendDeps) {
         return;
       } catch (e) {
         if (id !== run || signal.aborted || isAbort(e)) return;
-        const captchaFailed = !createdOnServer && (errMsg(e) === "bad_request" || solverFailed);
+        const captchaFailed = failedElement(e) === undefined && !createdOnServer && (errMsg(e) === "bad_request" || solverFailed);
         if (captchaFailed) {
           const next = attempt + 1;
           if (next === 2 || (next === 3 && fallbackOrigin !== null)) {

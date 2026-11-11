@@ -6,7 +6,7 @@
   import { tick, untrack } from "svelte";
   import type { LinkState } from "../app/link";
   import { followLink, href } from "../app/router.svelte";
-  import { formatDuration } from "../i18n/format";
+  import { formatClock, formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { LimitError, NotFoundError, destroyShare, shareStatus } from "../index";
   import { announce } from "../ui/announce";
@@ -19,6 +19,8 @@
   import TimeRim from "../ui/TimeRim.svelte";
   import Invalid from "./Invalid.svelte";
 
+  /** Relecture automatique (UI §9.6.4) : toutes les 60 s tant que la page est visible. */
+  const REFRESH_MS = 60_000;
   type Props = { take: () => LinkState | null };
   let { take }: Props = $props();
   const lang = $derived(getLang());
@@ -34,16 +36,24 @@
   let pausedUntil = 0;
   let reads = $state(0); // nouvelle lecture → nouveau compte à rebours
 
+  // Heure de la dernière lecture réussie (UI §9.6.5, audit M13).
+  let readAt = $state<number | null>(null);
+  // Suppression en cours ou faite : une relecture encore en vol ne réaffiche rien (audit, faible).
+  let deleting = false;
+  const over = () => secret === null || phase === "gone" || deleting;
   async function refresh() {
-    if (secret === null || phase === "gone" || Date.now() < pausedUntil) return;
+    if (over() || Date.now() < pausedUntil) return;
     try {
-      const s = await shareStatus(secret, location.origin);
+      const s = await shareStatus(secret!, location.origin);
+      if (over()) return;
+      readAt = Date.now();
       if (total === 0) total = s.expiresInS;
       status = s;
       error = "";
       reads++;
       phase = "ready";
     } catch (e) {
+      if (over()) return;
       if (e instanceof NotFoundError || (e instanceof Error && e.message === "lien_invalide")) return gone();
       if (e instanceof LimitError) {
         pausedUntil = Date.now() + e.retryAfterS * 1000;
@@ -69,10 +79,12 @@
   async function remove() {
     if (secret === null) return;
     deleteError = "";
+    deleting = true;
     try {
       await destroyShare(secret, location.origin);
     } catch (e) {
       if (!(e instanceof NotFoundError)) {
+        deleting = false;
         deleteError = t("manage.delete.net");
         return;
       }
@@ -88,8 +100,16 @@
     untrack(() => void refresh());
     const id = setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
-    }, 60_000);
-    return () => clearInterval(id);
+    }, REFRESH_MS);
+    // Retour sur l'onglet après plus d'une minute : relu tout de suite (jamais en arrière-plan).
+    const back = () => {
+      if (document.visibilityState === "visible" && readAt !== null && Date.now() - readAt >= REFRESH_MS) void refresh();
+    };
+    document.addEventListener("visibilitychange", back);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", back);
+    };
   });
 
   let title: HTMLHeadingElement | undefined = $state();
@@ -134,6 +154,7 @@
           {/key}
         </p>
         {#if line}<p class="sub">{line}</p>{/if}
+        {#if readAt !== null}<p class="read num" data-read-at>{t("manage.readAt", { time: formatClock(readAt, lang) })}</p>{/if}
       {:else}
         <p class="sub">{t("manage.loading")}</p>
       {/if}
@@ -194,6 +215,11 @@
   }
   .num {
     font-variant-numeric: tabular-nums;
+  }
+  .read {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--fs-small);
   }
   .sub,
   .lede {

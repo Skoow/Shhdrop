@@ -1,5 +1,5 @@
 // Cadenas d'état par élément (D41-25) : jamais vert avant l'événement réel. Envoi : gris tant
-// que le serveur n'a pas confirmé le segment, vert « Chiffré et envoyé » après. Réception : vert
+// que le serveur n'a pas confirmé le segment, vert « Chiffré, prêt à partir » après. Réception : vert
 // « Déchiffré et vérifié » pour un texte (manifeste authentifié) et pour un fichier seulement
 // une fois lu en entier ; rien avant. Captures fr-FR 390 et 1440.
 import { readFileSync } from "node:fs";
@@ -34,9 +34,9 @@ test("envoi : cadenas gris tant que le segment n'est pas confirmé, vert après 
   release();
   // Retours UI4 : plus de texte sur la ligne ; le libellé est le nom du bouton et sa bulle.
   // D41-34 : 2ᵉ ligne, le nettoyage (format inconnu : tel quel), dans le nom et dans la bulle.
-  await expect(r.locator('[data-lock="ok"] button')).toHaveAccessibleName("Chiffré et envoyé. Fichier tel quel (non modifié)", { timeout: 30_000 });
+  await expect(r.locator('[data-lock="ok"] button')).toHaveAccessibleName("Chiffré, prêt à partir. Fichier tel quel (non modifié)", { timeout: 30_000 });
   await expect(r.locator('[data-lock="ok"]')).toHaveText("", { useInnerText: true });
-  await expect(r.locator('[data-lock="ok"] button')).toHaveAccessibleDescription(/^Chiffré et envoyé ?\. Fichier tel quel \(non modifié\)$/);
+  await expect(r.locator('[data-lock="ok"] button')).toHaveAccessibleDescription(/^Chiffré, prêt à partir ?\. Fichier tel quel \(non modifié\)$/);
   // Capture : cadenas et marques de nettoyage.
   await (await openFilePicker(page)).setFiles([
     { name: "plage-nuit.jpg", mimeType: "image/jpeg", buffer: readFileSync(file("plage-nuit.jpg")) },

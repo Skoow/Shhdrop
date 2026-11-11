@@ -7,6 +7,7 @@ import { MANAGE_FRAGMENT, SHARE_FRAGMENT } from "../index";
 // Lien du QR code (D41-29) : « #<K_lien>. » suivi du mot de passe, même mal formé (écran de saisie).
 const SHARE_PW_PREFIX = /^#[A-Za-z0-9_-]{43}\./;
 import { runTransition } from "../ui/viewTransition";
+import { createLeaveGuard } from "./leave-guard";
 
 /**
  * Marque de l'entrée d'historique d'une ouverture déverrouillée (aucun secret) : un
@@ -77,12 +78,17 @@ function sync(): void {
   if (next.name !== router.current.name) router.current = next;
 }
 
+/** Garde du bouton Retour pendant un envoi et sur « Lien prêt » (app/leave-guard.ts, audit I2). */
+export const leaveGuard = typeof window === "undefined" ? null : createLeaveGuard(window);
+
 // Retour du système (geste, bouton) : même glissement, vers la droite, sur téléphone.
 if (typeof window !== "undefined")
   window.addEventListener("popstate", () => {
+    if (leaveGuard?.onPop()) return; // envoi en cours ou lien affiché : confirmé ou absorbé
     // Un « # » (lien collé, clé) se lit tout de suite, sans transition : l'écran qui le lit et
     // le gestionnaire hashchange d'App doivent voir la route à jour dans le même tour.
-    if (phone() && location.hash === "") void runTransition(() => flushSync(sync), { back: true });
+    const moves = match(location.pathname, location.hash, undefined, reopenHere()).name !== router.current.name;
+    if (moves && phone() && location.hash === "") void runTransition(() => flushSync(sync), { back: true });
     else sync();
   });
 

@@ -20,6 +20,7 @@ describe("interface publique", () => {
         "segmentsFor",
         "segmentsNeeded",
         "createDraft",
+        "failedElement",
         "CONTENT_MAX",
         "MAX_ITEMS",
         "MANIFEST_MAX",

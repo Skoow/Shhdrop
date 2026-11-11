@@ -27,7 +27,7 @@ export {
 } from "./transfer/client";
 export { prepareCaptcha, type PreparedCaptcha } from "./transfer/prepare";
 // Envoi dès l'ajout (spec §41.14) : brouillon et état des lignes.
-export { createDraft, type Draft, type ElementStatus } from "./transfer/draft";
+export { createDraft, failedElement, type Draft, type ElementStatus } from "./transfer/draft";
 export { SERVER_STALL_MS } from "./transfer/upload";
 export { isRiskyName, previewKindOf, safeName as cleanName } from "./transfer/safety";
 export { MANIFEST_MAX, PREVIEW_MAX, type KeepTtl, type Rights } from "./engine";

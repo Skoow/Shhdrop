@@ -98,3 +98,27 @@ describe("startWatch", () => {
     expect(h.listening()).toBe(false);
   });
 });
+
+describe("audit (faible) : aller-retour d'onglet rapide", () => {
+  it("page cachée puis réaffichée avant la fin du rejet de la requête relâchée : la surveillance repart", async () => {
+    let visible = true;
+    let wake!: (a: boolean) => void;
+    let polls = 0;
+    const w = startWatch(
+      (signal) => {
+        polls++;
+        return new Promise((_res, rej) => signal.addEventListener("abort", () => setTimeout(() => rej(new DOMException("a", "AbortError")), 5)));
+      },
+      () => undefined,
+      { now: () => 0, visible: () => visible, listen: (f) => ((wake = f), () => undefined), pause: async () => undefined },
+    );
+    await new Promise((r) => setTimeout(r, 1));
+    visible = false;
+    wake(false);
+    visible = true;
+    wake(false);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(polls).toBe(2);
+    w.stop();
+  });
+});

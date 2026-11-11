@@ -34,12 +34,16 @@ export function startWatch(poll: WatchPoll, onGone: () => void, deps: WatchDeps)
     try {
       while (!stopped && active()) {
         const started = deps.now();
-        ac = new AbortController();
+        const mine = new AbortController();
+        ac = mine;
         let r: "alive" | "gone" | "stop";
         try {
-          r = await poll(ac.signal);
+          r = await poll(mine.signal);
         } catch {
-          if (stopped || ac.signal.aborted) return;
+          if (stopped) return;
+          // Requête relâchée (page cachée) : la boucle repart si la page est revenue entre-temps
+          // (aller-retour d'onglet rapide), sinon elle s'arrête jusqu'au prochain réveil.
+          if (mine.signal.aborted) continue;
           r = "stop";
         } finally {
           ac = null;

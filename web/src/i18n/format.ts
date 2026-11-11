@@ -101,3 +101,10 @@ export function formatEndsAt(epochMs: number, lang: Lang): string {
   const time = new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(d);
   return `Ends ${date} at ${time}`;
 }
+
+/** Heure seule (dernière lecture d'un état, audit M13) : « 9 h 41 » ; « 9:41 AM ». */
+export function formatClock(epochMs: number, lang: Lang): string {
+  const d = new Date(epochMs);
+  if (lang === "fr") return `${d.getHours()} h ${String(d.getMinutes()).padStart(2, "0")}`;
+  return new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(d);
+}

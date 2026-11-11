@@ -73,18 +73,18 @@ test("composeur : libellés dans l'icône, bulle du cadenas à deux lignes, éti
   await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("3\u202ffichiers n'ont pas pu être nettoyés"); // abime.jpg, budget-2026.xlsx (factice, 8 octets), image.webp (faux WebP : format non reconnu)
   await expect(row(page, "budget-2026.xlsx").locator('[data-clean="echec"]')).toBeVisible();
   // Tout reste dans les libellés : le nom du cadenas porte les deux lignes.
-  await expect(lock(page, "plage-nuit.jpg")).toHaveAccessibleName(/\. Nettoyé\s: position, appareil et dates retirés$/);
+  await expect(lock(page, "plage-nuit.jpg")).toHaveAccessibleName(/\. Nettoyé\s: position, appareil et dates retirés, vignette d'aperçu gardée$/);
   await expect(lock(page, "abime.jpg")).toHaveAccessibleName(/\. Nettoyage impossible\s: structure du fichier inattendue$/);
   await expect(lock(page, "archive.zip")).toHaveAccessibleName(/\. Fichier tel quel \(non modifié\)$/);
   await expect(page.locator('[data-up]:not([data-up="pret"])')).toHaveCount(0, { timeout: 30_000 });
-  await expect(lock(page, "plage-nuit.jpg")).toHaveAccessibleName(/^Chiffré et envoyé\. Nettoyé\s: position, appareil et dates retirés$/);
+  await expect(lock(page, "plage-nuit.jpg")).toHaveAccessibleName(/^Chiffré, prêt à partir\. Nettoyé\s: position, appareil et dates retirés, vignette d'aperçu gardée$/);
   await settle(page);
   expect(await axe(page)).toEqual([]);
 
   await openTip(page, lock(page, "plage-nuit.jpg"), isMobile);
   const tip = page.getByRole("tooltip").filter({ visible: true });
-  await expect(tip.locator(".l1")).toHaveText("Chiffré et envoyé.");
-  await expect(tip.locator(".l2")).toHaveText(/^Nettoyé\s: position, appareil et dates retirés$/);
+  await expect(tip.locator(".l1")).toHaveText("Chiffré, prêt à partir.");
+  await expect(tip.locator(".l2")).toHaveText(/^Nettoyé\s: position, appareil et dates retirés, vignette d'aperçu gardée$/);
   await page.screenshot({ path: `${SHOTS}composeur-bulle-${w(isMobile)}.png` });
 });
 

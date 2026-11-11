@@ -445,3 +445,56 @@ describe("rechargement et autres onglets (spec §41.4, UI §9.7.1)", () => {
   });
 });
 
+
+describe("audit M2 : écran quitté pendant le déverrouillage ou la lecture", () => {
+  it("forget() pendant unlock : rien n'est gardé (ni octroi, ni contenu, ni minuterie), les clés sont effacées", async () => {
+    let release!: (o: Opened) => void;
+    const done = vi.fn(async () => undefined);
+    const opened = { manifest: { items: [] }, grant: GRANT, regrant: vi.fn(async () => GRANT2), done } as unknown as Opened;
+    const answer = vi.fn(() => () => undefined);
+    const t = setup({ openShare: () => new Promise<Opened>((res) => (release = res)), answerTabs: answer });
+    await flush();
+    expect(t.r.state).toBe("locked");
+    const p = t.r.unlock(PW);
+    t.r.forget();
+    release(opened);
+    await p;
+    expect(t.r.opened).toBeUndefined();
+    expect(t.r.state).not.toBe("open");
+    expect(t.store.save).not.toHaveBeenCalled();
+    expect(answer).not.toHaveBeenCalled();
+    expect(t.timers.filter((x) => x.on)).toEqual([]);
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+
+  it("forget() pendant fetchMeta : aucun état n'est écrit ensuite", async () => {
+    let release!: (m: { expiresInS: number; opensLeft: number }) => void;
+    const t = setup({ fetchMeta: () => new Promise((res) => (release = res)) });
+    await flush();
+    t.r.forget();
+    release({ expiresInS: 3600, opensLeft: 2 });
+    await flush();
+    expect(t.r.state).toBe("meta");
+    expect(t.r.opensLeft).toBe(0);
+  });
+});
+
+describe("audit M2 : dispose (écran démonté)", () => {
+  it("contenu affiché : entrée de l'onglet gardée (retour, rechargement), minuteries arrêtées", async () => {
+    const t = setup();
+    await flush();
+    await t.r.unlock(PW);
+    expect(t.r.state).toBe("open");
+    t.r.dispose();
+    expect(t.store.load()).not.toBeNull();
+    expect(t.timers.filter((x) => x.on)).toEqual([]);
+    expect(t.r.opened).toBeUndefined();
+  });
+  it("avant le déverrouillage : comme forget (rien n'est gardé)", async () => {
+    const t = setup();
+    await flush();
+    t.r.dispose();
+    expect(t.store.load()).toBeNull();
+    expect(t.timers.filter((x) => x.on)).toEqual([]);
+  });
+});

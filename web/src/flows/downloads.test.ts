@@ -284,3 +284,25 @@ describe("file de téléchargements", () => {
     expect([...chunks[0]!]).toEqual([0, 0, 0]);
   });
 });
+
+describe("audit M3 : « Enregistrer sous » en file", () => {
+  it("sélecteur refusé faute de clic récent (SecurityError, NotAllowedError) : raison « activation », nouvel essai possible", async () => {
+    const { classify } = await import("./downloads.svelte");
+    for (const n of ["SecurityError", "NotAllowedError"]) {
+      expect(classify(new DOMException("x", n))).toEqual({ reason: "activation", retryable: true, keepPartial: false });
+    }
+  });
+  it("canStart : vrai seulement si un appui lancerait vraiment l'élément (sélecteur ouvert au clic sinon inutile)", async () => {
+    const r = fakeReader([30, 30]);
+    const release = r.hold();
+    const dl = createDownloads([30, 30], { read: r.read, openSink: memSinks().openSink, meter: createReadMeter([{ kind: "file", offset: 0, size: 30 }, { kind: "file", offset: 30, size: 30 }]), now: () => 0 });
+    expect(dl.canStart(0)).toBe(true);
+    dl.start([0]);
+    await tick();
+    expect(dl.canStart(0)).toBe(false); // en cours
+    expect(dl.canStart(1)).toBe(true);
+    release();
+    await until(() => dl.rows[0]!.state === "done");
+    expect(dl.canStart(0)).toBe(true); // enregistrer à nouveau
+  });
+});

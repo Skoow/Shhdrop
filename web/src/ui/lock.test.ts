@@ -23,7 +23,7 @@ describe("cadenas d'état (D41-25, UI5) : jamais vert avant l'événement réel,
   });
 
   it("textes en français et en anglais", () => {
-    expect(fr["compose.up.pret"]).toBe("Chiffré et envoyé");
+    expect(fr["compose.up.pret"]).toBe("Chiffré, prêt à partir");
     expect(fr["lock.recv.ok"]).toBe("Déchiffré et vérifié");
     for (const k of ["lock.recv.ok", "lock.recv.error", "lock.recv.wait"] as const) expect(en[k]).toBeTruthy();
   });

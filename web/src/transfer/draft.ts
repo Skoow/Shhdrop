@@ -152,6 +152,15 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
   let waiters: (() => void)[] = [];
   let deadline = 0;
   let losses = 0;
+  /**
+   * Finalisation en cours (audit I1) : liste et contenus figés jusqu'à son issue. Un `sync`
+   * reçu entre-temps (un « Nettoyer » qui se termine) est gardé et appliqué après un échec ;
+   * après un succès, le brouillon est clos et il ne sert plus. `retry` est ignoré.
+   */
+  let finalizing = false;
+  let deferred: { id: string; data: Blob }[] | null = null;
+  /** Réveille une finalisation qui attend (abandon : elle échoue sur `closed`, audit I2). */
+  let wake: (() => void) | undefined;
 
   let report: (() => void) | undefined;
   const changed = () => {
@@ -461,6 +470,48 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
 
   const erasing = new Set<Promise<void>>();
 
+  /**
+   * Aligne le brouillon sur la liste des fichiers (id, contenu) : nouveaux mis en file,
+   * absents retirés (envoi interrompu, segments effacés), contenu changé renvoyé.
+   */
+  function syncList(list: { id: string; data: Blob }[]) {
+    if (closed) return;
+    if (finalizing) {
+      deferred = list;
+      return;
+    }
+    const want = new Map(list.map((x) => [x.id, x.data]));
+    for (const e of [...els.values()]) {
+      const d = want.get(e.id);
+      if (d !== e.src) {
+        const p = drop(e);
+        erasing.add(p);
+        void p.finally(() => erasing.delete(p));
+      }
+    }
+    for (const [id, data] of want)
+      if (!els.has(id))
+        els.set(id, fresh(id, data));
+    changed();
+    background();
+    void pump();
+  }
+
+  /** Élément en erreur relancé : envoi interrompu et effacé, puis clé neuve, place neuve. */
+  function restart(e: El): Promise<void> {
+    const p = drop(e).then(() => {
+      if (closed) return;
+      els.set(e.id, fresh(e.id, e.src));
+      backgroundFailed = false;
+      changed();
+      background();
+      void pump();
+    });
+    erasing.add(p);
+    void p.finally(() => erasing.delete(p));
+    return p;
+  }
+
   return {
     get created() {
       return created !== null;
@@ -471,28 +522,8 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       for (const h of holds) n += h.bytes;
       return n;
     },
-    /**
-     * Aligne le brouillon sur la liste des fichiers (id, contenu) : nouveaux mis en file,
-     * absents retirés (envoi interrompu, segments effacés), contenu changé renvoyé.
-     */
-    sync(list: { id: string; data: Blob }[]) {
-      if (closed) return;
-      const want = new Map(list.map((x) => [x.id, x.data]));
-      for (const e of [...els.values()]) {
-        const d = want.get(e.id);
-        if (d !== e.src) {
-          const p = drop(e);
-          erasing.add(p);
-          void p.finally(() => erasing.delete(p));
-        }
-      }
-      for (const [id, data] of want)
-        if (!els.has(id))
-          els.set(id, fresh(id, data));
-      changed();
-      background();
-      void pump();
-    },
+    /** Aligne le brouillon sur la liste des fichiers (syncList). */
+    sync: syncList,
     status(id: string): ElementStatus | undefined {
       const e = els.get(id);
       return e && { phase: e.phase, sent: e.acked + e.inflight, total: totalOf(e), error: e.error };
@@ -509,22 +540,16 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
     /** Réessayer un fichier en erreur : clé neuve, place neuve. */
     retry(id: string) {
       const e = els.get(id);
-      if (!e || e.phase !== "erreur") return;
-      const p = drop(e).then(() => {
-        els.set(id, fresh(id, e.src));
-        backgroundFailed = false;
-        changed();
-        background();
-        void pump();
-      });
-      erasing.add(p);
-      void p.finally(() => erasing.delete(p));
+      if (finalizing || !e || e.phase !== "erreur") return;
+      void restart(e);
     },
     /** Abandon (onglet fermé, retour, liste vidée) : brouillon détruit en keepalive (promesse : fin de la requête). */
     abandon(): Promise<void> {
       if (closed) return Promise.resolve();
       closed = true;
+      deferred = null;
       clearInterval(keepTimer);
+      wake?.();
       for (const e of els.values()) {
         e.ac.abort();
         e.sealer?.forget();
@@ -548,8 +573,19 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
     if (!isGeneratedPassword(f.password)) throw new Error("mot_de_passe_non_genere");
     throwIfAborted(f.signal);
     if (closed) throw new NotFoundError();
+    if (finalizing) throw new Error("finalisation_en_cours");
+    finalizing = true;
+    const stopped = () => {
+      if (closed) throw new NotFoundError(); // abandon pendant l'attente (audit I2)
+    };
     try {
       hooks = { pause: f.pause, onRetry: f.onRetry };
+      // « Réessayer » (audit M1) : un élément en erreur relançable repart (clé et place neuves)
+      // avant l'attente ; un fichier devenu illisible ne le serait pas davantage.
+      for (const { id } of list) {
+        const e = els.get(id);
+        if (e && e.phase === "erreur" && canRestart(e.error)) void restart(e);
+      }
       let lastProg: [number, number] | undefined;
       let lastBytes: [number, number] | undefined;
       // Note jamais remise au brouillon (appel direct, createShare) : envoyée maintenant. Son
@@ -562,7 +598,8 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
         background();
         void pump();
       }
-      await Promise.all([...erasing]);
+      await waitOrWake(Promise.all([...erasing]), f.signal);
+      stopped();
       const lossesAtStart = losses;
       for (const h of [...stuck]) {
         if (created && !(await eraseOnServer(created, h))) throw new Error("reseau");
@@ -570,19 +607,21 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
         holds.delete(h);
       }
       for (;;) {
+        stopped();
         if (losses !== lossesAtStart) throw new NotFoundError(); // brouillon perdu pendant l'attente
         if (!created) {
           const p = creating ?? obtain(f.solveCaptcha, f.prepared, f.signal);
-          const cr = await abortable(p, f.signal).catch((e: unknown) => {
+          const cr = await waitOrWake(p, f.signal).catch((e: unknown) => {
             throw senderError(e);
           });
+          stopped();
           if (!created) adopt(cr);
         }
         throwIfAborted(f.signal);
         const files = list.map((x) => els.get(x.id));
         if (files.some((e) => e === undefined)) throw new Error("element_inconnu");
-        const failed = files.find((e) => e!.phase === "erreur");
-        if (failed) throw failed.error;
+        const failed = files.findIndex((e) => e!.phase === "erreur");
+        if (failed >= 0) throw markElementFailure(failed, files[failed]!.error);
         report = () => {
           if (!created || files.some((e) => !els.has(e!.id))) return;
           const total = files.reduce((n, e) => n + totalOf(e!), 0);
@@ -607,16 +646,32 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
         };
         report();
         if (created && files.every((e) => e!.phase === "pret")) break;
-        await abortable(nextChange(), f.signal);
+        await waitOrWake(nextChange(), f.signal);
       }
+      stopped();
       deadline = Date.now() + SERVER_STALL_MS;
       return await finish(created!, list, f);
     } catch (e) {
-      throw senderError(e);
+      throw failedElement(e) !== undefined ? e : senderError(e);
     } finally {
       hooks = {};
       report = undefined;
+      finalizing = false;
+      const later = deferred;
+      deferred = null;
+      if (later && !closed) syncList(later);
     }
+  }
+
+  /** Attente d'une finalisation, interrompue par l'annulation (signal) ou par l'abandon (wake). */
+  function waitOrWake<T>(p: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+    if (closed) return Promise.reject(new NotFoundError());
+    return new Promise<T>((res, rej) => {
+      wake = () => rej(new NotFoundError());
+      abortable(p, signal).then(res, rej);
+    }).finally(() => {
+      wake = undefined;
+    });
   }
 
   /**
@@ -722,6 +777,29 @@ export async function textBlob(data: Uint8Array<ArrayBuffer> | Blob): Promise<Bl
 }
 
 export type Draft = ReturnType<typeof createDraft>;
+
+/**
+ * Un élément de la liste n'a pas pu être envoyé (audit M1) : finalize rejette avec l'erreur de
+ * son envoi, telle quelle (contrat de createShare), et `failedElement` en donne le rang dans la
+ * liste finalisée. Sert à ne jamais prendre un refus d'envoi (`bad_request` d'un PUT) pour un
+ * échec anti-robot, et à désigner la ligne en cause.
+ */
+const failedAt = new WeakMap<object, number>();
+export function failedElement(e: unknown): number | undefined {
+  return typeof e === "object" && e !== null ? failedAt.get(e) : undefined;
+}
+export function markElementFailure(index: number, e: unknown): unknown {
+  // Erreur non objet (jamais en pratique) : enveloppée pour pouvoir être marquée.
+  const err = typeof e === "object" && e !== null ? e : new Error(String(e));
+  failedAt.set(err, index);
+  return err;
+}
+
+/** Erreur d'envoi d'un élément qu'un nouvel essai peut lever (pas un fichier devenu illisible). */
+function canRestart(e: unknown): boolean {
+  if (e instanceof DOMException && (e.name === "NotReadableError" || e.name === "NotFoundError")) return false;
+  return !(e instanceof Error && e.message === "trop_gros");
+}
 
 /** Plages de void envoyées au plus (limite du serveur) ; au-delà, restent indéchiffrables. */
 export const MAX_VOID = 512;

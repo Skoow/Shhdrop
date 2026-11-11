@@ -199,6 +199,8 @@
         return s.captchaLocal ? t("err.captcha.local") : t("err.captcha");
       case "fichier_modifie":
         return t("err.changed", { name: items[s.failedItem ?? -1]?.name ?? "?" });
+      case "element":
+        return t("err.element", { name: items[s.failedItem ?? -1]?.name ?? "?" });
       default:
         return t("err.unexpected");
     }

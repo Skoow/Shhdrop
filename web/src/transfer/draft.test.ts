@@ -6,7 +6,7 @@ import { findIn, needle } from "../../e2e/scan";
 import { CHUNK_CT, HEADER, SEG_CHUNKS, SEG_PLAIN, utf8 } from "../engine/pure";
 import { createFakeServer } from "../demo/fake-server";
 import { openShare, type CaptchaProof, type Item } from "../index";
-import { createDraft } from "./draft";
+import { createDraft, failedElement } from "./draft";
 
 const ORIGIN = "https://demo.test";
 const PW = "Kq7!mP2#x?a";
@@ -341,5 +341,105 @@ describe("brouillon perdu pendant le chiffrement (revue du 10 novembre)", { time
     } finally {
       subtle.encrypt = real;
     }
+  });
+});
+
+// Audit du 11 novembre (I1, I2, M1) : brouillon figé pendant la finalisation, abandon qui
+// réveille les attentes, « Réessayer » qui relance les éléments en erreur.
+describe("audit du 11 novembre : finalisation", { timeout: 60_000 }, () => {
+  it("I1 : contenu remplacé (« Nettoyer » fini) pendant finalize : le partage scellé reste lisible, la mise à jour est différée", async () => {
+    const { net, seen } = setup();
+    const orig = file(5 * 1048576, 3);
+    const cleaned = file(5 * 1048576 - 1000, 5);
+    const d = createDraft(ORIGIN, { ...net, solveCaptcha, auto: true });
+    d.sync([{ id: "a", data: orig }]);
+    await until(() => d.status("a")?.phase === "pret");
+    const p = d.finalize([{ id: "a", item: fileItem("x.pdf", orig) }], { ttlHours: 1, maxOpens: 1, password: PW, solveCaptcha });
+    await new Promise((r) => setTimeout(r, 0));
+    d.sync([{ id: "a", data: cleaned }]); // gelé : rien n'est retiré ni effacé
+    d.retry("a");
+    const res = await p;
+    expect(seen.some((r) => r.path === "/api/shares/erase")).toBe(false);
+    const o = await openShare(res.link, PW, ORIGIN, undefined, net);
+    expect(Buffer.from(await o.item(0)).equals(Buffer.from(await orig.arrayBuffer()))).toBe(true);
+  });
+
+  it("I1 : finalize échoue : la mise à jour différée s'applique ensuite", async () => {
+    const { net } = setup();
+    const orig = file(100_000, 3);
+    const cleaned = file(90_000, 5);
+    let failFin = true;
+    const fetch = (async (u: RequestInfo | URL, i?: RequestInit) => {
+      if (failFin && new URL(new Request(u, i).url).pathname === "/api/shares/finalize") return new Response('{"error":"bad_request"}', { status: 400 });
+      return net.fetch(u, i);
+    }) as typeof globalThis.fetch;
+    const d = createDraft(ORIGIN, { fetch, retryDelayMs: 1, solveCaptcha, auto: true });
+    d.sync([{ id: "a", data: orig }]);
+    await until(() => d.status("a")?.phase === "pret");
+    const p = d.finalize([{ id: "a", item: fileItem("x.pdf", orig) }], { ttlHours: 1, maxOpens: 1, password: PW, solveCaptcha });
+    await new Promise((r) => setTimeout(r, 0));
+    d.sync([{ id: "a", data: cleaned }]);
+    await expect(p).rejects.toThrow("bad_request");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(d.status("a")?.phase).not.toBe("pret"); // contenu nettoyé renvoyé sous une clé neuve
+    await until(() => d.status("a")?.phase === "pret");
+    failFin = false;
+    const res = await d.finalize([{ id: "a", item: fileItem("x.pdf", cleaned) }], { ttlHours: 1, maxOpens: 1, password: PW, solveCaptcha });
+    const o = await openShare(res.link, PW, ORIGIN, undefined, net);
+    expect(Buffer.from(await o.item(0)).equals(Buffer.from(await cleaned.arrayBuffer()))).toBe(true);
+  });
+
+  it("I2 : abandon pendant l'attente de finalize : la promesse se termine (rejet), sans attendre la fin des envois", async () => {
+    const fake = createFakeServer({ rateBytesPerS: 2 * 1048576 });
+    const fetch = (async (u: RequestInfo | URL, i?: RequestInit) => fake.handle(new Request(u, i))) as typeof globalThis.fetch;
+    const d = createDraft(ORIGIN, { fetch, retryDelayMs: 1, solveCaptcha, auto: true });
+    const data = file(20 * 1048576, 1);
+    d.sync([{ id: "a", data }]);
+    const p = d.finalize([{ id: "a", item: fileItem("x.bin", data) }], { ttlHours: 1, maxOpens: 1, password: PW, solveCaptcha });
+    const settled = p.then(() => "résolue", () => "rejetée");
+    await until(() => d.status("a")?.phase === "envoi");
+    await d.abandon();
+    const r = await Promise.race([settled, new Promise((res) => setTimeout(() => res("en attente"), 2000))]);
+    expect(r).toBe("rejetée");
+  });
+
+  it("M1 : un élément en erreur au clic est relancé par finalize (« Réessayer » ne tourne plus en boucle)", async () => {
+    const { net } = setup();
+    let failPut = true;
+    let puts = 0;
+    const fetch = (async (u: RequestInfo | URL, i?: RequestInit) => {
+      if (i?.method === "PUT") {
+        puts++;
+        if (failPut) return new Response('{"error":"bad_request"}', { status: 400 });
+      }
+      return net.fetch(u, i);
+    }) as typeof globalThis.fetch;
+    const d = createDraft(ORIGIN, { fetch, retryDelayMs: 1, solveCaptcha, auto: true });
+    const data = file(100_000, 1);
+    d.sync([{ id: "a", data }]);
+    await until(() => d.status("a")?.phase === "erreur");
+    failPut = false;
+    const before = puts;
+    const res = await d.finalize([{ id: "a", item: fileItem("x.bin", data) }], { ttlHours: 1, maxOpens: 1, password: PW, solveCaptcha });
+    expect(puts).toBeGreaterThan(before);
+    const o = await openShare(res.link, PW, ORIGIN, undefined, net);
+    expect(Buffer.from(await o.item(0)).equals(Buffer.from(await data.arrayBuffer()))).toBe(true);
+  });
+
+  it("M1 : un élément qui échoue encore : son erreur, marquée avec le rang de sa ligne (failedElement)", async () => {
+    const { net } = setup();
+    const fetch = (async (u: RequestInfo | URL, i?: RequestInit) => {
+      if (i?.method === "PUT" && /\/segments\/[1-9]/.test(new URL(new Request(u, i).url).pathname)) return new Response('{"error":"bad_request"}', { status: 400 });
+      return net.fetch(u, i);
+    }) as typeof globalThis.fetch;
+    const d = createDraft(ORIGIN, { fetch, retryDelayMs: 1, solveCaptcha, auto: true });
+    const ok = file(1000, 2);
+    const bad = file(5 * 1048576, 1); // grand : segments entiers à partir du 1
+    d.sync([{ id: "ok", data: ok }]);
+    await until(() => d.status("ok")?.phase === "pret");
+    d.sync([{ id: "ok", data: ok }, { id: "b", data: bad }]);
+    const e = await d.finalize([{ id: "ok", item: fileItem("ok", ok) }, { id: "b", item: fileItem("b", bad) }], { ttlHours: 1, maxOpens: 1, password: PW, solveCaptcha }).catch((x: unknown) => x);
+    expect(failedElement(e)).toBe(1); // ligne en cause : jamais prise pour un refus anti-robot
+    expect(e).toEqual(new Error("bad_request"));
   });
 });

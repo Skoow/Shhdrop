@@ -134,7 +134,10 @@ describe("createComposer : ajout", () => {
     const [img, txt] = [c.items.find((i) => i.ext === ".jpg")!, c.items.find((i) => i.ext === ".txt")!];
     expect(img).toMatchObject({ clean: "nettoye" });
     expect(img.size).toBeLessThan(src.length);
-    expect(new TextDecoder("latin1").decode(await (img.data as Blob).arrayBuffer())).not.toMatch(/Reper|2001:02:03/);
+    const out = new TextDecoder("latin1").decode(await (img.data as Blob).arrayBuffer());
+    // Seule la vignette EXIF reste (décision du propriétaire du 11 novembre) : aucun autre repère.
+    expect(out.replace("ReperThumb", "")).not.toMatch(/Reper|2001:02:03/);
+    expect(out).toContain("ReperThumb");
     expect(txt.clean).toBe("sans");
     expect(c.blockReason()).toBeNull();
   });
@@ -154,7 +157,8 @@ describe("createComposer : ajout", () => {
     expect(cleanLineKey(pdf)).toBe("clean.done.pdf");
     expect((pdf.data as Blob).size).toBe(pdfFile.size);
     const out = new TextDecoder("latin1").decode(await (pdf.data as Blob).arrayBuffer());
-    expect(out).not.toMatch(/ReperAuteur|ReperXMP|ReperThumb/);
+    expect(out).not.toMatch(/ReperAuteur|ReperLogiciel/); // propriétés du document
+    expect(out).toContain("ReperThumb"); // miniature de page gardée (décision du 11 novembre)
     expect(out).toContain("(Bonjour Shhdrop) Tj");
     const signed = c.items.find((i) => i.base === "signe")!;
     expect(signed.clean).toBe("protege");
@@ -468,7 +472,7 @@ describe("blocages et textes de raison", () => {
   });
 
   it("chaque raison a son texte en français et en anglais", () => {
-    expect(BLOCK_REASONS).toEqual(["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "nettoyage", "hors_ligne"]);
+    expect(BLOCK_REASONS).toEqual(["vide", "trop_gros", "segments", "texte_trop_long", "manifeste", "nettoyage", "nettoyage_en_cours", "hors_ligne"]);
     for (const r of BLOCK_REASONS) {
       const k = blockKey(r);
       expect(fr[k as keyof typeof fr], r).toBeTruthy();
@@ -485,7 +489,7 @@ describe("blocages et textes de raison", () => {
       expect(fr[k as keyof typeof fr], k).toBeTruthy();
       expect(en[k as keyof typeof en], k).toBeTruthy();
     }
-    expect(fr["clean.done.image"]).toBe("Nettoyé\u202f: position, appareil et dates retirés");
+    expect(fr["clean.done.image"]).toBe("Nettoyé\u202f: position, appareil et dates retirés, vignette d'aperçu gardée");
     expect(fr["clean.asis"]).toBe("Fichier tel quel (non modifié)");
     for (const k of ["clean.mark", "clean.mark.not", "clean.original", "clean.original.hint"]) expect(k in fr, k).toBe(false);
   });
@@ -637,6 +641,17 @@ describe("nettoyage à la demande (menu « … » : Nettoyer, Réessayer)", () =
     expect(canClean({ kind: "text", clean: "sans", category: "texte" })).toBeNull();
     expect(canClean({ kind: "file", clean: "protege", category: "documents" })).toBeNull();
     expect(canClean({ kind: "file", clean: "non_pris_en_charge", category: "videos" })).toBeNull();
+  });
+  it("audit I1 : « Nettoyer » en cours → l'envoi est bloqué (raison dite), débloqué à la fin", async () => {
+    let release!: () => void;
+    const c = make({ autoClean: () => false, probe: head, strip: () => new Promise((r) => (release = () => r(nettoye(new Blob(["x"]))))) });
+    await c.add([realJpeg()], "fichiers");
+    expect(c.blockReason()).toBeNull();
+    const p = c.clean(c.items[0]!.id);
+    expect(c.blockReason()).toBe("nettoyage_en_cours");
+    release();
+    await p;
+    expect(c.blockReason()).toBeNull();
   });
   it("retiré pendant le nettoyage : rien n'est réappliqué", async () => {
     let release!: () => void;

@@ -161,7 +161,8 @@
       <button type="button" class="back" onclick={goBack}><ChevronLeft size={24} strokeWidth={2} aria-hidden="true" /><span class="back-t">{t("shell.back")}</span></button>
     {/if}
     <p class={["small", { on: small !== "" }]} aria-hidden="true">{small}</p>
-    <a class="logo" href={href("/")} onclick={(e) => followLink(e, "/")} aria-label={t("shell.home")}>
+    <!-- Pendant un envoi et sur « Lien prêt » : désactivé comme le pied (audit I2). -->
+    <a class="logo" href={href("/")} onclick={(e) => (busy ? e.preventDefault() : followLink(e, "/"))} aria-label={t("shell.home")} {...off}>
       <!-- Logo « Trame » (scripts/gen-logo.mjs) ; l'introduction ne se joue que sur l'accueil, une fois par chargement. -->
       <Logo />
     </a>
@@ -365,6 +366,9 @@
     color: var(--text);
     text-decoration: none;
     border-radius: var(--r-sm);
+  }
+  .logo[aria-disabled="true"] {
+    cursor: not-allowed;
   }
   main {
     min-height: 60dvh;

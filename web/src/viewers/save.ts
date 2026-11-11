@@ -9,6 +9,7 @@
 import type { ItemSink } from "../flows/downloads.svelte";
 import { lowMemory } from "../app/env";
 import { zipName } from "../zip/store-zip";
+import { revoke, trackUrl } from "./blobs";
 
 /** Délai avant la révocation de l'URL du repli : le téléchargement a le temps de démarrer. */
 export const REVOKE_AFTER_MS = 60_000;
@@ -99,14 +100,15 @@ export function blobDownloads(d: BlobDeps, foldBytes = FOLD_BYTES) {
         const wait = lastClick + CLICK_GAP_MS - d.now();
         if (wait > 0) await d.sleep(wait);
         lastClick = d.now();
-        const url = URL.createObjectURL(blob);
+        // URL suivie (viewers/blobs.ts) : révoquée aussi par revokeAll à la fin de lecture.
+        const url = trackUrl(blob);
         try {
           d.click(url, name);
         } catch (e) {
-          URL.revokeObjectURL(url);
+          revoke(url);
           throw e;
         }
-        setTimeout(() => URL.revokeObjectURL(url), REVOKE_AFTER_MS);
+        setTimeout(() => revoke(url), REVOKE_AFTER_MS);
       },
       async abort() {
         zero();

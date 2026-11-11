@@ -1,6 +1,6 @@
 // Retours DROP du propriétaire, sur le vrai serveur : une note part dès sa validation comme un
 // fichier (D41-36 : son texte est la donnée d'un élément chiffré, plus dans le manifeste) ;
-// cadenas vert « Chiffré et envoyé » avant le clic ; modifiée → renvoyée, le destinataire lit
+// cadenas vert « Chiffré, prêt à partir » avant le clic ; modifiée → renvoyée, le destinataire lit
 // la nouvelle version. La ligne d'une note ne montre que son titre (jamais le contenu), chez
 // l'expéditeur comme chez le destinataire. Ordinateur : la zone de dépôt est en filigrane dans
 // l'espace vide de la liste, texte entier. Captures fr-FR ×2 à 1440 px.
@@ -41,7 +41,7 @@ test("note : cadenas vert avant le clic ; modifiée → renvoyée, nouvelle vers
   await addText(page, "contenu-secret-v1");
   const row = noteRow(page);
   await expect(row.locator("[data-up]")).toHaveAttribute("data-up", "pret", { timeout: 30_000 });
-  await expect(row.locator("[data-lock] button")).toHaveAccessibleName(/Chiffré et envoyé/);
+  await expect(row.locator("[data-lock] button")).toHaveAccessibleName(/Chiffré, prêt à partir/);
   await expect(row).not.toContainText("contenu-secret");
   await expect(row.locator(".meta")).toContainText("Texte");
   expect(puts.length).toBe(1);

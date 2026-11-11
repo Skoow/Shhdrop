@@ -8,14 +8,14 @@
   import { getDemo } from "../app/demo-hooks";
   import { gate } from "../flows/clean-gate";
   import { setScreenTitle } from "../app/title";
-  import { router } from "../app/router.svelte";
+  import { leaveGuard, router } from "../app/router.svelte";
   import { createWakeLock } from "../app/wakelock";
   import { solvePow } from "../captcha/pow";
   import { categoryOf } from "../flows/kinds";
   import { createSender, type Sender, type SendOpts } from "../flows/send.svelte";
   import { formatBytes } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
-  import { createDraft, type CaptchaCtx, type Draft, type TtlHours } from "../index";
+  import { createDraft, destroyShare, type CaptchaCtx, type Draft, type TtlHours } from "../index";
   import { announce } from "../ui/announce";
   import Banner from "../ui/Banner.svelte";
   import { runTransition } from "../ui/viewTransition";
@@ -83,11 +83,59 @@
     draft.sync(list);
   }
 
-  // Démontage (autre route, démo « Ouvrir comme destinataire ») : plus d'envoi en cours.
+  // Démontage (autre route, démo « Ouvrir comme destinataire ») : plus d'envoi en cours. L'envoi
+  // est annulé (le partage créé est détruit), la preuve de travail arrêtée, le brouillon abandonné
+  // (une finalisation qui attend échoue aussitôt) et les secrets oubliés (audit I2).
   $effect(() => () => {
     onbusy?.(false);
+    stop();
+    powAbort?.abort();
+    disarm?.();
     void draft.abandon();
   });
+
+  // Bouton Retour pendant l'envoi et sur « Lien prêt » (audit I2) : confirmation, sinon on reste.
+  let disarm: (() => void) | undefined;
+  function guard() {
+    disarm?.();
+    disarm = leaveGuard?.arm({
+      confirm: () => window.confirm(view === "ready" ? t("leave.ready") : t("leave.sending")),
+      onleave: () => {
+        disarm = undefined;
+        unloadArmed = false;
+        stop();
+        powAbort?.abort();
+        const wasReady = view === "ready";
+        sender = null;
+        sent = null;
+        if (wasReady) composeKey++;
+        setView("compose");
+      },
+    });
+  }
+  /**
+   * Sortie sans « Terminé » : l'envoi est annulé ; pendant la finalisation (plus annulable,
+   * UI §9.4.5), le partage qui en sortira, dont personne n'aura vu le lien, est supprimé dès
+   * qu'il existe. Après « Lien prêt », le partage reste (le lien a pu être copié).
+   */
+  let running: Promise<void> | undefined;
+  function stop() {
+    const s = sender;
+    if (!s) return;
+    if (s.cancellable) s.cancel();
+    else if (s.phase === "finalize" && running)
+      void running.then(() => {
+        const r = s.result;
+        s.forget();
+        if (r) void destroyShare(r.manage, location.origin).catch(() => undefined);
+      });
+    if (s.phase !== "finalize") s.forget();
+  }
+  function unguard() {
+    const d = disarm;
+    disarm = undefined;
+    d?.();
+  }
 
   const wake = typeof document === "undefined" ? undefined : createWakeLock();
   $effect(() => () => wake?.dispose());
@@ -142,8 +190,9 @@
       rights: state.rights,
       keepTtlH: state.keepTtlH,
     };
+    guard();
     setView("sealing");
-    void s.start(state.items, opts);
+    running = s.start(state.items, opts);
   }
 
   function focusSend() {
@@ -155,6 +204,7 @@
     const s = sender;
     note = why === "cancelled" ? (s?.createdOnServer ? t("seal.cancelled.created") : t("seal.cancelled")) : "";
     powAbort?.abort();
+    unguard();
     sender = null;
     sent = null;
     setView("compose");
@@ -173,6 +223,7 @@
 
   /** Terminé, Nouvel envoi : composeur vide, plus aucune référence aux secrets. */
   function reset() {
+    unguard();
     sender?.forget();
     sender = null;
     sent = null;
@@ -180,6 +231,7 @@
     setView("compose");
   }
   function forget() {
+    unguard(); // partage supprimé : plus rien à perdre
     sender?.forget();
     sender = null;
   }
@@ -208,7 +260,8 @@
 
 <svelte:window onpagehide={onPageHide} onoffline={onOffline} />
 
-<div class="compose-host" hidden={view !== "compose"} inert={view !== "compose"}>
+<!-- Inerte dès l'appui sur Envoyer (audit I1) : la transition de vue arrive plus tard. -->
+<div class="compose-host" hidden={view !== "compose"} inert={view !== "compose" || sender !== null}>
   {#if note && view === "compose"}
     <div class="note"><Banner kind="info" action={{ label: t("common.close"), onpress: () => {
           note = "";
