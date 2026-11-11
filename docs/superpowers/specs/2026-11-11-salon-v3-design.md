@@ -99,7 +99,7 @@ Comme §39.5 : vocal enregistré dans la conversation (10 min au plus), lu sur p
     - un participant absent (coupure, onglet fermé, siège gardé) le **verra à son retour** : il n'est jamais sauté ;
     - quand **le dernier participant** l'a lu, le message **disparaît pour tout le monde, expéditeur compris**, et quitte le serveur (trame et pièce).
     - Un participant qui quitte le salon (« Quitter ») ou en est exclu ne compte plus parmi ceux qui doivent le lire.
-    - **Conséquence serveur (moyen)** : la file de §39.3.2 ne garde que les 200 dernières trames ou 15 min ; un absent qui revient plus tard perdrait le message. Correction proposée (§5.1).
+    - Les messages en attente sont gardés sur le disque du salon (§5.1) jusqu'à la dernière lecture.
   - **10 minutes** et **1 heure** : comptées **depuis l'envoi**, pour tout le monde, expéditeur compris. Un message que personne n'a lu dans ce délai est effacé sans avoir été lu. Compte à rebours visible dans le message.
 - **Qui la change** : **tout participant**, à tout moment. Chaque changement s'affiche dans la conversation : « Léa a réglé l'effacement des messages sur 10 minutes ». La règle s'applique aux messages envoyés **après** le changement ; un message garde la règle de son envoi (elle voyage avec lui, chiffrée).
 - **« Vu »** au sens de l'effacement : le message a été affiché à l'écran, page visible, au moins 1 seconde (`IntersectionObserver` et `visibilitychange`).
@@ -107,12 +107,23 @@ Comme §39.5 : vocal enregistré dans la conversation (10 min au plus), lu sur p
 - **Honnêteté, à afficher** : « L'effacement se fait sur les appareils des participants. Une capture d'écran, une photo de l'écran ou une app modifiée peuvent garder un message. »
 - **Choix du propriétaire (11 novembre)** : en « Instantané », un participant absent qui ne revient pas garde le message en attente jusqu'à son retour, son départ, son exclusion ou la fin du salon (24 h au plus) ; l'expéditeur voit « Lu par 2 / 3 » pendant ce temps.
 
-### 5.1 Aucune limite de nombre de messages (décision du propriétaire, 11 novembre)
+### 5.1 Conversation sur disque, messages sans limite (décisions du propriétaire, 11 novembre)
 
-- On parle **sans limite de nombre de messages**. La seule borne est la **capacité du salon** déjà décidée (§39.1) : 1 Go au total, messages et fichiers ; un message compte 4 140 octets, soit environ **250 000 messages** dans un salon sans fichiers. La cadence anti-abus reste (60 messages par minute et par personne, §39.3.6) : elle freine les robots, pas une conversation.
-- **Abonnements** (plus tard, §39.11, §38.8) : plus de capacité, de durée et de participants pour Plus et Pro, même chiffrement. Pas de salon payant avant l'avis du juriste.
-- **Messages « instantané » en attente** : gardés jusqu'à la dernière lecture ou la fin du salon, sans plafond de nombre, dans la capacité du salon. **Signalement (moyen, choix déjà validé « trames jamais sur disque », §39.3.2)** : en mémoire seule, 200 salons pleins pourraient demander des centaines de Go de mémoire et faire tomber le serveur. Correction proposée : jusqu'à 8 Mio par salon en mémoire ; au-delà, les trames en attente (déjà chiffrées de bout en bout et sous `K_trame`) sont écrites dans un fichier temporaire du salon, chiffré une seconde fois par le serveur avec une clé aléatoire gardée **en mémoire seulement** (un redémarrage rend le fichier illisible, puis il est effacé), effacé trame par trame à la dernière lecture et en entier à la fin du salon, compté dans `SHH_STORAGE_MAX`. Le serveur n'y apprend rien de plus qu'en mémoire.
+**Décisions** : (1) la conversation est **écrite sur le disque du serveur**, chiffrée de bout en bout, pour ne pas remplir la mémoire ; ce n'est pas un fichier temporaire de secours mais le stockage normal du salon jusqu'à sa fin. (2) Les **fichiers** (PDF, photos, vidéos, archives…) consomment la capacité du salon (1 Go, §39.1). (3) Les **messages écrits et vocaux** sont **sans limite** et ne consomment pas cette capacité : un salon plein de fichiers permet toujours d'écrire et d'envoyer des vocaux. (4) **Appels audio et vidéo : fonctions payantes** (§8). Remplace « relais en mémoire seulement » (§39.3.2) et le budget des trames (§39.1).
 
+**Stockage**
+- Un fichier par salon (`salons/{id interne}`), écrit en ajout : chaque trame de 4 140 octets telle qu'elle est arrivée (chiffrée de bout en bout par MLS, puis sous `K_trame`). Le serveur ne peut lire ni le contenu, ni le type, ni l'expéditeur, comme en mémoire.
+- **Seconde couche** : le fichier est chiffré par le serveur (AES-256-GCM, bibliothèque standard de Go) avec une clé aléatoire par salon gardée **en mémoire seulement**. À la fin du salon, la clé est oubliée puis le fichier effacé ; un disque saisi ou copié ne donne rien de plus que des trames illisibles, même sans `K_trame`. **Conséquence assumée** : un redémarrage du serveur rend la conversation illisible (comme avant, où tout était en mémoire) ; les pages ouvertes rentrent et continuent.
+- **Retrait et effacement** : une trame retirée (« retirer pour tous ») ou effacée par la règle (§5) est **écrasée** dans le fichier (zéros) et ne sera plus servie.
+- **Rattrapage** : un participant qui revient après une coupure reçoit toutes les trames depuis son dernier `seq`, sans limite de 200 trames ni de 15 min (§39.3.2 remplacé). Un nouveau venu ne lit toujours rien d'avant son arrivée (MLS).
+- Jamais : pseudonymes, adresses, heures en clair dans la base ; fichier sans date (dates remises à zéro, `O_NOATIME`, comme les partages).
+
+**Pourquoi des bornes restent nécessaires, sans compter les messages (signalements)**
+- **Élevé, abus du vocal** : le serveur ne peut pas savoir qu'un vocal est un vocal (tout est chiffré). « Vocal illimité » permettrait à un client modifié de déposer n'importe quel fichier en le disant vocal, et de contourner le 1 Go. Correction proposée : les vocaux ne comptent pas dans le 1 Go mais suivent la **vitesse d'une vraie voix** : chaque personne dispose de 4 Ko par seconde de présence dans le salon (une voix Opus en consomme environ 3), cumulés jusqu'à 1 h de réserve. Une personne qui parle sans arrêt n'est jamais bloquée ; un faux vocal d'un gros fichier l'est.
+- **Moyen, abus du texte** : un robot à 60 trames par minute écrit 350 Mo par jour et par siège. Correction proposée : la cadence actuelle (60 par minute, rafale 20) plus un plafond de **1 200 messages par heure et par personne** (un toutes les 3 s en continu, au-delà de toute conversation humaine). Les « en train d'écrire », accusés et présence (§6, §39.3.7) sont relayés **sans être écrits sur le disque**, signalés par un bit de l'enveloppe extérieure ; **fuite assumée** : le serveur distingue ces trames brèves des messages, ce qu'il pouvait déjà déduire de leur rythme (S34).
+- **Garde-fou global** : l'ensemble compte dans `SHH_STORAGE_MAX` ; disque presque plein → plus de nouveaux salons (503 `busy`), les salons ouverts continuent.
+
+**Abonnements** (plus tard, §39.11, §38.8) : plus de capacité de fichiers, de durée, de participants ; appels audio et vidéo. Pas de salon payant avant l'avis du juriste.
 
 ## 6. Accusés : envoyé, reçu, vu (décision : toujours actifs)
 
@@ -132,9 +143,9 @@ Choisi sur la page d'explication avant d'entrer (§39.4, règles de forme et d'u
 - **Avec un compte** (quand le compte existera, Tasks A1 à A3, §37) : photo gardée dans le coffre chiffré du compte et proposée à l'entrée de chaque salon. Le serveur ne la voit jamais. **Amendement de §37** : un avatar chiffré est permis ; pseudonymes, contacts et annuaires côté serveur restent exclus.
 - **Signalement (moyen, abus)** : une photo peut être choquante ou illégale. Chacun peut masquer l'avatar d'un participant pour soi ; le signalement existant (§39.5) s'applique.
 
-## 8. Appels audio et vidéo : plus tard, mais préparés
+## 8. Appels audio et vidéo : plus tard, payants, mais préparés
 
-Rien n'est codé maintenant. Contraintes posées dès aujourd'hui pour ne rien bloquer :
+**Fonctions payantes** (décision du propriétaire, 11 novembre). Rien n'est codé maintenant. Contraintes posées dès aujourd'hui pour ne rien bloquer :
 
 - **Jamais en direct entre participants** : un appel direct révélerait l'adresse IP de chacun aux autres (contraire à §39.3.1). Les appels passeront par un relais de notre serveur (TURN, mode « relais seulement »).
 - **Chiffrés de bout en bout** par SFrame (norme RFC 9605), avec une clé tirée de l'exporteur MLS du groupe : le relais ne voit que du chiffré.
