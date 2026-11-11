@@ -22,6 +22,28 @@ jobs:
       - name: govulncheck
         working-directory: server
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+  # Moteur Rust (engine/) : format, clippy (hôte et wasm32), tests, avis de sécurité RustSec.
+  engine:
+    runs-on: ubuntu-latest
+    # Tests du moteur (Argon2id optimisé même en debug) et compilation de cargo-audit (≈ 2-3 min).
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: toolchain
+        uses: ./.github/actions/engine-toolchain
+        with:
+          wasm-bindgen: "false"
+      # cargo fmt --check, cargo clippy -D warnings (hôte, puis shhdrop-wasm en wasm32), cargo test.
+      - run: make test-engine
+      # cargo-audit compilé ici, sans cache (même raison que wasm-bindgen : .github/actions/
+      # engine-toolchain), par le Rust épinglé. --deny warnings : un avis « non maintenu »,
+      # « unsound » ou une version retirée (yanked) échoue aussi.
+      - name: cargo audit
+        env:
+          CHANNEL: ${{ steps.toolchain.outputs.channel }}
+        run: |
+          cargo +"$CHANNEL" install --locked --root "$RUNNER_TEMP/cargo-audit" cargo-audit --version 0.22.2
+          cd engine && "$RUNNER_TEMP/cargo-audit/bin/cargo-audit" audit --deny warnings
   web:
     runs-on: ubuntu-latest
     steps:
@@ -102,7 +124,7 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     # Deux builds du moteur en release (LTO), chacun dans son engine/target, plus wasm-bindgen-cli
-    # à compiler la première fois (cache ensuite).
+    # à compiler (pas de cache : .github/actions/engine-toolchain).
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -132,3 +154,25 @@ jobs:
           ls -R sums
           diff sums/sums-ubuntu-latest/SHA256SUMS sums/sums-ubuntu-24.04/SHA256SUMS
           echo "$(wc -l < sums/sums-ubuntu-latest/SHA256SUMS) fichiers identiques sur les deux machines"
+  # Le pkg du moteur (.wasm et colle) construit par l'étape « engine » de deploy/Dockerfile, qui
+  # répète les commandes de web/scripts/build-engine.mjs (pas de Node dans cette étape), doit être
+  # identique, octet pour octet, à celui des builds de la CI (empreintes du job repro).
+  repro-docker:
+    needs: repro
+    runs-on: ubuntu-latest
+    # Image rust à télécharger, wasm-bindgen-cli à compiler, moteur en release.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sums-ubuntu-latest
+          path: sums
+      - name: pkg de l'image identique à celui de la CI
+        run: |
+          docker build -f deploy/Dockerfile --target engine-pkg --output "type=local,dest=$RUNNER_TEMP/image" .
+          grep '  pkg/' sums/SHA256SUMS > "$RUNNER_TEMP/ci.sums"
+          [ "$(wc -l < "$RUNNER_TEMP/ci.sums")" -eq 4 ] || { echo "4 fichiers pkg/ attendus dans SHA256SUMS" >&2; exit 1; }
+          (cd "$RUNNER_TEMP/image" && find pkg -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$RUNNER_TEMP/image.sums"
+          diff "$RUNNER_TEMP/ci.sums" "$RUNNER_TEMP/image.sums"
+          echo "pkg de l'image identique à celui de la CI :"; cat "$RUNNER_TEMP/image.sums"

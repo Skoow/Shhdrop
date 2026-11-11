@@ -1,36 +1,47 @@
-# Chaîne d'outils du moteur WebAssembly (engine/, web/scripts/build-engine.mjs), pour tout job
-# qui construit ou teste le site (npm test, npm run build, npm run build:demo, npm run check) :
-# - Rust à la version exacte de engine/rust-toolchain.toml, cible wasm32-unknown-unknown, par le
-#   rustup déjà présent sur l'exécuteur (aucune action tierce) ;
+# Chaîne d'outils du moteur (engine/, web/scripts/build-engine.mjs), pour tout job qui construit
+# ou teste le moteur ou le site (npm test, npm run build, npm run build:demo, npm run check) :
+# - Rust à la version exacte de engine/rust-toolchain.toml, avec rustfmt, clippy et la cible
+#   wasm32-unknown-unknown, par le rustup déjà présent sur l'exécuteur (aucune action tierce) ;
 # - wasm-bindgen-cli 0.2.130 (même version que la crate wasm-bindgen de engine/Cargo.lock),
-#   compilé une fois par `cargo install --locked` puis gardé en cache (clé : version et image).
+#   compilé depuis crates.io par `cargo +<version> install --locked` (sources vérifiées par les
+#   sommes de contrôle du verrou), par ce même Rust épinglé.
+#
+# Pas de cache pour wasm-bindgen (≈ 75 s de compilation par job) : un cache est inscriptible par
+# tout code qui tourne dans un job de main, y compris une dépendance npm piégée (npm test, Vitest,
+# Playwright), qui pourrait y remplacer le binaire et piéger le .wasm de tous les builds suivants,
+# démo GitHub Pages comprise. Sauvegarder le cache avant npm ne suffit pas : un jeton d'exécution
+# lu dans la mémoire du runner permet d'évincer puis de réécrire une entrée. Un binaire compilé
+# dans le job, avant toute étape npm, ne dépend que de crates.io et du verrou.
 name: engine-toolchain
-description: Rust épinglé (cible wasm32) et wasm-bindgen-cli 0.2.130
+description: Rust épinglé (rustfmt, clippy, cible wasm32) et wasm-bindgen-cli 0.2.130
+inputs:
+  wasm-bindgen:
+    description: "« true » : installe aussi wasm-bindgen-cli 0.2.130 (inutile au job engine)"
+    default: "true"
+outputs:
+  channel:
+    description: Version de Rust de engine/rust-toolchain.toml (ex. 1.97.0)
+    value: ${{ steps.rust.outputs.channel }}
 runs:
   using: composite
   steps:
     - name: Rust de engine/rust-toolchain.toml
+      id: rust
       shell: bash
       run: |
         channel="$(sed -n 's/^channel = "\(.*\)"$/\1/p' engine/rust-toolchain.toml)"
         [ -n "$channel" ] || { echo "channel absent de engine/rust-toolchain.toml" >&2; exit 1; }
-        rustup toolchain install "$channel" --profile minimal --target wasm32-unknown-unknown --no-self-update
+        rustup toolchain install "$channel" --profile minimal --component rustfmt,clippy \
+          --target wasm32-unknown-unknown --no-self-update
         (cd engine && rustc --version | grep -q "^rustc $channel ") || { echo "rustc $channel attendu dans engine/" >&2; exit 1; }
-    # Image de l'exécuteur (ubuntu24…) dans la clé : un binaire lié à une glibc plus récente ne
-    # revient pas sur une image plus ancienne. ImageOS est une variable du système de l'exécuteur,
-    # absente du contexte `env` des expressions : relue ici.
-    - id: image
-      shell: bash
-      run: echo "os=${ImageOS:-inconnu}" >> "$GITHUB_OUTPUT"
-    - name: Cache de wasm-bindgen-cli
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: ~/.cargo/bin/wasm-bindgen
-        key: wasm-bindgen-cli-0.2.130-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.os }}
+        echo "channel=$channel" >> "$GITHUB_OUTPUT"
     - name: wasm-bindgen-cli 0.2.130
+      if: inputs.wasm-bindgen == 'true'
       shell: bash
+      env:
+        CHANNEL: ${{ steps.rust.outputs.channel }}
       run: |
-        if [ "$(wasm-bindgen --version 2>/dev/null)" != "wasm-bindgen 0.2.130" ]; then
-          cargo install --locked wasm-bindgen-cli --version 0.2.130
-        fi
-        wasm-bindgen --version
+        root="$RUNNER_TEMP/wasm-bindgen-cli"
+        cargo +"$CHANNEL" install --locked --root "$root" wasm-bindgen-cli --version 0.2.130
+        echo "$root/bin" >> "$GITHUB_PATH"
+        [ "$("$root/bin/wasm-bindgen" --version)" = "wasm-bindgen 0.2.130" ] || { echo "wasm-bindgen 0.2.130 attendu" >&2; exit 1; }

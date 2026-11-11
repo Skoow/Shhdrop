@@ -9,7 +9,12 @@
 //      du même module après une panique (spec moteur §7 ; web/src/engine/index.ts).
 // Les chemins de ~/.cargo (sources des crates, cités par les messages de panique) sont réécrits
 // en /cargo : le .wasm ne porte ni le dossier personnel de qui le construit, ni rien qui change
-// d'une machine à l'autre (build reproductible, web/scripts/repro.sh).
+// d'une machine à l'autre (build reproductible, web/scripts/repro.sh). L'option passe par
+// CARGO_ENCODED_RUSTFLAGS (options séparées par 0x1f) : un CARGO_HOME qui contient une espace
+// reste une seule option, alors que RUSTFLAGS couperait le chemin en deux.
+// Refusés s'ils sont hérités de l'environnement : RUSTFLAGS et CARGO_ENCODED_RUSTFLAGS, qui
+// changeraient le .wasm sans laisser de trace ; CARGO_TARGET_DIR et CARGO_BUILD_TARGET_DIR, qui
+// feraient passer à wasm-bindgen un ancien .wasm resté dans engine/target.
 //
 // SHH_ENGINE_PREBUILT=1 : pkg/ a déjà été construit par la même commande dans une autre étape
 // (image Docker : étape Rust, deploy/Dockerfile) ; le script vérifie seulement sa présence.
@@ -43,9 +48,16 @@ const version = execFileSync("wasm-bindgen", ["--version"], { encoding: "utf8" }
 if (version !== `wasm-bindgen ${WASM_BINDGEN}`) {
   throw new Error(`wasm-bindgen ${WASM_BINDGEN} attendu, trouvé « ${version} » : cargo install wasm-bindgen-cli --version ${WASM_BINDGEN} --locked`);
 }
+for (const name of ["RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_TARGET_DIR", "CARGO_BUILD_TARGET_DIR"]) {
+  if (process.env[name] !== undefined) {
+    throw new Error(`${name} est défini (« ${process.env[name]} ») : le build du moteur n'accepte ni option de rustc ni dossier de sortie hérités (build reproductible)`);
+  }
+}
 const cargoHome = process.env.CARGO_HOME || join(homedir(), ".cargo");
-const rustflags = [process.env.RUSTFLAGS, `--remap-path-prefix=${cargoHome}=/cargo`].filter(Boolean).join(" ");
-run("cargo", ["build", "--release", "--target", "wasm32-unknown-unknown", "-p", "shhdrop-wasm", "--locked"], engine, { ...process.env, RUSTFLAGS: rustflags });
+run("cargo", ["build", "--release", "--target", "wasm32-unknown-unknown", "-p", "shhdrop-wasm", "--locked"], engine, {
+  ...process.env,
+  CARGO_ENCODED_RUSTFLAGS: `--remap-path-prefix=${cargoHome}=/cargo`,
+});
 rmSync(out, { recursive: true, force: true });
 run(
   "wasm-bindgen",

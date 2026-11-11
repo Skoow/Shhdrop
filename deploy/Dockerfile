@@ -20,7 +20,8 @@
 # --- Moteur WebAssembly -----------------------------------------------------------------
 # Mêmes commandes et mêmes options que web/scripts/build-engine.mjs (qui ne tourne pas ici :
 # pas de Node dans cette étape) : le .wasm obtenu est identique, octet pour octet, à celui de la
-# CI et du poste de développement (chemins de CARGO_HOME réécrits en /cargo). Image glibc
+# CI et du poste de développement (chemins de CARGO_HOME réécrits en /cargo ; comparé à chaque
+# push par le job repro-docker de la CI, étape engine-pkg ci-dessous). Image glibc
 # (Debian), pas Alpine : cargo mêle le triplet de l'hôte (…-linux-gnu / …-linux-musl) aux noms
 # internes des crates, et un hôte musl donnerait un autre .wasm que la CI (vérifié).
 FROM rust:1.97.0-slim-bookworm@sha256:6d220bf85c74e842a79da63997af8d2e74455c0b8847d8bb3a5888572334991d AS engine
@@ -30,10 +31,16 @@ RUN rustup target add wasm32-unknown-unknown \
  && cargo install --locked wasm-bindgen-cli --version 0.2.130
 WORKDIR /src/engine
 COPY engine/ ./
-RUN RUSTFLAGS="--remap-path-prefix=$CARGO_HOME=/cargo" \
+RUN CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$CARGO_HOME=/cargo" \
     cargo build --release --target wasm32-unknown-unknown -p shhdrop-wasm --locked \
  && wasm-bindgen --target web --remove-name-section --remove-producers-section --experimental-reset-state-function \
     --out-dir /out/pkg --out-name shhdrop_wasm target/wasm32-unknown-unknown/release/shhdrop_wasm.wasm
+
+# Le pkg seul, pour la CI (job repro-docker de .github/workflows/ci.yml), qui le compare à celui
+# de ses propres builds ; n'entre pas dans l'image :
+#   docker build -f deploy/Dockerfile --target engine-pkg --output type=local,dest=<dossier> .
+FROM scratch AS engine-pkg
+COPY --from=engine /out/pkg /pkg
 
 # --- Site -------------------------------------------------------------------------------
 FROM node:22.23.4-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202 AS web

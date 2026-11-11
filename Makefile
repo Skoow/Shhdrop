@@ -1,6 +1,14 @@
-.PHONY: test test-go test-web test-e2e test-ui test-repro
+.PHONY: test test-engine test-go test-web test-e2e test-ui test-repro
 
-test: test-go test-web test-e2e
+test: test-engine test-go test-web test-e2e
+
+# Moteur Rust : format, clippy sans avertissement (hôte, puis la liaison WebAssembly en wasm32),
+# tests. --locked : Cargo.lock fait foi. cargo audit (réseau) tourne dans la CI (job engine).
+test-engine:
+	cd engine && cargo fmt --all --check
+	cd engine && cargo clippy --workspace --all-targets --locked -- -D warnings
+	cd engine && cargo clippy -p shhdrop-wasm --target wasm32-unknown-unknown --all-targets --locked -- -D warnings
+	cd engine && cargo test --workspace --locked
 
 test-go:
 	cd server && go vet ./... && go test ./... && GOARCH=386 go build ./...
