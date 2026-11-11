@@ -3,6 +3,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	_ "modernc.org/sqlite"
@@ -40,9 +41,37 @@ const keptColumns = `id,state,bucket,ttl_hours,max_opens,opens_left,opens_issued
 const indexes = `CREATE UNIQUE INDEX IF NOT EXISTS shares_access_v ON shares(access_v);
 CREATE UNIQUE INDEX IF NOT EXISTS shares_manage_v ON shares(manage_v)`
 
-// Les PRAGMA passent par le DSN pour s'appliquer à chaque connexion.
-const pragmas = "_pragma=journal_mode(WAL)&_pragma=secure_delete(ON)" +
+// Les PRAGMA passent par le DSN pour s'appliquer à chaque connexion. synchronous(FULL) :
+// valeur par défaut, écrite pour qu'un changement du pilote ne l'abaisse pas en silence
+// (NORMAL perdrait les dernières transactions à une coupure de courant).
+const pragmas = "_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_pragma=secure_delete(ON)" +
 	"&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=temp_store(MEMORY)"
+
+// SchemaVersion : version du schéma, écrite dans PRAGMA user_version. Un binaire refuse une
+// base d'une version plus récente (ErrNewerSchema) : un retour arrière ne réécrit jamais une
+// base qu'il ne connaît pas. À incrémenter avec toute migration.
+const SchemaVersion = 1
+
+var (
+	// ErrNewerSchema : message fixe, sans chemin.
+	ErrNewerSchema = errors.New("base créée par une version plus récente de Shhdrop : refus d'ouvrir " +
+		"(retour arrière : réinstaller la version récente, ou effacer la base)")
+	// ErrCheckpointBusy : le vidage du WAL n'a pas pu finir (lecteur ou écrivain en cours) ;
+	// le WAL garde encore des pages, à revider au prochain passage (spec §9.1).
+	ErrCheckpointBusy = errors.New("vidage du WAL incomplet (base occupée)")
+)
+
+// checkVersion refuse une base d'une version plus récente et rend la version lue.
+func checkVersion(db *sql.DB) (int, error) {
+	var v int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		return 0, fmt.Errorf("lecture de la version du schéma : %w", err)
+	}
+	if v > SchemaVersion {
+		return v, ErrNewerSchema
+	}
+	return v, nil
+}
 
 func open(dsn string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", dsn)
@@ -61,6 +90,10 @@ func OpenExisting(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := checkVersion(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	var n int
 	if err := db.QueryRow(`SELECT count(*) FROM shares`).Scan(&n); err != nil {
 		db.Close()
@@ -73,6 +106,12 @@ func OpenExisting(path string) (*sql.DB, error) {
 func Open(path string) (*sql.DB, error) {
 	db, err := open("file:" + path + "?" + pragmas)
 	if err != nil {
+		return nil, err
+	}
+	// Version d'abord : une base plus récente n'est pas touchée (ni schéma, ni migration).
+	version, err := checkVersion(db)
+	if err != nil {
+		db.Close()
 		return nil, err
 	}
 	if _, err := db.Exec(schema); err != nil {
@@ -97,6 +136,12 @@ func Open(path string) (*sql.DB, error) {
 	if _, err := db.Exec(indexes); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("création des index : %w", err)
+	}
+	if version < SchemaVersion {
+		if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, SchemaVersion)); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("écriture de la version du schéma : %w", err)
+		}
 	}
 	return db, nil
 }
@@ -141,8 +186,16 @@ func migrate(db *sql.DB) error {
 	return Checkpoint(db)
 }
 
-// Checkpoint replie le WAL dans la base et le tronque.
+// Checkpoint replie le WAL dans la base et le tronque. Le PRAGMA ne rend pas d'erreur quand
+// un lecteur l'empêche de finir : il le dit dans sa première colonne (busy), lue ici (audit
+// F8) ; ErrCheckpointBusy alors.
 func Checkpoint(db *sql.DB) error {
-	_, err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
-	return err
+	var busy, logFrames, done int
+	if err := db.QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &logFrames, &done); err != nil {
+		return err
+	}
+	if busy != 0 {
+		return ErrCheckpointBusy
+	}
+	return nil
 }

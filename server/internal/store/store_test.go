@@ -2,6 +2,8 @@ package store
 
 import (
 	"bytes"
+	"errors"
+	"strconv"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -311,5 +313,108 @@ CREATE UNIQUE INDEX shares_manage_v ON shares(manage_v)`
 	w, _ := os.ReadFile(path + "-wal")
 	if bytes.Contains(append(b, w...), marker) {
 		t.Fatal("octets des colonnes retirées encore sur disque")
+	}
+}
+
+// synchronous reste FULL (2) : un partage « ready » ne doit pas disparaître à une coupure de
+// courant (optimisation NORMAL écartée, décision du 11 novembre).
+func TestSynchronousFull(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "shares.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if v := pragma(t, db, "synchronous"); v != "2" {
+		t.Fatalf("synchronous = %s", v)
+	}
+}
+
+// Audit F8 : un vidage du WAL bloqué par un lecteur (busy = 1) est une erreur : le WAL garde
+// alors des pages de partages effacés (spec §9.1), il ne doit pas passer pour vidé.
+func TestCheckpointBusy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shares.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`PRAGMA busy_timeout=10`); err != nil { // une seule connexion (Open)
+		t.Fatal(err)
+	}
+	if err := Checkpoint(db); err != nil {
+		t.Fatal("vidage sans lecteur :", err)
+	}
+	other, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	tx, err := other.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var n int
+	if err := tx.QueryRow(`SELECT count(*) FROM shares`).Scan(&n); err != nil { // lecteur ouvert
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO shares(id,state,bucket,opens_left,segments_mask,access_v,manage_v)
+		VALUES('x','uploading',1,0,x'00',x'01',x'02')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Checkpoint(db); !errors.Is(err, ErrCheckpointBusy) {
+		t.Fatal("vidage bloqué par un lecteur non signalé :", err)
+	}
+	tx.Rollback()
+	if err := Checkpoint(db); err != nil {
+		t.Fatal("vidage après le lecteur :", err)
+	}
+}
+
+// Version du schéma (PRAGMA user_version) : posée à la création et sur une base existante
+// sans version ; une base d'une version plus récente est refusée sans rien toucher (retour
+// arrière vers un binaire plus ancien), avec un message fixe.
+func TestSchemaVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shares.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := pragma(t, db, "user_version"); v != strconv.Itoa(SchemaVersion) {
+		t.Fatalf("user_version = %s", v)
+	}
+	if _, err := db.Exec(`PRAGMA user_version=0`); err != nil { // base d'avant la version
+		t.Fatal(err)
+	}
+	db.Close()
+	if db, err = Open(path); err != nil {
+		t.Fatal(err)
+	}
+	if v := pragma(t, db, "user_version"); v != strconv.Itoa(SchemaVersion) {
+		t.Fatalf("user_version non posée sur une base existante : %s", v)
+	}
+	if _, err := db.Exec(`PRAGMA user_version=` + strconv.Itoa(SchemaVersion+1)); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	for name, open := range map[string]func(string) (*sql.DB, error){"Open": Open, "OpenExisting": OpenExisting} {
+		db, err := open(path)
+		if !errors.Is(err, ErrNewerSchema) {
+			if db != nil {
+				db.Close()
+			}
+			t.Fatalf("%s : base plus récente acceptée : %v", name, err)
+		}
+		if strings.Contains(err.Error(), path) {
+			t.Fatalf("%s : message avec le chemin : %v", name, err)
+		}
+	}
+	raw, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if v := pragma(t, raw, "user_version"); v != strconv.Itoa(SchemaVersion+1) {
+		t.Fatal("version touchée", v)
 	}
 }
