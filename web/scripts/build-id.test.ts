@@ -1,7 +1,7 @@
 // buildId (vite.config.ts) : un build sans identifiant valide échoue (audit du 11 novembre, I6) ;
 // « dev » reste possible pour vite dev et les tests.
 import { afterEach, describe, expect, it } from "vitest";
-import { buildId } from "../vite.config.ts";
+import { buildId } from "../vite.config";
 
 const saved = process.env.SHH_BUILD_ID;
 afterEach(() => {
