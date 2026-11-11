@@ -31,10 +31,12 @@ fn env(k: u32) -> Enveloppe {
     }
 }
 
-/// Membres indexés par siège (`None` : siège vide) et compteur `seq` du serveur.
+/// Membres indexés par siège (`None` : siège vide), compteur `seq` du serveur et liste des
+/// sièges occupés que le serveur donne à l'accueil (`remplacer_annonces`, créateur au siège 0).
 struct Reseau {
     m: Vec<Option<Salon>>,
     seq: u64,
+    liste: Vec<(u8, [u8; 16])>,
 }
 
 impl Reseau {
@@ -42,42 +44,61 @@ impl Reseau {
         self.m[s].as_mut().unwrap()
     }
 
-    /// Le serveur range `mls` au rang suivant et le remet à tous.
-    fn diffuser(&mut self, mls: &[u8]) -> Vec<(usize, Result<Evenement, Error>)> {
+    /// Le serveur range `mls`, envoyé par le siège `de`, au rang suivant et le remet à tous.
+    fn diffuser(&mut self, de: u8, mls: &[u8]) -> Vec<(usize, Result<Evenement, Error>)> {
         self.seq += 1;
         let seq = self.seq;
         self.m
             .iter_mut()
             .enumerate()
-            .filter_map(|(i, s)| s.as_mut().map(|s| (i, s.recevoir(mls, seq))))
+            .filter_map(|(i, s)| s.as_mut().map(|s| (i, s.recevoir(mls, seq, de))))
             .collect()
     }
 
+    /// Arrivée (0x02) ou reprise (0x0A) annoncée par le serveur.
     fn annoncer(&mut self, siege: u8, n: [u8; 16]) {
+        self.liste.retain(|a| a.0 != siege);
+        self.liste.push((siege, n));
         for s in self.m.iter_mut().flatten() {
             s.annoncer(siege, n);
         }
     }
 
-    /// Arrivée au siège `siege` (arrivée numéro `n`) : annonce du serveur, KeyPackage diffusé
-    /// (reconnu par chacun), ajout par `adder`, Welcome rendu à l'écho gagnant du Commit.
-    fn arrivee(&mut self, adder: usize, siege: u8, n: u8, retires: Vec<u8>) {
-        let mut nouveau = Salon::creer(
-            nouvelle_identite(siege, nonce(siege, n)).unwrap(),
-            cles(),
-            false,
-        )
-        .unwrap();
-        let kp = nouveau.key_package().unwrap();
-        self.annoncer(siege, nonce(siege, n));
-        nouveau.annoncer(siege, nonce(siege, n));
-        for (i, r) in self.diffuser(&kp) {
+    /// Départ (0x03) annoncé par le serveur.
+    fn partir(&mut self, siege: u8) {
+        self.liste.retain(|a| a.0 != siege);
+        for s in self.m.iter_mut().flatten() {
+            s.marquer_parti(siege);
+        }
+    }
+
+    /// Nouvel arrivant (déjà annoncé) : il reçoit la liste complète à l'accueil.
+    fn nouveau(&self, siege: u8, n: [u8; 16]) -> Salon {
+        let mut x = Salon::creer(nouvelle_identite(siege, n).unwrap(), cles(), false).unwrap();
+        x.remplacer_annonces(0, &self.liste);
+        x
+    }
+
+    /// Le siège publie son KeyPackage : chacun le reconnaît.
+    fn publier(&mut self, siege: u8, kp: &[u8]) {
+        for (i, r) in self.diffuser(siege, kp) {
             assert_eq!(
                 r,
-                Ok(Evenement::KeyPackage { octets: kp.clone() }),
+                Ok(Evenement::KeyPackage {
+                    octets: kp.to_vec()
+                }),
                 "membre {i}"
             );
         }
+    }
+
+    /// Arrivée au siège `siege` (arrivée numéro `n`) : annonce du serveur, KeyPackage publié
+    /// par le siège, ajout par `adder`, Welcome rendu à l'écho gagnant du Commit.
+    fn arrivee(&mut self, adder: usize, siege: u8, n: u8, retires: Vec<u8>) {
+        self.annoncer(siege, nonce(siege, n));
+        let mut nouveau = self.nouveau(siege, nonce(siege, n));
+        let kp = nouveau.key_package().unwrap();
+        self.publier(siege, &kp);
         let commit = self.salon(adder).ajouter(&kp).unwrap();
         let welcome = self.commit_accepte(adder, &commit, vec![siege], retires);
         nouveau.rejoindre(&welcome.unwrap()).unwrap();
@@ -93,7 +114,7 @@ impl Reseau {
         let e = env(k);
         let mls = self.salon(de).chiffrer(&e).unwrap();
         assert!(mls.len() <= MAX_CHARGE);
-        for (i, r) in self.diffuser(&mls) {
+        for (i, r) in self.diffuser(de as u8, &mls) {
             if i == de {
                 assert_eq!(r, Ok(Evenement::Ignore), "écho de l'expéditeur {i}");
             } else {
@@ -119,7 +140,7 @@ impl Reseau {
         retires: Vec<u8>,
     ) -> Option<Vec<u8>> {
         let mut welcome = None;
-        for (i, r) in self.diffuser(mls) {
+        for (i, r) in self.diffuser(de as u8, mls) {
             if i == de {
                 match r {
                     Ok(Evenement::CommitAccepte { welcome: w }) => {
@@ -153,13 +174,21 @@ impl Reseau {
     }
 }
 
-/// Groupe de `n` membres (sièges 0 à n-1) : le créateur (siège 0) ajoute chacun, un par un.
-fn groupe(n: u8) -> Reseau {
-    let createur = Salon::creer(nouvelle_identite(0, nonce(0, 0)).unwrap(), cles(), true).unwrap();
-    let mut r = Reseau {
+/// Créateur seul au siège 0.
+fn createur_seul(id: shhdrop_salon::Identite) -> Reseau {
+    let mut createur = Salon::creer(id, cles(), true).unwrap();
+    let liste = vec![(0, nonce(0, 0))];
+    createur.remplacer_annonces(0, &liste);
+    Reseau {
         m: vec![Some(createur)],
         seq: 0,
-    };
+        liste,
+    }
+}
+
+/// Groupe de `n` membres (sièges 0 à n-1) : le créateur (siège 0) ajoute chacun, un par un.
+fn groupe(n: u8) -> Reseau {
+    let mut r = createur_seul(nouvelle_identite(0, nonce(0, 0)).unwrap());
     for s in 1..n {
         r.arrivee(0, s, 0, vec![]);
     }
@@ -189,7 +218,7 @@ fn retrait() {
     let mls = r.salon(1).chiffrer(&env(1)).unwrap();
     r.seq += 1;
     let seq = r.seq;
-    let lu = r.salon(9).recevoir(&mls, seq);
+    let lu = r.salon(9).recevoir(&mls, seq, 1);
     assert!(
         matches!(lu, Err(Error::NonMembre) | Ok(Evenement::Ignore)),
         "{lu:?}"
@@ -232,9 +261,12 @@ fn commits_concurrents() {
     let b = r.salon(5).renouveler().unwrap();
     // Tant que son Commit attend, l'auteur n'en fait pas d'autre.
     assert_eq!(r.salon(5).renouveler(), Err(Error::CommitEnCours));
-    for (i, ev) in r.diffuser(&a) {
+    for (i, ev) in r.diffuser(2, &a) {
         let attendu = if i == 5 {
-            Evenement::CommitPerdu
+            Evenement::CommitPerdu {
+                ajoutes: vec![],
+                retires: vec![],
+            }
         } else if i == 2 {
             Evenement::CommitAccepte { welcome: None }
         } else {
@@ -245,7 +277,7 @@ fn commits_concurrents() {
         };
         assert_eq!(ev, Ok(attendu), "membre {i}");
     }
-    for (i, ev) in r.diffuser(&b) {
+    for (i, ev) in r.diffuser(5, &b) {
         assert_eq!(ev, Ok(Evenement::Ignore), "commit perdant chez {i}");
     }
     assert_eq!(r.meme_epoque(), e0 + 1);
@@ -266,17 +298,20 @@ fn commits_concurrents() {
 #[test]
 fn ajout_perdu_puis_rejoue() {
     let mut r = groupe(9);
-    let mut nouveau =
-        Salon::creer(nouvelle_identite(9, nonce(9, 0)).unwrap(), cles(), false).unwrap();
-    let kp = nouveau.key_package().unwrap();
     r.annoncer(9, nonce(9, 0));
+    let mut nouveau = r.nouveau(9, nonce(9, 0));
+    let kp = nouveau.key_package().unwrap();
+    r.publier(9, &kp);
     // Le Commit d'ajout ne donne pas de Welcome : il n'existe qu'à l'écho gagnant.
     let ajout = r.salon(0).ajouter(&kp).unwrap();
     let maj = r.salon(4).renouveler().unwrap();
-    for (i, ev) in r.diffuser(&maj) {
+    for (i, ev) in r.diffuser(4, &maj) {
         // Perdu : le Welcome de l'ajout est jeté avec le Commit.
         let attendu = if i == 0 {
-            Evenement::CommitPerdu
+            Evenement::CommitPerdu {
+                ajoutes: vec![],
+                retires: vec![],
+            }
         } else if i == 4 {
             Evenement::CommitAccepte { welcome: None }
         } else {
@@ -287,7 +322,7 @@ fn ajout_perdu_puis_rejoue() {
         };
         assert_eq!(ev, Ok(attendu), "membre {i}");
     }
-    for (_, ev) in r.diffuser(&ajout) {
+    for (_, ev) in r.diffuser(0, &ajout) {
         assert_eq!(ev, Ok(Evenement::Ignore));
     }
     let ajout2 = r.salon(0).ajouter(&kp).unwrap();
@@ -307,7 +342,7 @@ fn message_epoque_precedente() {
     let vieux = r.salon(4).chiffrer(&e).unwrap();
     let commit = r.salon(0).renouveler().unwrap();
     r.commit_accepte(0, &commit, vec![], vec![]);
-    for (i, ev) in r.diffuser(&vieux) {
+    for (i, ev) in r.diffuser(4, &vieux) {
         if i == 4 {
             assert_eq!(ev, Ok(Evenement::Ignore));
         } else {
@@ -332,7 +367,7 @@ fn deux_epoques_trop_vieux() {
     r.commit_accepte(0, &c1, vec![], vec![]);
     let c2 = r.salon(1).renouveler().unwrap();
     r.commit_accepte(1, &c2, vec![], vec![]);
-    for (i, ev) in r.diffuser(&vieux) {
+    for (i, ev) in r.diffuser(4, &vieux) {
         assert_eq!(ev, Err(Error::EpoquePerdue), "membre {i}");
     }
     r.message(4, 8);
@@ -361,8 +396,14 @@ fn politique_refuse() {
     let kp_nonce = Salon::creer(nouvelle_identite(9, nonce(9, 2)).unwrap(), cles(), false).unwrap();
     let kp2 = kp_nonce.key_package().unwrap();
     r.salon(0).annoncer(9, nonce(9, 2));
+    r.seq += 1;
+    let seq = r.seq;
+    assert!(matches!(
+        r.salon(0).recevoir(&kp2, seq, 9),
+        Ok(Evenement::KeyPackage { .. })
+    ));
     let commit = r.salon(0).ajouter(&kp2).unwrap();
-    for (i, ev) in r.diffuser(&commit) {
+    for (i, ev) in r.diffuser(0, &commit) {
         if i != 0 {
             assert_eq!(ev, Err(Error::CommitRefuse), "membre {i}");
             assert_eq!(r.m[i].as_ref().unwrap().epoque(), Some(e0), "membre {i}");
@@ -379,16 +420,27 @@ fn politique_refuse() {
 #[test]
 fn politique_regles() {
     let annonces = [(4u8, nonce(4, 0)), (5, nonce(5, 1))];
+    // KeyPackages publiés par leur siège : clé (empreinte) [siège; 32].
+    let kps: Vec<_> = annonces.iter().map(|&(s, n)| (s, n, [s; 32])).collect();
+    let avec_cle = |a: &[(u8, [u8; 16])]| a.iter().map(|&(s, n)| (s, n, [s; 32])).collect();
     // Feuilles retirées : leur nonce d'arrivée numéro 0.
+    let ch =
+        |ajouts: Vec<(u8, [u8; 16], [u8; 32])>, retraits: &[u8], restants: &[u8]| Changements {
+            ajouts,
+            retraits: retraits.iter().map(|&s| (s, nonce(s, 0))).collect(),
+            restants: restants.to_vec(),
+            interdit: false,
+        };
     let v =
         |ajouts: &[(u8, [u8; 16])], retraits: &[u8], restants: &[u8], auteur: u8, partis: &[u8]| {
-            let ch = Changements {
-                ajouts: ajouts.to_vec(),
-                retraits: retraits.iter().map(|&s| (s, nonce(s, 0))).collect(),
-                restants: restants.to_vec(),
-                interdit: false,
-            };
-            verifier(&ch, 0, auteur, &annonces, partis)
+            verifier(
+                &ch(avec_cle(ajouts), retraits, restants),
+                0,
+                auteur,
+                &annonces,
+                partis,
+                &kps,
+            )
         };
     let refus = Err(Error::CommitRefuse);
     // Renouvellement seul.
@@ -417,12 +469,18 @@ fn politique_regles() {
         v(&[(4, nonce(4, 0)), (4, nonce(4, 0))], &[], &[0], 0, &[]),
         refus
     );
+    // Feuille annoncée mais d'une autre clé que le KeyPackage publié par le siège (fabriquée
+    // par un membre avec le nonce public), ou sans KeyPackage reçu : refusée, même du créateur.
+    let copie = ch(vec![(4, nonce(4, 0), [9; 32])], &[], &[0, 1]);
+    assert_eq!(verifier(&copie, 0, 0, &annonces, &[], &kps), refus);
+    let sans_kp = ch(vec![(4, nonce(4, 0), [4; 32])], &[], &[0, 1]);
+    assert_eq!(verifier(&sans_kp, 0, 0, &annonces, &[], &[]), refus);
     // Proposition interdite.
     let x = Changements {
         interdit: true,
         ..Changements::default()
     };
-    assert_eq!(verifier(&x, 0, 0, &annonces, &[]), refus);
+    assert_eq!(verifier(&x, 0, 0, &annonces, &[], &kps), refus);
 }
 
 /// Review Focus 5 : le siège 3 revient avec une nouvelle identité ; un non-créateur retire
@@ -433,16 +491,20 @@ fn retour_nouvelle_feuille() {
     let avant = r.salon(0).empreinte(3).unwrap();
     let mut ancien = r.m[3].take().unwrap();
     // L'ancienne instance reste joignable (l'onglet rechargé n'a pas encore disparu).
-    let mut nouveau =
-        Salon::creer(nouvelle_identite(3, nonce(3, 1)).unwrap(), cles(), false).unwrap();
-    let kp = nouveau.key_package().unwrap();
     r.annoncer(3, nonce(3, 1));
     ancien.annoncer(3, nonce(3, 1));
+    let mut nouveau = r.nouveau(3, nonce(3, 1));
+    let kp = nouveau.key_package().unwrap();
+    r.publier(3, &kp);
+    assert!(matches!(
+        ancien.recevoir(&kp, r.seq, 3),
+        Ok(Evenement::KeyPackage { .. })
+    ));
     let commit = r.salon(1).ajouter(&kp).unwrap();
     let welcome = r.commit_accepte(1, &commit, vec![3], vec![3]).unwrap();
     r.seq += 1;
     assert_eq!(
-        ancien.recevoir(&commit, r.seq),
+        ancien.recevoir(&commit, r.seq, 1),
         Ok(Evenement::Membres {
             ajoutes: vec![3],
             retires: vec![3]
@@ -461,7 +523,7 @@ fn retour_nouvelle_feuille() {
     let mls = r.salon(2).chiffrer(&env(4)).unwrap();
     r.seq += 1;
     assert!(matches!(
-        ancien.recevoir(&mls, r.seq),
+        ancien.recevoir(&mls, r.seq, 2),
         Err(Error::NonMembre) | Ok(Evenement::Ignore)
     ));
     // Nouvelle clé, nouveau code, le même chez tous.
@@ -476,7 +538,7 @@ fn retour_nouvelle_feuille() {
     assert_eq!(r.salon(1).ajouter(&vieux_kp), Err(Error::CommitRefuse));
     // Le KeyPackage déjà ajouté, rejoué par le serveur : ni signalé, ni rajouté (il
     // chasserait la feuille vivante du siège 3).
-    for (i, ev) in r.diffuser(&kp) {
+    for (i, ev) in r.diffuser(3, &kp) {
         assert_eq!(ev, Ok(Evenement::Ignore), "membre {i}");
     }
     assert_eq!(r.salon(1).ajouter(&kp), Err(Error::CommitRefuse));
@@ -508,14 +570,14 @@ fn octets_aleatoires() {
         let x = a.octets(n);
         r.seq += 1;
         let seq = r.seq;
-        assert!(r.salon(1).recevoir(&x, seq).is_err(), "{n} octets");
+        assert!(r.salon(1).recevoir(&x, seq, 2).is_err(), "{n} octets");
         assert!(r.salon(1).ajouter(&x).is_err());
     }
     // Trop grand : refusé avant lecture.
     r.seq += 1;
     let seq = r.seq;
     assert_eq!(
-        r.salon(1).recevoir(&vec![0u8; MAX_CHARGE + 1], seq),
+        r.salon(1).recevoir(&vec![0u8; MAX_CHARGE + 1], seq, 2),
         Err(Error::TropGrand)
     );
     // Messages réels altérés d'un octet.
@@ -526,7 +588,7 @@ fn octets_aleatoires() {
         x[p] ^= 1 << (i % 8);
         r.seq += 1;
         let seq = r.seq;
-        assert!(r.salon(1).recevoir(&x, seq).is_err(), "octet {p}");
+        assert!(r.salon(1).recevoir(&x, seq, 2).is_err(), "octet {p}");
     }
     // Un Welcome ou un KeyPackage hostile pour qui attend d'entrer.
     let mut attente =
@@ -549,11 +611,11 @@ fn rejeu_ignore() {
     r.seq += 1;
     let seq = r.seq;
     assert!(matches!(
-        r.salon(1).recevoir(&mls, seq),
+        r.salon(1).recevoir(&mls, seq, 0),
         Ok(Evenement::Message { .. })
     ));
-    assert_eq!(r.salon(1).recevoir(&mls, seq), Ok(Evenement::Ignore));
-    assert_eq!(r.salon(1).recevoir(&mls, seq - 1), Ok(Evenement::Ignore));
+    assert_eq!(r.salon(1).recevoir(&mls, seq, 0), Ok(Evenement::Ignore));
+    assert_eq!(r.salon(1).recevoir(&mls, seq - 1, 0), Ok(Evenement::Ignore));
 }
 
 #[test]
@@ -585,13 +647,8 @@ fn empreinte_stable() {
         .map(|c| format!("{:05}", u32::from_be_bytes(c.try_into().unwrap()) % 100_000))
         .collect::<Vec<_>>()
         .join(" ");
-    let createur = Salon::creer(id, cles(), true).unwrap();
-    assert_eq!(createur.empreinte(0).unwrap(), attendu);
-
-    let mut r = Reseau {
-        m: vec![Some(createur)],
-        seq: 0,
-    };
+    let mut r = createur_seul(id);
+    assert_eq!(r.salon(0).empreinte(0).unwrap(), attendu);
     for s in 1..10 {
         r.arrivee(0, s, 0, vec![]);
     }
@@ -651,7 +708,7 @@ fn chiffrer_borne() {
                 r.seq += 1;
                 let seq = r.seq;
                 assert_eq!(
-                    r.salon(1).recevoir(&mls, seq),
+                    r.salon(1).recevoir(&mls, seq, 0),
                     Ok(Evenement::Message {
                         de_siege: 0,
                         enveloppe: e
@@ -674,7 +731,7 @@ fn etats() {
         Salon::creer(nouvelle_identite(5, nonce(5, 0)).unwrap(), cles(), false).unwrap();
     assert_eq!(attente.chiffrer(&env(1)), Err(Error::NonMembre));
     assert_eq!(attente.renouveler(), Err(Error::NonMembre));
-    assert_eq!(attente.recevoir(&[0; 10], 1), Err(Error::NonMembre));
+    assert_eq!(attente.recevoir(&[0; 10], 1, 0), Err(Error::NonMembre));
     assert_eq!(attente.epoque(), None);
     assert!(attente.membres().is_empty());
     // Un Welcome d'un autre salon (autre étiquette) est refusé.
@@ -682,9 +739,15 @@ fn etats() {
     let mut ailleurs =
         Salon::creer(nouvelle_identite(0, nonce(0, 9)).unwrap(), autre, true).unwrap();
     let kp = attente.key_package().unwrap();
-    ailleurs.annoncer(5, nonce(5, 0));
+    let liste = [(0, nonce(0, 9)), (5, nonce(5, 0))];
+    ailleurs.remplacer_annonces(0, &liste);
+    attente.remplacer_annonces(0, &liste);
+    assert!(matches!(
+        ailleurs.recevoir(&kp, 1, 5),
+        Ok(Evenement::KeyPackage { .. })
+    ));
     let c = ailleurs.ajouter(&kp).unwrap();
-    let Ok(Evenement::CommitAccepte { welcome: Some(w) }) = ailleurs.recevoir(&c, 1) else {
+    let Ok(Evenement::CommitAccepte { welcome: Some(w) }) = ailleurs.recevoir(&c, 2, 0) else {
         panic!("Welcome attendu à l'écho");
     };
     assert_eq!(attente.rejoindre(&w), Err(Error::MlsInvalide));
@@ -698,16 +761,20 @@ fn key_package_recu() {
     let attente = Salon::creer(nouvelle_identite(7, nonce(7, 0)).unwrap(), cles(), false).unwrap();
     let kp = attente.key_package().unwrap();
     // Pas encore annoncé : ignoré.
-    for (i, ev) in r.diffuser(&kp) {
+    for (i, ev) in r.diffuser(7, &kp) {
         assert_eq!(ev, Ok(Evenement::Ignore), "membre {i}");
     }
     // Annoncé avec un autre nonce : ignoré.
     r.annoncer(7, nonce(7, 1));
-    for (_, ev) in r.diffuser(&kp) {
+    for (_, ev) in r.diffuser(7, &kp) {
         assert_eq!(ev, Ok(Evenement::Ignore));
     }
     r.annoncer(7, nonce(7, 0));
-    for (i, ev) in r.diffuser(&kp) {
+    // Envoyé par un autre siège que le sien (siège attesté par le serveur) : ignoré.
+    for (_, ev) in r.diffuser(1, &kp) {
+        assert_eq!(ev, Ok(Evenement::Ignore));
+    }
+    for (i, ev) in r.diffuser(7, &kp) {
         assert_eq!(
             ev,
             Ok(Evenement::KeyPackage { octets: kp.clone() }),
@@ -718,7 +785,7 @@ fn key_package_recu() {
     let mut abime = kp.clone();
     let n = abime.len();
     abime[n - 5] ^= 1;
-    for (_, ev) in r.diffuser(&abime) {
+    for (_, ev) in r.diffuser(7, &abime) {
         assert!(ev.is_err(), "{ev:?}");
     }
 }
@@ -729,17 +796,21 @@ fn key_package_recu() {
 fn annonces_completes_tardives() {
     let mut r = groupe(9);
     let mut coupe = r.m[5].take().unwrap();
-    let mut nouveau =
-        Salon::creer(nouvelle_identite(9, nonce(9, 0)).unwrap(), cles(), false).unwrap();
-    let kp = nouveau.key_package().unwrap();
     r.annoncer(9, nonce(9, 0));
-    // Sans elle, il refuserait le Commit (`sans_annonce_refus`).
-    let liste: Vec<(u8, [u8; 16])> = (0..10u8).map(|s| (s, nonce(s, 0))).collect();
-    coupe.remplacer_annonces(&liste);
+    let mut nouveau = r.nouveau(9, nonce(9, 0));
+    let kp = nouveau.key_package().unwrap();
+    r.publier(9, &kp);
+    let seq_kp = r.seq;
+    // Reconnexion : liste complète à l'accueil, puis la file du serveur rejouée (dont le
+    // KeyPackage). Sans elles, il refuserait le Commit (`sans_annonce_refus`).
+    coupe.remplacer_annonces(0, &r.liste);
+    assert!(matches!(
+        coupe.recevoir(&kp, seq_kp, 9),
+        Ok(Evenement::KeyPackage { .. })
+    ));
     r.m[5] = Some(coupe);
     let commit = r.salon(0).ajouter(&kp).unwrap();
     let welcome = r.commit_accepte(0, &commit, vec![9], vec![]).unwrap();
-    nouveau.remplacer_annonces(&liste);
     nouveau.rejoindre(&welcome).unwrap();
     r.m.push(Some(nouveau));
     r.meme_epoque();
@@ -752,13 +823,14 @@ fn annonces_completes_tardives() {
 fn sans_annonce_refus() {
     let mut r = groupe(9);
     let mut coupe = r.m[5].take().unwrap();
-    let nouveau = Salon::creer(nouvelle_identite(9, nonce(9, 0)).unwrap(), cles(), false).unwrap();
-    let kp = nouveau.key_package().unwrap();
     r.annoncer(9, nonce(9, 0));
+    let nouveau = r.nouveau(9, nonce(9, 0));
+    let kp = nouveau.key_package().unwrap();
+    r.publier(9, &kp);
     let commit = r.salon(0).ajouter(&kp).unwrap();
     r.commit_accepte(0, &commit, vec![9], vec![]);
     r.seq += 1;
-    assert_eq!(coupe.recevoir(&commit, r.seq), Err(Error::CommitRefuse));
+    assert_eq!(coupe.recevoir(&commit, r.seq, 0), Err(Error::CommitRefuse));
 }
 
 /// Créateur absent : un membre retire un siège parti (0x03) ou exclu (0x09) ; les autres
@@ -768,9 +840,7 @@ fn retrait_d_un_parti() {
     let mut r = groupe(10);
     let createur = r.m[0].take().unwrap();
     // Siège 4 parti, siège 6 présent.
-    for s in r.m.iter_mut().flatten() {
-        s.marquer_parti(4);
-    }
+    r.partir(4);
     assert_eq!(r.salon(2).retirer(6), Err(Error::CommitRefuse));
     let commit = r.salon(2).retirer(4).unwrap();
     r.commit_accepte(2, &commit, vec![], vec![4]);
@@ -783,13 +853,9 @@ fn retrait_d_un_parti() {
     // 4 absent, donc parti) puis le Commit : il l'accepte.
     let mut createur = createur;
     r.seq += 1;
-    let liste: Vec<(u8, [u8; 16])> = [0u8, 1, 2, 3, 5, 6, 7, 8, 9]
-        .iter()
-        .map(|&s| (s, nonce(s, 0)))
-        .collect();
-    createur.remplacer_annonces(&liste);
+    createur.remplacer_annonces(0, &r.liste);
     assert!(matches!(
-        createur.recevoir(&commit, r.seq),
+        createur.recevoir(&commit, r.seq, 2),
         Ok(Evenement::Membres { .. })
     ));
     assert_eq!(createur.epoque(), r.salon(1).epoque());
@@ -798,4 +864,308 @@ fn retrait_d_un_parti() {
     r.arrivee(1, 4, 1, vec![]);
     assert_eq!(r.salon(2).retirer(4), Err(Error::CommitRefuse));
     r.message(4, 2);
+}
+
+/// IMPORTANT 1 : un membre retiré qui ignore le Commit de son retrait et écrit encore à
+/// l'époque précédente est refusé par tous (il n'est plus une feuille de l'arbre courant).
+#[test]
+fn retire_qui_ecrit_encore() {
+    let mut r = groupe(10);
+    let mut exclu = r.m[9].take().unwrap();
+    let commit = r.salon(0).retirer(9).unwrap();
+    r.commit_accepte(0, &commit, vec![], vec![9]);
+    // Client modifié : il n'a pas traité son retrait, il chiffre à l'époque n-1.
+    let mls = exclu.chiffrer(&env(1)).unwrap();
+    for (i, ev) in r.diffuser(9, &mls) {
+        assert_eq!(ev, Err(Error::NonMembre), "membre {i}");
+    }
+    // Un membre resté, à l'époque n-1, est toujours lu (Review Focus 2).
+    let vieux = r.salon(4).chiffrer(&env(2)).unwrap();
+    let c = r.salon(0).renouveler().unwrap();
+    r.commit_accepte(0, &c, vec![], vec![]);
+    for (i, ev) in r.diffuser(4, &vieux) {
+        if i != 4 {
+            assert!(
+                matches!(ev, Ok(Evenement::Message { de_siege: 4, .. })),
+                "membre {i}"
+            );
+        }
+    }
+}
+
+/// IMPORTANT 2 : un membre fabrique un KeyPackage au (siège, nonce) public d'un arrivant et
+/// le fait entrer avant lui : refusé par tous, avant comme après la publication légitime.
+#[test]
+fn kp_usurpe_par_un_membre() {
+    let mut r = groupe(9);
+    r.annoncer(9, nonce(9, 0));
+    let mut legitime = r.nouveau(9, nonce(9, 0));
+    // L'attaquant (siège 3) : identité à lui, credential de l'arrivant.
+    let faux = r.nouveau(9, nonce(9, 0)).key_package().unwrap();
+    // Envoyé par le siège 3 : personne ne le retient.
+    for (i, ev) in r.diffuser(3, &faux) {
+        assert_eq!(ev, Ok(Evenement::Ignore), "membre {i}");
+    }
+    // Son propre client modifié croit le serveur (siège 9) et fait le Commit le premier.
+    r.seq += 1;
+    let seq = r.seq;
+    assert!(matches!(
+        r.salon(3).recevoir(&faux, seq, 9),
+        Ok(Evenement::KeyPackage { .. })
+    ));
+    let pirate = r.salon(3).ajouter(&faux).unwrap();
+    for (i, ev) in r.diffuser(3, &pirate) {
+        if i != 3 {
+            assert_eq!(ev, Err(Error::CommitRefuse), "membre {i}");
+        }
+    }
+    r.m[3] = None;
+    // Le vrai KeyPackage, publié par le siège 9 : accepté, ajouté par le créateur.
+    let kp = legitime.key_package().unwrap();
+    r.publier(9, &kp);
+    let commit = r.salon(0).ajouter(&kp).unwrap();
+    let welcome = r.commit_accepte(0, &commit, vec![9], vec![]).unwrap();
+    legitime.rejoindre(&welcome).unwrap();
+    r.m.push(Some(legitime));
+    r.meme_epoque();
+    r.message(9, 1);
+    // Le faux, rejoué ensuite par le siège 9 lui-même : la clé retenue est la première.
+    let faux2 = r.nouveau(9, nonce(9, 0)).key_package().unwrap();
+    for (_, ev) in r.diffuser(9, &faux2) {
+        assert_eq!(ev, Ok(Evenement::Ignore));
+    }
+}
+
+/// IMPORTANT 2 : retour du créateur ; un membre tente de prendre son siège avec le nouveau
+/// nonce (public) avant lui : refusé ; le vrai retour passe et garde le droit de retirer.
+#[test]
+fn retour_du_createur_detourne() {
+    let mut r = groupe(10);
+    let _ancien = r.m[0].take().unwrap();
+    r.annoncer(0, nonce(0, 1));
+    let mut createur = r.nouveau(0, nonce(0, 1));
+    let faux = r.nouveau(0, nonce(0, 1)).key_package().unwrap();
+    r.seq += 1;
+    let seq = r.seq;
+    assert!(matches!(
+        r.salon(3).recevoir(&faux, seq, 0),
+        Ok(Evenement::KeyPackage { .. })
+    ));
+    let pirate = r.salon(3).ajouter(&faux).unwrap();
+    r.seq += 1;
+    let seq = r.seq;
+    for s in [1usize, 2, 4, 5, 6, 7, 8, 9] {
+        assert_eq!(
+            r.salon(s).recevoir(&pirate, seq, 3),
+            Err(Error::CommitRefuse),
+            "membre {s}"
+        );
+    }
+    r.salon(3).abandonner_commit().unwrap();
+    // Le client de l'attaquant a retenu sa fausse clé : il sort du test (il divergerait).
+    r.m[3] = None;
+    // Le vrai retour : KeyPackage publié par le siège 0, ajouté par le siège 1.
+    let kp = createur.key_package().unwrap();
+    r.publier(0, &kp);
+    let commit = r.salon(1).ajouter(&kp).unwrap();
+    let welcome = r.commit_accepte(1, &commit, vec![0], vec![0]).unwrap();
+    createur.rejoindre(&welcome).unwrap();
+    r.m[0] = Some(createur);
+    r.meme_epoque();
+    let c = r.salon(0).retirer(9).unwrap();
+    r.commit_accepte(0, &c, vec![], vec![9]);
+}
+
+/// Fabrique un KeyPackage brut (hors `Salon`) d'une durée de vie donnée.
+fn kp_brut(siege: u8, n: [u8; 16], vie: openmls::prelude::Lifetime) -> Vec<u8> {
+    use openmls::prelude::tls_codec::Serialize as _;
+    use openmls::prelude::*;
+    use openmls_basic_credential::SignatureKeyPair;
+    let suite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+    let f = shhdrop_salon::Fournisseur::default();
+    let sig = SignatureKeyPair::new(suite.signature_algorithm()).unwrap();
+    let mut id = vec![siege];
+    id.extend_from_slice(&n);
+    let cwk = CredentialWithKey {
+        credential: BasicCredential::new(id).into(),
+        signature_key: sig.public().into(),
+    };
+    let kp = KeyPackage::builder()
+        .key_package_lifetime(vie)
+        .build(suite, &f, &sig, cwk)
+        .unwrap();
+    MlsMessageOut::from(kp.key_package().clone())
+        .tls_serialize_detached()
+        .unwrap()
+}
+
+/// IMPORTANT 3 : aucune décision ne dépend de l'horloge. Nos KeyPackages valent (0, u64::MAX) ;
+/// tout autre durée de vie est refusée par tous, même valide à l'heure locale.
+#[test]
+fn duree_de_vie_sans_horloge() {
+    use openmls::prelude::tls_codec::Deserialize as _;
+    use openmls::prelude::{
+        Lifetime, MlsMessageBodyIn, MlsMessageIn, OpenMlsProvider as _, ProtocolVersion,
+    };
+    let mut r = groupe(3);
+    r.annoncer(7, nonce(7, 0));
+    let kp = r.nouveau(7, nonce(7, 0)).key_package().unwrap();
+    let MlsMessageBodyIn::KeyPackage(lu) =
+        MlsMessageIn::tls_deserialize_exact(&kp).unwrap().extract()
+    else {
+        panic!("KeyPackage attendu");
+    };
+    let lu = lu
+        .validate(
+            shhdrop_salon::Fournisseur::default().crypto(),
+            ProtocolVersion::Mls10,
+        )
+        .unwrap();
+    assert_eq!(
+        (lu.life_time().not_before(), lu.life_time().not_after()),
+        (0, u64::MAX)
+    );
+    // not_before dans le futur (horloge d'un membre en retard) ou durée bornée valide
+    // maintenant : refusés de même chez tous, et par `ajouter`.
+    for vie in [
+        Lifetime::init(u64::MAX - 10, u64::MAX),
+        Lifetime::init(0, u64::MAX - 1),
+    ] {
+        let brut = kp_brut(7, nonce(7, 0), vie);
+        for (i, ev) in r.diffuser(7, &brut) {
+            assert_eq!(ev, Err(Error::MlsInvalide), "membre {i}");
+        }
+        assert_eq!(r.salon(0).ajouter(&brut), Err(Error::MlsInvalide));
+    }
+}
+
+/// MINOR 5 : l'arrivant refuse un Welcome d'un faux groupe : autre siège de créateur, ou
+/// feuille d'un siège occupé avec un autre nonce que celui annoncé ; et rien sans liste.
+#[test]
+fn faux_groupe_refuse() {
+    let mut r = groupe(6);
+    r.annoncer(9, nonce(9, 0));
+    let mut arrivant = r.nouveau(9, nonce(9, 0));
+    let kp = arrivant.key_package().unwrap();
+    r.publier(9, &kp);
+    // Le siège 3 crée son propre groupe (identifiant tag ‖ 3) et y ajoute l'arrivant.
+    let mut faux = Salon::creer(nouvelle_identite(3, nonce(3, 0)).unwrap(), cles(), true).unwrap();
+    faux.remplacer_annonces(3, &r.liste);
+    assert!(matches!(
+        faux.recevoir(&kp, 1, 9),
+        Ok(Evenement::KeyPackage { .. })
+    ));
+    let c = faux.ajouter(&kp).unwrap();
+    let Ok(Evenement::CommitAccepte { welcome: Some(w) }) = faux.recevoir(&c, 2, 3) else {
+        panic!("Welcome attendu");
+    };
+    assert_eq!(arrivant.rejoindre(&w), Err(Error::MlsInvalide));
+    // Faux groupe « du créateur » (siège 0, nonce public) avec une feuille du siège 5 d'un
+    // autre nonce que celui annoncé.
+    let mut faux0 = Salon::creer(nouvelle_identite(0, nonce(0, 0)).unwrap(), cles(), true).unwrap();
+    let mut liste = r.liste.clone();
+    liste.retain(|a| a.0 != 5);
+    liste.push((5, nonce(5, 9)));
+    faux0.remplacer_annonces(0, &liste);
+    let complice = Salon::creer(nouvelle_identite(5, nonce(5, 9)).unwrap(), cles(), false).unwrap();
+    let kp5 = complice.key_package().unwrap();
+    assert!(matches!(
+        faux0.recevoir(&kp5, 1, 5),
+        Ok(Evenement::KeyPackage { .. })
+    ));
+    let c5 = faux0.ajouter(&kp5).unwrap();
+    assert!(matches!(
+        faux0.recevoir(&c5, 2, 0),
+        Ok(Evenement::CommitAccepte { .. })
+    ));
+    assert!(matches!(
+        faux0.recevoir(&kp, 3, 9),
+        Ok(Evenement::KeyPackage { .. })
+    ));
+    let c9 = faux0.ajouter(&kp).unwrap();
+    let Ok(Evenement::CommitAccepte { welcome: Some(w) }) = faux0.recevoir(&c9, 4, 0) else {
+        panic!("Welcome attendu");
+    };
+    assert_eq!(arrivant.rejoindre(&w), Err(Error::MlsInvalide));
+    // Le vrai groupe : accepté.
+    let commit = r.salon(0).ajouter(&kp).unwrap();
+    let welcome = r.commit_accepte(0, &commit, vec![9], vec![]).unwrap();
+    arrivant.rejoindre(&welcome).unwrap();
+}
+
+/// Sans la liste complète de l'accueil, l'arrivant ne peut rien vérifier : il refuse ; avec
+/// elle, le même Welcome passe.
+#[test]
+fn rejoindre_sans_liste() {
+    let mut r = groupe(3);
+    r.annoncer(5, nonce(5, 0));
+    let mut x = Salon::creer(nouvelle_identite(5, nonce(5, 0)).unwrap(), cles(), false).unwrap();
+    let kp = x.key_package().unwrap();
+    r.publier(5, &kp);
+    let c = r.salon(0).ajouter(&kp).unwrap();
+    let w = r.commit_accepte(0, &c, vec![5], vec![]).unwrap();
+    assert_eq!(x.rejoindre(&w), Err(Error::MlsInvalide));
+    x.remplacer_annonces(0, &r.liste);
+    x.rejoindre(&w).unwrap();
+}
+
+/// MINOR 4 : le perdant apprend ce qu'a changé le Commit gagnant.
+#[test]
+fn commit_perdu_dit_ce_qui_a_change() {
+    let mut r = groupe(10);
+    let a = r.salon(0).retirer(9).unwrap();
+    let _b = r.salon(5).renouveler().unwrap();
+    for (i, ev) in r.diffuser(0, &a) {
+        if i == 5 {
+            assert_eq!(
+                ev,
+                Ok(Evenement::CommitPerdu {
+                    ajoutes: vec![],
+                    retires: vec![9]
+                })
+            );
+        }
+    }
+}
+
+/// MINOR 6 : un Commit jamais revenu (perdu à la reconnexion) s'abandonne ; on peut rejouer.
+#[test]
+fn abandon_du_commit() {
+    let mut r = groupe(4);
+    let _perdu = r.salon(2).renouveler().unwrap();
+    assert_eq!(r.salon(2).renouveler(), Err(Error::CommitEnCours));
+    r.salon(2).abandonner_commit().unwrap();
+    let c = r.salon(2).renouveler().unwrap();
+    r.commit_accepte(2, &c, vec![], vec![]);
+    r.meme_epoque();
+    r.message(2, 1);
+}
+
+/// Deux arrivées rapprochées : le second KeyPackage est publié pendant que le premier arrivant
+/// attend encore ; celui-ci le retient en attente et accepte ensuite le second ajout.
+#[test]
+fn deux_arrivees_rapprochees() {
+    let mut r = groupe(5);
+    r.annoncer(5, nonce(5, 0));
+    let mut a = r.nouveau(5, nonce(5, 0));
+    let kp_a = a.key_package().unwrap();
+    r.publier(5, &kp_a);
+    r.annoncer(6, nonce(6, 0));
+    a.annoncer(6, nonce(6, 0));
+    let mut b = r.nouveau(6, nonce(6, 0));
+    let kp_b = b.key_package().unwrap();
+    r.publier(6, &kp_b);
+    // A, en attente, reçoit aussi la trame du KeyPackage de B.
+    assert_eq!(a.recevoir(&kp_b, r.seq, 6), Ok(Evenement::Ignore));
+    let c_a = r.salon(0).ajouter(&kp_a).unwrap();
+    let w_a = r.commit_accepte(0, &c_a, vec![5], vec![]).unwrap();
+    a.rejoindre(&w_a).unwrap();
+    r.m.push(Some(a));
+    let c_b = r.salon(0).ajouter(&kp_b).unwrap();
+    let w_b = r.commit_accepte(0, &c_b, vec![6], vec![]).unwrap();
+    b.rejoindre(&w_b).unwrap();
+    r.m.push(Some(b));
+    r.meme_epoque();
+    r.message(5, 1);
+    r.message(6, 2);
 }

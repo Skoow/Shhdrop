@@ -21,6 +21,9 @@
 //! complète `(siège, nonce_arrivee)` reçue à l'accueil du WebSocket (et à chaque
 //! reconnexion) **avant tout `recevoir`**, puis chaque 0x02 / 0x0A à `annoncer` et chaque
 //! 0x03 / 0x09 à `marquer_parti`, dans l'ordre `seq`, avant les trames qui les suivent.
+//! Chaque trame va à `recevoir` avec le siège que le serveur atteste l'avoir envoyée, **y
+//! compris en attente d'entrer** et pour la file rejouée à la (re)connexion : un ajout n'est
+//! accepté que si l'on a vu le KeyPackage publié par le siège même de l'arrivant.
 //!
 //! **Membres fantômes (risque accepté, décision du 11 novembre)** : un serveur malveillant
 //! peut annoncer un siège pour un KeyPackage à lui ; le membre désigné l'ajoutera, et ce
@@ -39,6 +42,7 @@ use openmls::framing::errors::{MessageDecryptionError, SecretTreeError};
 use openmls::prelude::tls_codec::{Deserialize as _, Serialize as _};
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
+use openmls_traits::storage::StorageProvider as _;
 use shhdrop_core::kdf::sha256;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -108,8 +112,10 @@ pub enum Evenement {
     /// (un retour après rechargement figure dans les deux listes).
     Membres { ajoutes: Vec<u8>, retires: Vec<u8> },
     /// Notre Commit en attente a perdu (un autre Commit de l'époque est passé avant, ou la
-    /// politique le refuse à son écho) : l'appelant rejoue son intention.
-    CommitPerdu,
+    /// politique le refuse à son écho) : l'appelant rejoue son intention. `ajoutes` et
+    /// `retires` : ce qu'a changé le Commit gagnant (vides si la politique a refusé le nôtre
+    /// à son écho, sans autre Commit).
+    CommitPerdu { ajoutes: Vec<u8>, retires: Vec<u8> },
     /// Notre Commit en attente est revenu le premier de son époque et a été fusionné ; pour
     /// un ajout, le Welcome à envoyer maintenant à l'arrivant.
     CommitAccepte { welcome: Option<Vec<u8>> },
@@ -133,6 +139,10 @@ pub struct Salon {
     annonces: Vec<(u8, [u8; 16])>,
     /// Sièges que le serveur a dits partis (0x03) ou exclus (0x09), non repris depuis.
     partis: Vec<u8>,
+    /// Premier KeyPackage valide de chaque arrivée annoncée, envoyé par son propre siège.
+    key_packages: Vec<politique::Arrivee>,
+    /// Siège du créateur donné par le serveur avec la liste complète (vérifié au Welcome).
+    createur_annonce: Option<u8>,
     /// Une liste complète des sièges occupés a été donnée (`remplacer_annonces`).
     liste_complete: bool,
     /// Octets de notre Commit en attente de son écho, et le Welcome qu'il rendra s'il gagne.
@@ -146,8 +156,31 @@ impl core::fmt::Debug for Salon {
     }
 }
 
+/// Durée de vie de toute feuille de KeyPackage : sans borne, pour qu'aucune décision du groupe
+/// ne dépende de l'horloge d'un membre (un membre en retard d'une heure divergerait sinon).
+fn vie_sans_horloge() -> Lifetime {
+    Lifetime::init(0, u64::MAX)
+}
+
+fn vie_acceptee(kp: &KeyPackage) -> bool {
+    let v = kp.life_time();
+    (v.not_before(), v.not_after()) == (0, u64::MAX)
+}
+
+/// KeyPackage reçu en octets : valide (signature), suite 0x0001, durée de vie sans horloge.
+fn lire_key_package(kp: KeyPackageIn, crypto: &impl OpenMlsCrypto) -> Result<KeyPackage> {
+    let kp = kp
+        .validate(crypto, ProtocolVersion::Mls10)
+        .map_err(|_| Error::MlsInvalide)?;
+    if kp.ciphersuite() != SUITE || !vie_acceptee(&kp) {
+        return Err(Error::MlsInvalide);
+    }
+    Ok(kp)
+}
+
 fn config_creation() -> MlsGroupCreateConfig {
     MlsGroupCreateConfig::builder()
+        .lifetime(vie_sans_horloge())
         .ciphersuite(SUITE)
         .use_ratchet_tree_extension(true)
         .wire_format_policy(PURE_CIPHERTEXT_WIRE_FORMAT_POLICY)
@@ -221,10 +254,19 @@ fn changements(groupe: &MlsGroup, commit: &StagedCommit, auteur: LeafNodeIndex) 
             continue;
         }
         match qp.proposal() {
-            Proposal::Add(a) => match lire_credential(a.key_package().leaf_node().credential()) {
-                Ok(c) => ch.ajouts.push(c),
-                Err(_) => ch.interdit = true,
-            },
+            Proposal::Add(a) => {
+                let feuille = a.key_package().leaf_node();
+                if !vie_acceptee(a.key_package()) {
+                    ch.interdit = true;
+                }
+                match lire_credential(feuille.credential()) {
+                    Ok((s, n)) => {
+                        ch.ajouts
+                            .push((s, n, sha256(feuille.signature_key().as_slice())))
+                    }
+                    Err(_) => ch.interdit = true,
+                }
+            }
             Proposal::Remove(r) => {
                 let siege = groupe
                     .member_at(r.removed())
@@ -320,6 +362,8 @@ impl Salon {
             groupe: None,
             annonces: Vec::new(),
             partis: Vec::new(),
+            key_packages: Vec::new(),
+            createur_annonce: None,
             liste_complete: false,
             commit_en_attente: None,
             dernier_seq: None,
@@ -346,7 +390,18 @@ impl Salon {
         if self.groupe.is_some() {
             return Err(Error::DejaMembre);
         }
+        // « Last resort » : OpenMLS n'efface pas la clé d'init au premier Welcome lu ; un faux
+        // Welcome refusé ne grille donc pas le KeyPackage. `rejoindre` l'efface après l'entrée.
         let paquet = KeyPackage::builder()
+            .key_package_lifetime(vie_sans_horloge())
+            .leaf_node_capabilities(Capabilities::new(
+                None,
+                None,
+                Some(&[ExtensionType::LastResort]),
+                None,
+                None,
+            ))
+            .mark_as_last_resort()
             .build(
                 SUITE,
                 &self.fournisseur,
@@ -367,6 +422,8 @@ impl Salon {
         let MlsMessageBodyIn::Welcome(welcome) = lire_mls(welcome)? else {
             return Err(Error::MlsInvalide);
         };
+        let utilises: Vec<KeyPackageRef> =
+            welcome.secrets().iter().map(|e| e.new_member()).collect();
         let prepare =
             StagedWelcome::new_from_welcome(&self.fournisseur, &config_jonction(), welcome, None)
                 .map_err(|_| Error::MlsInvalide)?;
@@ -379,11 +436,23 @@ impl Salon {
         {
             return Err(Error::MlsInvalide);
         }
+        // Le créateur est celui que le serveur a donné ; chaque feuille d'un siège occupé porte
+        // le nonce annoncé (et la clé retenue si son KeyPackage nous est passé). Une feuille
+        // d'un siège absent de la liste est un parti pas encore retiré.
         let createur_siege = id[16];
+        if self.createur_annonce != Some(createur_siege) {
+            return Err(Error::MlsInvalide);
+        }
         let mut sieges = Vec::new();
         for m in prepare.members() {
-            let (s, _) = lire_credential(&m.credential)?;
-            if sieges.contains(&s) {
+            let (s, n) = lire_credential(&m.credential)?;
+            let annonce = self.annonces.iter().find(|a| a.0 == s);
+            let cle = sha256(&m.signature_key);
+            let retenu = self.key_packages.iter().find(|k| (k.0, k.1) == (s, n));
+            if sieges.contains(&s)
+                || annonce.is_some_and(|a| a.1 != n)
+                || retenu.is_some_and(|k| k.2 != cle)
+            {
                 return Err(Error::MlsInvalide);
             }
             sieges.push(s);
@@ -393,6 +462,13 @@ impl Salon {
             .map_err(|_| Error::MlsInvalide)?;
         self.createur_siege = createur_siege;
         self.groupe = Some(groupe);
+        // Entré : la clé d'init du KeyPackage ne sert plus (confidentialité persistante).
+        for r in &utilises {
+            self.fournisseur
+                .storage()
+                .delete_key_package(r)
+                .map_err(|_| Error::MlsInterne)?;
+        }
         Ok(())
     }
 
@@ -402,6 +478,8 @@ impl Salon {
     /// appliquent la même politique.
     pub fn annoncer(&mut self, siege: u8, nonce_arrivee: [u8; 16]) {
         self.partis.retain(|&p| p != siege);
+        self.key_packages
+            .retain(|k| k.0 != siege || k.1 == nonce_arrivee);
         self.annonces.retain(|a| a.0 != siege);
         self.annonces.push((siege, nonce_arrivee));
     }
@@ -410,12 +488,15 @@ impl Salon {
     /// l'accueil du WebSocket (et à chaque reconnexion) avant toute trame : remplace toutes les
     /// annonces connues. Un siège présent dans l'arbre MLS mais absent de cette liste compte
     /// ensuite comme parti (retirable par tout membre), jusqu'à sa prochaine annonce.
-    pub fn remplacer_annonces(&mut self, liste: &[(u8, [u8; 16])]) {
+    pub fn remplacer_annonces(&mut self, createur_siege: u8, liste: &[(u8, [u8; 16])]) {
         self.annonces.clear();
         for &(siege, nonce) in liste {
             self.annoncer(siege, nonce);
         }
+        let annonces = &self.annonces;
+        self.key_packages.retain(|k| annonces.contains(&(k.0, k.1)));
         self.partis.clear();
+        self.createur_annonce = Some(createur_siege);
         self.liste_complete = true;
     }
 
@@ -424,30 +505,64 @@ impl Salon {
     /// sur ce siège sera annoncée de nouveau).
     pub fn marquer_parti(&mut self, siege: u8) {
         self.annonces.retain(|a| a.0 != siege);
+        self.key_packages.retain(|k| k.0 != siege);
         if !self.partis.contains(&siege) {
             self.partis.push(siege);
         }
     }
 
-    /// KeyPackage reçu dans le flux : signalé seulement s'il peut être ajouté.
-    fn key_package_recu(&self, kp: KeyPackageIn, octets: &[u8]) -> Result<Evenement> {
-        let kp = kp
-            .validate(self.fournisseur.crypto(), ProtocolVersion::Mls10)
-            .map_err(|_| Error::MlsInvalide)?;
-        if kp.ciphersuite() != SUITE {
-            return Err(Error::MlsInvalide);
+    /// KeyPackage reçu dans le flux, envoyé par `emetteur` (siège attesté par le serveur). Le
+    /// premier KeyPackage valide d'une arrivée annoncée, **envoyé par ce siège même**, est
+    /// retenu (empreinte de sa clé) : seul lui pourra être ajouté. Signalé (`KeyPackage`) aux
+    /// membres s'il peut l'être ; retenu aussi en attente d'entrer (rendu `Ignore`).
+    fn key_package_recu(
+        &mut self,
+        kp: KeyPackageIn,
+        octets: &[u8],
+        emetteur: u8,
+    ) -> Result<Evenement> {
+        let kp = lire_key_package(kp, self.fournisseur.crypto())?;
+        let (siege, nonce) = lire_credential(kp.leaf_node().credential())?;
+        if emetteur != siege || !self.annonces.contains(&(siege, nonce)) {
+            return Ok(Evenement::Ignore);
         }
-        let arrivee = lire_credential(kp.leaf_node().credential())?;
-        let deja = self
-            .groupe_actif()?
+        let cle = sha256(kp.leaf_node().signature_key().as_slice());
+        match self
+            .key_packages
+            .iter()
+            .find(|k| (k.0, k.1) == (siege, nonce))
+        {
+            Some(k) if k.2 != cle => return Ok(Evenement::Ignore),
+            Some(_) => {}
+            None => self.key_packages.push((siege, nonce, cle)),
+        }
+        let Some(groupe) = self.groupe.as_ref() else {
+            return Ok(Evenement::Ignore);
+        };
+        let deja = groupe
             .members()
-            .any(|m| lire_credential(&m.credential).is_ok_and(|c| c == arrivee));
-        if !self.annonces.contains(&arrivee) || deja {
+            .any(|m| lire_credential(&m.credential).is_ok_and(|c| c == (siege, nonce)));
+        if deja {
             return Ok(Evenement::Ignore);
         }
         Ok(Evenement::KeyPackage {
             octets: octets.to_vec(),
         })
+    }
+
+    /// Abandonne notre Commit en attente (et son Welcome) sans attendre son écho : à appeler
+    /// après une reconnexion si l'écho n'est pas dans les trames rejouées (la trame s'est
+    /// perdue). Attention : si l'écho arrive quand même ensuite, ce membre ne le fusionnera
+    /// pas alors que les autres l'auront fait.
+    pub fn abandonner_commit(&mut self) -> Result<()> {
+        self.commit_en_attente = None;
+        if let Some(g) = self.groupe.as_mut()
+            && g.pending_commit().is_some()
+        {
+            g.clear_pending_commit(self.fournisseur.storage())
+                .map_err(|_| Error::MlsInterne)?;
+        }
+        Ok(())
     }
 
     /// Groupe actif, sans Commit en attente : seul état où l'on peut faire un Commit.
@@ -501,6 +616,7 @@ impl Salon {
                 self.identite.siege,
                 &self.annonces,
                 &partis_effectifs(groupe, &self.partis, &self.annonces, self.liste_complete),
+                &self.key_packages,
             )?;
             let commit = serialiser(paquet.commit())?;
             let welcome = paquet
@@ -536,17 +652,16 @@ impl Salon {
         let MlsMessageBodyIn::KeyPackage(kp) = lire_mls(key_package)? else {
             return Err(Error::MlsInvalide);
         };
-        let kp = kp
-            .validate(self.fournisseur.crypto(), ProtocolVersion::Mls10)
-            .map_err(|_| Error::MlsInvalide)?;
-        if kp.ciphersuite() != SUITE {
-            return Err(Error::MlsInvalide);
-        }
+        let kp = lire_key_package(kp, self.fournisseur.crypto())?;
         let (siege, nonce) = lire_credential(kp.leaf_node().credential())?;
         let groupe = self.groupe.as_ref().ok_or(Error::NonMembre)?;
         let (indices, retraits, restants) = prevoir(groupe, siege)?;
         let prevu = Changements {
-            ajouts: vec![(siege, nonce)],
+            ajouts: vec![(
+                siege,
+                nonce,
+                sha256(kp.leaf_node().signature_key().as_slice()),
+            )],
             retraits,
             restants,
             interdit: false,
@@ -557,6 +672,7 @@ impl Salon {
             self.identite.siege,
             &self.annonces,
             &partis_effectifs(groupe, &self.partis, &self.annonces, self.liste_complete),
+            &self.key_packages,
         )?;
         Ok(self.commit(Some(kp), indices)?.0)
     }
@@ -585,6 +701,7 @@ impl Salon {
             self.identite.siege,
             &self.annonces,
             &partis_effectifs(groupe, &self.partis, &self.annonces, self.liste_complete),
+            &self.key_packages,
         )?;
         Ok(self.commit(None, indices)?.0)
     }
@@ -612,13 +729,16 @@ impl Salon {
         Ok(octets)
     }
 
-    /// Traite un message MLS rangé au rang `seq` par le serveur. Les rangs déjà vus (rejeu,
-    /// rattrapage après reconnexion) sont ignorés ; une erreur consomme aussi le rang.
-    pub fn recevoir(&mut self, mls: &[u8], seq: u64) -> Result<Evenement> {
-        match self.groupe.as_ref() {
-            Some(g) if g.is_active() => {}
-            _ => return Err(Error::NonMembre),
-        }
+    /// Traite un message MLS rangé au rang `seq` par le serveur ; `siege_emetteur` est le siège
+    /// que le serveur atteste avoir envoyé la trame (enregistrement 0x01). Les rangs déjà vus
+    /// (rejeu, rattrapage après reconnexion) sont ignorés ; une erreur consomme aussi le rang.
+    /// En attente d'entrer, seuls les KeyPackages sont lus (retenus), le reste rend `NonMembre`.
+    pub fn recevoir(&mut self, mls: &[u8], seq: u64, siege_emetteur: u8) -> Result<Evenement> {
+        let en_attente = match self.groupe.as_ref() {
+            Some(g) if g.is_active() => false,
+            Some(_) => return Err(Error::NonMembre),
+            None => true,
+        };
         if self.dernier_seq.is_some_and(|d| seq <= d) {
             return Ok(Evenement::Ignore);
         }
@@ -626,13 +746,25 @@ impl Salon {
         if mls.len() > MAX_CHARGE {
             return Err(Error::TropGrand);
         }
+        // En attente d'entrer : seuls les KeyPackages des autres arrivants comptent (retenus
+        // pour la politique, qui s'appliquera aux Commits après l'entrée).
+        if en_attente {
+            return match lire_mls(mls) {
+                Ok(MlsMessageBodyIn::KeyPackage(kp)) => {
+                    self.key_package_recu(kp, mls, siege_emetteur)
+                }
+                _ => Err(Error::NonMembre),
+            };
+        }
         if self.commit_en_attente.as_ref().is_some_and(|c| c.0 == mls) {
             return self.confirmer_commit();
         }
         let protocole = match lire_mls(mls)? {
             MlsMessageBodyIn::PrivateMessage(p) => ProtocolMessage::from(p),
             MlsMessageBodyIn::Welcome(_) => return Ok(Evenement::Ignore),
-            MlsMessageBodyIn::KeyPackage(kp) => return self.key_package_recu(kp, mls),
+            MlsMessageBodyIn::KeyPackage(kp) => {
+                return self.key_package_recu(kp, mls, siege_emetteur);
+            }
             // Message en clair (dont external commit et proposition externe) et GroupInfo :
             // jamais acceptés.
             _ => return Err(Error::MlsInvalide),
@@ -668,6 +800,15 @@ impl Salon {
             return Err(Error::MlsInvalide);
         };
         let (de_siege, _) = lire_credential(traite.credential())?;
+        // Message de l'époque précédente : son auteur doit être encore une feuille de l'arbre
+        // courant (un retiré qui ignore son retrait ne peut plus écrire à n-1).
+        if epoque < courante
+            && !groupe
+                .members()
+                .any(|m| &m.credential == traite.credential())
+        {
+            return Err(Error::NonMembre);
+        }
         match traite.into_content() {
             ProcessedMessageContent::ApplicationMessage(a) => {
                 let octets = Zeroizing::new(a.into_bytes());
@@ -684,6 +825,7 @@ impl Salon {
                     de_siege,
                     &self.annonces,
                     &partis_effectifs(groupe, &self.partis, &self.annonces, self.liste_complete),
+                    &self.key_packages,
                 )?;
                 let perdu = self.commit_en_attente.take().is_some();
                 if perdu {
@@ -694,10 +836,11 @@ impl Salon {
                 groupe
                     .merge_staged_commit(&self.fournisseur, *sc)
                     .map_err(|_| Error::MlsInterne)?;
-                Ok(if perdu {
-                    Evenement::CommitPerdu
-                } else {
-                    membres_de(&ch)
+                Ok(match (perdu, membres_de(&ch)) {
+                    (true, Evenement::Membres { ajoutes, retires }) => {
+                        Evenement::CommitPerdu { ajoutes, retires }
+                    }
+                    (_, membres) => membres,
                 })
             }
             ProcessedMessageContent::OwnPrivateMessage => Ok(Evenement::Ignore),
@@ -720,13 +863,17 @@ impl Salon {
             self.identite.siege,
             &self.annonces,
             &partis_effectifs(groupe, &self.partis, &self.annonces, self.liste_complete),
+            &self.key_packages,
         )
         .is_err()
         {
             groupe
                 .clear_pending_commit(self.fournisseur.storage())
                 .map_err(|_| Error::MlsInterne)?;
-            return Ok(Evenement::CommitPerdu);
+            return Ok(Evenement::CommitPerdu {
+                ajoutes: vec![],
+                retires: vec![],
+            });
         }
         groupe
             .merge_pending_commit(&self.fournisseur)
@@ -824,19 +971,29 @@ mod tests {
     fn trois() -> (Vec<Salon>, u64) {
         let mut m =
             vec![Salon::creer(nouvelle_identite(0, [0; 16]).unwrap(), cles(), true).unwrap()];
+        m[0].remplacer_annonces(0, &[(0, [0; 16])]);
         let mut seq = 0;
         for s in 1..3u8 {
             let mut n =
                 Salon::creer(nouvelle_identite(s, [s; 16]).unwrap(), cles(), false).unwrap();
+            let liste: Vec<(u8, [u8; 16])> = (0..=s).map(|i| (i, [i; 16])).collect();
+            n.remplacer_annonces(0, &liste);
             let kp = n.key_package().unwrap();
             for x in m.iter_mut() {
                 x.annoncer(s, [s; 16]);
+            }
+            seq += 1;
+            for x in m.iter_mut() {
+                assert!(matches!(
+                    x.recevoir(&kp, seq, s),
+                    Ok(Evenement::KeyPackage { .. })
+                ));
             }
             let c = m[0].ajouter(&kp).unwrap();
             seq += 1;
             let mut welcome = None;
             for x in m.iter_mut() {
-                match x.recevoir(&c, seq) {
+                match x.recevoir(&c, seq, 0) {
                     Ok(Evenement::CommitAccepte { welcome: w }) => welcome = w,
                     ev => assert!(matches!(ev, Ok(Evenement::Membres { .. })), "{ev:?}"),
                 }
@@ -877,7 +1034,7 @@ mod tests {
         *seq += 1;
         for (i, x) in m.iter_mut().enumerate() {
             if i != 1 {
-                assert_eq!(x.recevoir(commit, *seq), Err(attendu), "membre {i}");
+                assert_eq!(x.recevoir(commit, *seq, 1), Err(attendu), "membre {i}");
                 assert_eq!(x.epoque(), e0);
                 assert_eq!(x.membres(), vec![0, 1, 2]);
             }
@@ -886,11 +1043,11 @@ mod tests {
         let mls = m[2].chiffrer(&env()).unwrap();
         *seq += 1;
         assert!(matches!(
-            m[0].recevoir(&mls, *seq),
+            m[0].recevoir(&mls, *seq, 2),
             Ok(Evenement::Message { de_siege: 2, .. })
         ));
         assert!(matches!(
-            m[1].recevoir(&mls, *seq),
+            m[1].recevoir(&mls, *seq, 2),
             Ok(Evenement::Message { de_siege: 2, .. })
         ));
     }
@@ -936,14 +1093,14 @@ mod tests {
             .unwrap();
         let prop = serialiser(&prop).unwrap();
         seq += 1;
-        assert_eq!(m[0].recevoir(&prop, seq), Ok(Evenement::Ignore));
-        assert_eq!(m[2].recevoir(&prop, seq), Ok(Evenement::Ignore));
+        assert_eq!(m[0].recevoir(&prop, seq, 1), Ok(Evenement::Ignore));
+        assert_eq!(m[2].recevoir(&prop, seq, 1), Ok(Evenement::Ignore));
         // … donc le Commit qui la cite par référence ne peut pas passer.
         let c = commit_brut(&mut m[1], |b| b.consume_proposal_store(true));
         let e0 = m[0].epoque();
         seq += 1;
         for i in [0, 2] {
-            assert!(m[i].recevoir(&c, seq).is_err(), "membre {i}");
+            assert!(m[i].recevoir(&c, seq, 1).is_err(), "membre {i}");
             assert_eq!(m[i].epoque(), e0);
             assert_eq!(m[i].membres(), vec![0, 1, 2]);
         }
