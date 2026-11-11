@@ -283,11 +283,14 @@ async function accessCases(): Promise<Json[]> {
       v_preuve: hex(ak.vPreuve),
     });
   }
-  const bad = async (name: string, f: () => Promise<unknown>) => out.push({ name, ...((await outcome(f, () => ({}))) as object) });
-  await bad("deriveAccess : K_lien de 31 octets", () => K.deriveAccess(seq(31) as KLien));
-  await bad("shareId : K_lien de 33 octets", () => Env.shareId(seq(33) as KLien));
-  await bad("accessKeys : K_lien de 31 octets", () => Env.accessKeys(seq(31) as KLien, seq(32) as KMdp));
-  await bad("accessKeys : K_mdp de 31 octets", () => Env.accessKeys(seq(32) as KLien, seq(31) as KMdp));
+  // Refus de taille : les entrées (k_lien, k_mdp quand la fonction le prend) sont écrites dans le
+  // cas, pour être rejouées sans connaître le générateur.
+  const bad = async (name: string, fn: string, kLien: Bytes, kMdp: Bytes | null, f: () => Promise<unknown>) =>
+    out.push({ name, fn, k_lien: hex(kLien), ...(kMdp ? { k_mdp: hex(kMdp) } : {}), ...((await outcome(f, () => ({}))) as object) });
+  await bad("deriveAccess : K_lien de 31 octets", "deriveAccess", seq(31), null, () => K.deriveAccess(seq(31) as KLien));
+  await bad("shareId : K_lien de 33 octets", "shareId", seq(33), null, () => Env.shareId(seq(33) as KLien));
+  await bad("accessKeys : K_lien de 31 octets", "accessKeys", seq(31), seq(32), () => Env.accessKeys(seq(31) as KLien, seq(32) as KMdp));
+  await bad("accessKeys : K_mdp de 31 octets", "accessKeys", seq(32), seq(31), () => Env.accessKeys(seq(32) as KLien, seq(31) as KMdp));
   return out;
 }
 

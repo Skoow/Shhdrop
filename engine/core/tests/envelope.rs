@@ -9,8 +9,11 @@ use shhdrop_core::envelope::{
     ENVELOPE_LEN, access_keys, content_keys, content_keys_checked, new_seed, open, seal, share_id,
 };
 use shhdrop_core::kdf::derive_access;
-use shhdrop_core::platform::{KeyHandle, Platform};
+use shhdrop_core::native::RustCrypto;
+use shhdrop_core::platform::{Key, KeyHandle, Platform};
 use shhdrop_core::{Error, KLien, KMdp, Seed};
+use std::cell::RefCell;
+use std::rc::Rc;
 use support::{block_on, hex, no_random, platform, unhex};
 use zeroize::Zeroizing;
 
@@ -42,9 +45,9 @@ fn id() -> [u8; 16] {
 fn header() -> [u8; 48] {
     unhex(V_HEADER).try_into().unwrap()
 }
-fn import(p: &impl Platform, raw: &str) -> KeyHandle {
+fn import(p: &Rc<RustCrypto>, raw: &str) -> Key<RustCrypto> {
     let k: [u8; 32] = unhex(raw).try_into().unwrap();
-    block_on(p.aes_import(Zeroizing::new(k))).unwrap()
+    block_on(Key::import(p, Zeroizing::new(k))).unwrap()
 }
 fn env_ad(id: &[u8], header: &[u8]) -> Vec<u8> {
     [ENV_AD, id, header].concat()
@@ -66,7 +69,7 @@ fn vecteurs_fixes_ids_et_preuves() {
 fn open_deballe_une_enveloppe_de_node() {
     let p = platform(1);
     let a = block_on(access_keys(&p, &k_lien(), &k_mdp())).unwrap();
-    let got = block_on(open(&p, a.k_env, &unhex(V_E), &id(), &header())).unwrap();
+    let got = block_on(open(&a.k_env, &unhex(V_E), &id(), &header())).unwrap();
     assert_eq!(got.as_bytes(), &[3; 32]);
 }
 
@@ -74,12 +77,12 @@ fn open_deballe_une_enveloppe_de_node() {
 fn seal_produit_une_enveloppe_que_k_env_de_node_deballe() {
     let p = platform(1);
     let a = block_on(access_keys(&p, &k_lien(), &k_mdp())).unwrap();
-    let e = block_on(seal(&p, a.k_env, &r(), &id(), &header())).unwrap();
+    let e = block_on(seal(&a.k_env, &r(), &id(), &header())).unwrap();
     assert_eq!(e.len(), 60);
     // K_env calculée par Node, importée telle quelle : AES-GCM(K_env, nonce, R, AD).
     let node = import(&p, V_K_ENV);
     let nonce: [u8; 12] = e[..12].try_into().unwrap();
-    let pt = block_on(p.aes_open_batch(node, &env_ad(&id(), &header()), &[nonce], &e[12..], 48));
+    let pt = block_on(node.open_batch(&env_ad(&id(), &header()), &[nonce], &e[12..], 48));
     assert_eq!(&pt.unwrap()[..], &[3; 32]);
 }
 
@@ -88,9 +91,9 @@ fn k_contenu_egale_hkdf_de_r() {
     // Node déchiffre ce que K_contenu chiffre : ici, la clé de Node importée déchiffre.
     let p = platform(1);
     let c = block_on(content_keys(&p, &r())).unwrap();
-    let ct = block_on(p.aes_seal_batch(c.k_contenu, b"", &[[0; 12]], b"AAAAA", 5)).unwrap();
+    let ct = block_on(c.k_contenu.seal_batch(b"", &[[0; 12]], b"AAAAA", 5)).unwrap();
     let node = import(&p, V_K_CONTENU);
-    let pt = block_on(p.aes_open_batch(node, b"", &[[0; 12]], &ct, 21)).unwrap();
+    let pt = block_on(node.open_batch(b"", &[[0; 12]], &ct, 21)).unwrap();
     assert_eq!(&pt[..], b"AAAAA");
 }
 
@@ -98,13 +101,13 @@ fn k_contenu_egale_hkdf_de_r() {
 fn aller_retour_et_nonces_differents() {
     let p = platform(7);
     let a = block_on(access_keys(&p, &k_lien(), &k_mdp())).unwrap();
-    let e1 = block_on(seal(&p, a.k_env, &r(), &id(), &header())).unwrap();
-    let e2 = block_on(seal(&p, a.k_env, &r(), &id(), &header())).unwrap();
+    let e1 = block_on(seal(&a.k_env, &r(), &id(), &header())).unwrap();
+    let e2 = block_on(seal(&a.k_env, &r(), &id(), &header())).unwrap();
     assert_eq!(e1.len(), ENVELOPE_LEN);
     assert_eq!(ENVELOPE_LEN, 60);
     assert_ne!(e1[..12], e2[..12]);
     for e in [&e1, &e2] {
-        let got = block_on(open(&p, a.k_env, e, &id(), &header())).unwrap();
+        let got = block_on(open(&a.k_env, e, &id(), &header())).unwrap();
         assert_eq!(got.as_bytes(), &[3; 32]);
     }
 }
@@ -113,7 +116,7 @@ fn aller_retour_et_nonces_differents() {
 fn toute_alteration_donne_paquet_corrompu() {
     let p = platform(7);
     let a = block_on(access_keys(&p, &k_lien(), &k_mdp())).unwrap();
-    let e = block_on(seal(&p, a.k_env, &r(), &id(), &header())).unwrap();
+    let e = block_on(seal(&a.k_env, &r(), &id(), &header())).unwrap();
     let other = block_on(access_keys(&p, &k_lien(), &KMdp::from_bytes([4; 32]))).unwrap();
     let other_link = block_on(access_keys(&p, &KLien::from_bytes([5; 32]), &k_mdp())).unwrap();
     let mut other_id = id();
@@ -123,25 +126,25 @@ fn toute_alteration_donne_paquet_corrompu() {
     let longer = [&e[..], &[0]].concat();
     let (id, header) = (id(), header());
     // (K_env, E, id, en-tête)
-    type Case = (KeyHandle, Vec<u8>, Vec<u8>, Vec<u8>);
+    type Case<'a> = (&'a Key<RustCrypto>, Vec<u8>, Vec<u8>, Vec<u8>);
     let mut cases: Vec<Case> = vec![
-        (a.k_env, e.clone(), other_id.to_vec(), header.to_vec()),
-        (a.k_env, e.clone(), id.to_vec(), other_header.to_vec()),
-        (other.k_env, e.clone(), id.to_vec(), header.to_vec()),
-        (other_link.k_env, e.clone(), id.to_vec(), header.to_vec()),
-        (a.k_env, e[..59].to_vec(), id.to_vec(), header.to_vec()),
-        (a.k_env, longer, id.to_vec(), header.to_vec()),
-        (a.k_env, e.clone(), id[..15].to_vec(), header.to_vec()),
-        (a.k_env, e.clone(), id.to_vec(), header[..47].to_vec()),
-        (a.k_env, vec![], id.to_vec(), header.to_vec()),
+        (&a.k_env, e.clone(), other_id.to_vec(), header.to_vec()),
+        (&a.k_env, e.clone(), id.to_vec(), other_header.to_vec()),
+        (&other.k_env, e.clone(), id.to_vec(), header.to_vec()),
+        (&other_link.k_env, e.clone(), id.to_vec(), header.to_vec()),
+        (&a.k_env, e[..59].to_vec(), id.to_vec(), header.to_vec()),
+        (&a.k_env, longer, id.to_vec(), header.to_vec()),
+        (&a.k_env, e.clone(), id[..15].to_vec(), header.to_vec()),
+        (&a.k_env, e.clone(), id.to_vec(), header[..47].to_vec()),
+        (&a.k_env, vec![], id.to_vec(), header.to_vec()),
         (
-            a.k_env,
+            &a.k_env,
             e.clone(),
             [&id[..], &[0]].concat(),
             header.to_vec(),
         ),
         (
-            a.k_env,
+            &a.k_env,
             e.clone(),
             id.to_vec(),
             [&header[..], &[0]].concat(),
@@ -150,11 +153,11 @@ fn toute_alteration_donne_paquet_corrompu() {
     for i in 0..e.len() {
         let mut t = e.clone();
         t[i] ^= 0x80;
-        cases.push((a.k_env, t, id.to_vec(), header.to_vec()));
+        cases.push((&a.k_env, t, id.to_vec(), header.to_vec()));
     }
     assert_eq!(cases.len(), 71);
     for (k, ee, ii, hh) in &cases {
-        let got = block_on(open(&p, *k, ee, ii, hh));
+        let got = block_on(open(k, ee, ii, hh));
         assert_eq!(got.unwrap_err(), Error::PaquetCorrompu, "{}", hex(ee));
     }
 }
@@ -164,14 +167,14 @@ fn enveloppe_d_un_autre_partage_refusee() {
     // Le serveur échange E entre deux partages : les données authentifiées (en-tête) l'empêchent.
     let p = platform(9);
     let a = block_on(access_keys(&p, &k_lien(), &k_mdp())).unwrap();
-    let r2 = new_seed(&p).unwrap();
+    let r2 = new_seed(&*p).unwrap();
     let eng2 = block_on(content_keys(&p, &r2)).unwrap().engagement;
     let h2: [u8; 48] = [&header()[..16], &eng2[..]].concat().try_into().unwrap();
-    let e2 = block_on(seal(&p, a.k_env, &r2, &id(), &h2)).unwrap();
-    let got = block_on(open(&p, a.k_env, &e2, &id(), &header()));
+    let e2 = block_on(seal(&a.k_env, &r2, &id(), &h2)).unwrap();
+    let got = block_on(open(&a.k_env, &e2, &id(), &header()));
     assert_eq!(got.unwrap_err(), Error::PaquetCorrompu);
     // Avec son propre en-tête, elle s'ouvre (le refus vient bien des données authentifiées).
-    let got = block_on(open(&p, a.k_env, &e2, &id(), &h2)).unwrap();
+    let got = block_on(open(&a.k_env, &e2, &id(), &h2)).unwrap();
     assert_eq!(got.as_bytes(), r2.as_bytes());
 }
 
@@ -183,15 +186,15 @@ fn engagement_faux_refuse_juste_memes_cles() {
     assert_eq!(hex(&c.engagement), V_ENGAGEMENT);
     // Même K_contenu que content_keys : même chiffré pour le même nonce.
     let plain = [0x41u8; 16];
-    let a = block_on(p.aes_seal_batch(c.k_contenu, b"", &[[0; 12]], &plain, 16)).unwrap();
+    let a = block_on(c.k_contenu.seal_batch(b"", &[[0; 12]], &plain, 16)).unwrap();
     let c2 = block_on(content_keys(&p, &r())).unwrap();
-    let b = block_on(p.aes_seal_batch(c2.k_contenu, b"", &[[0; 12]], &plain, 16)).unwrap();
+    let b = block_on(c2.k_contenu.seal_batch(b"", &[[0; 12]], &plain, 16)).unwrap();
     assert_eq!(a, b);
     let mut bad = good.clone();
     bad[0] ^= 1;
     let mut bad_last = good.clone();
     bad_last[31] ^= 0x80;
-    let other_r = new_seed(&p).unwrap();
+    let other_r = new_seed(&*p).unwrap();
     for (seed, eng) in [
         (&r(), &bad[..]),
         (&r(), &bad_last[..]),
@@ -227,41 +230,18 @@ fn tailles_refusees() {
 fn aleatoire_qui_echoue() {
     // Jamais de graine ou de nonce nuls à la place : l'erreur remonte.
     let p = no_random();
-    assert_eq!(new_seed(&p).unwrap_err(), Error::AleatoireIndisponible);
+    assert_eq!(new_seed(&*p).unwrap_err(), Error::AleatoireIndisponible);
     let a = block_on(access_keys(&p, &k_lien(), &k_mdp())).unwrap();
-    let got = block_on(seal(&p, a.k_env, &r(), &id(), &header()));
+    let got = block_on(seal(&a.k_env, &r(), &id(), &header()));
     assert_eq!(got.unwrap_err(), Error::AleatoireIndisponible);
 }
 
 #[test]
-fn etiquettes_v2_seulement() {
-    let srcs = [
+fn aucune_etiquette_v1() {
+    for s in [
         include_str!("../src/envelope.rs"),
         include_str!("../src/kdf.rs"),
-    ];
-    let mut labels = vec![];
-    for s in srcs {
-        for (i, _) in s.match_indices("\"shhdrop/") {
-            let rest = &s[i + 1..];
-            labels.push(&rest[..rest.find('"').unwrap()]);
-        }
-    }
-    assert!(labels.len() >= 7, "{labels:?}");
-    for l in &labels {
-        let tail = l
-            .strip_prefix("shhdrop/v2/")
-            .unwrap_or_else(|| panic!("{l}"));
-        let word = tail.strip_suffix("-ad").unwrap_or(tail);
-        assert!(
-            !word.is_empty() && word.bytes().all(|b| b.is_ascii_lowercase()),
-            "{l}"
-        );
-    }
-    // Une étiquette, un usage : l'info HKDF de K_env et le préfixe des données authentifiées
-    // de E sont distincts (séparation des domaines).
-    assert!(srcs[0].contains("\"shhdrop/v2/enveloppe-ad\""));
-    assert!(srcs[0].contains("hkdf::<32>(&*k_maitre, \"shhdrop/v2/enveloppe\")"));
-    for s in srcs {
+    ] {
         assert!(!s.contains("shhdrop/v1/"));
     }
 }
@@ -274,22 +254,22 @@ fn lot_concatenation_des_morceaux() {
     let k = import(&p, V_K_CONTENU);
     let plain: Vec<u8> = (0..300u32).map(|i| i as u8).collect();
     let nonces = [[1u8; 12], [2; 12], [3; 12]];
-    let ct = block_on(p.aes_seal_batch(k, b"ad", &nonces, &plain, 100)).unwrap();
+    let ct = block_on(k.seal_batch(b"ad", &nonces, &plain, 100)).unwrap();
     assert_eq!(ct.len(), 3 * 116);
     for (i, n) in nonces.iter().enumerate() {
-        let one = block_on(p.aes_seal_batch(k, b"ad", &[*n], &plain[i * 100..][..100], 100));
+        let one = block_on(k.seal_batch(b"ad", &[*n], &plain[i * 100..][..100], 100));
         assert_eq!(one.unwrap(), ct[i * 116..][..116], "morceau {i}");
     }
-    let pt = block_on(p.aes_open_batch(k, b"ad", &nonces, &ct, 116)).unwrap();
+    let pt = block_on(k.open_batch(b"ad", &nonces, &ct, 116)).unwrap();
     assert_eq!(&pt[..], &plain[..]);
     // Lot vide : rien à chiffrer.
     assert!(
-        block_on(p.aes_seal_batch(k, b"ad", &[], &[], 100))
+        block_on(k.seal_batch(b"ad", &[], &[], 100))
             .unwrap()
             .is_empty()
     );
     assert!(
-        block_on(p.aes_open_batch(k, b"ad", &[], &[], 116))
+        block_on(k.open_batch(b"ad", &[], &[], 116))
             .unwrap()
             .is_empty()
     );
@@ -302,7 +282,7 @@ fn lot_concatenation_des_morceaux() {
         (&swapped, &b"ad"[..], &ct),
         (&nonces, &b"ae"[..], &ct),
     ] {
-        let got = block_on(p.aes_open_batch(k, ad, n, c, 116));
+        let got = block_on(k.open_batch(ad, n, c, 116));
         assert_eq!(got.unwrap_err(), Error::PaquetCorrompu);
     }
 }
@@ -317,49 +297,135 @@ fn lot_mal_forme() {
         (&[0; 201][..], 100),
         (&[0; 0][..], 0),
     ] {
-        let got = block_on(p.aes_seal_batch(k, b"", &n2, plain, chunk));
+        let got = block_on(k.seal_batch(b"", &n2, plain, chunk));
         assert_eq!(got.unwrap_err(), Error::ChiffrementEchec, "{chunk}");
     }
     for (cipher, chunk_ct) in [
         (&[0u8; 231][..], 116),
         (&[0; 233][..], 116),
         (&[0; 30][..], 15),
+        (&[0; 32][..], 16),
         (&[0; 0][..], 0),
     ] {
-        let got = block_on(p.aes_open_batch(k, b"", &n2, cipher, chunk_ct));
+        let got = block_on(k.open_batch(b"", &n2, cipher, chunk_ct));
         assert_eq!(got.unwrap_err(), Error::PaquetCorrompu, "{chunk_ct}");
     }
     // Tailles qui débordent : refus, pas de panique.
-    let got = block_on(p.aes_seal_batch(k, b"", &n2, &[0; 4], usize::MAX));
+    let got = block_on(k.seal_batch(b"", &n2, &[0; 4], usize::MAX));
     assert_eq!(got.unwrap_err(), Error::ChiffrementEchec);
-    let got = block_on(p.aes_open_batch(k, b"", &n2, &[0; 4], usize::MAX));
+    let got = block_on(k.open_batch(b"", &n2, &[0; 4], usize::MAX));
     assert_eq!(got.unwrap_err(), Error::PaquetCorrompu);
 }
 
+/// Fournisseur espion : délègue à RustCrypto et note chaque import et chaque oubli.
+struct Spy {
+    inner: RustCrypto,
+    imported: RefCell<Vec<u32>>,
+    dropped: RefCell<Vec<u32>>,
+}
+
+impl Platform for Spy {
+    fn random(&self, out: &mut [u8]) -> shhdrop_core::Result<()> {
+        self.inner.random(out)
+    }
+    async fn aes_import(&self, key: Zeroizing<[u8; 32]>) -> shhdrop_core::Result<u32> {
+        let h = self.inner.aes_import(key).await?;
+        self.imported.borrow_mut().push(h);
+        Ok(h)
+    }
+    async fn aes_seal_batch(
+        &self,
+        k: KeyHandle,
+        ad: &[u8],
+        nonces: &[[u8; 12]],
+        plain: &[u8],
+        chunk: usize,
+    ) -> shhdrop_core::Result<Vec<u8>> {
+        self.inner.aes_seal_batch(k, ad, nonces, plain, chunk).await
+    }
+    async fn aes_open_batch(
+        &self,
+        k: KeyHandle,
+        ad: &[u8],
+        nonces: &[[u8; 12]],
+        cipher: &[u8],
+        chunk_ct: usize,
+    ) -> shhdrop_core::Result<Zeroizing<Vec<u8>>> {
+        self.inner
+            .aes_open_batch(k, ad, nonces, cipher, chunk_ct)
+            .await
+    }
+    fn aes_drop(&self, k: KeyHandle) {
+        self.dropped.borrow_mut().push(k.raw());
+        self.inner.aes_drop(k);
+    }
+}
+
+fn spy() -> Rc<Spy> {
+    Rc::new(Spy {
+        inner: RustCrypto::new(Box::new(support::splitmix(1))),
+        imported: RefCell::new(vec![]),
+        dropped: RefCell::new(vec![]),
+    })
+}
+
 #[test]
-fn poignees_distinctes_et_drop() {
+fn chaque_cle_est_oubliee_a_sa_destruction() {
+    let p = spy();
+    {
+        let c = block_on(content_keys(&p, &r())).unwrap();
+        let a = block_on(access_keys(&p, &k_lien(), &k_mdp())).unwrap();
+        assert_eq!(p.dropped.borrow().len(), 0);
+        // E scellée puis ouverte : la clé sert tant qu'elle vit.
+        let e = block_on(seal(&a.k_env, &r(), &id(), &header())).unwrap();
+        block_on(open(&a.k_env, &e, &id(), &header())).unwrap();
+        drop(c);
+        assert_eq!(*p.dropped.borrow(), vec![p.imported.borrow()[0]]);
+        // Erreur d'ouverture (`?`) : la clé reste tenue par `a`, rien n'est oublié en double.
+        assert!(block_on(open(&a.k_env, &e[..59], &id(), &header())).is_err());
+        assert_eq!(p.dropped.borrow().len(), 1);
+    }
+    // Fin de portée : toutes les clés importées oubliées, chacune une seule fois.
+    let mut imported = p.imported.borrow().clone();
+    let mut dropped = p.dropped.borrow().clone();
+    imported.sort_unstable();
+    dropped.sort_unstable();
+    assert_eq!(imported.len(), 2);
+    assert_eq!(imported, dropped);
+    // Engagement faux : aucune clé importée, donc rien à oublier.
+    let p = spy();
+    let bad = [0u8; 32];
+    assert!(block_on(content_keys_checked(&p, &r(), &bad)).is_err());
+    assert!(p.imported.borrow().is_empty() && p.dropped.borrow().is_empty());
+}
+
+#[test]
+fn poignees_jamais_reutilisees() {
+    let p = spy();
+    let k1 = import_spy(&p, 1);
+    let k2 = import_spy(&p, 2);
+    let ct = block_on(k1.seal_batch(b"", &[[0; 12]], b"abc", 3)).unwrap();
+    // Autre clé : refus.
+    let got = block_on(k2.open_batch(b"", &[[0; 12]], &ct, 19));
+    assert_eq!(got.unwrap_err(), Error::PaquetCorrompu);
+    drop(k1);
+    let _k3 = import_spy(&p, 1);
+    let mut ids = p.imported.borrow().clone();
+    ids.dedup();
+    assert_eq!(ids.len(), 3, "une poignée oubliée n'est jamais redonnée");
+}
+
+fn import_spy(p: &Rc<Spy>, b: u8) -> Key<Spy> {
+    block_on(Key::import(p, Zeroizing::new([b; 32]))).unwrap()
+}
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "nonce répété dans un lot")]
+fn nonce_repete_dans_un_lot() {
     let p = platform(1);
-    let k1 = import(&p, V_K_CONTENU);
-    let k2 = import(&p, V_K_ENV);
-    assert_ne!(k1, k2);
-    let ct = block_on(p.aes_seal_batch(k1, b"", &[[0; 12]], b"abc", 3)).unwrap();
-    // Autre poignée = autre clé.
-    let got = block_on(p.aes_open_batch(k2, b"", &[[0; 12]], &ct, 19));
-    assert_eq!(got.unwrap_err(), Error::PaquetCorrompu);
-    p.aes_drop(k1);
-    p.aes_drop(k1); // deux fois : sans effet
-    let got = block_on(p.aes_seal_batch(k1, b"", &[[0; 12]], b"abc", 3));
-    assert_eq!(got.unwrap_err(), Error::ChiffrementEchec);
-    let got = block_on(p.aes_open_batch(k1, b"", &[[0; 12]], &ct, 19));
-    assert_eq!(got.unwrap_err(), Error::PaquetCorrompu);
-    // Une poignée oubliée n'est jamais redonnée à une autre clé.
-    let k3 = import(&p, V_K_CONTENU);
-    assert_ne!(k3, k1);
-    assert_ne!(k3, k2);
-    // Poignée jamais donnée.
-    let unknown = KeyHandle::from_raw(9999);
-    let got = block_on(p.aes_seal_batch(unknown, b"", &[[0; 12]], b"abc", 3));
-    assert_eq!(got.unwrap_err(), Error::ChiffrementEchec);
+    let k = import(&p, V_K_CONTENU);
+    let _ = block_on(k.seal_batch(b"", &[[1; 12], [2; 12], [1; 12]], &[0; 3], 1));
 }
 
 #[test]

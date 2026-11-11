@@ -26,18 +26,28 @@
     },
     {
       "error": "clé ou sel de taille invalide",
+      "fn": "deriveAccess",
+      "k_lien": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e",
       "name": "deriveAccess : K_lien de 31 octets"
     },
     {
       "error": "clé ou sel de taille invalide",
+      "fn": "shareId",
+      "k_lien": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
       "name": "shareId : K_lien de 33 octets"
     },
     {
       "error": "clé ou sel de taille invalide",
+      "fn": "accessKeys",
+      "k_lien": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e",
+      "k_mdp": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
       "name": "accessKeys : K_lien de 31 octets"
     },
     {
       "error": "clé ou sel de taille invalide",
+      "fn": "accessKeys",
+      "k_lien": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "k_mdp": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e",
       "name": "accessKeys : K_mdp de 31 octets"
     }
   ],

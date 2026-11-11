@@ -16,9 +16,11 @@ use shhdrop_core::link::{
     ParsedLink, check_origin, manage_link, parse_link, share_link, share_link_with_password,
     split_password,
 };
+use shhdrop_core::native::RustCrypto;
 use shhdrop_core::password::{generate, is_generated};
-use shhdrop_core::platform::{KeyHandle, Platform};
+use shhdrop_core::platform::{Key, Platform};
 use shhdrop_core::{Error, KLien, KMdp, SGestion, Seed};
+use std::rc::Rc;
 use support::{block_on, platform, replay, unhex};
 use zeroize::Zeroizing;
 
@@ -314,12 +316,12 @@ fn seq(n: usize) -> Vec<u8> {
 
 /// Vérifie qu'une poignée tient la clé brute `raw` du vecteur : la même sonde AES-GCM sous la
 /// poignée et sous `raw` importée donne le même chiffré (la clé ne sort jamais du fournisseur).
-fn same_key(p: &impl Platform, k: KeyHandle, raw: &[u8], what: &str) {
+fn same_key(p: &Rc<RustCrypto>, k: &Key<RustCrypto>, raw: &[u8], what: &str) {
     let raw: [u8; 32] = raw.try_into().expect("32 octets");
-    let r = block_on(p.aes_import(Zeroizing::new(raw))).unwrap();
-    let probe = |h| block_on(p.aes_seal_batch(h, b"sonde", &[[7; 12]], &seq(16), 16)).unwrap();
-    assert_eq!(probe(k), probe(r), "{what}");
-    p.aes_drop(r);
+    let r = block_on(Key::import(p, Zeroizing::new(raw))).unwrap();
+    let probe =
+        |h: &Key<RustCrypto>| block_on(h.seal_batch(b"sonde", &[[7; 12]], &seq(16), 16)).unwrap();
+    assert_eq!(probe(k), probe(&r), "{what}");
 }
 
 /// En-tête de 48 octets : « SHH2 », version 2, 11 octets nuls, engagement (format, Task 6).
@@ -335,19 +337,18 @@ fn access_cases() {
     let (mut ok, mut refused) = (0, 0);
     for c in cases {
         if let Value::String(e) = &c["error"] {
-            // Le générateur a passé `seq(n)` de la taille donnée dans le nom du cas.
-            let got: Result<(), Error> = match c["name"].as_str().unwrap() {
-                "deriveAccess : K_lien de 31 octets" => {
-                    KLien::from_slice(&seq(31)).map(|k| drop(derive_access(&k)))
-                }
-                "shareId : K_lien de 33 octets" => KLien::from_slice(&seq(33)).map(drop),
-                "accessKeys : K_lien de 31 octets" => KLien::from_slice(&seq(31))
-                    .and_then(|l| KMdp::from_slice(&seq(32)).map(|m| (l, m)))
-                    .map(drop),
-                "accessKeys : K_mdp de 31 octets" => KLien::from_slice(&seq(32))
-                    .and_then(|l| KMdp::from_slice(&seq(31)).map(|m| (l, m)))
-                    .map(drop),
-                other => panic!("refus inconnu dans les vecteurs : {other}"),
+            // Entrées de taille libre lues dans le vecteur ; K_lien est vérifiée avant K_mdp,
+            // comme dans `accessKeys`.
+            let k_lien = || KLien::from_slice(&hexf(c, "k_lien"));
+            let got: Result<(), Error> = match c["fn"].as_str().unwrap() {
+                "deriveAccess" => k_lien().map(|k| drop(derive_access(&k))),
+                "shareId" => k_lien().map(|k| {
+                    share_id(&k);
+                }),
+                "accessKeys" => k_lien()
+                    .and_then(|l| KMdp::from_slice(&hexf(c, "k_mdp")).map(|m| (l, m)))
+                    .and_then(|(l, m)| block_on(access_keys(&p, &l, &m)).map(drop)),
+                other => panic!("fonction inconnue dans les vecteurs : {other}"),
             };
             assert_eq!(got.unwrap_err().to_string(), *e, "{c}");
             refused += 1;
@@ -367,10 +368,9 @@ fn access_cases() {
         let k_env = hkdf::<32>(&*k_maitre, "shhdrop/v2/enveloppe");
         assert_eq!(k_env.to_vec(), hexf(c, "k_env"), "{c}");
         let ak = block_on(access_keys(&p, &k_lien, &k_mdp)).unwrap();
-        same_key(&p, ak.k_env, &hexf(c, "k_env"), "k_env");
+        same_key(&p, &ak.k_env, &hexf(c, "k_env"), "k_env");
         assert_eq!(ak.k_preuve.as_bytes().to_vec(), hexf(c, "k_preuve"), "{c}");
         assert_eq!(ak.v_preuve.to_vec(), hexf(c, "v_preuve"), "{c}");
-        p.aes_drop(ak.k_env);
         ok += 1;
     }
     assert_eq!((ok, refused), (2, 4));
@@ -405,10 +405,9 @@ fn content_cases() {
                 block_on(content_keys(&p, &r)).unwrap()
             };
             assert_eq!(ck.engagement.to_vec(), engagement, "{c}");
-            same_key(&p, ck.k_contenu, &hexf(c, "k_contenu"), "k_contenu");
+            same_key(&p, &ck.k_contenu, &hexf(c, "k_contenu"), "k_contenu");
             // probe = AES-GCM(K_contenu, nonce(0, faux) = 12 zéros, en-tête, probe_plain).
-            let probe = block_on(p.aes_seal_batch(
-                ck.k_contenu,
+            let probe = block_on(ck.k_contenu.seal_batch(
                 &header(&ck.engagement),
                 &[[0; 12]],
                 &hexf(c, "probe_plain"),
@@ -416,7 +415,6 @@ fn content_cases() {
             ))
             .unwrap();
             assert_eq!(probe, hexf(c, "probe"), "{c}");
-            p.aes_drop(ck.k_contenu);
         }
         assert_eq!(
             hkdf::<32>(r.as_bytes(), "shhdrop/v2/contenu").to_vec(),
@@ -447,8 +445,7 @@ fn envelope_cases() {
                 assert_eq!(header(&eng), hdr, "{c}");
                 assert_eq!(share_id(&k_lien).to_vec(), id, "{c}");
                 let got = block_on(seal(
-                    &p,
-                    ak.k_env,
+                    &ak.k_env,
                     &r,
                     &id.clone().try_into().unwrap(),
                     &hdr.clone().try_into().unwrap(),
@@ -462,7 +459,7 @@ fn envelope_cases() {
             "open" => {
                 let p = platform(1);
                 let ak = block_on(access_keys(&p, &k_lien, &k_mdp)).unwrap();
-                let got = block_on(open(&p, ak.k_env, &e, &id, &hdr));
+                let got = block_on(open(&ak.k_env, &e, &id, &hdr));
                 check(c, got.map(|s| s.as_bytes().to_vec()), |_| hexf(c, "r"));
                 if c["error"].is_null() {
                     opened += 1;
@@ -475,5 +472,5 @@ fn envelope_cases() {
         }
     }
     assert_eq!((sealed, opened), (1, 1));
-    assert!(refused >= 10, "{refused}");
+    assert_eq!(refused, 10);
 }

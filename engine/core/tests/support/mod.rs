@@ -5,6 +5,7 @@ use core::future::Future;
 use core::task::{Context, Poll, Waker};
 use shhdrop_core::native::RustCrypto;
 use shhdrop_core::{Error, Result};
+use std::rc::Rc;
 
 /// Exécute un futur du fournisseur natif, toujours prêt dès le premier appel (aucune attente
 /// réelle) : un futur en attente est un bogue du test ou du fournisseur.
@@ -45,25 +46,27 @@ pub fn splitmix(seed: u64) -> impl FnMut(&mut [u8]) -> Result<()> {
 }
 
 /// Fournisseur natif à aléa déterministe.
-pub fn platform(seed: u64) -> RustCrypto {
-    RustCrypto::new(Box::new(splitmix(seed)))
+pub fn platform(seed: u64) -> Rc<RustCrypto> {
+    Rc::new(RustCrypto::new(Box::new(splitmix(seed))))
 }
 
 /// Fournisseur natif qui rejoue des tirages connus (champ `random` des vecteurs), dans l'ordre ;
 /// un tirage de mauvaise taille fait échouer le test ; au-delà du dernier, l'aléa échoue.
-pub fn replay(draws: Vec<Vec<u8>>) -> RustCrypto {
+pub fn replay(draws: Vec<Vec<u8>>) -> Rc<RustCrypto> {
     let mut draws: Vec<Vec<u8>> = draws.into_iter().rev().collect();
-    RustCrypto::new(Box::new(move |buf: &mut [u8]| {
+    Rc::new(RustCrypto::new(Box::new(move |buf: &mut [u8]| {
         let Some(d) = draws.pop() else {
             return Err(Error::AleatoireIndisponible);
         };
         assert_eq!(buf.len(), d.len(), "taille du tirage");
         buf.copy_from_slice(&d);
         Ok(())
-    }))
+    })))
 }
 
 /// Fournisseur dont l'aléa échoue toujours.
-pub fn no_random() -> RustCrypto {
-    RustCrypto::new(Box::new(|_: &mut [u8]| Err(Error::AleatoireIndisponible)))
+pub fn no_random() -> Rc<RustCrypto> {
+    Rc::new(RustCrypto::new(Box::new(|_: &mut [u8]| {
+        Err(Error::AleatoireIndisponible)
+    })))
 }

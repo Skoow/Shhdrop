@@ -8,6 +8,7 @@ use crate::platform::{KeyHandle, NONCE_LEN, Platform, TAG_LEN};
 use aes_gcm::aead::{AeadInOut, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce, Tag};
 use core::cell::{Cell, RefCell};
+use core::mem;
 use std::collections::BTreeMap;
 use zeroize::Zeroizing;
 
@@ -50,14 +51,14 @@ impl Platform for RustCrypto {
         (self.rng.borrow_mut())(out)
     }
 
-    async fn aes_import(&self, key: Zeroizing<[u8; 32]>) -> Result<KeyHandle> {
+    async fn aes_import(&self, key: Zeroizing<[u8; 32]>) -> Result<u32> {
         let id = self.next.get();
         self.next
             .set(id.checked_add(1).ok_or(Error::ChiffrementEchec)?);
         // Référence vers les octets de `key` (aucune copie), effacés quand `key` est détruite.
         let cipher = Box::new(Aes256Gcm::new((&*key).into()));
         self.keys.borrow_mut().insert(id, cipher);
-        Ok(KeyHandle::from_raw(id))
+        Ok(id)
     }
 
     async fn aes_seal_batch(
@@ -78,7 +79,9 @@ impl Platform for RustCrypto {
             .len()
             .checked_mul(chunk_ct)
             .ok_or(Error::ChiffrementEchec)?;
-        let mut out = Vec::new();
+        // Zeroizing : le clair recopié d'un lot interrompu (échec au morceau i) est effacé.
+        // Capacité réservée d'avance : aucune réallocation ne laisse de copie non effacée.
+        let mut out = Zeroizing::new(Vec::new());
         out.try_reserve_exact(cap)
             .map_err(|_| Error::ChiffrementEchec)?;
         for (nonce, piece) in nonces.iter().zip(plain.chunks_exact(chunk)) {
@@ -89,7 +92,8 @@ impl Platform for RustCrypto {
                 .map_err(|_| Error::ChiffrementEchec)?;
             out.extend_from_slice(&tag);
         }
-        Ok(out)
+        // Lot complet : que du chiffré, rendu tel quel (le `Zeroizing` vidé n'efface rien).
+        Ok(mem::take(&mut *out))
     }
 
     async fn aes_open_batch(
@@ -102,7 +106,7 @@ impl Platform for RustCrypto {
     ) -> Result<Zeroizing<Vec<u8>>> {
         let keys = self.keys.borrow();
         let aes = keys.get(&k.raw()).ok_or(Error::PaquetCorrompu)?;
-        if chunk_ct < TAG_LEN || !fits(cipher.len(), nonces.len(), chunk_ct) {
+        if chunk_ct <= TAG_LEN || !fits(cipher.len(), nonces.len(), chunk_ct) {
             return Err(Error::PaquetCorrompu);
         }
         let chunk = chunk_ct - TAG_LEN;
@@ -129,5 +133,62 @@ impl Platform for RustCrypto {
     fn aes_drop(&self, k: KeyHandle) {
         // La boîte retirée est détruite ici : `Aes256Gcm` met sa clé à zéro (ZeroizeOnDrop).
         drop(self.keys.borrow_mut().remove(&k.raw()));
+    }
+}
+
+/// Le fournisseur seul, poignées nues (le moteur, lui, ne passe que par `Key`).
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::future::Future;
+    use core::task::{Context, Poll, Waker};
+
+    /// Les futurs de ce fournisseur sont prêts dès le premier appel.
+    fn block_on<F: Future>(f: F) -> F::Output {
+        let mut f = core::pin::pin!(f);
+        match f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+            Poll::Ready(v) => v,
+            Poll::Pending => panic!("futur en attente"),
+        }
+    }
+
+    fn p() -> RustCrypto {
+        RustCrypto::new(Box::new(|b: &mut [u8]| {
+            b.fill(1);
+            Ok(())
+        }))
+    }
+
+    #[test]
+    fn poignee_oubliee_ou_inconnue_refusee() {
+        let p = p();
+        let k = KeyHandle(block_on(p.aes_import(Zeroizing::new([7; 32]))).unwrap());
+        let ct = block_on(p.aes_seal_batch(k, b"", &[[0; 12]], b"abc", 3)).unwrap();
+        assert_eq!(p.keys.borrow().len(), 1);
+        p.aes_drop(k);
+        assert!(
+            p.keys.borrow().is_empty(),
+            "clé retirée, donc détruite et effacée"
+        );
+        p.aes_drop(k); // deux fois : sans effet
+        let got = block_on(p.aes_seal_batch(k, b"", &[[0; 12]], b"abc", 3));
+        assert_eq!(got.unwrap_err(), Error::ChiffrementEchec);
+        let got = block_on(p.aes_open_batch(k, b"", &[[0; 12]], &ct, 19));
+        assert_eq!(got.unwrap_err(), Error::PaquetCorrompu);
+        let k2 = block_on(p.aes_import(Zeroizing::new([7; 32]))).unwrap();
+        assert_ne!(k2, k.raw(), "jamais réutilisée");
+        let got = block_on(p.aes_seal_batch(KeyHandle(9999), b"", &[[0; 12]], b"abc", 3));
+        assert_eq!(got.unwrap_err(), Error::ChiffrementEchec);
+    }
+
+    #[test]
+    fn morceaux_vides_refuses() {
+        let p = p();
+        let k = KeyHandle(block_on(p.aes_import(Zeroizing::new([7; 32]))).unwrap());
+        let got = block_on(p.aes_seal_batch(k, b"", &[[0; 12]], b"", 0));
+        assert_eq!(got.unwrap_err(), Error::ChiffrementEchec);
+        // 16 octets = un tag seul, morceau vide : refusé à l'ouverture comme au scellement.
+        let got = block_on(p.aes_open_batch(k, b"", &[[0; 12]], &[0; 16], 16));
+        assert_eq!(got.unwrap_err(), Error::PaquetCorrompu);
     }
 }
