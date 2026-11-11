@@ -3718,11 +3718,60 @@
       "label": "seulement_controles"
     },
     {
+      "error": "texte_invalide",
       "in": {
         "hex": "202020"
       },
-      "label": "seulement_espaces",
-      "out_hex": "202020"
+      "label": "seulement_espaces"
+    },
+    {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "0a"
+      },
+      "label": "seulement_saut_de_ligne"
+    },
+    {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "c2a0e38080"
+      },
+      "label": "seulement_espaces_insecables"
+    },
+    {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "e2808b"
+      },
+      "label": "seulement_zwsp"
+    },
+    {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "e2808ee2808f"
+      },
+      "label": "seulement_lrm_rlm"
+    },
+    {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "e2808defb88f"
+      },
+      "label": "seulement_zwj_et_vs16"
+    },
+    {
+      "in": {
+        "hex": "206120"
+      },
+      "label": "espaces_et_lettre_gardes",
+      "out_hex": "206120"
+    },
+    {
+      "in": {
+        "hex": "e2808b61"
+      },
+      "label": "zwsp_et_lettre_gardes",
+      "out_hex": "e2808b61"
     },
     {
       "in": {

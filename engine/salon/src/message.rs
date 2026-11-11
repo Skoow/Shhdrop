@@ -1150,7 +1150,10 @@ mod tests {
         assert_eq!(decoder(&o).unwrap(), e);
         // 2 000 guillemets, saut de ligne ou barre : l'échappement double le JSON, au-delà de 3 900 octets.
         for c in ["\"", "\n", "\\"] {
-            let e = env(Message::Texte { x: c.repeat(2000) });
+            // « a » en tête : un texte fait seulement de sauts de ligne est refusé (aucun caractère visible).
+            let e = env(Message::Texte {
+                x: format!("a{}", c.repeat(1999)),
+            });
             assert_eq!(encoder(&e).unwrap_err(), Error::TropGrand, "{c:?}");
         }
         // la borne est exacte

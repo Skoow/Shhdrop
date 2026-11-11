@@ -923,6 +923,13 @@ fn texte() -> Value {
         ("vide", utf8("")),
         ("seulement_controles", utf8("\t\r\u{0}\u{202E}")),
         ("seulement_espaces", utf8("   ")),
+        ("seulement_saut_de_ligne", utf8("\n")),
+        ("seulement_espaces_insecables", utf8("\u{A0}\u{3000}")),
+        ("seulement_zwsp", utf8("\u{200B}")),
+        ("seulement_lrm_rlm", utf8("\u{200E}\u{200F}")),
+        ("seulement_zwj_et_vs16", utf8("\u{200D}\u{FE0F}")),
+        ("espaces_et_lettre_gardes", utf8(" a ")),
+        ("zwsp_et_lettre_gardes", utf8("\u{200B}a")),
         ("graphemes_2000_a", repeat("a", 2000)),
         ("graphemes_2001_a", repeat("a", 2001)),
         (

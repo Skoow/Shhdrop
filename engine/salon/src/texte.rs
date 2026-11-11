@@ -5,7 +5,7 @@
 //! dans un drapeau de la liste emoji 15.0 : U+1F3F4, étiquettes U+E0020–E007E, U+E007F) et des contrôles (C0, DEL, C1, `\t` et `\r`
 //! compris, sauf `\n`) et des inversions de sens U+202A–U+202E et U+2066–U+2069 ; 3. NFC de
 //! nouveau (un caractère retiré entre une lettre et son accent ne doit pas empêcher la
-//! composition ; sans effet sinon) ; 4. comptage : 1 à 2 000 graphèmes (UAX #29, `unicode-segmentation`)
+//! composition ; sans effet sinon) ; 4. au moins un caractère visible (ni `White_Space` ni invisible) ; 5. comptage : 1 à 2 000 graphèmes (UAX #29, `unicode-segmentation`)
 //! et 3 500 octets UTF-8 au plus.
 //!
 //! **Pseudonyme** (`verifier_pseudo`, spec §39.4 point 4) : 1. NFC ; 2. retrait des contrôles,
@@ -89,7 +89,8 @@ pub fn nettoyer_texte(s: &str) -> Result<String> {
         .filter(|&c| (c == '\n' || !c.is_control()) && !est_inversion_de_sens(c))
         .collect();
     let out: String = retirer_etiquettes(&sans).nfc().collect();
-    if out.is_empty() {
+    // Au moins un caractère visible : ni espace (White_Space), ni invisible (est_ignorable).
+    if !out.chars().any(|c| !c.is_whitespace() && !est_ignorable(c)) {
         return Err(Error::TexteInvalide);
     }
     if out.len() > TEXTE_OCTETS || out.graphemes(true).count() > TEXTE_GRAPHEMES {
@@ -652,6 +653,30 @@ mod tests {
         }
         // plafond d'octets (64) avant la recherche
         assert!(!emoji_valide(&"👍".repeat(17)));
+    }
+
+    #[test]
+    fn texte_sans_caractere_visible_refuse() {
+        for ko in [
+            "   ",
+            "\n",
+            " \n ",
+            "\u{200B}",
+            "\u{200E}\u{200F}",
+            "\u{200D}",
+            " \u{FE0F}",
+            "\u{A0}\u{3000}",
+            "\u{2060}\u{FEFF}",
+        ] {
+            assert_eq!(
+                nettoyer_texte(ko).unwrap_err(),
+                Error::TexteInvalide,
+                "{ko:?}"
+            );
+        }
+        assert_eq!(nettoyer_texte(" a ").unwrap(), " a ");
+        assert_eq!(nettoyer_texte("\u{200B}a").unwrap(), "\u{200B}a");
+        assert!(nettoyer_texte("👨\u{200D}👩").is_ok());
     }
 
     #[test]
