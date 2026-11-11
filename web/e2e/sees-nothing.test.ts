@@ -15,7 +15,9 @@ import { b64u, concat, generatePassword, unb64u, utf8, type KAcces, type KLien, 
 // Graines R tirées par createShare : R ne sort jamais du moteur (poignée opaque) ; le moteur la
 // tire par le fournisseur (random(32), aléa de crypto.getRandomValues), qui en garde ici une copie
 // pendant newSeed seulement (le moteur efface le tableau qu'il reçoit, après l'avoir recopié).
-const seeds = vi.hoisted(() => ({ list: [] as Uint8Array<ArrayBuffer>[], on: false }));
+// Les autres tirages de 32 octets (graines k des éléments, tirées par elementSealer) sont gardés
+// aussi : `others`, fouillés comme des secrets.
+const seeds = vi.hoisted(() => ({ list: [] as Uint8Array<ArrayBuffer>[], others: [] as Uint8Array<ArrayBuffer>[], on: false }));
 vi.mock("../src/engine/provider", async (orig) => {
   const m = await orig<typeof import("../src/engine/provider")>();
   return {
@@ -26,7 +28,7 @@ vi.mock("../src/engine/provider", async (orig) => {
         ...p,
         random: (n: number) => {
           const b = p.random(n);
-          if (seeds.on && n === 32) seeds.list.push(new Uint8Array(b));
+          if (n === 32) (seeds.on ? seeds.list : seeds.others).push(new Uint8Array(b));
           return b;
         },
       };
@@ -166,6 +168,8 @@ describe("le serveur ne voit rien", () => {
     await o2.done(); // 410 « gone » attendu et toléré : le partage est déjà effacé
     o2.wipe();
     expect(seeds.list).toHaveLength(2);
+    // Deux éléments au premier partage (texte, fichier), un au second : trois graines k.
+    expect(seeds.others).toHaveLength(3);
     const seed1 = seeds.list[0]!, seed2 = seeds.list[1]!;
     const kMaitre = hk(concat(kLien, kMdp), "shhdrop/v2/maitre");
     secrets = [
@@ -174,6 +178,8 @@ describe("le serveur ne voit rien", () => {
       needle("K_contenu", hk(seed1, "shhdrop/v2/contenu")),
       needle("K_contenu (signalé)", hk(seed2, "shhdrop/v2/contenu")),
       needle("K_mdp", kMdp),
+      ...seeds.others.map((k, i) => needle(`graine k d'élément ${i}`, k)),
+      ...seeds.others.map((k, i) => needle(`clé d'élément ${i}`, hk(k, "shhdrop/v2/element"))),
       needle("K_maître", kMaitre),
       needle("K_env", hk(kMaitre, "shhdrop/v2/enveloppe")),
       ...windows("nom", NAME),

@@ -26,6 +26,23 @@ describe("panique du moteur (spec moteur §7)", () => {
     expect(reset).toHaveBeenCalledTimes(1);
     // Scelleur de l'instance remplacée : refusé (objet périmé), jamais un autre message.
     expect(await errorOf(el.piece(0))).toBe("paquet_corrompu");
+    // Revue Task 11 : les numéros repartent à 1 dans l'instance neuve. Un scelleur d'avant la
+    // panique, de même numéro qu'un neuf, n'entre jamais dans un manifeste (sa graine est perdue :
+    // le manifeste désignerait celle de l'autre élément, et le partage serait illisible).
+    const fresh = await F.elementSealer(new Blob([new Uint8Array(10)]), 0);
+    expect(fresh.id).toBe(el.id);
+    const entry = (sealer: F.ElementSealer) => [{ kind: "file" as const, name: "a", mime: "x/y", size: 10, first: 0, sealer }];
+    expect(await errorOf(F.sealFinal(entry(el), await F.contentKeys(await F.newSeed()), {}))).toBe("paquet_corrompu");
+    const fin = await F.sealFinal(entry(fresh), await F.contentKeys(await F.newSeed()), {});
+    expect(fin.bucket).toBe(16);
+  });
+
+  it("sealFinal : taille ou place différente de celles du scelleur refusée (entree_invalide)", async () => {
+    const el = await F.elementSealer(new Blob([new Uint8Array(10)]), 0);
+    const keys = await F.contentKeys(await F.newSeed());
+    for (const [size, first] of [[9, 0], [11, 0], [10, 1]] as const)
+      expect(await errorOf(F.sealFinal([{ kind: "file", name: "a", mime: "x/y", size, first, sealer: el }], keys, {})), `${size}/${first}`).toBe("entree_invalide");
+    expect((await F.sealFinal([{ kind: "file", name: "a", mime: "x/y", size: 10, first: 0, sealer: el }], keys, {})).bucket).toBe(16);
   });
 
   it("panique pendant une opération asynchrone : les opérations en cours rejetées par paquet_corrompu, plus aucun appel dans l'instance arrêtée", async () => {

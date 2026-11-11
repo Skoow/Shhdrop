@@ -28,6 +28,12 @@ const STALE = "Invalid stale object from previous Wasm instance";
 const ENGINE_ONLY = new Set(["aleatoire_indisponible", "chiffrement_echec", "entree_invalide", "argon2_echec"]);
 
 let broken = false;
+/**
+ * Génération de l'instance : +1 à chaque instance neuve (après une panique). Les numéros de
+ * scelleurs repartent de 1 dans une instance neuve : un scelleur d'une génération passée ne doit
+ * jamais désigner celui, de même numéro, d'une autre (sealFinal le refuse).
+ */
+let gen = 0;
 let armed: Engine["wasm"] | undefined;
 /** Rejets des opérations du moteur en cours, appelés sur une panique. */
 const pending = new Set<(e: Error) => void>();
@@ -46,6 +52,7 @@ async function engine(): Promise<Engine> {
   if (broken) {
     broken = false;
     resetEngine(e);
+    gen++;
     armed = undefined;
   }
   if (armed !== e.wasm) {
@@ -212,6 +219,8 @@ export type ContainerReader = {
   streamItem(i: number, sink: (chunk: Uint8Array<ArrayBuffer>) => Promise<void> | void): Promise<void>;
   /** Met à zéro le segment chiffré en cache (le manifeste reste : chaînes JavaScript). */
   wipe(): void;
+  /** Oublie le lecteur et les clés de ses éléments (chez le fournisseur) ; il ne lit plus rien ensuite. */
+  free(): void;
 };
 
 /**
@@ -222,16 +231,25 @@ export type ContainerReader = {
 export async function openStream(fetchSegment: (n: number) => Promise<Uint8Array>, bucket: number, keys: ContentKeys): Promise<ContainerReader> {
   const rd: JsReader = await run((e) => e.wasm.openReader(keys, fetchSegment, bucket), openFault);
   const manifest = rd.manifest() as Manifest;
+  let freed = false;
+  const alive = () => {
+    if (freed) throw new Error("cles_effacees");
+  };
   return {
     manifest,
-    item: (i) => call(() => rd.item(i) as Promise<Uint8Array<ArrayBuffer>>, openFault),
-    streamItem: (i, sink) => call(() => rd.streamItem(i, sink as (c: Uint8Array) => Promise<void> | void), openFault),
+    item: (i) => call(() => (alive(), rd.item(i) as Promise<Uint8Array<ArrayBuffer>>), openFault),
+    streamItem: (i, sink) => call(() => (alive(), rd.streamItem(i, sink as (c: Uint8Array) => Promise<void> | void)), openFault),
     wipe: () => {
+      if (freed) return;
       try {
         rd.wipe();
       } catch {
         // instance remplacée après une panique : plus rien en cache
       }
+    },
+    free: () => {
+      freed = true;
+      forget(rd);
     },
   };
 }
@@ -249,15 +267,23 @@ export type ElementSealer = {
   readonly id: number;
 };
 
+/** Génération, taille et place de chaque scelleur, vérifiées par sealFinal (hors de l'objet rendu). */
+const sealers = new WeakMap<ElementSealer, { gen: number; size: number; first: number }>();
+
 /**
  * Prépare l'élément `blob` placé au morceau `first` (clé neuve à chaque appel). Le Blob est lu
  * par plages (4 Mio au plus) ; un File modifié depuis l'ajout fait échouer la lecture.
  */
 export async function elementSealer(blob: Blob, first: number): Promise<ElementSealer> {
-  const el: JsElementSealer = await run((e) => e.wasm.elementSealer(e.provider, blob.size, first));
+  const size = blob.size;
+  const made = await run((e) => {
+    const g = gen;
+    return e.wasm.elementSealer(e.provider, size, first).then((el: JsElementSealer) => ({ el, gen: g }));
+  });
+  const el = made.el;
   const pieces = el.pieces() as Piece[];
   let gone = false;
-  return {
+  const out: ElementSealer = {
     pieces,
     id: el.id,
     async piece(j: number): Promise<Uint8Array<ArrayBuffer>> {
@@ -281,6 +307,8 @@ export async function elementSealer(blob: Blob, first: number): Promise<ElementS
       }
     },
   };
+  sealers.set(out, { gen: made.gen, size, first });
+  return out;
 }
 
 /**
@@ -294,7 +322,10 @@ export type FinalEntry =
 /**
  * Manifeste des éléments gardés, dans l'ordre donné, palier final, en-tête et morceau chiffré du
  * manifeste. Refus : « vide », « droits_invalides », « manifeste_trop_gros », « texte_trop_long »,
- * « trop_gros », « chevauchement », « cle_deja_utilisee ».
+ * « trop_gros », « chevauchement », « cle_deja_utilisee ». Une entrée dont la taille ou la place
+ * diffère de celles de son scelleur : « entree_invalide » ; un scelleur d'une instance remplacée
+ * après une panique (sa graine est perdue, son numéro peut désigner un autre élément) :
+ * « paquet_corrompu », jamais un manifeste qui désignerait la graine d'un autre élément.
  */
 export function sealFinal(
   entries: FinalEntry[],
@@ -302,6 +333,11 @@ export function sealFinal(
   opts: { rights?: Rights; keepTtlH?: KeepTtl },
 ): Promise<{ bucket: number; header: Uint8Array<ArrayBuffer>; tail: Uint8Array<ArrayBuffer> }> {
   return run(async (e) => {
+    for (const x of entries) {
+      const m = sealers.get(x.sealer);
+      if (!m || m.gen !== gen) throw corrupt();
+      if (m.size !== x.size || m.first !== x.first) throw new Error("entree_invalide");
+    }
     const list = entries.map(({ sealer, ...x }) => ({ ...x, sealer: sealer.id }));
     const fin = await e.wasm.sealFinal(list, keys, opts.rights, opts.keepTtlH);
     return fin as { bucket: number; header: Uint8Array<ArrayBuffer>; tail: Uint8Array<ArrayBuffer> };

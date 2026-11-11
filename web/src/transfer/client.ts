@@ -483,6 +483,7 @@ export type Opened = {
    * collectToBlob). Si saveItem échoue, le fichier partiel doit être supprimé.
    */
   saveItem(i: number, sink: (chunk: Uint8Array<ArrayBuffer>) => Promise<void> | void): Promise<void>;
+  /** Fin du téléchargement (le jeton ne lit plus rien) ; le lecteur et ses clés sont oubliés. */
   done(): Promise<void>;
   /**
    * Octroi d'ouverture rendu par unlock (spec §41.4) : à garder (session/open-grant.ts) pour
@@ -515,8 +516,9 @@ export type Opened = {
    */
   destroy(reason?: "report"): Promise<void>;
   /**
-   * Met à zéro K_accès, K_preuve et le segment en cache (le manifeste reste en mémoire :
-   * voir ContainerReader.wipe). destroy() n'est plus possible ensuite.
+   * Met à zéro K_accès, K_preuve et le segment en cache, et oublie le lecteur et les clés des
+   * éléments (le manifeste reste en mémoire : voir ContainerReader.wipe). Ni destroy(), ni item(),
+   * ni saveItem() ne sont possibles ensuite (comme après done() pour item et saveItem).
    */
   wipe(): void;
 };
@@ -628,7 +630,13 @@ export async function openShare(
         }
         return get(n);
       };
-      const rd = await openStream(fetchSegment, m.bucket, content);
+      let rd: Awaited<ReturnType<typeof openStream>>;
+      try {
+        rd = await openStream(fetchSegment, m.bucket, content);
+      } finally {
+        // K_contenu ne sert qu'au manifeste, déjà lu : la poignée est oubliée tout de suite.
+        forget(content);
+      }
       seg0?.fill(0);
       seg0 = null;
       const wrap = async <T>(f: () => Promise<T>): Promise<T> => {
@@ -651,7 +659,14 @@ export async function openShare(
         isRiskyFile: (i) => isRiskyName(safeName(entry(i).name)),
         item: (i) => wrap(() => rd.item(i)),
         saveItem: (i, sink) => wrap(() => rd.streamItem(i, sink)),
-        done,
+        // Fin du téléchargement : le lecteur et les clés de ses éléments sont oubliés.
+        done: async () => {
+          try {
+            await done();
+          } finally {
+            rd.free();
+          }
+        },
         grant: u.grant,
         opensLeft: u.opensLeft,
         regrant: () => guarded(() => api.regrant(c, u.downloadToken), readerError),
@@ -680,6 +695,7 @@ export async function openShare(
           wiped = true;
           zero();
           rd.wipe();
+          rd.free(); // aucune poignée de clé ne reste jusqu'au ramasse-miettes
         },
       };
     } catch (e) {
