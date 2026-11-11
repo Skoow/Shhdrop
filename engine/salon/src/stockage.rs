@@ -2,18 +2,22 @@
 //! la destruction.
 //!
 //! Dérivé de `openmls_memory_storage` 0.6.0 (MIT, Copyright (c) 2020 OpenMLS Authors, texte dans
-//! `LICENSE-openmls-memory-storage`) : mêmes étiquettes de clés et même sérialisation JSON, mais
-//! toute valeur rangée est un `Valeur` (octets effacés par `zeroize` quand ils sont détruits), les
-//! tampons de sérialisation sont à taille exacte (pas de recopie non effacée par agrandissement),
+//! `LICENSE-openmls-memory-storage`) : mêmes étiquettes de clés, mais les valeurs sont en
+//! postcard (préfixées par leur longueur, donc lues sans agrandissement de tampon) au lieu de
+//! JSON. Toute valeur rangée est un `Valeur` (octets effacés par `zeroize` quand ils sont
+//! détruits) et les tampons d'écriture sont à taille exacte,
 //! les `unwrap` deviennent des erreurs typées, et `clear_proposal_queue` retire bien les
 //! propositions (la version d'origine cherchait leurs clés sans l'étiquette et ne les retirait
 //! jamais). Les fonctionnalités `persistence`, `test-utils`, `extensions-draft` et
 //! `virtual-clients-draft` ne sont pas reprises.
 //!
-//! Limites assumées : les clés de la carte (étiquette, identifiants de groupe, clés publiques) ne
-//! sont pas secrètes et ne sont pas effacées ; les objets OpenMLS désérialisés à la lecture
-//! relèvent d'OpenMLS ; l'allocateur ne garantit rien sur les pages libérées au-delà de ce que
-//! `zeroize` a écrasé avant.
+//! Limites assumées : ce stockage ne laisse aucune copie des valeurs dans son propre format
+//! (écriture à taille exacte, lecture sans agrandissement : les tableaux ont leur longueur en
+//! tête, la taille annoncée est exacte). Restent hors de son contrôle : les tampons temporaires
+//! d'OpenMLS lui-même, les objets qu'il reconstruit à la lecture une fois remis à l'appelant, et
+//! l'allocateur, qui ne garantit rien sur les pages libérées au-delà de ce que `zeroize` a
+//! écrasé avant. Les clés de la carte (étiquette, identifiants de groupe, clés publiques) sont du
+//! JSON ordinaire, non secret, et ne sont pas effacées.
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -79,32 +83,28 @@ fn journal_ajouter(longueur: usize, non_nul_avant: bool, nul_apres: bool) {
     JOURNAL.with(|j| j.borrow_mut().push((longueur, non_nul_avant, nul_apres)));
 }
 
+/// Test seulement : remet le journal de ce fil à zéro (les tests ne dépendent pas d'un fil à eux).
+#[cfg(test)]
+fn journal_vider() {
+    JOURNAL.with(|j| j.borrow_mut().clear());
+}
+
 /// Test seulement : effacements observés dans ce fil depuis son début.
 #[cfg(test)]
 fn journal_effacements() -> Vec<(usize, bool, bool)> {
     JOURNAL.with(|j| j.borrow().clone())
 }
 
-/// Compte les octets écrits, pour dimensionner exactement le tampon final.
-struct Compteur(usize);
-
-impl std::io::Write for Compteur {
-    fn write(&mut self, tampon: &[u8]) -> std::io::Result<usize> {
-        self.0 += tampon.len();
-        Ok(tampon.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-/// Sérialise en JSON dans un tampon de taille exacte : pas d'agrandissement, donc pas de copie
+/// Sérialise une valeur en postcard dans un tampon de taille exacte : une passe pour mesurer,
+/// puis l'écriture dans un tampon alloué une fois, sans agrandissement donc sans copie
 /// intermédiaire laissée sans effacement.
 fn serialiser<T: Serialize + ?Sized>(valeur: &T) -> Result<Valeur, StockageError> {
-    let mut compteur = Compteur(0);
-    serde_json::to_writer(&mut compteur, valeur)?;
-    let mut tampon = Valeur(Vec::with_capacity(compteur.0));
-    serde_json::to_writer(&mut tampon.0, valeur)?;
+    let taille = postcard::serialize_with_flavor(valeur, postcard::ser_flavors::Size::default())?;
+    let mut tampon = Valeur(vec![0u8; taille]);
+    let ecrit = postcard::to_slice(valeur, &mut tampon.0)?.len();
+    if ecrit != taille {
+        return Err(StockageError::Incoherent);
+    }
     Ok(tampon)
 }
 
@@ -180,6 +180,12 @@ impl From<serde_json::Error> for StockageError {
     }
 }
 
+impl From<postcard::Error> for StockageError {
+    fn from(_: postcard::Error) -> Self {
+        Self::Serialisation
+    }
+}
+
 type R<T> = Result<T, StockageError>;
 
 impl Stockage {
@@ -242,7 +248,7 @@ impl Stockage {
     ) -> R<Option<V>> {
         let valeurs = self.valeurs_lecture()?;
         match valeurs.get(&build_key_from_vec::<VERSION>(etiquette, cle.to_vec())) {
-            Some(v) => Ok(Some(serde_json::from_slice(v)?)),
+            Some(v) => Ok(Some(postcard::from_bytes(v)?)),
             None => Ok(None),
         }
     }
@@ -257,7 +263,7 @@ impl Stockage {
         let liste = lire_liste_brute(valeurs.get(&cle_complete))?;
         liste
             .iter()
-            .map(|v| serde_json::from_slice(v).map_err(StockageError::from))
+            .map(|v| postcard::from_bytes(v).map_err(StockageError::from))
             .collect()
     }
 }
@@ -267,7 +273,7 @@ fn lire_liste_brute(valeur: Option<&Valeur>) -> R<Vec<Valeur>> {
     match valeur {
         None => Ok(Vec::new()),
         Some(v) => {
-            let brut: Vec<Vec<u8>> = serde_json::from_slice(v)?;
+            let brut: Vec<Vec<u8>> = postcard::from_bytes(v)?;
             Ok(brut.into_iter().map(Valeur).collect())
         }
     }
@@ -452,9 +458,7 @@ impl StorageProvider<CURRENT_VERSION> for Stockage {
         let Some(value) = values.get(&key) else {
             return Ok(None);
         };
-        let value = serde_json::from_slice(value)?;
-
-        Ok(value)
+        Ok(Some(postcard::from_bytes(value)?))
     }
 
     fn group_context<
@@ -470,9 +474,7 @@ impl StorageProvider<CURRENT_VERSION> for Stockage {
         let Some(value) = values.get(&key) else {
             return Ok(None);
         };
-        let value = serde_json::from_slice(value)?;
-
-        Ok(value)
+        Ok(Some(postcard::from_bytes(value)?))
     }
 
     fn interim_transcript_hash<
@@ -488,9 +490,7 @@ impl StorageProvider<CURRENT_VERSION> for Stockage {
         let Some(value) = values.get(&key) else {
             return Ok(None);
         };
-        let value = serde_json::from_slice(value)?;
-
-        Ok(value)
+        Ok(Some(postcard::from_bytes(value)?))
     }
 
     fn confirmation_tag<
@@ -506,9 +506,7 @@ impl StorageProvider<CURRENT_VERSION> for Stockage {
         let Some(value) = values.get(&key) else {
             return Ok(None);
         };
-        let value = serde_json::from_slice(value)?;
-
-        Ok(value)
+        Ok(Some(postcard::from_bytes(value)?))
     }
 
     fn signature_key_pair<
@@ -528,9 +526,7 @@ impl StorageProvider<CURRENT_VERSION> for Stockage {
         let Some(value) = values.get(&key) else {
             return Ok(None);
         };
-        let value = serde_json::from_slice(value)?;
-
-        Ok(value)
+        Ok(Some(postcard::from_bytes(value)?))
     }
 
     fn write_key_package<
@@ -602,10 +598,10 @@ impl StorageProvider<CURRENT_VERSION> for Stockage {
     }
 
     fn delete_signature_key_pair<
-        SignaturePublicKeuy: traits::SignaturePublicKey<CURRENT_VERSION>,
+        SignaturePublicKey: traits::SignaturePublicKey<CURRENT_VERSION>,
     >(
         &self,
-        public_key: &SignaturePublicKeuy,
+        public_key: &SignaturePublicKey,
     ) -> Result<(), Self::Error> {
         self.supprimer(SIGNATURE_KEY_PAIR_LABEL, &cle_json(public_key)?)
     }
@@ -825,7 +821,7 @@ impl StorageProvider<CURRENT_VERSION> for Stockage {
         let value = values.get(&storage_key);
 
         if let Some(value) = value {
-            return Ok(serde_json::from_slice(value)?);
+            return Ok(postcard::from_bytes(value)?);
         }
 
         Ok(vec![])
@@ -996,7 +992,7 @@ fn epoch_key_pairs_id(
     epoch: &impl traits::EpochKey<CURRENT_VERSION>,
     leaf_index: u32,
 ) -> R<Vec<u8>> {
-    let mut key = cle_json(group_id)?.to_vec();
+    let mut key = cle_json(group_id)?;
     key.extend_from_slice(&cle_json(epoch)?);
     key.extend_from_slice(&cle_json(&leaf_index)?);
     Ok(key)
@@ -1015,6 +1011,7 @@ mod tests {
 
     #[test]
     fn ecrase_efface() {
+        journal_vider();
         let s = Stockage::default();
         s.ecrire(b"L", b"k", vec![0xAA; 37]).unwrap();
         assert!(journal().is_empty());
@@ -1025,6 +1022,7 @@ mod tests {
 
     #[test]
     fn supprime_efface() {
+        journal_vider();
         let s = Stockage::default();
         s.ecrire(b"L", b"k", vec![0xCC; 53]).unwrap();
         s.supprimer(b"L", b"k").unwrap();
@@ -1036,6 +1034,7 @@ mod tests {
 
     #[test]
     fn drop_efface_tout() {
+        journal_vider();
         let s = Stockage::default();
         s.ecrire(b"L", b"a", vec![1; 11]).unwrap();
         s.ecrire(b"L", b"b", vec![2; 12]).unwrap();
@@ -1052,18 +1051,24 @@ mod tests {
 
     #[test]
     fn ajout_et_retrait_de_liste_effacent() {
+        journal_vider();
         let s = Stockage::default();
         s.ajouter(b"Liste", b"g", vec![7; 5]).unwrap();
+        // Liste d'un élément de 5 octets en postcard : 1 (longueur) + 1 (longueur) + 5 = 7 octets.
+        journal_vider();
         s.ajouter(b"Liste", b"g", vec![8; 6]).unwrap();
-        let avant = journal().len();
+        // L'ancienne sérialisation de la liste (7 octets non nuls) a été effacée.
+        assert!(journal().contains(&(7, true, true)));
+        journal_vider();
         s.retirer_element(b"Liste", b"g", vec![7; 5]).unwrap();
-        // Chaque réécriture de la liste efface l'ancienne sérialisation.
-        assert!(journal().len() > avant);
+        // Liste de deux éléments (1 + 6 + 7 = 14 octets) effacée à la réécriture.
+        assert!(journal().contains(&(14, true, true)));
         assert!(journal().iter().all(|&(_, nn, z)| nn && z));
     }
 
     #[test]
     fn cle_de_signature_ecrasee_puis_supprimee_efface() {
+        journal_vider();
         let f = Fournisseur::default();
         let paire = SignatureKeyPair::new(SignatureScheme::ED25519).unwrap();
         paire.store(f.storage()).unwrap();
@@ -1098,6 +1103,7 @@ mod tests {
 
     #[test]
     fn file_de_propositions_videe_et_efface() {
+        journal_vider();
         let s = Stockage::default();
         s.queue_proposal(&Groupe(1), &Ref(2), &Proposition(vec![0x5A; 64]))
             .unwrap();
@@ -1112,5 +1118,39 @@ mod tests {
         // Plus aucune entrée : la proposition a bien été retirée (et donc effacée), pas seulement
         // la liste de références.
         assert!(s.valeurs_lecture().unwrap().is_empty());
+    }
+
+    #[derive(Serialize, serde::Deserialize)]
+    struct Paire(openmls_traits::types::HpkeKeyPair);
+    #[derive(Serialize, serde::Deserialize)]
+    struct ClePublique(Vec<u8>);
+    impl Key<CURRENT_VERSION> for ClePublique {}
+    impl traits::EncryptionKey<CURRENT_VERSION> for ClePublique {}
+    impl Entity<CURRENT_VERSION> for Paire {}
+    impl traits::HpkeKeyPair<CURRENT_VERSION> for Paire {}
+
+    #[test]
+    fn paire_hpke_aller_retour_postcard() {
+        journal_vider();
+        let s = Stockage::default();
+        let paire = Paire(openmls_traits::types::HpkeKeyPair {
+            private: vec![0x42; 32].into(),
+            public: vec![0x24; 32],
+        });
+        let cle = ClePublique(vec![0x24; 32]);
+        s.write_encryption_key_pair(&cle, &paire).unwrap();
+        let relue: Paire = s.encryption_key_pair(&cle).unwrap().unwrap();
+        assert_eq!(&*relue.0.private, &[0x42u8; 32][..]);
+        assert_eq!(relue.0.public, vec![0x24u8; 32]);
+        // Format stocké : postcard à longueur exacte, pas de JSON.
+        let stocke = s.valeurs_lecture().unwrap();
+        let (_, v) = stocke
+            .iter()
+            .find(|(k, _)| k.starts_with(ENCRYPTION_KEY_PAIR_LABEL))
+            .unwrap();
+        assert_eq!(v.len(), 1 + 32 + 1 + 32);
+        drop(stocke);
+        s.delete_encryption_key_pair(&cle).unwrap();
+        assert!(s.encryption_key_pair::<Paire, _>(&cle).unwrap().is_none());
     }
 }

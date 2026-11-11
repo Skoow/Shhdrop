@@ -28,6 +28,8 @@ fn membre(nom: &[u8]) -> Membre {
     }
 }
 
+/// Scénario `fumee_avec_stockage` du brief de la Task 2 : le même échange qu'à la Task 1, avec
+/// `Fournisseur` (stockage qui efface) à la place du stockage d'OpenMLS.
 #[test]
 fn deux_membres_echangent() {
     let alice = membre(b"alice");
