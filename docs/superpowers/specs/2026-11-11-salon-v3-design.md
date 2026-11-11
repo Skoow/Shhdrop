@@ -61,17 +61,58 @@ Le moteur Rust porte tout le protocole du salon (groupe MLS, enveloppe, découpa
 
 ### 3.6 Résultat de l'essai (11 novembre) : utilisable, avec réserves
 
-- **Bibliothèque** : `openmls` **=0.9.2** (22 octobre), `openmls_rust_crypto`, `openmls_basic_credential`, `openmls_traits` 0.6.0 ; licence MIT ; Phoenix R&D et CE Labs ; audit SRLabs de 2026 (8 constats corrigés ; **rapport à lire avant le code**) ; utilisée par Wire (sur un fork) et XMTP. Compile vers WebAssembly sans réglage particulier (feature `js` sur la cible wasm seulement, jamais en natif).
+- **Bibliothèque** : `openmls` **=0.9.2** (22 octobre), `openmls_rust_crypto`, `openmls_basic_credential`, `openmls_traits` 0.6.0 ; licence MIT ; Phoenix R&D et CE Labs ; audit SRLabs de 2026 (8 constats corrigés ; **rapport à lire avant le code**) ; utilisée par Wire (sur un fork) et XMTP. Compile vers WebAssembly sans réglage particulier (feature `js` sur la cible wasm seulement, jamais en natif). AES-GCM d'OpenMLS = celui de RustCrypto, dans le module du salon : les traits d'OpenMLS sont synchrones et WebCrypto est asynchrone, un fournisseur WebCrypto est impossible (Ruling 1, voir §6 de la spec principale). (11 novembre, C-1)
 - **Suite** : MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519 (0x0001). Message MLS dans `O` de la trame de 4 140 o sous `K_trame` (§3.2) ; Commit, Welcome et KeyPackage tiennent dans les 4 093 o utiles pour 10 membres (au plus 2 551 o mesurés) : pas de découpage nécessaire en V1, mais le format le garde possible.
 - **Temps mesurés dans Chromium, 10 membres** : chiffrer ou déchiffrer un message ~0,2 ms ; ajout d'un membre ~2 ms ; scénario complet (9 ajouts, 900 réceptions, retrait, renouvellement) ~0,3 s. Natif : apps en opt-level 3 (20 à 40 fois plus lent sinon).
-- **Poids** : ~359 Ko brotli, dans un **module wasm à part**, chargé seulement sur les pages du salon. Les pages de partage gardent le moteur actuel (141 Ko).
-- **Règles retenues** : arbre dans le Welcome, aucun GroupInfo publié, **external commits refusés** ; premier Commit de l'époque dans l'ordre du serveur gagne, les autres sont rejoués ; ajouts faits par le membre en ligne de plus petit siège ; si personne n'est en ligne, l'arrivant attend (« En attente d'un participant en ligne ») ; chaque Commit reçu est vérifié avant fusion (seul le créateur retire autrui, chaque ajout est lié à un siège par son `nonce_arrivée` signé) ; `max_past_epochs(1)` (un message envoyé juste avant un Commit reste lisible ; perte de confidentialité persistante limitée à une époque).
+  - **Mesure finale (C-1, 11 novembre, profil opt-level "z")** : 10 membres, 9 arrivées et 100 messages scellés puis ouverts : 410 à 444 ms dans Chromium (limite du test : 2 s), contre 406 ms en opt-level 3. Message MLS dans la trame de 4 140 octets sans découpage. Test croisé natif ↔ wasm (Welcome, Commit d'ajout, renouvellement, messages, réaction, pièce, profil) octet pour octet. (11 novembre, C-1)
+- **Poids** : essai : ~359 Ko brotli (sans les règles de texte) ; **mesuré en C-1 (11 novembre) : 422 288 à 422 681 octets en brotli** (1 364 656 octets bruts), profil `wasm-salon` (opt-level "z" : 530 787 octets en opt-level 3), plafond de `check-dist` **430 000 octets** (Ruling 25). Cause : OpenMLS (`openmls_rust_crypto` active toujours `experimental` de hpke-rs : ML-KEM, X-Wing, P-256/384, k256, choisis à l'exécution, donc non retirables par la LTO) et les tables Unicode (~96 Ko : graphèmes, écritures, squelettes UTS #39, émojis 15.0). Réduction possible plus tard : un fournisseur limité à la suite 0x0001 (de l'ordre de 100 Ko, code crypto d'adaptation à relire). Module à part, chargé avec contrôle d'empreinte seulement sur les pages du salon ; les pages de partage gardent le moteur actuel (141 559 octets) et ne le chargent jamais. (11 novembre, C-1)
+- **Règles retenues** : arbre dans le Welcome, aucun GroupInfo publié, **external commits refusés** ; premier Commit de l'époque dans l'ordre du serveur gagne, les autres sont rejoués ; ajouts faits par le membre en ligne de plus petit siège ; si personne n'est en ligne, l'arrivant attend (« En attente d'un participant en ligne ») ; chaque Commit reçu est vérifié avant fusion (tout membre retire un siège parti ou exclu, seul le créateur retire un membre présent, chaque ajout est lié à un siège par son `nonce_arrivée` signé) ; `max_past_epochs(1)` (un message envoyé juste avant un Commit reste lisible ; perte de confidentialité persistante limitée à une époque).
 - **Réserves (à corriger dans C-1)** :
   - **Élevée, mémoire** : le stockage en mémoire fourni par OpenMLS garde des copies des secrets sans les effacer → stockage en mémoire écrit par nous, valeurs effacées à l'écrasement et à la suppression (code d'adaptation, relu).
   - **Élevée, suivi** : environ un avis de sécurité par mois en 2026 (corrigés en 0.9.1 et 0.9.2), WebAssembly non testé dans leur CI → tests du salon dans Chromium en CI, taille des messages entrants bornée, suivi des avis, mises à jour après 7 jours.
   - **Moyenne, chaîne** : 136 crates (doublons RustCrypto, courbes P-256/P-384/k256 inutilisées), trois crates de moins de 7 jours à épingler plus anciennes, `cargo audit` avec exceptions justifiées (crypto-bigint compilé mais jamais exécuté par notre suite).
   - **Moyenne, rechargement** : l'état MLS vit en mémoire ; après un rechargement, le participant revient avec une nouvelle feuille (retrait de l'ancienne, nouvel ajout) et sa place, son pseudonyme et sa couleur par la preuve de membre (D41-26). Il ne relit pas les messages d'avant son retour, sauf les messages « instantané » qui l'attendent (§5) : ils sont alors renvoyés automatiquement par l'appareil de l'expéditeur sous la nouvelle époque (si l'expéditeur n'est pas en ligne, ils attendent son retour ; s'il a quitté le salon, ils sont perdus pour ce participant, avec la notice « Des messages ont pu vous échapper »).
 - **Amendements** : §39.2 (clés d'expéditeur) remplacé ; §6 et CLAUDE.md citent RustCrypto : OpenMLS repose sur RustCrypto, aucune crypto maison ; vecteurs communs complétés par les vecteurs officiels d'interopérabilité MLS.
+
+### 3.6.1 Règles du moteur décidées en C-1 (11 novembre) : le serveur (C-2), l'interface (C-3) et les apps les suivent
+
+**Messages** (`engine/salon/src/message.rs`, `texte.rs`, `emoji.rs`)
+- `Reponse` n'a **pas** de champ `extrait` (Ruling 7) : la citation est affichée depuis le message local, sinon « message indisponible ». Un extrait recopié survivrait au retrait de l'original.
+- JSON encodé : **3 900 octets au plus** (`JSON_MAX`, Ruling 8) ; la trame porte 4 093 octets de MLS (MLS en ajoute environ 146). L'échappement JSON peut doubler un texte (guillemets, barres, sauts de ligne) : au-delà, le moteur rend `trop_grand` et l'interface propose l'envoi en fichier `.txt` (§39.5). Texte : 1 à 2 000 graphèmes et 3 500 octets UTF-8 au plus.
+- Réactions : exactement une séquence « fully-qualified » de `emoji-test.txt` d'Unicode émoji 15.0 (**3 655** séquences ; fichier source commité avec son empreinte SHA-256 ; table générée par `build.rs`), 64 octets au plus (Ruling 11). Le sélecteur du site utilise la même liste.
+- Clés JSON répétées refusées (`message_invalide`, Ruling 12). Le décodeur accepte une espace après l'objet et une sorte inconnue de 32 caractères au plus (Ruling 24).
+- Caractères « étiquette » U+E0000–E007F retirés des textes, sauf dans les drapeaux de sous-division RGI de la liste 15.0 (Angleterre, Écosse, Pays de Galles) ; LRM et RLM gardés (Ruling 13). Un texte sans aucun caractère visible (espaces, invisibles seuls) est refusé (`texte_invalide`, Ruling 23).
+- Pseudonymes : unicité par le **squelette des confusables UTS #39** (`unicode-security`, Ruling 9) : « 0 » et « o », « 1 », « l » et « I », et « m » et « rn » sont confondus (Ruling 24) ; les marques restent (« Léa » et « Lea » diffèrent). L'apostrophe ’ (U+2019) est acceptée et ramenée à `'` (Ruling 10). Une marque doit porter sur une lettre ou un chiffre (Ruling 14). **Une seule écriture**, plus strict que « Highly Restrictive » d'UTS #39 (« Taro太郎 » est refusé). **U+200C et U+200D retirés** : le persan et les conjointes indiennes en souffrent ; accepté, publics visés FR/EN/ES/PT, signalé au propriétaire.
+- Les versions Unicode de chaque table (normalisation, écritures, segmentation, UTS #39, émojis) sont enregistrées dans `engine/vectors/salon-v3.json` (clé `unicode`) : les apps utilisent les mêmes versions ou régénèrent les vecteurs.
+
+**MLS** (`engine/salon/src/groupe.rs`)
+- Le premier Commit d'une époque, dans l'ordre du serveur, gagne ; les autres sont rejetés et refaits (`commitPerdu`). Seuls les ajouts et retraits **en ligne** sont acceptés.
+- Une feuille par siège. Retour après rechargement : le KeyPackage du siège ajoute une nouvelle feuille et **retire l'ancienne dans le même Commit** (Ruling 2) ; `retirer(siège)` retire toutes les feuilles du siège.
+- Un ajout n'est accepté que si la clé de signature de la feuille est celle du premier KeyPackage valide envoyé **par ce siège**, le siège étant celui que le serveur atteste pour la trame (Ruling 20).
+- Retrait d'un siège parti (`0x03`) ou exclu : tout membre peut le faire ; un membre présent : le créateur seul (Ruling 18).
+- Durée de vie des KeyPackage non bornée, `Lifetime::init(0, u64::MAX)` (identités éphémères, Ruling 21) ; KeyPackage « dernier recours » ; clé d'initialisation effacée après l'entrée dans le groupe.
+- Le Welcome n'est libéré que si **notre** Commit revient gagnant (`CommitAccepte { welcome }`, Ruling 17).
+- Le nouveau venu (`rejoindre`) vérifie le siège du créateur et que les (siège, nonce) de l'arbre égalent la liste annoncée, avec la clé enregistrée de chaque siège (Ruling 22).
+
+**Risques résiduels**
+- **Membres fantômes** : un serveur malveillant peut faire ajouter un faux membre, et un membre malveillant peut construire pour un nouveau venu un **faux groupe**, qui peut aussi omettre des membres. Seuls les **codes de vérification** (§9, point 4) les révèlent (Ruling 19) ; aucun service d'authentification.
+- Un Commit qui échoue chez une partie du groupe est inhérent à MLS : ce membre est en retard (`epoque_perdue`).
+- Les tampons temporaires d'OpenMLS ne sont **pas** effacés ; notre stockage efface ses valeurs (postcard, à l'écrasement, à la suppression et à la destruction). Le texte des messages (`String`) n'est pas effacé non plus : « secrets » vise les clés.
+
+**Exigences pour C-2 (serveur)**
+1. Chaque enregistrement de trame porte le **siège expéditeur attesté** (`0x01`, §39.3.1) : le moteur le reçoit dans `recevoir`.
+2. L'accueil WebSocket livre, avant toute trame, la **liste complète (siège, nonce_arrivée)** avec le `seq` auquel elle s'applique (point resté ouvert depuis la Task 6).
+3. Un `0x02` ou `0x0A` précède toujours les trames qui s'y rapportent (Ruling 16).
+4. Si la file rejouée ne contient plus les KeyPackage des arrivants en attente, le serveur les rejoue ou les arrivants les republient.
+5. Un membre en retard (`epoque_perdue`) rentre comme nouvel arrivant.
+
+**Exigences pour C-3 (interface)**
+1. La colle JavaScript du module (~32 Ko) reste **hors du script principal** des pages de partage (pas d'`import()` dynamique, §28.3) : point d'entrée ou script à part sous SRI, plus un contrôle de `check-dist`.
+2. L'image Docker construit le module du salon dès qu'une page l'importe (étape `engine` de `deploy/Dockerfile` ; `salon/pkg/` comparé par `repro-docker`).
+3. `encore_dans_conversation` = « n'a pas quitté depuis qu'il l'a vu » (contrat de l'appelant).
+4. L'interface utilise `nettoyerTexte`, `verifierPseudo`, `cleUnicite` et `nettoyerNom` du moteur, jamais `safeName` ni `Intl.Segmenter`.
+5. L'appelant met à zéro ce que le module lui rend : `K_accès_s` et `K_preuve_s` (envoyés au serveur), graines `r` des enveloppes lues, clé SFrame (Ruling 26).
+6. Appeler `casser()` avant la remise à zéro de la mémoire (défensif) ; après une panique (`salon_casse`), recharger le module et rejoindre avec une nouvelle identité.
 
 ## 4. Messages
 
