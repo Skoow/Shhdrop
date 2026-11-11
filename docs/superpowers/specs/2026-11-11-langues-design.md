@@ -1,13 +1,13 @@
-# Cinq langues sur le site — conception
+# Quatre langues sur le site — conception
 
 Date : 11 novembre 2026 · Statut : validée par le propriétaire le 11 novembre (liste des langues revue le même jour)
 Complète la spécification UI (`2026-11-04-shhdrop-ui-design.md`, §10 « Textes (FR / EN) ») et la spécification générale (§42, D42-20 : apps natives plus tard).
 
 ## 1. Décisions du propriétaire (11 novembre)
 
-- **Cinq langues** : français (fr), anglais (en), espagnol (es), allemand (de), portugais (pt). L'arabe, le hindi et le chinois, d'abord envisagés, sont retirés : leurs lecteurs ont l'anglais.
-- **Choix de la langue** : si une langue réglée dans le navigateur fait partie des cinq, le site s'affiche dans la première de ces langues ; sinon, en **anglais**. Pas de fuseau horaire, pas d'autre indice. Aujourd'hui le repli est le français : il devient l'anglais.
-- **Changement manuel** : dans le pied de page, liste des cinq langues, chacune écrite dans sa propre langue (« Français », « English », « Español », « Deutsch », « Português »).
+- **Quatre langues** : français (fr), anglais (en), espagnol (es), portugais (pt). L'arabe, le hindi, le chinois puis l'allemand, d'abord envisagés, sont retirés : leurs lecteurs ont l'anglais.
+- **Choix de la langue** : si une langue réglée dans le navigateur fait partie des quatre, le site s'affiche dans la première de ces langues ; sinon, en **anglais**. Pas de fuseau horaire, pas d'autre indice. Aujourd'hui le repli est le français : il devient l'anglais.
+- **Changement manuel** : dans le pied de page, liste des quatre langues, chacune écrite dans sa propre langue (« Français », « English », « Español », « Português »).
 - **Aucun stockage** (inchangé, UI §10) : la langue choisie à la main vaut pour la visite en cours ; à la visite suivante, la règle du navigateur s'applique de nouveau. Rien n'est envoyé au serveur.
 
 ## 2. Ce qui est traduit, ce qui ne l'est pas
@@ -18,11 +18,11 @@ Jamais traduit : le nom « Shhdrop », les liens, les mots de passe (alphabet in
 
 Le serveur n'envoie aucun texte à l'utilisateur : rien à changer côté Go. La démo suit les mêmes règles.
 
-**Variantes** : espagnol neutre (compréhensible en Espagne et en Amérique latine, « usted » évité au profit de tournures impersonnelles comme dans l'interface française) ; portugais du **Brésil** (le plus de lecteurs), lisible au Portugal ; allemand standard, vouvoiement (« Sie »).
+**Variantes** : espagnol neutre (compréhensible en Espagne et en Amérique latine, « usted » évité au profit de tournures impersonnelles comme dans l'interface française) ; portugais du **Brésil** (le plus de lecteurs), lisible au Portugal.
 
 ## 3. Format des traductions (compatible avec les apps)
 
-- Un fichier JSON par langue : `web/src/i18n/locales/{fr,en,es,de,pt}.json` (interface, à plat, mêmes clés qu'aujourd'hui) et `{fr,en,es,de,pt}.pages.json` (pages d'information). Lisible tel quel par Flutter (fichiers ARB = JSON) : aucune règle de format propre au navigateur (règle CLAUDE.md, apps natives).
+- Un fichier JSON par langue : `web/src/i18n/locales/{fr,en,es,pt}.json` (interface, à plat, mêmes clés qu'aujourd'hui) et `{fr,en,es,pt}.pages.json` (pages d'information). Lisible tel quel par Flutter (fichiers ARB = JSON) : aucune règle de format propre au navigateur (règle CLAUDE.md, apps natives).
 - Paramètres inchangés : `{n}`, `{max}`, etc.
 - **Pluriels** : clés `base.<catégorie>` avec les catégories de `Intl.PluralRules` (CLDR). `t("base", { n })` choisit la catégorie de la langue, `other` en dernier recours (le français, l'espagnol et le portugais ont aussi `many`, utilisé pour les grands nombres ronds ; `other` suffit s'il est identique).
 - **Le français reste la source** : toute clé ajoutée l'est d'abord en français ; un test refuse qu'une autre langue ait une clé manquante, une clé en trop ou un paramètre différent.
@@ -30,17 +30,17 @@ Le serveur n'envoie aucun texte à l'utilisateur : rien à changer côté Go. La
 
 ## 4. Chargement et poids
 
-Mesure : le français pèse ~19 Ko brotli (interface + pages), l'anglais ~17 Ko. Les trois nouvelles langues ajouteraient ~55 Ko au site si tout était dans le script principal (+16 % sur 339 Ko).
+Mesure : le français pèse ~19 Ko brotli (interface + pages), l'anglais ~17 Ko. Les deux nouvelles langues ajouteraient ~37 Ko au site si tout était dans le script principal (+11 % sur 339 Ko).
 
-**Choix retenu** : le script principal ne contient que l'anglais (langue de repli). Chaque autre langue est un fichier à empreinte (`assets/locale-fr-EMPREINTE.json`…), chargé avant le premier affichage quand le navigateur la demande, avec contrôle d'intégrité (même mécanisme vérifié que le moteur : `fetch` avec `integrity`, `check-dist.mjs` contrôle que chaque fichier est cité et haché). Coût : rien pour qui lit l'anglais, un fichier de ~20 Ko pour les autres. La démo (sans requête) embarque les cinq langues.
+**Choix retenu** : le script principal ne contient que l'anglais (langue de repli). Chaque autre langue est un fichier à empreinte (`assets/locale-fr-EMPREINTE.json`…), chargé avant le premier affichage quand le navigateur la demande, avec contrôle d'intégrité (même mécanisme vérifié que le moteur : `fetch` avec `integrity`, `check-dist.mjs` contrôle que chaque fichier est cité et haché). Coût : rien pour qui lit l'anglais, un fichier de ~20 Ko pour les autres. La démo (sans requête) embarque les quatre langues.
 
 Si le fichier d'une langue ne se charge pas (réseau), le site s'affiche en anglais, sans erreur bloquante.
 
 ## 5. Écriture et polices
 
-Les cinq langues s'écrivent de gauche à droite en alphabet latin. Les polices du site (Mona Sans, JetBrains Mono) couvrent déjà ces caractères (plage U+0000-00FF : ä, ö, ü, ß, ã, õ, ç, ñ, ¿, ¡) : aucune police ni écriture à ajouter.
+Les quatre langues s'écrivent de gauche à droite en alphabet latin. Les polices du site (Mona Sans, JetBrains Mono) couvrent déjà ces caractères (plage U+0000-00FF : ã, õ, ç, ñ, á, ¿, ¡) : aucune police ni écriture à ajouter.
 
-Les mots allemands sont souvent plus longs : les boutons et étiquettes doivent passer à la ligne ou se réduire sans déborder (contrôlé par les tests, §7).
+Les textes espagnols et portugais sont souvent plus longs que le français : les boutons et étiquettes doivent passer à la ligne ou se réduire sans déborder (contrôlé par les tests, §7).
 
 ## 6. Qualité des traductions
 
@@ -50,6 +50,6 @@ Les mots allemands sont souvent plus longs : les boutons et étiquettes doivent 
 
 ## 7. Tests
 
-- Unitaires : complétude des cinq fichiers (clés, paramètres, catégories de pluriel) ; règle de choix (matrice : `["es-MX"]` → es, `["de-AT"]` → de, `["pt-PT"]` → pt, `["it-IT"]` → en, `["it", "de"]` → de, `[]` → en) ; formats par langue (durées, tailles, dates) ; égalité FR/EN avec l'ancien contenu.
+- Unitaires : complétude des quatre fichiers (clés, paramètres, catégories de pluriel) ; règle de choix (matrice : `["es-MX"]` → es, `["pt-PT"]` → pt, `["de-DE"]` → en, `["it-IT"]` → en, `["it", "pt"]` → pt, `[]` → en) ; formats par langue (durées, tailles, dates) ; égalité FR/EN avec l'ancien contenu.
 - Interface (Playwright) : pour chaque langue, accueil, composeur, écran « Lien prêt », ouverture d'un partage et une page d'information : aucun texte vide ni clé brute, aucun débordement horizontal, contrôle d'accessibilité axe sans erreur, captures ordinateur et téléphone.
 - Poids : contrôle par `check-dist.mjs` (fichiers de langue cités et hachés) et mesure du script principal.
