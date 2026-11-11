@@ -238,13 +238,14 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
 
   it("spec §41.8 : suppression pendant une lecture → l'ouverture active finit, l'autre reçoit 410 ; watch → 410", async ({ expect }) => {
     let offset = 0;
-    const { fake, net } = setup({ watchHoldMs: 50, rateBytesPerS: 1e9, now: () => Date.now() + offset });
+    // Tenue de 1 s : la destruction doit arriver pendant la tenue même sous charge (50 ms échouait parfois).
+    const { fake, net } = setup({ watchHoldMs: 1_000, rateBytesPerS: 1e9, now: () => Date.now() + offset });
     const big = bigFile();
     const r = await share(net, 2, [big]);
     const b = await openShare(r.link, PW, ORIGIN, undefined, net);
     offset = 130_000; // b : plus aucun segment depuis 130 s, inactive
     const a = await openShare(r.link, PW, ORIGIN, undefined, net); // vient de lire : active
-    expect(await a.watch()).toBe("alive"); // 204 après la tenue (50 ms ici)
+    expect(await a.watch()).toBe("alive"); // 204 après la tenue (1 s ici)
     const pending = a.watch(); // tenue en cours
     await destroyShare(r.manage, ORIGIN, net);
     expect(await pending).toBe("gone");

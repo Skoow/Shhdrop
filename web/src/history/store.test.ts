@@ -51,7 +51,8 @@ describe("historique chiffré (IndexedDB simulé)", () => {
     const raw = dump(idb.raw());
     expect(raw).not.toContain("A".repeat(43));
     expect(raw).not.toContain("shhdrop.example");
-    expect(raw).not.toContain("#m");
+    // « #m » seul peut apparaître par hasard dans un chiffré : on cherche le lien de gestion lui-même.
+    expect(raw).not.toContain("#mAAAA");
     expect(raw).not.toContain("148897792");
     expect(raw).not.toContain(String(T0));
     expect(raw).not.toMatch(/sizeBytes|itemsCount|createdAt|manage"/);
