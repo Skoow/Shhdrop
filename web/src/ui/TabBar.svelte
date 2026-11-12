@@ -1,6 +1,5 @@
 <script lang="ts">
-  // Barre d'onglets du téléphone (< 900 px), façon app : Envoyer, Mes partages (bientôt),
-  // Salon (bientôt). Plus d'onglet Réglages : langue, nettoyage et liens sont dans le pied de page.
+  // Barre d'onglets du téléphone (< 900 px), façon app : Envoyer, Mes partages, Salon (bientôt). Plus d'onglet Réglages : langue, nettoyage et liens sont dans le pied de page.
   // Visibilité décidée par app/tabbar.ts ; masquée sur ordinateur par la CSS seule.
   import { currentTab, TABS, type TabId } from "../app/tabbar";
   import { followLink, href, router } from "../app/router.svelte";
@@ -19,9 +18,10 @@
   <ul>
     {#each TABS as tab (tab.id)}
       <li>
-        {#if tab.id === "send"}
-          <a class="tab" href={href("/")} aria-current={current === "send" ? "page" : undefined} onclick={(e) => followLink(e, "/")}>
-            <TabIcon id={tab.id} /><span class="lb">{t("tabs.send")}</span>
+        {#if !tab.soon}
+          {@const to = tab.id === "send" ? "/" : "/envois"}
+          <a class="tab" href={href(to)} aria-current={current === tab.id ? "page" : undefined} onclick={(e) => followLink(e, to)}>
+            <TabIcon id={tab.id} /><span class="lb">{t(`tabs.${tab.id}` as Key)}</span>
           </a>
         {:else}
           <button type="button" class="tab soon" aria-disabled="true" aria-describedby="tab-soon-{tab.id}" onclick={() => soon(tab.id)}>

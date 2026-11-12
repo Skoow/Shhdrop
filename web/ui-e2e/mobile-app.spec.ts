@@ -79,11 +79,26 @@ test.describe("téléphone façon app", () => {
     expect(await page.evaluate(() => navigator.serviceWorker?.controller ?? null)).toBeNull();
   });
 
-  test("accueil : pas de barre d'onglets tant qu'un seul onglet fonctionne (décision du 11 novembre), langue dans le pied, comparatif en cartes, ni rebond ni défilement horizontal", async ({ page, shh }) => {
+  test("accueil : barre d'onglets (Envoyer, Mes partages, Salon bientôt), langue dans le pied, comparatif en cartes, ni rebond ni défilement horizontal", async ({ page, shh }) => {
     await page.goto(shh.origin + "/");
-    // Mes partages et Salon sont « bientôt » : une barre à un seul onglet utile n'aide personne (audit M18).
-    await expect(tabbar(page)).toHaveCount(0);
-    expect(await page.evaluate(() => document.documentElement.classList.contains("has-tabbar"))).toBe(false);
+    // Règle du 11 novembre (audit M18) : visible dès deux onglets utiles ; Mes partages fonctionne.
+    await expect(tabbar(page)).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.classList.contains("has-tabbar"))).toBe(true);
+    await expect(tabbar(page).getByRole("link", { name: "Envoyer" })).toHaveAttribute("aria-current", "page");
+    const shares = tabbar(page).getByRole("link", { name: "Mes partages" });
+    await expect(shares).not.toHaveAttribute("aria-current", "page");
+    await expect(tabbar(page).getByRole("button", { name: /Salon/ })).toHaveAttribute("aria-disabled", "true");
+    expect(await smallTargets(page, "[data-tabbar]")).toEqual([]);
+    await shot(page, "barre-onglets-accueil");
+    await shares.click();
+    await expect(page).toHaveURL(/\/envois$/);
+    await expect(tabbar(page)).toBeVisible();
+    await expect(shares).toHaveAttribute("aria-current", "page");
+    await expect(tabbar(page).getByRole("link", { name: "Envoyer" })).not.toHaveAttribute("aria-current", "page");
+    expect(await noHScroll(page)).toBe(true);
+    await shot(page, "barre-onglets-mes-partages");
+    await tabbar(page).getByRole("link", { name: "Envoyer" }).click();
+    await expect(page).toHaveURL(new RegExp(`${shh.origin.replace(/[.:/]/g, "\\$&")}/$`));
     expect(await smallTargets(page, "body")).toEqual([]);
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).overscrollBehaviorY)).toBe("none");
     expect(await noHScroll(page)).toBe(true);
@@ -106,7 +121,7 @@ test.describe("téléphone façon app", () => {
     await switchLang(page, "Français");
     await footLink(page, "Sécurité").click();
     await expect(page).toHaveURL(/\/securite$/);
-    await expect(tabbar(page)).toHaveCount(0);
+    await expect(tabbar(page)).toBeVisible();
     // En-tête natif : retour en haut à gauche.
     const back = page.getByRole("banner").getByRole("button", { name: "Retour" });
     await expect(back).toBeVisible();

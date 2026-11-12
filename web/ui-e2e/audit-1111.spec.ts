@@ -83,8 +83,8 @@ test("I4 : « Détruire » depuis le bas du contenu : l'écran « Détruit » ar
   await s.ctx.close();
   await page.goto(sent.link);
   await unlock(page, sent.password);
-  await expect(page.locator("[data-last-top]")).toHaveText("Dernière ouverture\u202f: effacé du serveur au plus tard 30\u202fmin après votre départ.");
-  await expect(page.getByText(/il sera effacé du serveur au plus tard 30\u202fmin après votre départ/)).toBeVisible();
+  await expect(page.locator("[data-last-top]")).toHaveText("Dernière ouverture\u202f: personne d'autre ne pourra l'ouvrir. Vous pouvez y revenir depuis ce navigateur jusqu'à l'échéance.");
+  await expect(page.getByText(/Vous pouvez y revenir depuis ce navigateur jusqu'à son échéance, puis il sera effacé du serveur/)).toBeVisible();
   await shot(page, "i5-contenu-derniere-ouverture", isMobile);
   const destroy = page.getByRole("button", { name: "Détruire ce partage" });
   await destroy.scrollIntoViewIfNeeded();
@@ -104,7 +104,7 @@ test("M20 : page du mot de passe : coût d'ouverture en une ligne ; dernier essa
   const sent = await sendShare(s.page, shh.origin + "/", { text: "x" });
   await s.ctx.close();
   await page.goto(sent.link);
-  await expect(page.locator("#open-cost")).toHaveText("Dernière ouverture possible\u202f; recharger ensuite n'en compte pas d'autre pendant 30\u00a0min.");
+  await expect(page.locator("#open-cost")).toHaveText("Dernière ouverture possible\u202f; ensuite, revenir depuis ce navigateur n'en compte pas d'autre, jusqu'à l'échéance.");
   for (let k = 4; k >= 1; k--) {
     await pwField(page).fill("faux-" + k);
     await unlockButton(page).click();
@@ -126,11 +126,12 @@ test("M20 : page du mot de passe : coût d'ouverture en une ligne ; dernier essa
   await shot(page, "faible-detruit-5-essais", isMobile);
 });
 
-test("M17, M18, coffre : une ligne Plus et Pro, aucune option verrouillée ni copie chiffrée ; pas de barre d'onglets ; captures", async ({ page, shh, isMobile }) => {
+test("M17, M18, coffre : une ligne Plus et Pro, aucune option verrouillée ni copie chiffrée ; barre d'onglets sur téléphone seulement (deux onglets utiles) ; captures", async ({ page, shh, isMobile }) => {
   test.setTimeout(90_000);
   await page.goto(shh.origin + "/");
-  await expect(page.getByRole("navigation", { name: "Navigation principale" })).toHaveCount(0);
-  await shot(page, "m18-accueil-sans-onglets", isMobile);
+  // M18 (règle du 11 novembre) : visible dès deux onglets utiles ; Mes partages fonctionne.
+  await expect(page.getByRole("navigation", { name: "Navigation principale" })).toHaveCount(isMobile ? 1 : 0);
+  await shot(page, "m18-accueil-onglets", isMobile);
   await addText(page, "Le code de la porte est 4471.");
   await expect(page.locator("[data-paid-line]").filter({ visible: true })).toBeVisible();
   await expect(page.locator("[data-locked], [data-paid-space]")).toHaveCount(0);
