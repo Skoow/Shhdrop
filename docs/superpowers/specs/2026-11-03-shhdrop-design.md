@@ -2148,7 +2148,7 @@ Longueurs exactes en base64url : secrets et jetons 43 caractères, identifiants 
 | CH5 | Moyenne | pseudonymes | homoglyphes, inversion de sens | une seule écriture, nettoyage de §39.4, unicité NFKC |
 | CH6 | Moyenne | réactions et textes | `{@html}` ou émoji arbitraire | nœuds texte ; réaction limitée à la liste |
 | CH7 | Moyenne | jeton de membre | dans l'URL du flux | en-tête seulement (d'où `fetch` et non `EventSource`) |
-| CH8 | Faible | file du serveur | mémoire sans borne | 200 trames, 15 min, `SHH_SALONS_MAX` ; file d'envoi bornée par connexion (§39.3.1) |
+| CH8 | Faible | file du serveur | mémoire ou disque sans borne | conversation chiffrée sur disque, comptée dans `SHH_STORAGE_MAX` ; index de 24 octets par trame en mémoire ; 1 200 messages par heure et par siège ; `SHH_SALONS_MAX` ; file d'envoi bornée par connexion (§39.3.1) |
 | CH9 | Élevée | exclusion | l'exclu reviendrait avec le lien et le mot de passe | rotation de l'invitation à chaque exclusion (§39.13.2) |
 | CH10 | Moyenne | WebSocket | détournement de connexion (pas de CORS) ; jeton dans l'URL | contrôle d'`Origin`, jeton dans le premier message, `wss://` explicite en CSP (§39.3.1) |
 | CH11 | Moyenne | rechargement du salon | `sessionStorage` lisible par un script injecté | ~~jeton de membre et clé courante seulement (jamais les chaînes ni les messages), 30 min d'inactivité, CSP stricte (§39.13.3, §41.4)~~ D41-24 : plus rien dans le `sessionStorage` ; secret de reconnexion en mémoire de la page seulement ; D41-26 : preuve de membre en IndexedDB, chiffrée (Argon2id du mot de passe et `K_lien`, XChaCha20-Poly1305) ; copie du stockage → attaque hors ligne sur le mot de passe (§39.13.3) |
@@ -2159,7 +2159,7 @@ Ajoutées à §18, points 20 (qui parle avec qui), 21 (membres) et 22 (coupures)
 
 ### 39.11 Offres payantes (§38.8)
 
-Salons plus longs, plus grands et plus remplis pour Plus et Pro (§38.8) ; même chiffrement, même code. Recommandation maintenue : **pas de salon payant avant l'avis du juriste** (§39.7), un salon long attirant d'autres usages. Au-delà de 12 destinataires, la distribution des clés s'étale sur plusieurs trames (§39.2.2) ; la file reste de 200 trames.
+Salons plus longs, plus grands et plus remplis pour Plus et Pro (§38.8) ; même chiffrement, même code. Recommandation maintenue : **pas de salon payant avant l'avis du juriste** (§39.7), un salon long attirant d'autres usages. Au-delà de 12 destinataires, la distribution des clés s'étale sur plusieurs trames (§39.2.2).
 
 ### 39.12 Questions ouvertes (défaut recommandé)
 

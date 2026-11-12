@@ -380,6 +380,8 @@ Autres messages de contrôle (`0x02`–`0x05`) : 600 par minute et par WebSocket
 
 ### Task 13 : pièces jointes et vocaux
 
+> Relecture Task 8 : `Retirer` doit faire `delete(s.pieces, e.seq)` dès que cette tâche remplit `salon.pieces`, avec un test.
+
 **Files :**
 - Create : `server/internal/salon/pieces.go`, `server/internal/salon/pieces_test.go`, `server/internal/api/handlers_salon_pieces.go`, `server/internal/api/salon_pieces_test.go`
 - Modify : `server/internal/share/sizing.go` (exports), `server/internal/token/token.go` (type `SalonPiece byte = 'p'`), `server/internal/api/api.go` (`validSegmentToken` : `PUT /api/salons/pieces/segments/{n}` à jeton `SalonPiece`, `GET` à `X-Shh-Membre` valide → compteur des segments)
