@@ -41,6 +41,27 @@ const keptColumns = `id,state,bucket,ttl_hours,max_opens,opens_left,opens_issued
 const indexes = `CREATE UNIQUE INDEX IF NOT EXISTS shares_access_v ON shares(access_v);
 CREATE UNIQUE INDEX IF NOT EXISTS shares_manage_v ON shares(manage_v)`
 
+// salonsSchema (schéma 2, plan C-2 Task 4, spec §39.3.5) : seules colonnes du salon en base.
+// Ni durée, ni sièges, ni nombre de messages, ni pseudonyme : tout ce qui décrit les
+// personnes reste en mémoire. Comme shares : id interne jamais montré, salon trouvé par
+// access_v ou manage_v (index uniques), WITHOUT ROWID (aucun ordre de création), seule date
+// expires_at (arrondie au quart d'heure par l'appelant). salon_pieces : pièces jointes,
+// effacées avec leur salon (ON DELETE CASCADE, foreign_keys(ON) dans le DSN).
+const salonsSchema = `CREATE TABLE IF NOT EXISTS salons(
+  id TEXT PRIMARY KEY, access_v BLOB NOT NULL, manage_v BLOB NOT NULL, proof_v BLOB NOT NULL,
+  salt BLOB NOT NULL, kdf_ops INTEGER NOT NULL, kdf_mem INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+  max_members INTEGER NOT NULL CHECK(max_members BETWEEN 2 AND 10),
+  members_can_destroy INTEGER NOT NULL CHECK(members_can_destroy IN (0,1)),
+  failed_attempts INTEGER NOT NULL DEFAULT 0, pieces_bytes INTEGER NOT NULL DEFAULT 0,
+  CHECK(length(access_v)=32 AND length(manage_v)=32 AND length(proof_v)=32 AND length(salt)=16)) WITHOUT ROWID;
+CREATE UNIQUE INDEX IF NOT EXISTS salons_access_v ON salons(access_v);
+CREATE UNIQUE INDEX IF NOT EXISTS salons_manage_v ON salons(manage_v);
+CREATE TABLE IF NOT EXISTS salon_pieces(
+  id TEXT PRIMARY KEY, salon_id TEXT NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  bucket INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('uploading','ready')),
+  segments_mask BLOB NOT NULL) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS salon_pieces_salon ON salon_pieces(salon_id)`
+
 // Les PRAGMA passent par le DSN pour s'appliquer à chaque connexion. synchronous(FULL) :
 // valeur par défaut, écrite pour qu'un changement du pilote ne l'abaisse pas en silence
 // (NORMAL perdrait les dernières transactions à une coupure de courant).
@@ -50,7 +71,8 @@ const pragmas = "_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_pragma=sec
 // SchemaVersion : version du schéma, écrite dans PRAGMA user_version. Un binaire refuse une
 // base d'une version plus récente (ErrNewerSchema) : un retour arrière ne réécrit jamais une
 // base qu'il ne connaît pas. À incrémenter avec toute migration.
-const SchemaVersion = 1
+// 1 : partages ; 2 : tables salons et salon_pieces (tables neuves, aucune donnée migrée).
+const SchemaVersion = 2
 
 var (
 	// ErrNewerSchema : message fixe, sans chemin.
@@ -136,6 +158,10 @@ func Open(path string) (*sql.DB, error) {
 	if _, err := db.Exec(indexes); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("création des index : %w", err)
+	}
+	if _, err := db.Exec(salonsSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("création des tables du salon : %w", err)
 	}
 	if version < SchemaVersion {
 		if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, SchemaVersion)); err != nil {

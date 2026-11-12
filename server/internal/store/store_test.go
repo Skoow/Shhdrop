@@ -215,6 +215,10 @@ func masterNames(t *testing.T, db *sql.DB) []string {
 	return out
 }
 
+// wantMaster : contenu exact de sqlite_master au schéma 2 (partages et salon), rien d'autre.
+const wantMaster = "index:salon_pieces_salon,index:salons_access_v,index:salons_manage_v," +
+	"index:shares_access_v,index:shares_manage_v,table:salon_pieces,table:salons,table:shares"
+
 // Spec §36 S5, S11, S12 (Task M2) : progress_at, upload_deadline et purge_at vivent en
 // mémoire ; la base ne garde qu'une date (expires_at). sqlite_master : shares et ses index.
 func TestSchemaMinimal(t *testing.T) {
@@ -232,9 +236,8 @@ func TestSchemaMinimal(t *testing.T) {
 	if !cols["expires_at"] || !cols["ttl_hours"] {
 		t.Fatal("expires_at et ttl_hours attendus", cols)
 	}
-	want := "index:shares_access_v,index:shares_manage_v,table:shares"
-	if got := strings.Join(masterNames(t, db), ","); got != want {
-		t.Fatalf("sqlite_master = %s, attendu %s", got, want)
+	if got := strings.Join(masterNames(t, db), ","); got != wantMaster {
+		t.Fatalf("sqlite_master = %s, attendu %s", got, wantMaster)
 	}
 	// Un partage prêt sans ttl_hours est accepté (ttl_hours à NULL après finalize, S11).
 	if _, err := db.Exec(`INSERT INTO shares(id,state,bucket,max_opens,opens_left,segments_mask,salt,kdf_ops,kdf_mem,access_v,proof_v,manage_v,envelope,expires_at)
@@ -299,7 +302,7 @@ CREATE UNIQUE INDEX shares_manage_v ON shares(manage_v)`
 	if n != 2 {
 		t.Fatal("lignes copiées", n)
 	}
-	if got := strings.Join(masterNames(t, db), ","); got != "index:shares_access_v,index:shares_manage_v,table:shares" {
+	if got := strings.Join(masterNames(t, db), ","); got != wantMaster {
 		t.Fatal("sqlite_master", got)
 	}
 	var rowid int
@@ -380,8 +383,8 @@ func TestSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v := pragma(t, db, "user_version"); v != strconv.Itoa(SchemaVersion) {
-		t.Fatalf("user_version = %s", v)
+	if v := pragma(t, db, "user_version"); v != "2" {
+		t.Fatalf("user_version = %s, attendu 2 (tables du salon)", v)
 	}
 	if _, err := db.Exec(`PRAGMA user_version=0`); err != nil { // base d'avant la version
 		t.Fatal(err)
@@ -416,5 +419,197 @@ func TestSchemaVersion(t *testing.T) {
 	defer raw.Close()
 	if v := pragma(t, raw, "user_version"); v != strconv.Itoa(SchemaVersion+1) {
 		t.Fatal("version touchée", v)
+	}
+}
+
+// tableColumns : noms des colonnes d'une table, dans l'ordre de déclaration.
+func tableColumns(t *testing.T, db *sql.DB, table string) []string {
+	t.Helper()
+	rs, err := db.Query(`SELECT name FROM pragma_table_info(?) ORDER BY cid`, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+	var out []string
+	for rs.Next() {
+		var n string
+		if err := rs.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// Spec §39.3.5 : la base ne garde du salon que ces 12 colonnes ; ni durée, ni sièges, ni
+// nombre de messages (tout ce qui décrit les personnes reste en mémoire).
+func TestSalonsColonnes(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	want := "id,access_v,manage_v,proof_v,salt,kdf_ops,kdf_mem,expires_at,max_members," +
+		"members_can_destroy,failed_attempts,pieces_bytes"
+	if got := strings.Join(tableColumns(t, db, "salons"), ","); got != want {
+		t.Fatalf("colonnes de salons = %s, attendu %s", got, want)
+	}
+	if got := strings.Join(tableColumns(t, db, "salon_pieces"), ","); got != "id,salon_id,bucket,state,segments_mask" {
+		t.Fatalf("colonnes de salon_pieces = %s", got)
+	}
+}
+
+// insSalon insère un salon valide (vérificateurs tirés au hasard par SQLite).
+func insSalon(db *sql.DB, id string) error {
+	_, err := db.Exec(`INSERT INTO salons(id,access_v,manage_v,proof_v,salt,kdf_ops,kdf_mem,expires_at,max_members,members_can_destroy)
+		VALUES(?,randomblob(32),randomblob(32),randomblob(32),randomblob(16),3,67108864,900,10,0)`, id)
+	return err
+}
+
+// Contraintes : longueurs exactes des vérificateurs et du sel, max_members de 2 à 10,
+// members_can_destroy booléen, vérificateurs uniques, état des pièces fermé.
+func TestSalonsContraintes(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := insSalon(db, "a"); err != nil {
+		t.Fatal("salon valide refusé :", err)
+	}
+	bad := map[string]string{
+		"max_members 1":         `VALUES('b',randomblob(32),randomblob(32),randomblob(32),randomblob(16),3,67108864,900,1,0)`,
+		"max_members 11":        `VALUES('b',randomblob(32),randomblob(32),randomblob(32),randomblob(16),3,67108864,900,11,0)`,
+		"members_can_destroy 2": `VALUES('b',randomblob(32),randomblob(32),randomblob(32),randomblob(16),3,67108864,900,10,2)`,
+		"access_v de 31":        `VALUES('b',randomblob(31),randomblob(32),randomblob(32),randomblob(16),3,67108864,900,10,0)`,
+		"manage_v de 33":        `VALUES('b',randomblob(32),randomblob(33),randomblob(32),randomblob(16),3,67108864,900,10,0)`,
+		"proof_v de 16":         `VALUES('b',randomblob(32),randomblob(32),randomblob(16),randomblob(16),3,67108864,900,10,0)`,
+		"salt de 32":            `VALUES('b',randomblob(32),randomblob(32),randomblob(32),randomblob(32),3,67108864,900,10,0)`,
+		"access_v en double":    `SELECT 'b',access_v,randomblob(32),randomblob(32),randomblob(16),3,67108864,900,10,0 FROM salons`,
+		"manage_v en double":    `SELECT 'b',randomblob(32),manage_v,randomblob(32),randomblob(16),3,67108864,900,10,0 FROM salons`,
+	}
+	for name, v := range bad {
+		if _, err := db.Exec(`INSERT INTO salons(id,access_v,manage_v,proof_v,salt,kdf_ops,kdf_mem,expires_at,max_members,members_can_destroy) ` + v); err == nil {
+			t.Errorf("%s accepté", name)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO salon_pieces(id,salon_id,bucket,state,segments_mask) VALUES('p','a',1,'draining',x'00')`); err == nil {
+		t.Error("état de pièce invalide accepté")
+	}
+	if _, err := db.Exec(`INSERT INTO salon_pieces(id,salon_id,bucket,state,segments_mask) VALUES('p','inconnu',1,'ready',x'00')`); err == nil {
+		t.Error("pièce d'un salon inconnu acceptée (clés étrangères)")
+	}
+	var fa, pb int
+	if err := db.QueryRow(`SELECT failed_attempts, pieces_bytes FROM salons WHERE id='a'`).Scan(&fa, &pb); err != nil || fa != 0 || pb != 0 {
+		t.Fatal("valeurs par défaut", fa, pb, err)
+	}
+}
+
+// Supprimer la ligne du salon supprime ses pièces (ON DELETE CASCADE, foreign_keys(ON)).
+func TestPiecesEffaceesAvecSalon(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, id := range []string{"a", "b"} {
+		if err := insSalon(db, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, p := range [][2]string{{"p1", "a"}, {"p2", "a"}, {"p3", "b"}} {
+		if _, err := db.Exec(`INSERT INTO salon_pieces(id,salon_id,bucket,state,segments_mask) VALUES(?,?,16,'uploading',x'00')`, p[0], p[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`DELETE FROM salons WHERE id='a'`); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM salon_pieces WHERE salon_id='a'`).Scan(&n); err != nil || n != 0 {
+		t.Fatal("pièces du salon supprimé restantes :", n, err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM salon_pieces`).Scan(&n); err != nil || n != 1 {
+		t.Fatal("pièce de l'autre salon :", n, err)
+	}
+}
+
+// Sans rowid : aucun compteur d'insertion ne trahit l'ordre de création des salons ni des pièces.
+func TestSalonsWithoutRowid(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, table := range []string{"salons", "salon_pieces"} {
+		var v int
+		if err := db.QueryRow("SELECT rowid FROM " + table).Scan(&v); err == nil || !strings.Contains(err.Error(), "rowid") {
+			t.Fatalf("la table %s ne doit pas avoir de rowid : %v", table, err)
+		}
+	}
+}
+
+// baseV1 : base du schéma 1 (partages seuls), comme l'écrivait le binaire précédent.
+func baseV1(t *testing.T, path string, version int) {
+	t.Helper()
+	raw, err := sql.Open("sqlite", "file:"+path+"?_pragma=journal_mode(WAL)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	for _, stmt := range []string{schema, indexes, `PRAGMA user_version=` + strconv.Itoa(version)} {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := raw.Exec(`INSERT INTO shares(id,state,bucket,max_opens,opens_left,segments_mask,salt,kdf_ops,kdf_mem,access_v,proof_v,manage_v,envelope,expires_at)
+		VALUES('r','ready',16,1,1,x'00',x'00',3,3,x'01',x'01',x'02',zeroblob(60),900)`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Une base du schéma 1 avec un partage s'ouvre, garde le partage et passe au schéma 2.
+func TestMigreV1VersV2(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shares.db")
+	baseV1(t, path, 1)
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var exp int64
+	if err := db.QueryRow(`SELECT expires_at FROM shares WHERE id='r'`).Scan(&exp); err != nil || exp != 900 {
+		t.Fatal("partage perdu :", exp, err)
+	}
+	if v := pragma(t, db, "user_version"); v != "2" {
+		t.Fatalf("user_version = %s", v)
+	}
+	if err := insSalon(db, "a"); err != nil {
+		t.Fatal("table salons absente après migration :", err)
+	}
+}
+
+// Une base du schéma 3 (binaire plus récent) est refusée sans rien toucher : ni tables du
+// salon créées, ni version réécrite.
+func TestRefuseV3(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shares.db")
+	baseV1(t, path, 3)
+	db, err := Open(path)
+	if !errors.Is(err, ErrNewerSchema) {
+		if db != nil {
+			db.Close()
+		}
+		t.Fatal("base du schéma 3 acceptée :", err)
+	}
+	raw, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if v := pragma(t, raw, "user_version"); v != "3" {
+		t.Fatal("version touchée", v)
+	}
+	if got := strings.Join(masterNames(t, raw), ","); got != "index:shares_access_v,index:shares_manage_v,table:shares" {
+		t.Fatal("schéma touché :", got)
 	}
 }
