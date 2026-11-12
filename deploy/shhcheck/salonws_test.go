@@ -10,6 +10,8 @@ package main
 //	SHH_PROXY_ADDR    adresse TCP où joindre Caddy (127.0.0.1:port)
 //	SHH_PROXY_CA      autorités du test (PEM)
 //	SHH_PROXY_GARDE   durée de garde du WebSocket en secondes (défaut 75, au-delà de « idle 1m »)
+//	SHH_PROXY_SOURCE  adresse source des connexions (facultative : l'adresse repère du client du
+//	                  banc, cherchée ensuite dans tout ce que Caddy et le serveur ont écrit)
 //
 // Ce qui est prouvé : un salon se crée et s'ouvre à travers Caddy ; la mise à niveau passe ;
 // l'en-tête Origin arrive au serveur Go (il refuse sinon, 403) ; le WebSocket reste ouvert
@@ -47,6 +49,7 @@ type banc struct {
 	url, addr, nom string
 	tls            *tls.Config
 	http           *http.Client
+	dialer         *net.Dialer
 }
 
 func nouveauBanc(t *testing.T) *banc {
@@ -67,15 +70,23 @@ func nouveauBanc(t *testing.T) *banc {
 		nom = nom[:i]
 	}
 	cfg := &tls.Config{RootCAs: pool, ServerName: nom, MinVersion: tls.VersionTLS13}
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	if src := os.Getenv("SHH_PROXY_SOURCE"); src != "" {
+		ip := net.ParseIP(src)
+		if ip == nil {
+			t.Fatalf("SHH_PROXY_SOURCE %q", src)
+		}
+		dialer.LocalAddr = &net.TCPAddr{IP: ip}
+	}
 	tr := &http.Transport{
 		Proxy:           nil,
 		TLSClientConfig: cfg.Clone(),
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, "tcp", addr)
+			return dialer.DialContext(ctx, "tcp", addr)
 		},
 	}
-	return &banc{url: u, addr: addr, nom: nom, tls: cfg, http: &http.Client{Transport: tr, Timeout: 20 * time.Second}}
+	return &banc{url: u, addr: addr, nom: nom, tls: cfg, http: &http.Client{Transport: tr, Timeout: 20 * time.Second},
+		dialer: dialer}
 }
 
 func (b *banc) json(t *testing.T, method, path string, h map[string]string, corps any, sortie any) {
@@ -175,7 +186,7 @@ func (b *banc) poignee(t *testing.T, origine string) (*ws, int) {
 	t.Helper()
 	cfg := b.tls.Clone()
 	cfg.NextProtos = []string{"http/1.1"}
-	c, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", b.addr, cfg)
+	c, err := tls.DialWithDialer(b.dialer, "tcp", b.addr, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

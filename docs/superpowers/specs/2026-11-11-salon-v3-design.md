@@ -139,7 +139,8 @@ Le moteur Rust porte tout le protocole du salon (groupe MLS, enveloppe, découpa
 17. **Point 12** : groupe MLS orphelin (tous les membres ont rechargé, ou redémarrage) : le créateur (siège 0) refonde le groupe quand aucun membre en ligne n'est dans un groupe ; à spécifier.
 18. **Point 14** : réécrire les textes de la page d'explication (§39.4 point 3) : les messages sont « écrits chiffrés sur le disque du serveur, effacés au plus tard à la fin du salon ; un redémarrage les rend illisibles ».
 19. **Point 17** : grouper les accusés (`Recu { ids }`, `Vu { ids }`) en une trame au plus par top de 2,5 s (cadence de 60 trames par minute par siège).
-20. **Relecture Task 16** : après un `0x0B`, renvoyer exactement les mêmes octets, une seule trame `0x01` en vol à la fois ; la fin du rattrapage se déduit du pong d'un ping `0x04` envoyé après l'accueil ; reconnexion automatique après une coupure (mise à jour du serveur, `Caddy reload` ou recréation du conteneur Caddy : ils coupent les WebSocket).
+20. **Relecture Task 16** : après un `0x0B`, renvoyer exactement les mêmes octets, une seule trame `0x01` en vol à la fois ; la fin du rattrapage se déduit du pong d'un ping `0x04` envoyé après l'accueil ; reconnexion automatique après une coupure (mise à jour du serveur, redémarrage ou recréation du conteneur Caddy : ils coupent les WebSocket ; pas de `caddy reload`, l'API de Caddy est coupée).
+21. **Conditions bloquantes d'activation du salon** (relecture C-2 Task 17) : (a) un WebSocket gardé au moins 11 min à travers Caddy (`SALON_GARDE=660 make test-proxy`), au-delà du délai `read_body 5m`, la première coupure possible ; (b) un parcours dans WebKit et dans Chromium à travers Caddy en HTTP/2, mise à niveau par la RFC 8441 (CONNECT étendu) comprise. Tant que l'un des deux manque, `SHH_SALONS` reste à 0 (`deploy/README.md` §10).
 
 #### 3.6.2 Restes de C-1 à corriger avant C-3 (relecture finale, 12 novembre)
 

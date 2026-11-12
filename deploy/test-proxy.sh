@@ -12,14 +12,16 @@
 #   5. TLS 1.3, échange de clés X25519MLKEM768, redirection HTTP vers HTTPS ;
 #   6. aucune adresse de client dans ce que Caddy et le serveur écrivent (fichiers, sorties) ;
 #   7. salon (SHH_SALONS=1, plan C-2 Task 17) : Caddy garde l'en-tête Origin et laisse passer la
-#      mise à niveau WebSocket ; un WebSocket de /api/salons/ws reste ouvert 75 s (au-delà de
-#      « idle 1m ») avec les pings du serveur, puis répond encore ; une origine étrangère ou
-#      absente reçoit 403 à travers Caddy (deploy/shhcheck/salonws_test.go, lancé par go test).
+#      mise à niveau WebSocket ; un WebSocket de /api/salons/ws, ouvert depuis l'adresse repère
+#      du client (couverte par la section 6), reste ouvert SALON_GARDE secondes (75 par défaut,
+#      au-delà de « idle 1m ») avec les pings du serveur, puis répond encore ; une origine
+#      étrangère ou absente reçoit 403 à travers Caddy (deploy/shhcheck/salonws_test.go, go test).
 #
 # Ce qui n'est PAS prouvé ici : Docker (pilote de journal, réseau), journald, le vrai
 # certificat Let's Encrypt, un envoi complet de partage à travers Caddy (voir README), un
-# WebSocket par HTTP/2 (RFC 8441 : l'essai passe en HTTP/1.1), un WebSocket au-delà de « write
-# 10m » de Caddy.
+# WebSocket par HTTP/2 (RFC 8441 : l'essai passe en HTTP/1.1) ; par défaut, un WebSocket au-delà
+# de la première coupure possible de Caddy, à 5 min (« read_body 5m ») : SALON_GARDE=660 pour
+# l'essai long, condition bloquante d'activation du salon (README §10).
 #
 # Seules différences avec la production : deux lignes ajoutées au Caddyfile (certificat de
 # l'autorité interne de Caddy, non installée dans le système), et les ports, par variables.
@@ -327,7 +329,7 @@ check "308 de Caddy : ni Server, ni Via" bash -c "! grep -qiE '^(server|via):' '
 garde=${SALON_GARDE:-75}
 echo "salon : WebSocket gardé $garde s à travers Caddy…"
 if (cd "$here/shhcheck" && SHH_PROXY_URL="$A" SHH_PROXY_ADDR="127.0.0.1:$p_https" SHH_PROXY_CA="$ca" \
-	SHH_PROXY_GARDE="$garde" go test -count=1 -v -run '^TestSalonWSDerriereCaddy$' . >"$cli/salon-ws.txt" 2>&1) &&
+	SHH_PROXY_SOURCE="$client" SHH_PROXY_GARDE="$garde" go test -timeout "$((garde + 300))s" -count=1 -v -run '^TestSalonWSDerriereCaddy$' . >"$cli/salon-ws.txt" 2>&1) &&
 	grep -q -- '--- PASS: TestSalonWSDerriereCaddy' "$cli/salon-ws.txt"; then
 	ok "salon : mise à niveau, Origin gardé, WebSocket ouvert $garde s avec pings puis pong ; origine étrangère ou absente → 403"
 else
