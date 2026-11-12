@@ -31,55 +31,68 @@ async function lit(c: ClientSalon, e: Envoi, siege: number): Promise<number> {
 }
 
 describe("salon : trois clients, vrai moteur", () => {
+  // Étapes dans l'ordre du cahier des charges (Task 16), en `it` successifs qui partagent l'état
+  // ci-dessous : Vitest les exécute dans l'ordre d'écriture, l'un après l'autre (aucun
+  // `concurrent`) ; un échec fait échouer les étapes qui en dépendent, nommées.
   let srv: TestServer;
   const clients: ClientSalon[] = [];
+  let a: ClientSalon, b: ClientSalon, c: ClientSalon;
+  let tous: ClientSalon[];
+  let lien: Uint8Array, mdp: string, sGestion: Uint8Array;
+  let seqInst: number;
+
   beforeAll(async () => {
     srv = await startServer({ salons: true });
   });
   afterAll(async () => {
-    for (const c of clients) await c.fermer().catch(() => undefined);
+    for (const x of clients) await x.fermer().catch(() => undefined);
     await srv?.dispose();
   });
 
-  it("conversation, éphémères, instantané, retrait, coupure, reprise, pièce, mauvais mot de passe, destruction", async () => {
-    // --- Entrées : le créateur (siège 0) ajoute chaque invité dès son KeyPackage ---------------
-    const { createur: a, lien, mdp, sGestion } = await ClientSalon.creer(srv, { maxMembers: 4 });
+  it("entrées : le créateur (siège 0) ajoute chaque invité dès son KeyPackage", async () => {
+    const cr = await ClientSalon.creer(srv, { maxMembers: 4 });
+    ({ lien, mdp, sGestion } = cr);
+    a = cr.createur;
     clients.push(a);
     expect(a.siege).toBe(0);
-    const b = await ClientSalon.rejoindre(srv, lien, mdp);
+    b = await ClientSalon.rejoindre(srv, lien, mdp);
     clients.push(b);
     expect(b.siege).toBe(1);
     await Promise.all([a.attendreMembres([0, 1]), b.attendreMembres([0, 1])]);
-    const c = await ClientSalon.rejoindre(srv, lien, mdp);
+    c = await ClientSalon.rejoindre(srv, lien, mdp);
     clients.push(c);
     expect(c.siege).toBe(2);
-    await Promise.all([a, b, c].map((x) => x.attendreMembres([0, 1, 2])));
+    tous = [a, b, c];
+    await Promise.all(tous.map((x) => x.attendreMembres([0, 1, 2])));
+  });
 
-    // --- Chacun lit les textes des deux autres, enveloppe identique ----------------------------
+  it("chacun lit les textes des deux autres, enveloppe identique", async () => {
     const textes = [texte("Bonjour de A é😀"), texte("Bonjour de B"), texte("Bonjour de C")];
-    const tous = [a, b, c];
     for (const [i, x] of tous.entries()) await x.envoyer(textes[i]!);
     for (const [i, x] of tous.entries()) {
       for (const [j, y] of tous.entries()) if (i !== j) await lit(y, textes[i]!, i);
     }
+  });
 
-    // --- « écrit » (volatil) : reçu en direct, jamais au rattrapage (vérifié à la coupure) ------
+  it("« écrit » (volatil) : marqué volatil dans l'en-tête, reçu en direct", async () => {
     const e1 = ecrit();
     const seqEcrit = await a.envoyer(e1);
     expect(a.eng.lireEnTete((a.recus.find(enr(0x01, seqEcrit)) as { enr: { octets: Uint8Array } }).enr.octets.slice(18)).volatile).toBe(true);
     await lit(b, e1, 0);
     await lit(c, e1, 0);
+  });
 
-    // --- « instantané » lu (0x05) par les deux autres → 0x0E chez les trois --------------------
+  it("« instantané » lu (0x05) par les deux autres → 0x0E chez les trois", async () => {
     const inst = texte("Lu une fois", 1);
-    const seqInst = await a.envoyer(inst);
+    seqInst = await a.envoyer(inst);
     for (const x of [b, c]) {
       expect(await lit(x, inst, 0)).toBe(seqInst);
       x.lu(seqInst);
     }
     await Promise.all(tous.map((x) => x.attendre(efface(seqInst))));
+  });
 
-    // --- Coupure de C pendant 20 messages ; un retrait et un « écrit » pendant ce temps --------
+  it("coupure de C pendant 20 messages, un retrait et un « écrit » : rattrapage exact", async () => {
     await c.couper();
     const avantCoupure = c.dernierSeq;
     const retire = texte("Message retiré");
@@ -87,6 +100,8 @@ describe("salon : trois clients, vrai moteur", () => {
     await lit(b, retire, 0);
     a.retirer(seqRetire);
     await a.ping(); // 0x02 traité avant le 0x08
+    // « écrit » envoyé pendant la coupure : relayé en direct (B le lit), jamais servi au
+    // rattrapage de C.
     const e2 = ecrit();
     const seqEcrit2 = await a.envoyer(e2);
     await lit(b, e2, 0);
@@ -100,15 +115,33 @@ describe("salon : trois clients, vrai moteur", () => {
     for (const v of vingt) expect(await lit(c, v.e, v.siege)).toBe(v.seq);
     const apres = c.recus.filter((r) => r.k === "evt" && r.seq > avantCoupure && r.evenement.type === "message").map((r) => (r as { seq: number }).seq);
     expect(apres).toEqual(vingt.map((v) => v.seq)); // tous, dans l'ordre, rien d'autre
+    // Ce qui prouve l'exclusion du rattrapage : ni le retrait, ni l'« écrit » e2 (ni son
+    // enregistrement 0x01, ni son message) n'ont atteint C.
     expect(c.recus.some(enr(0x01, seqRetire))).toBe(false);
     expect(c.recus.some(enr(0x01, seqEcrit2))).toBe(false);
-    expect(c.recus.some(enr(0x01, seqEcrit))).toBe(true); // reçu en direct, avant la coupure
+    expect(c.recus.some(message(e2.id))).toBe(false);
     // Accueil de la reconnexion : 0x0E renvoyé pour l'instantané (rang dans (émission, depuis]),
     // jamais pour le retrait.
     expect(c.effaces.filter((s) => s === seqInst).length).toBe(2);
     expect(c.effaces).not.toContain(seqRetire);
 
-    // --- Reprise de C (nouvelle identité) : le créateur l'ajoute de nouveau --------------------
+    // Retrait après la reconnexion, tel que le moteur le porte : l'auteur (A) retire sa trame
+    // au serveur (0x02) et envoie le message chiffré `retrait` (cible = id du message). B et C
+    // le lisent, signé du siège de l'auteur. Le moteur ne tient pas le fil : remplacer le
+    // message par « Message retiré » revient à l'interface (C-3).
+    const cible = vingt[0]!;
+    a.retirer(cible.seq);
+    await a.ping();
+    const retrait: Envoi = { id: alea(16), heureMs: Date.now(), regle: 0, message: { k: "retrait", cible: cible.e.id } };
+    const seqRetrait = await a.envoyer(retrait);
+    for (const x of [b, c]) {
+      expect(await lit(x, retrait, 0)).toBe(seqRetrait);
+      const m = enveloppe(await x.attendre(message(retrait.id))).enveloppe.message;
+      expect(m.k === "retrait" && egal(m.cible, cible.e.id)).toBe(true);
+    }
+  });
+
+  it("reprise de C (nouvelle identité) : le créateur l'ajoute de nouveau", async () => {
     const ancienNonce = c.nonce;
     const repere = a.dernierSeq;
     await c.reprendre();
@@ -121,8 +154,9 @@ describe("salon : trois clients, vrai moteur", () => {
     await b.envoyer(suite[1]!);
     await lit(c, suite[0]!, 0);
     await lit(c, suite[1]!, 1);
+  });
 
-    // --- Pièce de 5 Mio : envoyée, liée à sa trame, relue par un autre à l'identique ----------
+  it("pièce de 5 Mio : envoyée, liée à sa trame, relue à l'identique, effacée au retrait", async () => {
     const bucket = 160; // 5 Mio de contenu : palier 160 (159 × 64 Kio au plus)
     const conteneur = new Uint8Array(tailleConteneur(bucket));
     for (let o = 0; o < conteneur.length; o += 65536) conteneur.set(alea(Math.min(65536, conteneur.length - o)), o);
@@ -147,14 +181,16 @@ describe("salon : trois clients, vrai moteur", () => {
     b.retirer(seqPiece);
     await b.ping();
     expect((await c.lireSegment(piece, 0)).status).toBe(404);
+  });
 
-    // --- 4ᵉ client, mauvais mot de passe : 403, 9 essais restants ------------------------------
+  it("4ᵉ client, mauvais mot de passe : 403, 9 essais restants", async () => {
     const refus = await ClientSalon.rejoindre(srv, lien, "Zz9!wQ4#k?b").catch((e: unknown) => e);
     expect(refus).toBeInstanceOf(HttpError);
     expect((refus as HttpError).status).toBe(403);
     expect((refus as HttpError).body).toEqual({ error: "bad_password", attempts_left: 9 });
+  });
 
-    // --- Destruction par le créateur : 0x05 raison 2 chez tous ---------------------------------
+  it("destruction par le créateur : 0x05 raison 2 chez tous, fermeture 1000", async () => {
     const r = await fetch(`${srv.origin}/api/salons/detruire`, {
       method: "POST",
       headers: { "X-Shh-Manage": b64u(sGestion), "Content-Type": "application/json" },
@@ -166,8 +202,9 @@ describe("salon : trois clients, vrai moteur", () => {
       expect(x.fin).toBe(2);
       expect(await x.attendreFermeture()).toBe(1000);
     }
+  });
 
-    // Aucun écart de protocole, aucune trame refusée par le moteur.
+  it("aucun écart de protocole, aucune trame refusée par le moteur", () => {
     for (const x of tous) {
       expect(x.erreurs).toEqual([]);
       expect(x.recus.filter((r) => r.k === "err")).toEqual([]);

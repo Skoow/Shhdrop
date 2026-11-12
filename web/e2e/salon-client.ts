@@ -22,6 +22,8 @@ export const KDF: KdfParams = { ops: 3, mem: 67108864 };
 export const MDP = "Kq7!mP2#x?a";
 const TAILLE_TRAME = 4140;
 const DEPUIS_REPRISE = 0xffffffffffffffffn;
+/** Délai d'un envoi (écho ou refus) : au-delà, échec avec les écarts notés. */
+const DELAI_ENVOI = 30_000;
 
 export type Srv = { origin: string };
 
@@ -108,6 +110,8 @@ export class ClientSalon {
   #accueilli: (() => void) | undefined;
   /** KeyPackage de cette identité déjà publié. */
   #kpPublie = false;
+  /** Nouvel envoi prévu après un `0x0B` (effacé par `couper`). */
+  #relance: ReturnType<typeof setTimeout> | undefined;
 
   private constructor(
     readonly srv: Srv,
@@ -391,26 +395,44 @@ export class ClientSalon {
 
   /**
    * Envoie une trame (et la pièce liée) ; rend son rang (écho). `0x0B` : attente puis nouvel
-   * envoi des mêmes octets ; `0x0C` : échec. Une trame à la fois.
+   * envoi des mêmes octets ; `0x0C` : échec. Une trame à la fois. Ni écho ni refus en
+   * `DELAI_ENVOI` : échec, avec les écarts notés par ce client.
    */
   envoyerTrame(trame: Uint8Array, piece?: Uint8Array): Promise<number> {
-    const p = this.#envois.then(
-      () =>
-        new Promise<number>((resoudre, refuser) => {
-          const corps = new Uint8Array(1 + trame.length + (piece?.length ?? 0));
-          corps[0] = 0x01;
-          corps.set(trame, 1);
-          if (piece) corps.set(piece, 1 + trame.length);
-          const fin = () => (this.#enCours = undefined);
-          this.#enCours = {
-            trame,
-            resoudre: (s) => (fin(), resoudre(s)),
-            refuser: (e) => (fin(), refuser(e)),
-            limite: (s) => setTimeout(() => this.#ws?.send(corps), (s + 1) * 1000),
-          };
-          this.#ws!.send(corps);
-        }),
-    );
+    const p = this.#envois.then(() => {
+      let enCours: EnCours | undefined;
+      const envoi = new Promise<number>((resoudre, refuser) => {
+        const corps = new Uint8Array(1 + trame.length + (piece?.length ?? 0));
+        corps[0] = 0x01;
+        corps.set(trame, 1);
+        if (piece) corps.set(piece, 1 + trame.length);
+        const fin = () => {
+          if (this.#enCours === enCours) this.#enCours = undefined;
+        };
+        enCours = {
+          trame,
+          resoudre: (s) => (fin(), resoudre(s)),
+          refuser: (e) => (fin(), refuser(e)),
+          limite: (s) => {
+            clearTimeout(this.#relance);
+            this.#relance = setTimeout(() => {
+              this.#relance = undefined;
+              this.#ws?.send(corps);
+            }, (s + 1) * 1000);
+          },
+        };
+        this.#enCours = enCours;
+        this.#ws!.send(corps);
+      });
+      let t: ReturnType<typeof setTimeout> | undefined;
+      const delai = new Promise<never>((_, ko) => {
+        t = setTimeout(() => {
+          if (this.#enCours === enCours) this.#enCours = undefined;
+          ko(new Error(`siège ${this.siege} : envoi sans écho après ${DELAI_ENVOI} ms ; écarts : ${JSON.stringify(this.erreurs)}`));
+        }, DELAI_ENVOI);
+      });
+      return Promise.race([envoi, delai]).finally(() => clearTimeout(t));
+    });
     this.#envois = p.catch(() => undefined);
     return p;
   }
@@ -478,8 +500,15 @@ export class ClientSalon {
     await attente;
   }
 
-  /** Coupe le WebSocket (fermeture normale du client), sans rien oublier de l'état. */
+  /**
+   * Coupe le WebSocket (fermeture normale du client), sans rien oublier de l'état du moteur.
+   * Le nouvel envoi prévu après un `0x0B` est annulé ; la présence est vidée (l'accueil
+   * suivant la redonne, `0x07` par siège occupé).
+   */
   async couper(): Promise<void> {
+    clearTimeout(this.#relance);
+    this.#relance = undefined;
+    this.presence.clear();
     const ws = this.#ws;
     this.#ws = undefined;
     if (!ws || ws.readyState === WebSocket.CLOSED) return;
