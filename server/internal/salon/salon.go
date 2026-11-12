@@ -54,9 +54,11 @@ type salon struct {
 	jetons     map[[32]byte]uint8
 	revoques   map[[32]byte]struct{}
 	journal    []evenement
-	// index : trames non volatiles rangées, triées par seq (relais.go).
-	index []entree
-	conv  *Conversation // nil pour la tombe d'un salon détruit sans état
+	// index : trames non volatiles rangées, triées par seq (relais.go). pieces : pièce liée
+	// par rang de trame (Task 13, bornée par le budget des pièces) ; nil tant qu'aucune.
+	index  []entree
+	pieces map[uint64][16]byte
+	conv   *Conversation // nil pour la tombe d'un salon détruit sans état
 	// fini : salon détruit ; plus rien n'y entre ni n'y est recréé (tombe gardée dans
 	// Manager.salons jusqu'à l'échéance).
 	fini bool

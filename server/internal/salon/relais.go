@@ -1,6 +1,7 @@
 package salon
 
 import (
+	"math"
 	"slices"
 	"sort"
 	"time"
@@ -12,20 +13,26 @@ import (
 // une volatile n'est ni écrite ni indexée (son rang est consommé : trou normal). La diffusion
 // aux connexions en direct vient à la Task 9.
 
-// entree : trame non volatile rangée. recuMs : heure de réception du serveur (ms Unix), jamais
-// lue dans la trame ni écrite sur disque. attendus : lecteurs attendus d'une trame
-// « instantané » (sièges occupés à la réception, moins l'expéditeur ; plan, point 8), 0
-// sinon. piece : pièce liée (Task 13). efface : emplacement écrasé (retrait, règle).
+// entree : trame non volatile rangée, 24 octets (plan, point 10 ; TestTailleEntree).
+// recuMs : heure de réception du serveur (ms Unix), jamais lue dans la trame ni écrite sur
+// disque. emplacement : numéro dans la conversation, ou effaceMarque une fois l'emplacement
+// écrasé (retrait, règle). attendus : lecteurs attendus d'une trame « instantané » (sièges
+// occupés à la réception, moins l'expéditeur ; plan, point 8), 0 sinon. La pièce liée d'une
+// trame est rangée à part (salon.pieces, Task 13).
 type entree struct {
 	seq         uint64
-	emplacement uint32
 	recuMs      int64
+	emplacement uint32
+	attendus    uint16
 	siege       uint8
 	drapeaux    uint8
-	attendus    uint16
-	piece       *[16]byte
-	efface      bool
 }
+
+// effaceMarque : jamais un numéro d'emplacement (Conversation.Ajouter s'arrête à
+// math.MaxUint32 − 1, ErrPleine).
+const effaceMarque = math.MaxUint32
+
+func (e entree) efface() bool { return e.emplacement == effaceMarque }
 
 // membreLocked : mb désigne toujours le titulaire actuel de son siège (même rang d'émission,
 // unique dans le salon), dans un salon ni fini ni échu. Un jeton remplacé (reprise), oublié
@@ -55,9 +62,10 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 	if err != nil {
 		return 0, ErrBadRequest
 	}
-	now := m.cfg.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Heure lue sous le verrou : recuMs ne décroît jamais quand seq croît (TestHeureMonotone).
+	now := m.cfg.Now()
 	if !s.membreLocked(mb, now) {
 		return 0, ErrNotFound
 	}
@@ -105,13 +113,13 @@ func (m *Manager) Retirer(mb Membre, seq uint64) error {
 	if mb.siege != 0 {
 		borne = s.sieges[mb.siege].arrivee // occupé : membreLocked
 	}
-	if e.efface || e.siege != mb.siege || e.seq <= borne {
+	if e.efface() || e.siege != mb.siege || e.seq <= borne {
 		return nil
 	}
 	if err := s.conv.Effacer(e.emplacement); err != nil {
 		return err
 	}
-	e.efface = true
+	e.emplacement = effaceMarque
 	return nil
 }
 
@@ -189,7 +197,7 @@ func (s *salon) suiteLocked(apres uint64, max int) [][]byte {
 		if j == len(s.journal) || (i < len(s.index) && s.index[i].seq < s.journal[j].seq) {
 			e := s.index[i]
 			i++
-			if e.efface {
+			if e.efface() {
 				continue
 			}
 			trame, err := s.conv.Lire(e.emplacement)

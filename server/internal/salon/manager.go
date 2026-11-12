@@ -442,6 +442,7 @@ func (m *Manager) detruire(id string) error {
 		s.sieges = [nbSieges]*siege{}
 		s.journal = nil
 		s.index = nil
+		s.pieces = nil
 	}
 	if s.conv != nil {
 		errs = append(errs, s.conv.Detruire()) // idempotent : réessaie la suppression

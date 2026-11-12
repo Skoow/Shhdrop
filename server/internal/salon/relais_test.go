@@ -10,8 +10,10 @@ import (
 	"reflect"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 // Relais et stockage des trames (plan C-2 Task 8).
@@ -267,6 +269,9 @@ func TestRetirerParAuteurSeul(t *testing.T) {
 			t.Fatal(seq, err)
 		}
 	}
+	s.mu.Lock()
+	emplacementX := s.index[0].emplacement
+	s.mu.Unlock()
 	if err := b.m.Retirer(a, x); err != nil {
 		t.Fatal(err)
 	}
@@ -276,10 +281,10 @@ func TestRetirerParAuteurSeul(t *testing.T) {
 	s.mu.Lock()
 	e := s.index[0]
 	s.mu.Unlock()
-	if !e.efface || e.seq != x {
+	if !e.efface() || e.seq != x {
 		t.Fatal("entrée", e)
 	}
-	if _, err := s.conv.Lire(e.emplacement); !errors.Is(err, ErrEfface) {
+	if _, err := s.conv.Lire(emplacementX); !errors.Is(err, ErrEfface) {
 		t.Fatal("emplacement non écrasé :", err)
 	}
 	// Retirer deux fois : sans effet.
@@ -649,5 +654,53 @@ func TestRetirerApresReprise(t *testing.T) {
 	}
 	if err := b.m.Retirer(n, z); err != nil || !servie(z) {
 		t.Fatal("nouvel occupant a retiré la trame de l'ancien :", err)
+	}
+}
+
+// I-1 : index de 24 octets par trame au plus (plan, point 10).
+func TestTailleEntree(t *testing.T) {
+	if n := unsafe.Sizeof(entree{}); n > 24 {
+		t.Fatalf("entree : %d octets, 24 au plus", n)
+	}
+}
+
+// M-1 : sous concurrence, avec une horloge qui avance à chaque lecture, l'index est trié à la
+// fois par seq et par recuMs (l'heure est lue sous le verrou du salon).
+func TestHeureMonotone(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	var mbs []Membre
+	for _, cr := range []bool{true, false, false, false} {
+		_, mb := b.entrerMembre(t, c, cr)
+		mbs = append(mbs, mb)
+	}
+	base := b.h.Now()
+	var tic atomic.Int64
+	b.m.cfg.Now = func() time.Time { return base.Add(time.Duration(tic.Add(1)) * time.Millisecond) }
+	var wg sync.WaitGroup
+	for _, mb := range mbs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for k := 0; k < 200; k++ {
+				if _, err := b.m.Recevoir(mb, trameD(0, k), nil); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	s := mbs[0].salon
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.index) != 800 {
+		t.Fatal("index", len(s.index))
+	}
+	for i := 1; i < len(s.index); i++ {
+		p, e := s.index[i-1], s.index[i]
+		if e.seq <= p.seq || e.recuMs < p.recuMs {
+			t.Fatalf("index[%d] : seq %d→%d, recuMs %d→%d", i, p.seq, e.seq, p.recuMs, e.recuMs)
+		}
 	}
 }
