@@ -1227,3 +1227,37 @@ func TestParallelUnlockAtomicAttempts(t *testing.T) {
 		}
 	}
 }
+
+// Plan C-2 Task 12, point 10 : les partages comptent l'usage du salon (Config.ExtraUsed) à la
+// création et à l'agrandissement.
+func TestPartagesVoientLeSalon(t *testing.T) {
+	s, _ := newSvc(t)
+	s.ExtraUsed = func() int64 { return 3 << 30 }
+	s.StorageMax = 4 << 30
+	if ContentBytes(32769) != 2<<30 {
+		t.Fatal("palier de 2 Gio :", ContentBytes(32769))
+	}
+	if _, _, err := s.createAny(newKeys().req(32769, 1, 1)); !errors.Is(err, ErrFull) {
+		t.Fatal("palier de 2 Gio :", err)
+	}
+	if _, _, err := s.createAny(newKeys().req(1, 1, 1)); err != nil {
+		t.Fatal("petit palier :", err)
+	}
+	id, _, err := s.createAny(newKeys().req(80, 1, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	used, err := s.Blobs.UsedBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sans l'usage du salon, l'agrandissement tiendrait largement.
+	s.StorageMax = 3<<30 + used + totalSize(160) - totalSize(80) - 1
+	if err := s.Grow(id, 160); !errors.Is(err, ErrFull) {
+		t.Fatal("agrandissement :", err)
+	}
+	s.StorageMax++
+	if err := s.Grow(id, 160); err != nil {
+		t.Fatal("agrandissement juste :", err)
+	}
+}

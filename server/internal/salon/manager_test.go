@@ -66,6 +66,9 @@ func nouveauBanc(t *testing.T, max int) *banc {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Limites par siège coupées : ces tests envoient des centaines de trames à horloge figée
+	// (bancLimite, limites_test.go, les rétablit).
+	m.sansLimiteSiege = true
 	return &banc{m: m, db: db, h: h, dir: dir, cfg: cfg}
 }
 

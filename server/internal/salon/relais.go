@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"sort"
+	"syscall"
 	"time"
 )
 
@@ -53,6 +54,11 @@ func (s *salon) membreLocked(mb Membre, now time.Time) bool {
 // est celui des rangs. Règle « 10 min » ou « 1 h » : échéance rangée (effacement.go).
 // « Instantané » sans aucun autre siège occupé : relayée puis effacée aussitôt (0x0E), sans
 // jamais être écrite sur le disque.
+//
+// Garde-fous (Task 12), sans rang consommé ni jeton pris : trame non volatile alors que
+// l'usage (partages, pièces, conversations) plus une trame dépasse StorageMax, usage
+// illisible, ou disque réellement plein (ENOSPC, écriture annulée) → ErrPlein (0x0C) ; seaux
+// du siège vides (limites.go) → *Attente (0x0B).
 func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, error) {
 	s := mb.salon
 	if s == nil {
@@ -65,12 +71,23 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 	if err != nil {
 		return 0, ErrBadRequest
 	}
+	// Usage lu avant s.mu (il prend Manager.mu, pris avant salon.mu dans l'ordre des verrous) :
+	// des trames rangées en même temps dans d'autres salons peuvent le dépasser d'autant.
+	plein := !h.Volatile && m.plein(TailleEmplacement)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Heure lue sous le verrou : recuMs ne décroît jamais quand seq croît (TestHeureMonotone).
 	now := m.cfg.Now()
 	if !s.membreLocked(mb, now) {
 		return 0, ErrNotFound
+	}
+	if plein {
+		return 0, ErrPlein
+	}
+	if !m.sansLimiteSiege {
+		if d := s.limites[mb.siege].prendre(now, !h.Volatile); d > 0 {
+			return 0, &Attente{Retry: d}
+		}
 	}
 	if h.Volatile {
 		s.seq++
@@ -84,6 +101,9 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 	e := uint32(effaceMarque)
 	if h.Regle != Instantane || attendus != 0 {
 		if e, err = s.conv.Ajouter(trame); err != nil {
+			if errors.Is(err, syscall.ENOSPC) {
+				return 0, ErrPlein // écriture annulée par Ajouter (fichier à sa taille d'avant)
+			}
 			return 0, err
 		}
 	}

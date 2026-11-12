@@ -121,6 +121,12 @@ type Config struct {
 	// KillWait (commande d'administration seulement) : attente de la coupure, par le serveur
 	// en marche, d'un partage déjà détaché (DestroyAdmin, kill.go) ; 0 : aucune demande.
 	KillWait time.Duration
+	// ExtraUsed (facultatif, nil : 0) : octets pris hors des partages sous le même
+	// StorageMax (salons : pièces et conversations, salon.Manager.UsedBytes), ajoutés à
+	// l'usage à la création et à l'agrandissement (plan C-2, point 10). Ne doit pas bloquer ni
+	// prendre de verrou du Service ; une erreur de lecture doit rendre une valeur haute (échec
+	// fermé).
+	ExtraUsed func() int64
 }
 
 // NewService valide la configuration : une valeur zéro ne doit jamais désactiver le gel
@@ -139,7 +145,7 @@ func NewService(c Config) (*Service, error) {
 		return nil, errors.New("share : FrozenFile doit être un chemin absolu")
 	}
 	s := &Service{DB: c.DB, Blobs: c.Blobs, Now: c.Now, StorageMax: c.StorageMax, FrozenFile: c.FrozenFile,
-		OnAbandon: c.OnAbandon, KillWait: c.KillWait}
+		OnAbandon: c.OnAbandon, KillWait: c.KillWait, ExtraUsed: c.ExtraUsed}
 	rand.Read(s.grantKey[:]) // clé des octrois d'ouverture, propre à ce processus (spec §41.4)
 	return s, nil
 }
@@ -153,6 +159,7 @@ type Service struct {
 	FrozenFile string
 	OnAbandon  func(id string, bucket int)
 	KillWait   time.Duration
+	ExtraUsed  func() int64
 
 	createMu sync.Mutex // rend atomiques « place libre ? » et la réservation
 	// attemptMu : rend atomiques, par partage, la lecture du compteur, la vérification de
@@ -480,6 +487,14 @@ func validFill(from, to, segs int) bool {
 	return from >= 0 && from <= to && to <= segs-1 && (from == to || from >= 1)
 }
 
+// extraUsed : Config.ExtraUsed, 0 sans elle.
+func (s *Service) extraUsed() int64 {
+	if s.ExtraUsed == nil {
+		return 0
+	}
+	return s.ExtraUsed()
+}
+
 // Create réserve la place du palier et enregistre l'envoi sous r.ID (tiré par NewID, rendu
 // tel quel). Un V_accès ou un V_gestion déjà présent (ou un id déjà pris, en base ou sur
 // disque) donne ErrConflict, sans toucher au partage existant : sans K_accès ni S_gestion,
@@ -513,7 +528,7 @@ func (s *Service) create(r CreateReq, valid func(CreateReq) error) (string, int,
 		return "", 0, err
 	}
 	// Les descripteurs détachés (§41.8) tiennent encore leur place jusqu'à leur fermeture.
-	if used+s.detachedBytes()+size > s.StorageMax {
+	if used+s.detachedBytes()+s.extraUsed()+size > s.StorageMax {
 		return "", 0, ErrFull
 	}
 	if err := reserveBlob(s.Blobs, id, size); err != nil {

@@ -329,7 +329,8 @@ func TestIDInvalide(t *testing.T) {
 // fichierPanne : fichier d'écriture qui échoue sur demande (écriture partielle, Truncate).
 type fichierPanne struct {
 	*os.File
-	ecriturePartielle bool // WriteAt écrit la moitié puis échoue
+	ecriturePartielle bool  // WriteAt écrit la moitié puis échoue
+	errEcriture       error // code de l'échec (errPanneTest si nil), ex. syscall.ENOSPC
 	truncateEchoue    bool
 	// panneSeule : seule l'écriture au décalage panneDecalage échoue (sans rien écrire).
 	panneSeule    bool
@@ -341,7 +342,11 @@ var errPanneTest = errors.New("/chemin/secret/panne injectée")
 func (f *fichierPanne) WriteAt(p []byte, off int64) (int, error) {
 	if f.ecriturePartielle {
 		n, _ := f.File.WriteAt(p[:len(p)/2], off)
-		return n, &os.PathError{Op: "write", Path: "/chemin/secret", Err: errPanneTest}
+		code := f.errEcriture
+		if code == nil {
+			code = errPanneTest
+		}
+		return n, &os.PathError{Op: "write", Path: "/chemin/secret", Err: code}
 	}
 	if f.panneSeule && off == f.panneDecalage {
 		return 0, &os.PathError{Op: "write", Path: "/chemin/secret", Err: errPanneTest}

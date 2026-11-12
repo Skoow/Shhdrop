@@ -74,6 +74,9 @@ type Manager struct {
 
 	// arrete : FermerTout appelée (arrêt du serveur) ; plus aucune connexion inscrite.
 	arrete atomic.Bool
+	// sansLimiteSiege : tests seulement (limites par siège coupées, limites.go) ; jamais posé
+	// en production (NewManager le laisse à false : limites actives).
+	sansLimiteSiege bool
 }
 
 var errConfig = errors.New("salon: configuration incomplète")
@@ -621,6 +624,16 @@ func (m *Manager) usedBytes() (int64, error) {
 		u += c.Taille()
 	}
 	return u, nil
+}
+
+// plein : n octets de plus dépasseraient StorageMax (partages, pièces et conversations) ;
+// échec fermé : usage illisible → plein. Ne pas appeler sous salon.mu (prend Manager.mu).
+func (m *Manager) plein(n int64) bool {
+	partages, err := m.cfg.UsedPartages()
+	if err != nil {
+		return true
+	}
+	return partages+m.UsedBytes()+n > m.cfg.StorageMax
 }
 
 // UsedBytes : usedBytes pour le décompte des partages ; échec fermé : usage illisible des
