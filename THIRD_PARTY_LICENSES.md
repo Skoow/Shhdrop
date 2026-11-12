@@ -197,3 +197,13 @@ Versions exactes dans `engine/Cargo.lock` ; liste : `cargo tree -p shhdrop-salon
 - MIT OR Apache-2.0 (stockage MLS à valeurs effacées, `engine/salon/src/stockage.rs`, Ruling 3 ; déplacées ici le 11 novembre, C-1, car absentes du `.wasm` des partages) : `postcard` 1.1.3 (format des valeurs, sans fonctions par défaut sauf `alloc`) et `cobs` 0.3.0 ; `embedded-io` 0.4.0 et 0.6.1 figurent dans `engine/Cargo.lock` comme dépendances facultatives de `postcard`, mais ne sont pas compilées (absentes de `cargo tree`).
 - Navigateur seulement (cible wasm32) : `js-sys` 0.3.107 et `wasm-bindgen` 0.2.130 (MIT OR Apache-2.0).
 - Crates déjà listées plus haut, en versions parfois différentes : `hkdf` 0.13.0, `hmac` 0.13.0, `sha2` 0.11.1, `digest` 0.11.3, `block-buffer` 0.12.1, `crypto-common` 0.2.2, `hybrid-array` 0.4.15, `cmov` 0.5.4, `ctutils` 0.4.8, `base64ct` 1.8.3, `cfg-if` 1.0.5, `slab` 0.4.12, `zmij` 1.0.23, `subtle` 2.6.1.
+
+## Serveur Go (`server/`, binaire `shhdrop`)
+
+Versions exactes dans `server/go.mod` et `server/go.sum` ; liste des modules compilés dans le binaire : `cd server && go list -deps -f '{{if .Module}}{{.Module.Path}}{{end}}' ./cmd/shhdrop | sort -u` (relevée le 12 novembre 2026, plan C-2 Task 17, Linux amd64). Licences lues dans le fichier de licence de chaque module (`go env GOMODCACHE`). La bibliothèque standard de Go est sous licence BSD-3-Clause (The Go Authors).
+
+- ISC : `github.com/coder/websocket` v1.8.15 (WebSocket du salon ; Copyright (c) 2025 Coder ; aucune dépendance transitive)
+- MIT : `github.com/altcha-org/altcha-lib-go` v1.0.0 (anti-robot ; Copyright (c) 2023 Daniel Regeci), `github.com/dustin/go-humanize` v1.1.0 (Copyright (c) 2005-2008 Dustin Sallings)
+- BSD-3-Clause : `modernc.org/sqlite` v1.62.0 (SQLite traduit en Go ; SQLite lui-même est dans le domaine public), `modernc.org/libc` v1.81.0, `modernc.org/mathutil` v1.7.1, `modernc.org/memory` v1.12.1, `golang.org/x/sys` v0.50.0, `github.com/google/uuid` v1.6.0, `github.com/remyoudompheng/bigfft` v0.0.0-20230129092748-24d4a6f8daec
+- Indirectes de `go.mod` absentes du binaire Linux (compilées sur d'autres systèmes seulement) : `github.com/mattn/go-isatty` v0.0.24 (MIT), `github.com/ncruces/go-strftime` v1.1.0 (MIT)
+- `deploy/shhcheck` : bibliothèque standard seulement.

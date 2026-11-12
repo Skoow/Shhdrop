@@ -107,7 +107,7 @@ Le moteur Rust porte tout le protocole du salon (groupe MLS, enveloppe, découpa
 - Un Commit qui échoue chez une partie du groupe est inhérent à MLS : ce membre est en retard (`epoque_perdue`).
 - Les tampons temporaires d'OpenMLS ne sont **pas** effacés ; notre stockage efface ses valeurs (postcard, à l'écrasement, à la suppression et à la destruction). Le texte des messages (`String`) n'est pas effacé non plus : « secrets » vise les clés.
 
-**Exigences pour C-2 (serveur)**
+**Exigences pour C-2 (serveur)** — **faites** (plan C-2, Tasks 1 à 17, 12 novembre ; référence : « Protocole » de `docs/superpowers/plans/2026-11-12-salon-c2-serveur.md`) : 1 et 2 (`0x01` et `0x0D`), 3 (journal dans l'ordre `seq`), 4 (trames non volatiles gardées et servies à chaque rattrapage, KeyPackages compris ; point 9 du plan), 5 (reprise par `depuis = 0xFFFFFFFFFFFFFFFF`), 6 (heure de réception dans `0x01`, en mémoire seulement), 7 et 8 ; prouvées par les tests du serveur et le test de bout en bout `web/e2e/salon-flow.test.ts`.
 1. Chaque enregistrement de trame porte le **siège expéditeur attesté** (`0x01`, §39.3.1) : le moteur le reçoit dans `recevoir`.
 2. L'accueil WebSocket livre, avant toute trame, la **liste complète (siège, nonce_arrivée)** avec le `seq` auquel elle s'applique (point resté ouvert depuis la Task 6).
 3. Un `0x02` ou `0x0A` précède toujours les trames qui s'y rapportent (Ruling 16).
@@ -131,6 +131,15 @@ Le moteur Rust porte tout le protocole du salon (groupe MLS, enveloppe, découpa
 11. **Pseudonymes** (I5) : chaque client applique l'unicité (`cleUnicite`) à la réception d'un `profil` : si la clé est déjà celle d'un autre siège présent, le premier en ordre `seq` garde le pseudonyme ; l'autre siège est affiché sous un nom neutre (« Participant 3 ») et, si c'est lui-même, son client le renvoie au champ (§39.4, point 4).
 12. **Renouvellement** (I5) : `renouveler` toutes les 100 trames envoyées (volatiles comprises) et toutes les heures ; un `commit_en_cours` ou `commitPerdu` se rejoue ensuite.
 13. **« Instantané » après rechargement** (I5, §3.6) : l'expéditeur renvoie sous la nouvelle époque, pour le revenant, ses messages « instantané » qu'il n'a pas encore lus ; le serveur libère l'ancienne trame quand tous les sièges présents l'ont lue sous l'une ou l'autre forme (l'ancienne feuille du revenant ne compte plus).
+
+**Exigences ajoutées pour C-3 par le plan C-2** (numéros des « Points à trancher » du plan C-2) :
+14. **Point 8** : le client envoie `0x05` (lu) pour toute trame « instantané » que le moteur lui rend `Ignore` (avant son entrée dans le groupe).
+15. **Point 9** : l'arrivant en attente republie son KeyPackage à chaque `0x07` « en ligne », `0x02` ou `0x0A` reçu.
+16. **Point 11** : jeton refusé (`4004`, après un redémarrage du serveur ou une place libérée) → `rejoindre`, puis nouveau `Salon` du moteur (le `seq` repart de 1).
+17. **Point 12** : groupe MLS orphelin (tous les membres ont rechargé, ou redémarrage) : le créateur (siège 0) refonde le groupe quand aucun membre en ligne n'est dans un groupe ; à spécifier.
+18. **Point 14** : réécrire les textes de la page d'explication (§39.4 point 3) : les messages sont « écrits chiffrés sur le disque du serveur, effacés au plus tard à la fin du salon ; un redémarrage les rend illisibles ».
+19. **Point 17** : grouper les accusés (`Recu { ids }`, `Vu { ids }`) en une trame au plus par top de 2,5 s (cadence de 60 trames par minute par siège).
+20. **Relecture Task 16** : après un `0x0B`, renvoyer exactement les mêmes octets, une seule trame `0x01` en vol à la fois ; la fin du rattrapage se déduit du pong d'un ping `0x04` envoyé après l'accueil ; reconnexion automatique après une coupure (mise à jour du serveur, `Caddy reload` ou recréation du conteneur Caddy : ils coupent les WebSocket).
 
 #### 3.6.2 Restes de C-1 à corriger avant C-3 (relecture finale, 12 novembre)
 
@@ -244,6 +253,12 @@ Inchangé : trames de taille unique ; contenu, type de message et expéditeur ca
 - **En-tête en clair de chaque trame** (authentifié, pas chiffré) : volatile ou non (§5.1) et règle d'effacement (désactivé, instantané, 10 min, 1 h). Le serveur efface lui-même du disque une trame « 10 min » ou « 1 h » à l'échéance, sans attendre personne.
 - **Lectures en « instantané »** : chaque lecteur envoie au serveur « lu » pour la trame (numéro `seq`) ; quand tous les sièges présents à l'envoi l'ont envoyé, ou sont partis, le serveur efface la trame et prévient les présents. **Fuite assumée (moyen)** : le serveur sait qui a lu quelle trame « instantané », et quand ; il ne sait toujours pas ce qu'elle contient. **Correction du 12 novembre (relecture C-2)** : il connaît en revanche le **siège** qui l'a envoyée (le serveur atteste le siège de chaque trame, §3.6.1), mais jamais le pseudonyme ni l'identité de la personne derrière ce siège. Sans cela, un message resterait sur le disque tant que l'expéditeur est hors ligne.
 - Le rythme des trames par siège reste visible (S34).
+- **Vocaux** (plan C-2, point 3) : une pièce est créée avec `vocal: true` (paliers 1, 16 ou 80, débités de la réserve vocale du siège) : le serveur sait qu'une pièce est un vocal, et sa durée à un palier près. **Fuite assumée (faible).**
+- **Lien pièce ↔ trame** (plan C-2, point 2) : le message `0x01` peut porter l'identifiant de la pièce après la trame, pour que la pièce suive la vie de sa trame (retrait, règle, lectures, fin). Le serveur sait donc quelle trame porte quelle pièce (il le devinait déjà au rythme des envois). **Fuite assumée (faible).**
+- **Lectures** : en plus des lectures « instantané » ci-dessus, le serveur voit qui télécharge chaque pièce (requête `GET` d'un membre, à la seconde) et combien d'octets (budget de lecture) ; il ne voit pas qui l'ouvre ni qui l'enregistre (accusés chiffrés, §14.2).
+- **Emplacements remis à zéro** (relecture C-2 Task 11) : une trame effacée (retrait, règle, lectures) a son emplacement de 4 168 octets écrasé de zéros dans le fichier de conversation. Qui lit le disque pendant la vie du salon voit **la position et le nombre des effacements** (combien de trames, lesquelles dans l'ordre d'arrivée), pas leur contenu, ni leur siège, ni leur heure (aucun en clair). **Fuite assumée (faible)** ; correction possible plus tard : écraser d'aléa plutôt que de zéros (le serveur reconnaîtrait alors un emplacement effacé par un marqueur en mémoire seulement).
+- **Rotation de l'invitation** : la colonne `rotation_r` de `salons` (spec principale §39.3.5) donne le nombre de rotations, donc une borne du nombre d'exclusions du salon. **Fuite assumée (faible)**, signalée au propriétaire (relecture C-2 Task 15).
+- **Vérifié (plan C-2 Task 17)** : le test bloquant `web/e2e/salon-sees-nothing.test.ts` (trois clients, vrai moteur) ne trouve aucun pseudonyme, avatar, texte, nom ou contenu de fichier, vocal, réaction, mot de passe, `K_lien`, `K_mdp`, `K_trame`, `heure_ms`, ni `K_preuve_s` ou jeton de membre, sur le disque (base, WAL, `salons/`, `salon-pieces/`), dans les sorties, les réponses, ni (contenus et clés jamais envoyées) dans la mémoire du serveur ; aucune fenêtre de 32 octets d'une trame dans `salons/` ; aucune heure de réception sur disque ; plus rien après destruction et arrêt.
 
 ## 11. Cadre légal
 

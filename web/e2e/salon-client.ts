@@ -25,7 +25,11 @@ const DEPUIS_REPRISE = 0xffffffffffffffffn;
 /** Délai d'un envoi (écho ou refus) : au-delà, échec avec les écarts notés. */
 const DELAI_ENVOI = 30_000;
 
-export type Srv = { origin: string };
+/**
+ * Serveur visé. `fetch` (facultatif) remplace le fetch global pour toutes les requêtes HTTP du
+ * client (capture, en-têtes repères) ; `entetes` s'ajoutent à la poignée du WebSocket.
+ */
+export type Srv = { origin: string; fetch?: typeof fetch; entetes?: Record<string, string> };
 
 /** Taille exacte de chaque enregistrement serveur → client (« Protocole »), hors 0x0D. */
 const TAILLES: Record<number, number> = {
@@ -69,8 +73,8 @@ const u64 = (b: Uint8Array, o: number) => Number(new DataView(b.buffer, b.byteOf
 const egal = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function json(origin: string, method: string, path: string, headers: Record<string, string>, body?: unknown): Promise<any> {
-  const r = await fetch(origin + path, {
+async function json(srv: Srv, method: string, path: string, headers: Record<string, string>, body?: unknown): Promise<any> {
+  const r = await (srv.fetch ?? fetch)(srv.origin + path, {
     method,
     headers: body === undefined ? headers : { "Content-Type": "application/json", ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -91,6 +95,8 @@ export class ClientSalon {
   readonly erreurs: string[] = [];
   /** Cibles des 0x0E reçus. */
   readonly effaces: number[] = [];
+  /** Messages binaires envoyés sur le WebSocket, dans l'ordre (accueil compris). */
+  readonly envoyes: Uint8Array[] = [];
   /** Présence (0x07) : siège → en ligne. */
   readonly presence = new Map<number, boolean>();
   /** Raison du 0x05 reçu, s'il y en a un. */
@@ -124,16 +130,17 @@ export class ClientSalon {
   ) {}
 
   /** Crée un salon (1 h, `max_members`), puis y entre comme créateur (siège 0). */
-  static async creer(srv: Srv, opts: { maxMembers?: number; membersCanDestroy?: boolean } = {}): Promise<{ createur: ClientSalon; lien: Uint8Array; mdp: string; sGestion: Uint8Array }> {
+  static async creer(srv: Srv, opts: { maxMembers?: number; membersCanDestroy?: boolean; mdp?: string } = {}): Promise<{ createur: ClientSalon; lien: Uint8Array; mdp: string; sGestion: Uint8Array }> {
+    const mdp = opts.mdp ?? MDP;
     const eng = await loadSalonEngine();
     const lien = alea(32);
     const sGestion = alea(32);
     const salt = alea(16);
-    const kMdp = await passwordKey(MDP, salt as Uint8Array<ArrayBuffer>, KDF);
+    const kMdp = await passwordKey(mdp, salt as Uint8Array<ArrayBuffer>, KDF);
     const cles = eng.clesSalon(lien, kMdp);
     kMdp.fill(0);
     const acces = eng.cleAcces(lien);
-    const cap = await json(srv.origin, "GET", "/api/captcha", {});
+    const cap = await json(srv, "GET", "/api/captcha", {});
     const recu = Date.now();
     const { shown_at, fallback: _f, ...defi } = cap;
     const preuve = await solveAltcha(defi);
@@ -141,7 +148,7 @@ export class ClientSalon {
     await dormir(Math.max(0, recu + 3100 - Date.now()));
     if (preuve.kind !== "pow") throw new Error("preuve inattendue");
     await json(
-      srv.origin,
+      srv,
       "POST",
       "/api/salons",
       { "X-Shh-Access": b64u(acces.k), "X-Shh-Manage": b64u(sGestion) },
@@ -160,14 +167,14 @@ export class ClientSalon {
     );
     acces.k.fill(0);
     const createur = await ClientSalon.#entrer(srv, eng, lien, cles, sGestion);
-    return { createur, lien, mdp: MDP, sGestion };
+    return { createur, lien, mdp, sGestion };
   }
 
   /** Entre dans le salon avec le lien et le mot de passe (meta, Argon2id, rejoindre, WebSocket). */
   static async rejoindre(srv: Srv, lien: Uint8Array, mdp: string): Promise<ClientSalon> {
     const eng = await loadSalonEngine();
     const acces = eng.cleAcces(lien);
-    const meta = await json(srv.origin, "GET", "/api/salons/meta", { "X-Shh-Access": b64u(acces.k) });
+    const meta = await json(srv, "GET", "/api/salons/meta", { "X-Shh-Access": b64u(acces.k) });
     acces.k.fill(0);
     const kMdp = await passwordKey(mdp, unb64u(meta.salt) as Uint8Array<ArrayBuffer>, { ops: meta.kdf_ops, mem: meta.kdf_mem });
     const cles = eng.clesSalon(lien, kMdp);
@@ -185,7 +192,7 @@ export class ClientSalon {
     const kPreuve = cles.kPreuve();
     const h: Record<string, string> = { "X-Shh-Access": b64u(acces.k) };
     if (sGestion) h["X-Shh-Manage"] = b64u(sGestion);
-    const e = await json(srv.origin, "POST", "/api/salons/rejoindre", h, { proof: b64u(kPreuve) });
+    const e = await json(srv, "POST", "/api/salons/rejoindre", h, { proof: b64u(kPreuve) });
     acces.k.fill(0);
     kPreuve.fill(0);
     const createur = sGestion !== undefined;
@@ -204,7 +211,7 @@ export class ClientSalon {
 
   /** Ouvre le WebSocket et attend la fin de la séquence d'accueil (0x0D reçu et appliqué). */
   async #connecter(depuis: bigint): Promise<void> {
-    const ws = new WebSocket(this.srv.origin.replace(/^http/, "ws") + "/api/salons/ws", { headers: { Origin: this.srv.origin } } as never);
+    const ws = new WebSocket(this.srv.origin.replace(/^http/, "ws") + "/api/salons/ws", { headers: { ...this.srv.entetes, Origin: this.srv.origin } } as never);
     ws.binaryType = "arraybuffer";
     this.#ws = ws;
     const accueilli = new Promise<void>((ok, ko) => {
@@ -229,8 +236,13 @@ export class ClientSalon {
     const accueil = new Uint8Array(51);
     accueil.set(new TextEncoder().encode(this.jeton), 0);
     new DataView(accueil.buffer).setBigUint64(43, depuis);
-    ws.send(accueil);
+    this.#envoyerWS(ws, accueil);
     await accueilli;
+  }
+
+  #envoyerWS(ws: WebSocket, b: Uint8Array<ArrayBuffer>): void {
+    this.envoyes.push(b.slice());
+    ws.send(b);
   }
 
   #noter(r: Recu): void {
@@ -417,12 +429,12 @@ export class ClientSalon {
             clearTimeout(this.#relance);
             this.#relance = setTimeout(() => {
               this.#relance = undefined;
-              this.#ws?.send(corps);
+              if (this.#ws) this.#envoyerWS(this.#ws, corps);
             }, (s + 1) * 1000);
           },
         };
         this.#enCours = enCours;
-        this.#ws!.send(corps);
+        this.#envoyerWS(this.#ws!, corps);
       });
       let t: ReturnType<typeof setTimeout> | undefined;
       const delai = new Promise<never>((_, ko) => {
@@ -476,7 +488,7 @@ export class ClientSalon {
     const b = new Uint8Array(seq === undefined ? 1 : 9);
     b[0] = type;
     if (seq !== undefined) new DataView(b.buffer).setBigUint64(1, BigInt(seq));
-    this.#ws!.send(b);
+    this.#envoyerWS(this.#ws!, b);
   }
 
   /** 0x05 : lecture « instantané » de la trame `seq`. */
@@ -496,7 +508,7 @@ export class ClientSalon {
     b[0] = 0x04;
     b.set(n, 1);
     const attente = this.attendre((r) => r.k === "enr" && r.enr.type === 0x08 && egal(r.enr.octets.slice(9), n));
-    this.#ws!.send(b);
+    this.#envoyerWS(this.#ws!, b);
     await attente;
   }
 
@@ -551,23 +563,23 @@ export class ClientSalon {
    * Envoie une pièce (palier `bucket`, octets opaques de la taille exacte du conteneur) : création,
    * segments, finalisation sans bourrage. Rend son identifiant (16 octets).
    */
-  async envoyerPiece(bucket: number, conteneur: Uint8Array): Promise<Uint8Array> {
-    const p = await json(this.srv.origin, "POST", "/api/salons/pieces", this.enTeteMembre, { bucket, vocal: false });
+  async envoyerPiece(bucket: number, conteneur: Uint8Array, vocal = false): Promise<Uint8Array> {
+    const p = await json(this.srv, "POST", "/api/salons/pieces", this.enTeteMembre, { bucket, vocal });
     const auth = { Authorization: `Bearer ${p.upload_token}` };
     let o = 0;
     for (let n = 0; o < conteneur.length; n++) {
       const t = Math.min(64, bucket - 64 * n) * 65552 + (n === 0 ? 48 : 0);
-      const r = await fetch(`${this.srv.origin}/api/salons/pieces/segments/${n}`, { method: "PUT", headers: auth, body: conteneur.slice(o, o + t) });
+      const r = await (this.srv.fetch ?? fetch)(`${this.srv.origin}/api/salons/pieces/segments/${n}`, { method: "PUT", headers: auth, body: conteneur.slice(o, o + t) });
       if (r.status !== 204) throw new HttpError(r.status, await r.text());
       o += t;
     }
-    await json(this.srv.origin, "POST", "/api/salons/pieces/finalize", auth, { fill_from: 0, fill_to: 0 });
+    await json(this.srv, "POST", "/api/salons/pieces/finalize", auth, { fill_from: 0, fill_to: 0 });
     return unb64u(p.piece);
   }
 
   /** Lit le segment `n` d'une pièce (statut et octets). */
   async lireSegment(piece: Uint8Array, n: number): Promise<{ status: number; octets: Uint8Array }> {
-    const r = await fetch(`${this.srv.origin}/api/salons/pieces/segments/${n}`, { headers: { ...this.enTeteMembre, "X-Shh-Piece": b64u(piece) } });
+    const r = await (this.srv.fetch ?? fetch)(`${this.srv.origin}/api/salons/pieces/segments/${n}`, { headers: { ...this.enTeteMembre, "X-Shh-Piece": b64u(piece) } });
     return { status: r.status, octets: new Uint8Array(await r.arrayBuffer()) };
   }
 

@@ -6,8 +6,10 @@
 #   SHH_DOMAIN     nom du site (exemple : shhdrop.app)
 #   SHH_DATA_ROOT  point de montage du volume chiffré (LUKS2, noatime), par exemple /srv/shhdrop.
 #                  Doit contenir « data » (compte 65532, mode 0700) et « caddy » (root, 0700).
-# Variable facultative :
+# Variables facultatives :
 #   SHH_STORAGE_MAX  plafond de stockage en octets (défaut : 200 Gio, spec §24)
+#   SHH_SALONS_MAX   salons vivants au plus (défaut : 200 ; 50 proposé pour un usage personnel),
+#                    sans effet tant que le salon est désactivé (SHH_SALONS, ci-dessous)
 #
 # Réseau : Caddy utilise le réseau de la machine (il voit donc toujours la vraie adresse
 # du client, en IPv4 comme en IPv6, sans dépendre de la traduction d'adresses de Docker).
@@ -54,6 +56,15 @@ services:
       # où Caddy écoute. /32 : le serveur ne croit X-Shh-Client-IP de personne d'autre.
       SHH_TRUSTED_PROXY: 172.30.53.1/32
       SHH_STORAGE_MAX: ${SHH_STORAGE_MAX:-214748364800}
+      # Salon (spec §39, plan C-2) : DÉSACTIVÉ, sans variable pour l'ouvrir, tant que le juriste
+      # n'a pas validé l'hébergement des conversations (Q-SAL8, §39.7) : aucune route
+      # /api/salons/*. Pour l'activer plus tard : "1", en changeant ce fichier (relu, commité).
+      SHH_SALONS: "0"
+      # Origine publique du site, comparée à l'en-tête Origin du WebSocket et copiée dans la CSP.
+      # Vérifiée même salon coupé : une valeur refusée (majuscules dans SHH_DOMAIN, par exemple)
+      # empêche le serveur de démarrer ET « shhdrop admin » de tourner (deploy/README.md §10).
+      SHH_ORIGIN: https://${SHH_DOMAIN:?SHH_DOMAIN manquant (nom du site)}
+      SHH_SALONS_MAX: ${SHH_SALONS_MAX:-200}
     networks:
       interne:
         ipv4_address: 172.30.53.2

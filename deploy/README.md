@@ -8,8 +8,8 @@ Caddy (TLS) devant le serveur Go, dans Docker. Références : spécification §8
 | `Dockerfile` | image du serveur : binaire Go statique + site, sur `scratch`, compte 65532 |
 | `compose.yaml` | les deux conteneurs, en lecture seule, sans capacité, sans journal |
 | `deploy.sh` | installe une version par empreinte, contrôle, revient en arrière ; commandes d'administration |
-| `shhcheck/` | petit programme Go : santé du conteneur, test TLS hybride |
-| `test-proxy.sh` | test du proxy : le Caddyfile devant le vrai serveur, sur la boucle locale |
+| `shhcheck/` | petit programme Go : santé du conteneur, test TLS hybride ; `salonws_test.go` : essai du WebSocket du salon à travers Caddy (test seulement, hors du binaire) |
+| `test-proxy.sh` | test du proxy : le Caddyfile devant le vrai serveur (salon activé), sur la boucle locale |
 | `env.example` | modèle de `deploy/.env` |
 
 Ce kit réduit les risques ; il ne rend pas le service invulnérable. Les limites sont listées en fin de page.
@@ -174,7 +174,7 @@ docker run --rm --network host --log-driver none -v /etc/ssl/certs/ca-certificat
 ## 8. Tester le kit
 
 ```sh
-CADDY=/chemin/vers/caddy deploy/test-proxy.sh     # Caddy 2.10 ou plus, curl 7.83 ou plus, Go, web/dist construit
+CADDY=/chemin/vers/caddy deploy/test-proxy.sh     # Caddy 2.10 ou plus, curl 7.83 ou plus, Go, web/dist construit (≈ 2 min 30 : WebSocket gardé 75 s)
 make lint-deploy                                  # bash -n, ShellCheck, go vet de shhcheck
 ```
 
@@ -198,3 +198,28 @@ Un job rouge = une faille connue : GitHub envoie un e-mail d'échec au propriét
 - **Durcissement de la machine** : les réglages du §1 (journald, pare-feu, SSH, mises à jour) sont à faire à la main ; aucun script ne les pose ni ne les vérifie, sauf `noatime` et la mémoire d'échange, contrôlés par `deploy.sh`.
 - **Hébergeur** : il voit les adresses IP et peut lire la mémoire de la machine. Hors de portée (§18.3).
 - **Envoi complet à travers Caddy** : `test-proxy.sh` prouve le relais (`/api/captcha`, corps d'un segment, en-têtes, octets), pas la création puis l'ouverture d'un partage par un navigateur. À faire à la main après la première installation (tests manuels de la §14).
+- **WebSocket du salon** : `test-proxy.sh` le garde ouvert 75 s à travers Caddy, en HTTP/1.1. Ni un WebSocket par HTTP/2 (RFC 8441, que certains navigateurs emploient), ni un WebSocket de plus de 10 min (délai `write 10m` de Caddy) ne sont essayés. À vérifier avant d'activer le salon (§10).
+
+## 10. Salon (désactivé)
+
+Le salon (spécification §39 et `docs/superpowers/specs/2026-11-11-salon-v3-design.md`) est livré **désactivé** : `compose.yaml` pose `SHH_SALONS: "0"`, sans variable dans `.env` pour l'ouvrir. Il reste fermé au public tant que le juriste n'a pas validé l'hébergement des conversations chiffrées (Q-SAL8, §39.7). Avec `SHH_SALONS=0`, aucune route `/api/salons/*` n'existe (même réponse 404 qu'une route inconnue).
+
+Variables :
+
+| Variable | Valeur | Rôle |
+|---|---|---|
+| `SHH_SALONS` | `0` (défaut) ou `1` | active les routes du salon et son WebSocket |
+| `SHH_ORIGIN` | `https://${SHH_DOMAIN}` (posée par `compose.yaml`) | origine publique du site, comparée **exactement** à l'en-tête `Origin` du WebSocket et copiée dans la CSP (`connect-src … wss://hôte`). Obligatoire avec `SHH_SALONS=1`. Forme exigée : `https://hôte[:port]` en minuscules, sans chemin ni barre finale, port par défaut omis ; `http://` seulement pour `localhost` ou `127.0.0.0/8` ; IPv6 refusé, `http://[::1]` compris (la CSP ne l'accepte pas) |
+| `SHH_SALONS_MAX` | 1 à 10 000, défaut 200 | salons vivants au plus ; **50 proposé pour un usage personnel** (`deploy/.env`) |
+
+À savoir avant d'activer :
+
+- **`SHH_ORIGIN` est vérifiée même salon coupé** : une valeur refusée empêche le serveur de démarrer **et** fait échouer `shhdrop admin` (`deploy.sh admin …`), qui lit la même configuration. Corriger `SHH_DOMAIN` (minuscules) d'abord.
+- **Schéma de base 2 sans retour arrière** : le premier démarrage d'une version qui contient le salon ajoute les tables `salons` et `salon_pieces` (schéma 2), **même avec `SHH_SALONS=0`**. Une image plus ancienne refuse ensuite cette base : `deploy.sh rollback` vers une version d'avant le salon ne marche plus sans effacer la base (`admin wipe --yes`, partages perdus). Le schéma 2 n'a jamais été publié avant sa forme finale (colonne `rotation_r` comprise) : une base de développement créée par une version intermédiaire est à effacer, pas à reprendre.
+- **Disque** : une conversation est écrite chiffrée sur le disque (`data/salons/`, seconde couche AES-256-GCM dont la clé ne vit qu'en mémoire), les pièces dans `data/salon-pieces/`. Une création de salon exige 2 Gio libres sous `SHH_STORAGE_MAX` (sinon 503) ; au pire environ 1,2 Go de conversation et 3,5 Go de vocaux par salon (plan C-2, point 10) : `SHH_STORAGE_MAX` reste la vraie protection du disque.
+- **À la fin d'un salon, la clé de la seconde couche est oubliée** (plus référencée par le serveur, tableau mis à zéro), **pas effacée de la mémoire** au sens strict : Go ne permet pas d'effacer la clé étendue gardée par AES ni d'éventuelles copies du ramasse-miettes. Elle n'est jamais écrite sur disque ; elle disparaît au plus tard à l'arrêt du processus.
+- **Un redémarrage du serveur** rend toutes les conversations illisibles : au démarrage, les fichiers de conversation et toutes les pièces sont effacés ; les salons restent (lien et mot de passe valables), les membres reviennent par `rejoindre`.
+- **`Caddy reload` (ou la recréation du conteneur Caddy après un changement du `Caddyfile`, puisque l'API d'administration est coupée) et toute mise à jour du serveur coupent les WebSocket ouverts.** Les pages du salon se reconnectent d'elles-mêmes (reconnexion automatique, avec rattrapage des messages manqués ; exigence du client C-3) ; rien n'est perdu côté serveur tant que le serveur Go ne redémarre pas.
+- **Caddy garde l'en-tête `Origin`** et laisse passer la mise à niveau WebSocket (§36 S2) : `test-proxy.sh` (section 7) le prouve, et une ligne `header_up -Origin` ferait échouer le test.
+- **Signalements** : « Quitter et signaler » (`POST /api/salons/signaler`) et « Détruire et signaler » comptent dans le même entier horaire que les partages (`reports_alert` de `shhcheck health`). `admin destroy -` accepte aussi un lien de salon `#c…`.
+- **Adresses IP** : le serveur n'en garde aucune pour le salon ; seules les limites en mémoire en tiennent compte (empreintes HMAC du jour, §9.5).

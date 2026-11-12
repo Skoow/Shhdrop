@@ -10,10 +10,16 @@
 #   4. les en-têtes du serveur Go arrivent une seule fois, les octets ne changent pas ; aucune
 #      réponse, même fabriquée par Caddy (308, 413, 502), ne porte « Server » ni « Via » ;
 #   5. TLS 1.3, échange de clés X25519MLKEM768, redirection HTTP vers HTTPS ;
-#   6. aucune adresse de client dans ce que Caddy et le serveur écrivent (fichiers, sorties).
+#   6. aucune adresse de client dans ce que Caddy et le serveur écrivent (fichiers, sorties) ;
+#   7. salon (SHH_SALONS=1, plan C-2 Task 17) : Caddy garde l'en-tête Origin et laisse passer la
+#      mise à niveau WebSocket ; un WebSocket de /api/salons/ws reste ouvert 75 s (au-delà de
+#      « idle 1m ») avec les pings du serveur, puis répond encore ; une origine étrangère ou
+#      absente reçoit 403 à travers Caddy (deploy/shhcheck/salonws_test.go, lancé par go test).
 #
 # Ce qui n'est PAS prouvé ici : Docker (pilote de journal, réseau), journald, le vrai
-# certificat Let's Encrypt, un envoi complet de partage à travers Caddy (voir README).
+# certificat Let's Encrypt, un envoi complet de partage à travers Caddy (voir README), un
+# WebSocket par HTTP/2 (RFC 8441 : l'essai passe en HTTP/1.1), un WebSocket au-delà de « write
+# 10m » de Caddy.
 #
 # Seules différences avec la production : deux lignes ajoutées au Caddyfile (certificat de
 # l'autorité interne de Caddy, non installée dans le système), et les ports, par variables.
@@ -25,6 +31,8 @@
 #   STATIC_DIR=…   site construit (défaut : web/dist, qui doit exister)
 #   PORT_BASE=…    premier de 6 ports locaux libres (défaut : 18400)
 #   KEEP=1         garde le dossier de travail après le test
+#   SALON_GARDE=…  secondes de garde du WebSocket du salon (défaut : 75)
+# Go (la chaîne de deploy/shhcheck/go.mod) doit être dans le PATH : l'essai du salon est un go test.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -93,6 +101,13 @@ handlers=$(SHH_DOMAIN=$name "$caddy" adapt --config "$here/Caddyfile" --adapter 
 	grep -o '"handler":"[a-z_]*"' | sort -u | tr '\n' ' ')
 check "gestionnaires du Caddyfile : headers, request_body, reverse_proxy, static_response, subroute ($handlers)" \
 	test "$handlers" = '"handler":"headers" "handler":"request_body" "handler":"reverse_proxy" "handler":"static_response" "handler":"subroute" '
+# Salon (§36 S2, plan C-2 Task 17) : aucun en-tête retiré vers l'amont n'est Origin ni un en-tête
+# de la mise à niveau WebSocket (le serveur Go refuse un WebSocket sans Origin exact : 403).
+deleted=$(SHH_DOMAIN=$name "$caddy" adapt --config "$here/Caddyfile" --adapter caddyfile 2>/dev/null |
+	grep -o '"delete":\[[^]]*\]' | tr '\n' ' ')
+check "en-têtes retirés vers l'amont lus dans la configuration ($deleted)" grep -q 'User-Agent' <<<"$deleted"
+check "Caddyfile : ni Origin, ni Upgrade, Connection, Sec-WebSocket-* parmi les en-têtes retirés" \
+	bash -c "! grep -qiE '\"(origin|upgrade|connection|sec-websocket-[a-z]*)\"' <<<'$deleted'"
 
 # --- Caddyfile de test : production + 2 lignes --------------------------------------------
 sed -e 's/^\tadmin off$/&\n\tskip_install_trust/' \
@@ -115,8 +130,10 @@ fi
 
 # --- Démarrage ------------------------------------------------------------------------------
 # Serveur Go, comme en production : derrière le proxy, échec fermé.
+# Salon activé (SHH_SALONS=1) : SHH_ORIGIN est l'origine publique, telle que la voit le client ;
+# 4 Gio : une création de salon exige 2 Gio libres sous SHH_STORAGE_MAX (plan C-2, point 10).
 env -i PATH="$PATH" SHH_DATA_DIR="$srv/data" SHH_STATIC_DIR="$static" SHH_LISTEN="127.0.0.1:$p_go" \
-	SHH_BEHIND_PROXY=1 SHH_STORAGE_MAX=1073741824 \
+	SHH_BEHIND_PROXY=1 SHH_STORAGE_MAX=4294967296 SHH_SALONS=1 SHH_ORIGIN="https://$name:$p_https" \
 	"$shhdrop" serve >"$srv/shhdrop.stdout" 2>"$srv/shhdrop.stderr" &
 pids+=($!)
 
@@ -185,7 +202,8 @@ hostile=(-H "X-Shh-Client-IP: $spoof" -H "X-Shh-Client-IP: 203.0.113.5" -H "X-Fo
 	-H "X-Forwarded-Host: evil.example" -H "X-Forwarded-Proto: http" -H "Forwarded: for=$spoof"
 	-H "X-Real-IP: $spoof" -H "Via: 1.1 $spoof" -H "User-Agent: UA-REPERE" -H "Referer: https://ref.example/REPERE"
 	-H "Accept-Language: fr-REPERE" -H "Cookie: c=REPERE" -H 'Sec-CH-UA: "REPERE"' -H "Sec-CH-UA-Platform: REPERE"
-	-H "Sec-Fetch-Site: REPERE" -H "DNT: 1" -H "Priority: u=1" -H "Accept-Encoding: br, gzip")
+	-H "Sec-Fetch-Site: REPERE" -H "DNT: 1" -H "Priority: u=1" -H "Accept-Encoding: br, gzip"
+	-H "Origin: https://$name")
 for proto in --http1.1 --http2; do
 	out=$cli/echo$proto.txt
 	check "$proto écho : l'amont répond" test "$(c $proto "${hostile[@]}" -o "$out" -w '%{http_code}' "$E/api/x")" = 200
@@ -199,6 +217,7 @@ for proto in --http1.1 --http2; do
 	check "$proto écho : ni User-Agent du client, Referer, Accept-Language, Cookie, Sec-CH-UA*, Sec-Fetch-*, DNT, Priority" \
 		bash -c "! grep -qiE 'REPERE|^(Referer|Accept-Language|Cookie|Sec-Ch-Ua[a-z-]*|Sec-Fetch-[a-z-]+|Dnt|Priority):' '$out'"
 	check "$proto écho : Accept-Encoding transmis tel quel" grep -qixF "Accept-Encoding: [br, gzip]" "$out"
+	check "$proto écho : Origin transmis tel quel (WebSocket du salon, §36 S2)" grep -qixF "Origin: [https://$name]" "$out"
 done
 c --http1.1 -o "$cli/echo-noae.txt" "$E/"
 check "écho sans Accept-Encoding : la liste des en-têtes reçus n'est pas vide" grep -qi '^Accept:' "$cli/echo-noae.txt"
@@ -303,6 +322,19 @@ check "HTTP → HTTPS : « $loc »" test "$loc" = "308 https://$name/abc"
 curl -sS --noproxy '*' --max-time 10 --interface "$client" -o /dev/null -D "$cli/h-308" \
 	-H "Host: $name" "http://127.0.0.1:$p_http/abc"
 check "308 de Caddy : ni Server, ni Via" bash -c "! grep -qiE '^(server|via):' '$cli/h-308'"
+
+# --- 7. Salon : WebSocket à travers Caddy (avant l'arrêt du serveur Go, section 6) -----------
+garde=${SALON_GARDE:-75}
+echo "salon : WebSocket gardé $garde s à travers Caddy…"
+if (cd "$here/shhcheck" && SHH_PROXY_URL="$A" SHH_PROXY_ADDR="127.0.0.1:$p_https" SHH_PROXY_CA="$ca" \
+	SHH_PROXY_GARDE="$garde" go test -count=1 -v -run '^TestSalonWSDerriereCaddy$' . >"$cli/salon-ws.txt" 2>&1) &&
+	grep -q -- '--- PASS: TestSalonWSDerriereCaddy' "$cli/salon-ws.txt"; then
+	ok "salon : mise à niveau, Origin gardé, WebSocket ouvert $garde s avec pings puis pong ; origine étrangère ou absente → 403"
+else
+	ko "salon : WebSocket à travers Caddy"
+	sed 's/^/    /' "$cli/salon-ws.txt"
+fi
+grep -h 'WebSocket à travers Caddy' "$cli/salon-ws.txt" | sed 's/^ */    /' || true
 
 # --- 6. Rien d'écrit avec l'adresse du client -----------------------------------------------
 # Erreurs provoquées depuis l'adresse repère : HTTP en clair sur le port TLS, TLS 1.2, nom
