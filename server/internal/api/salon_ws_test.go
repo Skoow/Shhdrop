@@ -143,6 +143,9 @@ func TestPoigneeInvalide(t *testing.T) {
 		"Connection faux": debut + "Upgrade: websocket\r\nConnection: " + m + "\r\nSec-WebSocket-Version: 13\r\n" + cle + "\r\n",
 		"version fausse":  debut + "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: " + m + "\r\n" + cle + "\r\n",
 		"version absente": debut + "Upgrade: websocket\r\nConnection: Upgrade\r\n" + cle + "\r\n",
+		"version 8":       debut + "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 8\r\n" + cle + "\r\n",
+		"version en double": debut + "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +
+			"Sec-WebSocket-Version: 13\r\n" + cle + "\r\n",
 		"clé fausse":      debut + ok + "Sec-WebSocket-Key: " + m + "\r\n\r\n",
 		"clé courte":      debut + ok + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=\r\n\r\n",
 		"clé 17 octets":   debut + ok + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZSE=\r\n\r\n",
@@ -161,6 +164,12 @@ func TestPoigneeInvalide(t *testing.T) {
 		if resp.StatusCode != 400 || resp.Body != want || resp.Header.Get("Upgrade") != "" {
 			t.Errorf("%s : %d %q %v", nom, resp.StatusCode, resp.Body, resp.Header)
 		}
+		// RFC 6455 §4.2.2 : refus de version → Sec-WebSocket-Version des versions comprises
+		// (constante) ; aucun autre refus ne l'annonce.
+		v := resp.Header.Values("Sec-WebSocket-Version")
+		if strings.HasPrefix(nom, "version") != (len(v) == 1 && v[0] == "13") || len(v) > 1 {
+			t.Errorf("%s : Sec-WebSocket-Version %v", nom, v)
+		}
 		for _, x := range []string{m, "dGhl", "websocket", "Upgrade"} {
 			if strings.Contains(resp.Raw, x) {
 				t.Errorf("%s : la réponse recopie %q :\n%s", nom, x, resp.Raw)
@@ -169,6 +178,39 @@ func TestPoigneeInvalide(t *testing.T) {
 	}
 	if n := b.e.srv.wsSlots.Len(); n != 0 {
 		t.Fatalf("%d places prises", n)
+	}
+}
+
+// Poignées de main réelles (navigateurs, mandataires, clients des apps) : 101 et le bon
+// Sec-WebSocket-Accept (RFC 6455 §1.3 : clé de l'exemple de la RFC).
+func TestPoigneesReelles(t *testing.T) {
+	b := nouveauWS(t, nil)
+	const accept = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+	const cle = "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+	const v13 = "Sec-WebSocket-Version: 13\r\n"
+	debut := "GET /api/salons/ws HTTP/1.1\r\nHost: x\r\nOrigin: " + origineSalon + "\r\n"
+	for _, c := range []struct{ nom, entetes string }{
+		{"Firefox", "Upgrade: websocket\r\nConnection: keep-alive, Upgrade\r\n" + v13 + cle +
+			"Sec-WebSocket-Extensions: permessage-deflate\r\n"},
+		{"casse", "Upgrade: WebSocket\r\nConnection: UPGRADE\r\n" + v13 + cle},
+		{"deux lignes Connection", "Upgrade: websocket\r\nConnection: keep-alive\r\nConnection: Upgrade\r\n" + v13 + cle},
+		{"Upgrade en liste", "Upgrade: h2c, websocket\r\nConnection: Upgrade\r\n" + v13 + cle},
+		{"clé entourée d'espaces", "Upgrade: websocket\r\nConnection: Upgrade\r\n" + v13 +
+			"Sec-WebSocket-Key:   dGhlIHNhbXBsZSBub25jZQ==  \r\n"},
+		{"Content-Length: 0", "Upgrade: websocket\r\nConnection: Upgrade\r\n" + v13 + cle + "Content-Length: 0\r\n"},
+		{"tabulations", "Upgrade:\th2c,\twebsocket\t\r\nConnection:\tkeep-alive,\tUpgrade\t\r\n" +
+			"Sec-WebSocket-Version:\t13\r\nSec-WebSocket-Key:\tdGhlIHNhbXBsZSBub25jZQ==\t\r\n"},
+		{"liste sans espaces", "Upgrade: h2c,websocket\r\nConnection: keep-alive,Upgrade\r\n" + v13 + cle},
+	} {
+		resp := b.brut(t, debut+c.entetes+"\r\n")
+		if resp.StatusCode != http.StatusSwitchingProtocols || resp.Header.Get("Sec-WebSocket-Accept") != accept {
+			t.Errorf("%s : %d %v", c.nom, resp.StatusCode, resp.Header)
+		}
+		if v := resp.Header.Values("Sec-WebSocket-Extensions"); len(v) != 0 {
+			t.Errorf("%s : Sec-WebSocket-Extensions %v", c.nom, v)
+		}
+		// Connexion coupée par brut : la place est rendue avant le cas suivant (4 par adresse).
+		attendre(t, 5*time.Second, func() bool { return b.e.srv.wsSlots.Len() == 0 })
 	}
 }
 

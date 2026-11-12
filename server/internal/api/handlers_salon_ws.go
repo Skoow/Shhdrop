@@ -23,8 +23,9 @@ const wsTotal, wsPer64, wsPer48 = 2000, 4, 16
 // forbidden avant toute mise à niveau (aucun autre site ne peut ouvrir le WebSocket avec le
 // navigateur d'un membre). Puis poignée de main vérifiée ici (poigneeWS : 400 bad_request
 // fixe, sans rien recopier de la requête, quand Accept aurait refusé avec un texte qui la
-// cite ; aucun corps admis). Puis place (429 limit, 503 busy) ; échéances HTTP de la connexion
-// (ReadTimeout, WriteTimeout) effacées seulement alors, juste avant la mise à niveau : une
+// cite ; aucun corps admis ; refus de version : Sec-WebSocket-Version: 13 en plus). Puis
+// place (429 limit, 503 busy) ; échéances HTTP de la connexion (ReadTimeout, WriteTimeout)
+// effacées seulement alors, juste avant la mise à niveau : une
 // requête refusée garde ses délais (un corps envoyé au goutte-à-goutte est coupé). Le
 // WebSocket vit tant que les pings passent (le salon ferme un client muet après 45 s).
 // Compression coupée (trames chiffrées, incompressibles ; pas d'attaque par compression ni de
@@ -37,7 +38,12 @@ func (a salonAPI) salonWS(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return
 	}
-	if !poigneeWS(r) {
+	if ok, version := poigneeWS(r); !ok {
+		if version {
+			// RFC 6455 §4.2.2 (MUST) : versions comprises par le serveur ; constante, rien
+			// n'est recopié de la requête.
+			w.Header().Set("Sec-WebSocket-Version", "13")
+		}
 		writeErr(w, http.StatusBadRequest, "bad_request")
 		return
 	}
@@ -58,8 +64,9 @@ func (a salonAPI) salonWS(w http.ResponseWriter, r *http.Request) {
 		OriginPatterns:  []string{hote},
 	})
 	if err != nil {
-		// Inatteignable après poigneeWS, sauf connexion sans Hijack (HTTP/2) : réponse déjà
-		// écrite par Accept ; la connexion est coupée au lieu de rester sans échéance.
+		// Inatteignable après poigneeWS (HTTP/2 y est déjà refusé), sauf ResponseWriter
+		// enveloppé sans Hijack ou Hijack qui échoue : réponse déjà écrite par Accept ; la
+		// connexion est coupée au lieu de rester sans échéance.
 		_ = rc.SetReadDeadline(time.Now())
 		return
 	}
@@ -71,24 +78,25 @@ func (a salonAPI) salonWS(w http.ResponseWriter, r *http.Request) {
 // d'Accept, qui ne refuse donc jamais après elle : HTTP/1.1 ou plus en HTTP/1 (Hijack), GET,
 // aucun corps, Upgrade contenant websocket et Connection contenant upgrade (jetons, sans
 // tenir compte de la casse), Sec-WebSocket-Version 13 une seule fois, Sec-WebSocket-Key une
-// seule fois, 24 caractères base64 standard canoniques pour 16 octets.
-func poigneeWS(r *http.Request) bool {
+// seule fois, 24 caractères base64 standard canoniques pour 16 octets. version : le refus
+// vient de Sec-WebSocket-Version (absent, en double ou autre que 13).
+func poigneeWS(r *http.Request) (ok, version bool) {
 	if r.ProtoMajor != 1 || r.ProtoMinor < 1 || r.Method != http.MethodGet ||
 		r.ContentLength != 0 || len(r.TransferEncoding) > 0 {
-		return false
+		return false, false
 	}
 	if !jeton(r.Header.Values("Upgrade"), "websocket") || !jeton(r.Header.Values("Connection"), "upgrade") {
-		return false
+		return false, false
 	}
 	if v := r.Header.Values("Sec-WebSocket-Version"); len(v) != 1 || v[0] != "13" {
-		return false
+		return false, true
 	}
 	k := r.Header.Values("Sec-WebSocket-Key")
 	if len(k) != 1 || len(k[0]) != 24 {
-		return false
+		return false, false
 	}
 	b, err := base64.StdEncoding.Strict().DecodeString(k[0])
-	return err == nil && len(b) == 16
+	return err == nil && len(b) == 16, false
 }
 
 // jeton : un des jetons (listes séparées par des virgules) de vs vaut t, casse ignorée.
