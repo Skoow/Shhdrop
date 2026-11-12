@@ -387,7 +387,7 @@ func (m *Manager) etat(id string, exp int64, maxMembers int) (*salon, error) {
 		if err != nil {
 			return nil, err
 		}
-		neuf := nouveauSalon(id, time.Unix(exp, 0), maxMembers, conv)
+		neuf := nouveauSalon(id, time.Unix(exp, 0), maxMembers, conv, m.now)
 		m.mu.Lock()
 		if s = m.salons[id]; s == nil {
 			m.salons[id], s = neuf, neuf
@@ -433,7 +433,7 @@ func (m *Manager) detruire(id string) error {
 	s := m.salons[id]
 	if s == nil {
 		// Échéance inconnue sans la ligne : la plus lointaine possible (24 h, arrondie).
-		s = nouveauSalon(id, m.cfg.Now().Add(25*time.Hour), 0, nil)
+		s = nouveauSalon(id, m.cfg.Now().Add(25*time.Hour), 0, nil, m.now)
 		m.salons[id] = s
 	}
 	m.finirLocked(id)
@@ -599,6 +599,9 @@ func (m *Manager) entretenir(s *salon, now time.Time) (tombe bool) {
 	}
 	return s.fini && !now.Before(s.expires)
 }
+
+// now : Config.Now lue à chaque appel (un test peut la remplacer après la création d'un salon).
+func (m *Manager) now() time.Time { return m.cfg.Now() }
 
 // usedBytes : octets des pièces et des fichiers de conversation.
 func (m *Manager) usedBytes() (int64, error) {

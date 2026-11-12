@@ -557,3 +557,220 @@ func TestEffacementEchecPlusServie(t *testing.T) {
 		t.Fatal("rattrapage :", l)
 	}
 }
+
+// I1 : une trame « instantané » retirée par son auteur n'attend plus personne : le départ
+// ultérieur de ses lecteurs n'envoie aucun 0x0E.
+func TestRetireePuisDepartSans0x0E(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		eg, g := b.entrerMembre(t, c, true)
+		_, cm := b.entrerMembre(t, c, false)
+		lg := b.connecter(eg.Jeton, eg.Seq)
+		synctest.Wait()
+		seq := b.recevoir(t, g, trameD(dInstantane, 1))
+		if err := b.m.Retirer(g, seq); err != nil {
+			t.Fatal(err)
+		}
+		if e, _ := entreeDe(g.salon, seq); !e.efface() || e.attendus != 0 {
+			t.Fatalf("après retrait : %+v", e)
+		}
+		if err := b.m.Quitter(cm); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		if l := effaces(lg); len(l) != 0 {
+			t.Fatal("0x0E pour une trame retirée :", l)
+		}
+		finir(t, lg)
+	})
+}
+
+// I2 : un départ qui efface 1 500 trames d'un coup ne ferme aucune connexion (un 0x0E ne
+// fait jamais fermer) ; chaque connexion reçoit les 1 500 0x0E.
+func TestDepartEffaceBeaucoup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		eg, g := b.entrerMembre(t, c, true)
+		ea, a := b.entrerMembre(t, c, false)
+		_, cm := b.entrerMembre(t, c, false)
+		lg := b.connecter(eg.Jeton, eg.Seq)
+		la := b.connecter(ea.Jeton, ea.Seq)
+		synctest.Wait()
+		const n = 1500
+		var seqs []uint64
+		for i := range n {
+			seq := b.recevoir(t, g, trameD(dInstantane, i))
+			b.lu(t, a, seq)
+			seqs = append(seqs, seq)
+			if i%100 == 0 {
+				synctest.Wait()
+			}
+		}
+		synctest.Wait()
+		if err := b.m.Quitter(cm); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		for _, l := range []*fauxLien{lg, la} {
+			if l.codeFerme() != 0 {
+				t.Fatal("connexion fermée :", l.codeFerme())
+			}
+			if got := effaces(l); !slices.Equal(got, seqs) {
+				t.Fatal("0x0E reçus :", len(got))
+			}
+		}
+		finir(t, lg, la)
+	})
+}
+
+// I3 : B reçoit une trame « instantané », lit, se coupe ; la trame est effacée par la
+// dernière lecture ; B se reconnecte avec depuis = ce rang → 0x0E dans l'accueil, après le
+// 0x0D et les 0x07.
+func TestReconnexionRecoit0x0E(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		_, g := b.entrerMembre(t, c, true)
+		eb, bm := b.entrerMembre(t, c, false)
+		_, cm := b.entrerMembre(t, c, false)
+		s := g.salon
+		lb := b.connecter(eb.Jeton, eb.Seq)
+		synctest.Wait()
+		x := b.recevoir(t, g, trameD(dInstantane, 1))
+		synctest.Wait()
+		if !slices.Contains(rangs(lb.enrs()), x) {
+			t.Fatal("trame non reçue")
+		}
+		b.lu(t, bm, x)
+		finir(t, lb)
+		b.lu(t, cm, x)
+		lb2 := b.connecter(eb.Jeton, x)
+		synctest.Wait()
+		l := lb2.enrs()
+		if len(l) != 1+3+1 || l[0].ty != 0x0D || l[1].ty != 0x07 || l[3].ty != 0x07 ||
+			!bytes.Equal(lb2.brut(4), EnrEfface(dernierSeq(s), x)) {
+			t.Fatalf("accueil : %v", l)
+		}
+		finir(t, lb2)
+	})
+}
+
+// I3, ce que l'accueil ne renvoie pas : trame retirée, trame « 10 min » échue, trame effacée
+// par lecture de rang > depuis (jamais reçue : le rattrapage ne la sert pas) ou ≤ rang
+// d'émission du jeton (jamais reçue) ; et une reprise ne renvoie aucun 0x0E.
+func TestReconnexion0x0EExclus(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		_, g := b.entrerMembre(t, c, true)
+		_, a := b.entrerMembre(t, c, false)
+		avantB := b.recevoir(t, g, trameD(dInstantane, 0)) // attend A seul
+		eb, bm := b.entrerMembre(t, c, false)
+		b.lu(t, a, avantB) // effacée par lecture, rang ≤ émission du jeton de B
+		retiree := b.recevoir(t, g, trameD(dInstantane, 1))
+		dix := b.recevoir(t, g, trameD(dDixMinutes, 2))
+		lue := b.recevoir(t, g, trameD(dInstantane, 3))
+		point := lue
+		tard := b.recevoir(t, g, trameD(dInstantane, 4))
+		if err := b.m.Retirer(g, retiree); err != nil {
+			t.Fatal(err)
+		}
+		for _, seq := range []uint64{lue, tard} {
+			b.lu(t, a, seq)
+			b.lu(t, bm, seq)
+		}
+		b.h.avancer(10 * time.Minute)
+		func() { // échéance sans Tick, qui libérerait aussi les sièges hors ligne
+			s := g.salon
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			s.effacerEchuesLocked(b.h.Now().UnixMilli())
+		}()
+		if e, _ := entreeDe(g.salon, dix); !e.efface() {
+			t.Fatal("10 min non effacée")
+		}
+		lb := b.connecter(eb.Jeton, point)
+		synctest.Wait()
+		if got := effaces(lb); !slices.Equal(got, []uint64{lue}) {
+			t.Fatal("0x0E à l'accueil :", got)
+		}
+		finir(t, lb)
+		lr := b.connecter(eb.Jeton, DepuisReprise)
+		synctest.Wait()
+		if got := effaces(lr); len(got) != 0 {
+			t.Fatal("0x0E après une reprise :", got)
+		}
+		finir(t, lr)
+	})
+}
+
+// M2 : une trame échue n'est jamais servie, même avant le passage de Tick.
+func TestEchueJamaisServie(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		_, g := b.entrerMembre(t, c, true)
+		ea, _ := b.entrerMembre(t, c, false)
+		s := g.salon
+		seq := b.recevoir(t, g, trameD(dDixMinutes, 1))
+		b.h.avancer(10 * time.Minute)
+		if servie(t, s, seq) {
+			t.Fatal("servie par suite après l'échéance, avant Tick")
+		}
+		seq2 := b.recevoir(t, g, trameD(dDixMinutes, 2))
+		b.h.avancer(10 * time.Minute)
+		la := b.connecter(ea.Jeton, ea.Seq)
+		synctest.Wait()
+		if r := rangs(la.enrs()); slices.Contains(r, seq) || slices.Contains(r, seq2) {
+			t.Fatal("servie au rattrapage après l'échéance :", r)
+		}
+		finir(t, la)
+	})
+}
+
+// M4 : l'ancien Membre du créateur, après sa reprise par rejoindre, ne lit plus rien.
+func TestLuAncienMembreApresReprise(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	_, ancien := b.entrerMembre(t, c, true)
+	_, a := b.entrerMembre(t, c, false)
+	seq := b.recevoir(t, a, trameD(dInstantane, 1))
+	b.entrer(t, c, true)
+	if err := b.m.Lu(ancien, seq); !errors.Is(err, ErrNotFound) {
+		t.Fatal("ancien membre :", err)
+	}
+}
+
+// M4 : l'horloge recule de 5 min entre deux réceptions : chaque trame est effacée à sa
+// propre échéance (tas, pas une file dans l'ordre des rangs).
+func TestHorlogeRecule(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	_, g := b.entrerMembre(t, c, true)
+	s := g.salon
+	un := b.recevoir(t, g, trameD(dDixMinutes, 1))
+	b.h.avancer(-5 * time.Minute)
+	deux := b.recevoir(t, g, trameD(dDixMinutes, 2))
+	b.h.avancer(10 * time.Minute) // échéance de la seconde
+	b.m.Tick()
+	if a, d := entreeDeEfface(s, un), entreeDeEfface(s, deux); a || !d {
+		t.Fatal("à l'échéance de la seconde :", a, d)
+	}
+	b.h.avancer(5*time.Minute - time.Millisecond)
+	b.m.Tick()
+	if entreeDeEfface(s, un) {
+		t.Fatal("première effacée avant son échéance")
+	}
+	b.h.avancer(time.Millisecond)
+	b.m.Tick()
+	if !entreeDeEfface(s, un) {
+		t.Fatal("première non effacée à son échéance")
+	}
+}
+
+func entreeDeEfface(s *salon, seq uint64) bool {
+	e, _ := entreeDe(s, seq)
+	return e.efface()
+}

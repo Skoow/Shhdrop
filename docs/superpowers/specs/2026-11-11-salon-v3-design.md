@@ -171,6 +171,7 @@ Comme §39.5 : vocal enregistré dans la conversation (10 min au plus), lu sur p
     - un participant absent (coupure, onglet fermé, siège gardé) le **verra à son retour** : il n'est jamais sauté ;
     - quand **le dernier participant** l'a lu, le message **disparaît pour tout le monde, expéditeur compris**, et quitte le serveur (trame et pièce).
     - Un participant qui quitte le salon (« Quitter ») ou en est exclu ne compte plus parmi ceux qui doivent le lire.
+    - Un participant coupé pendant l'effacement l'apprend en se reconnectant : le serveur lui renvoie, dès l'accueil, l'avis d'effacement (`0x0E`) de chaque message « instantané » effacé par lecture ou par départ qu'il a pu recevoir avant sa coupure (décision du 12 novembre, plan C-2 « Protocole »).
     - Les messages en attente sont gardés sur le disque du salon (§5.1) jusqu'à la dernière lecture.
   - **10 minutes** et **1 heure** : comptées **depuis l'envoi**, pour tout le monde, expéditeur compris. Un message que personne n'a lu dans ce délai est effacé sans avoir été lu. Compte à rebours visible dans le message.
 - **Qui la change** : **tout participant**, à tout moment. Chaque changement s'affiche dans la conversation : « Léa a réglé l'effacement des messages sur 10 minutes ». La règle s'applique aux messages envoyés **après** le changement ; un message garde la règle de son envoi (elle voyage avec lui, chiffrée).

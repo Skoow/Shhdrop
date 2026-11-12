@@ -45,6 +45,10 @@ func TestSansDate(t *testing.T) {
 		t.Fatal(err)
 	}
 	verifier("effacement")
+	if err := c.EffacerPlusieurs([]uint32{0, 1}); err != nil {
+		t.Fatal(err)
+	}
+	verifier("effacement en lot")
 	// Témoin : une lecture ordinaire change l'atime sur ce volume, sinon « lecture
 	// (O_NOATIME) » ne prouve rien.
 	if _, err := os.ReadFile(p); err != nil {

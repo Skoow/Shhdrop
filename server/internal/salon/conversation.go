@@ -305,3 +305,34 @@ func (c *Conversation) Detruire() error {
 	// Fichier supprimé et clé oubliée : une erreur de fermeture est seulement signalée.
 	return es(errFermeture)
 }
+
+// EffacerPlusieurs écrase de zéros chaque emplacement de l (effacements en chaîne : départ,
+// libération, échéances), dates remises à l'epoch une seule fois. Un numéro hors du fichier :
+// ErrEmplacement, rien n'est écrit. Une écriture en échec n'arrête pas les suivantes ; la
+// première erreur est rendue (ErrES).
+func (c *Conversation) EffacerPlusieurs(l []uint32) error {
+	if len(l) == 0 {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.etat(); err != nil {
+		return err
+	}
+	for _, e := range l {
+		if e >= c.n {
+			return ErrEmplacement
+		}
+	}
+	zeros := make([]byte, TailleEmplacement)
+	var premiere error
+	for _, e := range l {
+		if _, err := c.f.WriteAt(zeros, decalage(e)); err != nil && premiere == nil {
+			premiere = es(err)
+		}
+	}
+	if err := sansDate(c.chemin); premiere == nil {
+		premiere = err
+	}
+	return premiere
+}

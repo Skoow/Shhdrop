@@ -88,8 +88,12 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 		}
 	}
 	s.seq++
+	drapeaux := trame[len(marque)]
+	if e == effaceMarque {
+		drapeaux |= drapeauLu // personne à attendre : effacée comme par une dernière lecture
+	}
 	s.index = append(s.index, entree{seq: s.seq, emplacement: e, recuMs: now.UnixMilli(), siege: mb.siege,
-		drapeaux: trame[len(marque)], attendus: attendus})
+		drapeaux: drapeaux, attendus: attendus})
 	s.echeanceLocked(h.Regle, s.seq, now.UnixMilli())
 	s.relayerLocked(mb.siege, now.UnixMilli(), trame)
 	if e == effaceMarque {
@@ -262,10 +266,11 @@ func (s *salon) effaceeDepuis(seq uint64) bool {
 }
 
 // suite : au plus max enregistrements de rang > apres (refsLocked), lus sous le verrou du
-// salon, comme le dernier lot du rattrapage (connexion.prochainLot) ; une trame illisible
-// arrête la suite avec une erreur (lireRefs).
+// salon, comme le dernier lot du rattrapage (connexion.prochainLot), trames échues effacées
+// d'abord ; une trame illisible arrête la suite avec une erreur (lireRefs).
 func (s *salon) suite(apres uint64, max int) ([][]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.effacerEchuesLocked(s.now().UnixMilli())
 	return s.lireRefs(s.refsLocked(apres, max), nil)
 }

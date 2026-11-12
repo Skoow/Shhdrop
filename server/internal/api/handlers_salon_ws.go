@@ -25,9 +25,9 @@ const wsTotal, wsPer64, wsPer48 = 2000, 4, 16
 // fixe, sans rien recopier de la requête, quand Accept aurait refusé avec un texte qui la
 // cite ; aucun corps admis ; refus de version : Sec-WebSocket-Version: 13 en plus). Puis
 // place (429 limit, 503 busy) ; échéances HTTP de la connexion (ReadTimeout, WriteTimeout)
-// effacées seulement alors, juste avant la mise à niveau : une
-// requête refusée garde ses délais (un corps envoyé au goutte-à-goutte est coupé). Le
-// WebSocket vit tant que les pings passent (le salon ferme un client muet après 45 s).
+// effacées seulement alors, juste avant la mise à niveau : une requête refusée garde ses
+// délais (un corps envoyé au goutte-à-goutte est coupé). Le WebSocket vit tant que les pings
+// passent (le salon ferme un client muet après 45 s).
 // Compression coupée (trames chiffrées, incompressibles ; pas d'attaque par compression ni de
 // mémoire par connexion). Rien de la requête n'est journalisé ni gardé ; l'adresse ne sert
 // qu'aux limites (clés HMAC).

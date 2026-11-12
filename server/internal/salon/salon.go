@@ -67,14 +67,16 @@ type salon struct {
 	conv      *Conversation // nil pour la tombe d'un salon détruit sans état
 	// conns : connexion WebSocket de chaque siège (une au plus, connexion.go).
 	conns [nbSieges]*connexion
+	// now : horloge du gestionnaire (Config.Now), pour les échéances lues hors de Tick.
+	now func() time.Time
 	// fini : salon détruit ; plus rien n'y entre ni n'y est recréé (tombe gardée dans
 	// Manager.salons jusqu'à l'échéance).
 	fini bool
 }
 
-func nouveauSalon(id string, expires time.Time, maxMembers int, conv *Conversation) *salon {
+func nouveauSalon(id string, expires time.Time, maxMembers int, conv *Conversation, now func() time.Time) *salon {
 	return &salon{
-		id: id, expires: expires, maxMembers: maxMembers, conv: conv,
+		id: id, expires: expires, maxMembers: maxMembers, conv: conv, now: now,
 		jetons: map[[32]byte]uint8{}, revoques: map[[32]byte]struct{}{},
 	}
 }

@@ -65,25 +65,42 @@ func (s *salon) chercherLocked(seq uint64) int {
 	return i
 }
 
-// effacerLocked : effacement commun (retrait, règle, lectures) de l'entrée i : emplacement
-// écrasé de zéros, entrée marquée effacée ; la pièce liée et ses flux suivront (Task 13).
-// L'entrée est marquée effacée même si l'écriture des zéros échoue (erreur rendue) : la
+// drapeauLu : bit 7 de entree.drapeaux, interne au serveur (les bits 3 à 7 d'une trame
+// reçue sont nuls, LireEnTete) : trame « instantané » effacée par la dernière lecture ou par
+// un départ, dont le 0x0E est renvoyé à l'accueil d'une reconnexion (inscrire). Jamais posé
+// pour un retrait ni une échéance.
+const drapeauLu uint8 = 0x80
+
+// marquerLocked : entrée i marquée effacée (plus jamais servie, plus aucun lecteur attendu) ;
+// rend son ancien emplacement à écraser (ok = false si déjà effacée). Appelé sous s.mu.
+func (s *salon) marquerLocked(i int) (emplacement uint32, ok bool) {
+	e := &s.index[i]
+	e.attendus = 0
+	if e.efface() {
+		return 0, false
+	}
+	emplacement, e.emplacement = e.emplacement, effaceMarque
+	return emplacement, true
+}
+
+// effacerLocked : effacement commun (retrait, règle, lectures) de l'entrée i : entrée
+// marquée effacée, emplacement écrasé de zéros ; la pièce liée et ses flux suivront (Task
+// 13). L'entrée est marquée effacée même si l'écriture des zéros échoue (erreur rendue) : la
 // trame n'est plus jamais servie ; son emplacement, chiffré sous la clé du salon (en mémoire
 // seulement), disparaît avec la conversation. Sans effet sur une entrée déjà effacée.
 // Appelé sous s.mu.
 func (s *salon) effacerLocked(i int) error {
-	e := &s.index[i]
-	if e.efface() {
+	emplacement, ok := s.marquerLocked(i)
+	if !ok {
 		return nil
 	}
-	err := s.conv.Effacer(e.emplacement)
-	e.emplacement = effaceMarque
-	return err
+	return s.conv.Effacer(emplacement)
 }
 
-// effacerLuLocked : trame « instantané » qui n'attend plus personne : effacée, puis 0x0E
-// diffusé (connexions hors du direct : renvoyé au retour, diffuserLocked). Appelé sous s.mu.
+// effacerLuLocked : trame « instantané » qui n'attend plus personne : effacée (drapeauLu),
+// puis 0x0E diffusé. Appelé sous s.mu.
 func (s *salon) effacerLuLocked(i int) error {
+	s.index[i].drapeaux |= drapeauLu
 	err := s.effacerLocked(i)
 	s.diffuserLocked(EnrEfface(s.seq, s.index[i].seq), genreEfface, nil)
 	return err
@@ -91,21 +108,47 @@ func (s *salon) effacerLuLocked(i int) error {
 
 // plusAttenduLocked : le siège n n'est plus attendu par aucune trame (départ, libération,
 // exclusion, reprise : au moment de l'appel, toutes les trames rangées sont d'un rang
-// inférieur à l'annonce) ; celles qui n'attendaient plus que lui sont effacées (0x0E). Une
-// erreur d'écriture des zéros est ignorée ici (trame quand même plus servie, effacerLocked) :
-// l'annonce est déjà faite et ne peut pas échouer. Appelé sous s.mu.
+// inférieur à l'annonce) ; celles qui n'attendaient plus que lui sont effacées en un lot
+// (EffacerPlusieurs), puis un 0x0E par trame est diffusé. Une erreur d'écriture des zéros est
+// ignorée ici (trames quand même plus servies, marquerLocked) : l'annonce est déjà faite et
+// ne peut pas échouer. Appelé sous s.mu.
 func (s *salon) plusAttenduLocked(n uint8) {
 	b := bitSiege(n)
+	var emplacements []uint32
+	var cibles []uint64
 	for i := range s.index {
 		e := &s.index[i]
-		if e.attendus&b == 0 {
+		if e.efface() || e.attendus&b == 0 {
 			continue
 		}
 		e.attendus &^= b
-		if e.attendus == 0 {
-			_ = s.effacerLuLocked(i)
+		if e.attendus != 0 {
+			continue
+		}
+		e.drapeaux |= drapeauLu
+		if emplacement, ok := s.marquerLocked(i); ok {
+			emplacements = append(emplacements, emplacement)
+		}
+		cibles = append(cibles, e.seq)
+	}
+	_ = s.conv.EffacerPlusieurs(emplacements)
+	for _, cible := range cibles {
+		s.diffuserLocked(EnrEfface(s.seq, cible), genreEfface, nil)
+	}
+}
+
+// effacesLusLocked : 0x0E des trames effacées par lecture ou départ (drapeauLu) de rang dans
+// (plancher, point] : celles qu'une connexion qui se reconnecte a pu recevoir avant sa
+// coupure (le rattrapage commence après point). Appelé sous s.mu.
+func (s *salon) effacesLusLocked(plancher, point uint64) [][]byte {
+	var out [][]byte
+	i := sort.Search(len(s.index), func(k int) bool { return s.index[k].seq > plancher })
+	for ; i < len(s.index) && s.index[i].seq <= point; i++ {
+		if e := s.index[i]; e.efface() && e.drapeaux&drapeauLu != 0 {
+			out = append(out, EnrEfface(s.seq, e.seq))
 		}
 	}
+	return out
 }
 
 // Lu : 0x05 du siège de mb pour la trame de rang seq. Seulement une trame « instantané »
@@ -155,13 +198,19 @@ func (s *salon) echeanceLocked(r Regle, seq uint64, recuMs int64) {
 	heap.Push(&s.echeances, echeance{ms: recuMs + d, seq: seq})
 }
 
-// effacerEchuesLocked : efface (sans 0x0E) les trames dont l'échéance est atteinte à nowMs. Erreurs
-// d'écriture ignorées (effacerLocked : trame quand même plus servie). Appelé sous s.mu.
+// effacerEchuesLocked : efface en un lot (sans 0x0E) les trames dont l'échéance est atteinte
+// à nowMs. Appelé par Tick, et avant tout rattrapage (etapeLocked, suite) : une trame échue
+// n'est jamais servie, même entre deux Tick. Erreurs d'écriture ignorées (marquerLocked :
+// trames quand même plus servies). Appelé sous s.mu.
 func (s *salon) effacerEchuesLocked(nowMs int64) {
+	var emplacements []uint32
 	for len(s.echeances) > 0 && s.echeances[0].ms <= nowMs {
 		ech := heap.Pop(&s.echeances).(echeance)
 		if i := s.chercherLocked(ech.seq); i >= 0 {
-			_ = s.effacerLocked(i)
+			if emplacement, ok := s.marquerLocked(i); ok {
+				emplacements = append(emplacements, emplacement)
+			}
 		}
 	}
+	_ = s.conv.EffacerPlusieurs(emplacements)
 }

@@ -104,9 +104,10 @@ type connexion struct {
 	curseur         uint64   // dernier rang remis à l'écrivain (lu ou mis dans la file)
 	retardDepuis    time.Time
 	presenceManquee bool // une présence (0x07) diffusée hors du direct : état renvoyé au retour
-	// effacesManques : cibles des 0x0E diffusés hors du direct (sans rang, le rattrapage ne
-	// les sert pas) : renvoyés au retour au direct, après tout ce qui a été écrit avant.
-	effacesManques []uint64
+	// effaces : cibles des 0x0E à écrire (sans rang, le rattrapage ne les sert pas), hors de
+	// la file : au plus un par entrée de l'index, jamais une cause de fermeture ni de sortie
+	// du direct. Écrits après la file en direct, après le dernier lot au retour au direct.
+	effaces []uint64
 
 	reveil       chan struct{} // capacité 1
 	stop         chan struct{} // fermé par arreter
@@ -296,6 +297,11 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 		crochetAccueil()
 	}
 	accueil := append([][]byte{EnrListe(point, 0, s.etatAuLocked(point))}, s.presencesLocked(mb.siege)...)
+	if !a.Reprise {
+		// Trames « instantané » effacées par lecture ou départ pendant la coupure, que ce
+		// client a pu recevoir avant (rang ≤ point, après l'émission de son jeton).
+		accueil = append(accueil, s.effacesLusLocked(x.plancher, point)...)
+	}
 	c := &connexion{
 		m: m, s: s, mb: mb, l: l, ctx: ctx, t0: time.Now(), curseur: point, direct: point == s.seq,
 		prive: accueil, reveil: make(chan struct{}, 1), stop: make(chan struct{}), ecrivainFini: make(chan struct{}),
@@ -364,12 +370,19 @@ const (
 
 // diffuserLocked remet enr à chaque connexion sauf sauf, sans jamais attendre. Hors du
 // direct, un rang manqué sera servi par le rattrapage (sauf une trame volatile, perdue :
-// normal) ; une présence manquée fait renvoyer l'état des présences au retour au direct ; un
-// 0x0E manqué est renvoyé au retour au direct (effacesManques ; plus de priveMax en attente :
-// le client ne suit plus, 4006). Appelé sous s.mu.
+// normal) ; une présence manquée fait renvoyer l'état des présences au retour au direct. Un
+// 0x0E ne passe jamais par la file : sa cible va dans c.effaces (écrite en direct, ou au
+// retour au direct), sans plafond autre que l'index ni fermeture. Appelé sous s.mu.
 func (s *salon) diffuserLocked(enr []byte, g genre, sauf *connexion) {
 	for _, c := range s.conns {
 		if c == nil || c == sauf || c.arrete.Load() {
+			continue
+		}
+		if g == genreEfface {
+			c.effaces = append(c.effaces, binary.BigEndian.Uint64(enr[9:17]))
+			if c.direct {
+				c.signaler()
+			}
 			continue
 		}
 		if c.direct && len(c.file) >= fileMax {
@@ -380,15 +393,8 @@ func (s *salon) diffuserLocked(enr []byte, g genre, sauf *connexion) {
 			continue
 		}
 		if !c.direct {
-			switch g {
-			case genrePresence:
+			if g == genrePresence {
 				c.presenceManquee = true
-			case genreEfface:
-				if len(c.effacesManques) >= priveMax {
-					c.arreter(CodeTropLent, EnrFin(s.seq, RaisonTropLent))
-					continue
-				}
-				c.effacesManques = append(c.effacesManques, binary.BigEndian.Uint64(enr[9:17]))
 			}
 			continue
 		}
@@ -702,11 +708,16 @@ func (c *connexion) etapeLocked() (lot [][]byte, refs []ref, e etape) {
 	if c.arrete.Load() {
 		return nil, nil, eArreter
 	}
+	// Échéances d'abord : une trame échue n'est jamais servie, même entre deux Tick.
+	s.effacerEchuesLocked(c.m.cfg.Now().UnixMilli())
 	lot = c.prive
 	c.prive = nil
 	if len(c.file) > 0 {
 		lot = append(lot, c.file...)
 		c.file = nil
+	}
+	if c.direct {
+		lot = c.ajouterEffaces(lot)
 	}
 	if len(lot) > 0 {
 		return lot, nil, eEcrire
@@ -732,11 +743,16 @@ func (c *connexion) etapeLocked() (lot [][]byte, refs []ref, e etape) {
 		lot = append(lot, s.presencesLocked(c.mb.siege)...)
 		c.presenceManquee = false
 	}
-	for _, cible := range c.effacesManques {
-		lot = append(lot, EnrEfface(s.seq, cible))
+	return c.ajouterEffaces(lot), nil, eEcrire
+}
+
+// ajouterEffaces : 0x0E en attente ajoutés à lot (rang courant), liste vidée. Sous s.mu.
+func (c *connexion) ajouterEffaces(lot [][]byte) [][]byte {
+	for _, cible := range c.effaces {
+		lot = append(lot, EnrEfface(c.s.seq, cible))
 	}
-	c.effacesManques = nil
-	return lot, nil, eEcrire
+	c.effaces = nil
+	return lot
 }
 
 // avancer : curseur après un lot de rattrapage lu hors du verrou (seul l'écrivain le change

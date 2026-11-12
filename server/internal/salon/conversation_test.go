@@ -203,6 +203,50 @@ func TestEffacerZeros(t *testing.T) {
 	}
 }
 
+// EffacerPlusieurs : tous les emplacements donnés écrasés de zéros, les autres intacts,
+// taille inchangée ; un numéro hors du fichier refuse tout (rien n'est écrit) ; liste vide :
+// rien ; conversation détruite : ErrDetruite ; écriture en échec : ErrES.
+func TestEffacerPlusieurs(t *testing.T) {
+	dir := t.TempDir()
+	c := nouvelleConv(t, dir, idConv)
+	ajouter(t, c, 6)
+	if err := c.EffacerPlusieurs(nil); err != nil {
+		t.Fatal("liste vide :", err)
+	}
+	if err := c.EffacerPlusieurs([]uint32{1, 3, 4, 3}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 6 {
+		b, err := c.Lire(uint32(i))
+		if i == 1 || i == 3 || i == 4 {
+			if !errors.Is(err, ErrEfface) {
+				t.Fatalf("emplacement %d non effacé : %v", i, err)
+			}
+		} else if err != nil || !bytes.Equal(b, trameTest(i)) {
+			t.Fatalf("emplacement %d : %v", i, err)
+		}
+	}
+	if c.Taille() != 6*TailleEmplacement {
+		t.Fatal("taille changée", c.Taille())
+	}
+	if err := c.EffacerPlusieurs([]uint32{2, 6}); !errors.Is(err, ErrEmplacement) {
+		t.Fatal("hors du fichier :", err)
+	}
+	if b, err := c.Lire(2); err != nil || !bytes.Equal(b, trameTest(2)) {
+		t.Fatal("emplacement 2 écrit malgré le refus :", err)
+	}
+	f := avecPanne(t, c)
+	f.ecriturePartielle = true
+	if err := c.EffacerPlusieurs([]uint32{0, 2}); !errors.Is(err, ErrES) || strings.Contains(err.Error(), "/") {
+		t.Fatal("écriture en échec :", err)
+	}
+	f.ecriturePartielle = false
+	c.Detruire()
+	if err := c.EffacerPlusieurs([]uint32{0}); !errors.Is(err, ErrDetruite) {
+		t.Fatal("après Detruire :", err)
+	}
+}
+
 func TestDetruire(t *testing.T) {
 	dir := t.TempDir()
 	c := nouvelleConv(t, dir, idConv)
