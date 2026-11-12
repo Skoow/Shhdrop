@@ -5,7 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // idConv : identifiant interne valide (22 caractères base64url, 16 octets).
@@ -248,4 +251,184 @@ func TestIDInvalide(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "x")); err == nil {
 		t.Fatal("fichier créé hors du dossier")
 	}
+}
+
+// fichierPanne : fichier d'écriture qui échoue sur demande (écriture partielle, Truncate).
+type fichierPanne struct {
+	*os.File
+	ecriturePartielle bool // WriteAt écrit la moitié puis échoue
+	truncateEchoue    bool
+}
+
+var errPanneTest = errors.New("/chemin/secret/panne injectée")
+
+func (f *fichierPanne) WriteAt(p []byte, off int64) (int, error) {
+	if f.ecriturePartielle {
+		n, _ := f.File.WriteAt(p[:len(p)/2], off)
+		return n, &os.PathError{Op: "write", Path: "/chemin/secret", Err: errPanneTest}
+	}
+	return f.File.WriteAt(p, off)
+}
+
+func (f *fichierPanne) Truncate(n int64) error {
+	if f.truncateEchoue {
+		return &os.PathError{Op: "truncate", Path: "/chemin/secret", Err: errPanneTest}
+	}
+	return f.File.Truncate(n)
+}
+
+func avecPanne(t *testing.T, c *Conversation) *fichierPanne {
+	t.Helper()
+	f := &fichierPanne{File: c.f.(*os.File)}
+	c.f = f
+	return f
+}
+
+// Une écriture partielle est annulée : fichier ramené à sa taille d'avant, numéro rendu à
+// l'ajout suivant, erreur sans chemin.
+func TestAjouterRetourArriere(t *testing.T) {
+	dir := t.TempDir()
+	c := nouvelleConv(t, dir, idConv)
+	ajouter(t, c, 2)
+	f := avecPanne(t, c)
+	f.ecriturePartielle = true
+	_, err := c.Ajouter(trameTest(2))
+	if !errors.Is(err, ErrES) || strings.Contains(err.Error(), "/") {
+		t.Fatalf("erreur %v", err)
+	}
+	fi, err := os.Stat(filepath.Join(dir, idConv))
+	if err != nil || fi.Size() != 2*TailleEmplacement || c.Taille() != 2*TailleEmplacement {
+		t.Fatal("taille après échec :", fi.Size(), c.Taille(), err)
+	}
+	f.ecriturePartielle = false
+	if e, err := c.Ajouter(trameTest(2)); err != nil || e != 2 {
+		t.Fatal("ajout après échec :", e, err)
+	}
+	for i := range 3 {
+		if b, err := c.Lire(uint32(i)); err != nil || !bytes.Equal(b, trameTest(i)) {
+			t.Fatalf("emplacement %d : %v", i, err)
+		}
+	}
+}
+
+// Truncate impossible après un échec : conversation inutilisable (erreur fixe), Taille ne
+// sous-compte jamais le fichier réel, Detruire marche encore.
+func TestTruncateEchoue(t *testing.T) {
+	dir := t.TempDir()
+	c := nouvelleConv(t, dir, idConv)
+	ajouter(t, c, 2)
+	f := avecPanne(t, c)
+	f.ecriturePartielle, f.truncateEchoue = true, true
+	if _, err := c.Ajouter(trameTest(2)); !errors.Is(err, ErrES) {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(filepath.Join(dir, idConv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Size() <= 2*TailleEmplacement {
+		t.Fatal("témoin : écriture partielle absente", fi.Size())
+	}
+	if c.Taille() < fi.Size() {
+		t.Fatalf("Taille %d < fichier %d", c.Taille(), fi.Size())
+	}
+	f.ecriturePartielle, f.truncateEchoue = false, false
+	if _, err := c.Ajouter(trameTest(2)); !errors.Is(err, ErrInutilisable) {
+		t.Fatal("ajout :", err)
+	}
+	if _, err := c.Lire(0); !errors.Is(err, ErrInutilisable) {
+		t.Fatal("lecture :", err)
+	}
+	if err := c.Effacer(0); !errors.Is(err, ErrInutilisable) {
+		t.Fatal("effacement :", err)
+	}
+	if err := c.Detruire(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, idConv)); !errors.Is(err, os.ErrNotExist) || c.Taille() != 0 {
+		t.Fatal("fichier après destruction :", err, c.Taille())
+	}
+}
+
+// Erreurs d'E/S sans chemin : lecture d'un fichier tronqué de l'extérieur, suppression
+// impossible, ouverture d'un fichier existant.
+func TestErreursSansChemin(t *testing.T) {
+	dir := t.TempDir()
+	c := nouvelleConv(t, dir, idConv)
+	ajouter(t, c, 2)
+	if err := os.Truncate(filepath.Join(dir, idConv), TailleEmplacement); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.Lire(1)
+	if !errors.Is(err, ErrES) || strings.Contains(err.Error(), dir) {
+		t.Fatal("lecture :", err)
+	}
+	_, err = OuvrirConversation(dir, idConv)
+	if !errors.Is(err, ErrES) || !errors.Is(err, os.ErrExist) || strings.Contains(err.Error(), dir) {
+		t.Fatal("ouverture :", err)
+	}
+	_, err = OuvrirConversation(filepath.Join(dir, idConv, "sous"), "BBBBBBBBBBBBBBBBBBBBBA")
+	if !errors.Is(err, ErrES) || strings.Contains(err.Error(), dir) {
+		t.Fatal("dossier :", err)
+	}
+}
+
+// Lire en parallèle d'Ajouter, Effacer et Detruire (sous -race) : aucune course, aucune
+// trame fausse ; chaque lecture rend la trame, ErrEfface, ErrEmplacement ou ErrDetruite.
+func TestLireConcurrent(t *testing.T) {
+	dir := t.TempDir()
+	c := nouvelleConv(t, dir, idConv)
+	ajouter(t, c, 10)
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for g := range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				e := uint32((i + g) % 40)
+				b, err := c.Lire(e)
+				switch {
+				case err == nil:
+					if !bytes.Equal(b, trameTest(int(e))) {
+						t.Errorf("emplacement %d : trame fausse", e)
+						return
+					}
+				case errors.Is(err, ErrEfface), errors.Is(err, ErrEmplacement), errors.Is(err, ErrDetruite):
+				default:
+					t.Errorf("emplacement %d : %v", e, err)
+					return
+				}
+				_ = c.Taille()
+			}
+		}()
+	}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 10; i < 40; i++ {
+			if _, err := c.Ajouter(trameTest(i)); err != nil && !errors.Is(err, ErrDetruite) {
+				t.Error(err)
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 40; i += 3 {
+			if err := c.Effacer(uint32(i)); err != nil && !errors.Is(err, ErrEmplacement) && !errors.Is(err, ErrDetruite) {
+				t.Error(err)
+			}
+		}
+	}()
+	time.Sleep(20 * time.Millisecond)
+	if err := c.Detruire(); err != nil {
+		t.Fatal(err)
+	}
+	close(stop)
+	wg.Wait()
 }

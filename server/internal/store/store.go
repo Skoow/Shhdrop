@@ -47,18 +47,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS shares_manage_v ON shares(manage_v)`
 // access_v ou manage_v (index uniques), WITHOUT ROWID (aucun ordre de création), seule date
 // expires_at (arrondie au quart d'heure par l'appelant). salon_pieces : pièces jointes,
 // effacées avec leur salon (ON DELETE CASCADE, foreign_keys(ON) dans le DSN).
+// Bornes (plan C-2, Global Constraints) : pieces_bytes ≤ budget de 1 073 741 824 octets (hors
+// vocaux), palier d'une pièce de 1 à 8 000.
 const salonsSchema = `CREATE TABLE IF NOT EXISTS salons(
   id TEXT PRIMARY KEY, access_v BLOB NOT NULL, manage_v BLOB NOT NULL, proof_v BLOB NOT NULL,
   salt BLOB NOT NULL, kdf_ops INTEGER NOT NULL, kdf_mem INTEGER NOT NULL, expires_at INTEGER NOT NULL,
   max_members INTEGER NOT NULL CHECK(max_members BETWEEN 2 AND 10),
   members_can_destroy INTEGER NOT NULL CHECK(members_can_destroy IN (0,1)),
-  failed_attempts INTEGER NOT NULL DEFAULT 0, pieces_bytes INTEGER NOT NULL DEFAULT 0,
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  pieces_bytes INTEGER NOT NULL DEFAULT 0 CHECK(pieces_bytes BETWEEN 0 AND 1073741824),
   CHECK(length(access_v)=32 AND length(manage_v)=32 AND length(proof_v)=32 AND length(salt)=16)) WITHOUT ROWID;
 CREATE UNIQUE INDEX IF NOT EXISTS salons_access_v ON salons(access_v);
 CREATE UNIQUE INDEX IF NOT EXISTS salons_manage_v ON salons(manage_v);
 CREATE TABLE IF NOT EXISTS salon_pieces(
   id TEXT PRIMARY KEY, salon_id TEXT NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
-  bucket INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('uploading','ready')),
+  bucket INTEGER NOT NULL CHECK(bucket BETWEEN 1 AND 8000), state TEXT NOT NULL CHECK(state IN ('uploading','ready')),
   segments_mask BLOB NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS salon_pieces_salon ON salon_pieces(salon_id)`
 

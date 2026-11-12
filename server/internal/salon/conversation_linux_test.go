@@ -54,3 +54,26 @@ func TestSansDate(t *testing.T) {
 		t.Skip("volume monté sans mise à jour d'atime (noatime) : témoin non concluant")
 	}
 }
+
+// Dates à l'epoch même après une écriture partielle annulée (defer, comme blob.WriteAt).
+func TestSansDateApresEchec(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, idConv)
+	c := nouvelleConv(t, dir, idConv)
+	ajouter(t, c, 1)
+	f := avecPanne(t, c)
+	f.ecriturePartielle = true
+	if _, err := c.Ajouter(trameTest(1)); err == nil {
+		t.Fatal("écriture partielle acceptée")
+	}
+	if m, a := dates(t, p); !m.Equal(time.Unix(0, 0)) || !a.Equal(time.Unix(0, 0)) {
+		t.Fatalf("après échec : mtime %v, atime %v", m, a)
+	}
+	f.truncateEchoue = true
+	if _, err := c.Ajouter(trameTest(1)); err == nil {
+		t.Fatal("écriture partielle acceptée")
+	}
+	if m, _ := dates(t, p); !m.Equal(time.Unix(0, 0)) {
+		t.Fatalf("après Truncate en échec : mtime %v", m)
+	}
+}

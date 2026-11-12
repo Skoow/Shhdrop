@@ -496,6 +496,27 @@ func TestSalonsContraintes(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO salon_pieces(id,salon_id,bucket,state,segments_mask) VALUES('p','a',1,'draining',x'00')`); err == nil {
 		t.Error("état de pièce invalide accepté")
 	}
+	for _, b := range []int{0, -1, 8001} {
+		if _, err := db.Exec(`INSERT INTO salon_pieces(id,salon_id,bucket,state,segments_mask) VALUES(?,'a',?,'ready',x'00')`, "q"+strconv.Itoa(b), b); err == nil {
+			t.Errorf("palier %d accepté", b)
+		}
+	}
+	for _, b := range []int{1, 8000} {
+		id := "p" + strconv.Itoa(b)
+		if _, err := db.Exec(`INSERT INTO salon_pieces(id,salon_id,bucket,state,segments_mask) VALUES(?,'a',?,'ready',x'00')`, id, b); err != nil {
+			t.Errorf("palier %d refusé : %v", b, err)
+		}
+	}
+	for _, v := range []int64{-1, 1073741825} {
+		if _, err := db.Exec(`UPDATE salons SET pieces_bytes=? WHERE id='a'`, v); err == nil {
+			t.Errorf("pieces_bytes %d accepté", v)
+		}
+	}
+	for _, v := range []int64{1073741824, 0} {
+		if _, err := db.Exec(`UPDATE salons SET pieces_bytes=? WHERE id='a'`, v); err != nil {
+			t.Errorf("pieces_bytes %d refusé : %v", v, err)
+		}
+	}
 	if _, err := db.Exec(`INSERT INTO salon_pieces(id,salon_id,bucket,state,segments_mask) VALUES('p','inconnu',1,'ready',x'00')`); err == nil {
 		t.Error("pièce d'un salon inconnu acceptée (clés étrangères)")
 	}
@@ -557,7 +578,21 @@ func baseV1(t *testing.T, path string, version int) {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	for _, stmt := range []string{schema, indexes, `PRAGMA user_version=` + strconv.Itoa(version)} {
+	// DDL du schéma 1 figé en littéral (comme TestMigratesDatesOutOfDB) : une évolution de
+	// schema ou d'indexes ne doit pas changer la base « ancienne » du test.
+	const v1 = `CREATE TABLE IF NOT EXISTS shares(
+  id TEXT PRIMARY KEY, state TEXT NOT NULL CHECK(state IN ('uploading','ready','draining')),
+  bucket INTEGER NOT NULL, ttl_hours INTEGER, max_opens INTEGER,
+  opens_left INTEGER NOT NULL, opens_issued INTEGER NOT NULL DEFAULT 0, done_mask INTEGER NOT NULL DEFAULT 0,
+  failed_attempts INTEGER NOT NULL DEFAULT 0, segments_mask BLOB NOT NULL,
+  salt BLOB, kdf_ops INTEGER, kdf_mem INTEGER,
+  access_v BLOB NOT NULL, proof_v BLOB, manage_v BLOB NOT NULL, envelope BLOB,
+  expires_at INTEGER,
+  CHECK(state='uploading' OR (max_opens IS NOT NULL AND salt IS NOT NULL AND
+    kdf_ops IS NOT NULL AND kdf_mem IS NOT NULL AND proof_v IS NOT NULL AND envelope IS NOT NULL AND length(envelope)=60))) WITHOUT ROWID;
+CREATE UNIQUE INDEX IF NOT EXISTS shares_access_v ON shares(access_v);
+CREATE UNIQUE INDEX IF NOT EXISTS shares_manage_v ON shares(manage_v)`
+	for _, stmt := range []string{v1, `PRAGMA user_version=` + strconv.Itoa(version)} {
 		if _, err := raw.Exec(stmt); err != nil {
 			t.Fatal(err)
 		}
