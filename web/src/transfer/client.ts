@@ -497,6 +497,11 @@ export type Opened = {
    */
   readonly opensLeft: number;
   /**
+   * Cette ouverture est la dernière permise (rendu par unlock, revue D42-22) : seule elle se
+   * voit proposer « Détruire ». Une personne qui revient sans être la dernière : faux.
+   */
+  readonly lastOpen: boolean;
+  /**
    * Surveillance de la disparition (spec §41.8) : un appel = une requête tenue au plus 25 s.
    * "alive" (rien), "gone" (partage disparu : fermer l'interface), "stop" (ne plus surveiller).
    */
@@ -682,6 +687,7 @@ async function openWith(
         },
         grant: u.grant,
         opensLeft: u.opensLeft,
+        lastOpen: u.lastOpen,
         // Une destruction ou une fin (done) faite ici prévient aussi la surveillance (410) :
         // ce « gone » est le nôtre, l'écran de fin vient de destroy() ou de done() ; la
         // surveillance s'arrête simplement.

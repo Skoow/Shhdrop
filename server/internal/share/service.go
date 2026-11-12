@@ -880,7 +880,7 @@ func (s *Service) UnlockGrant(id string, kAcces, kPreuve []byte, grant string) (
 		s.gone.mu.Lock()
 		g := s.grantLocked(openKey{id, openN}, exp)
 		s.gone.unlock()
-		return Opened{N: openN, Envelope: envelope, Grant: g, OpensLeft: left}, nil
+		return Opened{N: openN, Envelope: envelope, Grant: g, OpensLeft: left, LastOpen: left == 0}, nil
 	}
 	left, err := s.countFailure(id)
 	if err != nil {

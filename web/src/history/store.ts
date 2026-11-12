@@ -59,6 +59,8 @@ export type Backend = {
   clear(): Promise<void>;
   flag(name: string): Promise<unknown>;
   setFlag(name: string, v: unknown): Promise<void>;
+  /** Supprime toute la base (clé comprise) ; une écriture suivante la recrée. */
+  drop(): Promise<void>;
 };
 
 const MANAGE_LINK = /^https?:\/\/[^#\s]+#m[A-Za-z0-9_-]{43}$/;
@@ -155,6 +157,17 @@ export function idbBackend(idb: IDBFactory, name = DB): Backend {
       return req(tx.objectStore(META).get("flag:" + name));
     },
     setFlag: (name, v) => write(META, (s) => (v === undefined ? s.delete("flag:" + name) : s.put(v, "flag:" + name))),
+    async drop() {
+      const was = opened;
+      opened = undefined;
+      (await was?.catch(() => null))?.close();
+      await new Promise<void>((ok, ko) => {
+        const r = idb.deleteDatabase(name);
+        r.onsuccess = () => ok();
+        r.onerror = () => ko(r.error ?? new Error("idb"));
+        r.onblocked = () => ok(); // un autre onglet la tient : supprimée à sa fermeture
+      });
+    },
   };
 }
 
@@ -173,6 +186,11 @@ export function memoryBackend(): Backend & { raw(): Map<string, Rec> } {
     clear: async () => m.clear(),
     flag: async (n) => flags.get(n),
     setFlag: async (n, v) => void (v === undefined ? flags.delete(n) : flags.set(n, v)),
+    drop: async () => {
+      m.clear();
+      flags.clear();
+      k = undefined;
+    },
   };
 }
 

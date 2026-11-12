@@ -73,6 +73,8 @@ function memReturns(init: Record<string, string> = {}) {
     find: vi.fn(async (tag: string) => m.get(tag)?.grant ?? null),
     save: vi.fn(async (e: { tag: string; grant: string; expiresAt: number }) => void m.set(e.tag, { grant: e.grant, expiresAt: e.expiresAt })),
     forget: vi.fn(async (tag: string) => void m.delete(tag)),
+    sweep: vi.fn(async () => undefined),
+    clear: vi.fn(async () => void m.clear()),
   };
 }
 
@@ -487,6 +489,43 @@ describe("rechargement et autres onglets (spec §41.4, UI §9.7.1)", () => {
       expect(openShare).toHaveBeenLastCalledWith(LINK, PW, "https://x.test");
       expect(returns.m.get(TAG)?.grant).toBe(GRANT2);
     }
+  });
+
+  it("revue D42-22 : refus d'octroi sur un partage sans ouverture restante → return_lost (limite dite), jamais « déverrouiller en utilisera une nouvelle »", async () => {
+    for (const [err, code] of [[new ReopenLimitError(), "reopen_limit"], [new GrantInvalidError(), "grant_invalid"]] as const) {
+      const returns = memReturns({ [TAG]: GRANT });
+      const { r } = setup({ returns, fetchMeta: vi.fn(async () => ({ expiresInS: 3600, opensLeft: 0 })), openShare: vi.fn(async () => Promise.reject(err)) });
+      await flush();
+      expect(r.state).toBe("reopen");
+      await r.unlock(PW);
+      await flush();
+      expect([r.state, r.error]).toEqual(["return_lost", code]);
+      expect(returns.m.size).toBe(0);
+    }
+  });
+
+  it("revue D42-22 : l'état « open » n'arrive qu'une fois le retour écrit", async () => {
+    let done!: () => void;
+    const returns = memReturns();
+    returns.save.mockImplementation(() => new Promise<undefined>((ok) => (done = () => ok(undefined))));
+    const { r } = setup({ returns });
+    await flush();
+    const p = r.unlock(PW);
+    await flush();
+    await flush();
+    expect(r.state).toBe("unlocking");
+    done();
+    await p;
+    expect(r.state).toBe("open");
+  });
+
+  it("revue D42-22 : un retour qui n'arrive pas à s'écrire n'empêche pas l'ouverture", async () => {
+    const returns = memReturns();
+    returns.save.mockImplementation(async () => Promise.reject(new Error("idb")));
+    const { r } = setup({ returns });
+    await flush();
+    await r.unlock(PW);
+    expect(r.state).toBe("open");
   });
 
   it("destruction, disparition ou échéance (forget) : retour oublié ; démontage du contenu (dispose) : gardé", async () => {

@@ -276,10 +276,17 @@ func (s *Service) serveDetachedLocked(parent context.Context, id string, d *deta
 	return s.startLocked(parent, k, sec, size, nil, func() { d.refs-- }), nil
 }
 
-// budgetLocked : budget de lecture de l'ouverture k, (2 + r) × le fichier chiffré + segment 0
-// + dernier segment, où r est le nombre de rechargements acceptés (spec §41.4). Sous gone.mu.
+// reopenExtraMin : relecture permise au-delà de trois fichiers complets, pour les petits
+// partages (revue D42-22, point 3).
+const reopenExtraMin = 256 << 20
+
+// budgetLocked : budget de lecture de l'ouverture k : ReadBudget + min(r × F, max(3 × F,
+// 256 Mio)), où F est le fichier chiffré et r le nombre de retours acceptés (spec §24, §41.4,
+// D42-22) : un petit partage se relit à chaque retour (20 au plus), un gros fichier trois fois
+// de plus au plus. Sous gone.mu.
 func (s *Service) budgetLocked(k openKey, bucket int) int64 {
-	return ReadBudget(bucket) + s.grantReopensLocked(k)*totalSize(bucket)
+	f := totalSize(bucket)
+	return ReadBudget(bucket) + min(s.grantReopensLocked(k)*f, max(3*f, reopenExtraMin))
 }
 
 // startLocked inscrit le flux (Streams) et l'activité de l'ouverture ; la fermeture met à jour
@@ -330,6 +337,7 @@ func (s *Service) reapLocked(id string, d *detached, now int64) {
 				delete(s.gone.active, openKey{id, n})
 			}
 		}
+		s.forgetOpensLocked(id, nil) // grâce finie : octrois et budgets oubliés
 	}
 }
 
@@ -420,6 +428,13 @@ func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 			delete(s.gone.active, k)
 		}
 	}
+	// Plus aucun retour possible : octrois et budgets oubliés, sauf pour les ouvertures qui
+	// finissent sur le descripteur détaché (oubliés à la fin de grâce, reapLocked).
+	keep := allowed
+	if s.gone.dead[id] == nil {
+		keep = nil
+	}
+	s.forgetOpensLocked(id, keep)
 	s.notifyLocked(id)
 	return ok, nil
 }
@@ -584,6 +599,7 @@ func (s *Service) sweepGone(now int64) {
 	for id, d := range s.gone.dead {
 		s.reapLocked(id, d, now)
 	}
+	s.sweepGrantsLocked(now)
 	for k, a := range s.gone.active {
 		if !a.activeAt(now) {
 			delete(s.gone.active, k)

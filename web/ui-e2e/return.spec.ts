@@ -80,6 +80,7 @@ test("dernière ouverture : fermer l'onglet puis rouvrir le lien revient sans co
   await comeBack(other, sent.link, sent.password);
   expect(await shareStatus(sent.manage, shh.origin)).toMatchObject({ opensUsed: 1, state: "draining" });
   await expect(other.locator("[data-last-top]")).toBeVisible();
+  await expect(other.locator("[data-return-limits]")).toContainText("Un gros fichier ne se retélécharge que quelques fois.");
   await shot(other, "contenu-derniere-ouverture", isMobile);
   expect(leaves).toBe(0);
 
@@ -128,4 +129,44 @@ test("retour impossible : octroi gardé, partage supprimé entre-temps → écra
   // Le retour gardé est oublié : la fois suivante, l'écran ordinaire du lien invalide.
   await other.goto(sent.link);
   await expect(other.getByRole("heading", { name: "Ce lien n'existe pas ou n'est plus disponible." })).toBeVisible({ timeout: 30_000 });
+});
+
+test("revue D42-22 : la première personne revient après la dernière : ni « dernière personne » ni Détruire ; « Toutes les ouvertures sont prises. »", async ({ page, shh, browser }) => {
+  test.setTimeout(180_000);
+  const s = await freshPage(browser);
+  const sent = await sendShare(s.page, shh.origin + "/", { text: TEXT, opens: 2 });
+  await s.ctx.close();
+  await page.goto(sent.link);
+  await unlock(page, sent.password);
+  await expect(page.locator("[data-last-top]")).toHaveCount(0);
+  const b = await freshPage(browser);
+  await b.page.goto(sent.link);
+  await unlock(b.page, sent.password);
+  await expect(b.page.locator("[data-last-top]")).toBeVisible();
+  await b.ctx.close();
+  const other = await page.context().newPage();
+  await page.close();
+  await comeBack(other, sent.link, sent.password);
+  await expect(other.locator("[data-eol]")).toContainText("Toutes les ouvertures sont prises.");
+  await expect(other.locator("[data-last-top]")).toHaveCount(0);
+  await expect(other.getByRole("button", { name: /^Détruire/ })).toHaveCount(0);
+});
+
+test("revue D42-22 : limite des retours atteinte sur un partage sans ouverture restante → « Impossible de revenir », cause dite", async ({ page, shh, browser }) => {
+  test.setTimeout(180_000);
+  const s = await freshPage(browser);
+  const sent = await sendShare(s.page, shh.origin + "/", { text: TEXT, opens: 1 });
+  await s.ctx.close();
+  await page.goto(sent.link);
+  await unlock(page, sent.password);
+  const other = await page.context().newPage();
+  await page.close();
+  // 21ᵉ retour simulé (le serveur le refuse ainsi, TestReopenLimitAndBudget).
+  await other.route("**/api/shares/unlock", (r) => r.fulfill({ status: 429, contentType: "application/json", body: '{"error":"reopen_limit"}' }));
+  await other.goto(sent.link);
+  await expect(other.getByRole("heading", { name: "Rouvrir ce partage" })).toBeVisible({ timeout: 30_000 });
+  await pwField(other).fill(sent.password);
+  await other.getByRole("button", { name: /^(Rouvrir|Déchiffrement)/ }).click();
+  await expect(other.getByRole("heading", { name: "Impossible de revenir sur ce partage" })).toBeVisible({ timeout: 30_000 });
+  await expect(other.getByText("Vous êtes revenu 20 fois sur ce partage ; il ne reste aucune ouverture.", { exact: false })).toBeVisible();
 });

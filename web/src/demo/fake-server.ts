@@ -713,6 +713,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
         envelope: b64(s.envelope!),
         grant: grant(id, openN, s.expiresAt),
         opens_left: s.opensLeft,
+        last_open: s.opensLeft === 0 && openN === s.opensIssued,
       });
     }
     const left = await countFailure(id, s);

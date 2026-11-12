@@ -926,7 +926,7 @@ func TestCreateConflictAndFinalizeV2(t *testing.T) {
 		body: mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve)})})
 	expect(t, w, 200, "")
 	r := jsonOf(t, w)
-	if r["envelope"] != g["envelope"] || len(r) != 5 || len(r["grant"].(string)) != 54 || r["opens_left"] != 1.0 {
+	if r["envelope"] != g["envelope"] || len(r) != 6 || len(r["grant"].(string)) != 54 || r["opens_left"] != 1.0 || r["last_open"] != false {
 		t.Fatalf("unlock : %v", r)
 	}
 	dl := r["download_token"].(string)

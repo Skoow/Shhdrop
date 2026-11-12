@@ -250,13 +250,15 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
   };
   let guard = startInactivityGuard(d.now, onIdle, d.every);
 
-  function keep(o: Opened, key: string, tag: string | null) {
+  async function keep(o: Opened, key: string, tag: string | null): Promise<void> {
     if (guard.stopped) guard = startInactivityGuard(d.now, onIdle, d.every);
     held = { key, grant: o.grant, tag };
     d.grants.save({ v: 1, link: key, grant: o.grant, last: d.now() });
     // D42-22 : gardé jusqu'à l'échéance du partage (celle de l'octroi), pour revenir plus tard.
-    if (tag !== null && expiresAt > 0) void d.returns.save({ tag, grant: o.grant, expiresAt }).catch(() => undefined);
     stopAnswer = tag === null ? () => undefined : d.answerTabs((t) => (held !== null && t === held.tag ? held.grant : null));
+    // Attendu (quelques ms) avant d'afficher le contenu : fermer l'onglet aussitôt après ne
+    // perd pas le retour. Échec : silencieux, revenir comptera une ouverture.
+    if (tag !== null && expiresAt > 0) await d.returns.save({ tag, grant: o.grant, expiresAt }).catch(() => undefined);
   }
 
   async function loadMeta(): Promise<void> {
@@ -327,8 +329,17 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
     else void loadMeta();
   }
 
-  /** Octroi refusé : effacé, retour à l'écran normal ; la prochaine fois comptera une ouverture. */
+  /**
+   * Octroi refusé : effacé, retour à l'écran normal ; la prochaine fois comptera une ouverture.
+   * Plus aucune ouverture restante (partage « draining ») : déverrouiller serait refusé, on le
+   * dit tout de suite (« retour impossible », avec la cause : limite des retours ou octroi).
+   */
   function grantRefused(error: "grant_invalid" | "reopen_limit") {
+    if (s.opensLeft === 0) {
+      end("return_lost");
+      s.error = error;
+      return;
+    }
     drop();
     reloaded = false;
     s.otherTab = false;
@@ -442,7 +453,13 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
           return;
         }
         // L'octroi n'est écrit qu'après un déverrouillage réussi (jamais le mot de passe).
-        keep(o, keyOf(l), tag);
+        await keep(o, keyOf(l), tag);
+        if (disposed) {
+          // Écran quitté pendant l'écriture : rien n'est gardé (comme avant le déverrouillage).
+          if (tag !== null) await d.returns.forget(tag).catch(() => undefined);
+          void o.done().catch(() => undefined);
+          return;
+        }
         opened = o;
         s.state = "open";
       } catch (e) {

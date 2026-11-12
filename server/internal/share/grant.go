@@ -41,6 +41,9 @@ var grantLabel = []byte("shhdrop-open-grant-v1")
 // retours acceptés.
 type grantEntry struct {
 	reopens int
+	// exp : échéance du partage ; l'entrée est oubliée au plus tard à exp + grâce (sweepGone),
+	// même si le partage a été effacé hors de ce processus.
+	exp int64
 }
 
 func grantMAC(secret [32]byte, id [16]byte, head []byte) []byte {
@@ -92,8 +95,11 @@ type Opened struct {
 	Envelope []byte
 	Grant    string
 	// OpensLeft : ouvertures encore possibles après celle-ci (0 : c'était la dernière permise,
-	// le partage est « draining »). Le lecteur ne montre « Détruire » qu'à 0 (retours UI4).
+	// le partage est « draining »).
 	OpensLeft int
+	// LastOpen : cette ouverture est la dernière permise (n = opens_issued et plus aucune
+	// ouverture) ; seul ce lecteur montre « Détruire » (retours UI4, revue D42-22).
+	LastOpen bool
 }
 
 // grantLocked inscrit l'ouverture k en mémoire et signe son octroi, valable jusqu'à exp
@@ -101,10 +107,15 @@ type Opened struct {
 // après plus de 6 h ne le remet pas à zéro. Sous gone.mu.
 func (s *Service) grantLocked(k openKey, exp int64) string {
 	s.gone.init()
-	if s.gone.grants[k] == nil {
-		s.gone.grants[k] = &grantEntry{}
+	e := s.gone.grants[k]
+	if e == nil {
+		e = &grantEntry{}
+		s.gone.grants[k] = e
 	}
-	s.budget.keep(k, exp)
+	e.exp = max(e.exp, exp)
+	// Le budget vit jusqu'à la fin de grâce de l'échéance : il ne repart pas à zéro pendant
+	// qu'une lecture active finit (spec §41.8).
+	s.budget.keep(k, max(exp+graceWindow, s.now()+purgeWindow))
 	id, _ := idBytes(k.id)
 	return IssueGrant(s.grantKey, id, uint32(k.openN), time.Unix(exp, 0))
 }
@@ -165,7 +176,32 @@ func (s *Service) reopen(id string, kAcces, kPreuve []byte, grant string) (Opene
 		return Opened{}, ErrReopenLimit
 	}
 	e.reopens++
-	return Opened{N: int(n), Envelope: envelope, Grant: s.grantLocked(k, exp), OpensLeft: left}, nil
+	return Opened{N: int(n), Envelope: envelope, Grant: s.grantLocked(k, exp), OpensLeft: left, LastOpen: left == 0 && int(n) == issued}, nil
+}
+
+// BudgetCount : compteurs de budget de lecture en mémoire (tests).
+func (s *Service) BudgetCount() int { return s.budget.count() }
+
+// forgetOpensLocked oublie les octrois et les compteurs de budget des ouvertures du partage
+// id, sauf celles de keep (ouvertures actives qui gardent le droit de finir). Sous gone.mu.
+func (s *Service) forgetOpensLocked(id string, keep map[int]bool) {
+	for n := 1; n <= maxOpenN; n++ {
+		if keep[n] {
+			continue
+		}
+		delete(s.gone.grants, openKey{id, n})
+		s.budget.forget(openKey{id, n})
+	}
+}
+
+// sweepGrantsLocked oublie les octrois dont le partage a passé son échéance et sa grâce (filet
+// pour un partage effacé hors de ce processus). Sous gone.mu.
+func (s *Service) sweepGrantsLocked(now int64) {
+	for k, e := range s.gone.grants {
+		if e.exp+graceWindow <= now && s.gone.dead[k.id] == nil {
+			delete(s.gone.grants, k)
+		}
+	}
 }
 
 // GrantCount : octrois en mémoire (tests).

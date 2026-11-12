@@ -78,7 +78,7 @@ test("recharger rouvre sans consommer (1 / 3 avant et après), vingt fois (D42-2
   await page.getByRole("button", { name: /^(Déverrouiller|Déchiffrement)/ }).click();
   await expect(noteRow(page)).toBeVisible({ timeout: 30_000 });
   expect((await shareStatus(sent.manage, shh.origin)).opensUsed).toBe(2);
-  await expect(page.locator("[data-eol]")).toHaveText("Ce lien peut encore être ouvert 1\u202ffois. Vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.");
+  await expect(page.locator("[data-eol] p").first()).toHaveText("Ce lien peut encore être ouvert 1\u202ffois. En général, vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.");
 });
 
 test("deuxième onglet : avec le premier ouvert, même ouverture ; sans premier onglet, une de plus, annoncée", async ({ page, shh, browser }) => {

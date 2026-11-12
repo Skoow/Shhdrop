@@ -255,7 +255,9 @@
   $effect(() => setProgressTitle(dlPct, lang));
   $effect(() => () => setProgressTitle(null, getLang()));
   const totalBytes = totals.reduce((a, n) => a + n, 0);
-  const lastOpen = o.opensLeft === 0;
+  // Revue D42-22 : rendu par le serveur (n = opens_issued et plus aucune ouverture) ; une
+  // personne qui revient sans être la dernière ne l'a pas, même à 0 ouverture restante.
+  const lastOpen = o.lastOpen;
   const risky = entries.flatMap((_, i) => (o.isRiskyFile(i) ? [names[i]!] : []));
 
   // ---------- Fin de vie ----------
@@ -469,8 +471,9 @@
     </section>
   {/each}
 
-  <!-- Pied (retours UI4) : « Détruire ce partage » seulement à la dernière ouverture permise
-       (opens_left = 0 rendu par unlock) ; sinon, combien d'ouvertures restent. -->
+  <!-- Pied (retours UI4, revue D42-22) : « Détruire ce partage » seulement à la dernière
+       ouverture permise (last_open rendu par unlock) ; sinon, combien d'ouvertures restent, ou
+       « Toutes les ouvertures sont prises. » ; puis les limites du retour. -->
   {#if !closer.closed}
     <footer class="eol" data-eol data-last={lastOpen ? "" : undefined}>
       {#if lastOpen}
@@ -487,8 +490,9 @@
         </InlineConfirm>
         {#if destroyError}<p class="err" role="alert">{destroyError}</p>{/if}
       {:else}
-        <p class="hint num">{t("content.opensLeft", { n: o.opensLeft })}</p>
+        <p class="hint num">{o.opensLeft > 0 ? t("content.opensLeft", { n: o.opensLeft }) : t("content.allTaken")}</p>
       {/if}
+      <p class="hint" data-return-limits>{t("content.return.limits")}</p>
     </footer>
   {/if}
 </div>

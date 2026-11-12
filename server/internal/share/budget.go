@@ -74,3 +74,17 @@ func (b *readBudget) keep(k openKey, until int64) {
 	e.until = max(e.until, until)
 	b.m[k] = e
 }
+
+// forget oublie le compteur de k (ouverture finie avec son partage).
+func (b *readBudget) forget(k openKey) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.m, k)
+}
+
+// count : entrées en mémoire (tests).
+func (b *readBudget) count() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.m)
+}

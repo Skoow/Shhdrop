@@ -86,3 +86,14 @@ describe("syncManaged : ordre", () => {
     expect(live.shares.entries[0]!.destroyedHere).toBe(true);
   });
 });
+
+describe("revue D42-22 : « Effacer l'historique » efface aussi les retours gardés", () => {
+  it("la base shhdrop-returns disparaît avec l'historique", async () => {
+    await seed();
+    const { pageReturns, RETURNS_DB } = await import("./returns");
+    await pageReturns().save({ tag: "T".repeat(22), grant: "G".repeat(54), expiresAt: Date.now() + 3600_000 });
+    expect(idb.raw().has(RETURNS_DB)).toBe(true);
+    await live.clearHistory();
+    expect(idb.raw().has(RETURNS_DB)).toBe(false);
+  });
+});

@@ -29,7 +29,7 @@ func TestGrantHTTP(t *testing.T) {
 	r := unlock("", k.preuve)
 	g, _ := r["grant"].(string)
 	dl0, _ := r["download_token"].(string)
-	if r["code"] != 200.0 || len(g) != 54 || r["opens_left"] != 0.0 {
+	if r["code"] != 200.0 || len(g) != 54 || r["opens_left"] != 0.0 || r["last_open"] != true {
 		t.Fatal(r)
 	}
 	// « draining » : meta sans octroi → 404 ; avec octroi → 200.
@@ -66,6 +66,9 @@ func TestGrantHTTP(t *testing.T) {
 	e.upload(t, c2, 1)
 	k = k2
 	r2 := unlock("", k.preuve)
+	if r2["last_open"] != false { // revue D42-22 : seulement la dernière ouverture permise
+		t.Fatal(r2)
+	}
 	bad := []byte(r2["grant"].(string))
 	if bad[10] == 'A' {
 		bad[10] = 'B'

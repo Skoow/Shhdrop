@@ -48,7 +48,7 @@ describe("retours chiffrés (IndexedDB simulé)", () => {
     // Échéance : retiré.
     now = T0 + 3600_000;
     expect(await r2.find(TAG)).toBeNull();
-    expect(idb.raw().get(RETURNS_DB)!.get("entries")!.size).toBe(0);
+    expect(idb.raw().has(RETURNS_DB)).toBe(false); // vide : base supprimée
   });
 
   it("une visite sans retour gardé n'écrit rien (aucune base créée)", async () => {
@@ -105,5 +105,32 @@ describe("retours chiffrés (IndexedDB simulé)", () => {
     await r.save({ tag: TAG, grant: GRANT, expiresAt: T0 + 60_000 });
     expect(await r.find(TAG)).toBe(GRANT);
     expect(m.raw().size).toBe(1);
+  });
+
+  it("revue D42-22 : base supprimée quand elle est vide (oubli, échéance) ; balayage au démarrage sans rien créer ; clear efface tout", async () => {
+    const idb = fakeIndexedDB();
+    let now = T0;
+    const r = openReturns({ backend: idbBackend(idb, RETURNS_DB), now: () => now });
+    await r.sweep();
+    expect(idb.raw().size).toBe(0); // rien créé
+    await r.save({ tag: TAG, grant: GRANT, expiresAt: T0 + 60_000 });
+    await r.forget(TAG);
+    expect(idb.raw().has(RETURNS_DB)).toBe(false);
+    await r.save({ tag: TAG, grant: GRANT, expiresAt: T0 + 60_000 });
+    await r.save({ tag: TAG2, grant: GRANT, expiresAt: T0 + 120_000 });
+    now = T0 + 60_000;
+    const r2 = openReturns({ backend: idbBackend(idb, RETURNS_DB), now: () => now });
+    await r2.sweep();
+    expect(idb.raw().get(RETURNS_DB)!.get("entries")!.size).toBe(1);
+    now = T0 + 120_000;
+    await r2.sweep();
+    expect(idb.raw().has(RETURNS_DB)).toBe(false);
+    await r2.save({ tag: TAG, grant: GRANT, expiresAt: now + 60_000 });
+    await r2.clear();
+    expect(idb.raw().has(RETURNS_DB)).toBe(false);
+    expect(await r2.find(TAG)).toBeNull();
+    // Après suppression, une nouvelle écriture recrée la base (nouvelle clé).
+    await r2.save({ tag: TAG, grant: GRANT2, expiresAt: now + 60_000 });
+    expect(await r2.find(TAG)).toBe(GRANT2);
   });
 });

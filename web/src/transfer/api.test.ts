@@ -204,7 +204,7 @@ describe("API v2 (spec §29.8)", () => {
   it("unlock : envelope de 80 caractères base64url exigée (60 octets) ; sinon BadResponse", async () => {
     const env = Buffer.alloc(60, 7).toString("base64url");
     const reply = (envelope: unknown) =>
-      vi.fn(async () => new Response(JSON.stringify({ download_token: "d", segments: 1, envelope, grant: "g".repeat(54), opens_left: 2 })));
+      vi.fn(async () => new Response(JSON.stringify({ download_token: "d", segments: 1, envelope, grant: "g".repeat(54), opens_left: 2, last_open: false })));
     const k = new Uint8Array(32) as KAcces, p = new Uint8Array(32) as KPreuve;
     const r = await unlock(ctx("http://x", { fetch: reply(env) as unknown as typeof fetch }), k, p);
     expect(r.envelope).toEqual(new Uint8Array(60).fill(7));
@@ -214,7 +214,7 @@ describe("API v2 (spec §29.8)", () => {
   });
   it("unlock : octroi de 54 caractères exigé ; X-Shh-Grant envoyé seulement s'il est donné (spec §41.4)", async () => {
     const env = Buffer.alloc(60, 7).toString("base64url");
-    const reply = (grant: unknown) => vi.fn(async (_u: string, _i: RequestInit) => new Response(JSON.stringify({ download_token: "d", segments: 1, envelope: env, grant, opens_left: 0 })));
+    const reply = (grant: unknown) => vi.fn(async (_u: string, _i: RequestInit) => new Response(JSON.stringify({ download_token: "d", segments: 1, envelope: env, grant, opens_left: 0, last_open: true })));
     const k = new Uint8Array(32) as KAcces, p = new Uint8Array(32) as KPreuve;
     const f = reply("g".repeat(54));
     expect((await unlock(ctx("http://x", { fetch: f as unknown as typeof fetch }), k, p)).grant).toBe("g".repeat(54));
@@ -225,6 +225,20 @@ describe("API v2 (spec §29.8)", () => {
     for (const bad of [undefined, "g".repeat(53), "g".repeat(53) + "="]) {
       await expect(unlock(ctx("http://x", { fetch: reply(bad) as unknown as typeof fetch }), k, p), String(bad)).rejects.toBeInstanceOf(BadResponse);
     }
+  });
+});
+
+describe("unlock : last_open (revue D42-22)", () => {
+  it("booléen exigé ; vrai seulement à 0 ouverture restante ; sinon BadResponse", async () => {
+    const env = Buffer.alloc(60, 7).toString("base64url");
+    const reply = (left: number, last: unknown) =>
+      vi.fn(async () => new Response(JSON.stringify({ download_token: "d", segments: 1, envelope: env, grant: "g".repeat(54), opens_left: left, last_open: last })));
+    const k = new Uint8Array(32) as KAcces, p = new Uint8Array(32) as KPreuve;
+    const go = (left: number, last: unknown) => unlock(ctx("http://x", { fetch: reply(left, last) as unknown as typeof fetch }), k, p);
+    expect((await go(0, true)).lastOpen).toBe(true);
+    expect((await go(0, false)).lastOpen).toBe(false);
+    expect((await go(2, false)).lastOpen).toBe(false);
+    for (const [left, last] of [[2, true], [0, undefined], [0, "true"], [0, 1]] as const) await expect(go(left, last), `${left} ${String(last)}`).rejects.toBeInstanceOf(BadResponse);
   });
 });
 

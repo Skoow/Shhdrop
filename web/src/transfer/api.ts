@@ -366,6 +366,13 @@ function opensLeft(n: number, reopen: boolean): number {
   return n;
 }
 
+/** last_open (revue D42-22) : booléen exigé ; vrai seulement à 0 ouverture restante. */
+function lastOpenOf(o: Record<string, unknown>, left: number): boolean {
+  const v = o["last_open"];
+  if (typeof v !== "boolean" || (v && left !== 0)) throw new BadResponse();
+  return v;
+}
+
 function grantOf(o: Record<string, unknown>): string {
   const g = str(o, "grant");
   if (!GRANT_RE.test(g)) throw new BadResponse();
@@ -392,7 +399,7 @@ export async function unlock(
   kAcces: KAcces,
   kPreuve: KPreuve,
   grant?: string,
-): Promise<{ downloadToken: string; segments: number; envelope: Uint8Array<ArrayBuffer>; grant: string; opensLeft: number }> {
+): Promise<{ downloadToken: string; segments: number; envelope: Uint8Array<ArrayBuffer>; grant: string; opensLeft: number; lastOpen: boolean }> {
   const o = await send(
     c,
     {
@@ -404,7 +411,8 @@ export async function unlock(
     readJSON,
   );
   // opens_left : ouvertures encore possibles après celle-ci (0 : c'était la dernière).
-  return { downloadToken: str(o, "download_token"), segments: num(o, "segments"), envelope: envelopeOf(o), grant: grantOf(o), opensLeft: opensLeft(num(o, "opens_left"), true) };
+  const left = opensLeft(num(o, "opens_left"), true);
+  return { downloadToken: str(o, "download_token"), segments: num(o, "segments"), envelope: envelopeOf(o), grant: grantOf(o), opensLeft: left, lastOpen: lastOpenOf(o, left) };
 }
 
 export async function getSegment(c: Ctx, token: string, n: number, size: number): Promise<Uint8Array<ArrayBuffer>> {

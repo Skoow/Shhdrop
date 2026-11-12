@@ -188,12 +188,18 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     expect((await fetchMeta(r.link, ORIGIN, net)).opensLeft).toBe(3);
     const o = await openShare(r.link, PW, ORIGIN, undefined, net);
     expect(o.opensLeft).toBe(2); // rendu par unlock : ouvertures encore possibles après celle-ci
+    expect(o.lastOpen).toBe(false);
     await o.done();
     expect((await fetchMeta(r.link, ORIGIN, net)).opensLeft).toBe(2);
-    expect((await openShare(r.link, PW, ORIGIN, undefined, net)).opensLeft).toBe(1);
+    const second = await openShare(r.link, PW, ORIGIN, undefined, net);
+    expect(second.opensLeft).toBe(1);
     const last = await openShare(r.link, PW, ORIGIN, undefined, net);
-    expect(last.opensLeft).toBe(0); // dernière ouverture permise : « Détruire » proposé
-    expect((await openShare(r.link, PW, ORIGIN, { grant: last.grant }, net)).opensLeft).toBe(0); // rechargement
+    expect([last.opensLeft, last.lastOpen]).toEqual([0, true]); // dernière ouverture permise : « Détruire » proposé
+    const again = await openShare(r.link, PW, ORIGIN, { grant: last.grant }, net); // rechargement
+    expect([again.opensLeft, again.lastOpen]).toEqual([0, true]);
+    // Revue D42-22 : la deuxième personne qui revient n'est pas la dernière, même à 0.
+    const back = await openShare(r.link, PW, ORIGIN, { grant: second.grant }, net);
+    expect([back.opensLeft, back.lastOpen]).toEqual([0, false]);
   });
 
   it("destroyShare par le lien de gestion, puis par lien + mot de passe", async ({ expect }) => {

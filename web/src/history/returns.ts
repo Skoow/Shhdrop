@@ -12,7 +12,8 @@
 //   ressaisi), l'octroi n'ouvre rien.
 // - Retirée à l'échéance (à chaque lecture), à la destruction, à la disparition du partage et
 //   quand le serveur refuse l'octroi (grant_invalid, reopen_limit).
-// - Une simple visite n'écrit rien (aucune base créée tant qu'aucun retour n'est gardé).
+// - Une simple visite n'écrit rien (aucune base créée tant qu'aucun retour n'est gardé) ; la
+//   base est supprimée dès qu'elle est vide (clé comprise), et balayée au démarrage.
 // - Stockage absent, refusé ou en panne : tout échoue en silence ; revenir comptera alors une
 //   ouverture (ou sera impossible si toutes sont prises), ce que l'écran dit.
 // Honnêtement : la clé est sur le même appareil ; le chiffrement ne protège que d'une lecture
@@ -36,6 +37,10 @@ export type Returns = {
   save(e: ReturnEntry): Promise<void>;
   /** Retire l'octroi de ce partage. */
   forget(tag: string): Promise<void>;
+  /** Démarrage de l'application : retire les entrées échues, sans rien créer. */
+  sweep(): Promise<void>;
+  /** « Effacer l'historique » : tout retirer, base comprise. */
+  clear(): Promise<void>;
 };
 
 const TAG = /^[A-Za-z0-9_-]{22}$/;
@@ -85,7 +90,13 @@ export function openReturns(deps: { backend: Backend | null; now?: () => number 
       if (e === null || e.expiresAt <= t) await b.del(id).catch(() => undefined);
       else out.push([id, e]);
     }
+    if (out.length === 0) await drop();
     return out;
+  }
+  /** Base vide : supprimée, clé comprise (la prochaine écriture en crée une neuve). */
+  async function drop(): Promise<void> {
+    keyP = undefined;
+    await b?.drop();
   }
   const quiet = async <T>(f: () => Promise<T>, fallback: T): Promise<T> => {
     try {
@@ -101,8 +112,9 @@ export function openReturns(deps: { backend: Backend | null; now?: () => number 
       quiet(async () => {
         const c = clean(e);
         if (b === null || c === null || c.expiresAt <= now()) return;
+        const list = await all(); // avant la clé : une base vide est supprimée, puis recréée
         const k = await key();
-        for (const [id, x] of await all()) if (x.tag === c.tag) await b.del(id);
+        for (const [id, x] of list) if (x.tag === c.tag) await b.del(id);
         const id = randomId();
         const iv = crypto.getRandomValues(new Uint8Array(12));
         const pt = new TextEncoder().encode(JSON.stringify(c));
@@ -112,8 +124,14 @@ export function openReturns(deps: { backend: Backend | null; now?: () => number 
       }, undefined),
     forget: (tag) =>
       quiet(async () => {
-        for (const [id, x] of await all()) if (x.tag === tag) await b!.del(id);
+        const list = await all();
+        const left = list.filter(([, x]) => x.tag !== tag);
+        if (left.length === list.length) return;
+        if (left.length === 0) return drop();
+        for (const [id, x] of list) if (x.tag === tag) await b!.del(id);
       }, undefined),
+    sweep: () => quiet(async () => void (await all()), undefined),
+    clear: () => quiet(async () => (b !== null && (await b.exists()) ? drop() : undefined), undefined),
   };
 }
 

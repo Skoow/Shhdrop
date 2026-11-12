@@ -6,6 +6,7 @@
 import { getDemo } from "../app/demo-hooks";
 import { destroyShare, shareStatus } from "../index";
 import { destroyedPatch, missingPatch, pollHistory, statusPatch, type PollError, type Poller, type RefreshResult, type Status } from "./poll";
+import { pageReturns } from "./returns";
 import { effectiveState, idbBackend, memoryBackend, openHistory, type Backend, type History, type HistoryEntry, type NewEntry } from "./store";
 
 export type ShareInfo = {
@@ -130,6 +131,8 @@ export async function forgetShare(id: string): Promise<void> {
 }
 
 export async function clearHistory(): Promise<void> {
+  // Revue D42-22 : les retours gardés (octrois chiffrés, history/returns.ts) partent aussi.
+  await pageReturns().clear();
   const h = await store();
   if (!h) return;
   await h.clear();

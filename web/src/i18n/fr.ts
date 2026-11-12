@@ -368,11 +368,11 @@ export const fr = {
     "Le partage sera détruit immédiatement pour tout le monde. Shhdrop ne peut pas voir le contenu et ne garde aucune trace de votre signalement. Pour un contenu illégal, vous pouvez aussi le signaler aux autorités (en France\u202f: PHAROS, internet-signalement.gouv.fr).",
 
   "invalid": "Ce lien n'existe pas ou n'est plus disponible.",
-  "invalid.hint":
-    "Vous l'avez déjà ouvert\u202f? On ne peut y revenir que depuis le même navigateur, hors navigation privée, jusqu'à son échéance. Depuis un autre appareil, il faut une ouverture restante.",
+  "invalid.hint": "Vous l'avez déjà ouvert\u202f? On ne peut y revenir que depuis le même navigateur (ou la même session de navigation privée, tant qu'elle reste ouverte), jusqu'à son échéance. Depuis un autre appareil, il faut une ouverture restante.",
   "lost": "Impossible de revenir sur ce partage",
   "lost.hint":
     "Ce navigateur l'avait déjà ouvert, mais le serveur ne le reconnaît plus\u202f: il a été détruit ou a expiré, ou notre serveur a redémarré alors que toutes ses ouvertures étaient prises. Demandez à l'expéditeur de vous l'envoyer à nouveau.",
+  "lost.limit": "Vous êtes revenu 20\u202ffois sur ce partage\u202f; il ne reste aucune ouverture. Demandez à l'expéditeur de vous l'envoyer à nouveau.",
   "incomplete": "Lien incomplet",
   "incomplete.hint":
     "Rouvrez-le depuis le message d'origine. Il manque une partie du lien\u202f: il a peut-être été coupé lors d'un copier-coller, ou sa partie secrète a été retirée de la barre d'adresse après une première visite. Rien n'a été demandé au serveur.",
@@ -402,8 +402,8 @@ export const fr = {
   "open.title": "Un partage chiffré vous attend",
   "open.loading": "Lecture du partage…",
   "open.available": "Disponible encore",
-  "open.oneOpen.one": "Dernière ouverture possible\u202f; ensuite, revenir depuis ce navigateur n'en compte pas d'autre, jusqu'à l'échéance.",
-  "open.oneOpen.other": "Ouvrir compte 1\u00a0ouverture sur les {n}\u00a0restantes\u202f; ensuite, revenir depuis ce navigateur n'en compte pas d'autre, jusqu'à l'échéance.",
+  "open.oneOpen.one": "Dernière ouverture possible\u202f; ensuite, revenir depuis ce navigateur n'en compte en général pas d'autre, jusqu'à l'échéance.",
+  "open.oneOpen.other": "Ouvrir compte 1\u00a0ouverture sur les {n}\u00a0restantes\u202f; ensuite, revenir depuis ce navigateur n'en compte en général pas d'autre, jusqu'à l'échéance.",
   // Rechargement et autres onglets (spec §41.4, UI §9.7.1)
   "open.reopen.title": "Rouvrir ce partage",
   "open.reopen.body": "Vous avez déjà déverrouillé ce partage dans ce navigateur. Entrez le mot de passe pour le rouvrir\u202f: cela ne compte pas une ouverture de plus.",
@@ -448,10 +448,12 @@ export const fr = {
   "content.memory": "Cet appareil risque de manquer de mémoire pour un fichier de cette taille.",
   "content.copied": "Texte copié",
   "content.destroy": "Détruire ce partage",
-  "content.lastOpen": "Vous êtes la dernière personne à pouvoir ouvrir ce partage\u202f: personne d'autre ne pourra l'ouvrir. Vous pouvez y revenir depuis ce navigateur jusqu'à son échéance, puis il sera effacé du serveur. Vous pouvez aussi le détruire maintenant.",
-  "content.lastOpen.top": "Dernière ouverture\u202f: personne d'autre ne pourra l'ouvrir. Vous pouvez y revenir depuis ce navigateur jusqu'à l'échéance.",
-  "content.opensLeft.one": "Ce lien peut encore être ouvert {n}\u202ffois. Vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.",
-  "content.opensLeft.other": "Ce lien peut encore être ouvert {n}\u202ffois. Vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.",
+  "content.lastOpen": "Vous êtes la dernière personne à pouvoir ouvrir ce partage\u202f: personne d'autre ne pourra l'ouvrir. En général, vous pouvez y revenir depuis ce navigateur jusqu'à son échéance, puis il sera effacé du serveur. Vous pouvez aussi le détruire maintenant.",
+  "content.lastOpen.top": "Dernière ouverture\u202f: personne d'autre ne pourra l'ouvrir. En général, vous pouvez y revenir depuis ce navigateur jusqu'à l'échéance.",
+  "content.opensLeft.one": "Ce lien peut encore être ouvert {n}\u202ffois. En général, vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.",
+  "content.opensLeft.other": "Ce lien peut encore être ouvert {n}\u202ffois. En général, vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.",
+  "content.allTaken": "Toutes les ouvertures sont prises. En général, vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.",
+  "content.return.limits": "Le retour n'est plus possible après la fermeture d'une navigation privée, si ce navigateur refuse le stockage, après un redémarrage de notre serveur ou après 20\u202fretours. Un gros fichier ne se retélécharge que quelques fois.",
   "content.destroy.confirm": "Détruire ce partage pour tout le monde\u202f? C'est immédiat et définitif.",
   "content.destroy.yes": "Détruire",
   "content.destroy.net": "Connexion impossible\u202f: le partage n'a pas été détruit.",
@@ -478,7 +480,7 @@ export const fr = {
 
   "manage.title": "Suivi du partage",
   "manage.loading": "Lecture de l'état…",
-  "manage.draining": "Toutes les ouvertures sont utilisées · effacé à l'échéance, ou avant si le destinataire le détruit",
+  "manage.draining": "Toutes les ouvertures sont utilisées · effacé à l'échéance, au redémarrage du serveur, ou avant si le destinataire le détruit",
   "manage.uploading": "Envoi en cours",
   "manage.delete": "Supprimer maintenant",
   "manage.delete.confirm": "Supprimer ce partage pour tout le monde\u202f? C'est immédiat et définitif.",
@@ -812,9 +814,9 @@ export const fr = {
   "cap.fallback.photo.pick": "Choisir une photo",
   "cap.fallback.video.pick": "Choisir une vidéo",
   // Historique local des envois (spec §33, §33.1 ; UI §9.6).
-  "title.envois": "Vos envois",
-  "foot.shares": "Vos envois",
-  "hist.title": "Vos envois",
+  "title.envois": "Mes partages",
+  "foot.shares": "Mes partages",
+  "hist.title": "Mes partages",
   "hist.count.active.one": "{n}\u202factif",
   "hist.count.active.other": "{n}\u202factifs",
   "hist.count.ended.one": "{n}\u202fterminé",

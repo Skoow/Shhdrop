@@ -57,7 +57,7 @@ test("destinataire, ouverture non dernière : « Ce lien peut encore être ouver
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(sent.link);
   await unlock(page, sent.password);
-  await expect(page.locator("[data-eol]")).toHaveText("Ce lien peut encore être ouvert 2 fois. Vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.");
+  await expect(page.locator("[data-eol] p").first()).toHaveText("Ce lien peut encore être ouvert 2 fois. En général, vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.");
   await expect(page.getByRole("button", { name: /^Détruire/ })).toHaveCount(0);
   await settle(page);
   await page.screenshot({ path: `${SHOTS}content-not-last-${w(isMobile)}.png`, fullPage: true });

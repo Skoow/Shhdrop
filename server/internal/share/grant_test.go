@@ -163,7 +163,7 @@ func TestReopenInvalidGrant(t *testing.T) {
 	check("ouverture terminée", o.Grant, k.preuve)
 }
 
-// Au plus MaxReopens (20) retours par ouverture ; budget de lecture (2 + r) × le fichier.
+// Au plus MaxReopens (20) retours par ouverture ; budget de lecture borné (revue D42-22).
 func TestReopenLimitAndBudget(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
@@ -202,20 +202,20 @@ func TestReopenLimitAndBudget(t *testing.T) {
 	if left, issued, failed := opensOf(t, s, id); left != 2 || issued != 1 || failed != 0 {
 		t.Fatal(left, issued, failed)
 	}
-	// 20 retours : 20 lectures complètes de plus (le compteur n'a pas été remis à zéro).
-	for i := 0; i < MaxReopens; i++ {
+	// 20 retours : min(20 × F, max(3 × F, 256 Mio)) de plus, soit ici (F ≈ 26 Mio) neuf
+	// lectures complètes ; le compteur n'a pas été remis à zéro.
+	f := totalSize(gb)
+	extra := int(min(MaxReopens*f, max(3*f, reopenExtraMin)) / f)
+	if extra < 3 || extra >= MaxReopens {
+		t.Fatal("palier de test inattendu", extra)
+	}
+	for i := 0; i < extra; i++ {
 		if err := readAll(); err != nil {
 			t.Fatal(i, err)
 		}
 	}
 	if err := readAll(); !errors.Is(err, ErrBudget) {
 		t.Fatal("budget dépassé", err)
-	}
-}
-
-func TestMaxReopensIs20(t *testing.T) {
-	if MaxReopens != 20 {
-		t.Fatal(MaxReopens)
 	}
 }
 
@@ -381,5 +381,135 @@ func TestAdminDestroyCutsDetached(t *testing.T) {
 	}
 	if es, _ := os.ReadDir(filepath.Join(filepath.Dir(s.FrozenFile), "kill")); len(es) != 0 {
 		t.Fatal("demande restée", len(es))
+	}
+}
+
+// Revue de sécurité D42-22 (point 1) : aucun octroi ni compteur de budget ne reste en mémoire
+// après l'échéance (balayage) ni après une destruction.
+func TestGrantsForgottenWhenShareGoes(t *testing.T) {
+	s, c := newSvc(t)
+	k, k2 := newKeys(), newKeys()
+	exp := ready(t, s, k, 1, 1, 2)
+	gone2 := ready(t, s, k2, 1, 24, 2)
+	if _, err := s.UnlockGrant(exp, k.acces, k.preuve, ""); err != nil {
+		t.Fatal(err)
+	}
+	o2, err := s.UnlockGrant(gone2, k2.acces, k2.preuve, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readSegment(s, gone2, 0, o2.N); err != nil {
+		t.Fatal(err)
+	}
+	if s.GrantCount() != 2 {
+		t.Fatal(s.GrantCount())
+	}
+	if err := s.DestroyManaged(k2.gestion); err != nil {
+		t.Fatal(err)
+	}
+	c.Add(2 * time.Hour) // échéance du premier, fin de grâce du second
+	if _, err := s.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	gone(t, s, exp)
+	if s.GrantCount() != 0 || s.BudgetCount() != 0 {
+		t.Fatal("restés en mémoire :", s.GrantCount(), s.BudgetCount())
+	}
+}
+
+// Point 1 (bis) : partage effacé hors de ce processus (administrateur) : les octrois partent
+// au plus tard à la fin de grâce de son échéance.
+func TestGrantsForgottenAfterOutOfProcessDelete(t *testing.T) {
+	s, c := newSvc(t)
+	k := newKeys()
+	id := ready(t, s, k, 1, 1, 2)
+	if _, err := s.UnlockGrant(id, k.acces, k.preuve, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`DELETE FROM shares WHERE id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	c.Add(4 * time.Hour)
+	if _, err := s.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	if s.GrantCount() != 0 {
+		t.Fatal(s.GrantCount())
+	}
+}
+
+// Point 2 : le budget d'une ouverture ne repart pas à zéro à l'échéance (grâce de 2 h).
+func TestBudgetNotResetAtExpiry(t *testing.T) {
+	s, c := newSvc(t)
+	k := newKeys()
+	id := ready(t, s, k, gb, 1, 2)
+	o, _ := s.UnlockGrant(id, k.acces, k.preuve, "")
+	segs := SegmentCount(gb)
+	m, err := s.Meta(k.acces)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Add(m.ExpiresIn - 30*time.Second)
+	var last error
+	for i := 0; i < 3 && last == nil; i++ {
+		for n := range segs {
+			if _, last = readSegment(s, id, n, o.N); last != nil {
+				break
+			}
+		}
+	}
+	if !errors.Is(last, ErrBudget) {
+		t.Fatal("budget non épuisé", last)
+	}
+	c.Add(31 * time.Second)
+	if _, err := s.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readSegment(s, id, 0, o.N); !errors.Is(err, ErrBudget) {
+		t.Fatal("budget remis à zéro pendant la grâce", err)
+	}
+}
+
+// Point 3 : budget = ReadBudget + min(r × fichier, max(3 × fichier, 256 Mio)) : un petit partage
+// relit à chaque retour, un gros fichier trois fois de plus au plus.
+func TestReopenBudgetCapped(t *testing.T) {
+	s, _ := newSvc(t)
+	k := openKey{"AAAAAAAAAAAAAAAAAAAAAA", 1}
+	big := 32769 // plus grand palier gratuit (2 Gio)
+	s.gone.mu.Lock()
+	s.gone.init()
+	s.gone.grants[k] = &grantEntry{reopens: 20}
+	gotBig := s.budgetLocked(k, big)
+	gotSmall := s.budgetLocked(k, 1)
+	s.gone.unlock()
+	if want := ReadBudget(big) + 3*totalSize(big); gotBig != want {
+		t.Fatal("gros", gotBig, want)
+	}
+	if want := ReadBudget(1) + 20*totalSize(1); gotSmall != want {
+		t.Fatal("petit", gotSmall, want)
+	}
+}
+
+// Point 4 : last_open seulement pour la dernière ouverture permise (n = opens_issued, plus
+// aucune ouverture) ; une personne qui revient sans être la dernière ne l'a pas.
+func TestLastOpen(t *testing.T) {
+	s, _ := newSvc(t)
+	k := newKeys()
+	id := ready(t, s, k, 1, 24, 2)
+	a, _ := s.UnlockGrant(id, k.acces, k.preuve, "")
+	if a.LastOpen {
+		t.Fatal("première sur deux")
+	}
+	b, _ := s.UnlockGrant(id, k.acces, k.preuve, "")
+	if !b.LastOpen || b.OpensLeft != 0 {
+		t.Fatal("dernière", b)
+	}
+	ra, err := s.UnlockGrant(id, k.acces, k.preuve, a.Grant)
+	if err != nil || ra.LastOpen || ra.OpensLeft != 0 {
+		t.Fatal("retour de la première", ra, err)
+	}
+	rb, err := s.UnlockGrant(id, k.acces, k.preuve, b.Grant)
+	if err != nil || !rb.LastOpen {
+		t.Fatal("retour de la dernière", rb, err)
 	}
 }

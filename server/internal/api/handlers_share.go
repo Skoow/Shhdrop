@@ -392,7 +392,10 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 		Envelope  string `json:"envelope"`
 		Grant     string `json:"grant"`
 		OpensLeft int    `json:"opens_left"`
-	}{s.sig.Issue(token.Download, id, openN, time.Unix(exp, 0)), m.Segments, b64.EncodeToString(envelope), o.Grant, o.OpensLeft})
+		// last_open : dernière ouverture permise (n = opens_issued, plus aucune) ; seule
+		// celle-ci se voit proposer « Détruire » (revue D42-22).
+		LastOpen bool `json:"last_open"`
+	}{s.sig.Issue(token.Download, id, openN, time.Unix(exp, 0)), m.Segments, b64.EncodeToString(envelope), o.Grant, o.OpensLeft, o.LastOpen})
 }
 
 func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {

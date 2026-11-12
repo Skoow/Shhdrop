@@ -83,8 +83,8 @@ test("I4 : « Détruire » depuis le bas du contenu : l'écran « Détruit » ar
   await s.ctx.close();
   await page.goto(sent.link);
   await unlock(page, sent.password);
-  await expect(page.locator("[data-last-top]")).toHaveText("Dernière ouverture\u202f: personne d'autre ne pourra l'ouvrir. Vous pouvez y revenir depuis ce navigateur jusqu'à l'échéance.");
-  await expect(page.getByText(/Vous pouvez y revenir depuis ce navigateur jusqu'à son échéance, puis il sera effacé du serveur/)).toBeVisible();
+  await expect(page.locator("[data-last-top]")).toHaveText("Dernière ouverture\u202f: personne d'autre ne pourra l'ouvrir. En général, vous pouvez y revenir depuis ce navigateur jusqu'à l'échéance.");
+  await expect(page.getByText(/En général, vous pouvez y revenir depuis ce navigateur jusqu'à son échéance, puis il sera effacé du serveur/)).toBeVisible();
   await shot(page, "i5-contenu-derniere-ouverture", isMobile);
   const destroy = page.getByRole("button", { name: "Détruire ce partage" });
   await destroy.scrollIntoViewIfNeeded();
@@ -104,7 +104,7 @@ test("M20 : page du mot de passe : coût d'ouverture en une ligne ; dernier essa
   const sent = await sendShare(s.page, shh.origin + "/", { text: "x" });
   await s.ctx.close();
   await page.goto(sent.link);
-  await expect(page.locator("#open-cost")).toHaveText("Dernière ouverture possible\u202f; ensuite, revenir depuis ce navigateur n'en compte pas d'autre, jusqu'à l'échéance.");
+  await expect(page.locator("#open-cost")).toHaveText("Dernière ouverture possible\u202f; ensuite, revenir depuis ce navigateur n'en compte en général pas d'autre, jusqu'à l'échéance.");
   for (let k = 4; k >= 1; k--) {
     await pwField(page).fill("faux-" + k);
     await unlockButton(page).click();

@@ -365,11 +365,11 @@ export const en = {
     "The share will be destroyed immediately for everyone. Shhdrop cannot see the content and keeps no trace of your report. For illegal content, you can also report it to the authorities (in France: PHAROS, internet-signalement.gouv.fr).",
 
   "invalid": "This link does not exist or is no longer available.",
-  "invalid.hint":
-    "Already opened it? You can only come back from the same browser, outside private browsing, until it expires. From another device, an open must be left.",
+  "invalid.hint": "Already opened it? You can only come back from the same browser (or the same private session, while it stays open), until it expires. From another device, an open must be left.",
   "lost": "You can no longer come back to this share",
   "lost.hint":
     "This browser had already opened it, but the server no longer recognizes it: it was destroyed or expired, or our server restarted while all its opens were used. Ask the sender to send it again.",
+  "lost.limit": "You have come back 20\u00a0times to this share; no opens are left. Ask the sender to send it again.",
   "incomplete": "Incomplete link",
   "incomplete.hint":
     "Reopen it from the original message. Part of the link is missing: it may have been cut off when copied, or its secret part was removed from the address bar after a first visit. Nothing was requested from the server.",
@@ -399,8 +399,8 @@ export const en = {
   "open.title": "An encrypted share is waiting for you",
   "open.loading": "Reading the share…",
   "open.available": "Available for",
-  "open.oneOpen.one": "Last open left; afterwards, coming back from this browser does not count another one, until it expires.",
-  "open.oneOpen.other": "Opening uses 1\u00a0of the {n}\u00a0opens left; afterwards, coming back from this browser does not count another one, until it expires.",
+  "open.oneOpen.one": "Last open left; afterwards, coming back from this browser usually does not count another one, until it expires.",
+  "open.oneOpen.other": "Opening uses 1\u00a0of the {n}\u00a0opens left; afterwards, coming back from this browser usually does not count another one, until it expires.",
   // Reload and other tabs (spec §41.4, UI §9.7.1)
   "open.reopen.title": "Reopen this share",
   "open.reopen.body": "You already unlocked this share in this browser. Enter the password to reopen it: this does not count another open.",
@@ -444,10 +444,12 @@ export const en = {
   "content.memory": "This device may run out of memory for a file this size.",
   "content.copied": "Text copied",
   "content.destroy": "Destroy this share",
-  "content.lastOpen": "You are the last person allowed to open this share: nobody else will be able to open it. You can come back to it from this browser until it expires; then it is erased from the server. You can also destroy it now.",
-  "content.lastOpen.top": "Last opening: nobody else will be able to open it. You can come back from this browser until it expires.",
-  "content.opensLeft.one": "This link can be opened {n}\u00a0more time. You can come back to this share from this browser until it expires without using an open.",
-  "content.opensLeft.other": "This link can be opened {n}\u00a0more times. You can come back to this share from this browser until it expires without using an open.",
+  "content.lastOpen": "You are the last person allowed to open this share: nobody else will be able to open it. Usually, you can come back to it from this browser until it expires; then it is erased from the server. You can also destroy it now.",
+  "content.lastOpen.top": "Last opening: nobody else will be able to open it. Usually, you can come back from this browser until it expires.",
+  "content.opensLeft.one": "This link can be opened {n}\u00a0more time. Usually, you can come back to this share from this browser until it expires without using an open.",
+  "content.opensLeft.other": "This link can be opened {n}\u00a0more times. Usually, you can come back to this share from this browser until it expires without using an open.",
+  "content.allTaken": "All opens are used. Usually, you can come back to this share from this browser until it expires without using an open.",
+  "content.return.limits": "Coming back is no longer possible once a private window is closed, if this browser refuses storage, after our server restarts or after 20\u00a0returns. A large file can only be downloaded again a few times.",
   "content.destroy.confirm": "Destroy this share for everyone? It is immediate and final.",
   "content.destroy.yes": "Destroy",
   "content.destroy.net": "Can't connect: the share was not destroyed.",
@@ -474,7 +476,7 @@ export const en = {
 
   "manage.title": "Share status",
   "manage.loading": "Reading the status…",
-  "manage.draining": "All opens are used · erased when it expires, or earlier if the recipient destroys it",
+  "manage.draining": "All opens are used · erased when it expires, when the server restarts, or earlier if the recipient destroys it",
   "manage.uploading": "Upload in progress",
   "manage.delete": "Delete now",
   "manage.delete.confirm": "Delete this share for everyone? It is immediate and final.",
@@ -808,9 +810,9 @@ export const en = {
   "cap.fallback.photo.pick": "Choose a photo",
   "cap.fallback.video.pick": "Choose a video",
   // Historique local des envois (spec §33, §33.1 ; UI §9.6).
-  "title.envois": "Your shares",
-  "foot.shares": "Your shares",
-  "hist.title": "Your shares",
+  "title.envois": "My shares",
+  "foot.shares": "My shares",
+  "hist.title": "My shares",
   "hist.count.active.one": "{n}\u00a0active",
   "hist.count.active.other": "{n}\u00a0active",
   "hist.count.ended.one": "{n}\u00a0ended",

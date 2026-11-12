@@ -184,7 +184,7 @@ const keepSealers: unknown[] = [];
 type Pack = Awaited<ReturnType<typeof pack>>;
 const packRoute = (pk: Pack, bad?: (n: number, seg: Uint8Array<ArrayBuffer>) => Uint8Array<ArrayBuffer>): Route => (_, p) => {
   if (p.endsWith("/meta")) return j(200, { ...META, bucket: pk.bucket, segments: pk.segments });
-  if (p.endsWith("/unlock")) return j(200, { download_token: "t", segments: pk.segments, envelope: pk.envelope, grant: GRANT0, opens_left: 0 });
+  if (p.endsWith("/unlock")) return j(200, { download_token: "t", segments: pk.segments, envelope: pk.envelope, grant: GRANT0, opens_left: 0, last_open: true });
   const m = /\/segments\/(\d+)$/.exec(p);
   if (m) {
     const n = Number(m[1]);
@@ -207,7 +207,7 @@ function server(route: Route) {
 }
 function defaults(method: string, path: string): Reply {
   if (path === "/api/shares/meta") return j(200, META);
-  if (path === "/api/shares/unlock") return j(200, { download_token: "t", segments: 1, envelope: ENV0, grant: GRANT0, opens_left: 0 });
+  if (path === "/api/shares/unlock") return j(200, { download_token: "t", segments: 1, envelope: ENV0, grant: GRANT0, opens_left: 0, last_open: true });
   if (path === "/api/shares/segments/0") return new Response(new Uint8Array(segmentSize(16, 0)), { status: 200 });
   if (path === "/api/shares/done") return new Response(null, { status: 204 });
   return j(404, { error: "not_found" });
@@ -251,9 +251,9 @@ describe("openShare : correspondance des erreurs", () => {
     ["sel de 15 octets", (_, p) => (p.endsWith("/meta") ? j(200, { ...META, salt: b64u(new Uint8Array(15)) }) : undefined)],
     ["palier inconnu", (_, p) => (p.endsWith("/meta") ? j(200, { ...META, bucket: 2 }) : undefined)],
     ["meta non JSON", (_, p) => (p.endsWith("/meta") ? new Response("<html>", { status: 200 }) : undefined)],
-    ["unlock : nombre de segments différent", (_, p) => (p.endsWith("/unlock") ? j(200, { download_token: "t", segments: 2, envelope: ENV0, grant: GRANT0, opens_left: 0 }) : undefined)],
+    ["unlock : nombre de segments différent", (_, p) => (p.endsWith("/unlock") ? j(200, { download_token: "t", segments: 2, envelope: ENV0, grant: GRANT0, opens_left: 0, last_open: true }) : undefined)],
     ["unlock sans enveloppe", (_, p) => (p.endsWith("/unlock") ? j(200, { download_token: "t", segments: 1 }) : undefined)],
-    ["enveloppe de 59 octets", (_, p) => (p.endsWith("/unlock") ? j(200, { download_token: "t", segments: 1, envelope: b64u(new Uint8Array(59)), grant: GRANT0, opens_left: 0 }) : undefined)],
+    ["enveloppe de 59 octets", (_, p) => (p.endsWith("/unlock") ? j(200, { download_token: "t", segments: 1, envelope: b64u(new Uint8Array(59)), grant: GRANT0, opens_left: 0, last_open: true }) : undefined)],
     ["palier 1 annoncé, paquet invalide", (_, p) => (p.endsWith("/meta") ? j(200, { ...META, bucket: 1 }) : undefined)],
     ["segment de mauvaise taille (persistant)", (_, p) => (p.endsWith("/segments/0") ? new Response(new Uint8Array(10)) : undefined)],
     ["paquet corrompu", () => undefined],
@@ -637,7 +637,7 @@ describe("Opened.destroy et done en keepalive (S1)", () => {
       if (p.endsWith("/meta")) return unlocked ? j(404, { error: "not_found" }) : j(200, { ...META, bucket: pk.bucket });
       if (p.endsWith("/unlock")) {
         unlocked = true; // maxOpens=1 : le partage passe en « draining »
-        return j(200, { download_token: "t", segments: 1, envelope: pk.envelope, grant: GRANT0, opens_left: 0 });
+        return j(200, { download_token: "t", segments: 1, envelope: pk.envelope, grant: GRANT0, opens_left: 0, last_open: true });
       }
       if (p.endsWith("/destroy")) {
         bodies.push(String(init?.body));
@@ -1284,7 +1284,7 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
         const path = String(input).slice(ORIGIN.length);
         rd.calls.push(`${init?.method ?? "GET"} ${path}`);
         if (path.endsWith("/meta")) return j(200, { expires_in_s: 60, salt: fin.salt, kdf: { ops: 3, mem: 67108864 }, bucket: 400, segments: 7, opens_left: 1 });
-        if (path.endsWith("/unlock")) return j(200, { download_token: "t", segments: 7, envelope: fin.envelope, grant: GRANT0, opens_left: 0 });
+        if (path.endsWith("/unlock")) return j(200, { download_token: "t", segments: 7, envelope: fin.envelope, grant: GRANT0, opens_left: 0, last_open: true });
         const m = /\/segments\/(\d+)$/.exec(path);
         if (m) return new Response(new Uint8Array(segs[Number(m[1])]!), { status: 200 });
         return new Response(null, { status: 204 });
@@ -1314,7 +1314,7 @@ describe("createShare v2 : création, envoi sans le bourrage, finalisation", () 
       const f = (async (input: RequestInfo | URL) => {
         const path = String(input).slice(ORIGIN.length);
         if (path.endsWith("/meta")) return j(200, { expires_in_s: 60, salt: fin.salt, kdf: { ops: 3, mem: 67108864 }, bucket: 16, segments: 1, opens_left: 1 });
-        if (path.endsWith("/unlock")) return j(200, { download_token: "t", segments: 1, envelope: fin.envelope, grant: GRANT0, opens_left: 0 });
+        if (path.endsWith("/unlock")) return j(200, { download_token: "t", segments: 1, envelope: fin.envelope, grant: GRANT0, opens_left: 0, last_open: true });
         if (path.endsWith("/segments/0")) return new Response(new Uint8Array(segs[0]!), { status: 200 });
         return new Response(null, { status: 204 });
       }) as typeof fetch;

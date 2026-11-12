@@ -10,8 +10,9 @@
   import { Link2 } from "../ui/Icon";
   import StatusPage from "../ui/StatusPage.svelte";
 
-  type Props = { kind: "invalid" | "incomplete" | "return_lost" };
-  let { kind }: Props = $props();
+  /** limit : retour refusé par la limite des retours (20), sans ouverture restante. */
+  type Props = { kind: "invalid" | "incomplete" | "return_lost"; limit?: boolean };
+  let { kind, limit = false }: Props = $props();
   const demo = getDemo();
 </script>
 
@@ -21,7 +22,7 @@
     screen={kind === "incomplete" ? "incomplete" : "invalid"}
     icon={Link2}
     title={t(kind === "invalid" ? "invalid" : kind === "incomplete" ? "incomplete" : "lost")}
-    lede={t(kind === "invalid" ? "invalid.hint" : kind === "incomplete" ? "incomplete.hint" : "lost.hint")}
+    lede={t(kind === "invalid" ? "invalid.hint" : kind === "incomplete" ? "incomplete.hint" : limit ? "lost.limit" : "lost.hint")}
   >
     {#if kind === "invalid" && demo}<p class="lede demo-note">{demo.invalidLinkNote}</p>{/if}
     {#snippet action()}<a class="send" href={href("/")} onclick={(e) => followLink(e, "/")}>{t("invalid.send")}</a>{/snippet}

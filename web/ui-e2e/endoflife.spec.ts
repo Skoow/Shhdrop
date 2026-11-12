@@ -27,9 +27,9 @@ test("Détruire (dernière ouverture permise) : pied séparé par un filet, conf
   const destroy = page.getByRole("button", { name: "Détruire ce partage", exact: true });
   await expect(destroy).toHaveClass(/ghost/);
   // Texte exact (audit I5 ; D42-22 : retour possible jusqu'à l'échéance, plus de suppression au départ).
-  await expect(page.getByText("Vous êtes la dernière personne à pouvoir ouvrir ce partage\u202f: personne d'autre ne pourra l'ouvrir. Vous pouvez y revenir depuis ce navigateur jusqu'à son échéance, puis il sera effacé du serveur. Vous pouvez aussi le détruire maintenant.")).toBeVisible();
+  await expect(page.getByText("Vous êtes la dernière personne à pouvoir ouvrir ce partage\u202f: personne d'autre ne pourra l'ouvrir. En général, vous pouvez y revenir depuis ce navigateur jusqu'à son échéance, puis il sera effacé du serveur. Vous pouvez aussi le détruire maintenant.")).toBeVisible();
   // Dit aussi en haut de la page (audit I5).
-  await expect(page.locator("[data-last-top]")).toHaveText("Dernière ouverture\u202f: personne d'autre ne pourra l'ouvrir. Vous pouvez y revenir depuis ce navigateur jusqu'à l'échéance.");
+  await expect(page.locator("[data-last-top]")).toHaveText("Dernière ouverture\u202f: personne d'autre ne pourra l'ouvrir. En général, vous pouvez y revenir depuis ce navigateur jusqu'à l'échéance.");
 
   let release!: () => void;
   const held = new Promise<void>((r) => (release = r));
@@ -127,7 +127,7 @@ test("ouverture non dernière : ni « Détruire » ni « Terminer » ; « Ce lie
   const sent = await opened(browser, shh.origin, 3);
   await page.goto(sent.link);
   await unlock(page, sent.password);
-  await expect(page.locator("[data-eol]")).toHaveText("Ce lien peut encore être ouvert 2\u202ffois. Vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.");
+  await expect(page.locator("[data-eol] p").first()).toHaveText("Ce lien peut encore être ouvert 2\u202ffois. En général, vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.");
   await expect(page.getByRole("button", { name: /^Détruire/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Terminer|J'ai fini/ })).toHaveCount(0);
   await expect(page.locator("header.top").getByRole("button", { name: /Signaler/ })).toHaveCount(0);
