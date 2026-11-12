@@ -5,6 +5,7 @@
 import { reducedMotion } from "./motion";
 
 type ViewTransitionLike = {
+  ready: Promise<void>;
   finished: Promise<void>;
   updateCallbackDone: Promise<void>;
   skipTransition(): void;
@@ -40,6 +41,12 @@ export async function runTransition(update: () => void, opts: { reduced?: boolea
     called = true;
     update();
   });
+  // skipTransition() (appui, touche, délai) rejette `ready` (AbortError « Transition was
+  // skipped ») : sans gestionnaire, une exception non attrapée par clic (audit D1). Une
+  // exception du rappel rejette `updateCallbackDone` avant la fin de `finished` : marquée
+  // traitée ici, elle remonte quand même par l'`await` final.
+  void vt.ready.catch(() => undefined);
+  void vt.updateCallbackDone.catch(() => undefined);
   const stall = setTimeout(() => {
     if (!called) vt.skipTransition();
   }, STALL_MS);

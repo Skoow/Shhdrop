@@ -1,6 +1,7 @@
 // Banc Playwright : un serveur Go neuf par test, sert web/dist (fixture `shh`) ; ou la démo
 // web/dist-demo servie comme par GitHub Pages (fixture `demo`).
-// Gardes de fin de test : aucune violation CSP, aucune requête hors de l'origine du serveur.
+// Gardes de fin de test : aucune violation CSP, aucune requête hors de l'origine du serveur,
+// aucune exception non attrapée dans une page du contexte (audit D1, garde automatique).
 import AxeBuilder from "@axe-core/playwright";
 import { errors, test as base, expect, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { get } from "node:http";
@@ -182,7 +183,26 @@ export type Demo = {
   requests: { url: string; headers: Record<string, string>; postData: string | null }[];
 };
 
-export const test = base.extend<{ shh: Shh; demo: Demo; shhServer: Pick<StartOpts, "binary" | "env"> }>({
+export const test = base.extend<{ shh: Shh; demo: Demo; shhServer: Pick<StartOpts, "binary" | "env">; pageErrors: string[] }>({
+  /**
+   * Exceptions non attrapées (erreur levée ou promesse rejetée sans gestionnaire) de toute page
+   * du contexte du test, onglets ouverts en cours de test compris (`weberror`). Automatique : un
+   * test qui n'utilise ni `shh` ni `demo` est gardé aussi. Une seule fait échouer le test (audit
+   * D1 : « Transition was skipped » passait inaperçu). Les contextes créés à la main par un test
+   * (browser.newContext) ne sont pas couverts.
+   */
+  pageErrors: [
+    async ({ context }, use) => {
+      const seen: string[] = [];
+      context.on("weberror", (e) => {
+        const err = e.error();
+        seen.push(`${err.name}: ${err.message} (${e.page()?.url() ?? "?"})`);
+      });
+      await use(seen);
+      expect(seen, "exception non attrapée dans la page").toEqual([]);
+    },
+    { auto: true },
+  ],
   /** Binaire et variables du serveur de test (par défaut : le binaire livré, SHH_STATIC_DIR seul). */
   shhServer: [{}, { option: true }],
   shh: async ({ page, shhServer }, use) => {

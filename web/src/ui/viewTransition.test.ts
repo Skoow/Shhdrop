@@ -23,10 +23,24 @@ function fakeApi() {
       done = Promise.reject(e);
       done.catch(() => undefined);
     }
-    return { finished, updateCallbackDone: done, skipTransition };
+    return { ready: Promise.resolve(), finished, updateCallbackDone: done, skipTransition };
   });
   (document as unknown as Doc).startViewTransition = start;
   return { start, skipTransition, finish };
+}
+
+/** Promesses rejetées sans gestionnaire pendant `run` (Node : unhandledRejection). */
+async function unhandledDuring(run: () => Promise<unknown>): Promise<unknown[]> {
+  const seen: unknown[] = [];
+  const on = (e: unknown) => seen.push(e);
+  process.on("unhandledRejection", on);
+  try {
+    await run().catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 20));
+  } finally {
+    process.off("unhandledRejection", on);
+  }
+  return seen;
 }
 
 describe("runTransition (UI §20.2 K2)", () => {
@@ -94,6 +108,33 @@ describe("runTransition (UI §20.2 K2)", () => {
     await expect(p).rejects.toThrow("boom");
   });
 
+  it("transition sautée (skipTransition) : `ready` rejeté n'est jamais une promesse non traitée (audit D1)", async () => {
+    const skipped = () => new DOMException("Transition was skipped", "AbortError");
+    const seen = await unhandledDuring(() => {
+      (document as unknown as Doc).startViewTransition = vi.fn((cb: () => void) => {
+        cb();
+        return { ready: Promise.reject(skipped()), finished: new Promise<void>((r) => setTimeout(r, 5)), updateCallbackDone: Promise.resolve(), skipTransition: () => undefined };
+      });
+      return runTransition(() => undefined, { reduced: false });
+    });
+    expect(seen).toEqual([]);
+  });
+
+  it("le rappel lève : `updateCallbackDone` n'est pas signalée non traitée pendant l'attente de `finished`, l'erreur remonte quand même", async () => {
+    let result: unknown;
+    const seen = await unhandledDuring(async () => {
+      (document as unknown as Doc).startViewTransition = vi.fn(() => ({
+        ready: Promise.reject(new DOMException("skipped", "AbortError")),
+        finished: new Promise<void>((r) => setTimeout(r, 5)),
+        updateCallbackDone: Promise.reject(new Error("boom")),
+        skipTransition: () => undefined,
+      }));
+      result = await runTransition(() => undefined, { reduced: false }).catch((e: Error) => e.message);
+    });
+    expect(seen).toEqual([]);
+    expect(result).toBe("boom");
+  });
+
   it("rappel jamais appelé (peinture bloquée) : la transition saute après STALL_MS et la mise à jour a lieu", async () => {
     vi.useFakeTimers();
     try {
@@ -106,7 +147,7 @@ describe("runTransition (UI §20.2 K2)", () => {
       });
       (document as unknown as Doc).startViewTransition = vi.fn((c: () => void) => {
         cb = c;
-        return { finished, updateCallbackDone: Promise.resolve(), skipTransition };
+        return { ready: Promise.resolve(), finished, updateCallbackDone: Promise.resolve(), skipTransition };
       });
       const update = vi.fn();
       const p = runTransition(update, { reduced: false });
