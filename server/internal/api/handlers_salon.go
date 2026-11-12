@@ -52,6 +52,10 @@ func failSalon(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusConflict, "full")
 	case errors.Is(err, salon.ErrBudget):
 		writeErr(w, http.StatusConflict, "budget")
+	case errors.Is(err, salon.ErrTropEcrit):
+		// Pièce trop réécrite (2 × sa taille) : 413, pas 429, car la même requête resterait
+		// refusée ; le client abandonne la pièce.
+		writeErr(w, http.StatusRequestEntityTooLarge, "too_large")
 	case errors.Is(err, salon.ErrStale):
 		writeErr(w, http.StatusConflict, "stale")
 	case errors.Is(err, salon.ErrExcluded):

@@ -54,6 +54,15 @@ const (
 	// 12 novembre). Une pièce n'est pas une création de partage (limits.BeginPiece) : ce
 	// plafond borne seul leur nombre ; les vocaux n'y comptent pas (réserve du siège).
 	PiecesParHeure = 120
+	// EcritureMax : octets de segments reçus au plus par pièce, réécritures comprises, en
+	// multiples de sa taille (audit du 12 novembre, D2) : une reprise complète après coupure
+	// passe, une réécriture sans fin (vocal hors de tout quota d'octets) non (ErrTropEcrit).
+	EcritureMax = 2
+	// BourrageFacteur, BourrageMarge : aléa écrit à la finalisation, en morceaux, au plus
+	// BourrageFacteur × morceaux reçus + BourrageMarge (padAllowed des partages, D42-17 ;
+	// audit du 12 novembre, D1), sinon ErrBadRequest.
+	BourrageFacteur = 4
+	BourrageMarge   = 8 * share.SegChunks
 )
 
 // VocalPaliers : paliers d'un vocal (plan, point 3 : 10 min tiennent dans 80).
@@ -88,6 +97,7 @@ type piece struct {
 	etat       etatPiece
 	ecritures  int       // PutSegment en cours (hors du verrou)
 	recus      []bool    // segments reçus (envoi seulement)
+	ecrit      int64     // octets de segments acceptés, réécritures comprises (EcritureMax)
 	activite   time.Time // création, dernier segment reçu, puis finalisation
 	lus        map[[32]byte]int64
 	efface     bool
@@ -320,7 +330,9 @@ func (m *Manager) salonDePiece(id string) *salon {
 }
 
 // PutSegment écrit le segment n de la pièce id (jeton d'envoi) : taille exacte du palier
-// (sinon ErrBadRequest). L'écriture se fait hors du verrou du salon. Pièce inconnue,
+// (sinon ErrBadRequest) ; total reçu pour la pièce, réécritures comprises, au plus
+// EcritureMax × sa taille (sinon ErrTropEcrit, rien compté). L'écriture se fait hors du
+// verrou du salon. Pièce inconnue,
 // finalisée ou effacée, auteur parti : ErrNotFound ; auteur révoqué : ErrExcluded ;
 // finalisation en cours : ErrBusy.
 func (m *Manager) PutSegment(id string, n int, body []byte) error {
@@ -350,6 +362,11 @@ func (m *Manager) debuterEcriture(s *salon, id string, n, longueur int) (*piece,
 	if n < 0 || n >= len(p.recus) || longueur != share.SegmentSize(p.bucket, n) {
 		return nil, ErrBadRequest
 	}
+	// Compté avant l'écriture : une écriture qui échoue compte quand même (jamais gratuite).
+	if p.ecrit+int64(longueur) > EcritureMax*share.TotalSize(p.bucket) {
+		return nil, ErrTropEcrit
+	}
+	p.ecrit += int64(longueur)
 	p.ecritures++
 	return p, nil
 }
@@ -365,7 +382,9 @@ func (m *Manager) finirEcriture(s *salon, p *piece, n int, ok bool) {
 }
 
 // FinalizePiece termine l'envoi de la pièce id : tous les segments reçus sauf le bourrage
-// [from, to) (share.ValidFill, sinon ErrBadRequest), bourrage rempli d'aléa (crypto/rand) et
+// [from, to) (share.ValidFill, sinon ErrBadRequest), bourrage d'au plus BourrageFacteur ×
+// morceaux reçus + BourrageMarge morceaux (sinon ErrBadRequest, rien écrit : deux segments
+// reçus ne font pas écrire 516 Mo d'aléa), bourrage rempli d'aléa (crypto/rand) et
 // fichier synchronisé hors du verrou du salon (aucun segment accepté pendant ce temps :
 // ErrBusy), puis état « ready ». Rejouée après succès : ErrNotFound.
 func (m *Manager) FinalizePiece(id string, from, to int) error {
@@ -394,10 +413,17 @@ func (m *Manager) debuterFinal(s *salon, id string, from, to int) (*piece, error
 	if !share.ValidFill(from, to, len(p.recus)) {
 		return nil, ErrBadRequest
 	}
+	var recus int64 // morceaux des segments reçus (chacun une fois)
 	for n, ok := range p.recus {
 		if !ok && (n < from || n >= to) {
 			return nil, ErrBadRequest // segment manquant hors du bourrage
 		}
+		if ok {
+			recus += int64(min(share.SegChunks, p.bucket-n*share.SegChunks))
+		}
+	}
+	if int64(to-from)*share.SegChunks > BourrageFacteur*recus+BourrageMarge {
+		return nil, ErrBadRequest
 	}
 	p.etat = finalisation
 	return p, nil

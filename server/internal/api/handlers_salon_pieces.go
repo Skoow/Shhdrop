@@ -113,7 +113,8 @@ func (a salonAPI) creerPiece(w http.ResponseWriter, r *http.Request) {
 
 // envoyerSegmentPiece : PUT /api/salons/pieces/segments/{n} (jeton d'envoi), patron de
 // putSegment : corps borné, place de transfert, débit minimal, octets reçus comptés au quota
-// du jour même si le segment est refusé ensuite.
+// du jour même si le segment est refusé ensuite. Total reçu par pièce au-delà de
+// salon.EcritureMax × sa taille (réécritures, vocal compris) : 413 too_large.
 func (a salonAPI) envoyerSegmentPiece(w http.ResponseWriter, r *http.Request) {
 	id, _, err := a.checkToken(r, token.SalonPiece)
 	if err != nil {

@@ -30,6 +30,9 @@ var (
 	ErrStale = errors.New("salon: état dépassé")
 	// ErrLimit : limite atteinte sans délai d'attente utile.
 	ErrLimit = errors.New("salon: limite atteinte")
+	// ErrTropEcrit : pièce dont les segments reçus, réécritures comprises, dépasseraient
+	// 2 × sa taille (EcritureMax ; 413 too_large) : la pièce est à abandonner, pas à réessayer.
+	ErrTropEcrit = errors.New("salon: pièce trop réécrite")
 	// ErrPlein : disque plein, trame non rangée (0x0C).
 	ErrPlein = errors.New("salon: disque plein")
 	// ErrBase : erreur de la base (message fixe, sans requête ni chemin).

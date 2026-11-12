@@ -307,8 +307,13 @@ func TestSegmentsPiecesHorsLimite(t *testing.T) {
 	j := salonMembres(t, e, 2)
 	id, tok := e.pieceCreee(t, j[0], 1, false)
 	seg := rnd(share.SegmentSize(1, 0))
+	// Au-delà de 2 écritures du segment (2 × la taille de la pièce) : 413, jamais 429 limit.
 	for i := 0; i < limits.RequestsPerMin+10; i++ {
-		expect(t, e.putPiece(tok, 0, seg), 204, "")
+		if i < 2 {
+			expect(t, e.putPiece(tok, 0, seg), 204, "")
+		} else {
+			expect(t, e.putPiece(tok, 0, seg), 413, `{"error":"too_large"}`)
+		}
 	}
 	expect(t, e.finaliserPiece(tok, 0, 0), 200, `{}`)
 	for i := 0; i < limits.RequestsPerMin+10; i++ {
