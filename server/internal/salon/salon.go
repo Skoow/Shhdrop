@@ -32,11 +32,13 @@ type evenement struct {
 // siege : place occupée. jetonV : SHA-256 du jeton de membre (le jeton lui-même n'est
 // jamais gardé). emis : rang de l'annonce qui a donné le jeton (0x02 ou 0x0A) ; plancher :
 // rang à partir duquel le membre peut lire les pièces (Task 13). horsLigneDepuis : zéro
-// tant qu'un WebSocket du siège est ouvert (Task 9) ; posé à l'entrée.
+// tant qu'un WebSocket du siège est ouvert (Task 9) ; posé à l'entrée. arrivee : rang de
+// l'arrivée (0x02) de l'occupant, gardé par une reprise (0x0A) : borne de Retirer.
 type siege struct {
 	nonce           [16]byte
 	jetonV          [32]byte
 	emis, plancher  uint64
+	arrivee         uint64
 	horsLigneDepuis time.Time
 }
 
@@ -106,7 +108,10 @@ func (s *salon) installerLocked(n uint8, reprise bool, now time.Time) (jeton [32
 	if err != nil {
 		return [32]byte{}, nil, err
 	}
-	x.emis, x.plancher = seq, seq
+	x.emis, x.plancher, x.arrivee = seq, seq, seq
+	if reprise && s.sieges[n] != nil {
+		x.arrivee = s.sieges[n].arrivee
+	}
 	s.sieges[n] = x
 	s.jetons[x.jetonV] = n
 	return jeton, x, nil

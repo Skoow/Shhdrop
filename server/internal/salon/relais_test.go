@@ -586,3 +586,68 @@ func TestRecevoirApresDestruction(t *testing.T) {
 		t.Fatal("index gardé après destruction", n)
 	}
 }
+
+// Décision du propriétaire (12 novembre) : « supprimer pour tout le monde » survit à une
+// reprise. La borne est le rang d'arrivée (0x02) de l'occupant du siège, gardé par 0x0A ;
+// au siège 0 (toujours le créateur), tout depuis la création.
+func TestRetirerApresReprise(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 3)
+	_, g := b.entrerMembre(t, c, true)
+	_, a := b.entrerMembre(t, c, false)
+	s := a.salon
+	servie := func(seq uint64) bool {
+		for _, e := range lireSuite(t, s, 0, 1000) {
+			if e.ty == 0x01 && e.seq == seq {
+				return true
+			}
+		}
+		return false
+	}
+	// Invité : reprise (0x0A, nouveau jeton) simulée comme la fera la Task 9.
+	xa := b.recevoir(t, a, trameD(0, 1))
+	s.mu.Lock()
+	jeton, x, err := s.installerLocked(a.siege, true, b.h.Now())
+	s.mu.Unlock()
+	if err != nil || x.emis <= xa {
+		t.Fatal("reprise", err)
+	}
+	s.mu.Lock()
+	b.m.idxMu.Lock()
+	b.m.index[x.jetonV] = s
+	b.m.idxMu.Unlock()
+	s.mu.Unlock()
+	a2, err := b.m.Membre(jeton[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.m.Retirer(a2, xa); err != nil || servie(xa) {
+		t.Fatal("invité, trame d'avant sa reprise non retirée :", err)
+	}
+	// Créateur : reprise par Rejoindre, puis siège 0 libéré et repris par une arrivée (0x02).
+	x0 := b.recevoir(t, g, trameD(0, 2))
+	y0 := b.recevoir(t, g, trameD(0, 3))
+	_, g2 := b.entrerMembre(t, c, true)
+	if err := b.m.Retirer(g2, x0); err != nil || servie(x0) {
+		t.Fatal("créateur, trame d'avant sa reprise non retirée :", err)
+	}
+	if err := b.m.Quitter(g2); err != nil {
+		t.Fatal(err)
+	}
+	_, g3 := b.entrerMembre(t, c, true)
+	if err := b.m.Retirer(g3, y0); err != nil || servie(y0) {
+		t.Fatal("créateur, trame d'avant sa nouvelle arrivée non retirée :", err)
+	}
+	// Siège invité libéré puis réattribué : le nouvel occupant ne retire pas.
+	z := b.recevoir(t, a2, trameD(0, 4))
+	if err := b.m.Quitter(a2); err != nil {
+		t.Fatal(err)
+	}
+	_, n := b.entrerMembre(t, c, false)
+	if n.siege != a.siege {
+		t.Fatal("siège non réattribué")
+	}
+	if err := b.m.Retirer(n, z); err != nil || !servie(z) {
+		t.Fatal("nouvel occupant a retiré la trame de l'ancien :", err)
+	}
+}

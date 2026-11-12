@@ -79,10 +79,12 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 	return s.seq, nil
 }
 
-// Retirer écrase la trame non volatile de rang seq si mb en est l'auteur : même siège et
-// rang postérieur à l'émission de son jeton (une trame d'un ancien titulaire du siège, ou
-// d'avant une reprise, n'est pas à lui). Toute autre trame (autre auteur, volatile, rang
-// inconnu, déjà effacée) : ignorée sans erreur. Membre périmé : ErrNotFound.
+// Retirer écrase la trame non volatile de rang seq si mb en est l'auteur (décision du
+// propriétaire, 12 novembre) : même siège et rang postérieur à l'arrivée (0x02) de
+// l'occupant actuel, qu'une reprise (0x0A) ne change pas ; au siège 0, toujours le créateur,
+// tout depuis la création. Une trame d'un ancien titulaire d'un siège invité n'est pas à lui.
+// Toute autre trame (autre auteur, volatile, rang inconnu, déjà effacée) : ignorée sans
+// erreur. Membre périmé : ErrNotFound.
 func (m *Manager) Retirer(mb Membre, seq uint64) error {
 	s := mb.salon
 	if s == nil {
@@ -99,7 +101,11 @@ func (m *Manager) Retirer(mb Membre, seq uint64) error {
 		return nil
 	}
 	e := &s.index[i]
-	if e.efface || e.siege != mb.siege || e.seq <= mb.emis {
+	var borne uint64 // siège 0 : depuis la création
+	if mb.siege != 0 {
+		borne = s.sieges[mb.siege].arrivee // occupé : membreLocked
+	}
+	if e.efface || e.siege != mb.siege || e.seq <= borne {
 		return nil
 	}
 	if err := s.conv.Effacer(e.emplacement); err != nil {
