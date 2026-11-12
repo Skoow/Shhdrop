@@ -27,7 +27,7 @@ test("sans aperçu : Télécharger seulement ; HEIC illisible ici : format et na
   await expect(page.getByRole("alert").filter({ hasText: "HEIC" })).toHaveText(/^\s*Ce navigateur ne sait pas lire le format HEIC\. Enregistrez le fichier, ou ouvrez le lien dans Safari\.\s*$/, { timeout: 20_000 });
 });
 
-test("FLAC et MKV : « Voir » et lecture dans la page (Chromium), même sans type donné par le navigateur", async ({ page, shh, browser, browserName }) => {
+test("FLAC et MKV : « Écouter », « Voir » et lecture dans la page (Chromium), même sans type donné par le navigateur", async ({ page, shh, browser, browserName }) => {
   test.setTimeout(120_000);
   test.skip(browserName !== "chromium", "MKV : Chromium seulement");
   const s = await freshPage(browser);
@@ -38,7 +38,7 @@ test("FLAC et MKV : « Voir » et lecture dans la page (Chromium), même sans ty
   await page.goto(sent.link);
   await unlock(page, sent.password);
   const viewer = page.getByRole("dialog");
-  await page.getByRole("button", { name: "Voir concert.flac" }).click();
+  await page.getByRole("button", { name: "Écouter concert.flac" }).click(); // son : « Écouter » (audit D2)
   await expect.poll(() => viewer.locator("audio").evaluate((a: HTMLAudioElement) => a.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Voir film.mkv" }).click();
