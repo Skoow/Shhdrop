@@ -408,6 +408,16 @@ Autres messages de contrôle (`0x02`–`0x05`) : 600 par minute et par WebSocket
 - [ ] **Step 4 :** `go test -race ./...` puis `make test-go` → PASS.
 - [ ] **Step 5 :** commit `feat(salon): pièces jointes, budget de 1 Go, vocaux au rythme d'une voix, lien avec la trame`.
 
+### Task 9b : dernière connexion (spec v3 §14.1, décision du propriétaire du 12 novembre)
+
+**Files :**
+- Modify : `server/internal/salon/protocole.go`, `protocole_test.go`, `connexion.go`, `connexion_test.go`, `salon.go` ; la section « Protocole » de ce plan.
+
+**Interfaces :**
+- Produces : `EnrPresence(seq uint64, siege uint8, enLigne bool, derniereMin uint64) []byte` (19 octets : type ‖ seq ‖ siège ‖ 1/0 ‖ minutes Unix sur 8 octets, 0 = inconnue ou en ligne) ; `Annonce` gagne `DerniereMin uint64` et une annonce de `0x0D` passe de 17 à 25 octets (`11 + 25n`) ; heure de la dernière déconnexion de chaque siège, **en mémoire seulement**, arrondie à la minute inférieure, posée à la déconnexion (pas à une reprise), oubliée quand le siège est libéré ou le salon fini. **Aucun masquage** : décision du propriétaire, tout le monde voit la dernière connexion.
+- [ ] **Step 1 : tests** — `TestDerniereConnexionDiffusee` (B se déconnecte à 14:32:47 → `0x07` hors ligne avec la minute de 14:32 chez A) ; `TestDerniereConnexionAccueil` (A se reconnecte : `0x0D` porte la minute de B) ; `TestDerniereConnexionOubliee` (siège libéré → 0 pour le nouvel occupant ; fin du salon → rien gardé) ; `TestDerniereConnexionJamaisSurDisque` (repère de minute absent du fichier de conversation, de la base et du WAL) ; tailles exactes des enregistrements ; `FuzzFlux` mis à jour.
+- [ ] **Step 2 :** FAIL ; **Step 3 :** implémenter ; **Step 4 :** `go test -race ./...`, `make test-go`, `make test-e2e` → PASS ; **Step 5 :** commit `feat(salon): heure de dernière connexion en mémoire, jointe à la présence`.
+
 ### Task 14 : exclusion et rotation de l'invitation
 
 > Relecture Task 13 : ajouter `TestPieceExclu` côté HTTP (403 `excluded` pour `POST /pieces`, `PUT` avec un jeton d'envoi encore valable, `GET`) et vérifier que l'exclusion coupe les lectures et envois de pièces en cours de ce membre (`Streams.Revoke` sur `"m:" + hex(SHA-256(jeton))`).
