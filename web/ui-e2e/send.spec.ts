@@ -53,13 +53,13 @@ test.describe("fr-FR", () => {
 
   test("texte + photo : phases dans l'ordre, coches honnêtes, lien jamais avant finalize, capsule nommée", async ({ page, shh }) => {
     test.setTimeout(120_000);
-    await page.goto(shh.origin + "/");
-    await addText(page, "Le code de la porte est 4471.");
-    await addRealFile(page, "plage-nuit.jpg");
-    await addFile(page, "archive-photos.bin", 3 * MIB);
     // Premier PUT libre, les suivants retenus, puis finalize retenu : chaque phase reste affichée
     // jusqu'à ce que le test l'ait vue (des délais fixes laissaient WebKit, lent en CI, manquer
     // la fenêtre de « Chiffrement et envoi » : CI du 11 novembre, 45 s au lieu de 15 à 20 s).
+    // Barrières posées AVANT les ajouts : le brouillon envoie chaque fichier dès son ajout
+    // (spec §41.14) ; posées après, tout pouvait être déjà parti au clic, et l'écran passait
+    // directement à « Finalisation », à juste titre (CI du 12 novembre, webkit-desktop ;
+    // reproduit sous Chromium avec 6 s d'attente entre les ajouts et les barrières).
     let openSegments!: () => void;
     const segmentsGate = new Promise<void>((r) => (openSegments = r));
     let openFinalize!: () => void;
@@ -75,6 +75,10 @@ test.describe("fr-FR", () => {
       await finalizeGate;
       await route.continue();
     });
+    await page.goto(shh.origin + "/");
+    await addText(page, "Le code de la porte est 4471.");
+    await addRealFile(page, "plage-nuit.jpg");
+    await addFile(page, "archive-photos.bin", 3 * MIB);
     const titles: string[] = [];
     await page.exposeFunction("__phase", (s: string) => titles.push(s));
     await sendButton(page).click();

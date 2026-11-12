@@ -61,6 +61,14 @@ async function entry(page: Page, secrets: string[]) {
  * `n - 1` Retours depuis la dernière entrée atteignent la première, quelle qu'elle soit
  * (entrée du même document créée par pushState, ou about:blank, autre document).
  * Rend les adresses visitées, de la première à la dernière.
+ *
+ * `forward` faux (tous les appels sous WebKit) : pas de parcours « Avant ». CI du 11 et du
+ * 12 novembre : « Page crashed » du processus WebKit dans page.goForward, sur des variantes
+ * différentes d'une exécution à l'autre (navigations de fragment, page fixe sans script du site),
+ * sur téléphone comme sur ordinateur, alors qu'elles passaient à l'exécution précédente :
+ * plantage du navigateur de test (probable, non prouvé : pas de WebKit ici), pas du site. Le
+ * parcours Retour complet reste vérifié sous WebKit (toutes les entrées : aucun #, aucune fuite) ;
+ * Chromium vérifie aussi Avant.
  */
 async function walkHistory(page: Page, secrets: string[], forward = true): Promise<string[]> {
   const n = await historyLength(page);
@@ -107,7 +115,7 @@ for (const [kind, frag] of [
   ["partage", `#${KEY}`],
   ["gestion", `#m${KEY}`],
 ] as const) {
-  test(`/${frag.slice(0, 2)}… (${kind}) : le # est retiré de l'adresse et de l'historique, jamais envoyé`, async ({ page, shh }) => {
+  test(`/${frag.slice(0, 2)}… (${kind}) : le # est retiré de l'adresse et de l'historique, jamais envoyé`, async ({ page, shh, browserName }) => {
     const api = apiRequests(page);
     const all = allRequests(page);
     await page.goto(`${shh.origin}/${frag}`);
@@ -121,7 +129,7 @@ for (const [kind, frag] of [
     // ajouté d'entrée (replaceState) : une seule entrée « / » de l'origine avant « /securite ».
     await goSecurity(page);
     await expect(page).toHaveURL(`${shh.origin}/securite`);
-    expectOnlyOwnEntries(await walkHistory(page, [KEY]), shh.origin, ["/", "/securite"]);
+    expectOnlyOwnEntries(await walkHistory(page, [KEY], browserName !== "webkit"), shh.origin, ["/", "/securite"]);
     // Rechargement : rien ne revient.
     await page.goBack();
     await expect(page).toHaveURL(`${shh.origin}/`);
@@ -139,7 +147,7 @@ for (const [kind, frag] of [
   });
 }
 
-test("# collé dans la barre sur la même page (navigation de fragment) : retiré aussi", async ({ page, shh }) => {
+test("# collé dans la barre sur la même page (navigation de fragment) : retiré aussi", async ({ page, shh, browserName }) => {
   await page.goto(`${shh.origin}/#${KEY}`);
   await expect.poll(() => hash(page)).toBe("");
   await page.evaluate((k) => (location.hash = k), KEY2);
@@ -147,8 +155,8 @@ test("# collé dans la barre sur la même page (navigation de fragment) : retir�
   await page.evaluate((k) => (location.hash = `m${k}`), KEY2);
   await expect.poll(() => hash(page)).toBe("");
   // Chaque navigation de fragment a créé une entrée, aussitôt remplacée par « / » nu : trois
-  // entrées « / », aucune avec un « # », ni au Retour ni à l'Avant.
-  expectOnlyOwnEntries(await walkHistory(page, [KEY, KEY2]), shh.origin, ["/", "/", "/"]);
+  // entrées « / », aucune avec un « # », au Retour (et à l'Avant hors WebKit : walkHistory).
+  expectOnlyOwnEntries(await walkHistory(page, [KEY, KEY2], browserName !== "webkit"), shh.origin, ["/", "/", "/"]);
 });
 
 test.describe("navigateur intégré (Instagram)", () => {
@@ -242,11 +250,7 @@ for (const [what, path, frag] of [
     expect(await hash(page)).toBe("");
     await page.goForward();
     await expect(page).toHaveURL(`${shh.origin}${next}`);
-    // Parcours « Avant » complet non fait sous WebKit : CI du 11 novembre, « Page crashed » du
-    // processus WebKit dans page.goForward vers une page fixe sans script du site (/securite),
-    // sur une seule variante des huit, alors qu'elle passait à l'exécution précédente : plantage
-    // du navigateur de test (probable, non prouvé : pas de WebKit ici), pas du site. Retour
-    // vérifie déjà toutes les entrées (aucun #, aucune fuite) et un Avant a eu lieu plus haut.
+    // Parcours « Avant » complet non fait sous WebKit (raison : walkHistory) ; un Avant a eu lieu plus haut.
     expectOnlyOwnEntries(await walkHistory(page, [KEY], browserName !== "webkit"), shh.origin, [path, next]);
   });
 }

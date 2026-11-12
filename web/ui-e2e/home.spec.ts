@@ -4,6 +4,7 @@
 import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
 import { maxRelLuminance } from "./png";
+import { MIMES } from "../src/media/capture";
 
 /** Paires de libellés du schéma dont les boîtes se croisent (texte réel, pas la cellule). */
 function labelOverlaps(page: Page) {
@@ -234,9 +235,25 @@ test.describe("fr-FR", () => {
       document.addEventListener("close", () => w.__closes++, true);
     });
     let closes = 0;
+    // Bascule « Vidéo » seulement si le navigateur sait enregistrer une vidéo (captureSupport,
+    // media/capture.ts). Le WebKit Linux des tests n'en enregistre aucune (comme pour le vocal,
+    // compose.spec.ts) : le site masque alors la bascule, et le tour Vidéo attendait en vain
+    // (CI du 11 et du 12 novembre, webkit-desktop ; ce test ne tourne pas sur téléphone).
+    const canVideo = await page.evaluate(
+      (list) => typeof MediaRecorder !== "undefined" && list.some((m) => MediaRecorder.isTypeSupported(m)),
+      MIMES.video.map(([m]) => m),
+    );
+    if (browserName === "chromium") expect(canVideo, "Chromium enregistre la vidéo : le tour Vidéo y reste vérifié").toBe(true);
     for (const [mode, accept, fallback] of [["Photo", "image/*", "Choisir une photo"], ["Vidéo", "video/*", "Choisir une vidéo"]] as const) {
       await page.getByRole("group", { name: "Ou créez sur place" }).getByRole("button", { name: "Photo ou vidéo", exact: true }).click();
       const cam = page.locator("dialog[data-capture]");
+      if (mode === "Vidéo" && !canVideo) {
+        await expect(cam.getByRole("alert")).toContainText("Aucune caméra ni aucun micro utilisable");
+        await expect(cam.getByRole("button", { name: "Vidéo", exact: true })).toHaveCount(0);
+        await page.keyboard.press("Escape");
+        await expect(cam).toBeHidden();
+        break;
+      }
       if (mode === "Vidéo") await cam.getByRole("button", { name: "Vidéo", exact: true }).click();
       await expect(cam.getByRole("alert")).toContainText("Aucune caméra ni aucun micro utilisable");
       // Le WebKit des tests n'émet pas « filechooser » pour un champ <input capture> : le repli

@@ -133,6 +133,11 @@ jobs:
           name: captures-ui
           path: web/ui-e2e/__captures__/
           if-no-files-found: ignore
+      # Traces (trace.zip) et error-context.md des tests échoués, pour diagnostiquer WebKit (absent
+      # en local). Aucun secret réel : ce job n'a aucun secret GitHub (persist-credentials: false),
+      # les traces ne gardent ni l'environnement ni le disque, seulement les pages de test. Les
+      # liens et mots de passe qu'elles montrent sont ceux de partages de test, sur un serveur
+      # local jetable, avec des clés tirées au hasard pendant le test : acceptable.
       - name: Traces et rapports en cas d'échec
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
