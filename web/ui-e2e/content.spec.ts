@@ -110,7 +110,7 @@ test("expiration pendant la lecture, rien en cours → l'interface se ferme auss
   await expect(page.getByRole("heading", { name: "Contenu", exact: true })).toHaveCount(0);
   await expect(page.locator("li.row, pre[dir=auto], video, audio, img[src^=blob]")).toHaveCount(0);
   expect(await page.evaluate(() => document.body.innerText)).not.toMatch(/anniversaire-lou|trap\.svg|4471/);
-  await expect(page).toHaveTitle("Partage indisponible · Shhdrop");
+  await expect(page).toHaveTitle("Partage indisponible · Shhgone");
   expect(api.filter((u) => !u.endsWith("/api/shares/done"))).toEqual([]); // aucune requête pour fermer
   await settle(page);
   expect(await axe(page)).toEqual([]);

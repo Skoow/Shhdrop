@@ -303,7 +303,7 @@ test.describe("fr-FR", () => {
     await expect(opts.getByRole("radio", { name: "12 h" })).toBeChecked();
     if (isMobile) await page.keyboard.press("Escape");
     await line.click();
-    const sheet = page.getByRole("dialog", { name: "Shhdrop Plus" });
+    const sheet = page.getByRole("dialog", { name: "Shhgone Plus" });
     await expect(sheet).toBeVisible();
     await expect(sheet.locator("[data-paid] > *").first()).toContainText("Bientôt disponible.");
     await expect(sheet).toContainText(/7\s€\s?par mois, TTC/);
@@ -511,7 +511,7 @@ test.describe("fr-FR", () => {
       await page.waitForTimeout(6500);
       await capture(page, "compose-limit-size");
       await page.locator('[data-offer-strip] [data-offer="plus"] button').filter({ visible: true }).click();
-      await expect(page.getByRole("dialog", { name: "Shhdrop Plus" })).toBeVisible();
+      await expect(page.getByRole("dialog", { name: "Shhgone Plus" })).toBeVisible();
       await page.keyboard.press("Escape");
     } finally {
       rmSync(dir, { recursive: true, force: true });

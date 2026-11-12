@@ -1,6 +1,6 @@
 <script lang="ts">
   // Icônes maison de la feuille « Ajouter » (24 × 24, trait 1,75 comme le jeu maison de l'UI §6).
-  // Dessinées pour Shhdrop : chaque glyphe porte un petit détail « scellé » (point, verrou).
+  // Dessinées pour Shhgone : chaque glyphe porte un petit détail « scellé » (point, verrou).
   import type { AddId } from "../flows/add-actions";
   let { id, size = 24 }: { id: AddId | "gallery"; size?: number } = $props();
 </script>

@@ -34,19 +34,19 @@ test("pied de page (UI5) : Produit, Confiance, Légal ; langue, nettoyage, À pr
     await expect(foot.getByRole("link", { name: new RegExp(`^${l}`) })).toBeVisible();
   // 10 liens (dont « Mes partages », Task H), plus le logo (retour à l'accueil, UI7).
   await expect(foot.getByRole("link")).toHaveCount(11);
-  await expect(foot.getByRole("link", { name: "Shhdrop, accueil" })).toBeVisible();
+  await expect(foot.getByRole("link", { name: "Shhgone, accueil" })).toBeVisible();
   await expect(foot.getByText(/^Salon\s+bientôt$/)).toBeVisible(); // pas un lien
   await expect(foot.getByRole("link", { name: /^Code source/ })).toHaveAttribute("href", "https://github.com/Skoow/shhdrop");
   await expect(foot.getByRole("link", { name: /^Code source/ })).toHaveAttribute("rel", "noopener noreferrer");
   // Retours UI9 : plus de mention « aucune publicité » ; le nom en bas à gauche, « © 2026 » à côté.
   await expect(foot.getByText(/publicité/)).toHaveCount(0);
-  await expect(foot.locator(".base .sig")).toHaveText(/^Shhdrop\s*©\s2026$/);
+  await expect(foot.locator(".base .sig")).toHaveText(/^Shhgone\s*©\s2026$/);
   await expect(foot.locator("[data-build]")).toHaveText(/^Version ([0-9a-f]{7}|dev)$/);
   // Ni langue ni nettoyage automatique (décision du propriétaire du 12 novembre) ; « À propos » reste.
   await expect(foot.getByRole("combobox")).toHaveCount(0);
   await expect(foot.getByRole("group", { name: "Langue" })).toHaveCount(0);
   await expect(foot.getByRole("switch")).toHaveCount(0);
-  await expect(foot.getByText("Shhdrop chiffre sur votre appareil avant l'envoi.", { exact: false })).toBeVisible();
+  await expect(foot.getByText("Shhgone chiffre sur votre appareil avant l'envoi.", { exact: false })).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(600); // fin des apparitions au défilement
   expect(await axe(page)).toEqual([]);
@@ -56,11 +56,11 @@ test("pied de page (UI5) : Produit, Confiance, Légal ; langue, nettoyage, À pr
 test("référencement : robots.txt et sitemap.xml ; pages publiques indexées, pages privées « noindex »", async ({ page, request, shh }) => {
   const robots = await request.get(shh.origin + "/robots.txt");
   expect(robots.status()).toBe(200);
-  expect(await robots.text()).toContain("Sitemap: https://shhdrop.app/sitemap.xml");
+  expect(await robots.text()).toContain("Sitemap: https://shhgone.com/sitemap.xml");
   const map = await request.get(shh.origin + "/sitemap.xml");
   expect(map.status()).toBe(200);
   expect(map.headers()["content-type"]).toMatch(/xml/);
-  const locs = [...(await map.text()).matchAll(/<loc>https:\/\/shhdrop\.app([^<]*)<\/loc>/g)].map((m) => m[1]);
+  const locs = [...(await map.text()).matchAll(/<loc>https:\/\/shhgone\.com([^<]*)<\/loc>/g)].map((m) => m[1]);
   expect(locs).toEqual(["/", "/securite", "/confidentialite", "/offres", "/conditions", "/mentions-legales"]);
   const meta = (n: string) => page.locator(`meta[name="${n}"]`);
   for (const p of locs) {

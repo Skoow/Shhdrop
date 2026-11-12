@@ -73,7 +73,7 @@ test("premier écran : titre, trois assurances, zone de dépôt compacte, offres
   await expect(offers.locator("input, form")).toHaveCount(0);
   // Plus : la feuille d'information s'ouvre sur place.
   await offers.locator('[data-offer="plus"]').getByRole("button").click();
-  await expect(page.getByRole("dialog", { name: "Shhdrop Plus" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Shhgone Plus" })).toBeVisible();
   await page.keyboard.press("Escape");
   // Salon : même icône et même mot que l'onglet, « bientôt », désactivé avec sa raison.
   const room = page.locator("[data-room]").getByRole("button", { name: /^Salon/ });

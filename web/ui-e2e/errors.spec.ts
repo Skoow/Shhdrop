@@ -30,7 +30,7 @@ test.describe("pages d'erreur", () => {
     expect((await page.goto(shh.origin + "/securite"))!.status()).toBe(200);
     await page.goto(shh.origin + "/nope");
     await expect(page.getByRole("heading", { level: 1, name: "Cette page n'existe pas." })).toBeVisible();
-    await expect(page).toHaveTitle("Page introuvable · Shhdrop");
+    await expect(page).toHaveTitle("Page introuvable · Shhgone");
     await expect(page.getByRole("link", { name: "Retour à l'accueil" })).toBeVisible();
     await noSecret(page);
     await shot(page, "erreur-404");
@@ -43,14 +43,14 @@ test.describe("pages d'erreur", () => {
     await context.setOffline(true);
     await page.evaluate((k) => (location.hash = k), KEY);
     await expect(page.getByRole("heading", { level: 1, name: "Vous êtes hors ligne." })).toBeVisible();
-    await expect(page).toHaveTitle("Hors ligne · Shhdrop");
+    await expect(page).toHaveTitle("Hors ligne · Shhgone");
     expect(api).toEqual([]);
     await noSecret(page);
     await shot(page, "erreur-hors-ligne");
     await context.setOffline(false);
     // Le lien de test n'existe pas : la relance aboutit à « lien invalide », même facture.
     await expect(page.getByRole("heading", { level: 1, name: "Ce lien n'existe pas ou n'est plus disponible." })).toBeVisible({ timeout: 20_000 });
-    await expect(page).toHaveTitle("Lien indisponible · Shhdrop");
+    await expect(page).toHaveTitle("Lien indisponible · Shhgone");
     await noSecret(page);
     await shot(page, "erreur-lien-invalide");
   });
@@ -60,7 +60,7 @@ test.describe("pages d'erreur", () => {
     await page.route("**/api/shares/meta", (r) => r.fulfill({ status: 500, contentType: "application/json", body: '{"error":"internal"}' }));
     await page.goto(`${shh.origin}/#${KEY}`);
     await expect(page.getByRole("heading", { level: 1, name: "Le serveur a un problème." })).toBeVisible({ timeout: 40_000 });
-    await expect(page).toHaveTitle("Erreur du serveur · Shhdrop");
+    await expect(page).toHaveTitle("Erreur du serveur · Shhgone");
     await expect(page.getByRole("button", { name: "Réessayer" })).toBeEnabled();
     await noSecret(page);
     await shot(page, "erreur-serveur");
@@ -71,7 +71,7 @@ test.describe("pages d'erreur", () => {
     await page.route("**/api/shares/meta", (r) => r.fulfill({ status: 429, headers: { "Retry-After": "1" }, body: "trop" }));
     await page.goto(`${shh.origin}/#${KEY}`);
     await expect(page.getByRole("heading", { level: 1, name: "Trop de demandes rapprochées." })).toBeVisible({ timeout: 40_000 });
-    await expect(page).toHaveTitle("Trop de demandes · Shhdrop");
+    await expect(page).toHaveTitle("Trop de demandes · Shhgone");
     await expect(page.getByRole("button", { name: "Réessayer" })).toBeEnabled({ timeout: 5_000 });
     await expect(page.locator(".wait")).toHaveText("Vous pouvez réessayer.");
     await noSecret(page);
@@ -85,8 +85,8 @@ test.describe("pages d'erreur", () => {
     await page.goto(shh.origin + "/");
     await addText(page, "note gardée");
     await sendButton(page).click();
-    await expect(page.getByRole("heading", { name: "Shhdrop est en maintenance." })).toBeVisible({ timeout: 40_000 });
-    await expect(page).toHaveTitle("Maintenance · Shhdrop");
+    await expect(page.getByRole("heading", { name: "Shhgone est en maintenance." })).toBeVisible({ timeout: 40_000 });
+    await expect(page).toHaveTitle("Maintenance · Shhgone");
     await noSecret(page);
     await shot(page, "erreur-maintenance");
     await page.getByRole("button", { name: "Revenir à mon envoi" }).click();
@@ -102,7 +102,7 @@ test.describe("navigateur sans crypto.subtle", () => {
   test("« non pris en charge » : titre, aucune requête", async ({ page, shh }) => {
     await page.goto(shh.origin + "/");
     await expect(page.getByRole("heading", { level: 1, name: "Ce navigateur ne permet pas de chiffrer en sécurité." })).toBeVisible();
-    await expect(page).toHaveTitle("Navigateur non pris en charge · Shhdrop");
+    await expect(page).toHaveTitle("Navigateur non pris en charge · Shhgone");
     await shot(page, "erreur-navigateur");
   });
 });

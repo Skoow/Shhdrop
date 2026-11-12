@@ -1,6 +1,6 @@
 // Animations du logo « Trame » (chronologies pures, sans DOM, appliquées par Logo.svelte) :
 // effacement à la gomme pour l'écran de destruction.
-// Repère : celui du mot-symbole (logo-paths.ts), y = 0 sur la ligne de base, x de 0 à ~183.
+// Repère : celui du mot-symbole (logo-paths.ts), y = 0 sur la ligne de base, x de 0 à ~190.
 // Principe : une gomme (deux tracés) balaie le mot en deux passes ; sous elle, deux rectangles d'un
 // masque SVG glissent (transform) et effacent les lettres, bord avant adouci par un dégradé. Seules
 // opacity et transform varient. Le mot nettoyé laisse transparaître un instant sa trame, puis reste effacé.
@@ -8,7 +8,7 @@
 /** Point de contact de la gomme : abscisses de début et de fin de passe, ordonnée de chaque bande. */
 export const ERASE = {
   x0: -8,
-  x1: 190,
+  x1: 197,
   /** Bande haute (passe 1, vers la droite) et bande basse (passe 2, vers la gauche). */
   band1: { y: -40, h: 29, contact: -17 },
   band2: { y: -15, h: 29, contact: 0 },

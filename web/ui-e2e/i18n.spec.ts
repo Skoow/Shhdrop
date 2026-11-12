@@ -18,24 +18,24 @@ test.describe("français par défaut", () => {
     await page.goto(shh.origin + "/inconnu");
     await expect(page.locator("html")).toHaveAttribute("lang", "fr");
     await expect(page.getByRole("heading", { name: "Cette page n'existe pas." })).toBeVisible();
-    await expect(page).toHaveTitle("Page introuvable · Shhdrop");
+    await expect(page).toHaveTitle("Page introuvable · Shhgone");
     await expect(foot(page).getByRole("group", { name: /^(Langue|Language)$/ })).toHaveCount(0);
 
     const en = await pageIn(browser, "en-US", shh.origin + "/inconnu");
     await expect(en.page.locator("html")).toHaveAttribute("lang", "en");
     await expect(en.page.getByRole("heading", { name: "This page does not exist." })).toBeVisible();
-    await expect(en.page).toHaveTitle("Page not found · Shhdrop");
+    await expect(en.page).toHaveTitle("Page not found · Shhgone");
     // Titre par route (scan UX B9) : Sécurité, puis l'accueil.
     await openSecurity(en.page);
-    await expect(en.page).toHaveTitle("Security · Shhdrop");
+    await expect(en.page).toHaveTitle("Security · Shhgone");
     await en.page.goto(shh.origin + "/");
-    await expect(en.page).toHaveTitle("End-to-end encrypted sharing, no account · Shhdrop");
+    await expect(en.page).toHaveTitle("End-to-end encrypted sharing, no account · Shhgone");
     await en.ctx.close();
     // Accueil : titre descriptif (référencement, retours CLEAN2) ; page d'envoi : « Envoyer ».
     await page.goto(shh.origin + "/");
-    await expect(page).toHaveTitle("Partage chiffré de bout en bout, sans compte · Shhdrop");
+    await expect(page).toHaveTitle("Partage chiffré de bout en bout, sans compte · Shhgone");
     await page.goto(shh.origin + "/envoyer");
-    await expect(page).toHaveTitle("Envoyer · Shhdrop");
+    await expect(page).toHaveTitle("Envoyer · Shhgone");
 
     const stored = await page.evaluate(async () => ({
       local: localStorage.length,

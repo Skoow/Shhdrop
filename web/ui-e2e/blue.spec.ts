@@ -33,7 +33,7 @@ test("composeur et options : aucun choix payant verrouillé ; le bloc des offres
   await page.screenshot({ path: `${SHOTS}options-${w(isMobile)}.png` });
   if (isMobile) await page.keyboard.press("Escape");
   await line.click();
-  const sheet = page.getByRole("dialog", { name: "Shhdrop Plus" });
+  const sheet = page.getByRole("dialog", { name: "Shhgone Plus" });
   await expect(sheet.locator("[data-paid] > *").first()).toContainText("Bientôt disponible.");
 });
 

@@ -11,5 +11,5 @@ test("démo : liens d'icônes sous la base /shhdrop/, fichiers servis (200)", as
     const res = await request.get(demo.origin + p);
     expect(res.status(), p).toBe(200);
   }
-  await expect(page.locator("header").getByRole("img", { name: "Shhdrop" })).toBeVisible();
+  await expect(page.locator("header").getByRole("img", { name: "Shhgone" })).toBeVisible();
 });

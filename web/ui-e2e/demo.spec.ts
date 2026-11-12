@@ -31,7 +31,7 @@ test.describe("fr-FR", () => {
     // Tout en haut de la page, avant l'en-tête, sans bouton de fermeture.
     expect((await banner.boundingBox())!.y).toBe(0);
     await expect(banner.getByRole("button")).toHaveCount(0);
-    await expect(page).toHaveTitle("Démo · Partage chiffré de bout en bout, sans compte · Shhdrop");
+    await expect(page).toHaveTitle("Démo · Partage chiffré de bout en bout, sans compte · Shhgone");
 
     const head = await page.evaluate(() =>
       [...document.head.children].slice(0, 3).map((e) => e.outerHTML),
@@ -93,7 +93,7 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("note")).toHaveText(BANNER_FR); // sur toutes les pages
     // Téléphone : en-tête natif, « Retour » à la place du logo ; ordinateur : le logo.
     // Celui de l'en-tête : le pied de page a aussi un logo (même nom).
-    const logo = page.getByRole("banner").getByRole("link", { name: "Shhdrop, accueil" });
+    const logo = page.getByRole("banner").getByRole("link", { name: "Shhgone, accueil" });
     if (await logo.isVisible()) await logo.click();
     else await page.getByRole("banner").getByRole("button", { name: "Retour" }).click();
     await expect(page).toHaveURL(demo.url);
@@ -288,7 +288,7 @@ test.describe("fr-FR : envoi (Tasks 17–18)", () => {
     await expect(page.getByRole("heading", { name: /^(Préparation des clés|Vérification anti-robot|Chiffrement et envoi|Finalisation|Lien prêt)$/ }).first()).toBeVisible();
     await expect(page).toHaveTitle(/^Démo · /);
     await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
-    await expect(page).toHaveTitle("Démo · Lien prêt · Shhdrop");
+    await expect(page).toHaveTitle("Démo · Lien prêt · Shhgone");
     const link = (await page.getByRole("group", { name: "Lien", exact: true }).locator(".sr-only").first().textContent()) ?? "";
     expect(link).toMatch(new RegExp(`^${demo.origin.replace(/\./g, "\\.")}/shhdrop/#[A-Za-z0-9_-]{43}$`));
     const manage = (await page.locator(".manage .sr-only").first().textContent()) ?? "";
@@ -367,7 +367,7 @@ test.describe("en-US", () => {
   test("bandeau en anglais ; capture", async ({ page, demo }) => {
     await page.goto(demo.url);
     await expect(page.getByRole("note")).toHaveText(BANNER_EN);
-    await expect(page).toHaveTitle("Demo · End-to-end encrypted sharing, no account · Shhdrop");
+    await expect(page).toHaveTitle("Demo · End-to-end encrypted sharing, no account · Shhgone");
     await page.waitForTimeout(700);
     await capture(page, "demo-home-en");
   });

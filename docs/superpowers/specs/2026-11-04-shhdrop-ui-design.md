@@ -65,6 +65,7 @@ L'interface n'importe que `web/src/index.ts`. Elle n'importe jamais `transfer/ap
 | P6 | **Écran d'envoi** complet : progression, vitesse, temps restant, segments, phases, coupure et reprise, Pause, Annuler (suppression côté serveur), sceau lié à la vraie progression ; après succès, « Supprimer ce partage » | §7.3, §9.4, §9.5 |
 | P7 | **Penser à tout** : états limites des deux côtés | §9 (tableaux d'états), §18 |
 | P8 | **Démo sur GitHub Pages** (`skoow.github.io/Shhdrop`) : build à part, faux serveur en mémoire, vrai chiffrement, bandeau permanent, anti-robot désactivé, CSP par meta ; publiée à chaque push sur `main` | §14.3 ; tâche « Démo » tôt dans le plan, puis mise à jour à chaque tâche d'écran |
+| P9 | **Nom affiché : Shhgone** (décision du propriétaire, 12 novembre ; domaine shhgone.com). Tout ce que voit un visiteur (textes, titres d'onglet, manifeste, logo, pied de page, démo) dit « Shhgone ». L'interne garde « shhdrop » (dépôt, paquets, bases locales, étiquettes HKDF, en-têtes `X-Shh-*`, base `/shhdrop/` de la démo) pour ne casser ni la compatibilité ni le chiffrement | §6 (logo « shh » plein, « gone » en trame) ; spec D42-24 |
 
 ### 0.3 Reports du Plan 1 traités ici
 
@@ -257,7 +258,7 @@ Le verre ne sert qu'aux éléments **sous lesquels le contenu défile** : la bar
 - Trait 1,75 px, taille 20 px (24 px dans les boutons principaux), `currentColor`, `aria-hidden="true"` ; le libellé est porté par le texte du bouton ou `aria-label`.
 - Jeu fermé (toute icône ajoutée passe en revue) : `paperclip` (fichiers), `camera` (photo), `mic` / `square` (vocal / arrêt), `type` (texte), `clipboard-paste` (coller), `x` (retirer), `undo-2` (annuler un retrait), `pencil` (renommer, modifier un texte), `grip-vertical` (poignée de déplacement), `arrow-up` / `arrow-down` (monter / descendre en mode déplacement), `lock` / `lock-open`, `shield-check` (nettoyé), `shield-alert` (vérification anti-robot de repli), `triangle-alert` (avertissement), `copy` / `check` (copié), `share-2`, `qr-code`, `refresh-cw` (régénérer, actualiser), `eye` / `eye-off`, `clock`, `timer` (reprise automatique), `pause` / `play`, `download`, `file`, `file-text`, `image`, `music`, `audio-lines` (vocal), `film`, `folder-x` (dossier refusé), `trash-2` (détruire, supprimer), `flag` (signaler), `external-link` (navigateur intégré), `chevron-left`, `languages`, `wifi-off`, `clipboard-x` (vider le presse-papier), `circle-help`, `minus` / `plus` (Stepper), `info` (bandeau d'information). Révision 5 (accueil v3) : `video` (vidéo), `link-2` (lien), `key-round` (mot de passe), `server` (serveur), `user-x` (sans compte), `hard-drive` (aucune IP sur disque), `code-xml` (code ouvert), `shield-x` (essais épuisés), `chevron-down` (question, défilement), `arrow-right` (lien vers une page).
 - Aucun emoji ni caractère Unicode (« ✕ », « ✓ », « ⋯ ») à la place d'une icône.
-- Logo : « Trame », mot-symbole « shhdrop » (« shhd » plein, « rop » en trame de points), statique : aucune animation à l'arrivée ; seul l'écran de destruction l'efface (§9).
+- Logo : « Trame », mot-symbole « shhgone » depuis le 12 novembre (P9 ; « shh » plein, « gone » en trame de points ; avant : « shhd » plein, « rop » en trame), statique : aucune animation à l'arrivée ; seul l'écran de destruction l'efface (§9).
 
 ---
 

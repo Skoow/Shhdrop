@@ -58,7 +58,7 @@ describe("feuille Plus : honnête, rien à acheter", () => {
     show(PaidSheet, { open: true, tier: "plus" });
     const s = text();
     expect(document.querySelector("[data-paid] > *")!.textContent).toContain("Bientôt disponible."); // audit M17
-    for (const x of ["Shhdrop Plus", "10 Go par partage", "2 Go par partage", "50 Go par partage", "Durée jusqu'à 7 jours (gratuit : 24 h maximum)", "7 €", "70 €", "Bientôt disponible."])
+    for (const x of ["Shhgone Plus", "10 Go par partage", "2 Go par partage", "50 Go par partage", "Durée jusqu'à 7 jours (gratuit : 24 h maximum)", "7 €", "70 €", "Bientôt disponible."])
       expect(s, x).toContain(x);
     expect(s).not.toMatch(/ouvertures \(gratuit/); // D41-36 : Plus garde les ouvertures du gratuit
     expect(s).not.toMatch(/élément/); // D41-17 : le nombre d'éléments n'est pas vendu
@@ -69,7 +69,7 @@ describe("feuille Plus : honnête, rien à acheter", () => {
   it("Pro : 50 Go, 50 ouvertures, 20 € par mois et 200 € par an (2 mois offerts) ; mensuel par abonnement, annuel au choix ; carte et crypto-monnaies ; aucun frais caché", () => {
     show(PaidSheet, { open: true, tier: "pro" });
     const s = text();
-    for (const x of ["Shhdrop Pro", "50 Go par partage", "Jusqu'à 50 ouvertures (gratuit : 10)", "20 € par mois, TTC", "ou 200 € par an", "2 mois offerts", "Au mois :", "abonnement renouvelé automatiquement chaque mois, résiliable en un clic, sans frais.", "À l'année, au choix :", "paiement unique (rien n'est prélevé ensuite) ou renouvellement automatique", "Moyens de paiement", "Carte bancaire", "Crypto-monnaies", "Aucun frais caché."]) expect(s.replace(/[\u202f\u00a0]/g, " "), x).toContain(x);
+    for (const x of ["Shhgone Pro", "50 Go par partage", "Jusqu'à 50 ouvertures (gratuit : 10)", "20 € par mois, TTC", "ou 200 € par an", "2 mois offerts", "Au mois :", "abonnement renouvelé automatiquement chaque mois, résiliable en un clic, sans frais.", "À l'année, au choix :", "paiement unique (rien n'est prélevé ensuite) ou renouvellement automatique", "Moyens de paiement", "Carte bancaire", "Crypto-monnaies", "Aucun frais caché."]) expect(s.replace(/[\u202f\u00a0]/g, " "), x).toContain(x);
     expect(s).not.toContain("220");
     expect(s).not.toContain("payé en une fois");
     // Aucun logo de marque tierce : les moyens de paiement sont des libellés et des pictogrammes maison.
@@ -88,12 +88,12 @@ describe("dépassement de 2 Go : l'erreur seule, les espaces Plus et Pro sont à
 
 describe("pages d'erreur (FR, EN) : titre d'onglet, action claire", () => {
   const cases = [
-    ["notfound", "Cette page n'existe pas.", "Page introuvable · Shhdrop", "This page does not exist."],
-    ["offline", "Vous êtes hors ligne.", "Hors ligne · Shhdrop", "You are offline."],
-    ["server", "Le serveur a un problème.", "Erreur du serveur · Shhdrop", "The server has a problem."],
-    ["limit", "Trop de demandes rapprochées.", "Trop de demandes · Shhdrop", "Too many requests in a row."],
-    ["unsupported", "Ce navigateur ne permet pas de chiffrer en sécurité.", "Navigateur non pris en charge · Shhdrop", "This browser cannot encrypt safely."],
-    ["maintenance", "Shhdrop est en maintenance.", "Maintenance · Shhdrop", "Shhdrop is under maintenance."],
+    ["notfound", "Cette page n'existe pas.", "Page introuvable · Shhgone", "This page does not exist."],
+    ["offline", "Vous êtes hors ligne.", "Hors ligne · Shhgone", "You are offline."],
+    ["server", "Le serveur a un problème.", "Erreur du serveur · Shhgone", "The server has a problem."],
+    ["limit", "Trop de demandes rapprochées.", "Trop de demandes · Shhgone", "Too many requests in a row."],
+    ["unsupported", "Ce navigateur ne permet pas de chiffrer en sécurité.", "Navigateur non pris en charge · Shhgone", "This browser cannot encrypt safely."],
+    ["maintenance", "Shhgone est en maintenance.", "Maintenance · Shhgone", "Shhgone is under maintenance."],
   ] as const;
   it.each(cases)("%s", (kind, fr, title, en) => {
     setLang("fr");
@@ -107,7 +107,7 @@ describe("pages d'erreur (FR, EN) : titre d'onglet, action claire", () => {
     expect(document.querySelector("h1")!.textContent).toBe(en);
     void unmount(c);
     mounted.pop();
-    expect(document.title).toBe("Open a share · Shhdrop"); // rendu à l'écran d'avant
+    expect(document.title).toBe("Open a share · Shhgone"); // rendu à l'écran d'avant
   });
   it("429 : compte à rebours de Retry-After, « Réessayer » activé à zéro", () => {
     vi.useFakeTimers();

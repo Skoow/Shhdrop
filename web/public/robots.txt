@@ -1,6 +1,6 @@
-# Shhdrop : seules les pages publiques sont indexées. Les partages (« /#clé ») ne sont jamais
+# Shhgone : seules les pages publiques sont indexées. Les partages (« /#clé ») ne sont jamais
 # envoyés au serveur après le « # » : rien à bloquer ici ; les autres pages portent « noindex ».
 User-agent: *
 Allow: /
 
-Sitemap: https://shhdrop.app/sitemap.xml
+Sitemap: https://shhgone.com/sitemap.xml

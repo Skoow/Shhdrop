@@ -211,7 +211,7 @@
   const bigWarn = typeof navigator !== "undefined" && needsMemoryWarning(totals, savePicker !== undefined, navigator);
   async function startZip() {
     if (disabled) return;
-    const name = "shhdrop.zip";
+    const name = "shhgone.zip";
     let sink: ItemSink | null;
     try {
       sink = savePicker ? await pickFile(savePicker, name) : series(name);
@@ -245,7 +245,7 @@
     return { ...s, bytes: s.done, n: items.length, finished: s.count.done, running: s.count.downloading + s.count.queued, paused: s.count.paused };
   };
   const allSum = $derived(sum(all.filter((i) => entries[i]!.kind === "file")));
-  // Titre de l'onglet pendant un téléchargement : « 42 % · Shhdrop » (jamais un nom de fichier),
+  // Titre de l'onglet pendant un téléchargement : « 42 % · Shhgone » (jamais un nom de fichier),
   // puis le titre de l'écran revient.
   const dlPct = $derived.by(() => {
     const z = dl.zip;

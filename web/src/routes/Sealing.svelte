@@ -218,7 +218,7 @@
   });
 
   // ---------- Titre de l'onglet, annonces de progression (tous les 10 %) ----------
-  // Pourcentage seulement, jamais un nom : « 42 % · Shhdrop » ; sinon « Envoi en cours · Shhdrop ».
+  // Pourcentage seulement, jamais un nom : « 42 % · Shhgone » ; sinon « Envoi en cours · Shhgone ».
   // La démo y ajoute son préfixe (demo/install.ts).
   const sending = $derived(phase === "upload" || phase === "paused" || phase === "offline" || phase === "finalize");
   $effect(() => {

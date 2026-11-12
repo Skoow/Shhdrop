@@ -143,7 +143,7 @@ test("M17, M18, coffre : bloc des offres (12 novembre, remplace la ligne Plus et
     await page.keyboard.press("Escape");
   }
   await page.locator('[data-offer-strip] [data-offer="plus"] button').filter({ visible: true }).click();
-  await expect(page.getByRole("dialog", { name: "Shhdrop Plus" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Shhgone Plus" })).toBeVisible();
   await shot(page, "m17-feuille-bientot", isMobile);
 });
 

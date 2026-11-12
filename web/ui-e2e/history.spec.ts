@@ -115,7 +115,7 @@ test.describe("fr-FR", () => {
     await strip.getByRole("link", { name: "Tout voir (1)" }).click();
     await expect(page).toHaveURL(/\/envois$/);
     await expect(page.getByRole("heading", { level: 1, name: "Mes partages" })).toBeVisible();
-    await expect(page).toHaveTitle("Mes partages · Shhdrop");
+    await expect(page).toHaveTitle("Mes partages · Shhgone");
     await expect(page.locator("[data-counts]")).toHaveText("1 actif · 0 terminé");
     await expect(card(page)).toHaveCount(1);
     await expect(card(page)).toContainText(/Créé (à l'instant|il y a \d+ min) · \d+ nov\., \d+ h \d\d/);

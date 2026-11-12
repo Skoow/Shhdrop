@@ -19,7 +19,7 @@
 <svelte:document onvisibilitychange={() => (hidden = document.hidden)} />
 
 <!-- Refonte du 12 novembre : nuit bleue sous l'aurore, et « la trame » (grille de petites
-     croix, signature de Shhdrop, comme les points du logo) : CSS pur, ni image ni data:. -->
+     croix, signature de Shhgone, comme les points du logo) : CSS pur, ni image ni data:. -->
 <div class="night" aria-hidden="true"></div>
 <div class={["aurora", { paused: hidden }]} aria-hidden="true" data-ambient style:--kx={k.x} style:--ky={k.y}>
   <img class="aur ink" src="{base}assets/aurora-ink.png" alt="" width="128" height="128" decoding="async" />

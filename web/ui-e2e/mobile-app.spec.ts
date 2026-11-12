@@ -64,7 +64,7 @@ test.describe("téléphone façon app", () => {
     const href = await page.locator('link[rel="manifest"]').getAttribute("href");
     expect(href).toBe("/manifest.webmanifest");
     const m = await page.evaluate(async (u) => (await fetch(u)).json(), href!);
-    expect(m).toMatchObject({ name: "Shhdrop", short_name: "Shhdrop", display: "standalone", start_url: "./", scope: "./", theme_color: "#0B0D12", background_color: "#0B0D12" });
+    expect(m).toMatchObject({ name: "Shhgone", short_name: "Shhgone", display: "standalone", start_url: "./", scope: "./", theme_color: "#0B0D12", background_color: "#0B0D12" });
     for (const i of m.icons as { src: string; sizes: string; type: string }[]) {
       expect(i.src).not.toMatch(/^(https?:)?\/\//); // aucune ressource tierce
       const r = await page.request.get(new URL(i.src, shh.origin + href!).href);

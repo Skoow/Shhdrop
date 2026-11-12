@@ -29,7 +29,7 @@ type V = { size: string; n: number; h: number; tries: number; opens: number };
 const FR: Record<InfoName, (v: V) => InfoPage> = {
   securite: (v) => ({
     title: "Sécurité",
-    lede: "Ce que Shhdrop protège, comment, et ce qu'il ne peut pas faire. Aucune protection n'est parfaite : voici ce qui est vrai aujourd'hui.",
+    lede: "Ce que Shhgone protège, comment, et ce qu'il ne peut pas faire. Aucune protection n'est parfaite : voici ce qui est vrai aujourd'hui.",
     blocks: [
       {
         id: "chiffrement",
@@ -68,7 +68,7 @@ const FR: Record<InfoName, (v: V) => InfoPage> = {
       },
       {
         id: "limites",
-        h: "Ce que Shhdrop ne peut pas faire",
+        h: "Ce que Shhgone ne peut pas faire",
         list: [
           "Empêcher une capture d'écran, une photo de l'écran ou une copie : ce que le destinataire voit ou télécharge lui appartient.",
           "Effacer l'historique de votre navigateur. Nous retirons la clé de la barre d'adresse, mais le navigateur a déjà noté l'adresse complète dans son historique (parfois synchronisé). Ouvrez le lien en navigation privée pour laisser moins de traces.",
@@ -155,10 +155,10 @@ const FR: Record<InfoName, (v: V) => InfoPage> = {
   }),
   conditions: () => ({
     title: "Conditions d'utilisation",
-    lede: "Les règles d'usage de Shhdrop.",
+    lede: "Les règles d'usage de Shhgone.",
     draft: true,
     blocks: [
-      { h: "Usage autorisé", p: ["Shhdrop sert à transmettre des contenus de façon privée. Il est interdit de l'utiliser pour diffuser des contenus illégaux ou pour nuire à autrui."] },
+      { h: "Usage autorisé", p: ["Shhgone sert à transmettre des contenus de façon privée. Il est interdit de l'utiliser pour diffuser des contenus illégaux ou pour nuire à autrui."] },
       { h: "Signalement", p: ["Tout destinataire peut signaler un partage : il est alors détruit tout de suite. Voir « Signaler un abus »."] },
       { h: "Responsabilité", p: ["À compléter par le propriétaire."] },
       { h: "Droit applicable", p: ["À compléter par le propriétaire."] },
@@ -171,7 +171,7 @@ const FR: Record<InfoName, (v: V) => InfoPage> = {
     blocks: [
       { h: "Éditeur", list: ["Nom ou raison sociale : à compléter par le propriétaire.", "Adresse : à compléter par le propriétaire.", "Contact : à compléter par le propriétaire.", "Directeur de la publication : à compléter par le propriétaire."] },
       { h: "Hébergeur", list: ["Nom : à compléter par le propriétaire.", "Adresse : à compléter par le propriétaire."] },
-      { h: "Code source", p: ["Le code de Shhdrop est public, sous licence AGPL-3.0."] },
+      { h: "Code source", p: ["Le code de Shhgone est public, sous licence AGPL-3.0."] },
     ],
   }),
   signaler: (v) => ({
@@ -200,7 +200,7 @@ const FR: Record<InfoName, (v: V) => InfoPage> = {
 const EN: Record<InfoName, (v: V) => InfoPage> = {
   securite: (v) => ({
     title: "Security",
-    lede: "What Shhdrop protects, how, and what it cannot do. No protection is perfect: here is what is true today.",
+    lede: "What Shhgone protects, how, and what it cannot do. No protection is perfect: here is what is true today.",
     blocks: [
       {
         id: "chiffrement",
@@ -239,7 +239,7 @@ const EN: Record<InfoName, (v: V) => InfoPage> = {
       },
       {
         id: "limites",
-        h: "What Shhdrop cannot do",
+        h: "What Shhgone cannot do",
         list: [
           "Prevent a screenshot, a photo of the screen or a copy: what the recipient sees or downloads is theirs.",
           "Erase your browser history. We remove the key from the address bar, but the browser has already recorded the full address in its history (sometimes synced). Open the link in a private window to leave fewer traces.",
@@ -326,10 +326,10 @@ const EN: Record<InfoName, (v: V) => InfoPage> = {
   }),
   conditions: () => ({
     title: "Terms of use",
-    lede: "The rules for using Shhdrop.",
+    lede: "The rules for using Shhgone.",
     draft: true,
     blocks: [
-      { h: "Allowed use", p: ["Shhdrop is for sending content privately. Using it to spread illegal content or to harm others is forbidden."] },
+      { h: "Allowed use", p: ["Shhgone is for sending content privately. Using it to spread illegal content or to harm others is forbidden."] },
       { h: "Reporting", p: ["Any recipient can report a share: it is destroyed at once. See “Report abuse”."] },
       { h: "Liability", p: ["To be completed by the owner."] },
       { h: "Governing law", p: ["To be completed by the owner."] },
@@ -342,7 +342,7 @@ const EN: Record<InfoName, (v: V) => InfoPage> = {
     blocks: [
       { h: "Publisher", list: ["Name or company: to be completed by the owner.", "Address: to be completed by the owner.", "Contact: to be completed by the owner.", "Publication director: to be completed by the owner."] },
       { h: "Host", list: ["Name: to be completed by the owner.", "Address: to be completed by the owner."] },
-      { h: "Source code", p: ["Shhdrop's code is public, under the AGPL-3.0 license."] },
+      { h: "Source code", p: ["Shhgone's code is public, under the AGPL-3.0 license."] },
     ],
   }),
   signaler: (v) => ({

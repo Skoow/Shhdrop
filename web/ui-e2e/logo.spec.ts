@@ -10,17 +10,17 @@ const logoAnimations = (page: Page) =>
       .filter((a) => a.playState === "running" && logo?.contains((a.effect as KeyframeEffect | null)?.target ?? null)).length;
   });
 
-test("en-tête : le logo est une image nommée « Shhdrop », dans le lien d'accueil", async ({ page, shh }) => {
+test("en-tête : le logo est une image nommée « Shhgone », dans le lien d'accueil", async ({ page, shh }) => {
   await page.goto(shh.origin + "/");
-  const logo = page.locator("header").getByRole("img", { name: "Shhdrop" });
+  const logo = page.locator("header").getByRole("img", { name: "Shhgone" });
   await expect(logo).toBeVisible();
-  await expect(page.locator("header a").first().locator("svg[role='img']")).toHaveAttribute("aria-label", "Shhdrop");
+  await expect(page.locator("header a").first().locator("svg[role='img']")).toHaveAttribute("aria-label", "Shhgone");
 });
 
-test("logo : statique à l'arrivée, aucune animation en cours, nom accessible « Shhdrop »", async ({ page, shh }) => {
+test("logo : statique à l'arrivée, aucune animation en cours, nom accessible « Shhgone »", async ({ page, shh }) => {
   await page.goto(shh.origin + "/");
   const logo = page.locator("header svg[role='img']");
-  await expect(logo).toHaveAttribute("aria-label", "Shhdrop");
+  await expect(logo).toHaveAttribute("aria-label", "Shhgone");
   expect(await logoAnimations(page)).toBe(0);
   await expect(logo.locator(".head")).toHaveCount(1);
   await expect(logo.locator(".dots")).toHaveCount(6);
@@ -46,7 +46,7 @@ test("logo : l'élément LCP de l'accueil n'est pas le logo", async ({ page, shh
 test("logo : aucune animation en mouvement réduit", async ({ page, shh }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto(shh.origin + "/");
-  const logo = page.locator("header").getByRole("img", { name: "Shhdrop" });
+  const logo = page.locator("header").getByRole("img", { name: "Shhgone" });
   await expect(logo).toBeVisible();
   expect(await logoAnimations(page)).toBe(0);
 });

@@ -193,7 +193,7 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("button", { name: "Épeler" })).toHaveCount(0);
     expect(logs.join("\n")).not.toContain(password);
     expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
-    expect(await page.title()).toBe("Lien prêt · Shhdrop");
+    expect(await page.title()).toBe("Lien prêt · Shhgone");
   });
 
   test("mouvement réduit : aucune animation ; sinon, montée en éventail ≤ 640 ms et boutons cliquables", async ({ page, shh, context }) => {

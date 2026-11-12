@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Logo « Trame » (scripts/gen-logo.mjs) : « shhd » plein, « rop » en trame de points.
+  // Logo « Trame » (scripts/gen-logo.mjs) : « shh » plein, « gone » en trame de points.
   // Statique à l'arrivée : le logo au repos s'affiche tout de suite, rien ne s'anime.
   // Animations (écran de destruction seulement) : opacity et transform (Web Animations API, aucun attribut style),
   // rien en mouvement réduit (UI §7.5). Chronologie de la gomme dans logoMotion.ts.
@@ -86,11 +86,11 @@
 </script>
 
 {#if variant === "mark"}
-  <svg bind:this={svg} class="logo mark" viewBox="4 4 22 22" role="img" aria-label="Shhdrop" focusable="false">
+  <svg bind:this={svg} class="logo mark" viewBox="4 4 22 22" role="img" aria-label="Shhgone" focusable="false">
     <path class="stripes" d={MARK_PATH} />
   </svg>
 {:else}
-  <svg bind:this={svg} class={["logo", "word", gone && "gone"]} viewBox={LOGO_VIEWBOX} role="img" aria-label="Shhdrop" focusable="false">
+  <svg bind:this={svg} class={["logo", "word", gone && "gone"]} viewBox={LOGO_VIEWBOX} role="img" aria-label="Shhgone" focusable="false">
     {#if erasing}
       <defs>
         <linearGradient id="{uid}-g1" x1="0" x2="1" y1="0" y2="0">
@@ -154,7 +154,7 @@
     fill: none;
     stroke: currentColor;
   }
-  /* État statique : « shhd » plein, « rop » en trame. */
+  /* État statique : « shh » plein, « gone » en trame. */
   .tail {
     opacity: 0;
   }

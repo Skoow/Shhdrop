@@ -189,7 +189,7 @@ test.describe("navigateur sans crypto.subtle", () => {
     await expect(
       page.getByRole("heading", { name: "Ce navigateur ne permet pas de chiffrer en sécurité.", exact: false }),
     ).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Shhdrop", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Shhgone", exact: true })).toHaveCount(0);
     // Le lien reste dans la barre : la personne peut le recopier dans un autre navigateur.
     expect(await hash(page)).toBe(`#${KEY}`);
     expect(api).toEqual([]);

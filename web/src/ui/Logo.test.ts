@@ -21,11 +21,11 @@ afterEach(() => {
 });
 
 describe("Logo", () => {
-  it("mot-symbole : image nommée « Shhdrop », trame en 6 tranches, aucun attribut style", () => {
+  it("mot-symbole : image nommée « Shhgone », trame en 6 tranches, aucun attribut style", () => {
     show({});
     const svg = document.querySelector("svg")!;
     expect(svg.getAttribute("role")).toBe("img");
-    expect(svg.getAttribute("aria-label")).toBe("Shhdrop");
+    expect(svg.getAttribute("aria-label")).toBe("Shhgone");
     expect(svg.querySelectorAll(".dots")).toHaveLength(6);
     expect(svg.querySelectorAll("*").length).toBeLessThanOrEqual(10);
     expect(document.body.innerHTML).not.toContain("style=");
@@ -34,7 +34,7 @@ describe("Logo", () => {
   it("marque seule : le o rayé, même nom accessible", () => {
     show({ variant: "mark" });
     const svg = document.querySelector("svg")!;
-    expect(svg.getAttribute("aria-label")).toBe("Shhdrop");
+    expect(svg.getAttribute("aria-label")).toBe("Shhgone");
     expect(svg.querySelectorAll(".stripes")).toHaveLength(1);
   });
 
@@ -50,7 +50,7 @@ describe("Logo", () => {
     expect(document.querySelector("svg")!.classList.contains("gone")).toBe(true);
   });
 
-  it("arrivée : logo au repos tout de suite, aucune animation lancée, « shhd » plein et « rop » en trame", async () => {
+  it("arrivée : logo au repos tout de suite, aucune animation lancée, « shh » plein et « gone » en trame", async () => {
     reduce(false);
     const animate = vi.spyOn(Element.prototype, "animate");
     show({});
@@ -58,7 +58,7 @@ describe("Logo", () => {
     flushSync();
     expect(animate).not.toHaveBeenCalled();
     const svg = document.querySelector("svg")!;
-    expect(svg.getAttribute("aria-label")).toBe("Shhdrop");
+    expect(svg.getAttribute("aria-label")).toBe("Shhgone");
     expect(svg.classList.contains("gone")).toBe(false);
     expect(svg.querySelector(".head")).not.toBeNull();
     expect(svg.querySelectorAll(".dots")).toHaveLength(6);
@@ -87,6 +87,17 @@ describe("Logo", () => {
     const m1 = erase.tracks.find((t) => t.target === ".m1")!;
     expect(m1.frames.some((f) => f.transform === `translateX(${ERASE.x1 - ERASE.x0}px)`)).toBe(true);
     expect(erase.tracks.find((t) => t.target === ".ink")!.fill).toBe("forwards");
+  });
+
+  it("gomme : sa course et le masque couvrent tout le mot-symbole (« shhgone », plus large que l'ancien)", async () => {
+    const { ERASE } = await import("./logoMotion");
+    const { LOGO_VIEWBOX, LOGO_STROKE } = await import("./logo-paths");
+    const [x, , w] = LOGO_VIEWBOX.split(" ").map(Number);
+    expect(ERASE.x0).toBeLessThanOrEqual(x! - LOGO_STROKE);
+    expect(ERASE.x1).toBeGreaterThanOrEqual(x! + w! + LOGO_STROKE);
+    // Masque (Logo.svelte : x = −40, largeur 270) : les deux rectangles restent dedans au départ comme à l'arrivée.
+    expect(ERASE.x1 + ERASE.maskW).toBeGreaterThan(-40 + 270);
+    expect(ERASE.maskW).toBeGreaterThanOrEqual(w! + 2 * LOGO_STROKE);
   });
 
   it("erase() : la gomme passe, puis le mot reste effacé et les effets disparaissent", async () => {

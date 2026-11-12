@@ -78,7 +78,7 @@ test("(a) expiration pendant un enregistrement : fermeture aussitôt, fichier no
   await expect(row).toContainText("Fichier en cours autorisé à se terminer");
   await expect(row.locator("progress")).toBeVisible();
   expect(await page.evaluate(() => document.body.innerText)).not.toContain("4471");
-  await expect(page).toHaveTitle("Partage indisponible · Shhdrop");
+  await expect(page).toHaveTitle("Partage indisponible · Shhgone");
   await settle(page);
   expect(await axe(page)).toEqual([]);
   await capture(page, "gone-finishing");

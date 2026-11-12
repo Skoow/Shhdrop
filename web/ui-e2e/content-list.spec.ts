@@ -271,7 +271,7 @@ test("archive .zip sans sélecteur : confirmation des fichiers à risque, archiv
   const dl = page.waitForEvent("download");
   await page.getByRole("button", { name: "Télécharger quand même" }).click();
   const d = await dl;
-  expect(d.suggestedFilename()).toBe("shhdrop.zip");
+  expect(d.suggestedFilename()).toBe("shhgone.zip");
   await expect(page.locator('[data-progress="zip"]')).toContainText("Archive enregistrée");
   const dir = mkdtempSync(join(tmpdir(), "shh-zip-e2e-"));
   const p = join(dir, "a.zip");

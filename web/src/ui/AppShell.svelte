@@ -223,7 +223,7 @@
     </div>
     <div class="base">
       <!-- Retours UI9 : le nom en bas à gauche, « © 2026 » à côté (plus de mention « aucune publicité »). -->
-      <p class="sig"><span class="wm" translate="no">Shhdrop</span><span>{t("foot.copy")}</span></p>
+      <p class="sig"><span class="wm" translate="no">Shhgone</span><span>{t("foot.copy")}</span></p>
       <p class="num" data-build>{t("foot.version", { v: BUILD_ID })}</p>
     </div>
   </div>
@@ -388,7 +388,7 @@
     block-size: 1px;
     background: linear-gradient(90deg, transparent, rgb(95 227 181 / 0.45) 22%, rgb(233 236 242 / 0.16) 60%, transparent);
   }
-  /* Papier peint maison (retours UI7) : petits pictos Shhdrop répétés (cadenas, clé, fichier,
+  /* Papier peint maison (retours UI7) : petits pictos Shhgone répétés (cadenas, clé, fichier,
      onde, points de la Trame), fichier statique mis en cache (CSP : ni data: ni style inline),
      à très faible contraste et fondu vers le haut ; retiré en contraste renforcé ou forcé. */
   .foot::after {

@@ -16,12 +16,20 @@ describe("gen-logo", () => {
       expect(readFileSync(join(web, rel), "utf8"), rel).toBe(gen());
   });
 
-  it("trame légère : 6 tranches, une quarantaine de points, rien d'autre qu'arcs et déplacements", () => {
+  it("trame légère : 6 tranches, une soixantaine de points (« gone »), rien d'autre qu'arcs et déplacements", () => {
     const b = build();
     expect(b.dots).toHaveLength(6);
-    expect(b.count).toBeGreaterThan(30);
-    expect(b.count).toBeLessThan(50);
+    expect(b.count).toBeGreaterThan(50);
+    expect(b.count).toBeLessThan(70);
     for (const d of b.dots) expect(d).toMatch(/^(M[-\d. ]+a[-\d. ]+a[-\d. ]+)+$/);
+  });
+
+  it("mot-symbole « shhgone » : « shh » plein (3 lettres), « gone » en trame, nommé Shhgone", () => {
+    const b = build();
+    expect(b.head.match(/M/g)).toHaveLength(5); // s : 1 tracé ; h : 2 chacun
+    const svg = (OUTPUTS as Record<string, () => string>)["public/logo.svg"]!();
+    expect(svg).toContain('aria-label="Shhgone"');
+    expect(svg).not.toMatch(/shhdrop/i);
   });
 
   it("favicon : bords des bandes sur des unités paires (net à 16 px)", () => {

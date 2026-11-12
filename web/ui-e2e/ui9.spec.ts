@@ -1,5 +1,5 @@
 // Retours UI9 du propriétaire, sur le vrai serveur : bouclier de nettoyage juste avant le nom (retours CLEAN2)
-// (composeur et destinataire, ellipse du nom préservée), pied de page signé « Shhdrop © 2026 »
+// (composeur et destinataire, ellipse du nom préservée), pied de page signé « Shhgone © 2026 »
 // en bas à gauche, papier peint de pictos sur les côtés de la page. Captures fr-FR ×2, 390 et 1440 px.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -78,7 +78,7 @@ async function sides(page: Page) {
   });
 }
 
-test("pied : « Shhdrop © 2026 » en bas à gauche, plus de « publicité » ; côtés en pictos, retirés en contraste renforcé ; captures", async ({ page, shh, isMobile }) => {
+test("pied : « Shhgone © 2026 » en bas à gauche, plus de « publicité » ; côtés en pictos, retirés en contraste renforcé ; captures", async ({ page, shh, isMobile }) => {
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(shh.origin + "/");
   await settle(page);
@@ -87,7 +87,7 @@ test("pied : « Shhdrop © 2026 » en bas à gauche, plus de « publicité » ; 
   await foot.scrollIntoViewIfNeeded();
   await expect(foot.getByText(/publicité/)).toHaveCount(0);
   const sig = foot.locator(".base .sig");
-  await expect(sig).toHaveText(/^Shhdrop\s*©\s2026$/);
+  await expect(sig).toHaveText(/^Shhgone\s*©\s2026$/);
   const [sb, base] = [await sig.boundingBox(), await foot.locator(".base").boundingBox()];
   expect(Math.abs(sb!.x - base!.x)).toBeLessThanOrEqual(1);
   // Côtés : fichier statique (pas de data:), fixe, très discret, colonne centrale masquée.

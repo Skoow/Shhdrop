@@ -1,14 +1,14 @@
-// Titre de l'onglet (scan UX B9) : « écran · Shhdrop », dans la langue de la page. Seulement des
+// Titre de l'onglet (scan UX B9) : « écran · Shhgone », dans la langue de la page. Seulement des
 // textes fixes de l'interface : jamais un nom de fichier, un lien, une clé ni un mot de passe
 // (le titre part dans l'historique, les onglets synchronisés et les captures).
 import { t } from "../i18n/i18n.svelte";
 import type { Route } from "./router.svelte";
 
 export type TitleScreen = Route["name"] | "landing" | "ready" | "sealing" | "unsupported" | "offline" | "server" | "limit" | "maintenance" | "invalid" | "incomplete" | "gone";
-const BRAND = "Shhdrop";
+const BRAND = "Shhgone";
 
 /**
- * Pendant un envoi ou un téléchargement : « 42 % · Shhdrop », comme les autres services (le
+ * Pendant un envoi ou un téléchargement : « 42 % · Shhgone », comme les autres services (le
  * pourcentage d'abord, lisible dans un onglet étroit ; aucun nom de fichier). Espace fine
  * insécable en français.
  */

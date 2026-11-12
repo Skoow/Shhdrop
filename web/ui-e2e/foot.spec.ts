@@ -85,7 +85,7 @@ test.describe("fr-FR", () => {
     await expect(sec).toHaveAccessibleDescription(/désactivés pendant l'envoi/);
     await expect(sec).not.toHaveAttribute("tabindex", "-1");
     await expect(footLink(page, /^Code source/)).toHaveAttribute("aria-disabled", "true");
-    await expect(f.getByRole("link", { name: "Shhdrop, accueil" })).toHaveAttribute("aria-disabled", "true");
+    await expect(f.getByRole("link", { name: "Shhgone, accueil" })).toHaveAttribute("aria-disabled", "true");
     for (const l of await f.getByRole("link").all()) await expect(l).toHaveAttribute("aria-disabled", "true");
     await sec.click({ force: true });
     expect(new URL(page.url()).pathname).toBe("/envoyer");

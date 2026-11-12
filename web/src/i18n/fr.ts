@@ -124,7 +124,7 @@ export const fr = {
   "home.faq.scan.q": "Mes fichiers sont-ils analysés\u202f?",
   "home.faq.scan.a": "Non, le serveur ne peut pas les lire. Sur votre appareil, la plupart des photos (lieu, appareil, date de prise de vue) et des documents PDF, Office et LibreOffice (auteur, société, dates) sont nettoyés avant le chiffrement\u202f; les vidéos (lieu, appareil, dates) et les sons (titre, artiste, logiciel) aussi, sans réencodage. Si un fichier ne peut pas être nettoyé, l'écran vous le dit.",
   "home.faq.copy.q": "Le destinataire peut-il garder une copie\u202f?",
-  "home.faq.copy.a": "Oui, s'il enregistre un élément ou fait une capture d'écran\u202f: ce qu'il garde lui appartient. Shhdrop efface le partage, pas ce qu'il a enregistré.",
+  "home.faq.copy.a": "Oui, s'il enregistre un élément ou fait une capture d'écran\u202f: ce qu'il garde lui appartient. Shhgone efface le partage, pas ce qu'il a enregistré.",
   "home.end.cta": "Commencer",
   "schema.label": "Chiffré sur votre appareil, illisible pour le serveur, déchiffré chez le destinataire\u202f; la clé passe à part, jamais par le serveur.",
   "schema.device": "Votre appareil",
@@ -136,7 +136,7 @@ export const fr = {
   "schema.recipient": "Destinataire",
 
   "shell.skip": "Aller au contenu",
-  "shell.home": "Shhdrop, accueil",
+  "shell.home": "Shhgone, accueil",
   "shell.nav": "Informations",
   "shell.security": "Sécurité",
   "shell.privacy": "Confidentialité",
@@ -368,11 +368,11 @@ export const fr = {
   "verif.more": "En savoir plus",
 
   "seo.home": "Envoyez fichiers, photos, vidéos et notes chiffrés de bout en bout, sans compte, par un lien avec mot de passe qui s'autodétruit. Le serveur ne lit rien.",
-  "seo.securite": "Comment Shhdrop protège vos envois\u202f: chiffrement dans le navigateur, clé jamais envoyée au serveur, mot de passe, destruction automatique.",
-  "seo.confidentialite": "Ce que Shhdrop voit\u202f: aucun compte, aucune adresse IP enregistrée, aucune statistique ni traceur\u202f; fichiers nettoyés sur votre appareil.",
-  "seo.offres": "Offres Shhdrop Plus et Pro, bientôt disponibles\u202f: plus d'espace, durées plus longues et plus d'ouvertures, avec le même chiffrement de bout en bout.",
-  "seo.conditions": "Conditions d'utilisation de Shhdrop, service de partage chiffré de bout en bout sans compte.",
-  "seo.mentions": "Mentions légales de Shhdrop\u202f: éditeur, hébergeur et contact.",
+  "seo.securite": "Comment Shhgone protège vos envois\u202f: chiffrement dans le navigateur, clé jamais envoyée au serveur, mot de passe, destruction automatique.",
+  "seo.confidentialite": "Ce que Shhgone voit\u202f: aucun compte, aucune adresse IP enregistrée, aucune statistique ni traceur\u202f; fichiers nettoyés sur votre appareil.",
+  "seo.offres": "Offres Shhgone Plus et Pro, bientôt disponibles\u202f: plus d'espace, durées plus longues et plus d'ouvertures, avec le même chiffrement de bout en bout.",
+  "seo.conditions": "Conditions d'utilisation de Shhgone, service de partage chiffré de bout en bout sans compte.",
+  "seo.mentions": "Mentions légales de Shhgone\u202f: éditeur, hébergeur et contact.",
   "title.landing": "Partage chiffré de bout en bout, sans compte",
   "title.home": "Envoyer",
   "title.envoyer": "Envoyer",
@@ -427,7 +427,7 @@ export const fr = {
   "ready.demo.open": "Ouvrir comme destinataire (démo)",
 
   "open.intro":
-    "Quelqu'un vous a envoyé un partage chiffré. Shhdrop ne vérifie pas l'identité de l'expéditeur.",
+    "Quelqu'un vous a envoyé un partage chiffré. Shhgone ne vérifie pas l'identité de l'expéditeur.",
   "open.cost":
     "Déverrouiller utilise une ouverture. Si le téléchargement échoue ensuite, cette ouverture est perdue.",
   "open.badPw.one": "Mot de passe incorrect · {n}\u202fessai restant",
@@ -445,7 +445,7 @@ export const fr = {
     "«\u00a0{name}\u00a0» peut exécuter du code sur votre appareil. N'ouvrez ce fichier que si vous faites confiance à l'expéditeur.",
 
   "report.body":
-    "Le partage sera détruit immédiatement pour tout le monde. Shhdrop ne peut pas voir le contenu et ne garde aucune trace de votre signalement. Pour un contenu illégal, vous pouvez aussi le signaler aux autorités (en France\u202f: PHAROS, internet-signalement.gouv.fr).",
+    "Le partage sera détruit immédiatement pour tout le monde. Shhgone ne peut pas voir le contenu et ne garde aucune trace de votre signalement. Pour un contenu illégal, vous pouvez aussi le signaler aux autorités (en France\u202f: PHAROS, internet-signalement.gouv.fr).",
 
   "invalid": "Ce lien n'existe pas ou n'est plus disponible.",
   "invalid.hint": "Vous l'avez déjà ouvert\u202f? On ne peut y revenir que depuis le même navigateur (ou la même session de navigation privée, tant qu'elle reste ouverte), jusqu'à son échéance. Depuis un autre appareil, il faut une ouverture restante.",
@@ -585,7 +585,7 @@ export const fr = {
   "error.notfound.title": "Cette page n'existe pas.",
   "error.notfound.body": "L'adresse a peut-être été mal recopiée. Rien n'a été demandé au serveur, et aucun partage n'a été ouvert.",
   "error.offline.title": "Vous êtes hors ligne.",
-  "error.offline.body": "Shhdrop a besoin du réseau pour ouvrir ou envoyer un partage. Rien n'a été envoyé. La page réessaie d'elle-même dès que la connexion revient.",
+  "error.offline.body": "Shhgone a besoin du réseau pour ouvrir ou envoyer un partage. Rien n'a été envoyé. La page réessaie d'elle-même dès que la connexion revient.",
   "error.server.title": "Le serveur a un problème.",
   "error.server.body": "Ce n'est pas de votre fait. Le serveur n'a jamais votre contenu en clair\u202f: rien n'a été exposé. Réessayez dans quelques instants.",
   "error.limit.title": "Trop de demandes rapprochées.",
@@ -594,7 +594,7 @@ export const fr = {
   "error.limit.ready": "Vous pouvez réessayer.",
   "error.unsupported.title": "Ce navigateur ne permet pas de chiffrer en sécurité.",
   "error.unsupported.body": "Ouvrez cette page dans une version récente de Safari, Chrome, Firefox ou Edge. Rien n'a été envoyé.",
-  "error.maintenance.title": "Shhdrop est en maintenance.",
+  "error.maintenance.title": "Shhgone est en maintenance.",
   "error.maintenance.body": "Les nouveaux envois sont suspendus un moment. Les partages déjà créés restent chiffrés et gardent leur échéance. Réessayez un peu plus tard.",
   "error.back": "Revenir à mon envoi",
 
@@ -605,7 +605,7 @@ export const fr = {
   "paid.days.other": "{n}\u202fjours",
   "paid.firstOpen": "Démarrer à la première ouverture",
   "paid.opens": "Jusqu'à {n}",
-  "paid.title": "Shhdrop {tier}",
+  "paid.title": "Shhgone {tier}",
   "paid.hero": "par lien, au lieu de {free} en gratuit",
   "paid.lead": "Plus de place et de confort. Même chiffrement, mêmes garanties\u202f: le gratuit reste complet et privé.",
   "paid.unlocks": "Ce que {tier} ajoute",
@@ -772,7 +772,7 @@ export const fr = {
   "clean.recv.done.audio": "Nettoyé avant l'envoi\u202f: titre, artiste, logiciel et dates retirés",
   "clean.recv.done.office": "Nettoyé avant l'envoi\u202f: propriétés et chemin local du fichier retirés (auteurs des commentaires et liens vers d'autres fichiers gardés)",
   "clean.recv.done.pdf": "Nettoyé avant l'envoi\u202f: propriétés du document retirées (auteur, logiciel, dates)",
-  "clean.recv.done.vocal": "Enregistré dans Shhdrop, sans informations cachées",
+  "clean.recv.done.vocal": "Enregistré dans Shhgone, sans informations cachées",
   "clean.recv.asis": "Fichier tel quel",
   "clean.recv.fail.echec": "Non nettoyé\u202f: structure du fichier inattendue",
   "clean.recv.fail.protege": "Non nettoyé\u202f: fichier signé ou protégé",
@@ -781,7 +781,7 @@ export const fr = {
   "compose.unsupported.one": "{n}\u202ffichier ne peut pas être nettoyé (format non pris en charge)",
   "compose.unsupported.other": "{n}\u202ffichiers ne peuvent pas être nettoyés (format non pris en charge)",
   "settings.about": "À propos",
-  "settings.about.body": "Shhdrop chiffre sur votre appareil avant l'envoi. Sans compte, sans traceur, code source public.",
+  "settings.about.body": "Shhgone chiffre sur votre appareil avant l'envoi. Sans compte, sans traceur, code source public.",
   "confirm.title": "Confirmation",
   "add.open": "Ajouter",
   "add.title": "Ajouter",
