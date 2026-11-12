@@ -58,9 +58,11 @@ func pieceID(r *http.Request) (string, error) {
 }
 
 // creerPiece : POST /api/salons/pieces {bucket, vocal}. Un fichier passe par les quotas des
-// envois (limits.BeginUpload : créations, octets utiles, 2 envois non finalisés à la fois par
-// connexion, partagés avec les partages ; rendus si la création échoue) ; un vocal n'y passe
-// pas (réserve du siège, v3 §5.1). Jeton d'envoi valable min(6 h, fin du salon).
+// envois sans compter comme création de partage (limits.BeginPiece : octets utiles du jour,
+// 2 envois non finalisés à la fois par connexion, partagés avec les partages ; rendus si la
+// création échoue) ; leur nombre est borné par le salon (salon.PiecesParHeure par siège :
+// 429 limit). Un vocal ne passe par aucun des deux (réserve du siège, v3 §5.1). Jeton
+// d'envoi valable min(6 h, fin du salon).
 func (a salonAPI) creerPiece(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Bucket *int  `json:"bucket"`
@@ -83,7 +85,7 @@ func (a salonAPI) creerPiece(w http.ResponseWriter, r *http.Request) {
 	id := share.NewID()
 	ip := ipOf(r)
 	if !vocal {
-		switch retry, err := a.lim.BeginUpload(ip, id, share.ContentBytes(bucket)); {
+		switch retry, err := a.lim.BeginPiece(ip, id, share.ContentBytes(bucket)); {
 		case errors.Is(err, limits.ErrDuplicate): // id de 128 bits déjà en cours : impossible
 			failSalon(w, errors.New("id de pièce en double"))
 			return

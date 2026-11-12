@@ -121,6 +121,7 @@ type upload struct {
 	recv     int64 // reçus (Receive) : jamais rendus
 	born     int64 // création (secondes Unix), en mémoire seulement : borne le report à minuit
 	old      bool  // créé la veille : ses clés sont celles du secret de la veille
+	piece    bool  // pièce jointe du salon (BeginPiece) : jamais comptée comme création
 }
 
 func New(now func() time.Time) *Limiter {
@@ -181,8 +182,10 @@ func (l *Limiter) rotateLocked(now time.Time) {
 		for id, u := range keep {
 			u.old = true
 			l.uploads[id] = u
-			l.count64[u.k64]++
-			l.count48[u.k48]++
+			if !u.piece {
+				l.count64[u.k64]++
+				l.count48[u.k48]++
+			}
 			l.bytes64[u.k64] += u.counted()
 			l.bytes48[u.k48] += u.counted()
 			l.pend64[u.k64]++
@@ -309,6 +312,19 @@ var (
 // jusqu'à minuit UTC (quotas du jour) ou 60 s (envois en cours). Les envois de la veille
 // encore en cours de la même adresse comptent aussi (clés de la veille, o64 et o48).
 func (l *Limiter) BeginUpload(ip netip.Addr, id string, bytes int64) (retryAfter time.Duration, err error) {
+	return l.begin(ip, id, bytes, false)
+}
+
+// BeginPiece : BeginUpload pour une pièce jointe du salon (plan C-2 Task 13, décision du
+// 12 novembre) : ce n'est pas une création de partage, le quota des créations n'est ni
+// consulté ni débité ; octets utiles du jour, envois en cours et octets abandonnés comptent
+// comme pour un partage. Le nombre de pièces est borné par le salon (120 par heure et par
+// siège).
+func (l *Limiter) BeginPiece(ip netip.Addr, id string, bytes int64) (retryAfter time.Duration, err error) {
+	return l.begin(ip, id, bytes, true)
+}
+
+func (l *Limiter) begin(ip netip.Addr, id string, bytes int64, piece bool) (retryAfter time.Duration, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
@@ -320,8 +336,9 @@ func (l *Limiter) BeginUpload(ip netip.Addr, id string, bytes int64) (retryAfter
 		o64, o48 = keys(l.prev, ip)
 	}
 	untilMidnight := time.Unix((l.day+1)*day, 0).Sub(now)
+	creations := !piece && (l.count64[k64]+l.count64[o64] >= CreatesPer64 || l.count48[k48]+l.count48[o48] >= CreatesPer48)
 	switch {
-	case bytes < 0 || l.count64[k64]+l.count64[o64] >= CreatesPer64 || l.count48[k48]+l.count48[o48] >= CreatesPer48 ||
+	case bytes < 0 || creations ||
 		bytes > BytesPer64-l.bytes64[k64]-l.bytes64[o64] || bytes > BytesPer48-l.bytes48[k48]-l.bytes48[o48] ||
 		l.aband64[k64]+l.aband64[o64] >= AbandonedPer64 || l.aband48[k48]+l.aband48[o48] >= AbandonedPer48:
 		return untilMidnight, ErrQuota
@@ -330,8 +347,10 @@ func (l *Limiter) BeginUpload(ip netip.Addr, id string, bytes int64) (retryAfter
 	// 256 bits, une vraie collision est impossible). Elle coûte une création du quota,
 	// comme une création réussie (revue K1, I2), et ne touche pas l'envoi existant.
 	if _, dup := l.uploads[id]; dup {
-		l.count64[k64]++
-		l.count48[k48]++
+		if !piece {
+			l.count64[k64]++
+			l.count48[k48]++
+		}
 		l.bytes64[k64] += bytes
 		l.bytes48[k48] += bytes
 		return 0, ErrDuplicate
@@ -339,13 +358,15 @@ func (l *Limiter) BeginUpload(ip netip.Addr, id string, bytes int64) (retryAfter
 	if l.pend64[k64]+l.pend64[o64] >= PendingPer64 || l.pend48[k48]+l.pend48[o48] >= PendingPer48 {
 		return min(pendingRetry, untilMidnight), ErrQuota
 	}
-	l.count64[k64]++
-	l.count48[k48]++
+	if !piece {
+		l.count64[k64]++
+		l.count48[k48]++
+	}
 	l.bytes64[k64] += bytes
 	l.bytes48[k48] += bytes
 	l.pend64[k64]++
 	l.pend48[k48]++
-	l.uploads[id] = upload{k64: k64, k48: k48, bytes: bytes, born: now.Unix()}
+	l.uploads[id] = upload{k64: k64, k48: k48, bytes: bytes, born: now.Unix(), piece: piece}
 	return 0, nil
 }
 
@@ -363,8 +384,10 @@ func (l *Limiter) endLocked(id string, refund, abandoned bool, finisher *netip.A
 	decr(l.pend48, u.k48)
 	if refund {
 		// La création et la réservation non remplie sont rendues ; les octets reçus, jamais.
-		decr(l.count64, u.k64)
-		decr(l.count48, u.k48)
+		if !u.piece {
+			decr(l.count64, u.k64)
+			decr(l.count48, u.k48)
+		}
 		l.bytes64[u.k64] -= u.counted() - u.paid()
 		l.bytes48[u.k48] -= u.counted() - u.paid()
 	}
@@ -374,13 +397,17 @@ func (l *Limiter) endLocked(id string, refund, abandoned bool, finisher *netip.A
 		// oubliée, à la clé du jour de l'adresse qui le finalise. Sans cela, il sortait de
 		// tout quota à minuit (10 Gio au lieu de 6 dans la journée). Aucune adresse gardée :
 		// la clé du jour est recalculée ici, comme à chaque requête.
-		decr(l.count64, u.k64)
-		decr(l.count48, u.k48)
+		if !u.piece {
+			decr(l.count64, u.k64)
+			decr(l.count48, u.k48)
+		}
 		l.bytes64[u.k64] -= u.counted()
 		l.bytes48[u.k48] -= u.counted()
 		k64, k48 := l.keyLocked(*finisher)
-		l.count64[k64]++
-		l.count48[k48]++
+		if !u.piece {
+			l.count64[k64]++
+			l.count48[k48]++
+		}
 		l.bytes64[k64] += u.counted()
 		l.bytes48[k48] += u.counted()
 	}

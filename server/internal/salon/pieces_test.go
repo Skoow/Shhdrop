@@ -760,3 +760,58 @@ func TestFinSalonPieces(t *testing.T) {
 		t.Fatal("index des pièces", n)
 	}
 }
+
+// Plafond propre au salon (décision du 12 novembre) : 120 pièces non vocales par heure et par
+// siège (seau plein au départ, 1 toutes les 30 s), neuf pour chaque nouvel occupant ; les
+// vocaux n'y comptent pas ; un refus plus loin (budget) rend le jeton.
+func TestPiecesParHeure(t *testing.T) {
+	b := bancLimite(t)
+	c := b.creer(t, 3)
+	_, mb := b.entrerMembre(t, c, true)
+	if PiecesParHeure != 120 {
+		t.Fatal("PiecesParHeure", PiecesParHeure)
+	}
+	for i := range PiecesParHeure {
+		if _, err := b.m.CreerPiece(mb, 1, false); err != nil {
+			t.Fatal("pièce", i+1, err)
+		}
+	}
+	if _, err := b.m.CreerPiece(mb, 1, false); !isAttente(err, 30*time.Second) {
+		t.Fatal("121e pièce dans l'heure :", err)
+	}
+	// Les vocaux restent hors de ce plafond.
+	fin := b.connecte(t, mb)
+	defer fin()
+	b.h.avancer(29 * time.Second)
+	if _, err := b.m.CreerPiece(mb, 1, true); err != nil {
+		t.Fatal("vocal :", err)
+	}
+	if _, err := b.m.CreerPiece(mb, 1, false); !isAttente(err, time.Second) {
+		t.Fatal("avant 30 s :", err)
+	}
+	b.h.avancer(time.Second)
+	b.creerPiece(t, mb, 1, false)
+	// Refus du budget : jeton rendu.
+	b.h.avancer(30 * time.Second)
+	if _, err := b.db.Exec(`UPDATE salons SET pieces_bytes=? WHERE id=?`, Budget, mb.salon.id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.m.CreerPiece(mb, 1, false); !errors.Is(err, ErrBudget) {
+		t.Fatal("budget :", err)
+	}
+	if _, err := b.db.Exec(`UPDATE salons SET pieces_bytes=0 WHERE id=?`, mb.salon.id); err != nil {
+		t.Fatal(err)
+	}
+	b.creerPiece(t, mb, 1, false)
+	// Nouvel occupant d'un siège : seau neuf.
+	_, invite := b.entrerMembre(t, c, false)
+	for range PiecesParHeure {
+		b.creerPiece(t, invite, 1, false)
+	}
+	b.depart(mb.salon, invite.siege)
+	_, suivant := b.entrerMembre(t, c, false)
+	if suivant.siege != invite.siege {
+		t.Fatal("siège", suivant.siege)
+	}
+	b.creerPiece(t, suivant, 1, false)
+}

@@ -325,3 +325,38 @@ func TestSegmentsPiecesHorsLimite(t *testing.T) {
 		t.Fatal("jeton invalide hors limite :", w.Code, w.Body.String())
 	}
 }
+
+// Une pièce n'est pas une création de partage (décision du 12 novembre) : 11 photos de suite
+// passent, et les 10 créations de partage du jour restent entières ensuite ; au-delà de 120
+// pièces dans l'heure pour un siège : 429 limit avec retry_after_s.
+func TestOnzePieces(t *testing.T) {
+	e, m := salonEnv(t)
+	j := salonMembres(t, e, 1)
+	for range 11 {
+		e.envoyerPiece(t, j[0], 1)
+	}
+	addr := netip.MustParseAddr("203.0.113.7")
+	for i := range limits.CreatesPer64 {
+		id := share.NewID()
+		if _, err := e.srv.lim.BeginUpload(addr, id, 0); err != nil {
+			t.Fatal("création de partage", i+1, "refusée :", err)
+		}
+		e.srv.lim.FinishUpload(id, addr)
+	}
+	// Le reste de l'heure directement (60 requêtes par minute et par connexion).
+	jeton, _ := enc.DecodeString(j[0])
+	mb, err := m.Membre(jeton)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 120 - 11 {
+		if _, err := m.CreerPiece(mb, 1, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := e.creerPieceHTTP(j[0], 1, false)
+	expect(t, w, 429, `{"error":"limit","retry_after_s":30}`)
+	if w.Header().Get("Retry-After") != "30" {
+		t.Fatal("Retry-After", w.Header().Get("Retry-After"))
+	}
+}

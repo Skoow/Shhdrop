@@ -67,10 +67,12 @@ func (b *seau) prendre(now time.Time) (ok bool, attente time.Duration) {
 // rendre : jeton rendu (au plus cap), pour une trame refusée après prendre.
 func (b *seau) rendre() { b.jetons = min(b.cap, b.jetons+1) }
 
-// limiteSiege : seaux et réserve vocale d'un numéro de siège.
+// limiteSiege : seaux (trames, pièces) et réserve vocale d'un numéro de siège.
 type limiteSiege struct {
 	cadence, horaire seau
-	vocal            reserveVocale
+	// pieces : pièces non vocales créées (PiecesParHeure, pieces.go), décision du 12 novembre.
+	pieces seau
+	vocal  reserveVocale
 }
 
 // octetVocal : présence qui donne un octet de réserve vocale (250 µs à 4 000 o/s).
@@ -139,6 +141,7 @@ func nouvelleLimite() limiteSiege {
 	return limiteSiege{
 		cadence: seau{jetons: rafaleSiege, cap: rafaleSiege, parSeconde: cadenceSeconde},
 		horaire: seau{jetons: horaireMax, cap: horaireMax, parSeconde: horaireParHeure / 3600},
+		pieces:  seau{jetons: PiecesParHeure, cap: PiecesParHeure, parSeconde: PiecesParHeure / 3600.0},
 	}
 }
 

@@ -49,6 +49,11 @@ const (
 	PieceSansLien = 15 * time.Minute
 	// PieceSansSegment : pièce non finalisée sans segment reçu depuis ce délai, effacée.
 	PieceSansSegment = 15 * time.Minute
+	// PiecesParHeure : pièces non vocales créées au plus par heure et par siège (seau plein au
+	// départ, une de plus toutes les 30 s, neuf pour chaque nouvel occupant ; décision du
+	// 12 novembre). Une pièce n'est pas une création de partage (limits.BeginPiece) : ce
+	// plafond borne seul leur nombre ; les vocaux n'y comptent pas (réserve du siège).
+	PiecesParHeure = 120
 )
 
 // VocalPaliers : paliers d'un vocal (plan, point 3 : 10 min tiennent dans 80).
@@ -164,7 +169,7 @@ func (m *Manager) CreerPiece(mb Membre, bucket int, vocal bool) (string, error) 
 }
 
 // CreerPieceID crée la pièce id (share.NewID, tiré par l'appelant pour ses quotas) : palier
-// invalide → ErrBadRequest ; fichier : pieces_bytes + taille ≤ Budget (SQL conditionnel,
+// invalide → ErrBadRequest ; fichier : PiecesParHeure par siège, sinon *Attente ; pieces_bytes + taille ≤ Budget (SQL conditionnel,
 // atomique), sinon ErrBudget ; vocal : taille débitée de la réserve du siège, sinon *Attente
 // (manque ÷ 4 000 s, arrondi au-dessus) ; place totale (StorageMax), réservée dans la même
 // section que sa vérification (placer), sinon ErrFull ; fichier réservé, ligne « uploading ».
@@ -192,9 +197,8 @@ func (m *Manager) CreerPieceID(mb Membre, id string, bucket int, vocal bool) (er
 			}
 		}
 	}()
-	if vocal {
-		annuler = append(annuler, func() { s.rendreVocal(mb.siege, arrivee, taille) })
-	} else {
+	annuler = append(annuler, func() { s.rendre(mb.siege, arrivee, vocal, taille) })
+	if !vocal {
 		res, err := m.cfg.DB.Exec(`UPDATE salons SET pieces_bytes=pieces_bytes+? WHERE id=? AND pieces_bytes+?<=?`,
 			taille, s.id, taille, Budget)
 		if err != nil {
@@ -240,16 +244,28 @@ func (m *Manager) debuterPiece(s *salon, mb Membre, p *piece, taille int64) (arr
 		if d := s.limites[mb.siege].vocal.prendre(now, taille); d > 0 {
 			return 0, &Attente{Retry: d}
 		}
+	} else if !m.sansLimiteSiege {
+		if ok, d := s.limites[mb.siege].pieces.prendre(now); !ok {
+			// Arrondi à la milliseconde : 1 ÷ (120 / 3 600) n'est pas exact en flottant, et
+			// Retry-After (arrondi au-dessus) dirait 31 s au lieu de 30.
+			return 0, &Attente{Retry: max(time.Millisecond, d.Round(time.Millisecond))}
+		}
 	}
 	return x.arrivee, nil
 }
 
-// rendreVocal : réserve rendue au siège n, s'il a toujours le même occupant.
-func (s *salon) rendreVocal(n uint8, arrivee uint64, taille int64) {
+// rendre : réserve vocale (vocal) ou jeton du seau des pièces rendu au siège n, s'il a
+// toujours le même occupant (création refusée plus loin).
+func (s *salon) rendre(n uint8, arrivee uint64, vocal bool, taille int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if x := s.sieges[n]; x != nil && x.arrivee == arrivee {
+	if x := s.sieges[n]; x == nil || x.arrivee != arrivee {
+		return
+	}
+	if vocal {
 		s.limites[n].vocal.rendre(taille)
+	} else {
+		s.limites[n].pieces.rendre()
 	}
 }
 
@@ -513,6 +529,10 @@ func (s *salon) lisibleLocked(mb Membre, id string, n int, now time.Time) (*piec
 	if p == nil || p.etat != prete {
 		return nil, ErrNotFound
 	}
+	// Plancher (plan, point 11) : rang de la trame liée s'il y en a une, sinon rang de
+	// création (décision du 12 novembre). Une pièce envoyée avant l'arrivée du membre mais
+	// liée à une trame reçue après est lisible : il lit cette trame, donc la clé de la pièce ;
+	// rien d'antérieur à son arrivée ne l'est sans une trame qu'il a reçue.
 	ref := p.rang
 	if p.lien != 0 {
 		ref = p.lien

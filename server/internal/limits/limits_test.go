@@ -1066,3 +1066,65 @@ func TestCleBloc(t *testing.T) {
 		t.Fatal("clé nulle")
 	}
 }
+
+// Pièce jointe du salon (BeginPiece) : pas une création de partage (le quota de 10 n'est ni
+// consulté ni débité, même à travers minuit) ; ses octets utiles et sa place d'envoi en cours
+// comptent comme ceux d'un partage.
+func TestBeginPieceSansCreation(t *testing.T) {
+	now := t0
+	l := newLim(&now)
+	a := ip("203.0.113.9")
+	for i := range CreatesPer64 {
+		id := fmt.Sprintf("p%d", i)
+		if _, err := l.BeginUpload(a, id, 1); err != nil {
+			t.Fatal("partage", i, err)
+		}
+		l.FinishUpload(id, a)
+	}
+	if _, err := l.BeginUpload(a, "trop", 1); !errors.Is(err, ErrQuota) {
+		t.Fatal("11e partage :", err)
+	}
+	for i := range 3 * CreatesPer64 {
+		id := fmt.Sprintf("piece%d", i)
+		if _, err := l.BeginPiece(a, id, 1<<20); err != nil {
+			t.Fatal("pièce", i, err)
+		}
+		if i%2 == 0 {
+			l.FinishUpload(id, a)
+		} else {
+			l.CancelUpload(id) // rendue : jamais de création à rendre
+		}
+	}
+	k64, _ := l.Key(a)
+	l.mu.Lock()
+	n, b := l.count64[k64], l.bytes64[k64]
+	l.mu.Unlock()
+	if n != CreatesPer64 || b != CreatesPer64+15<<20 {
+		t.Fatal("créations, octets :", n, b)
+	}
+	// Envois en cours : 2 par connexion, pièces et partages confondus.
+	for i := range PendingPer64 {
+		if _, err := l.BeginPiece(a, fmt.Sprintf("enc%d", i), 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := l.BeginPiece(a, "enc9", 0); !errors.Is(err, ErrQuota) {
+		t.Fatal("3e envoi en cours :", err)
+	}
+	// Octets du jour : refus au-delà de BytesPer64.
+	l.CancelUpload("enc0")
+	if _, err := l.BeginPiece(a, "gros", BytesPer64); !errors.Is(err, ErrQuota) {
+		t.Fatal("octets :", err)
+	}
+	// Envoi en cours à cheval sur minuit : la pièce n'est pas recomptée comme création.
+	now = time.Date(2026, 11, 5, 0, 0, 1, 0, time.UTC)
+	l.Key(a) // rotation
+	l.FinishUpload("enc1", a)
+	k64, _ = l.Key(a)
+	l.mu.Lock()
+	n = l.count64[k64]
+	l.mu.Unlock()
+	if n != 0 {
+		t.Fatal("pièce de la veille comptée comme création :", n)
+	}
+}
