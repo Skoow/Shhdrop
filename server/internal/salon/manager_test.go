@@ -2,11 +2,13 @@ package salon
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -74,12 +76,15 @@ func secret(graine byte) []byte { return bytes.Repeat([]byte{graine}, 32) }
 
 type cles struct{ acces, preuve, gestion []byte }
 
-var compteurCles byte
-
-func nouvellesCles() cles {
-	compteurCles += 3
-	return cles{secret(compteurCles), secret(compteurCles + 1), secret(compteurCles + 2)}
+// aleatoire : 32 octets de crypto/rand.
+func aleatoire() []byte {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return b
 }
+
+// nouvellesCles : secrets tirés au hasard (jamais égaux entre eux ni à secret(0xEE)).
+func nouvellesCles() cles { return cles{aleatoire(), aleatoire(), aleatoire()} }
 
 func reqValide(c cles) CreerReq {
 	return CreerReq{
@@ -129,9 +134,7 @@ func (b *banc) entrer(t *testing.T, c cles, createur bool) Entree {
 func (b *banc) depart(s *salon, siege uint8) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := b.m.departLocked(s, siege); err != nil {
-		panic(err)
-	}
+	b.m.departLocked(s, siege)
 }
 
 func occupes(s *salon) int {
@@ -219,6 +222,8 @@ func TestCreerRefuse(t *testing.T) {
 		"manage_v vide":   func(r *CreerReq) { r.ManageV = vide[:] },
 		"manage_v de 33":  func(r *CreerReq) { r.ManageV = append(r.ManageV, 0) },
 		"access = manage": func(r *CreerReq) { r.ManageV = r.AccessV },
+		"proof = access":  func(r *CreerReq) { r.ProofV = r.AccessV },
+		"proof = manage":  func(r *CreerReq) { r.ProofV = r.ManageV },
 	}
 	for nom, casser := range cas {
 		r := reqValide(nouvellesCles())
@@ -318,10 +323,8 @@ func TestMetaInconnu(t *testing.T) {
 			t.Fatal("clé de longueur", len(k), err)
 		}
 	}
-	r := reqValide(nouvellesCles())
-	r.TTLHours = 1
 	expire := nouvellesCles()
-	r = reqValide(expire)
+	r := reqValide(expire)
 	r.TTLHours = 1
 	if _, err := b.m.Creer(r); err != nil {
 		t.Fatal(err)
@@ -502,14 +505,21 @@ func TestMauvaisMotDePasse(t *testing.T) {
 	if es, _ := os.ReadDir(b.cfg.DossierConversations); len(es) != 0 {
 		t.Fatal("fichier de conversation restant")
 	}
+	// Seule reste la tombe (fini, sans siège ni jeton), oubliée à l'échéance.
 	b.m.mu.Lock()
-	n = len(b.m.salons)
+	for _, s := range b.m.salons {
+		s.mu.Lock()
+		if !s.fini || s.occupesLocked() != 0 || len(s.jetons) != 0 || len(s.journal) != 0 {
+			t.Error("état mémoire restant")
+		}
+		s.mu.Unlock()
+	}
 	b.m.mu.Unlock()
 	b.m.idxMu.Lock()
-	n += len(b.m.index)
+	n = len(b.m.index)
 	b.m.idxMu.Unlock()
 	if n != 0 {
-		t.Fatal("état mémoire restant")
+		t.Fatal("jetons restants dans l'index")
 	}
 }
 
@@ -732,5 +742,203 @@ func TestJournalPlein(t *testing.T) {
 	}
 	if _, err := b.m.Membre(g.Jeton[:]); !errors.Is(err, ErrNotFound) {
 		t.Fatal("jeton après départ :", err)
+	}
+}
+
+// idDe : identifiant interne du salon.
+func (b *banc) idDe(t *testing.T, c cles) string {
+	t.Helper()
+	var id string
+	if err := b.db.QueryRow(`SELECT id FROM salons WHERE access_v=?`, share.Verifier(c.acces)).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// invariantJournal : chaque siège occupé peut toujours être annoncé parti (plan Task 6, M3) ;
+// à réutiliser aux Tasks 9 et 14.
+func invariantJournal(t *testing.T, s *salon) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n := len(s.journal) + s.occupesLocked(); n > journalMax {
+		t.Fatalf("journal %d + occupés %d > %d", len(s.journal), s.occupesLocked(), journalMax)
+	}
+}
+
+// I1 : la suppression de la ligne échoue au 10ᵉ essai. L'état mémoire, les jetons et la
+// conversation sont détruits quand même ; la ligne restée (failed_attempts = 10) vaut
+// « détruit » partout ; echec rend ErrNotFound.
+func TestDestructionSansDelete(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	e := b.entrer(t, c, true)
+	id := b.idDe(t, c)
+	if _, err := b.db.Exec(`CREATE TRIGGER pas_de_delete BEFORE DELETE ON salons BEGIN SELECT RAISE(FAIL, 'panne injectée'); END`); err != nil {
+		t.Fatal(err)
+	}
+	for range 9 {
+		b.m.Rejoindre(c.acces, secret(0xEE), nil)
+	}
+	if _, err := b.m.Rejoindre(c.acces, secret(0xEE), nil); !errors.Is(err, ErrNotFound) {
+		t.Fatal("10ᵉ essai :", err)
+	}
+	var fa int
+	if err := b.db.QueryRow(`SELECT failed_attempts FROM salons WHERE id=?`, id).Scan(&fa); err != nil || fa != maxEssais {
+		t.Fatal("témoin : la ligne devait rester", fa, err)
+	}
+	if _, err := b.m.Membre(e.Jeton[:]); !errors.Is(err, ErrNotFound) {
+		t.Fatal("Membre :", err)
+	}
+	if _, err := os.Stat(filepath.Join(b.cfg.DossierConversations, id)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("fichier de conversation :", err)
+	}
+	if _, err := b.m.Meta(c.acces); !errors.Is(err, ErrNotFound) {
+		t.Fatal("Meta :", err)
+	}
+	for _, g := range [][]byte{nil, c.gestion} {
+		if _, err := b.m.Rejoindre(c.acces, c.preuve, g); !errors.Is(err, ErrNotFound) {
+			t.Fatal("Rejoindre :", err)
+		}
+	}
+	if _, _, err := b.m.Gestion(c.gestion); !errors.Is(err, ErrNotFound) {
+		t.Fatal("Gestion :", err)
+	}
+	if _, err := os.Stat(filepath.Join(b.cfg.DossierConversations, id)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("fichier recréé :", err)
+	}
+}
+
+// M1 : une destruction appelée sans essaiLock (purge, Task 15) entre la lecture de la ligne et
+// la création de l'état : aucun état ni fichier n'est recréé, Rejoindre et Membre refusent.
+func TestPasDeRecreationApresDestruction(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	e := b.entrer(t, c, false)
+	id := b.idDe(t, c)
+	s := b.etat(t, c)
+	if err := b.m.detruire(id); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	fini := s.fini
+	s.mu.Unlock()
+	if !fini {
+		t.Fatal("drapeau fini absent")
+	}
+	if _, err := b.m.etat(id, b.h.Now().Add(time.Hour).Unix(), 4); !errors.Is(err, ErrNotFound) {
+		t.Fatal("etat après destruction :", err)
+	}
+	if _, err := b.m.Membre(e.Jeton[:]); !errors.Is(err, ErrNotFound) {
+		t.Fatal("Membre :", err)
+	}
+	// Salon jamais rejoint, détruit sans état : etat ne crée rien non plus.
+	c2 := b.creer(t, 4)
+	id2 := b.idDe(t, c2)
+	if err := b.m.detruire(id2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.m.etat(id2, b.h.Now().Add(time.Hour).Unix(), 4); !errors.Is(err, ErrNotFound) {
+		t.Fatal("etat d'un salon détruit sans état :", err)
+	}
+	if es, _ := os.ReadDir(b.cfg.DossierConversations); len(es) != 0 {
+		t.Fatal("fichier de conversation recréé")
+	}
+	// Les tombes sont oubliées après l'échéance.
+	b.h.avancer(25 * time.Hour)
+	b.m.Tick()
+	b.m.mu.Lock()
+	n := len(b.m.salons)
+	b.m.mu.Unlock()
+	if n != 0 {
+		t.Fatal("tombes restantes", n)
+	}
+}
+
+// M3 : l'invariant tient après des entrées, reprises et départs, journal presque plein ou non.
+func TestInvariantJournal(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 10)
+	s := (*salon)(nil)
+	for tour := range 2 {
+		for i := range 9 {
+			if _, err := b.m.Rejoindre(c.acces, c.preuve, nil); err != nil && !errors.Is(err, ErrLimit) && !errors.Is(err, ErrFull) {
+				t.Fatal(tour, i, err)
+			}
+			b.m.Rejoindre(c.acces, c.preuve, c.gestion)
+			s = b.etat(t, c)
+			invariantJournal(t, s)
+		}
+		if tour == 0 {
+			s.mu.Lock()
+			for len(s.journal)+s.occupesLocked() < journalMax-nbSieges {
+				s.seq++
+				s.journal = append(s.journal, evenement{seq: s.seq, enr: EnrDepart(s.seq, 9)})
+			}
+			s.mu.Unlock()
+		}
+		b.h.avancer(10 * time.Minute)
+		b.m.Tick()
+		invariantJournal(t, s)
+		if occupes(s) != 0 {
+			t.Fatal("sièges non libérés", occupes(s))
+		}
+	}
+}
+
+// M5 : NewManager crée le dossier des pièces (0700) : UsedBytes ne bloque pas les partages.
+func TestDossierPiecesCree(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	cfg := b.cfg
+	cfg.Pieces = &blob.Store{Dir: filepath.Join(b.dir, "neuf", "pieces")}
+	m, err := NewManager(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(cfg.Pieces.Dir)
+	if err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
+		t.Fatal("dossier des pièces :", err)
+	}
+	if u := m.UsedBytes(); u != 0 {
+		t.Fatal("UsedBytes", u)
+	}
+	cfg.Pieces = &blob.Store{}
+	if _, err := NewManager(cfg); err == nil {
+		t.Fatal("dossier des pièces vide accepté")
+	}
+}
+
+// M6 : erreurs de la base et du stockage des pièces sans chemin ni texte SQL.
+func TestErreursGestionnaireFixes(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	b.entrer(t, c, false)
+	id := b.idDe(t, c)
+	// Pièce impossible à supprimer : un dossier non vide porte son nom.
+	const piece = "AAAAAAAAAAAAAAAAAAAAAA"
+	if err := os.MkdirAll(filepath.Join(b.cfg.Pieces.Dir, piece, "plein"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec(`INSERT INTO salon_pieces(id,salon_id,bucket,state,segments_mask) VALUES(?,?,1,'ready',x'00')`, piece, id); err != nil {
+		t.Fatal(err)
+	}
+	err := b.m.detruire(id)
+	if err == nil || strings.Contains(err.Error(), "/") || strings.Contains(err.Error(), b.dir) {
+		t.Fatal("pièce :", err)
+	}
+	b.db.Close()
+	for nom, f := range map[string]func() error{
+		"Meta":  func() error { _, err := b.m.Meta(c.acces); return err },
+		"Creer": func() error { _, err := b.m.Creer(reqValide(nouvellesCles())); return err },
+		"Rejoindre": func() error {
+			_, err := b.m.Rejoindre(c.acces, c.preuve, nil)
+			return err
+		},
+		"Gestion": func() error { _, _, err := b.m.Gestion(c.gestion); return err },
+	} {
+		err := f()
+		if !errors.Is(err, ErrBase) || err.Error() != ErrBase.Error() {
+			t.Errorf("%s : %v", nom, err)
+		}
 	}
 }

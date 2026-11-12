@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"hash/fnv"
+	"os"
 	"sync"
 	"time"
 
@@ -67,6 +68,14 @@ func NewManager(c Config) (*Manager, error) {
 		c.StorageMax <= 0 || c.UsedPartages == nil || c.Limites == nil {
 		return nil, errConfig
 	}
+	// Dossier des pièces créé ici (0700) : absent, UsedBytes échouerait fermé et bloquerait
+	// aussi les partages.
+	if c.Pieces.Dir == "" {
+		return nil, errConfig
+	}
+	if err := os.MkdirAll(c.Pieces.Dir, 0o700); err != nil {
+		return nil, es(err)
+	}
 	return &Manager{cfg: c, salons: map[string]*salon{}, index: map[[32]byte]*salon{}}, nil
 }
 
@@ -80,11 +89,21 @@ func (m *Manager) essaiLock(id string) *sync.Mutex {
 
 func secs(n int64) time.Duration { return time.Duration(n) * time.Second }
 
+// notFound : ErrNotFound pour une ligne absente, ErrBase (fixe) pour toute autre erreur.
 func notFound(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
-	return err
+	return base(err)
+}
+
+// base : ErrBase à la place d'une erreur SQL (le texte du pilote peut citer la requête ou le
+// chemin de la base) ; nil reste nil.
+func base(err error) error {
+	if err == nil {
+		return nil
+	}
+	return ErrBase
 }
 
 // CreerReq : POST /api/salons. AccessV, ManageV, ProofV : SHA-256 de K_accès_s, S_gestion
@@ -99,7 +118,8 @@ func (r CreerReq) valide() bool {
 	return (r.TTLHours == 1 || r.TTLHours == 6 || r.TTLHours == 12 || r.TTLHours == 24) &&
 		r.MaxMembers >= 2 && r.MaxMembers <= nbSieges && r.KdfOps == kdfOps && r.KdfMem == kdfMem &&
 		len(r.Salt) == 16 && len(r.AccessV) == 32 && len(r.ManageV) == 32 && len(r.ProofV) == 32 &&
-		share.NotEmptyHash(r.AccessV, r.ManageV, r.ProofV) && string(r.AccessV) != string(r.ManageV)
+		share.NotEmptyHash(r.AccessV, r.ManageV, r.ProofV) && string(r.AccessV) != string(r.ManageV) &&
+		string(r.ProofV) != string(r.AccessV) && string(r.ProofV) != string(r.ManageV)
 }
 
 // Creer range un salon et rend le délai jusqu'à son échéance (ceil15(now + ttl), seule date
@@ -118,19 +138,19 @@ func (m *Manager) Creer(r CreerReq) (time.Duration, error) {
 	case err == nil:
 		return 0, ErrConflict
 	case !errors.Is(err, sql.ErrNoRows):
-		return 0, err
+		return 0, base(err)
 	}
 	var vivants int
 	if err := m.cfg.DB.QueryRow(`SELECT count(*) FROM salons WHERE expires_at>? AND failed_attempts<?`,
 		now, maxEssais).Scan(&vivants); err != nil {
-		return 0, err
+		return 0, base(err)
 	}
 	if vivants >= m.cfg.Max {
 		return 0, ErrBusy
 	}
 	partages, err := m.cfg.UsedPartages()
 	if err != nil {
-		return 0, err
+		return 0, es(err)
 	}
 	salons, err := m.usedBytes()
 	if err != nil {
@@ -146,7 +166,7 @@ func (m *Manager) Creer(r CreerReq) (time.Duration, error) {
 	if _, err := m.cfg.DB.Exec(`INSERT INTO salons(id,access_v,manage_v,proof_v,salt,kdf_ops,kdf_mem,expires_at,
 		max_members,members_can_destroy) VALUES(?,?,?,?,?,?,?,?,?,?)`, share.NewID(), r.AccessV, r.ManageV, r.ProofV,
 		r.Salt, r.KdfOps, r.KdfMem, exp, r.MaxMembers, mcd); err != nil {
-		return 0, err
+		return 0, base(err)
 	}
 	return secs(exp - now), nil
 }
@@ -232,6 +252,9 @@ func (m *Manager) Rejoindre(kAcces, kPreuve, sGestion []byte) (Entree, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.fini {
+		return Entree{}, ErrNotFound
+	}
 	n, err := s.choisirLocked(createur)
 	if err != nil {
 		return Entree{}, err
@@ -280,23 +303,33 @@ func (s *salon) choisirLocked(createur bool) (uint8, error) {
 	return uint8(libre), nil
 }
 
-// etat : état mémoire du salon id, créé (fichier de conversation compris) s'il n'existe pas.
-// Appelé sous essaiLock(id) : aucune création concurrente pour le même id.
+// etat : état mémoire du salon id, créé (fichier de conversation compris) s'il n'existe pas ;
+// ErrNotFound si le salon a été détruit (tombe), même par un appel sans essaiLock.
 func (m *Manager) etat(id string, exp int64, maxMembers int) (*salon, error) {
 	m.mu.Lock()
 	s := m.salons[id]
 	m.mu.Unlock()
-	if s != nil {
-		return s, nil
+	if s == nil {
+		conv, err := OuvrirConversation(m.cfg.DossierConversations, id)
+		if err != nil {
+			return nil, err
+		}
+		neuf := nouveauSalon(id, time.Unix(exp, 0), maxMembers, conv)
+		m.mu.Lock()
+		if s = m.salons[id]; s == nil {
+			m.salons[id], s = neuf, neuf
+		}
+		m.mu.Unlock()
+		if s != neuf {
+			conv.Detruire() // une destruction (tombe) ou une autre création est passée entre-temps
+		}
 	}
-	conv, err := OuvrirConversation(m.cfg.DossierConversations, id)
-	if err != nil {
-		return nil, err
+	s.mu.Lock()
+	fini := s.fini
+	s.mu.Unlock()
+	if fini {
+		return nil, ErrNotFound
 	}
-	s = nouveauSalon(id, time.Unix(exp, 0), maxMembers, conv)
-	m.mu.Lock()
-	m.salons[id] = s
-	m.mu.Unlock()
 	return s, nil
 }
 
@@ -310,43 +343,31 @@ func (m *Manager) echec(id string) error {
 	if failed < maxEssais {
 		return &BadPassword{AttemptsLeft: maxEssais - failed}
 	}
-	// failed_attempts = 10 : déjà exclu de toute requête, même si la suppression échoue.
-	if err := m.detruire(id); err != nil {
-		return err
-	}
+	// failed_attempts = 10 : la ligne est déjà exclue de toute requête (failed_attempts<10)
+	// et l'état mémoire est détruit en premier ; si la suppression de la ligne échoue, elle
+	// reste « détruite » partout (la purge de la Task 15 la supprimera).
+	m.detruire(id)
 	return ErrNotFound
 }
 
-// detruire supprime la ligne du salon (et ses pièces en base, ON DELETE CASCADE), puis
-// l'état mémoire (jetons, conversation : clé oubliée, fichier supprimé) et les fichiers des
-// pièces. Complétée à la Task 15 (fin de vie, 0x05 aux connectés).
+// detruire détruit le salon id : d'abord l'état mémoire (drapeau fini, jetons oubliés,
+// conversation : clé mise à zéro, fichier supprimé), puis la ligne (pièces en base, ON DELETE
+// CASCADE), puis les fichiers des pièces. Sûre sans essaiLock (purge de la Task 15) : la tombe
+// laissée dans Manager.salons empêche de recréer état ou fichier. Erreurs fixes, sans chemin.
+// Complétée à la Task 15 (0x05 aux connectés).
 func (m *Manager) detruire(id string) error {
-	var pieces []string
-	rows, err := m.cfg.DB.Query(`SELECT id FROM salon_pieces WHERE salon_id=?`, id)
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err != nil {
-			rows.Close()
-			return err
-		}
-		pieces = append(pieces, p)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return err
-	}
-	if _, err := m.cfg.DB.Exec(`DELETE FROM salons WHERE id=?`, id); err != nil {
-		return err
-	}
-	var errs []error
 	m.mu.Lock()
 	s := m.salons[id]
-	delete(m.salons, id)
+	if s == nil {
+		// Échéance inconnue sans la ligne : la plus lointaine possible (24 h, arrondie).
+		s = nouveauSalon(id, m.cfg.Now().Add(25*time.Hour), 0, nil)
+		m.salons[id] = s
+	}
 	m.mu.Unlock()
-	if s != nil {
-		s.mu.Lock()
+	var errs []error
+	s.mu.Lock()
+	if !s.fini {
+		s.fini = true
 		m.idxMu.Lock()
 		for h := range s.jetons {
 			delete(m.index, h)
@@ -358,11 +379,29 @@ func (m *Manager) detruire(id string) error {
 		clear(s.jetons)
 		clear(s.revoques)
 		s.sieges = [nbSieges]*siege{}
-		errs = append(errs, s.conv.Detruire())
-		s.mu.Unlock()
+		s.journal = nil
 	}
+	if s.conv != nil {
+		errs = append(errs, s.conv.Detruire()) // idempotent : réessaie la suppression
+	}
+	s.mu.Unlock()
+
+	var pieces []string
+	rows, err := m.cfg.DB.Query(`SELECT id FROM salon_pieces WHERE salon_id=?`, id)
+	if err == nil {
+		for rows.Next() {
+			var p string
+			if rows.Scan(&p) == nil {
+				pieces = append(pieces, p)
+			}
+		}
+		err = errors.Join(rows.Err(), rows.Close())
+	}
+	errs = append(errs, base(err))
+	_, err = m.cfg.DB.Exec(`DELETE FROM salons WHERE id=?`, id)
+	errs = append(errs, base(err))
 	for _, p := range pieces {
-		errs = append(errs, m.cfg.Pieces.Delete(p))
+		errs = append(errs, es(m.cfg.Pieces.Delete(p)))
 	}
 	return errors.Join(errs...)
 }
@@ -416,7 +455,7 @@ func (m *Manager) Membre(jeton []byte) (Membre, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !m.cfg.Now().Before(s.expires) {
+	if s.fini || !m.cfg.Now().Before(s.expires) {
 		return Membre{}, ErrNotFound
 	}
 	if _, ok := s.revoques[h]; ok {
@@ -431,23 +470,20 @@ func (m *Manager) Membre(jeton []byte) (Membre, error) {
 }
 
 // departLocked : départ du siège n (0x03 au journal, jeton oublié) ; sans effet s'il est
-// libre. Appelé sous s.mu.
-func (m *Manager) departLocked(s *salon, n uint8) error {
+// libre. Ne peut pas échouer (invariant du journal, annoncerLocked). Appelé sous s.mu.
+func (m *Manager) departLocked(s *salon, n uint8) {
 	if s.sieges[n] == nil {
-		return nil
+		return
 	}
-	if _, err := s.annoncerLocked(func(seq uint64) []byte { return EnrDepart(seq, n) }, false); err != nil {
-		return err
-	}
+	s.annoncerLocked(func(seq uint64) []byte { return EnrDepart(seq, n) }, true)
 	jv, _ := s.oublierLocked(n)
 	m.idxMu.Lock()
 	delete(m.index, jv)
 	m.idxMu.Unlock()
-	return nil
 }
 
-// Tick : une passe d'entretien. Task 6 : libère les sièges hors ligne depuis 10 min
-// (complétée aux Tasks 11, 13 et 15).
+// Tick : une passe d'entretien. Task 6 : libère les sièges hors ligne depuis 10 min et
+// oublie les tombes échues (complétée aux Tasks 11, 13 et 15).
 func (m *Manager) Tick() {
 	now := m.cfg.Now()
 	m.mu.Lock()
@@ -458,12 +494,20 @@ func (m *Manager) Tick() {
 	m.mu.Unlock()
 	for _, s := range salons {
 		s.mu.Lock()
+		tombe := s.fini && !now.Before(s.expires)
 		for n, x := range s.sieges {
 			if x != nil && !x.horsLigneDepuis.IsZero() && now.Sub(x.horsLigneDepuis) >= horsLigneMax {
-				m.departLocked(s, uint8(n)) // ne peut échouer : place réservée aux départs
+				m.departLocked(s, uint8(n))
 			}
 		}
 		s.mu.Unlock()
+		if tombe {
+			m.mu.Lock()
+			if m.salons[s.id] == s {
+				delete(m.salons, s.id)
+			}
+			m.mu.Unlock()
+		}
 	}
 }
 
@@ -471,12 +515,14 @@ func (m *Manager) Tick() {
 func (m *Manager) usedBytes() (int64, error) {
 	u, err := m.cfg.Pieces.UsedBytes()
 	if err != nil {
-		return 0, err
+		return 0, es(err)
 	}
 	m.mu.Lock()
 	convs := make([]*Conversation, 0, len(m.salons))
 	for _, s := range m.salons {
-		convs = append(convs, s.conv)
+		if s.conv != nil {
+			convs = append(convs, s.conv)
+		}
 	}
 	m.mu.Unlock()
 	for _, c := range convs {

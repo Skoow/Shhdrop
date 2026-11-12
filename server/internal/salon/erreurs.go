@@ -32,6 +32,8 @@ var (
 	ErrLimit = errors.New("salon: limite atteinte")
 	// ErrPlein : disque plein, trame non rangée (0x0C).
 	ErrPlein = errors.New("salon: disque plein")
+	// ErrBase : erreur de la base (message fixe, sans requête ni chemin).
+	ErrBase = errors.New("salon: erreur de la base")
 )
 
 // BadPassword : K_preuve_s fausse, avec les essais restants (le 10ᵉ détruit le salon et

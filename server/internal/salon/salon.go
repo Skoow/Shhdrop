@@ -51,7 +51,10 @@ type salon struct {
 	jetons     map[[32]byte]uint8
 	revoques   map[[32]byte]struct{}
 	journal    []evenement
-	conv       *Conversation
+	conv       *Conversation // nil pour la tombe d'un salon détruit sans état
+	// fini : salon détruit ; plus rien n'y entre ni n'y est recréé (tombe gardée dans
+	// Manager.salons jusqu'à l'échéance).
+	fini bool
 }
 
 func nouveauSalon(id string, expires time.Time, maxMembers int, conv *Conversation) *salon {
@@ -72,16 +75,12 @@ func (s *salon) occupesLocked() int {
 	return n
 }
 
-// annoncerLocked range une annonce au rang suivant ; ErrLimit si le journal est plein (rien
-// n'est alors changé). Une entrée (0x02, 0x0A) laisse nbSieges places libres : au plus
-// nbSieges sièges sont occupés, donc chacun peut toujours être annoncé parti (0x03) et le
-// journal ne dépasse jamais journalMax.
-func (s *salon) annoncerLocked(enr func(seq uint64) []byte, entree bool) (uint64, error) {
-	max := journalMax
-	if entree {
-		max -= nbSieges
-	}
-	if len(s.journal) >= max {
+// annoncerLocked range une annonce au rang suivant. Invariant : len(journal) + sièges
+// occupés ≤ journalMax, si bien qu'un siège occupé peut toujours être annoncé parti (0x03).
+// Toute annonce autre qu'un départ garde donc nbSieges places libres (sinon ErrLimit, rien
+// n'est changé) ; un départ ne peut pas échouer (il libère un siège et prend une place).
+func (s *salon) annoncerLocked(enr func(seq uint64) []byte, depart bool) (uint64, error) {
+	if !depart && len(s.journal) >= journalMax-nbSieges {
 		return 0, ErrLimit
 	}
 	s.seq++
@@ -100,7 +99,7 @@ func (s *salon) installerLocked(n uint8, reprise bool, now time.Time) (jeton [32
 	if reprise {
 		enr = func(seq uint64) []byte { return EnrReprise(seq, n, x.nonce) }
 	}
-	seq, err := s.annoncerLocked(enr, true)
+	seq, err := s.annoncerLocked(enr, false)
 	if err != nil {
 		return [32]byte{}, nil, err
 	}
