@@ -126,6 +126,11 @@
     teardown();
     open = false;
   }
+  // Fermeture voulue (Échap) : `open` repasse à faux tout de suite, sans attendre « close »
+  // (tâche suivante) ; un nouveau clic juste après rouvre toujours la boîte.
+  function cancelled() {
+    open = false;
+  }
 
   /** Bascule Photo / Vidéo (la vidéo demande aussi le micro : nouveau flux). */
   function setKind(k: "photo" | "video") {
@@ -215,8 +220,7 @@
     facing = facing === "environment" ? "user" : "environment";
     void start(); // start() coupe l'ancienne piste avant d'ouvrir la nouvelle
   }
-  function fallback() {
-    const m = kind;
+  function fallback(m: "photo" | "video" = kind) {
     dlg?.close();
     onfallback?.(m);
   }
@@ -254,7 +258,7 @@
 <svelte:document onvisibilitychange={onvisibility} />
 <svelte:window onpagehide={teardown} />
 
-<dialog bind:this={dlg} class="cam" aria-labelledby="cap-title" onclose={closed} data-capture={kind}>
+<dialog bind:this={dlg} class="cam" aria-labelledby="cap-title" onclose={closed} oncancel={cancelled} data-capture={kind}>
   {#if open}
     <div class="stage">
       <!-- svelte-ignore a11y_media_has_caption -->
@@ -279,7 +283,9 @@
         <div class="err" role="alert">
           <p>{errText}</p>
           <div class="err-act">
-            {#if onfallback}<button type="button" class="pill solid" onclick={fallback}>{t(kind === "photo" ? (touch ? "cap.fallback.photo" : "cap.fallback.photo.pick") : touch ? "cap.fallback.video" : "cap.fallback.video.pick")}</button>{/if}
+            {#if onfallback}<button type="button" class="pill solid" onclick={() => fallback()}>{t(kind === "photo" ? (touch ? "cap.fallback.photo" : "cap.fallback.photo.pick") : touch ? "cap.fallback.video" : "cap.fallback.video.pick")}</button>{/if}
+            <!-- Pas d'enregistrement vidéo ici (aucune bascule Vidéo) : la vidéo du système reste possible. -->
+            {#if onfallback && !canVideo}<button type="button" class="pill" onclick={() => fallback("video")}>{t(touch ? "cap.fallback.video" : "cap.fallback.video.pick")}</button>{/if}
             <button type="button" class="pill" onclick={() => void start()}>{t("cap.retry")}</button>
           </div>
         </div>

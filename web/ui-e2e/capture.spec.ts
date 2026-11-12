@@ -169,6 +169,44 @@ test("fermer sans prendre : rien n'est ajouté, toutes les pistes s'arrêtent", 
   await expect(page.locator("[data-row]")).toHaveCount(0);
 });
 
+test("Échap ferme la caméra ; un nouveau clic la rouvre toujours (open remis à faux dès la fermeture voulue)", async ({ page, shh }) => {
+  await spyStreams(page);
+  await page.goto(shh.origin + "/");
+  const cam = page.getByRole("dialog", { name: "Prendre une photo" });
+  for (let i = 0; i < 3; i++) {
+    await pick(page, "Photo ou vidéo");
+    await expect(cam).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(cam).toBeHidden();
+    // Clic aussitôt après Échap, sans attendre que la caméra ait démarré.
+    await pick(page, "Photo ou vidéo");
+    await expect(cam).toBeVisible();
+    await expect(cam.getByRole("button", { name: "Prendre la photo" })).toBeEnabled({ timeout: 15_000 });
+    await page.keyboard.press("Escape");
+    await expect(cam).toBeHidden();
+  }
+  await expect.poll(() => liveTracks(page)).toBe(0);
+});
+
+test("pas d'enregistrement vidéo dans ce navigateur, caméra refusée : l'erreur propose aussi une vidéo du système", async ({ page, shh }) => {
+  await page.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("non", "NotAllowedError"));
+    Object.defineProperty(window, "MediaRecorder", { value: undefined, configurable: true });
+  });
+  await page.goto(shh.origin + "/");
+  await pick(page, "Photo ou vidéo");
+  const cam = page.getByRole("dialog", { name: "Prendre une photo" });
+  await expect(cam.getByRole("alert")).toContainText("L'accès à la caméra a été refusé.");
+  await expect(cam.getByRole("group", { name: "Photo ou vidéo" })).toHaveCount(0); // pas de bascule Vidéo
+  const video = cam.getByRole("button", { name: /^(Utiliser la caméra du téléphone|Choisir une vidéo)$/ });
+  await expect(video).toBeVisible();
+  const chooser = page.waitForEvent("filechooser");
+  await video.click();
+  const fc = await chooser;
+  expect(await fc.element().getAttribute("accept")).toBe("video/*");
+  await expect(cam).toBeHidden();
+});
+
 test("permission refusée : message clair, repli sur l'appareil photo du système", async ({ page, shh }) => {
   await page.addInitScript(() => {
     navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("non", "NotAllowedError"));
