@@ -79,6 +79,9 @@
   });
 
   // Ligne de méta : la limite gratuite vient de limits.ts (jamais écrite dans les textes).
+  // Sur-titre : « Hébergé en Europe » est vrai pour le serveur de production, pas pour la démo
+  // GitHub Pages (hors d'Europe) ; la condition est remplacée à la compilation.
+  const eyebrow = $derived(import.meta.env.MODE === "demo" ? [t("hero.eyebrow.e2e")] : [t("hero.eyebrow.e2e"), t("hero.eyebrow.eu")]);
   const meta = $derived([t("hero.meta.free", { size: formatBytes(CONTENT_MAX, getLang()) }), t("home.fact.account"), t("hero.meta.erase")]);
 
   // UI §9.2.1 : Vocal masqué sans MediaRecorder. Pas de bouton Coller (décision du propriétaire) : Ctrl/Cmd + V suffit.
@@ -146,7 +149,7 @@
     <div class="pitch">
       {#if !compact}
         <!-- Téléphone : une ligne par moitié, le « · » s'efface. -->
-        <p class="eyebrow" data-eyebrow>{#each t("hero.eyebrow").split(" · ") as part, i (i)}{#if i > 0}<span class="sep">{" · "}</span>{/if}<span class="part">{part}</span>{/each}</p>
+        <p class="eyebrow" data-eyebrow>{#each eyebrow as part, i (i)}{#if i > 0}<span class="sep">{" · "}</span>{/if}<span class="part">{part}</span>{/each}</p>
       {/if}
       <h1 id="hero-title" tabindex="-1" class:compact>
         <!-- K8 : phrase entière pour les lecteurs d'écran, copie animée cachée. -->

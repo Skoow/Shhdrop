@@ -32,6 +32,9 @@ test.describe("fr-FR", () => {
     expect((await banner.boundingBox())!.y).toBe(0);
     await expect(banner.getByRole("button")).toHaveCount(0);
     await expect(page).toHaveTitle("Démo · Partage chiffré de bout en bout, sans compte · Shhgone");
+    // La démo est servie par GitHub Pages, hors d'Europe : le sur-titre ne le prétend pas.
+    await expect(page.locator("[data-eyebrow]")).toHaveText("Chiffré de bout en bout");
+    await expect(page.getByText(/Hébergé en Europe/)).toHaveCount(0);
 
     const head = await page.evaluate(() =>
       [...document.head.children].slice(0, 3).map((e) => e.outerHTML),

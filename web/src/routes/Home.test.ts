@@ -62,6 +62,10 @@ describe("Home (UI §9.1)", () => {
     expect(priv).toHaveLength(4);
     expect(priv.map((c) => c.querySelector("h3")!.textContent!.trim())).toEqual(["Sans compte", "Rien de lisible sur le serveur", "Photos nettoyées", "Salon éphémère bientôt"]);
     for (const c of [...document.querySelectorAll("[data-how-card], [data-priv-card]")]) expect(c.querySelector(".tile-ic svg")).not.toBeNull();
+    // La clé après le « # » (retirée par la refonte, remise le 12 novembre) : une ligne courte et vraie.
+    const key = document.querySelector("section.priv [data-key-note]")!;
+    expect(key.textContent!.trim()).toBe("La clé du lien est après le «\u00a0#\u00a0»\u202f: les navigateurs n'envoient jamais cette partie au serveur.");
+    expect(key.querySelector("svg[aria-hidden='true']")).not.toBeNull();
     expect([...document.querySelectorAll("[data-offer]")].map((o) => o.getAttribute("data-offer"))).toEqual(["free", "plus", "pro"]);
     expect(document.querySelectorAll("details[name=faq]")).toHaveLength(5);
     expect(document.querySelector('[data-slot="compose"]')).not.toBeNull();
@@ -207,12 +211,29 @@ describe("Home (UI §9.1)", () => {
     expect(onfiles).toHaveBeenCalledWith([a], "depot", ["Vacances"]);
   });
 
+  it("démo (GitHub Pages, hors d'Europe) : sur-titre sans « Hébergé en Europe », en français comme en anglais", () => {
+    vi.stubEnv("MODE", "demo");
+    try {
+      show();
+      expect(document.querySelector("[data-eyebrow]")!.textContent).toBe("Chiffré de bout en bout");
+      if (c) void unmount(c);
+      document.body.innerHTML = "";
+      setLang("en");
+      show();
+      expect(document.querySelector("[data-eyebrow]")!.textContent).toBe("End-to-end encrypted");
+      expect(document.body.textContent).not.toMatch(/Europe/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("anglais", () => {
     setLang("en");
     show();
     expect(title(document.querySelector("h1")!)).toBe("One link, one password, then nothing.");
     expect(document.querySelector("[data-eyebrow]")!.textContent).toBe("End-to-end encrypted · Hosted in Europe");
     expect(document.querySelector("[data-pick]")!.textContent!.trim()).toBe("Choose files");
+    expect(document.querySelector("[data-key-note]")!.textContent!.trim()).toBe("The link's key comes after the “#”: browsers never send that part to the server.");
     expect([...document.querySelectorAll("[data-meta] li")].map((l) => l.textContent!.trim())).toEqual(["Free up to 2\u00a0GB", "No account", "Erased after opening"]);
   });
 });

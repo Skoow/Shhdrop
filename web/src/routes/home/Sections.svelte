@@ -9,7 +9,7 @@
   import { limitParams } from "../../i18n/limit-params";
   import { reveal } from "../../ui/attach";
   import AddIcon from "../../ui/AddIcon.svelte";
-  import { ArrowRight, Broom, EyeOff, Link2, Lock, UserX } from "../../ui/Icon";
+  import { ArrowRight, Broom, EyeOff, KeyRound, Link2, Lock, UserX } from "../../ui/Icon";
   import OffersStrip from "../../ui/OffersStrip.svelte";
   import TabIcon from "../../ui/TabIcon.svelte";
 
@@ -61,6 +61,8 @@
       </li>
     {/each}
   </ul>
+  <!-- La clé après le « # » (spec §5.3) : les navigateurs n'envoient pas le fragment d'une adresse. -->
+  <p class="key rv" data-key-note {@attach reveal}><KeyRound size={18} strokeWidth={1.8} aria-hidden="true" /><span>{t("home.priv.key")}</span></p>
   <a class="more" href={href("/securite")} onclick={(e) => followLink(e, "/securite")}>{t("home.why.more")}<ArrowRight size={18} strokeWidth={1.9} aria-hidden="true" /></a>
 </section>
 
@@ -255,6 +257,20 @@
     font-size: 0.75rem;
     font-weight: 600;
     vertical-align: 2px;
+  }
+  .key {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-2);
+    max-width: 62ch;
+    margin: 0;
+    color: var(--text-2);
+    text-align: left;
+  }
+  .key :global(svg) {
+    flex: none;
+    margin-top: 0.15em;
+    color: var(--accent);
   }
   .more {
     display: inline-flex;

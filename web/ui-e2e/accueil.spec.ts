@@ -42,7 +42,7 @@ test.describe("barre du haut (ordinateur)", () => {
 
   test("menus au clavier : Entrée, flèches, Échap ; focus visible ; un seul ouvert ; clic extérieur ; axe", async ({ page, shh }) => {
     await page.goto(shh.origin + "/");
-    const share = page.getByRole("navigation", { name: "Menu principal" }).getByRole("button", { name: "Partager" });
+    const share = page.getByRole("navigation", { name: "Menu principal" }).getByRole("button", { name: "Envoyer", exact: true });
     const sec = page.getByRole("button", { name: "Sécurité" });
     await share.focus();
     await page.keyboard.press("Enter");
@@ -71,9 +71,9 @@ test.describe("barre du haut (ordinateur)", () => {
     await expect(sec).toHaveAttribute("aria-expanded", "false");
   });
 
-  test("Partager › Note ouvre l'éditeur ; Sécurité › Ce que voit le serveur ouvre la question ; Offres", async ({ page, shh }) => {
+  test("Envoyer › Note ouvre l'éditeur ; Sécurité › Ce que voit le serveur ouvre la question ; Offres", async ({ page, shh }) => {
     await page.goto(shh.origin + "/");
-    await page.getByRole("navigation", { name: "Menu principal" }).getByRole("button", { name: "Partager" }).click();
+    await page.getByRole("navigation", { name: "Menu principal" }).getByRole("button", { name: "Envoyer", exact: true }).click();
     await page.getByRole("button", { name: /^Note / }).click();
     await expect(page.getByRole("dialog", { name: "Nouveau texte" })).toBeVisible();
     await page.keyboard.press("Escape");
@@ -83,8 +83,8 @@ test.describe("barre du haut (ordinateur)", () => {
     await expect(page.locator("#faq-server summary")).toBeFocused();
     await page.getByRole("link", { name: "Offres", exact: true }).click();
     await expect(page).toHaveURL(shh.origin + "/offres");
-    // Ailleurs que sur l'accueil : « Partager › Fichiers » mène à la page d'envoi.
-    await page.getByRole("navigation", { name: "Menu principal" }).getByRole("button", { name: "Partager" }).click();
+    // Ailleurs que sur l'accueil : « Envoyer › Note » mène à la page d'envoi.
+    await page.getByRole("navigation", { name: "Menu principal" }).getByRole("button", { name: "Envoyer", exact: true }).click();
     await page.getByRole("button", { name: /^Note / }).click();
     await expect(page).toHaveURL(shh.origin + "/envoyer");
     await expect(page.getByRole("dialog", { name: "Nouveau texte" })).toBeVisible();

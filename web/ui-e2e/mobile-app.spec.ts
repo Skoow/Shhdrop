@@ -266,7 +266,7 @@ test.describe("ordinateur : rien ne change", () => {
     // boutons sont ceux des menus de la barre du haut (refonte du 12 novembre).
     const banner = page.getByRole("banner");
     await expect(banner.getByRole("button", { name: /Réglages|Settings|Langue|Language|Français|English/ })).toHaveCount(0);
-    expect(await banner.getByRole("button").allTextContents()).toEqual(["Partager", "Salonbientôt", "Sécurité"]);
+    expect(await banner.getByRole("button").allTextContents()).toEqual(["Envoyer", "Salonbientôt", "Sécurité"]);
     await expect(foot(page).getByText("À propos", { exact: true })).toBeAttached();
     for (const n of ["Langue", "Fichiers"]) await expect(foot(page).getByText(n, { exact: true })).toHaveCount(0); // retirés le 12 novembre
     await expect(footLink(page, "Sécurité")).toBeVisible();

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // Barre du haut (refonte du 12 novembre), ordinateur et tablette : menus déroulants en motif
 // « disclosure » (bouton aria-expanded, liste de liens ou boutons), clavier (Entrée, Échap,
-// flèches, Tab), fermeture au clic extérieur ; « Partager » ouvre les gestes du composeur.
+// flèches, Tab), fermeture au clic extérieur ; « Envoyer ▾ » ouvre les gestes du composeur.
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chrome } from "../app/chrome.svelte";
@@ -29,11 +29,11 @@ afterEach(() => {
 });
 
 describe("TopNav", () => {
-  it("menus, Salon bientôt, Offres, Mes partages et Partager", () => {
+  it("menus, Salon bientôt, Offres, Mes partages et Partager ; le menu s'appelle « Envoyer », le bouton plein seul « Partager »", () => {
     show();
     const nav = document.querySelector("nav")!;
     expect(nav.getAttribute("aria-label")).toBe("Menu principal");
-    for (const n of ["Partager", "Sécurité"]) {
+    for (const n of ["Envoyer", "Sécurité"]) {
       const b = btn(n);
       expect(b.getAttribute("aria-expanded")).toBe("false");
       expect(panel(b).hidden).toBe(true);
@@ -43,14 +43,17 @@ describe("TopNav", () => {
     expect(room.textContent).toContain("bientôt");
     const links = [...document.querySelectorAll("a")].map((a) => [a.textContent!.trim(), a.getAttribute("href")]);
     expect(links).toEqual(expect.arrayContaining([["Offres", "/offres"], ["Mes partages", "/envois"], ["Partager", "/envoyer"]]));
+    const named = (n: string) => [...nav.querySelectorAll("a, button")].filter((e) => e.textContent!.trim() === n);
+    expect(named("Partager")).toHaveLength(1);
+    expect(named("Partager")[0]!.tagName).toBe("A");
   });
 
-  it("Partager : quatre gestes, chacun avec icône, titre et une ligne", () => {
+  it("Envoyer : quatre gestes, chacun avec icône, titre et une ligne", () => {
     show();
-    btn("Partager").click();
+    btn("Envoyer").click();
     flushSync();
-    expect(btn("Partager").getAttribute("aria-expanded")).toBe("true");
-    const items = [...panel(btn("Partager")).querySelectorAll("[data-nav-item]")];
+    expect(btn("Envoyer").getAttribute("aria-expanded")).toBe("true");
+    const items = [...panel(btn("Envoyer")).querySelectorAll("[data-nav-item]")];
     expect(items.map((i) => i.querySelector(".it-t")!.textContent)).toEqual(["Fichiers", "Note", "Vocal", "Photo ou vidéo"]);
     for (const i of items) {
       expect(i.querySelector(".it-ic svg")).not.toBeNull();
@@ -73,7 +76,7 @@ describe("TopNav", () => {
 
   it("clavier : flèche bas ouvre et va au premier élément, flèches et Échap ; le focus revient au bouton", () => {
     show();
-    const b = btn("Partager");
+    const b = btn("Envoyer");
     b.focus();
     key(b, "ArrowDown");
     expect(b.getAttribute("aria-expanded")).toBe("true");
@@ -92,11 +95,11 @@ describe("TopNav", () => {
 
   it("un seul menu ouvert ; clic extérieur et sortie au Tab ferment", () => {
     show();
-    btn("Partager").click();
+    btn("Envoyer").click();
     flushSync();
     btn("Sécurité").click();
     flushSync();
-    expect(btn("Partager").getAttribute("aria-expanded")).toBe("false");
+    expect(btn("Envoyer").getAttribute("aria-expanded")).toBe("false");
     expect(btn("Sécurité").getAttribute("aria-expanded")).toBe("true");
     document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
     flushSync();
@@ -109,33 +112,34 @@ describe("TopNav", () => {
     expect(btn("Sécurité").getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("un geste du menu Partager passe au composeur monté (chrome.add) et ferme le menu", () => {
+  it("un geste du menu Envoyer passe au composeur monté (chrome.add) et ferme le menu", () => {
     const add = vi.fn();
     chrome.add = add;
     show();
-    btn("Partager").click();
+    btn("Envoyer").click();
     flushSync();
-    const items = [...panel(btn("Partager")).querySelectorAll<HTMLButtonElement>("[data-nav-item]")];
+    const items = [...panel(btn("Envoyer")).querySelectorAll<HTMLButtonElement>("[data-nav-item]")];
     items[0]!.click();
     items[1]!.click();
     flushSync();
     expect(add.mock.calls).toEqual([["fichiers"], ["texte"]]);
-    expect(btn("Partager").getAttribute("aria-expanded")).toBe("false");
+    expect(btn("Envoyer").getAttribute("aria-expanded")).toBe("false");
   });
 
   it("pendant un envoi : menus et liens désactivés, raison donnée", () => {
     show({ busy: true });
     for (const a of document.querySelectorAll("a")) expect(a.getAttribute("aria-disabled")).toBe("true");
     for (const b of document.querySelectorAll("button[aria-expanded]")) expect(b.getAttribute("aria-disabled")).toBe("true");
-    btn("Partager").click();
+    btn("Envoyer").click();
     flushSync();
-    expect(btn("Partager").getAttribute("aria-expanded")).toBe("false");
+    expect(btn("Envoyer").getAttribute("aria-expanded")).toBe("false");
   });
 
   it("anglais", () => {
     setLang("en");
     show();
-    expect(btn("Share")).toBeDefined();
+    expect(btn("Send")).toBeDefined();
+    expect(btn("Share")).toBeUndefined();
     expect(btn("Security")).toBeDefined();
   });
 });
