@@ -17,8 +17,19 @@ import (
 // User-Agent ni Referer, et l'adresse du pair seulement dans clientip.go et /healthz.
 // Accept-Encoding (retours CLEAN2) : choix de la variante précompressée d'un fichier du site
 // (cmd/shhdrop/static.go) ; même valeur dans tous les navigateurs visés, jamais gardé ni journalisé.
-var readHeaders = []string{"Authorization", "X-Shh-Client-IP", "X-Shh-Access", "X-Shh-Manage", "X-Shh-Grant", "Accept-Encoding",
-	"X-Shh-Membre", "X-Shh-Piece"}
+var readHeaders = []string{"Authorization", "X-Shh-Client-IP", "X-Shh-Access", "X-Shh-Manage", "X-Shh-Grant", "Accept-Encoding"}
+
+// salonHeaders : jeton de membre et identifiant de pièce du salon (plan C-2 Task 13), lus
+// seulement dans les fichiers handlers_salon*.go (audit des partages du 12 novembre, D3 : une
+// liste globale laissait un gestionnaire de partage les lire sans être vu).
+var salonHeaders = []string{"X-Shh-Membre", "X-Shh-Piece"}
+
+// headerAllowed : en-tête name lisible dans le fichier path (readHeaders partout,
+// salonHeaders dans handlers_salon*.go seulement).
+func headerAllowed(path, name string) bool {
+	return slices.Contains(readHeaders, name) ||
+		slices.Contains(salonHeaders, name) && strings.HasPrefix(filepath.Base(path), "handlers_salon")
+}
 
 // wsHeaders : poignée de main du WebSocket du salon (plan C-2 Task 10, spec §39.3.1
 // « Origine »), lus seulement dans handlers_salon_ws.go (salonWS, poigneeWS) : Origin comparé à
@@ -96,6 +107,13 @@ func TestNoHeaderReadOutsideAllowList(t *testing.T) {
 					t.Errorf("%s : %s interdit", where(x), x.Sel.Name)
 				}
 			case *ast.CallExpr:
+				// headerSecret(r, nom) : vérifié avant le retour des appels qui ne sont pas des
+				// sélecteurs (audit D3 : cette vérification, placée après, ne s'exécutait jamais).
+				if id, ok := x.Fun.(*ast.Ident); ok && id.Name == "headerSecret" {
+					if name, lit := strLit(x.Args[1]); !lit || !headerAllowed(sf.path, name) {
+						t.Errorf("%s : headerSecret(%s) hors liste blanche", where(x), name)
+					}
+				}
 				sel, ok := x.Fun.(*ast.SelectorExpr)
 				if !ok {
 					return true
@@ -104,7 +122,7 @@ func TestNoHeaderReadOutsideAllowList(t *testing.T) {
 					(sel.Sel.Name == "Get" || sel.Sel.Name == "Values") {
 					name, lit := strLit(x.Args[0])
 					switch {
-					case lit && slices.Contains(readHeaders, name):
+					case lit && headerAllowed(sf.path, name):
 					case lit && slices.Contains(wsHeaders, name) && filepath.Base(sf.path) == "handlers_salon_ws.go" &&
 						slices.Contains([]string{"salonWS", "poigneeWS"}, enclosing(sf.f, x.Pos())):
 						// Poignée de main du WebSocket du salon (wsHeaders).
@@ -112,11 +130,6 @@ func TestNoHeaderReadOutsideAllowList(t *testing.T) {
 						// nom passé par l'appelant : vérifié sur les appels de headerSecret
 					default:
 						t.Errorf("%s : lecture d'en-tête hors liste blanche (%s)", where(x), name)
-					}
-				}
-				if id, ok := x.Fun.(*ast.Ident); ok && id.Name == "headerSecret" {
-					if name, lit := strLit(x.Args[1]); !lit || !slices.Contains(readHeaders, name) {
-						t.Errorf("%s : headerSecret(%s) hors liste blanche", where(x), name)
 					}
 				}
 				_ = sel

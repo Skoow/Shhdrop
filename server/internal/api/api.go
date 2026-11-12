@@ -368,26 +368,7 @@ func (s *server) guard(next http.Handler) http.Handler {
 // limite (SegmentsPerMin) ; l'état du partage ou de la pièce est revérifié ensuite.
 func (s *server) validSegmentToken(r *http.Request) bool {
 	if n, ok := strings.CutPrefix(r.URL.Path, "/api/salons/pieces/segments/"); ok {
-		if s.salons == nil || n == "" || strings.Contains(n, "/") {
-			return false
-		}
-		switch r.Method {
-		case http.MethodPut:
-			tok, err := bearer(r)
-			if err != nil {
-				return false
-			}
-			_, _, err = s.sig.Subject(tok, token.SalonPiece)
-			return err == nil
-		case http.MethodGet:
-			j, err := headerSecret(r, "X-Shh-Membre")
-			if err != nil {
-				return false
-			}
-			_, err = s.salons.Membre(j)
-			return err == nil
-		}
-		return false
+		return s.validPieceSegment(r, n) // handlers_salon_pieces.go
 	}
 	var kind byte
 	if r.URL.Path == "/api/shares/watch" && r.Method == http.MethodGet {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/limits"
@@ -29,6 +30,33 @@ func (a salonAPI) routesPieces(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/salons/pieces/segments/{n}", a.lireSegmentPiece)
 	mux.HandleFunc("/api/salons/pieces/segments/{n}", methodNotAllowed)
 	mux.HandleFunc("POST /api/salons/pieces/retirer", a.retirerPiece)
+}
+
+// validPieceSegment : validSegmentToken pour /api/salons/pieces/segments/{n} (n non vide,
+// sans « / ») : PUT avec un jeton d'envoi de pièce signé et non expiré, GET avec un
+// X-Shh-Membre valable ; faux si le salon est désactivé. Ici et non dans api.go : X-Shh-Membre
+// n'est lu que dans les fichiers handlers_salon*.go (minimize_test.go).
+func (s *server) validPieceSegment(r *http.Request, n string) bool {
+	if s.salons == nil || n == "" || strings.Contains(n, "/") {
+		return false
+	}
+	switch r.Method {
+	case http.MethodPut:
+		tok, err := bearer(r)
+		if err != nil {
+			return false
+		}
+		_, _, err = s.sig.Subject(tok, token.SalonPiece)
+		return err == nil
+	case http.MethodGet:
+		j, err := headerSecret(r, "X-Shh-Membre")
+		if err != nil {
+			return false
+		}
+		_, err = s.salons.Membre(j)
+		return err == nil
+	}
+	return false
 }
 
 // pieceTTL : durée maximale du jeton d'envoi d'une pièce (comme celui d'un partage), bornée
