@@ -208,3 +208,37 @@ func TestSync(t *testing.T) {
 		t.Fatal(fi.Size(), fi.ModTime(), err)
 	}
 }
+
+// Audit du salon (12 novembre), D7 : le dossier gardait l'heure de la dernière création ou
+// suppression de fichier. Ses dates de modification et d'accès sont remises à l'epoch après
+// chaque Reserve et chaque Delete, comme celles des fichiers (wipeTimes).
+func TestDossierSansDate(t *testing.T) {
+	s := newStore(t)
+	epoch := time.Unix(0, 0)
+	verifier := func(quand string) {
+		t.Helper()
+		fi, err := os.Stat(s.Dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !fi.ModTime().Equal(epoch) {
+			t.Fatalf("%s : mtime du dossier = %v", quand, fi.ModTime())
+		}
+	}
+	if err := s.Reserve(id1, 10); err != nil {
+		t.Fatal(err)
+	}
+	verifier("Reserve")
+	if err := s.Reserve(id2, 10); err != nil {
+		t.Fatal(err)
+	}
+	verifier("seconde Reserve")
+	if err := s.Delete(id1); err != nil {
+		t.Fatal(err)
+	}
+	verifier("Delete")
+	if err := s.Delete(id1); err != nil { // déjà absent : rien changé, toujours à l'epoch
+		t.Fatal(err)
+	}
+	verifier("Delete d'un absent")
+}

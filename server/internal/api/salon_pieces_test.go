@@ -250,6 +250,20 @@ func TestPieceSansDate(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(e.dir, "blobs", id)); !os.IsNotExist(err) {
 		t.Fatal("pièce dans blobs/ :", err)
 	}
+	// Dossiers sans date (audit D7) : ni la dernière création de pièce, de conversation ou de
+	// partage, ni la dernière suppression.
+	c := e.create(t, "203.0.113.7:1", newKeys(), 1, 1)
+	e.upload(t, c, 1)
+	expect(t, e.do(req{method: "POST", path: "/api/salons/pieces/retirer", hdr: pieceHdr(j[0], id), body: []byte(`{}`)}), 200, "")
+	for _, d := range []string{"salon-pieces", "salons", "blobs"} {
+		fi, err := os.Stat(filepath.Join(e.dir, d))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.ModTime().Unix() != 0 {
+			t.Fatal("dossier", d, fi.ModTime())
+		}
+	}
 }
 
 // Quotas (plan, point 22) : un fichier passe par limits (2 envois non finalisés à la fois,

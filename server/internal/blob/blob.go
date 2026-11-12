@@ -138,6 +138,12 @@ func wipeTimes(p string) error {
 	return os.Chtimes(p, time.Unix(0, 0), time.Unix(0, 0))
 }
 
+// wipeDirTimes remet les dates du dossier à l'epoch après une création ou une suppression de
+// fichier, qui les met à l'heure (audit du 12 novembre, D7). Au mieux : un échec n'annule pas
+// l'opération faite (un fichier créé mais signalé en échec resterait orphelin) ; la date de
+// changement d'inode (ctime) ne peut pas être remise, aucun appel système ne le permet.
+func (s *Store) wipeDirTimes() { _ = wipeTimes(s.Dir) }
+
 // Reserve crée le fichier de size octets, alloués sur le disque quand le système de
 // fichiers le permet (sinon fichier creux, ou ErrNoAllocate si NoSparse) ; erreur s'il existe déjà.
 func (s *Store) Reserve(id string, size int64) error {
@@ -152,6 +158,7 @@ func (s *Store) Reserve(id string, size int64) error {
 	mu.Lock()
 	defer mu.Unlock()
 	scans := s.begin(size)
+	defer s.wipeDirTimes() // fichier créé, ou créé puis retiré
 	if err := s.reserve(p, size); err != nil {
 		s.end(scans, size, 0) // rien de créé, ou fichier retiré
 		return err
@@ -191,6 +198,7 @@ func (s *Store) CheckAllocate() error {
 	if err != nil {
 		return err
 	}
+	defer s.wipeDirTimes() // après la suppression de la sonde (LIFO)
 	defer os.Remove(f.Name())
 	err = allocate(f, 4096, s.NoSparse)
 	return errors.Join(err, f.Close())
@@ -215,6 +223,8 @@ func (s *Store) RemoveProbes() error {
 		if probeName.MatchString(e.Name()) && e.Type().IsRegular() {
 			if err := os.Remove(filepath.Join(s.Dir, e.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
 				errs = append(errs, err)
+			} else {
+				s.wipeDirTimes()
 			}
 		}
 	}
@@ -315,8 +325,11 @@ func (s *Store) Delete(id string) error {
 	fi, serr := os.Stat(p)
 	if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
-	} else if err == nil && serr == nil && !fi.IsDir() {
-		freed = fi.Size()
+	} else if err == nil {
+		s.wipeDirTimes()
+		if serr == nil && !fi.IsDir() {
+			freed = fi.Size()
+		}
 	}
 	return nil
 }

@@ -137,6 +137,11 @@ func idValide(id string) bool {
 // sansDate met les dates du fichier à l'epoch (comme blob.wipeTimes).
 func sansDate(p string) error { return es(os.Chtimes(p, time.Unix(0, 0), time.Unix(0, 0))) }
 
+// dossierSansDate : dates du dossier de p remises à l'epoch après la création ou la
+// suppression de p (audit du 12 novembre, D7), au mieux : un échec n'annule pas l'opération
+// faite ; la date de changement d'inode (ctime) ne peut pas être remise.
+func dossierSansDate(p string) { _ = sansDate(filepath.Dir(p)) }
+
 // etat : erreur fixe si la conversation ne sert plus (appelant sous c.mu).
 func (c *Conversation) etat() error {
 	switch {
@@ -183,6 +188,7 @@ func OuvrirConversation(dossier, id string) (*Conversation, error) {
 	if err != nil {
 		return nil, es(err)
 	}
+	dossierSansDate(c.chemin)
 	c.f = f
 	ok := false
 	defer func() {
@@ -316,6 +322,7 @@ func (c *Conversation) Detruire() error {
 	if err := os.Remove(c.chemin); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return es(err)
 	}
+	dossierSansDate(c.chemin)
 	c.supprime = true
 	c.poserTaille(0)
 	// Fichier supprimé et clé oubliée : une erreur de fermeture est seulement signalée.

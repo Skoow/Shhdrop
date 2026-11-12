@@ -298,3 +298,37 @@ func TestAuditAutreSalon(t *testing.T) {
 		t.Fatal("retrait depuis un autre salon :", err)
 	}
 }
+
+// D7 de l'audit : les dossiers salon-pieces/ et salons/ gardaient l'heure de la dernière
+// création ou suppression d'une pièce ou d'une conversation. Leur date de modification est
+// remise à l'epoch après chacune (la date de changement d'inode, ctime, ne peut pas l'être).
+func TestAuditDateDossier(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	epoch := time.Unix(0, 0)
+	verifier := func(quand string) {
+		t.Helper()
+		for _, d := range []string{b.cfg.Pieces.Dir, b.cfg.DossierConversations} {
+			fi, err := os.Stat(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !fi.ModTime().Equal(epoch) {
+				t.Fatalf("%s : mtime de %s = %v", quand, filepath.Base(d), fi.ModTime())
+			}
+		}
+	}
+	c := b.creer(t, 3)
+	_, mb := b.entrerMembre(t, c, true) // conversation créée
+	verifier("entrée (conversation créée)")
+	id := b.creerPiece(t, mb, 1, false)
+	verifier("création de pièce")
+	if err := b.m.RetirerPiece(mb, id); err != nil {
+		t.Fatal(err)
+	}
+	verifier("retrait de pièce")
+	b.pretePiece(t, mb, 1, false)
+	if err := b.m.detruire(mb.salon.id); err != nil {
+		t.Fatal(err)
+	}
+	verifier("destruction (conversation et pièce effacées)")
+}

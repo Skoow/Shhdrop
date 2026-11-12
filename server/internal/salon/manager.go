@@ -109,6 +109,10 @@ func NewManager(c Config) (*Manager, error) {
 	if err := os.MkdirAll(c.Pieces.Dir, 0o700); err != nil {
 		return nil, es(err)
 	}
+	// Dates du dossier à l'epoch dès sa création (blob.Store les y remet ensuite, audit D7).
+	if err := os.Chtimes(c.Pieces.Dir, time.Unix(0, 0), time.Unix(0, 0)); err != nil {
+		return nil, es(err)
+	}
 	return &Manager{cfg: c, salons: map[string]*salon{}, index: map[[32]byte]*salon{},
 		vivants: map[string]vivant{}, parBloc: map[[32]byte]int{}, pieceIdx: map[string]*salon{}}, nil
 }
