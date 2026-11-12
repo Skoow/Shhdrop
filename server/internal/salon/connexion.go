@@ -67,7 +67,7 @@ const CodeInterne = 1011
 var errPanique = errors.New("salon: panique récupérée dans une connexion")
 
 // crochetAccueil : tests seulement (panique injectée en préparant l'accueil) ; nil en
-// production.
+// production. Ne pas paralléliser les tests qui le modifient (t.Parallel interdit).
 var crochetAccueil func()
 
 // Lien : WebSocket d'un membre, vu du salon (adaptateur coder/websocket à la Task 10).
@@ -252,6 +252,9 @@ func accueillir(ctx context.Context, l Lien, f *fermeur) (Accueil, int) {
 // 0x07 par siège occupé ; le rattrapage suit (écrivain). Reprise : 0x0A diffusé avec un
 // nonce neuf, 0x0D au rang de ce 0x0A, 0x07, direct. L'ancienne connexion du siège est
 // remplacée ; horsLigneDepuis est remis à zéro (un membre en ligne garde son siège).
+// En reprise, si la construction de l'accueil panique, il reste un 0x0A diffusé sans
+// connexion et une reprise décomptée : accepté, on ne peut pas faire autrement, puisque le
+// 0x0D est au rang de ce 0x0A (il faut l'avoir annoncé pour construire l'accueil).
 func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*connexion, int) {
 	s := mb.salon
 	now := m.cfg.Now()

@@ -243,7 +243,7 @@ func (s *salon) lireRefs(refs []ref, efface func(seq uint64) bool) ([][]byte, er
 }
 
 // crochetLireRefs : tests seulement (panique injectée sous le verrou du salon) ; nil en
-// production.
+// production. Ne pas paralléliser les tests qui le modifient (t.Parallel interdit).
 var crochetLireRefs func()
 
 // effaceeDepuis : la trame de rang seq n'est plus servie (effacée, ou salon détruit).
