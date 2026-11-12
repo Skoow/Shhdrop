@@ -69,10 +69,11 @@ impl Reseau {
             .collect()
     }
 
-    /// Trame du Welcome remise (au rang suivant) à l'arrivant en attente, hors du réseau.
-    fn entrer(&mut self, x: &mut Salon, w: &[u8]) -> Result<Evenement, Error> {
+    /// Trame du Welcome remise (au rang suivant) à l'arrivant en attente, hors du réseau ; `de` :
+    /// siège attesté de son expéditeur (l'auteur du Commit qui ajoute l'arrivant).
+    fn entrer(&mut self, x: &mut Salon, w: &[u8], de: u8) -> Result<Evenement, Error> {
         self.seq += 1;
-        x.recevoir_trame(&cles(), w, self.seq, 0)
+        x.recevoir_trame(&cles(), w, self.seq, de)
     }
 
     /// Arrivée (0x02) ou reprise (0x0A) annoncée par le serveur.
@@ -119,7 +120,8 @@ impl Reseau {
         self.publier(siege, &kp);
         let commit = self.salon(adder).ajouter(&cles(), &mls(&kp)).unwrap();
         let welcome = self.commit_accepte(adder, &commit, vec![siege], retires);
-        self.entrer(&mut nouveau, &welcome.unwrap()).unwrap();
+        self.entrer(&mut nouveau, &welcome.unwrap(), adder as u8)
+            .unwrap();
         let s = siege as usize;
         if self.m.len() <= s {
             self.m.resize_with(s + 1, || None);
@@ -346,7 +348,7 @@ fn ajout_perdu_puis_rejoue() {
     }
     let ajout2 = r.salon(0).ajouter(&cles(), &mls(&kp)).unwrap();
     let welcome = r.commit_accepte(0, &ajout2, vec![9], vec![]).unwrap();
-    r.entrer(&mut nouveau, &welcome).unwrap();
+    r.entrer(&mut nouveau, &welcome, 0).unwrap();
     r.m.push(Some(nouveau));
     r.meme_epoque();
     r.message(9, 1);
@@ -537,7 +539,7 @@ fn retour_nouvelle_feuille() {
             retires: vec![3]
         })
     );
-    r.entrer(&mut nouveau, &welcome).unwrap();
+    r.entrer(&mut nouveau, &welcome, 1).unwrap();
     r.m[3] = Some(nouveau);
     r.meme_epoque();
     for s in 0..10 {
@@ -818,7 +820,7 @@ fn etats() {
     else {
         panic!("Welcome attendu à l'écho");
     };
-    assert_eq!(r.entrer(&mut attente, &w), Err(Error::MlsInvalide));
+    assert_eq!(r.entrer(&mut attente, &w, 0), Err(Error::MlsInvalide));
 }
 
 /// Un KeyPackage reçu n'est signalé que s'il est valide et porte le siège et le nonce
@@ -880,7 +882,7 @@ fn annonces_completes_tardives() {
     r.m[5] = Some(coupe);
     let commit = r.salon(0).ajouter(&cles(), &mls(&kp)).unwrap();
     let welcome = r.commit_accepte(0, &commit, vec![9], vec![]).unwrap();
-    r.entrer(&mut nouveau, &welcome).unwrap();
+    r.entrer(&mut nouveau, &welcome, 0).unwrap();
     r.m.push(Some(nouveau));
     r.meme_epoque();
     r.message(5, 1);
@@ -997,7 +999,7 @@ fn kp_usurpe_par_un_membre() {
     r.publier(9, &kp);
     let commit = r.salon(0).ajouter(&cles(), &mls(&kp)).unwrap();
     let welcome = r.commit_accepte(0, &commit, vec![9], vec![]).unwrap();
-    r.entrer(&mut legitime, &welcome).unwrap();
+    r.entrer(&mut legitime, &welcome, 0).unwrap();
     r.m.push(Some(legitime));
     r.meme_epoque();
     r.message(9, 1);
@@ -1041,7 +1043,7 @@ fn retour_du_createur_detourne() {
     r.publier(0, &kp);
     let commit = r.salon(1).ajouter(&cles(), &mls(&kp)).unwrap();
     let welcome = r.commit_accepte(1, &commit, vec![0], vec![0]).unwrap();
-    r.entrer(&mut createur, &welcome).unwrap();
+    r.entrer(&mut createur, &welcome, 1).unwrap();
     r.m[0] = Some(createur);
     r.meme_epoque();
     let c = r.salon(0).retirer(&cles(), 9).unwrap();
@@ -1133,7 +1135,7 @@ fn faux_groupe_refuse() {
     else {
         panic!("Welcome attendu");
     };
-    assert_eq!(r.entrer(&mut arrivant, &w), Err(Error::MlsInvalide));
+    assert_eq!(r.entrer(&mut arrivant, &w, 3), Err(Error::MlsInvalide));
     // Faux groupe « du créateur » (siège 0, nonce public) avec une feuille du siège 5 d'un
     // autre nonce que celui annoncé.
     let mut faux0 =
@@ -1164,11 +1166,11 @@ fn faux_groupe_refuse() {
     else {
         panic!("Welcome attendu");
     };
-    assert_eq!(r.entrer(&mut arrivant, &w), Err(Error::MlsInvalide));
+    assert_eq!(r.entrer(&mut arrivant, &w, 0), Err(Error::MlsInvalide));
     // Le vrai groupe : accepté.
     let commit = r.salon(0).ajouter(&cles(), &mls(&kp)).unwrap();
     let welcome = r.commit_accepte(0, &commit, vec![9], vec![]).unwrap();
-    r.entrer(&mut arrivant, &welcome).unwrap();
+    r.entrer(&mut arrivant, &welcome, 0).unwrap();
 }
 
 /// Sans la liste complète de l'accueil, l'arrivant ne peut rien vérifier : il refuse ; avec
@@ -1182,9 +1184,9 @@ fn rejoindre_sans_liste() {
     r.publier(5, &kp);
     let c = r.salon(0).ajouter(&cles(), &mls(&kp)).unwrap();
     let w = r.commit_accepte(0, &c, vec![5], vec![]).unwrap();
-    assert_eq!(r.entrer(&mut x, &w), Err(Error::MlsInvalide));
+    assert_eq!(r.entrer(&mut x, &w, 0), Err(Error::MlsInvalide));
     x.remplacer_annonces(0, &r.liste);
-    r.entrer(&mut x, &w).unwrap();
+    r.entrer(&mut x, &w, 0).unwrap();
 }
 
 /// MINOR 4 : le perdant apprend ce qu'a changé le Commit gagnant.
@@ -1240,11 +1242,11 @@ fn deux_arrivees_rapprochees() {
     );
     let c_a = r.salon(0).ajouter(&cles(), &mls(&kp_a)).unwrap();
     let w_a = r.commit_accepte(0, &c_a, vec![5], vec![]).unwrap();
-    r.entrer(&mut a, &w_a).unwrap();
+    r.entrer(&mut a, &w_a, 0).unwrap();
     r.m.push(Some(a));
     let c_b = r.salon(0).ajouter(&cles(), &mls(&kp_b)).unwrap();
     let w_b = r.commit_accepte(0, &c_b, vec![6], vec![]).unwrap();
-    r.entrer(&mut b, &w_b).unwrap();
+    r.entrer(&mut b, &w_b, 0).unwrap();
     r.m.push(Some(b));
     r.meme_epoque();
     r.message(5, 1);
@@ -1359,9 +1361,12 @@ fn en_tete_lie_au_contenu() {
         &mls(&w),
     )
     .unwrap();
-    assert_eq!(r.entrer(&mut nouveau, &faux_w), Err(Error::MessageInvalide));
+    assert_eq!(
+        r.entrer(&mut nouveau, &faux_w, 0),
+        Err(Error::MessageInvalide)
+    );
     assert!(matches!(
-        r.entrer(&mut nouveau, &w),
+        r.entrer(&mut nouveau, &w, 0),
         Ok(Evenement::Entree { .. })
     ));
     r.m.push(Some(nouveau));
@@ -1480,7 +1485,7 @@ fn annonce_entre_commit_et_welcome() {
     let c = r.salon(1).ajouter(&cles(), &mls(&kp3)).unwrap();
     let w = r.commit_accepte(1, &c, vec![3], vec![3]).unwrap();
     assert!(matches!(
-        r.entrer(&mut revenant, &w),
+        r.entrer(&mut revenant, &w, 1),
         Ok(Evenement::Entree { .. })
     ));
     r.m[3] = Some(revenant);
@@ -1523,4 +1528,201 @@ fn attente_pleine() {
         Err(Error::AttentePleine)
     );
     assert_eq!(nouveau.epoque(), None);
+}
+
+/// N1 : un KeyPackage mis en file sous un autre en-tête que celui des trames de contrôle est
+/// refusé (`message_invalide`) et n'est jamais retenu, même au rejeu de la file : le vrai
+/// KeyPackage qui le suit reste celui que l'arrivant en attente vérifie dans son Welcome.
+#[test]
+fn n1_kp_mal_etiquete_ignore() {
+    let mut r = groupe(3);
+    r.annoncer(3, nonce(3, 0));
+    r.annoncer(4, nonce(4, 0));
+    let mut x = r.nouveau(4, nonce(4, 0));
+    let kp_x = x.key_package(&cles()).unwrap();
+    r.m.resize_with(5, || None);
+    r.m[4] = Some(x);
+    // Le siège 3 envoie d'abord un KeyPackage (clé K1) sous un en-tête volatil.
+    let k1 = r.nouveau(3, nonce(3, 0)).key_package(&cles()).unwrap();
+    let mal = sceller(
+        &cles(),
+        EnTete {
+            volatile: true,
+            regle: Regle::Desactive,
+        },
+        &mls(&k1),
+    )
+    .unwrap();
+    for (i, ev) in r.diffuser(3, &mal) {
+        assert_eq!(ev, Err(Error::MessageInvalide), "membre {i}");
+    }
+    // Puis son vrai KeyPackage (clé K2) : retenu par les membres, ajouté par le créateur.
+    let mut s3 = r.nouveau(3, nonce(3, 0));
+    let k2 = s3.key_package(&cles()).unwrap();
+    for (i, ev) in r.diffuser(3, &k2) {
+        let attendu = if i == 4 {
+            Evenement::Ignore
+        } else {
+            Evenement::KeyPackage { octets: mls(&k2) }
+        };
+        assert_eq!(ev, Ok(attendu), "membre {i}");
+    }
+    let c3 = r.salon(0).ajouter(&cles(), &mls(&k2)).unwrap();
+    let mut w3 = None;
+    for (i, ev) in r.diffuser(0, &c3) {
+        match (i, ev) {
+            (0, Ok(Evenement::CommitAccepte { welcome })) => w3 = welcome,
+            (4, ev) => assert_eq!(ev, Ok(Evenement::Ignore)),
+            (_, ev) => assert!(matches!(ev, Ok(Evenement::Membres { .. })), "{ev:?}"),
+        }
+    }
+    assert!(matches!(
+        r.entrer(&mut s3, &w3.unwrap(), 0),
+        Ok(Evenement::Entree { .. })
+    ));
+    r.m[3] = Some(s3);
+    // L'arrivant X publie, le créateur l'ajoute ; son Welcome le fait entrer.
+    for (i, ev) in r.diffuser(4, &kp_x) {
+        let attendu = if i == 4 {
+            Evenement::Ignore
+        } else {
+            Evenement::KeyPackage { octets: mls(&kp_x) }
+        };
+        assert_eq!(ev, Ok(attendu), "membre {i}");
+    }
+    let cx = r.salon(0).ajouter(&cles(), &mls(&kp_x)).unwrap();
+    let mut wx = None;
+    for (i, ev) in r.diffuser(0, &cx) {
+        match (i, ev) {
+            (0, Ok(Evenement::CommitAccepte { welcome })) => wx = welcome,
+            (4, ev) => assert_eq!(ev, Ok(Evenement::Ignore)),
+            (_, ev) => assert!(matches!(ev, Ok(Evenement::Membres { .. })), "{ev:?}"),
+        }
+    }
+    let ev = r.diffuser(0, &wx.unwrap());
+    assert!(
+        matches!(ev.last().unwrap(), (4, Ok(Evenement::Entree { .. }))),
+        "{ev:?}"
+    );
+    r.meme_epoque();
+    r.message(4, 1);
+    r.message(3, 2);
+}
+
+/// N2 : à l'époque E−1, un Commit refusé par tous (siège 2, non créateur, qui retire un
+/// présent) est rangé avant le vrai Commit du créateur ; entre les deux, le siège 4 fait une
+/// reprise (l'arrivant X, nouveau nonce) et le vrai Commit remplace sa feuille. Le Welcome de X,
+/// envoyé par le siège 0, est vérifié avec les annonces au rang du Commit **de ce siège**.
+#[test]
+fn n2_commit_refuse_avant_le_vrai() {
+    let mut r = groupe(5);
+    // Ancienne instance du siège 4 et le siège 2 (qui va diverger) hors du réseau.
+    let _ancien = r.m[4].take().unwrap();
+    let mut s2 = r.m[2].take().unwrap();
+    // X (futur siège 4) suit le réseau dès sa création ; liste de l'accueil : siège 4 au nonce n1.
+    let mut x = Salon::creer(nouvelle_identite(4, nonce(4, 1)).unwrap(), &cles(), false).unwrap();
+    x.remplacer_annonces(0, &r.liste);
+    let kp_x = x.key_package(&cles()).unwrap();
+    r.m[4] = Some(x);
+    // Le siège 2 croit le siège 3 parti et le retire : refusé par tous les autres.
+    s2.marquer_parti(3);
+    let faux = s2.retirer(&cles(), 3).unwrap();
+    for (i, ev) in r.diffuser(2, &faux) {
+        let attendu = if i == 4 {
+            Ok(Evenement::Ignore)
+        } else {
+            Err(Error::CommitRefuse)
+        };
+        assert_eq!(ev, attendu, "membre {i}");
+    }
+    // Reprise du siège 4 (nonce n2), puis le vrai Commit du créateur.
+    r.annoncer(4, nonce(4, 1));
+    for (i, ev) in r.diffuser(4, &kp_x) {
+        let attendu = if i == 4 {
+            Evenement::Ignore
+        } else {
+            Evenement::KeyPackage { octets: mls(&kp_x) }
+        };
+        assert_eq!(ev, Ok(attendu), "membre {i}");
+    }
+    let c = r.salon(0).ajouter(&cles(), &mls(&kp_x)).unwrap();
+    let mut w = None;
+    for (i, ev) in r.diffuser(0, &c) {
+        match (i, ev) {
+            (0, Ok(Evenement::CommitAccepte { welcome })) => w = welcome,
+            (4, ev) => assert_eq!(ev, Ok(Evenement::Ignore)),
+            (i, ev) => assert_eq!(
+                ev,
+                Ok(Evenement::Membres {
+                    ajoutes: vec![4],
+                    retires: vec![4]
+                }),
+                "membre {i}"
+            ),
+        }
+    }
+    let ev = r.diffuser(0, &w.unwrap());
+    assert!(
+        matches!(ev.last().unwrap(), (4, Ok(Evenement::Entree { .. }))),
+        "{ev:?}"
+    );
+    r.meme_epoque();
+    r.message(4, 1);
+    r.message(1, 2);
+}
+
+/// N2 : le siège attesté du Welcome doit être celui d'une feuille de son arbre, autre que la
+/// nôtre ; sinon `mls_invalide` et la file est gardée : le même Welcome, remis ensuite avec le
+/// bon siège, fait entrer et rejoue la file.
+#[test]
+fn n2_welcome_hors_arbre_refuse() {
+    let mut r = groupe(3);
+    r.annoncer(3, nonce(3, 0));
+    let mut x = r.nouveau(3, nonce(3, 0));
+    let kp = x.key_package(&cles()).unwrap();
+    r.publier(3, &kp);
+    assert_eq!(
+        x.recevoir_trame(&cles(), &kp, r.seq, 3),
+        Ok(Evenement::Ignore)
+    );
+    let c = r.salon(1).ajouter(&cles(), &mls(&kp)).unwrap();
+    let w = r.commit_accepte(1, &c, vec![3], vec![]).unwrap();
+    assert_eq!(
+        x.recevoir_trame(&cles(), &c, r.seq, 1),
+        Ok(Evenement::Ignore)
+    );
+    // Un message après le Commit, gardé dans la file de X.
+    let e = env(9);
+    let t = r.salon(2).envoyer(&cles(), &e).unwrap();
+    r.diffuser(2, &t);
+    let seq_t = r.seq;
+    assert_eq!(
+        x.recevoir_trame(&cles(), &t, seq_t, 2),
+        Ok(Evenement::Ignore)
+    );
+    // Siège absent de l'arbre, puis notre propre siège : refusés.
+    for de in [7, 3] {
+        assert_eq!(
+            r.entrer(&mut x, &w, de),
+            Err(Error::MlsInvalide),
+            "siège {de}"
+        );
+        assert_eq!(x.epoque(), None);
+    }
+    let Ok(Evenement::Entree { rejoues }) = r.entrer(&mut x, &w, 1) else {
+        panic!("entrée attendue");
+    };
+    assert_eq!(
+        rejoues.last(),
+        Some(&(
+            seq_t,
+            Ok(Evenement::Message {
+                de_siege: 2,
+                enveloppe: e
+            })
+        ))
+    );
+    r.m.push(Some(x));
+    r.meme_epoque();
+    r.message(3, 1);
 }

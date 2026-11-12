@@ -26,8 +26,9 @@
 //! **Arrivée** : l'arrivant crée son `Salon`, publie la trame de `key_package` et passe **toutes**
 //! les trames à `recevoir_trame` dès sa création. Il garde tout ce qui arrive avant son Welcome
 //! (trames et annonces, `ATTENTE_MAX` entrées au plus, au-delà `attente_pleine`) ; le Welcome fait
-//! pour son KeyPackage le fait entrer (vérifié avec les annonces au rang du Commit qui l'ajoute)
-//! et la file est rejouée dans l'ordre : `Entree { rejoues }` rend ce que chaque trame a donné.
+//! pour son KeyPackage le fait entrer (vérifié avec les annonces au rang du Commit qui l'ajoute,
+//! Commit de l'époque précédente envoyé par le siège attesté du Welcome) et la file est rejouée
+//! dans l'ordre : `Entree { rejoues }` rend ce que chaque trame a donné.
 //! Rien n'est perdu entre le Commit qui l'ajoute et son Welcome (messages, renouvellements).
 //!
 //! **Politique** (`politique.rs`) : vérifiée avant fusion sur chaque Commit reçu, sur nos
@@ -588,13 +589,18 @@ impl Salon {
             .any(|e| self.nos_key_packages.contains(&e.new_member()))
     }
 
-    /// Entre dans le groupe par un Welcome (arbre inclus) fait pour notre KeyPackage, puis
-    /// rejoue la file d'attente. Refus : autre salon, autre suite, extensions de contexte
-    /// (expéditeurs externes…), credential illisible, siège en double dans l'arbre, créateur,
-    /// nonce ou clé autres que ceux annoncés **au rang du Commit qui nous ajoute** (les annonces
-    /// arrivées entre ce Commit et le Welcome ne s'appliquent qu'après). En cas de refus, rien ne
-    /// change (file et annonces gardées) : un vrai Welcome peut encore venir.
-    fn entrer(&mut self, welcome: Welcome) -> Result<Vec<Rejoue>> {
+    /// Entre dans le groupe par un Welcome (arbre inclus) fait pour notre KeyPackage, envoyé par
+    /// `siege_welcome` (siège attesté par le serveur), puis rejoue la file d'attente. Refus :
+    /// autre salon, autre suite, extensions de contexte (expéditeurs externes…), siège attesté
+    /// sans feuille dans l'arbre ou égal au nôtre, credential illisible, siège en double dans
+    /// l'arbre, créateur, nonce ou clé autres que ceux annoncés **au rang du Commit qui nous
+    /// ajoute** (les annonces arrivées entre ce Commit et le Welcome ne s'appliquent qu'après).
+    /// Ce Commit est cherché parmi les trames de contrôle de la file envoyées par `siege_welcome`
+    /// à l'époque précédant celle du Welcome, dans l'ordre : le premier avec lequel le Welcome
+    /// se vérifie est retenu (un Commit refusé par tous ou une trame injectée du même siège ne
+    /// suffit pas à fausser le rang). En cas de refus, rien ne change (file et annonces
+    /// gardées) : un vrai Welcome peut encore venir.
+    fn entrer(&mut self, welcome: Welcome, siege_welcome: u8) -> Result<Vec<Rejoue>> {
         if self.attente_pleine {
             return Err(Error::AttentePleine);
         }
@@ -603,8 +609,6 @@ impl Salon {
         if welcome.ciphersuite() != SUITE {
             return Err(Error::MlsInvalide);
         }
-        let utilises: Vec<KeyPackageRef> =
-            welcome.secrets().iter().map(|e| e.new_member()).collect();
         let prepare =
             StagedWelcome::new_from_welcome(&self.fournisseur, &config_jonction(), welcome, None)
                 .map_err(|_| Error::MlsInvalide)?;
@@ -619,27 +623,62 @@ impl Salon {
         }
         let createur_siege = id[16];
         let epoque = contexte.epoch().as_u64();
-        // Annonces au rang du Commit qui nous ajoute (premier Commit de l'époque précédente
-        // dans la file) : on les refait depuis le début de la file. Sans ce Commit dans la file
-        // (trames perdues), les annonces courantes servent.
+        // L'expéditeur attesté du Welcome est l'auteur du Commit qui nous ajoute : un membre
+        // de l'arbre, autre que nous.
+        if siege_welcome == self.identite.siege
+            || !prepare
+                .members()
+                .any(|m| lire_credential(&m.credential).is_ok_and(|c| c.0 == siege_welcome))
+        {
+            return Err(Error::MlsInvalide);
+        }
+        // Annonces au rang du Commit qui nous ajoute : candidats, les Commits de l'époque
+        // précédente envoyés par ce siège, dans l'ordre ; pour chacun, les annonces sont
+        // refaites depuis le début de la file. Sans candidat (trames perdues), les annonces
+        // courantes servent.
         let file = core::mem::take(&mut self.attente);
-        let avant = file
+        let candidats: Vec<usize> = file
             .iter()
-            .position(|a| match a {
-                Attente::Trame { mls, .. } => est_commit_de(mls, epoque.wrapping_sub(1)),
+            .enumerate()
+            .filter(|(_, a)| match a {
+                Attente::Trame {
+                    siege,
+                    en_tete,
+                    mls,
+                    ..
+                } => {
+                    *siege == siege_welcome
+                        && *en_tete == EN_TETE_CONTROLE
+                        && est_commit_de(mls, epoque.wrapping_sub(1))
+                }
                 _ => false,
             })
-            .unwrap_or(file.len());
+            .map(|(i, _)| i)
+            .collect();
         let vivant = core::mem::take(&mut self.registre);
-        for a in &file[..avant] {
-            self.appliquer_en_attente(a);
+        let mut avant = None;
+        if candidats.is_empty() {
+            self.registre = vivant.clone();
+            if self.verifier_welcome(&prepare, createur_siege).is_ok() {
+                avant = Some(file.len());
+            }
+        } else {
+            for &i in &candidats {
+                self.registre = Registre::default();
+                for a in &file[..i] {
+                    self.appliquer_en_attente(a);
+                }
+                if self.verifier_welcome(&prepare, createur_siege).is_ok() {
+                    avant = Some(i);
+                    break;
+                }
+            }
         }
-        let verdict = self.verifier_welcome(&prepare, createur_siege);
-        if let Err(e) = verdict {
+        let Some(avant) = avant else {
             self.registre = vivant;
             self.attente = file;
-            return Err(e);
-        }
+            return Err(Error::MlsInvalide);
+        };
         let groupe = match prepare.into_group(&self.fournisseur) {
             Ok(g) => g,
             Err(_) => {
@@ -650,8 +689,9 @@ impl Salon {
         };
         self.createur_siege = createur_siege;
         self.groupe = Some(groupe);
-        // Entré : la clé d'init du KeyPackage ne sert plus (confidentialité persistante).
-        for r in &utilises {
+        // Entré : les clés d'init de tous nos KeyPackages (celui du Welcome et les autres
+        // publiés) ne servent plus (confidentialité persistante).
+        for r in &self.nos_key_packages {
             self.fournisseur
                 .storage()
                 .delete_key_package(r)
@@ -685,11 +725,19 @@ impl Salon {
             Attente::Annonce(s, n) => self.registre.annoncer(*s, *n),
             Attente::Parti(s) => self.registre.marquer_parti(*s),
             Attente::Liste(c, l) => self.registre.remplacer(*c, l),
-            Attente::Trame { siege, mls, .. } => {
+            // Comme à la réception : un KeyPackage sous un autre en-tête est refusé, jamais
+            // retenu (N1).
+            Attente::Trame {
+                siege,
+                en_tete,
+                mls,
+                ..
+            } if *en_tete == EN_TETE_CONTROLE => {
                 if let Ok(MlsMessageBodyIn::KeyPackage(kp)) = lire_mls(mls) {
                     let _ = self.key_package_recu(kp, mls, *siege);
                 }
             }
+            Attente::Trame { .. } => {}
         }
     }
 
@@ -1021,7 +1069,7 @@ impl Salon {
                     return Ok(Evenement::Ignore);
                 }
                 en_tete_coherent(en_tete, None)?;
-                let rejoues = self.entrer(w)?;
+                let rejoues = self.entrer(w, siege_emetteur)?;
                 Ok(Evenement::Entree { rejoues })
             }
             corps => {
@@ -1509,6 +1557,54 @@ mod tests {
             assert_eq!(m[i].epoque(), e0);
             assert_eq!(m[i].membres(), vec![0, 1, 2]);
         }
+    }
+
+    /// Clés restantes : l'arrivant a publié deux KeyPackages (republication) ; le Welcome vise
+    /// le second. À l'entrée, les clés d'init des **deux** sont effacées du stockage.
+    #[test]
+    fn cles_init_toutes_effacees() {
+        let mut c = Salon::creer(nouvelle_identite(0, [0; 16]).unwrap(), &cles(), true).unwrap();
+        c.remplacer_annonces(0, &[(0, [0; 16])]);
+        c.annoncer(1, [1; 16]);
+        let mut n = Salon::creer(nouvelle_identite(1, [1; 16]).unwrap(), &cles(), false).unwrap();
+        n.remplacer_annonces(0, &[(0, [0; 16]), (1, [1; 16])]);
+        let _kp1 = n.key_package(&cles()).unwrap();
+        let kp2 = n.key_package(&cles()).unwrap();
+        let refs = n.nos_key_packages.clone();
+        assert_eq!(refs.len(), 2);
+        let stocke = |n: &Salon, r: &KeyPackageRef| {
+            n.fournisseur
+                .storage()
+                .key_package::<KeyPackageRef, KeyPackageBundle>(r)
+                .unwrap()
+                .is_some()
+        };
+        assert!(refs.iter().all(|r| stocke(&n, r)));
+        let Ok(Evenement::KeyPackage { octets }) = c.recevoir_trame(&cles(), &kp2, 1, 1) else {
+            panic!("KeyPackage attendu")
+        };
+        let commit = c.ajouter(&cles(), &octets).unwrap();
+        let Ok(Evenement::CommitAccepte { welcome: Some(w) }) =
+            c.recevoir_trame(&cles(), &commit, 2, 0)
+        else {
+            panic!("Welcome attendu")
+        };
+        assert!(matches!(
+            n.recevoir_trame(&cles(), &w, 3, 0),
+            Ok(Evenement::Entree { .. })
+        ));
+        for r in &refs {
+            assert!(
+                matches!(
+                    n.fournisseur
+                        .storage()
+                        .key_package::<KeyPackageRef, KeyPackageBundle>(r),
+                    Ok(None)
+                ),
+                "{r:?}"
+            );
+        }
+        assert!(n.nos_key_packages.is_empty());
     }
 
     /// M3 : un KeyPackage d'une autre suite est refusé avant toute vérification de signature.

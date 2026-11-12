@@ -672,7 +672,6 @@ pub fn decoder(octets: &[u8]) -> Result<Enveloppe> {
     r
 }
 
-/// Messages qui ne se rangent pas dans l'historique : « écrit… », accusés de réception et de lecture.
 /// Identifiant aléatoire d'un nouveau message (16 octets, getrandom : aléa du système ;
 /// `crypto.getRandomValues` dans le navigateur).
 pub fn nouvel_id() -> Result<IdMessage> {
@@ -681,6 +680,7 @@ pub fn nouvel_id() -> Result<IdMessage> {
     Ok(id)
 }
 
+/// Messages qui ne se rangent pas dans l'historique : « écrit… », accusés de réception et de lecture.
 pub fn est_volatile(m: &Message) -> bool {
     matches!(
         m,
