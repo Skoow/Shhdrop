@@ -241,7 +241,7 @@ Choisi sur la page d'explication avant d'entrer (§39.4, règles de forme et d'u
 Inchangé : trames de taille unique ; contenu, type de message et expéditeur cachés. **Nouveau (décision du 11 novembre, prise pour que l'effacement ne dépende pas de l'appareil de l'expéditeur)** :
 
 - **En-tête en clair de chaque trame** (authentifié, pas chiffré) : volatile ou non (§5.1) et règle d'effacement (désactivé, instantané, 10 min, 1 h). Le serveur efface lui-même du disque une trame « 10 min » ou « 1 h » à l'échéance, sans attendre personne.
-- **Lectures en « instantané »** : chaque lecteur envoie au serveur « lu » pour la trame (numéro `seq`) ; quand tous les sièges présents à l'envoi l'ont envoyé, ou sont partis, le serveur efface la trame et prévient les présents. **Fuite assumée (moyen)** : le serveur sait qui a lu quelle trame « instantané », et quand ; il ne sait toujours ni ce qu'elle contient, ni qui l'a envoyée. Sans cela, un message resterait sur le disque tant que l'expéditeur est hors ligne.
+- **Lectures en « instantané »** : chaque lecteur envoie au serveur « lu » pour la trame (numéro `seq`) ; quand tous les sièges présents à l'envoi l'ont envoyé, ou sont partis, le serveur efface la trame et prévient les présents. **Fuite assumée (moyen)** : le serveur sait qui a lu quelle trame « instantané », et quand ; il ne sait toujours pas ce qu'elle contient. **Correction du 12 novembre (relecture C-2)** : il connaît en revanche le **siège** qui l'a envoyée (le serveur atteste le siège de chaque trame, §3.6.1), mais jamais le pseudonyme ni l'identité de la personne derrière ce siège. Sans cela, un message resterait sur le disque tant que l'expéditeur est hors ligne.
 - Le rythme des trames par siège reste visible (S34).
 
 ## 11. Cadre légal
