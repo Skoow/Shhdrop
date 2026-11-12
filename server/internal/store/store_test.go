@@ -668,3 +668,27 @@ func TestRequireCurrent(t *testing.T) {
 		t.Fatal("schéma 1 :", err)
 	}
 }
+
+// Relecture Task 15 : une table salons du schéma 2 d'avant rotation_r (bases de développement,
+// jamais publié) est refusée à l'ouverture, avec un message fixe, au lieu d'échouer plus tard
+// en 500 sur exclure.
+func TestOpenRefuseSalonsSansRotation(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "s.db")
+	db, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`ALTER TABLE salons DROP COLUMN rotation_r`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	if db, err := Open(p); !errors.Is(err, ErrSalonsPerimes) {
+		if db != nil {
+			db.Close()
+		}
+		t.Fatal("table salons sans rotation_r acceptée :", err)
+	}
+	if strings.Contains(ErrSalonsPerimes.Error(), p) {
+		t.Fatal("message avec le chemin")
+	}
+}

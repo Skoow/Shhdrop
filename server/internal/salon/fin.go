@@ -218,12 +218,15 @@ func (m *Manager) effacerPiecesEnBase(id string) error {
 
 // reprendreFin : Tick reprend une fin restée à faire ; une seule reprise à la fois.
 func (m *Manager) reprendreFin(s *salon) {
-	s.mu.Lock()
-	prise := s.etatFin == finAFaire
-	if prise {
+	prise := func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.etatFin != finAFaire {
+			return false
+		}
 		s.etatFin = finEnCours
-	}
-	s.mu.Unlock()
+		return true
+	}()
 	if prise {
 		_ = m.achever(s)
 	}
@@ -239,15 +242,19 @@ func (s *salon) finIncomplete() bool {
 // lotLignes : identifiants par requête IN (bien sous la limite de variables de SQLite).
 const lotLignes = 500
 
-// lignes : passe de Tick sur la base. Lignes à 10 essais supprimées (sans pièce restante :
+// lignes : passe de Tick sur la base. Lignes à 10 essais supprimées s'il y en a (sans pièce restante :
 // celles d'une fin en cours sont effacées par achever d'abord) ; salons vivants de ce
 // processus (état en mémoire non fini, ou place de bloc comptée) dont la ligne vivante a
 // disparu (admin destroy, wipe, 10 essais) : fin en raison 2, place du bloc rendue. Les
 // tombes n'y sont pas. Sous createMu : une création en cours a déjà sa ligne ou n'est pas
 // encore comptée.
 func (m *Manager) lignes() {
-	_, _ = m.cfg.DB.Exec(`DELETE FROM salons WHERE failed_attempts>=? AND NOT EXISTS
-		(SELECT 1 FROM salon_pieces WHERE salon_pieces.salon_id=salons.id)`, maxEssais)
+	// Lecture d'abord (cas rare) : aucune écriture en base à chaque seconde.
+	var un int
+	if m.cfg.DB.QueryRow(`SELECT 1 FROM salons WHERE failed_attempts>=? LIMIT 1`, maxEssais).Scan(&un) == nil {
+		_, _ = m.cfg.DB.Exec(`DELETE FROM salons WHERE failed_attempts>=? AND NOT EXISTS
+			(SELECT 1 FROM salon_pieces WHERE salon_pieces.salon_id=salons.id)`, maxEssais)
+	}
 	m.createMu.Lock()
 	m.mu.Lock()
 	ids := make([]string, 0, len(m.salons)+len(m.vivants))

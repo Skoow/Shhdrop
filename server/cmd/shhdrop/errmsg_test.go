@@ -31,6 +31,8 @@ func TestPublicMessage(t *testing.T) {
 		{name: "message pour l'exploitant", err: shown("SHH_DATA_DIR /srv n'est pas vide"), want: "SHH_DATA_DIR /srv"},
 		{name: "message enveloppé", err: fmt.Errorf("x : %w", shown("index.html absent")), want: "index.html absent"},
 		{name: "base plus récente", err: store.ErrNewerSchema, want: "plus récente"},
+		{name: "base antérieure", err: store.ErrOldSchema, want: "version antérieure"},
+		{name: "salon périmé", err: store.ErrSalonsPerimes, want: "rotation_r"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

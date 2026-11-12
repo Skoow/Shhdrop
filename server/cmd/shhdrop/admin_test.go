@@ -160,7 +160,7 @@ func TestAdminWipe(t *testing.T) {
 	cfg, s := adminSetup(t)
 	id1, id2 := mk(t, s), mk(t, s)
 	code, _, errOut := run(cfg, "wipe")
-	if code != 2 || errOut == "" || count(t, s) != 2 {
+	if code != 2 || !strings.Contains(errOut, "tous les partages et tous les salons") || count(t, s) != 2 {
 		t.Fatal("wipe sans --yes doit refuser", code)
 	}
 	if _, err := os.Stat(filepath.Join(cfg.DataDir, "frozen")); err == nil {

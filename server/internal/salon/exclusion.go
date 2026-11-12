@@ -51,9 +51,10 @@ var crochetExclure func()
 //     failed_attempts à 0, sur la ligne vivante seulement (failed_attempts<10 : une ligne
 //     bloquée ne revit jamais) et si R > rotation_r (en base : un rejeu après un redémarrage
 //     est refusé aussi), exactement une ligne ; sinon, relue : vivante → ErrStale (R ≤ dernier
-//     r), morte entre-temps (10 essais, échue) → ErrForbidden ; nouvelle access_v déjà prise
-//     (n'importe quel salon, celui-ci compris) : ErrConflict ; erreur de la base : ErrBase,
-//     rien changé ;
+//     r), morte entre-temps (10 essais, échue) → ErrForbidden ; nouvelle access_v déjà prise :
+//     ErrConflict (n'importe quel salon, celui-ci compris), sauf rejeu exact d'une rotation
+//     de ce salon (access_v actuelle et R ≤ rotation_r) : ErrStale ; erreur de la base :
+//     ErrBase, rien changé ;
 //   - puis, sous le verrou du salon : WebSocket de l'exclu fermé (0x05 raison 5, 4002 ; il ne
 //     reçoit pas le 0x09), siège libéré par sortirLocked (0x09 au journal et diffusé, siège
 //     plus attendu par aucune trame « instantané » : effacements et 0x0E, jeton révoqué et
@@ -141,9 +142,14 @@ func (m *Manager) tourner(id string, r ExclureReq, now int64) error {
 		return base(err)
 	}
 	defer tx.Rollback()
-	var un int
-	switch err := tx.QueryRow(`SELECT 1 FROM salons WHERE access_v=? OR manage_v=?`, r.AccessNewV, r.AccessNewV).
-		Scan(&un); {
+	var pris string
+	var prisR int64
+	switch err := tx.QueryRow(`SELECT id, rotation_r FROM salons WHERE access_v=? OR manage_v=?`, r.AccessNewV,
+		r.AccessNewV).Scan(&pris, &prisR); {
+	case err == nil && pris == id && prisR >= int64(r.R):
+		// Rejeu exact d'une rotation déjà faite (sa K_accès_s' est celle de ce salon) : 409
+		// stale, comme tout R ≤ dernier r, et non le conflit d'une clé prise ailleurs.
+		return ErrStale
 	case err == nil:
 		return ErrConflict
 	case !errors.Is(err, sql.ErrNoRows):
@@ -165,6 +171,7 @@ func (m *Manager) tourner(id string, r ExclureReq, now int64) error {
 	// Aucune ligne touchée : relue dans la même transaction. Vivante : R trop petit (rejeu,
 	// même après un redémarrage : rotation_r est en base), ErrStale. Sinon (10 essais, échue
 	// ou supprimée entre-temps) : ErrForbidden, comme les autres cas « introuvable ».
+	var un int
 	switch err := tx.QueryRow(`SELECT 1 FROM salons WHERE id=? AND manage_v=? AND expires_at>? AND failed_attempts<?`,
 		id, r.ManageV, now, maxEssais).Scan(&un); {
 	case err == nil:

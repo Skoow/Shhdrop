@@ -82,7 +82,14 @@ func newEnvWith(t *testing.T, behindProxy bool, proxies []netip.Prefix, static h
 
 func newEnvFull(t *testing.T, behindProxy bool, proxies []netip.Prefix, static http.Handler, x transfers) *env {
 	t.Helper()
-	dir := t.TempDir()
+	// Pas t.TempDir() : sous un fuzz, son nom contient « seed#0 », et store.Open (DSN
+	// « file:… ») couperait le chemin au « # » : base partagée entre essais et gardée dans
+	// /tmp d'une exécution à l'autre (constaté en Task 15, schéma périmé).
+	dir, err := os.MkdirTemp("", "shhdrop-api-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	db, err := store.Open(filepath.Join(dir, "shares.db"))
 	if err != nil {
 		t.Fatal(err)

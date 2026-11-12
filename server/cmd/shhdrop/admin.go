@@ -54,7 +54,7 @@ func runAdmin(args []string, cfg config.Config, stdin io.Reader, stdout, stderr 
 		}
 	case "wipe":
 		if len(args) != 2 || args[1] != "--yes" {
-			return usage("wipe efface tous les partages : relancer avec --yes pour confirmer")
+			return usage("wipe efface tous les partages et tous les salons : relancer avec --yes pour confirmer")
 		}
 	default:
 		return usage("commande admin inconnue")

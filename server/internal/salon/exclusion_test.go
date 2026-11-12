@@ -671,7 +671,8 @@ func TestRotationRejoueeApresRedemarrage(t *testing.T) {
 	if err := b.m.Exclure(vieille); err != nil {
 		t.Fatal("r = 1 :", err)
 	}
-	if err := b.m.Exclure(reqExclure(c, invitation(c), nil, nil, 2)); err != nil {
+	derniere := reqExclure(c, invitation(c), nil, nil, 2)
+	if err := b.m.Exclure(derniere); err != nil {
 		t.Fatal("r = 2 :", err)
 	}
 	var r int
@@ -693,6 +694,11 @@ func TestRotationRejoueeApresRedemarrage(t *testing.T) {
 		if err := m2.Exclure(rejeu); !errors.Is(err, ErrStale) {
 			t.Errorf("rejeu r = %d : %v, attendu ErrStale", k, err)
 		}
+	}
+	// Rejeu exact du dernier corps (sa K_accès_s' est celle de la ligne) : ErrStale, pas le
+	// conflit (400) que donnerait la recherche d'access_v, qui trouve ce salon lui-même.
+	if err := m2.Exclure(derniere); !errors.Is(err, ErrStale) {
+		t.Errorf("rejeu exact du dernier corps : %v, attendu ErrStale", err)
 	}
 	if !memeLigne(avant, b.ligne(t, s)) {
 		t.Fatal("invitation morte revenue après le redémarrage")

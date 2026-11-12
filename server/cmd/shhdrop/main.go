@@ -92,7 +92,8 @@ func publicMessage(err error) string {
 	switch {
 	case errors.As(err, &s):
 		return s.msg
-	case errors.Is(err, store.ErrNewerSchema), errors.Is(err, store.ErrOldSchema), errors.Is(err, store.ErrCheckpointBusy),
+	case errors.Is(err, store.ErrNewerSchema), errors.Is(err, store.ErrOldSchema), errors.Is(err, store.ErrSalonsPerimes),
+		errors.Is(err, store.ErrCheckpointBusy),
 		errors.Is(err, blob.ErrNoAllocate):
 		return firstKnown(err).Error()
 	}
@@ -101,7 +102,8 @@ func publicMessage(err error) string {
 
 // firstKnown : l'erreur connue de publicMessage contenue dans err.
 func firstKnown(err error) error {
-	for _, k := range []error{store.ErrNewerSchema, store.ErrOldSchema, store.ErrCheckpointBusy, blob.ErrNoAllocate} {
+	for _, k := range []error{store.ErrNewerSchema, store.ErrOldSchema, store.ErrSalonsPerimes, store.ErrCheckpointBusy,
+		blob.ErrNoAllocate} {
 		if errors.Is(err, k) {
 			return k
 		}

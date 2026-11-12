@@ -85,6 +85,10 @@ var (
 	// ErrNewerSchema : message fixe, sans chemin.
 	ErrNewerSchema = errors.New("base créée par une version plus récente de Shhdrop : refus d'ouvrir " +
 		"(retour arrière : réinstaller la version récente, ou effacer la base)")
+	// ErrSalonsPerimes : table salons du schéma 2 d'avant la colonne rotation_r (base de
+	// développement, jamais publiée) ; message fixe, sans chemin.
+	ErrSalonsPerimes = errors.New("base de développement au schéma du salon périmé (sans rotation_r) : " +
+		"l'effacer avant de démarrer (rien n'a été fait)")
 	// ErrOldSchema : base d'une version antérieure (commandes d'administration du salon) ;
 	// message fixe, sans chemin.
 	ErrOldSchema = errors.New("base d'une version antérieure de Shhdrop (sans les tables du salon) : " +
@@ -187,6 +191,17 @@ func Open(path string) (*sql.DB, error) {
 	if _, err := db.Exec(salonsSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("création des tables du salon : %w", err)
+	}
+	// CREATE TABLE IF NOT EXISTS ne touche pas une table salons plus ancienne : sans
+	// rotation_r, exclure échouerait plus tard (relecture Task 15).
+	var rot int
+	if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info('salons') WHERE name='rotation_r'`).Scan(&rot); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("lecture du schéma du salon : %w", err)
+	}
+	if rot == 0 {
+		db.Close()
+		return nil, ErrSalonsPerimes
 	}
 	if version < SchemaVersion {
 		if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, SchemaVersion)); err != nil {
