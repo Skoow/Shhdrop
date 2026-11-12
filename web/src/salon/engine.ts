@@ -11,7 +11,12 @@
 //   argument hors de son domaine ou de mauvais type (vérifié ici avant d'entrer dans le module),
 //   `poignee_liberee` pour une poignée déjà libérée, `appel_concurrent` pour un appel sur une
 //   poignée en cours d'usage, `salon_casse` après une panique (ci-dessous) ;
-// - nonces et aléa tirés dans le module (crypto.getRandomValues) : `sceller` ne prend pas de nonce ;
+// - nonces et aléa tirés dans le module (crypto.getRandomValues) : `sceller` ne prend pas de nonce,
+//   `Salon.envoyer` tire l'identifiant du message s'il manque ;
+// - le groupe ne parle qu'en trames : `Salon.envoyer`, `keyPackage`, `ajouter`, `retirer`,
+//   `renouveler` rendent des trames de 4 140 octets dont l'en-tête est tiré du contenu ;
+//   `recevoirTrame` les ouvre et refuse tout écart (`message_invalide`) ; l'arrivant y passe
+//   toutes les trames dès sa création, son Welcome le fait entrer (`entree`, trames rejouées) ;
 // - poignées `ClesSalon` et `Salon` à libérer par `free()` (efface les clés et l'état MLS) ;
 // - secrets rendus (à mettre à zéro par `fill(0)` après usage) : `cleAcces().k`,
 //   `ClesSalon.kPreuve()` (montrées au serveur), `Salon.exporterSframe()` (clé des appels) et les
@@ -30,10 +35,10 @@
 // nouvel appel de `loadSalonEngine()` rend un moteur neuf (instance neuve du même module,
 // `__wbg_reset_state`) : le salon doit être rejoint de nouveau (nouvelle identité).
 import init, * as wasm from "./pkg/shhdrop_salon_wasm.js";
-import type { Annonce, EnTete, Enveloppe, Evenement, Message, Regle } from "./pkg/shhdrop_salon_wasm.js";
+import type { Annonce, EnTete, Enveloppe, EnveloppeEnvoi, Evenement, Message, Regle } from "./pkg/shhdrop_salon_wasm.js";
 import { salonWasmBytes } from "./source";
 
-export type { Annonce, EnTete, Enveloppe, Evenement, Message, Regle, SortePiece } from "./pkg/shhdrop_salon_wasm.js";
+export type { Annonce, EnTete, Enveloppe, EnveloppeEnvoi, Evenement, Message, Regle, Rejoue, SortePiece } from "./pkg/shhdrop_salon_wasm.js";
 
 /** Instant en millisecondes : entier sûr positif (Date.now()) ou bigint de 0 à 2^64 − 1. */
 export type Instant = number | bigint;
@@ -42,6 +47,7 @@ export type EtatEffacement = { etat: "visible" } | { etat: "rebours"; finMs: num
 
 export type EntreeEffacement = {
   regle: Regle;
+  /** Heure de réception de la trame par le serveur (remise avec elle), jamais `heureMs` de l'enveloppe. */
   envoyeMs: Instant;
   maintenantMs: Instant;
   moiExpediteur: boolean;
@@ -197,36 +203,35 @@ function cles(x: unknown): ClesSalon {
 
 /** Un participant du salon et son état MLS (engine/salon/src/groupe.rs). */
 export class Salon extends Poignee<wasm.Salon> {
-  keyPackage(): Uint8Array {
-    return this.avec((h) => h.keyPackage());
+  /** Trame du KeyPackage à publier à l'arrivée. */
+  keyPackage(c: ClesSalon): Uint8Array {
+    return cles(c).brut((k) => this.avec((h) => h.keyPackage(k)));
   }
-  rejoindre(welcome: Uint8Array): void {
-    octets(welcome);
-    this.avec((h) => h.rejoindre(welcome));
-  }
-  /** Commit d'ajout (le Welcome vient à l'écho gagnant, `commitAccepte`). */
-  ajouter(keyPackage: Uint8Array): Uint8Array {
+  /** Trame du Commit d'ajout ; `keyPackage` : les octets d'un événement `keyPackage`. */
+  ajouter(c: ClesSalon, keyPackage: Uint8Array): Uint8Array {
     octets(keyPackage);
-    return this.avec((h) => h.ajouter(keyPackage));
+    return cles(c).brut((k) => this.avec((h) => h.ajouter(k, keyPackage)));
   }
-  retirer(siege: number): Uint8Array {
+  /** Trame du Commit qui retire le siège. */
+  retirer(c: ClesSalon, siege: number): Uint8Array {
     nombre(siege);
-    return this.avec((h) => h.retirer(siege));
+    return cles(c).brut((k) => this.avec((h) => h.retirer(k, siege)));
   }
-  renouveler(): Uint8Array {
-    return this.avec((h) => h.renouveler());
+  /** Trame du Commit de renouvellement (toutes les 100 trames envoyées et toutes les heures). */
+  renouveler(c: ClesSalon): Uint8Array {
+    return cles(c).brut((k) => this.avec((h) => h.renouveler(k)));
   }
-  /** Message MLS d'une enveloppe, à sceller dans une trame. */
-  chiffrer(e: Enveloppe): Uint8Array {
+  /** Trame d'une enveloppe (en-tête tiré du contenu) et son identifiant (tiré s'il manque). */
+  envoyer(c: ClesSalon, e: EnveloppeEnvoi): { trame: Uint8Array; id: Uint8Array } {
     objet(e);
-    return this.avec((h) => h.chiffrer(e));
+    return cles(c).brut((k) => this.avec((h) => h.envoyer(k, e)));
   }
-  /** Message MLS rangé au rang `seq`, envoyé par `siegeEmetteur` (attesté par le serveur). */
-  recevoir(mls: Uint8Array, seq: number, siegeEmetteur: number): Evenement {
-    octets(mls);
+  /** Trame rangée au rang `seq`, envoyée par `siegeEmetteur` (attesté par le serveur) ; toutes, attente comprise. */
+  recevoirTrame(c: ClesSalon, trame: Uint8Array, seq: number, siegeEmetteur: number): Evenement {
+    octets(trame);
     nombre(seq);
     nombre(siegeEmetteur);
-    return this.avec((h) => h.recevoir(mls, seq, siegeEmetteur));
+    return cles(c).brut((k) => this.avec((h) => h.recevoirTrame(k, trame, seq, siegeEmetteur)));
   }
   /** Arrivée (0x02) ou reprise (0x0A) annoncée par le serveur. */
   annoncer(siege: number, nonceArrivee: Uint8Array): void {
@@ -285,6 +290,8 @@ export type SalonEngine = {
   /** Tout échec : `trame_corrompue`. */
   ouvrir(cles: ClesSalon, trame: Uint8Array): EnTete & { charge: Uint8Array };
   lireEnTete(trame: Uint8Array): EnTete;
+  /** L'en-tête dit-il ce que dit le contenu (`null` : contrôle MLS) ? Écart : `message_invalide`. */
+  enTeteCoherent(enTete: EnTete, enveloppe: Enveloppe | null): void;
   encoder(e: Enveloppe): Uint8Array;
   decoder(octets: Uint8Array): Enveloppe;
   estVolatile(m: Message): boolean;
@@ -325,6 +332,11 @@ function moteur(g: number): SalonEngine {
     },
     ouvrir: (c, trame) => (octets(trame), cles(c).brut((h) => wasm.ouvrir(h, trame))),
     lireEnTete: (trame) => (octets(trame), a(() => wasm.lireEnTete(trame))),
+    enTeteCoherent: (enTete, e) => {
+      objet(enTete);
+      if (e !== null) objet(e);
+      a(() => wasm.enTeteCoherent(enTete, e));
+    },
     encoder: (e) => (objet(e), a(() => wasm.encoder(e))),
     decoder: (b) => (octets(b), a(() => wasm.decoder(b))),
     estVolatile: (m) => (objet(m), a(() => wasm.estVolatile(m))),
@@ -378,6 +390,9 @@ export async function loadSalonEngine(): Promise<SalonEngine> {
   }
   await loading;
   if (broken) {
+    // Mémoire de l'instance arrêtée mise à zéro avant de la quitter (déjà fait si l'arrêt est
+    // passé par un appel gardé ; défensif sinon : panique signalée hors d'un appel).
+    casser();
     wasm.__wbg_reset_state();
     broken = false;
     gen++;

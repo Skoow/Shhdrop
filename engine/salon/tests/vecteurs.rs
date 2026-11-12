@@ -6,15 +6,18 @@
 //   SHH_GEN_SALON=1 cargo test -p shhdrop-salon --test vecteurs
 // Le fichier est déterministe : entrées dérivées de SHA-256 d'étiquettes fixes (README).
 // MLS n'est pas dans le fichier (aléa interne d'OpenMLS) : voir engine/vectors/README.md.
+use chacha20poly1305::aead::{AeadInPlace, KeyInit};
+use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use serde_json::{Map, Value, json};
 use shhdrop_core::encoding::b64u;
 use shhdrop_core::format::MAX_SAFE;
 use shhdrop_core::kdf::sha256;
 use shhdrop_core::{KLien, KMdp};
 use shhdrop_salon::{
-    Enveloppe, Error, Etat, Graine, JSON_MAX, MAX_CHARGE, Message, RefPiece, Regle, SortePiece,
-    TAILLE_O, TAILLE_TRAME, cle_acces, cle_unicite, cles_salon, code_verification, decoder,
-    encoder, etat, lire_en_tete, nettoyer_texte, ouvrir, sceller, verifier_pseudo,
+    ClesSalon, EN_TETE_CONTROLE, EnTete, Enveloppe, Error, Etat, Graine, JSON_MAX, MAX_CHARGE,
+    Message, RefPiece, Regle, SortePiece, TAILLE_O, TAILLE_TRAME, cle_acces, cle_unicite,
+    cles_salon, code_verification, decoder, en_tete_coherent, en_tete_de, encoder, etat,
+    lire_en_tete, nettoyer_texte, ouvrir, sceller, verifier_pseudo,
 };
 
 const FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../vectors/salon-v3.json");
@@ -207,23 +210,132 @@ fn open_out(c: &Value, t: &[u8]) -> Value {
     }
 }
 
+/// Scellement à nonce donné, écrit ici d'après la spécification (v3 §3.2.1) avec
+/// XChaCha20-Poly1305 de RustCrypto, indépendamment du moteur (dont la forme à nonce donné est
+/// interne ; son test unitaire `trame::tests::vecteurs_a_nonce_donne` redonne ces trames) :
+/// `"SHC3"` ‖ drapeaux ‖ nonce ‖ AEAD(`K_trame`, nonce, `len` ‖ charge ‖ zéros,
+/// `"SHC3"` ‖ drapeaux ‖ tag du salon).
+fn sceller_ref(
+    cles: &ClesSalon,
+    et: EnTete,
+    charge: &[u8],
+    nonce: &[u8; 24],
+) -> Result<Vec<u8>, Error> {
+    if charge.len() > MAX_CHARGE {
+        return Err(Error::TropGrand);
+    }
+    let d = u8::from(et.volatile) | ((et.regle as u8) << 1);
+    let mut o = vec![0u8; TAILLE_O];
+    o[..2].copy_from_slice(&(charge.len() as u16).to_be_bytes());
+    o[2..2 + charge.len()].copy_from_slice(charge);
+    let mut aad = b"SHC3".to_vec();
+    aad.push(d);
+    aad.extend_from_slice(cles.tag());
+    let tag = XChaCha20Poly1305::new(cles.k_trame().into())
+        .encrypt_in_place_detached(XNonce::from_slice(nonce), &aad, &mut o)
+        .unwrap();
+    let mut t = b"SHC3".to_vec();
+    t.push(d);
+    t.extend_from_slice(nonce);
+    t.extend_from_slice(&o);
+    t.extend_from_slice(&tag);
+    Ok(t)
+}
+
+fn en_tete_de_json(v: &Value) -> EnTete {
+    EnTete {
+        volatile: v["volatile"].as_bool().unwrap(),
+        regle: regle_de(v["regle"].as_u64().unwrap()),
+    }
+}
+
 /// Cas de scellement : `{k_lien, k_mdp, en_tete, charge, nonce}`. Sorties : `seal`
-/// (`trame_hex` ou erreur), puis `read_header` et `open` de la trame obtenue.
+/// (`trame_hex` ou erreur), puis `read_header` et `open` de la trame obtenue. Le moteur
+/// (`sceller`, nonce tiré) donne la même erreur, ou une trame qui s'ouvre sur la même charge.
 fn trame_case(c: &Value) -> Value {
     let cles = cles_salon(&k_lien(c), &k_mdp(c));
-    let et = shhdrop_salon::EnTete {
-        volatile: c["en_tete"]["volatile"].as_bool().unwrap(),
-        regle: regle_de(c["en_tete"]["regle"].as_u64().unwrap()),
-    };
+    let et = en_tete_de_json(&c["en_tete"]);
     let nonce: [u8; 24] = unhex(c["nonce"].as_str().unwrap()).try_into().unwrap();
-    match sceller(&cles, et, &bytes(&c["charge"]), &nonce) {
-        Ok(t) => json!({
-            "seal": { "trame_hex": hex(&t) },
-            "read_header": header_read(&t),
-            "open": open_out(c, &t),
-        }),
-        Err(e) => json!({ "seal": err(e) }),
+    let charge = bytes(&c["charge"]);
+    match sceller_ref(&cles, et, &charge, &nonce) {
+        Ok(t) => {
+            let moteur = sceller(&cles, et, &charge).unwrap();
+            assert_eq!(ouvrir(&cles, &moteur).unwrap(), (et, charge.into()));
+            json!({
+                "seal": { "trame_hex": hex(&t) },
+                "read_header": header_read(&t),
+                "open": open_out(c, &t),
+            })
+        }
+        Err(e) => {
+            assert_eq!(sceller(&cles, et, &charge), Err(e));
+            json!({ "seal": err(e) })
+        }
     }
+}
+
+/// Cas de cohérence : `{en_tete, contenu}` où `contenu` est `"controle"` (Commit, Welcome,
+/// KeyPackage) ou une enveloppe → `{ok: true}` ou erreur (`message_invalide`).
+fn coherence_case(c: &Value) -> Value {
+    let et = en_tete_de_json(&c["en_tete"]);
+    let env = (c["contenu"] != "controle").then(|| env_de(&c["contenu"]));
+    // L'en-tête que le moteur met sur ce contenu passe toujours.
+    let propre = env.as_ref().map_or(EN_TETE_CONTROLE, en_tete_de);
+    assert_eq!(en_tete_coherent(propre, env.as_ref()), Ok(()));
+    match en_tete_coherent(et, env.as_ref()) {
+        Ok(()) => json!({ "ok": true }),
+        Err(e) => err(e),
+    }
+}
+
+/// Toutes les paires (en-tête, contenu) : seul l'en-tête tiré du contenu passe (et tout bit
+/// volatil pour une sorte inconnue).
+fn coherence() -> Value {
+    let et = |volatile: bool, regle: u8| json!({ "volatile": volatile, "regle": regle });
+    let contenus: Vec<(&str, Value)> = vec![
+        ("controle", json!("controle")),
+        (
+            "texte_e0",
+            enveloppe("coherence/texte_e0", 0, json!({ "k": "texte", "x": "a" })),
+        ),
+        (
+            "texte_e3",
+            enveloppe("coherence/texte_e3", 3, json!({ "k": "texte", "x": "a" })),
+        ),
+        (
+            "ecrit_e1",
+            enveloppe("coherence/ecrit_e1", 1, json!({ "k": "ecrit" })),
+        ),
+        (
+            "vu_e2",
+            enveloppe(
+                "coherence/vu_e2",
+                2,
+                json!({ "k": "vu", "ids": [h("coherence/vu", 16)] }),
+            ),
+        ),
+        (
+            "inconnu_e2",
+            enveloppe(
+                "coherence/inconnu_e2",
+                2,
+                json!({ "k": "inconnu", "sorte": "appel" }),
+            ),
+        ),
+    ];
+    let mut out = Vec::new();
+    for (nom, contenu) in contenus {
+        for v in [false, true] {
+            for r in 0..4u8 {
+                let mut c = json!({ "label": format!("{nom}_volatile_{v}_regle_{r}"),
+                    "en_tete": et(v, r), "contenu": contenu });
+                let x = coherence_case(&c);
+                merge(&mut c, x);
+                out.push(c);
+            }
+        }
+    }
+    out.into()
 }
 
 /// Altération d'une trame scellée : `{op: "xor", at, mask}`, `{op: "truncate", len}`,
@@ -337,6 +449,11 @@ fn trames() -> Value {
             "drapeaux_regle_change",
             json!({ "op": "xor", "at": 4, "mask": 2 }),
         ),
+        ("drapeaux_xor_3", json!({ "op": "xor", "at": 4, "mask": 3 })),
+        ("drapeaux_xor_4", json!({ "op": "xor", "at": 4, "mask": 4 })),
+        ("drapeaux_xor_5", json!({ "op": "xor", "at": 4, "mask": 5 })),
+        ("drapeaux_xor_6", json!({ "op": "xor", "at": 4, "mask": 6 })),
+        ("drapeaux_xor_7", json!({ "op": "xor", "at": 4, "mask": 7 })),
         ("nonce_altere", json!({ "op": "xor", "at": 5, "mask": 128 })),
         (
             "chiffre_altere_debut",
@@ -376,7 +493,7 @@ fn trames() -> Value {
             c
         })
         .collect();
-    json!({ "seal": seal, "reject": reject })
+    json!({ "seal": seal, "reject": reject, "coherence": coherence() })
 }
 
 // ------------------------------------------------------------------------------- messages
@@ -460,6 +577,7 @@ fn env_de(v: &Value) -> Enveloppe {
             }),
         },
         "depart" => Message::Depart,
+        "inconnu" => Message::Inconnu { sorte: s("sorte") },
         k => panic!("sorte {k}"),
     };
     Enveloppe {
@@ -928,6 +1046,28 @@ fn texte() -> Value {
         ("seulement_zwsp", utf8("\u{200B}")),
         ("seulement_lrm_rlm", utf8("\u{200E}\u{200F}")),
         ("seulement_zwj_et_vs16", utf8("\u{200D}\u{FE0F}")),
+        ("seulement_marque_combinante", utf8("\u{301}")),
+        (
+            "seulement_marques_combinantes",
+            utf8("\u{301}\u{302}\u{20DD}"),
+        ),
+        ("seulement_braille_vide", utf8("\u{2800}")),
+        ("braille_vide_et_espaces", utf8("\u{2800}\u{2800} \n")),
+        ("marque_sur_espace", utf8(" \u{301}")),
+        ("marque_sur_espace_insecable", utf8("\u{A0}\u{20E3}")),
+        (
+            "braille_vide_marque_et_zwsp",
+            utf8("\u{2800}\u{301}\u{200B}"),
+        ),
+        ("braille_vide_et_lettre_gardes", utf8("a\u{2800}")),
+        ("marque_puis_lettre_gardees", utf8("\u{301}x")),
+        ("keycap_garde", utf8("1\u{20E3}")),
+        ("seulement_teinte_de_peau", utf8("\u{1F3FB}")),
+        (
+            "teinte_de_peau_sur_emoji_gardee",
+            utf8("\u{1F44B}\u{1F3FB}"),
+        ),
+        ("seulement_signe_voyelle_devanagari", utf8("\u{093F}")),
         ("espaces_et_lettre_gardes", utf8(" a ")),
         ("zwsp_et_lettre_gardes", utf8("\u{200B}a")),
         ("graphemes_2000_a", repeat("a", 2000)),
@@ -1594,6 +1734,14 @@ fn replay_file(v: &Value) {
             c["label"]
         );
     }
+    for c in lines(&t["coherence"]) {
+        assert_eq!(
+            coherence_case(&c),
+            outputs(&c, &["ok", "error"]),
+            "{}",
+            c["label"]
+        );
+    }
     let m = &v["messages"];
     for c in lines(&m["encode"]) {
         assert_eq!(
@@ -1699,5 +1847,36 @@ fn salon_v3() {
             .unwrap()
             .iter()
             .all(|c| c["open"]["error"] == "trame_corrompue")
+    );
+    // Les huit en-têtes font l'aller-retour ; cohérence : un seul en-tête par contenu connu.
+    let seal = &file["trames"]["seal"];
+    for r in 0..4 {
+        for v in [false, true] {
+            let c = by(seal, &format!("regle_{r}_volatile_{v}"));
+            assert_eq!(c["read_header"], c["en_tete"]);
+            assert_eq!(c["open"]["regle"], r);
+        }
+    }
+    let coh = file["trames"]["coherence"].as_array().unwrap();
+    assert_eq!(coh.len(), 48);
+    let ok = |prefixe: &str| {
+        coh.iter()
+            .filter(|c| c["label"].as_str().unwrap().starts_with(prefixe) && c["ok"] == true)
+            .count()
+    };
+    for p in ["controle_", "texte_e0_", "texte_e3_", "ecrit_e1_", "vu_e2_"] {
+        assert_eq!(ok(p), 1, "{p}");
+    }
+    assert_eq!(ok("inconnu_e2_"), 2);
+    assert!(
+        coh.iter()
+            .all(|c| c["ok"] == true || c["error"] == "message_invalide")
+    );
+    assert_eq!(
+        by(
+            &file["trames"]["coherence"],
+            "controle_volatile_false_regle_0"
+        )["ok"],
+        true
     );
 }

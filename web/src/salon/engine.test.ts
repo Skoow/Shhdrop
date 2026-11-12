@@ -164,6 +164,13 @@ describe("vecteurs salon-v3.json rejoués par le module WebAssembly", () => {
       expect({ error: errorOf(() => S.ouvrir(cles, t)) }, c.label).toEqual(c.open);
       cles.free();
     }
+    // Cohérence en-tête ↔ contenu (ce que recevoirTrame vérifie) : seul l'en-tête du contenu passe.
+    expect(V.trames.coherence.length).toBe(48);
+    for (const c of V.trames.coherence as Cas[]) {
+      const e = c.contenu === "controle" ? null : envDe(c.contenu);
+      const err = errorOf(() => S.enTeteCoherent(c.en_tete, e));
+      expect(err === null ? { ok: true } : { error: err }, c.label).toEqual(c.ok ? { ok: true } : { error: c.error });
+    }
   });
 
   it("messages : encodage octet pour octet et relecture ; décodage strict", () => {
@@ -213,6 +220,59 @@ describe("vecteurs salon-v3.json rejoués par le module WebAssembly", () => {
   });
 });
 
+describe("groupe en trames (I1, I2, M4, M5)", () => {
+  it("en-tête tiré du contenu, identifiant tiré par le moteur, rescellement refusé ; l'arrivant garde les trames d'avant son Welcome et les rejoue", () => {
+    const cles = S.clesSalon(new Uint8Array(32).fill(3), new Uint8Array(32).fill(4));
+    const n = (s: number) => new Uint8Array(16).fill(s + 1);
+    const a = S.Salon.creer(0, n(0), cles, true);
+    a.remplacerAnnonces(0, [{ siege: 0, nonce: n(0) }]);
+    a.annoncer(1, n(1));
+    const b = S.Salon.creer(1, n(1), cles, false);
+    b.remplacerAnnonces(0, [
+      { siege: 0, nonce: n(0) },
+      { siege: 1, nonce: n(1) },
+    ]);
+    let seq = 0;
+    const tous = (t: Uint8Array, de: number) => {
+      seq++;
+      return [a.recevoirTrame(cles, t, seq, de), b.recevoirTrame(cles, t, seq, de)];
+    };
+    const kp = b.keyPackage(cles);
+    const [evA] = tous(kp, 1);
+    if (evA!.type !== "keyPackage") throw new Error(evA!.type);
+    const [accepte, enAttente] = tous(a.ajouter(cles, evA.octets), 0);
+    expect(enAttente!.type).toBe("ignore");
+    if (accepte!.type !== "commitAccepte" || !accepte.welcome) throw new Error(accepte!.type);
+    // Avant le Welcome : un message (identifiant tiré par le moteur) et un renouvellement.
+    const { trame, id } = a.envoyer(cles, { heureMs: 1, regle: 2, message: { k: "texte", x: "avant le Welcome" } });
+    expect(id.length).toBe(16);
+    expect(S.lireEnTete(trame)).toEqual({ volatile: false, regle: 2 });
+    expect(tous(trame, 0)[1]!.type).toBe("ignore");
+    expect(tous(a.renouveler(cles), 0)[1]!.type).toBe("ignore");
+    const [, entree] = tous(accepte.welcome, 0);
+    if (entree!.type !== "entree") throw new Error(entree!.type);
+    expect(entree.rejoues.map((r) => ("evenement" in r ? r.evenement.type : r.erreur))).toEqual(["ignore", "ignore", "message", "membres"]);
+    const lu = entree.rejoues[2]!;
+    expect("evenement" in lu && lu.evenement.type === "message" && hex(lu.evenement.enveloppe.id)).toBe(hex(id));
+    expect(b.epoque()).toBe(a.epoque());
+    // Volatil : bit posé ; la même charge rescellée sous un autre en-tête est refusée.
+    const ecrit = b.envoyer(cles, { id: new Uint8Array(16), heureMs: 2, regle: 0, message: { k: "ecrit" } }).trame;
+    expect(S.lireEnTete(ecrit)).toEqual({ volatile: true, regle: 0 });
+    const faux = S.sceller(cles, { volatile: false, regle: 0 }, S.ouvrir(cles, ecrit).charge);
+    seq++;
+    expect(errorOf(() => a.recevoirTrame(cles, faux, seq, 1))).toBe("message_invalide");
+    seq++;
+    const ev = a.recevoirTrame(cles, ecrit, seq, 1);
+    expect(ev.type === "message" && ev.enveloppe.message.k).toBe("ecrit");
+    // Siège attesté ≠ siège de l'expéditeur (credential MLS) : refusé (le message, déchiffré pour
+    // le savoir, est perdu).
+    const autre = b.envoyer(cles, { id: new Uint8Array(16), heureMs: 3, regle: 0, message: { k: "texte", x: "b" } }).trame;
+    seq++;
+    expect(errorOf(() => a.recevoirTrame(cles, autre, seq, 0))).toBe("message_invalide");
+    for (const x of [a, b, cles]) x.free();
+  });
+});
+
 describe("frontières du module", () => {
   it("erreurs : message snake_case du moteur ; arguments hors bornes refusés (argument_invalide), jamais tronqués", () => {
     const cles = S.clesSalon(new Uint8Array(32), new Uint8Array(32));
@@ -259,10 +319,14 @@ describe("frontières du module", () => {
     expect(s.epoque()).toBeUndefined();
     expect(s.membres()).toEqual([]);
     expect(errorOf(() => s.exporterSframe())).toBe("non_membre");
-    expect(errorOf(() => s.chiffrer({ id: new Uint8Array(16), heureMs: 1, regle: 0, message: { k: "texte", x: "a" } }))).toBe("non_membre");
-    expect(s.keyPackage().length).toBeGreaterThan(100);
+    expect(errorOf(() => s.envoyer(cles, { id: new Uint8Array(16), heureMs: 1, regle: 0, message: { k: "texte", x: "a" } }))).toBe("non_membre");
+    expect(errorOf(() => s.renouveler(cles))).toBe("non_membre");
+    const kp = s.keyPackage(cles);
+    expect(kp.length).toBe(V.constants.TAILLE_TRAME);
+    expect(S.lireEnTete(kp)).toEqual({ volatile: false, regle: 0 });
+    expect(errorOf(() => s.keyPackage({} as never))).toBe("argument_invalide");
     s.free();
-    expect(() => s.keyPackage()).toThrow();
+    expect(() => s.keyPackage(cles)).toThrow();
     cles.free();
     expect(() => cles.tag()).toThrow();
   });

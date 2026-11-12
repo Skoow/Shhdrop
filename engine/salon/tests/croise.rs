@@ -5,7 +5,9 @@
 //! dossier `SHH_CROISE_DIR` donné par le test Playwright, qui joue le serveur (numéros `seq`).
 //!
 //! Salon 1 : A (natif, créateur, siège 0) ajoute B (wasm, siège 1). Salon 2 : C (wasm, créateur,
-//! siège 0) ajoute D (natif, siège 1). Chaque message MLS voyage dans une trame de 4 140 octets ;
+//! siège 0) ajoute D (natif, siège 1). Tout voyage en trames de 4 140 octets faites par `Salon`
+//! (en-tête tiré du contenu) et lues par `recevoir_trame` ; chaque arrivant reçoit toutes les
+//! trames depuis sa création (son KeyPackage, le Commit qui l'ajoute, gardés, puis son Welcome) ;
 //! chaque enveloppe reçue est réencodée et comparée octet pour octet à celle de l'expéditeur ;
 //! clés SFrame et codes de vérification comparés des deux côtés.
 //!
@@ -14,8 +16,8 @@
 use serde_json::{Value, json};
 use shhdrop_core::{KLien, KMdp};
 use shhdrop_salon::{
-    ClesSalon, EnTete, Enveloppe, Evenement, Graine, Message, RefPiece, Regle, Salon, cles_salon,
-    encoder, nouvelle_identite, ouvrir, sceller,
+    ClesSalon, Enveloppe, Evenement, Graine, Message, RefPiece, Regle, Salon, cles_salon, encoder,
+    nouvelle_identite,
 };
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -66,27 +68,6 @@ fn cles(v: &Value, n: u8) -> ClesSalon {
     )
 }
 
-/// Trame (nonce propre à chaque trame du test ; le site tire le sien, getrandom).
-fn trame(c: &ClesSalon, mls: &[u8], n: &mut u8) -> String {
-    *n += 1;
-    let t = sceller(
-        c,
-        EnTete {
-            volatile: false,
-            regle: Regle::Desactive,
-        },
-        mls,
-        &[*n; 24],
-    )
-    .unwrap();
-    hex(&t)
-}
-
-fn charge(c: &ClesSalon, v: &Value, k: &str) -> Vec<u8> {
-    let (_, charge) = ouvrir(c, &champ(v, k)).unwrap();
-    charge.to_vec()
-}
-
 /// Message attendu de `de` : l'enveloppe reçue, réencodée, est l'octet près celle envoyée.
 fn message(ev: Evenement, de: u8, attendu: &Value, k: &str) {
     match ev {
@@ -109,6 +90,17 @@ fn empreintes(s: &Salon) -> Value {
     json!([s.empreinte(0).unwrap(), s.empreinte(1).unwrap()])
 }
 
+/// Entrée attendue : les trames d'avant le Welcome (KeyPackage, Commit d'ajout) rejouées en `Ignore`.
+fn entree(ev: Result<Evenement, shhdrop_salon::Error>, k: &str) {
+    assert_eq!(
+        ev,
+        Ok(Evenement::Entree {
+            rejoues: vec![(1, Ok(Evenement::Ignore)), (2, Ok(Evenement::Ignore))]
+        }),
+        "{k}"
+    );
+}
+
 #[test]
 fn croise_natif() {
     let Some(dir) = std::env::var_os("SHH_CROISE_DIR").map(PathBuf::from) else {
@@ -117,7 +109,6 @@ fn croise_natif() {
         );
         return;
     };
-    let mut n = 0u8;
     let w1 = attendre(&dir, "wasm-1.json");
     let (k1, k2) = (cles(&w1, 1), cles(&w1, 2));
     let (na, nb, nc, nd) = (
@@ -127,24 +118,23 @@ fn croise_natif() {
         fixe::<16>(&w1, "n_d"),
     );
 
-    // Salon 1 : A crée, voit le KeyPackage de B (seq 1), l'ajoute (seq 2), écrit (seq 3).
+    // Salon 1 : A crée, voit le KeyPackage de B (seq 1), l'ajoute (seq 2), envoie le Welcome
+    // (seq 3) et écrit (seq 4).
     let mut a = Salon::creer(nouvelle_identite(0, na).unwrap(), &k1, true).unwrap();
     a.remplacer_annonces(0, &[(0, na)]);
     a.annoncer(1, nb);
-    let kp_b = charge(&k1, &w1, "t_kp_b");
-    assert_eq!(
-        a.recevoir(&kp_b, 1, 1),
-        Ok(Evenement::KeyPackage {
-            octets: kp_b.clone()
-        })
-    );
-    let commit = a.ajouter(&kp_b).unwrap();
+    let t_kp_b = champ(&w1, "t_kp_b");
+    let Ok(Evenement::KeyPackage { octets: kp_b }) = a.recevoir_trame(&k1, &t_kp_b, 1, 1) else {
+        panic!("KeyPackage de B")
+    };
+    let commit = a.ajouter(&k1, &kp_b).unwrap();
     let Ok(Evenement::CommitAccepte {
         welcome: Some(welcome),
-    }) = a.recevoir(&commit, 2, 0)
+    }) = a.recevoir_trame(&k1, &commit, 2, 0)
     else {
         panic!("écho du Commit de A")
     };
+    assert_eq!(a.recevoir_trame(&k1, &welcome, 3, 0), Ok(Evenement::Ignore));
     let env1 = Enveloppe {
         id: [1; 16],
         heure_ms: 1_700_000_000_001,
@@ -153,38 +143,39 @@ fn croise_natif() {
             x: "Bonjour du natif, é 😀\nligne 2".into(),
         },
     };
-    let m1 = a.chiffrer(&env1).unwrap();
-    assert_eq!(a.recevoir(&m1, 3, 0), Ok(Evenement::Ignore));
+    let m1 = a.envoyer(&k1, &env1).unwrap();
+    assert_eq!(a.recevoir_trame(&k1, &m1, 4, 0), Ok(Evenement::Ignore));
 
-    // Salon 2 : D attend d'entrer et publie son KeyPackage.
+    // Salon 2 : D attend d'entrer, publie son KeyPackage (seq 1) et le reçoit en écho.
     let mut d = Salon::creer(nouvelle_identite(1, nd).unwrap(), &k2, false).unwrap();
     d.remplacer_annonces(0, &[(0, nc), (1, nd)]);
-    let kp_d = d.key_package().unwrap();
+    let t_kp_d = d.key_package(&k2).unwrap();
+    assert_eq!(d.recevoir_trame(&k2, &t_kp_d, 1, 1), Ok(Evenement::Ignore));
 
     ecrire(
         &dir,
         "natif-1.json",
         &json!({
-            "t_commit_1": trame(&k1, &commit, &mut n),
-            "t_welcome_1": trame(&k1, &welcome, &mut n),
-            "t_m1": trame(&k1, &m1, &mut n),
+            "t_commit_1": hex(&commit),
+            "t_welcome_1": hex(&welcome),
+            "t_m1": hex(&m1),
             "env1": hex(&encoder(&env1).unwrap()),
             "sframe_1": hex(&*a.exporter_sframe().unwrap()),
             "empreintes_1": empreintes(&a),
-            "t_kp_d": trame(&k2, &kp_d, &mut n),
+            "t_kp_d": hex(&t_kp_d),
         }),
     );
 
-    // Salon 1 : B (wasm) a écrit deux messages autour d'un renouvellement (seq 4, 5, 6).
+    // Salon 1 : B (wasm) a écrit deux messages autour d'un renouvellement (seq 5, 6, 7).
     let w2 = attendre(&dir, "wasm-2.json");
     message(
-        a.recevoir(&charge(&k1, &w2, "t_m2"), 4, 1).unwrap(),
+        a.recevoir_trame(&k1, &champ(&w2, "t_m2"), 5, 1).unwrap(),
         1,
         &w2,
         "env2",
     );
     assert_eq!(
-        a.recevoir(&charge(&k1, &w2, "t_c"), 5, 1),
+        a.recevoir_trame(&k1, &champ(&w2, "t_c"), 6, 1),
         Ok(Evenement::Membres {
             ajoutes: vec![],
             retires: vec![]
@@ -192,7 +183,7 @@ fn croise_natif() {
     );
     assert_eq!(a.epoque(), Some(2));
     message(
-        a.recevoir(&charge(&k1, &w2, "t_m3"), 6, 1).unwrap(),
+        a.recevoir_trame(&k1, &champ(&w2, "t_m3"), 7, 1).unwrap(),
         1,
         &w2,
         "env3",
@@ -202,8 +193,16 @@ fn croise_natif() {
         w2["sframe_b"].as_str().unwrap()
     );
 
-    // Salon 2 : D entre par le Welcome de C (wasm), lit son message (seq 3) et répond (seq 4).
-    d.rejoindre(&charge(&k2, &w2, "t_welcome_2")).unwrap();
+    // Salon 2 : D reçoit le Commit de C (seq 2, gardé), puis son Welcome (seq 3) : il entre,
+    // lit le message de C (seq 4) et répond (seq 5).
+    assert_eq!(
+        d.recevoir_trame(&k2, &champ(&w2, "t_commit_2"), 2, 0),
+        Ok(Evenement::Ignore)
+    );
+    entree(
+        d.recevoir_trame(&k2, &champ(&w2, "t_welcome_2"), 3, 0),
+        "entrée de D",
+    );
     assert_eq!(d.membres(), vec![0, 1]);
     assert_eq!(d.epoque(), Some(1));
     assert_eq!(
@@ -212,7 +211,7 @@ fn croise_natif() {
     );
     assert_eq!(empreintes(&d), w2["empreintes_2"]);
     message(
-        d.recevoir(&charge(&k2, &w2, "t_m4"), 3, 0).unwrap(),
+        d.recevoir_trame(&k2, &champ(&w2, "t_m4"), 4, 0).unwrap(),
         0,
         &w2,
         "env4",
@@ -231,13 +230,13 @@ fn croise_natif() {
             }),
         },
     };
-    let m5 = d.chiffrer(&env5).unwrap();
-    assert_eq!(d.recevoir(&m5, 4, 1), Ok(Evenement::Ignore));
+    let m5 = d.envoyer(&k2, &env5).unwrap();
+    assert_eq!(d.recevoir_trame(&k2, &m5, 5, 1), Ok(Evenement::Ignore));
     ecrire(
         &dir,
         "natif-2.json",
         &json!({
-            "t_m5": trame(&k2, &m5, &mut n),
+            "t_m5": hex(&m5),
             "env5": hex(&encoder(&env5).unwrap()),
         }),
     );

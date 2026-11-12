@@ -36,8 +36,11 @@ pub enum Error {
     DejaMembre,
     /// Aucun membre du groupe n'occupe ce siège.
     SiegeInconnu,
-    /// Erreur interne d'OpenMLS (aléa, stockage) : jamais causée par une entrée.
+    /// Erreur interne (OpenMLS, aléa du système, stockage) : jamais causée par une entrée.
     MlsInterne,
+    /// En attente d'entrer, la file des trames et annonces gardées (2 000 au plus) est pleine :
+    /// l'arrivant ne pourra pas suivre le groupe et doit recommencer comme nouvel arrivant.
+    AttentePleine,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -60,6 +63,7 @@ impl fmt::Display for Error {
             Error::DejaMembre => "deja_membre",
             Error::SiegeInconnu => "siege_inconnu",
             Error::MlsInterne => "mls_interne",
+            Error::AttentePleine => "attente_pleine",
         })
     }
 }
@@ -87,5 +91,6 @@ mod tests {
         assert_eq!(Error::DejaMembre.to_string(), "deja_membre");
         assert_eq!(Error::SiegeInconnu.to_string(), "siege_inconnu");
         assert_eq!(Error::MlsInterne.to_string(), "mls_interne");
+        assert_eq!(Error::AttentePleine.to_string(), "attente_pleine");
     }
 }

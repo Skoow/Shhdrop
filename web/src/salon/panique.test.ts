@@ -53,7 +53,7 @@ describe("panique du module du salon (audit F4)", () => {
     expect(errorOf(() => S.lireEnTete(new Uint8Array(4140)))).toBe("salon_casse");
     expect(vi.mocked(pkg.lireEnTete).mock.calls.length).toBe(lus);
     expect(errorOf(() => S.nettoyerTexte("a"))).toBe("salon_casse");
-    expect(errorOf(() => s.keyPackage())).toBe("salon_casse");
+    expect(errorOf(() => s.keyPackage(cles))).toBe("salon_casse");
     expect(errorOf(() => s.exporterSframe())).toBe("salon_casse");
     expect(errorOf(() => cles.tag())).toBe("salon_casse");
     expect(errorOf(() => S.clesSalon(new Uint8Array(32), new Uint8Array(32)))).toBe("salon_casse");
@@ -73,6 +73,23 @@ describe("panique du module du salon (audit F4)", () => {
   });
 });
 
+describe("panique signalée hors d'un appel gardé (M2)", () => {
+  it("le rechargement met d'abord à zéro la mémoire de l'instance arrêtée", async () => {
+    const S = await loadSalonEngine();
+    const cles = S.clesSalon(new Uint8Array(32).fill(5), new Uint8Array(32).fill(6));
+    const s = S.Salon.creer(0, new Uint8Array(16), cles, true);
+    const avant = memoire();
+    expect(avant.some((b) => b !== 0)).toBe(true);
+    // Le gestionnaire de panique a tourné, mais aucune RuntimeError n'est passée par un appel gardé.
+    handler!();
+    expect(errorOf(() => cles.tag())).toBe("salon_casse");
+    const S2 = await loadSalonEngine();
+    expect(S2).not.toBe(S);
+    expect(avant.every((b) => b === 0)).toBe(true);
+    expect(() => s.free()).not.toThrow();
+  });
+});
+
 describe("mauvais usages : codes snake_case, arguments vérifiés avant le module", () => {
   it("poignée libérée : poignee_liberee ; appel concurrent : appel_concurrent ; mauvais type : argument_invalide", async () => {
     const S = await loadSalonEngine();
@@ -80,7 +97,7 @@ describe("mauvais usages : codes snake_case, arguments vérifiés avant le modul
     const s = S.Salon.creer(1, new Uint8Array(16), cles, false);
     s.free();
     s.free(); // sans effet la seconde fois
-    expect(errorOf(() => s.keyPackage())).toBe("poignee_liberee");
+    expect(errorOf(() => s.keyPackage(cles))).toBe("poignee_liberee");
     // Erreur de la colle de wasm-bindgen pour un objet déjà emprunté (appel réentrant).
     vi.mocked(pkg.sceller).mockImplementationOnce(() => {
       throw new Error("recursive use of an object detected which would lead to unsafe aliasing in rust");

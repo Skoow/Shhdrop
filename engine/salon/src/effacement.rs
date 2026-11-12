@@ -16,6 +16,9 @@ pub enum Etat {
 
 /// Calcule l'état d'un message pour cet appareil.
 ///
+/// `envoye_ms` : **heure de réception de la trame par le serveur**, remise avec elle (spec v3
+/// §3.6.1, exigence C-2 6), jamais `heure_ms` de l'enveloppe, que l'expéditeur choisit (il
+/// pourrait sinon allonger ou raccourcir 10 min et 1 h).
 /// `vu_par_moi_ms` : instant où ce lecteur l'a vu (affiché, page visible, 1 s).
 /// `encore_dans_conversation` : le lecteur n'a pas quitté la conversation depuis.
 /// `lu_par_tous` : tous les participants encore présents l'ont lu.

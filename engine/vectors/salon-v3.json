@@ -3760,6 +3760,97 @@
       "label": "seulement_zwj_et_vs16"
     },
     {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "cc81"
+      },
+      "label": "seulement_marque_combinante"
+    },
+    {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "cc81cc82e2839d"
+      },
+      "label": "seulement_marques_combinantes"
+    },
+    {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "e2a080"
+      },
+      "label": "seulement_braille_vide"
+    },
+    {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "e2a080e2a080200a"
+      },
+      "label": "braille_vide_et_espaces"
+    },
+    {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "20cc81"
+      },
+      "label": "marque_sur_espace"
+    },
+    {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "c2a0e283a3"
+      },
+      "label": "marque_sur_espace_insecable"
+    },
+    {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "e2a080cc81e2808b"
+      },
+      "label": "braille_vide_marque_et_zwsp"
+    },
+    {
+      "in": {
+        "hex": "61e2a080"
+      },
+      "label": "braille_vide_et_lettre_gardes",
+      "out_hex": "61e2a080"
+    },
+    {
+      "in": {
+        "hex": "cc8178"
+      },
+      "label": "marque_puis_lettre_gardees",
+      "out_hex": "cc8178"
+    },
+    {
+      "in": {
+        "hex": "31e283a3"
+      },
+      "label": "keycap_garde",
+      "out_hex": "31e283a3"
+    },
+    {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "f09f8fbb"
+      },
+      "label": "seulement_teinte_de_peau"
+    },
+    {
+      "in": {
+        "hex": "f09f918bf09f8fbb"
+      },
+      "label": "teinte_de_peau_sur_emoji_gardee",
+      "out_hex": "f09f918bf09f8fbb"
+    },
+    {
+      "error": "texte_invalide",
+      "in": {
+        "hex": "e0a4bf"
+      },
+      "label": "seulement_signe_voyelle_devanagari"
+    },
+    {
       "in": {
         "hex": "206120"
       },
@@ -3891,6 +3982,768 @@
     }
   ],
   "trames": {
+    "coherence": [
+      {
+        "contenu": "controle",
+        "en_tete": {
+          "regle": 0,
+          "volatile": false
+        },
+        "label": "controle_volatile_false_regle_0",
+        "ok": true
+      },
+      {
+        "contenu": "controle",
+        "en_tete": {
+          "regle": 1,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "controle_volatile_false_regle_1"
+      },
+      {
+        "contenu": "controle",
+        "en_tete": {
+          "regle": 2,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "controle_volatile_false_regle_2"
+      },
+      {
+        "contenu": "controle",
+        "en_tete": {
+          "regle": 3,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "controle_volatile_false_regle_3"
+      },
+      {
+        "contenu": "controle",
+        "en_tete": {
+          "regle": 0,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "controle_volatile_true_regle_0"
+      },
+      {
+        "contenu": "controle",
+        "en_tete": {
+          "regle": 1,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "controle_volatile_true_regle_1"
+      },
+      {
+        "contenu": "controle",
+        "en_tete": {
+          "regle": 2,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "controle_volatile_true_regle_2"
+      },
+      {
+        "contenu": "controle",
+        "en_tete": {
+          "regle": 3,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "controle_volatile_true_regle_3"
+      },
+      {
+        "contenu": {
+          "e": 0,
+          "id": "4e8eac5077ec0908d6850bc4d60ee324",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 0,
+          "volatile": false
+        },
+        "label": "texte_e0_volatile_false_regle_0",
+        "ok": true
+      },
+      {
+        "contenu": {
+          "e": 0,
+          "id": "4e8eac5077ec0908d6850bc4d60ee324",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 1,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "texte_e0_volatile_false_regle_1"
+      },
+      {
+        "contenu": {
+          "e": 0,
+          "id": "4e8eac5077ec0908d6850bc4d60ee324",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 2,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "texte_e0_volatile_false_regle_2"
+      },
+      {
+        "contenu": {
+          "e": 0,
+          "id": "4e8eac5077ec0908d6850bc4d60ee324",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 3,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "texte_e0_volatile_false_regle_3"
+      },
+      {
+        "contenu": {
+          "e": 0,
+          "id": "4e8eac5077ec0908d6850bc4d60ee324",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 0,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "texte_e0_volatile_true_regle_0"
+      },
+      {
+        "contenu": {
+          "e": 0,
+          "id": "4e8eac5077ec0908d6850bc4d60ee324",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 1,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "texte_e0_volatile_true_regle_1"
+      },
+      {
+        "contenu": {
+          "e": 0,
+          "id": "4e8eac5077ec0908d6850bc4d60ee324",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 2,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "texte_e0_volatile_true_regle_2"
+      },
+      {
+        "contenu": {
+          "e": 0,
+          "id": "4e8eac5077ec0908d6850bc4d60ee324",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 3,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "texte_e0_volatile_true_regle_3"
+      },
+      {
+        "contenu": {
+          "e": 3,
+          "id": "881795fc0a6dccadd241e6df4c7e8727",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 0,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "texte_e3_volatile_false_regle_0"
+      },
+      {
+        "contenu": {
+          "e": 3,
+          "id": "881795fc0a6dccadd241e6df4c7e8727",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 1,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "texte_e3_volatile_false_regle_1"
+      },
+      {
+        "contenu": {
+          "e": 3,
+          "id": "881795fc0a6dccadd241e6df4c7e8727",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 2,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "texte_e3_volatile_false_regle_2"
+      },
+      {
+        "contenu": {
+          "e": 3,
+          "id": "881795fc0a6dccadd241e6df4c7e8727",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 3,
+          "volatile": false
+        },
+        "label": "texte_e3_volatile_false_regle_3",
+        "ok": true
+      },
+      {
+        "contenu": {
+          "e": 3,
+          "id": "881795fc0a6dccadd241e6df4c7e8727",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 0,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "texte_e3_volatile_true_regle_0"
+      },
+      {
+        "contenu": {
+          "e": 3,
+          "id": "881795fc0a6dccadd241e6df4c7e8727",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 1,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "texte_e3_volatile_true_regle_1"
+      },
+      {
+        "contenu": {
+          "e": 3,
+          "id": "881795fc0a6dccadd241e6df4c7e8727",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 2,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "texte_e3_volatile_true_regle_2"
+      },
+      {
+        "contenu": {
+          "e": 3,
+          "id": "881795fc0a6dccadd241e6df4c7e8727",
+          "message": {
+            "k": "texte",
+            "x": "a"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 3,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "texte_e3_volatile_true_regle_3"
+      },
+      {
+        "contenu": {
+          "e": 1,
+          "id": "6074957b1920caa3b5006576650e963c",
+          "message": {
+            "k": "ecrit"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 0,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "ecrit_e1_volatile_false_regle_0"
+      },
+      {
+        "contenu": {
+          "e": 1,
+          "id": "6074957b1920caa3b5006576650e963c",
+          "message": {
+            "k": "ecrit"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 1,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "ecrit_e1_volatile_false_regle_1"
+      },
+      {
+        "contenu": {
+          "e": 1,
+          "id": "6074957b1920caa3b5006576650e963c",
+          "message": {
+            "k": "ecrit"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 2,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "ecrit_e1_volatile_false_regle_2"
+      },
+      {
+        "contenu": {
+          "e": 1,
+          "id": "6074957b1920caa3b5006576650e963c",
+          "message": {
+            "k": "ecrit"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 3,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "ecrit_e1_volatile_false_regle_3"
+      },
+      {
+        "contenu": {
+          "e": 1,
+          "id": "6074957b1920caa3b5006576650e963c",
+          "message": {
+            "k": "ecrit"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 0,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "ecrit_e1_volatile_true_regle_0"
+      },
+      {
+        "contenu": {
+          "e": 1,
+          "id": "6074957b1920caa3b5006576650e963c",
+          "message": {
+            "k": "ecrit"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 1,
+          "volatile": true
+        },
+        "label": "ecrit_e1_volatile_true_regle_1",
+        "ok": true
+      },
+      {
+        "contenu": {
+          "e": 1,
+          "id": "6074957b1920caa3b5006576650e963c",
+          "message": {
+            "k": "ecrit"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 2,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "ecrit_e1_volatile_true_regle_2"
+      },
+      {
+        "contenu": {
+          "e": 1,
+          "id": "6074957b1920caa3b5006576650e963c",
+          "message": {
+            "k": "ecrit"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 3,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "ecrit_e1_volatile_true_regle_3"
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "2ce0719238ab817d3b1091c40155bf6a",
+          "message": {
+            "ids": [
+              "37544a4653828bc92d3573ab8a6422e6"
+            ],
+            "k": "vu"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 0,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "vu_e2_volatile_false_regle_0"
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "2ce0719238ab817d3b1091c40155bf6a",
+          "message": {
+            "ids": [
+              "37544a4653828bc92d3573ab8a6422e6"
+            ],
+            "k": "vu"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 1,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "vu_e2_volatile_false_regle_1"
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "2ce0719238ab817d3b1091c40155bf6a",
+          "message": {
+            "ids": [
+              "37544a4653828bc92d3573ab8a6422e6"
+            ],
+            "k": "vu"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 2,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "vu_e2_volatile_false_regle_2"
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "2ce0719238ab817d3b1091c40155bf6a",
+          "message": {
+            "ids": [
+              "37544a4653828bc92d3573ab8a6422e6"
+            ],
+            "k": "vu"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 3,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "vu_e2_volatile_false_regle_3"
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "2ce0719238ab817d3b1091c40155bf6a",
+          "message": {
+            "ids": [
+              "37544a4653828bc92d3573ab8a6422e6"
+            ],
+            "k": "vu"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 0,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "vu_e2_volatile_true_regle_0"
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "2ce0719238ab817d3b1091c40155bf6a",
+          "message": {
+            "ids": [
+              "37544a4653828bc92d3573ab8a6422e6"
+            ],
+            "k": "vu"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 1,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "vu_e2_volatile_true_regle_1"
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "2ce0719238ab817d3b1091c40155bf6a",
+          "message": {
+            "ids": [
+              "37544a4653828bc92d3573ab8a6422e6"
+            ],
+            "k": "vu"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 2,
+          "volatile": true
+        },
+        "label": "vu_e2_volatile_true_regle_2",
+        "ok": true
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "2ce0719238ab817d3b1091c40155bf6a",
+          "message": {
+            "ids": [
+              "37544a4653828bc92d3573ab8a6422e6"
+            ],
+            "k": "vu"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 3,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "vu_e2_volatile_true_regle_3"
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "91920d46d3011c1c632cfd0e6241e6fb",
+          "message": {
+            "k": "inconnu",
+            "sorte": "appel"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 0,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "inconnu_e2_volatile_false_regle_0"
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "91920d46d3011c1c632cfd0e6241e6fb",
+          "message": {
+            "k": "inconnu",
+            "sorte": "appel"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 1,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "inconnu_e2_volatile_false_regle_1"
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "91920d46d3011c1c632cfd0e6241e6fb",
+          "message": {
+            "k": "inconnu",
+            "sorte": "appel"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 2,
+          "volatile": false
+        },
+        "label": "inconnu_e2_volatile_false_regle_2",
+        "ok": true
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "91920d46d3011c1c632cfd0e6241e6fb",
+          "message": {
+            "k": "inconnu",
+            "sorte": "appel"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 3,
+          "volatile": false
+        },
+        "error": "message_invalide",
+        "label": "inconnu_e2_volatile_false_regle_3"
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "91920d46d3011c1c632cfd0e6241e6fb",
+          "message": {
+            "k": "inconnu",
+            "sorte": "appel"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 0,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "inconnu_e2_volatile_true_regle_0"
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "91920d46d3011c1c632cfd0e6241e6fb",
+          "message": {
+            "k": "inconnu",
+            "sorte": "appel"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 1,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "inconnu_e2_volatile_true_regle_1"
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "91920d46d3011c1c632cfd0e6241e6fb",
+          "message": {
+            "k": "inconnu",
+            "sorte": "appel"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 2,
+          "volatile": true
+        },
+        "label": "inconnu_e2_volatile_true_regle_2",
+        "ok": true
+      },
+      {
+        "contenu": {
+          "e": 2,
+          "id": "91920d46d3011c1c632cfd0e6241e6fb",
+          "message": {
+            "k": "inconnu",
+            "sorte": "appel"
+          },
+          "t": 1700000000000
+        },
+        "en_tete": {
+          "regle": 3,
+          "volatile": true
+        },
+        "error": "message_invalide",
+        "label": "inconnu_e2_volatile_true_regle_3"
+      }
+    ],
     "reject": [
       {
         "from": "message_texte",
@@ -3960,6 +4813,96 @@
         "read_header": {
           "regle": 1,
           "volatile": false
+        }
+      },
+      {
+        "from": "message_texte",
+        "k_lien": "a6ec42d4163531c951da038ddbea6e4cd6344fed592ac30d980ab7ac6b484911",
+        "k_mdp": "60d7f39eb3359b31f2c0ffd428ddd8ce5bce629dcd8bf9eacb99d32622a00a3d",
+        "label": "drapeaux_xor_3",
+        "mutation": {
+          "at": 4,
+          "mask": 3,
+          "op": "xor"
+        },
+        "open": {
+          "error": "trame_corrompue"
+        },
+        "read_header": {
+          "regle": 1,
+          "volatile": true
+        }
+      },
+      {
+        "from": "message_texte",
+        "k_lien": "a6ec42d4163531c951da038ddbea6e4cd6344fed592ac30d980ab7ac6b484911",
+        "k_mdp": "60d7f39eb3359b31f2c0ffd428ddd8ce5bce629dcd8bf9eacb99d32622a00a3d",
+        "label": "drapeaux_xor_4",
+        "mutation": {
+          "at": 4,
+          "mask": 4,
+          "op": "xor"
+        },
+        "open": {
+          "error": "trame_corrompue"
+        },
+        "read_header": {
+          "regle": 2,
+          "volatile": false
+        }
+      },
+      {
+        "from": "message_texte",
+        "k_lien": "a6ec42d4163531c951da038ddbea6e4cd6344fed592ac30d980ab7ac6b484911",
+        "k_mdp": "60d7f39eb3359b31f2c0ffd428ddd8ce5bce629dcd8bf9eacb99d32622a00a3d",
+        "label": "drapeaux_xor_5",
+        "mutation": {
+          "at": 4,
+          "mask": 5,
+          "op": "xor"
+        },
+        "open": {
+          "error": "trame_corrompue"
+        },
+        "read_header": {
+          "regle": 2,
+          "volatile": true
+        }
+      },
+      {
+        "from": "message_texte",
+        "k_lien": "a6ec42d4163531c951da038ddbea6e4cd6344fed592ac30d980ab7ac6b484911",
+        "k_mdp": "60d7f39eb3359b31f2c0ffd428ddd8ce5bce629dcd8bf9eacb99d32622a00a3d",
+        "label": "drapeaux_xor_6",
+        "mutation": {
+          "at": 4,
+          "mask": 6,
+          "op": "xor"
+        },
+        "open": {
+          "error": "trame_corrompue"
+        },
+        "read_header": {
+          "regle": 3,
+          "volatile": false
+        }
+      },
+      {
+        "from": "message_texte",
+        "k_lien": "a6ec42d4163531c951da038ddbea6e4cd6344fed592ac30d980ab7ac6b484911",
+        "k_mdp": "60d7f39eb3359b31f2c0ffd428ddd8ce5bce629dcd8bf9eacb99d32622a00a3d",
+        "label": "drapeaux_xor_7",
+        "mutation": {
+          "at": 4,
+          "mask": 7,
+          "op": "xor"
+        },
+        "open": {
+          "error": "trame_corrompue"
+        },
+        "read_header": {
+          "regle": 3,
+          "volatile": true
         }
       },
       {

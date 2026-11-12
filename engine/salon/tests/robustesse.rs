@@ -96,7 +96,7 @@ fn trame_valide(cles: &ClesSalon) -> Vec<u8> {
         volatile: false,
         regle: Regle::Desactive,
     };
-    sceller(cles, en_tete, &charge, &[3; 24]).unwrap().to_vec()
+    sceller(cles, en_tete, &charge).unwrap().to_vec()
 }
 
 #[test]

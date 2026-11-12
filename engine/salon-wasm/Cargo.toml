@@ -17,9 +17,5 @@ shhdrop-salon = { path = "../salon" }
 wasm-bindgen = "=0.2.130"
 js-sys = "=0.3.107"
 zeroize = { version = "1.9", default-features = false, features = ["alloc"] }
-# Nonce des trames (24 octets) : déjà dans l'arbre (OpenMLS, verrouillée, plus de 7 jours).
-getrandom = { version = "=0.4.3", default-features = false }
-
-# Navigateur seulement : crypto.getRandomValues (jamais activé en natif, comme dans shhdrop-salon).
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "=0.4.3", default-features = false, features = ["wasm_js"] }
+# Aléa (nonces des trames, identifiants des messages) : tiré par shhdrop-salon (getrandom, feature
+# `wasm_js` sur wasm32 seulement, déclarée dans engine/salon/Cargo.toml).

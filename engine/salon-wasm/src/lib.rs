@@ -18,8 +18,11 @@
 //!   à zéro (`fill(0)`) dès qu'il n'en a plus besoin. `K_trame`, `K_salon` et l'état MLS restent
 //!   dans le module, derrière des poignées (`ClesSalon`, `Salon`) à libérer par `free()`, qui
 //!   les efface.
-//! - Le nonce d'une trame est tiré ici (24 octets, `crypto.getRandomValues`) : `sceller` n'en
-//!   accepte pas de l'appelant (la forme à nonce donné du moteur sert aux vecteurs seulement).
+//! - Le nonce d'une trame (24 octets) et l'identifiant d'un message absent (16 octets) sont tirés
+//!   par le moteur (getrandom → `crypto.getRandomValues`) : aucun nonce n'entre de JavaScript (la
+//!   forme à nonce donné est interne au moteur, pour ses vecteurs).
+//! - Le groupe ne parle qu'en trames (`Salon.envoyer`, `recevoirTrame`…) : l'en-tête de chaque
+//!   trame est tiré de son contenu et vérifié à la réception (engine/salon/src/groupe.rs).
 #![forbid(unsafe_code)]
 
 use core::cell::RefCell;
@@ -60,14 +63,20 @@ export type Message =
   /** Sorte inconnue de ce moteur (lue, ignorée ; jamais encodée). */
   | { k: "inconnu"; sorte: string };
 export type Enveloppe = { id: Uint8Array; heureMs: number; regle: Regle; message: Message };
-/** Résultat de Salon.recevoir (engine/salon/src/groupe.rs, `Evenement`). */
+/** Résultat de Salon.recevoirTrame (engine/salon/src/groupe.rs, `Evenement`). */
 export type Evenement =
   | { type: "message"; deSiege: number; enveloppe: Enveloppe }
+  /** Entrée dans le groupe (Welcome reçu) : les trames gardées en attente, rejouées dans l'ordre `seq`. */
+  | { type: "entree"; rejoues: Rejoue[] }
   | { type: "membres"; ajoutes: number[]; retires: number[] }
   | { type: "commitPerdu"; ajoutes: number[]; retires: number[] }
   | { type: "commitAccepte"; welcome: Uint8Array | null }
   | { type: "keyPackage"; octets: Uint8Array }
   | { type: "ignore" };
+/** Trame gardée en attente puis rejouée à l'entrée : ce qu'elle a donné, ou son erreur (code snake_case). */
+export type Rejoue = { seq: number; evenement: Evenement } | { seq: number; erreur: string };
+/** Enveloppe à envoyer : `id` facultatif (tiré par le moteur s'il manque). */
+export type EnveloppeEnvoi = Omit<Enveloppe, "id"> & { id?: Uint8Array };
 export type Annonce = { siege: number; nonce: Uint8Array };
 /** Brut : instants en bigint (web/src/salon/engine.ts rend des nombres). */
 export type EtatEffacementBrut = { etat: "visible" } | { etat: "rebours"; finMs: bigint } | { etat: "efface" };
@@ -285,9 +294,19 @@ fn lire_message(m: &JsValue) -> Option<Message> {
 
 /// Enveloppe venue de JavaScript ; tout champ absent ou mal typé : `message_invalide`.
 fn lire_enveloppe(v: &JsValue) -> R<Enveloppe> {
+    lire_enveloppe_id(v, false)
+}
+
+/// Même chose ; avec `tirer`, un `id` absent (`undefined`) est tiré par le moteur (`nouvel_id`).
+fn lire_enveloppe_id(v: &JsValue, tirer: bool) -> R<Enveloppe> {
+    let id = if tirer && get(v, "id").is_undefined() {
+        Some(salon::nouvel_id().map_err(js_err)?)
+    } else {
+        fixe::<16>(&get(v, "id"))
+    };
     let e = (|| {
         Some(Enveloppe {
-            id: fixe::<16>(&get(v, "id"))?,
+            id: id?,
             // Au-delà de 2^53 − 1 : u64::MAX, que le moteur refuse (message_invalide).
             heure_ms: entier(&get(v, "heureMs"), MAX_SAFE).unwrap_or(u64::MAX),
             regle: regle_de(&get(v, "regle"))?,
@@ -488,7 +507,8 @@ fn lire_en_tete_js(v: &JsValue) -> R<EnTete> {
     Ok(EnTete { volatile, regle })
 }
 
-/// Trame de 4 140 octets ; le nonce (24 octets) est tiré ici par `crypto.getRandomValues`.
+/// Trame de 4 140 octets ; le nonce (24 octets) est tiré par le moteur (`crypto.getRandomValues`).
+/// Les trames du groupe se font par `Salon` (en-tête tiré du contenu).
 #[wasm_bindgen]
 pub fn sceller(
     cles: &JsClesSalon,
@@ -497,10 +517,25 @@ pub fn sceller(
 ) -> R<Uint8Array> {
     let en_tete = lire_en_tete_js(en_tete)?;
     let charge = Zeroizing::new(charge.to_vec());
-    let mut nonce = [0u8; 24];
-    getrandom::fill(&mut nonce).map_err(|_| js_err(salon::Error::MlsInterne))?;
-    let t = salon::sceller(&cles.0, en_tete, &charge, &nonce).map_err(js_err)?;
+    let t = salon::sceller(&cles.0, en_tete, &charge).map_err(js_err)?;
     Ok(octets(&t))
+}
+
+/// L'en-tête dit-il ce que dit le contenu (`engine/salon/src/trame.rs`, `en_tete_coherent`) ?
+/// `enveloppe` : `null` pour un message de contrôle MLS (Commit, Welcome, KeyPackage). Écart :
+/// `message_invalide`. `Salon.recevoirTrame` le fait déjà ; exposé pour les vecteurs.
+#[wasm_bindgen(js_name = enTeteCoherent)]
+pub fn en_tete_coherent(
+    #[wasm_bindgen(unchecked_param_type = "EnTete")] en_tete: &JsValue,
+    #[wasm_bindgen(unchecked_param_type = "Enveloppe | null")] enveloppe: &JsValue,
+) -> R<()> {
+    let et = lire_en_tete_js(en_tete)?;
+    let e = if enveloppe.is_null() {
+        None
+    } else {
+        Some(lire_enveloppe(enveloppe)?)
+    };
+    salon::en_tete_coherent(et, e.as_ref()).map_err(js_err)
 }
 
 /// Ouvre une trame : `{ volatile, regle, charge }` ; tout échec est `trame_corrompue`.
@@ -569,7 +604,8 @@ pub fn code_verification(cle: &[u8]) -> R<String> {
     Ok(salon::code_verification(c))
 }
 
-/// État d'un message à l'écran (`engine/salon/src/effacement.rs`) ; instants en millisecondes,
+/// État d'un message à l'écran (`engine/salon/src/effacement.rs`) ; `envoye_ms` : heure de
+/// réception par le serveur (jamais `heureMs`) ; instants en millisecondes,
 /// en `bigint` (la couche TypeScript les vérifie : web/src/salon/engine.ts).
 #[allow(clippy::too_many_arguments)]
 #[wasm_bindgen(js_name = etatEffacement, unchecked_return_type = "EtatEffacementBrut")]
@@ -644,6 +680,22 @@ fn evenement_js(ev: Evenement) -> Object {
             set(&o, "type", "keyPackage");
             set(&o, "octets", octets(&kp));
         }
+        Evenement::Entree { rejoues } => {
+            set(&o, "type", "entree");
+            let a: Array = rejoues
+                .into_iter()
+                .map(|(seq, r)| {
+                    let x = Object::new();
+                    set(&x, "seq", seq as f64);
+                    match r {
+                        Ok(ev) => set(&x, "evenement", evenement_js(ev)),
+                        Err(e) => set(&x, "erreur", e.to_string()),
+                    }
+                    JsValue::from(x)
+                })
+                .collect();
+            set(&o, "rejoues", a);
+        }
         Evenement::Ignore => set(&o, "type", "ignore"),
     }
     o
@@ -657,7 +709,8 @@ pub struct JsSalon(salon::Salon);
 #[wasm_bindgen(js_class = Salon)]
 impl JsSalon {
     /// Nouveau participant au siège donné par le serveur, avec une identité éphémère neuve.
-    /// `createur` : il crée le groupe ; sinon il attend un Welcome (`keyPackage`, `rejoindre`).
+    /// `createur` : il crée le groupe ; sinon il publie la trame de `keyPackage` et passe toutes
+    /// les trames à `recevoirTrame` : son Welcome le fait entrer (`entree`).
     pub fn creer(
         siege: f64,
         #[wasm_bindgen(unchecked_param_type = "Uint8Array")] nonce_arrivee: &JsValue,
@@ -672,49 +725,71 @@ impl JsSalon {
             .map_err(js_err)
     }
 
-    /// KeyPackage à publier à l'arrivée.
+    /// Trame du KeyPackage à publier à l'arrivée.
     #[wasm_bindgen(js_name = keyPackage)]
-    pub fn key_package(&self) -> R<Uint8Array> {
-        self.0.key_package().map(|b| octets(&b)).map_err(js_err)
-    }
-
-    pub fn rejoindre(&mut self, welcome: &[u8]) -> R<()> {
-        self.0.rejoindre(welcome).map_err(js_err)
-    }
-
-    /// Commit d'ajout (le Welcome vient à l'écho gagnant, `commitAccepte`).
-    pub fn ajouter(&mut self, key_package: &[u8]) -> R<Uint8Array> {
+    pub fn key_package(&mut self, cles: &JsClesSalon) -> R<Uint8Array> {
         self.0
-            .ajouter(key_package)
-            .map(|b| octets(&b))
+            .key_package(&cles.0)
+            .map(|t| octets(&t))
             .map_err(js_err)
     }
 
-    pub fn retirer(&mut self, siege: f64) -> R<Uint8Array> {
+    /// Trame du Commit d'ajout ; `keyPackage` : les octets d'un événement `keyPackage` (le
+    /// Welcome vient à l'écho gagnant, `commitAccepte`, en trame).
+    pub fn ajouter(&mut self, cles: &JsClesSalon, key_package: &[u8]) -> R<Uint8Array> {
+        self.0
+            .ajouter(&cles.0, key_package)
+            .map(|t| octets(&t))
+            .map_err(js_err)
+    }
+
+    /// Trame du Commit qui retire le siège.
+    pub fn retirer(&mut self, cles: &JsClesSalon, siege: f64) -> R<Uint8Array> {
         let s = self::siege(siege)?;
-        self.0.retirer(s).map(|b| octets(&b)).map_err(js_err)
+        self.0
+            .retirer(&cles.0, s)
+            .map(|t| octets(&t))
+            .map_err(js_err)
     }
 
-    pub fn renouveler(&mut self) -> R<Uint8Array> {
-        self.0.renouveler().map(|b| octets(&b)).map_err(js_err)
+    /// Trame du Commit de renouvellement (toutes les 100 trames envoyées et toutes les heures).
+    pub fn renouveler(&mut self, cles: &JsClesSalon) -> R<Uint8Array> {
+        self.0
+            .renouveler(&cles.0)
+            .map(|t| octets(&t))
+            .map_err(js_err)
     }
 
-    /// Message MLS d'une enveloppe, à sceller dans une trame.
-    pub fn chiffrer(
+    /// Trame d'une enveloppe (en-tête tiré du contenu) et son identifiant (tiré par le moteur si
+    /// `id` manque).
+    #[wasm_bindgen(unchecked_return_type = "{ trame: Uint8Array; id: Uint8Array }")]
+    pub fn envoyer(
         &mut self,
-        #[wasm_bindgen(unchecked_param_type = "Enveloppe")] e: &JsValue,
-    ) -> R<Uint8Array> {
-        let e = lire_enveloppe(e)?;
-        self.0.chiffrer(&e).map(|b| octets(&b)).map_err(js_err)
+        cles: &JsClesSalon,
+        #[wasm_bindgen(unchecked_param_type = "EnveloppeEnvoi")] e: &JsValue,
+    ) -> R<Object> {
+        let e = lire_enveloppe_id(e, true)?;
+        let t = self.0.envoyer(&cles.0, &e).map_err(js_err)?;
+        let o = Object::new();
+        set(&o, "trame", octets(&t));
+        set(&o, "id", id_js(&e.id));
+        Ok(o)
     }
 
-    /// Message MLS rangé au rang `seq` (entier sûr), envoyé par `siegeEmetteur` (attesté par le serveur).
-    #[wasm_bindgen(unchecked_return_type = "Evenement")]
-    pub fn recevoir(&mut self, mls: &[u8], seq: f64, siege_emetteur: f64) -> R<Object> {
+    /// Trame rangée au rang `seq` (entier sûr), envoyée par `siegeEmetteur` (attesté par le
+    /// serveur) ; à appeler pour chaque trame, en attente d'entrer comprise.
+    #[wasm_bindgen(js_name = recevoirTrame, unchecked_return_type = "Evenement")]
+    pub fn recevoir_trame(
+        &mut self,
+        cles: &JsClesSalon,
+        trame: &[u8],
+        seq: f64,
+        siege_emetteur: f64,
+    ) -> R<Object> {
         let seq = entier(&JsValue::from_f64(seq), MAX_SAFE).ok_or_else(arg)?;
         let de = self::siege(siege_emetteur)?;
         self.0
-            .recevoir(mls, seq, de)
+            .recevoir_trame(&cles.0, trame, seq, de)
             .map(evenement_js)
             .map_err(js_err)
     }

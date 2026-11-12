@@ -5,7 +5,7 @@
 //! dans un drapeau de la liste emoji 15.0 : U+1F3F4, étiquettes U+E0020–E007E, U+E007F) et des contrôles (C0, DEL, C1, `\t` et `\r`
 //! compris, sauf `\n`) et des inversions de sens U+202A–U+202E et U+2066–U+2069 ; 3. NFC de
 //! nouveau (un caractère retiré entre une lettre et son accent ne doit pas empêcher la
-//! composition ; sans effet sinon) ; 4. au moins un caractère visible (ni `White_Space` ni invisible) ; 5. comptage : 1 à 2 000 graphèmes (UAX #29, `unicode-segmentation`)
+//! composition ; sans effet sinon) ; 4. au moins un caractère visible (ni `White_Space`, ni invisible, ni marque, ni U+2800 motif braille vide : une marque seule, ou posée sur une espace, ne compte pas ; « marque » comme pour le pseudonyme ci-dessous) ; 5. comptage : 1 à 2 000 graphèmes (UAX #29, `unicode-segmentation`)
 //! et 3 500 octets UTF-8 au plus.
 //!
 //! **Pseudonyme** (`verifier_pseudo`, spec §39.4 point 4) : 1. NFC ; 2. retrait des contrôles,
@@ -20,7 +20,8 @@
 //! (voir `est_pictogramme`), ce qui couvre aussi chiffres entourés, lettres encerclées et drapeaux.
 //! Écarts connus : « lettre » = propriété `Alphabetic` et « chiffre » = propriété `Numeric` de la
 //! bibliothèque standard (inclut quelques nombres non décimaux) ; « marque » = caractère qui se
-//! lie au précédent dans la segmentation en graphèmes.
+//! lie au précédent dans la segmentation en graphèmes (UAX #29 : Extend, SpacingMark, ZWJ ; dont
+//! les modificateurs de teinte de peau, qui ne comptent donc pas seuls comme caractère visible).
 //!
 //! **Nom** (`nettoyer_nom`) : port de `safeName` (web/src/transfer/safety.ts), même ordre
 //! (retrait, puis NFC, puis espaces) ; seul écart : 255 octets UTF-8 au plus en plus des
@@ -89,8 +90,12 @@ pub fn nettoyer_texte(s: &str) -> Result<String> {
         .filter(|&c| (c == '\n' || !c.is_control()) && !est_inversion_de_sens(c))
         .collect();
     let out: String = retirer_etiquettes(&sans).nfc().collect();
-    // Au moins un caractère visible : ni espace (White_Space), ni invisible (est_ignorable).
-    if !out.chars().any(|c| !c.is_whitespace() && !est_ignorable(c)) {
+    // Au moins un caractère visible : ni espace (White_Space), ni invisible (est_ignorable), ni
+    // marque (`se_lie`), ni U+2800 (motif braille vide).
+    if !out
+        .chars()
+        .any(|c| !c.is_whitespace() && !est_ignorable(c) && c != '\u{2800}' && !se_lie(c))
+    {
         return Err(Error::TexteInvalide);
     }
     if out.len() > TEXTE_OCTETS || out.graphemes(true).count() > TEXTE_GRAPHEMES {
@@ -667,6 +672,17 @@ mod tests {
             " \u{FE0F}",
             "\u{A0}\u{3000}",
             "\u{2060}\u{FEFF}",
+            // T8 : marques seules, U+2800 (motif braille vide), marque sur une espace.
+            "\u{301}",
+            "\u{301}\u{302}\u{20DD}",
+            "\u{2800}",
+            "\u{2800}\u{2800} \n",
+            " \u{301}",
+            "\u{A0}\u{20E3}",
+            "\u{2800}\u{301}\u{200B}",
+            // Marque au sens de la segmentation : teinte de peau, signe voyelle (SpacingMark).
+            "\u{1F3FB}",
+            "\u{093F}",
         ] {
             assert_eq!(
                 nettoyer_texte(ko).unwrap_err(),
@@ -677,6 +693,12 @@ mod tests {
         assert_eq!(nettoyer_texte(" a ").unwrap(), " a ");
         assert_eq!(nettoyer_texte("\u{200B}a").unwrap(), "\u{200B}a");
         assert!(nettoyer_texte("👨\u{200D}👩").is_ok());
+        // Un seul caractère visible suffit, marques et U+2800 autour gardés.
+        assert_eq!(nettoyer_texte("a\u{2800}").unwrap(), "a\u{2800}");
+        assert_eq!(nettoyer_texte("\u{301}x").unwrap(), "\u{301}x");
+        assert_eq!(nettoyer_texte("1\u{20E3}").unwrap(), "1\u{20E3}");
+        assert!(nettoyer_texte("\u{1F44B}\u{1F3FB}").is_ok());
+        assert!(nettoyer_texte("\u{0915}\u{093F}").is_ok());
     }
 
     #[test]
