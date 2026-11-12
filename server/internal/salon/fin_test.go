@@ -530,3 +530,44 @@ func TestAttendreConnexions(t *testing.T) {
 		attendreFin(t, l0)
 	})
 }
+
+// Revue finale C-2, I2 : un salon échu sans état en mémoire (personne n'y est entré, ou
+// personne ne l'a rejoint depuis un redémarrage) perd sa ligne au tick qui suit l'échéance,
+// sans attendre un redémarrage ; un salon vivant sans état garde la sienne, et une pièce en
+// base sans fichier connu est effacée d'abord (fichier puis ligne).
+func TestLigneEchueSansEtatEffacee(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	id := b.idDe(t, c)
+	b.h.avancer(2 * time.Hour)
+	vivant := b.creer(t, 4)
+	idVivant := b.idDe(t, vivant)
+	// Redémarrage simulé : nouveau gestionnaire sur la même base (aucun état en mémoire).
+	m, err := NewManager(b.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.m = m
+	const piece = "BBBBBBBBBBBBBBBBBBBBBB"
+	if err := os.WriteFile(filepath.Join(b.cfg.Pieces.Dir, piece), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.db.Exec(`INSERT INTO salon_pieces(id,salon_id,bucket,state,segments_mask) VALUES(?,?,1,'ready',x'00')`,
+		piece, id); err != nil {
+		t.Fatal(err)
+	}
+	b.h.avancer(23 * time.Hour) // c échu (24 h), vivant encore à 1 h de son échéance
+	b.m.Tick()
+	if b.lignes(t, "salons", id) != 0 {
+		t.Fatal("ligne d'un salon échu sans état gardée")
+	}
+	if b.lignes(t, "salon_pieces", id) != 0 {
+		t.Fatal("ligne de pièce d'un salon échu gardée")
+	}
+	if _, err := os.Stat(filepath.Join(b.cfg.Pieces.Dir, piece)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("fichier de pièce d'un salon échu gardé :", err)
+	}
+	if b.lignes(t, "salons", idVivant) != 1 {
+		t.Fatal("ligne d'un salon vivant effacée")
+	}
+}

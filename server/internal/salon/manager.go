@@ -549,7 +549,8 @@ func (m *Manager) sortirLocked(s *salon, n uint8, enr func(seq uint64) []byte, r
 // aux connectés, conversation, pièces fichier puis ligne, ligne du salon), fins restées à
 // faire reprises, tombes échues oubliées une fois leur fin complète et leurs pièces purgées
 // (un effacement raté est retenté au Tick suivant), places de bloc des salons échus rendues,
-// puis passe sur la base (lignes, fin.go : lignes à 10 essais, lignes disparues).
+// puis passe sur la base (lignes, fin.go : lignes à 10 essais, lignes échues sans état, lignes
+// disparues).
 func (m *Manager) Tick() {
 	now := m.cfg.Now()
 	m.mu.Lock()
@@ -576,7 +577,7 @@ func (m *Manager) Tick() {
 			m.mu.Unlock()
 		}
 	}
-	m.lignes()
+	m.lignes(now)
 }
 
 // margeTombe : une tombe est gardée jusqu'à l'échéance plus cette marge (plan, Task 15) : un

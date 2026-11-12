@@ -243,18 +243,20 @@ func (s *salon) finIncomplete() bool {
 const lotLignes = 500
 
 // lignes : passe de Tick sur la base. Lignes à 10 essais supprimées s'il y en a (sans pièce restante :
-// celles d'une fin en cours sont effacées par achever d'abord) ; salons vivants de ce
+// celles d'une fin en cours sont effacées par achever d'abord) ; lignes échues sans état en
+// mémoire supprimées (echuesSansEtat) ; salons vivants de ce
 // processus (état en mémoire non fini, ou place de bloc comptée) dont la ligne vivante a
 // disparu (admin destroy, wipe, 10 essais) : fin en raison 2, place du bloc rendue. Les
 // tombes n'y sont pas. Sous createMu : une création en cours a déjà sa ligne ou n'est pas
 // encore comptée.
-func (m *Manager) lignes() {
+func (m *Manager) lignes(now time.Time) {
 	// Lecture d'abord (cas rare) : aucune écriture en base à chaque seconde.
 	var un int
 	if m.cfg.DB.QueryRow(`SELECT 1 FROM salons WHERE failed_attempts>=? LIMIT 1`, maxEssais).Scan(&un) == nil {
 		_, _ = m.cfg.DB.Exec(`DELETE FROM salons WHERE failed_attempts>=? AND NOT EXISTS
 			(SELECT 1 FROM salon_pieces WHERE salon_pieces.salon_id=salons.id)`, maxEssais)
 	}
+	m.echuesSansEtat(now.Unix())
 	m.createMu.Lock()
 	m.mu.Lock()
 	ids := make([]string, 0, len(m.salons)+len(m.vivants))
@@ -318,6 +320,40 @@ func (m *Manager) lignes() {
 	if len(partis) > 0 {
 		// Fichiers de pièces supprimés par un autre processus : usage relu (blob.Store).
 		_ = m.cfg.Pieces.Resync()
+	}
+}
+
+// echuesSansEtat (revue finale C-2, I2) : lignes échues à now (expires_at<=now) d'un salon
+// sans état en mémoire (personne n'y est entré, ou personne depuis un redémarrage) : pièces en
+// base effacées (fichier puis ligne), puis ligne du salon, comme par achever. Un salon qui a un
+// état (vivant ou tombe) n'y est pas : Tick le finit (entretenir) et achever efface sa ligne.
+// Lecture d'abord, lotLignes au plus par passe : aucune écriture en base sans ligne échue. Sans
+// état, aucun Rejoindre ne peut en recréer un (la ligne est échue). Erreurs ignorées : la
+// ligne reste, reprise au tick suivant.
+func (m *Manager) echuesSansEtat(now int64) {
+	rows, err := m.cfg.DB.Query(`SELECT id FROM salons WHERE expires_at<=? LIMIT ?`, now, lotLignes)
+	if err != nil {
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	if errors.Join(rows.Err(), rows.Close()) != nil {
+		return
+	}
+	for _, id := range ids {
+		m.mu.Lock()
+		_, enMemoire := m.salons[id]
+		m.mu.Unlock()
+		if enMemoire || m.effacerPiecesEnBase(id) != nil {
+			continue
+		}
+		_, _ = m.cfg.DB.Exec(`DELETE FROM salons WHERE id=? AND expires_at<=? AND NOT EXISTS
+			(SELECT 1 FROM salon_pieces WHERE salon_id=?)`, id, now, id)
 	}
 }
 
