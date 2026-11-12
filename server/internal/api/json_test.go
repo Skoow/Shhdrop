@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -65,4 +67,48 @@ func FuzzReadJSON(f *testing.F) {
 			_ = p[1]
 		}
 	})
+}
+
+// Relecture C-2 Task 17 : un corps `null` là où un objet est attendu est refusé (errKeys), pour
+// toutes les routes ; un champ pointeur facultatif peut rester `null`.
+func TestReadJSONNull(t *testing.T) {
+	type vide struct{}
+	type imbrique struct {
+		In  struct{ A int }  `json:"in"`
+		Opt *struct{ A int } `json:"opt"`
+	}
+	lire := func(body string, v any) error {
+		return readJSON(httptest.NewRecorder(), httptest.NewRequest("POST", "/", strings.NewReader(body)), v)
+	}
+	tests := []struct {
+		name string
+		body string
+		v    func() any
+		ok   bool
+	}{
+		{"null pour un objet vide", `null`, func() any { return &vide{} }, false},
+		{"null pour un objet", `null`, func() any { return &voidBody{} }, false},
+		{"null avec espaces", " null ", func() any { return &vide{} }, false},
+		{"objet vide", `{}`, func() any { return &vide{} }, true},
+		{"objet imbriqué null", `{"in":null}`, func() any { return &imbrique{} }, false},
+		{"pointeur facultatif null", `{"opt":null}`, func() any { return &imbrique{} }, true},
+		{"champ simple null", `{"n":null}`, func() any { return &voidBody{} }, true},
+		{"tableau null", `{"void":null}`, func() any { return &voidBody{} }, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := lire(tt.body, tt.v())
+			if (err == nil) != tt.ok {
+				t.Fatalf("readJSON(%q) : err = %v, attendu ok = %v", tt.body, err, tt.ok)
+			}
+		})
+	}
+}
+
+// strictKeys rend errKeys (et non une autre erreur) pour un corps `null`.
+func TestStrictKeysNull(t *testing.T) {
+	type vide struct{}
+	if err := strictKeys(json.NewDecoder(strings.NewReader("null")), reflect.TypeOf(vide{})); err != errKeys {
+		t.Fatalf("err = %v, attendu errKeys", err)
+	}
 }

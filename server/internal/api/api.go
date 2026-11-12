@@ -587,7 +587,7 @@ func readJSONMax(w http.ResponseWriter, r *http.Request, v any, max int64) error
 		return errBadRequest
 	}
 	scan := json.NewDecoder(bytes.NewReader(body))
-	if err := strictKeys(scan, reflect.TypeOf(v)); err != nil {
+	if err := strictKeys(scan, reflect.TypeOf(v).Elem()); err != nil { // v : pointeur exigé par Decode
 		return errBadRequest
 	}
 	if _, err := scan.Token(); err != io.EOF {
@@ -606,8 +606,11 @@ var errKeys = errors.New("clés JSON invalides")
 // strictKeys lit une valeur JSON et vérifie que chaque clé d'objet est exactement le nom
 // JSON (balise `json`) d'un champ du type attendu, et n'apparaît qu'une fois, et qu'un tableau
 // de taille fixe a exactement ce nombre d'éléments. Les types des valeurs sont vérifiés
-// ensuite par Decode.
+// ensuite par Decode. `null` à la place d'un objet (structure qui n'est pas derrière un
+// pointeur : le corps entier, ou un champ objet obligatoire) → errKeys (relecture C-2 Task 17 :
+// sinon un corps `null` passait pour `{}`) ; un champ pointeur facultatif peut valoir `null`.
 func strictKeys(dec *json.Decoder, t reflect.Type) error {
+	nullable := t == nil || t.Kind() == reflect.Pointer
 	for t != nil && t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -659,6 +662,9 @@ func strictKeys(dec *json.Decoder, t reflect.Type) error {
 		}
 		_, err = dec.Token() // ']'
 		return err
+	}
+	if tok == nil && !nullable && t.Kind() == reflect.Struct {
+		return errKeys
 	}
 	return nil // valeur simple
 }
