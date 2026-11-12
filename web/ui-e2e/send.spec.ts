@@ -149,9 +149,11 @@ test.describe("fr-FR", () => {
 
   test("Pause : plus aucun PUT pendant 5 s, Reprendre, succès ; M12 : Pause et Annuler à chaque phase", async ({ page, shh }) => {
     test.setTimeout(120_000);
+    // Barrière posée AVANT les ajouts (comme au commit 3fa680f) : le brouillon envoie chaque
+    // fichier dès son ajout (spec §41.14) ; posée après, tout pouvait être déjà parti.
+    const puts = await slowSegments(page, 900);
     await page.goto(shh.origin + "/");
     await addFile(page, "video.bin", 14 * MIB);
-    const puts = await slowSegments(page, 900);
     await sendButton(page).click();
     // Avant la création : Annuler seulement.
     await expect(page.getByRole("button", { name: "Annuler" })).toBeVisible();
@@ -202,10 +204,12 @@ test.describe("fr-FR", () => {
     // Écoute posée AVANT tout ajout : l'envoi démarre dès l'ajout (§41.14), la création du
     // partage peut donc partir avant « Chiffrer et envoyer » (test instable sinon).
     const m = manageFrom(page, shh.origin);
+    // Barrière posée AVANT les ajouts (comme au commit 3fa680f) : le brouillon envoie chaque
+    // fichier dès son ajout (spec §41.14) ; posée après, tout pouvait être déjà parti.
+    await slowSegments(page, 1500);
     await page.goto(shh.origin + "/");
     await addText(page, "Texte à garder");
     await addFile(page, "doc.bin", 10 * MIB);
-    await slowSegments(page, 1500);
     await sendButton(page).click();
     await expect(page.getByRole("heading", { name: "Chiffrement et envoi" })).toBeVisible({ timeout: 30_000 });
     // S9 : pendant l'envoi, Ctrl/Cmd + V (fichier ou texte) n'ajoute rien au composeur caché.
@@ -244,11 +248,13 @@ test.describe("fr-FR", () => {
     // Écoute posée AVANT tout ajout : l'envoi démarre dès l'ajout (§41.14), la création du
     // partage peut donc partir avant « Chiffrer et envoyer » (test instable sinon).
     const m = manageFrom(page, shh.origin);
-    await page.goto(shh.origin + "/");
-    await addFile(page, "doc.bin", 10 * MIB);
     // Premier segment libre, les suivants retenus : l'envoi reste au milieu. (La page n'est pas
     // fermée pendant l'interception : seul l'événement pagehide est envoyé, voir plus bas.)
+    // Barrière posée AVANT les ajouts (comme au commit 3fa680f) : le brouillon envoie chaque
+    // fichier dès son ajout (spec §41.14) ; posée après, tout pouvait être déjà parti.
     await slowSegments(page, 60_000, [], 1);
+    await page.goto(shh.origin + "/");
+    await addFile(page, "doc.bin", 10 * MIB);
     await sendButton(page).click();
     await expect(page.getByText(/^Bloc \d+ \/ \d+$/)).toBeVisible({ timeout: 30_000 });
     expect(await armed(page)).toBe(true);
@@ -354,10 +360,12 @@ test.describe("fr-FR", () => {
     test(`envoi puis Lien prêt à ${w} × ${h} : aucun débordement horizontal`, async ({ page, shh }) => {
       test.setTimeout(90_000);
       await page.setViewportSize({ width: w, height: h });
+      // Barrière posée AVANT les ajouts (comme au commit 3fa680f) : le brouillon envoie chaque
+      // fichier dès son ajout (spec §41.14) ; posée après, tout pouvait être déjà parti.
+      await slowSegments(page, 1500);
       await page.goto(shh.origin + "/");
       await addText(page, "petit écran");
       await addFile(page, "un-nom-de-fichier-vraiment-tres-long-pour-voir.bin", 2 * MIB);
-      await slowSegments(page, 1500);
       await sendButton(page).click();
       await expect(page.getByRole("heading", { name: "Chiffrement et envoi" })).toBeVisible({ timeout: 30_000 });
       expect(await noHScroll(page)).toBe(true);
