@@ -17,7 +17,8 @@ import (
 // User-Agent ni Referer, et l'adresse du pair seulement dans clientip.go et /healthz.
 // Accept-Encoding (retours CLEAN2) : choix de la variante précompressée d'un fichier du site
 // (cmd/shhdrop/static.go) ; même valeur dans tous les navigateurs visés, jamais gardé ni journalisé.
-var readHeaders = []string{"Authorization", "X-Shh-Client-IP", "X-Shh-Access", "X-Shh-Manage", "X-Shh-Grant", "Accept-Encoding"}
+var readHeaders = []string{"Authorization", "X-Shh-Client-IP", "X-Shh-Access", "X-Shh-Manage", "X-Shh-Grant", "Accept-Encoding",
+	"X-Shh-Membre", "X-Shh-Piece"}
 
 // wsHeaders : poignée de main du WebSocket du salon (plan C-2 Task 10, spec §39.3.1
 // « Origine »), lus seulement dans handlers_salon_ws.go (salonWS, poigneeWS) : Origin comparé à

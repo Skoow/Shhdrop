@@ -67,8 +67,72 @@ func (b *seau) prendre(now time.Time) (ok bool, attente time.Duration) {
 // rendre : jeton rendu (au plus cap), pour une trame refusée après prendre.
 func (b *seau) rendre() { b.jetons = min(b.cap, b.jetons+1) }
 
-// limiteSiege : seaux d'un numéro de siège.
-type limiteSiege struct{ cadence, horaire seau }
+// limiteSiege : seaux et réserve vocale d'un numéro de siège.
+type limiteSiege struct {
+	cadence, horaire seau
+	vocal            reserveVocale
+}
+
+// octetVocal : présence qui donne un octet de réserve vocale (250 µs à 4 000 o/s).
+const octetVocal = time.Second / VocalOctetsParSeconde
+
+// reserveVocale (v3 §5.1, plan point 3) : octets de vocaux que le siège peut encore créer.
+// Elle gagne VocalOctetsParSeconde par seconde de WebSocket ouvert (ouvrir, fermer :
+// connexion.go), jusqu'à VocalReserveMax ; chaque vocal en prend la taille de son palier.
+// Neuve (vide) pour chaque nouvel occupant, gardée par une reprise, comme les seaux.
+type reserveVocale struct {
+	octets int64
+	depuis time.Time // zéro : aucun WebSocket ouvert
+}
+
+// remplir ajoute la présence depuis depuis, à l'octet près (le reste de moins de 250 µs est
+// gardé pour la suite). Horloge qui recule : rien n'est gagné et le décompte repart de now.
+func (r *reserveVocale) remplir(now time.Time) {
+	if r.depuis.IsZero() {
+		return
+	}
+	d := now.Sub(r.depuis)
+	if d <= 0 {
+		r.depuis = now
+		return
+	}
+	gain := int64(d / octetVocal)
+	if gain >= VocalReserveMax-r.octets {
+		r.octets, r.depuis = VocalReserveMax, now
+		return
+	}
+	r.octets += gain
+	r.depuis = r.depuis.Add(time.Duration(gain) * octetVocal)
+}
+
+// ouvrir : un WebSocket du siège est ouvert à now.
+func (r *reserveVocale) ouvrir(now time.Time) {
+	r.remplir(now)
+	if r.depuis.IsZero() {
+		r.depuis = now
+	}
+}
+
+// fermer : plus aucun WebSocket du siège ouvert depuis now.
+func (r *reserveVocale) fermer(now time.Time) {
+	r.remplir(now)
+	r.depuis = time.Time{}
+}
+
+// prendre : n octets pris s'il y en a assez (0) ; sinon rien n'est pris et le délai de
+// présence qui manque est rendu (secondes entières, arrondies au-dessus).
+func (r *reserveVocale) prendre(now time.Time, n int64) time.Duration {
+	r.remplir(now)
+	if r.octets >= n {
+		r.octets -= n
+		return 0
+	}
+	manque := n - r.octets
+	return time.Duration((manque+VocalOctetsParSeconde-1)/VocalOctetsParSeconde) * time.Second
+}
+
+// rendre : n octets rendus (création refusée après prendre), au plus VocalReserveMax.
+func (r *reserveVocale) rendre(n int64) { r.octets = min(VocalReserveMax, r.octets+n) }
 
 // nouvelleLimite : seaux pleins.
 func nouvelleLimite() limiteSiege {

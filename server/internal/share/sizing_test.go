@@ -34,3 +34,21 @@ func TestPayloadBytes(t *testing.T) {
 		t.Fatal(sum)
 	}
 }
+
+// Exports pour les pièces du salon (plan C-2 Task 13) : mêmes valeurs que les fonctions internes.
+func TestExportsPieces(t *testing.T) {
+	if TotalSize(8000) != 524416048 || TotalSize(1) != 65600 || TotalSize(16385) != totalSize(16385) {
+		t.Fatal("TotalSize", TotalSize(8000), TotalSize(1))
+	}
+	if SegOffset(8000, 0) != 0 || SegOffset(8000, 1) != 48+64*65552 || SegOffset(8000, 124) != segOffset(8000, 124) {
+		t.Fatal("SegOffset")
+	}
+	for _, c := range [][3]int{{0, 0, 2}, {1, 1, 2}, {1, 2, 3}, {0, 1, 3}, {1, 3, 3}, {2, 1, 4}, {-1, -1, 2}} {
+		if ValidFill(c[0], c[1], c[2]) != validFill(c[0], c[1], c[2]) {
+			t.Fatal("ValidFill", c)
+		}
+	}
+	if !ValidFill(1, 2, 3) || ValidFill(0, 1, 3) || ValidFill(1, 3, 3) {
+		t.Fatal("ValidFill : valeurs")
+	}
+}

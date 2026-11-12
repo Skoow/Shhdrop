@@ -6,6 +6,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/skoow/shhdrop/server/internal/share"
 )
 
 // État en mémoire d'un salon (plan C-2 Tasks 6 et 8) : sièges, jetons, rangs, journal des
@@ -60,10 +62,17 @@ type salon struct {
 	jetons     map[[32]byte]uint8
 	revoques   map[[32]byte]struct{}
 	journal    []evenement
-	// index : trames non volatiles rangées, triées par seq (relais.go). pieces : pièce liée
-	// par rang de trame (Task 13, bornée par le budget des pièces) ; nil tant qu'aucune.
-	index  []entree
-	pieces map[uint64][16]byte
+	// index : trames non volatiles rangées, triées par seq (relais.go).
+	index []entree
+	// Pièces (pieces.go) : lesPieces, toutes les pièces vivantes par identifiant ; libres,
+	// celles qui ne sont pas encore liées (échéances de Tick) ; pieces, pièce liée par rang de
+	// trame ; aPurger, pièces marquées effacées dont fichier et ligne restent à effacer hors du
+	// verrou ; flux : lectures en cours (Manager.flux), nil pour une tombe. Maps nil tant
+	// qu'aucune pièce.
+	lesPieces, libres map[string]*piece
+	pieces            map[uint64]*piece
+	aPurger           []purge
+	flux              *share.Streams
 	// echeances : effacements « 10 min » et « 1 h » à venir (effacement.go), vidés par Tick.
 	echeances echeances
 	conv      *Conversation // nil pour la tombe d'un salon détruit sans état

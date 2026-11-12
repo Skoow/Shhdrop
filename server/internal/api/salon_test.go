@@ -72,7 +72,7 @@ func salonEnvMax(t *testing.T, max int) (*env, *salon.Manager) {
 	e := newEnv(t, false, nil)
 	m, err := salon.NewManager(salon.Config{DB: e.db, Pieces: &blob.Store{Dir: filepath.Join(e.dir, "salon-pieces")},
 		DossierConversations: filepath.Join(e.dir, "salons"), Now: e.clk.Now, Max: max, StorageMax: 1 << 40,
-		UsedPartages: e.svc.Blobs.UsedBytes})
+		UsedPartages: e.svc.Blobs.UsedBytes, OnAbandon: e.srv.lim.AbandonUpload})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,6 +20,8 @@ const (
 	Upload       byte = 'u'
 	Download     byte = 'd'
 	CaptchaShown byte = 'c'
+	// SalonPiece : jeton d'envoi d'une pièce jointe du salon (plan C-2 Task 13).
+	SalonPiece byte = 'p'
 )
 
 // ErrInvalid : jeton malformé, falsifié, expiré ou destiné à autre chose.

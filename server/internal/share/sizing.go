@@ -67,3 +67,12 @@ func PayloadBytes(n int64) int64 {
 	}
 	return k * 65536
 }
+
+// TotalSize : taille réservée pour un palier (pièces du salon, plan C-2 Task 13).
+func TotalSize(bucket int) int64 { return totalSize(bucket) }
+
+// SegOffset : position du segment n dans le fichier (pièces du salon).
+func SegOffset(bucket, n int) int64 { return segOffset(bucket, n) }
+
+// ValidFill : bourrage [from, to) permis pour segs segments (validFill ; pièces du salon).
+func ValidFill(from, to, segs int) bool { return validFill(from, to, segs) }

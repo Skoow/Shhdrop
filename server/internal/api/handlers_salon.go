@@ -7,6 +7,7 @@ import (
 	"github.com/skoow/shhdrop/server/internal/captcha"
 	"github.com/skoow/shhdrop/server/internal/salon"
 	"github.com/skoow/shhdrop/server/internal/share"
+	"github.com/skoow/shhdrop/server/internal/token"
 )
 
 // Routes JSON du salon (plan C-2 Task 7, spec §39.3.3, §39.3.9) : création, meta, entrée,
@@ -27,6 +28,7 @@ func (a salonAPI) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/salons/rejoindre", a.rejoindre)
 	mux.HandleFunc("GET /api/salons/gestion", a.gestion)
 	mux.HandleFunc("GET /api/salons/ws", a.salonWS)
+	a.routesPieces(mux)
 }
 
 // failSalon traduit une erreur du gestionnaire en réponse fixe ; toute autre erreur (base,
@@ -42,8 +44,9 @@ func failSalon(w http.ResponseWriter, err error) {
 			Error string `json:"error"`
 			Left  int    `json:"attempts_left"`
 		}{"bad_password", bp.AttemptsLeft})
-	case errors.As(err, &bp), errors.Is(err, salon.ErrNotFound):
-		// Sans essai restant : salon détruit, réponse « introuvable » uniforme.
+	case errors.As(err, &bp), errors.Is(err, salon.ErrNotFound), errors.Is(err, token.ErrInvalid):
+		// Sans essai restant : salon détruit, réponse « introuvable » uniforme. Jeton d'envoi
+		// de pièce invalide ou expiré : même réponse.
 		writeErr(w, http.StatusNotFound, "not_found")
 	case errors.Is(err, salon.ErrFull), errors.Is(err, salon.ErrLimit):
 		writeErr(w, http.StatusConflict, "full")

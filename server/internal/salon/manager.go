@@ -20,14 +20,14 @@ import (
 // Ordre des verrous : createMu → Manager.mu ; essais (rayé par id) → Manager.mu → salon.mu →
 // Manager.idxMu ; Conversation a son propre verrou, pris en dernier ; connexion.cmu
 // (connexion.go) est un verrou feuille, pris sous salon.mu (diffusion) ou seul, sous lequel
-// aucun autre verrou n'est pris. Aucune sortie (journal, stderr) : les erreurs remontent à
+// aucun autre verrou n'est pris ; le verrou de Manager.flux (share.Streams) aussi. placeMu
+// (pieces.go) n'est jamais pris sous salon.mu ; sous lui, seuls les verrous internes des
+// blob.Store (usage) sont pris. Aucune sortie (journal, stderr) : les erreurs remontent à
 // l'appelant, messages fixes.
 
 const (
 	// maxEssais : 10 K_preuve_s fausses détruisent le salon (§39.3.6).
 	maxEssais = 10
-	// BudgetPieces : capacité de pièces d'un salon (hors vocaux), 1 Gio.
-	BudgetPieces int64 = 1073741824
 	// reserveCreation : place disque libre exigée pour créer un salon (plan, point 10).
 	reserveCreation int64 = 2 << 30
 	kdfOps                = 3
@@ -51,6 +51,9 @@ type Config struct {
 	StorageMax           int64 // SHH_STORAGE_MAX
 	// UsedPartages : octets des partages (blob.Store des partages).
 	UsedPartages func() (int64, error)
+	// OnAbandon (facultatif) : pièce effacée sans avoir été finalisée (limits.AbandonUpload :
+	// sa place d'envoi en cours est rendue, ses octets comptent comme abandonnés).
+	OnAbandon func(id string)
 }
 
 // Manager : salons vivants du processus. Sûr pour un usage concurrent.
@@ -77,6 +80,13 @@ type Manager struct {
 	// octetsConv : somme des tailles des conversations ouvertes (Conversation.compterDans) :
 	// usage lu sans verrou ni parcours des salons (UsedBytes, plein).
 	octetsConv atomic.Int64
+	// placeMu, reserves : place des pièces en cours de réservation (placer, pieces.go).
+	placeMu  sync.Mutex
+	reserves atomic.Int64
+	// pieceIdx : identifiant de pièce → salon (sous idxMu), pour les routes à jeton d'envoi.
+	pieceIdx map[string]*salon
+	// flux : lectures de segments de pièces en cours (pieces.go).
+	flux share.Streams
 
 	// sansLimiteSiege : tests seulement (limites par siège coupées, limites.go) ; jamais posé
 	// en production (NewManager le laisse à false : limites actives).
@@ -100,7 +110,7 @@ func NewManager(c Config) (*Manager, error) {
 		return nil, es(err)
 	}
 	return &Manager{cfg: c, salons: map[string]*salon{}, index: map[[32]byte]*salon{},
-		vivants: map[string]vivant{}, parBloc: map[[32]byte]int{}}, nil
+		vivants: map[string]vivant{}, parBloc: map[[32]byte]int{}, pieceIdx: map[string]*salon{}}, nil
 }
 
 // vivant : bloc et échéance d'un salon compté dans parBloc.
@@ -358,7 +368,7 @@ func (m *Manager) Rejoindre(kAcces, kPreuve, sGestion []byte) (Entree, error) {
 	})
 	return Entree{
 		Jeton: jeton, Siege: n, Seq: x.emis, Nonce: x.nonce, ExpiresIn: secs(exp - now.Unix()),
-		MaxMembers: maxMembers, MembersCanDestroy: mcd == 1, BudgetLeft: BudgetPieces - piecesBytes,
+		MaxMembers: maxMembers, MembersCanDestroy: mcd == 1, BudgetLeft: Budget - piecesBytes,
 	}, nil
 }
 
@@ -398,6 +408,7 @@ func (m *Manager) etat(id string, exp int64, maxMembers int) (*salon, error) {
 		}
 		conv.compterDans(&m.octetsConv)
 		neuf := nouveauSalon(id, time.Unix(exp, 0), maxMembers, conv, m.now)
+		neuf.flux = &m.flux
 		m.mu.Lock()
 		if s = m.salons[id]; s == nil {
 			m.salons[id], s = neuf, neuf
@@ -464,6 +475,7 @@ func (m *Manager) detruire(id string) error {
 	for _, p := range pieces {
 		errs = append(errs, es(m.cfg.Pieces.Delete(p)))
 	}
+	m.purger(s) // pièces marquées par viderEtat : index, quotas (fichiers déjà effacés)
 	return errors.Join(errs...)
 }
 
@@ -544,8 +556,9 @@ func (m *Manager) departLocked(s *salon, n uint8) {
 
 // Tick : une passe d'entretien (chaque seconde, Run à la Task 15) : trames « 10 min » et
 // « 1 h » échues effacées (Task 11), sièges hors ligne depuis 10 min libérés (leurs lectures
-// « instantané » ne sont plus attendues), tombes échues oubliées, places de bloc des salons
-// échus rendues (complétée aux Tasks 13 et 15).
+// « instantané » ne sont plus attendues), pièces effacées (celles de ces trames, celles qui
+// ne sont jamais liées ou finalisées : Task 13), tombes échues oubliées, places de bloc des
+// salons échus rendues (complétée à la Task 15).
 func (m *Manager) Tick() {
 	now := m.cfg.Now()
 	m.mu.Lock()
@@ -556,7 +569,11 @@ func (m *Manager) Tick() {
 	}
 	m.mu.Unlock()
 	for _, s := range salons {
-		if m.entretenir(s, now) {
+		tombe, aPurger := m.entretenir(s, now)
+		if aPurger {
+			m.purger(s) // hors du verrou du salon
+		}
+		if tombe {
 			m.mu.Lock()
 			if m.salons[s.id] == s {
 				delete(m.salons, s.id)
@@ -567,8 +584,9 @@ func (m *Manager) Tick() {
 }
 
 // entretenir : passe de Tick sur un salon, sous son verrou (defer : une panique ne le garde
-// jamais) ; rend vrai pour une tombe échue.
-func (m *Manager) entretenir(s *salon, now time.Time) (tombe bool) {
+// jamais) ; rend vrai pour une tombe échue, et aPurger s'il reste des pièces à effacer
+// (pièces de trames échues, pièces non liées échues : pieces.go).
+func (m *Manager) entretenir(s *salon, now time.Time) (tombe, aPurger bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.effacerEchuesLocked(now.UnixMilli())
@@ -577,20 +595,25 @@ func (m *Manager) entretenir(s *salon, now time.Time) (tombe bool) {
 			m.departLocked(s, uint8(n))
 		}
 	}
-	return s.fini && !now.Before(s.expires)
+	return s.fini && !now.Before(s.expires), s.echuesPiecesLocked(now)
 }
 
 // now : Config.Now lue à chaque appel (un test peut la remplacer après la création d'un salon).
 func (m *Manager) now() time.Time { return m.cfg.Now() }
 
-// usedBytes : octets des pièces (blob.Store, usage en cache) et des fichiers de conversation
-// (octetsConv, atomique) : O(1), sans Manager.mu ni parcours des salons.
+// usedBytes : octets des pièces (blob.Store, usage en cache, et réservations en cours) et des
+// fichiers de conversation (octetsConv, atomique) : O(1), sans Manager.mu ni parcours des
+// salons.
 func (m *Manager) usedBytes() (int64, error) {
+	// Réservations lues avant l'usage des fichiers : une réservation n'est rendue qu'une fois
+	// son fichier compté par le blob.Store, elle est donc vue d'un côté ou de l'autre (au pire
+	// deux fois), jamais d'aucun.
+	r := m.reserves.Load()
 	u, err := m.cfg.Pieces.UsedBytes()
 	if err != nil {
 		return 0, es(err)
 	}
-	return u + m.octetsConv.Load(), nil
+	return r + u + m.octetsConv.Load(), nil
 }
 
 // plein : n octets de plus dépasseraient StorageMax (partages, pièces et conversations) ;
@@ -631,6 +654,11 @@ func (m *Manager) viderEtat(s *salon) error {
 				delete(index, h)
 			}
 		})
+		// Pièces : plus jamais servies, flux coupés ; fichiers et lignes effacés par detruire,
+		// index et quotas par purger.
+		for _, p := range s.lesPieces {
+			s.supprimerPieceLocked(p)
+		}
 		clear(s.jetons)
 		clear(s.revoques)
 		s.sieges = [nbSieges]*siege{}

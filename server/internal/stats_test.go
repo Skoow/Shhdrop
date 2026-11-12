@@ -61,6 +61,10 @@ var allowedMaps = map[string]string{
 	"salon/salon.go:jetons":             "§39.3.6 empreintes des jetons de membre → siège, effacées avec le salon",
 	"salon/salon.go:revoques":           "§39.3.6 empreintes des jetons révoqués (exclusion, §39.13), effacées avec le salon",
 	"salon/salon.go:pieces":             "§39.3.4 auteur d'une pièce en mémoire : rang de la trame → pièce liée (plan, point 2), effacé avec le salon",
+	"salon/salon.go:lesPieces":          "§9.5 état d'un salon vivant : pièces vivantes par id (plan C-2 Task 13), effacées avec elles ou le salon",
+	"salon/salon.go:libres":             "§9.5 état d'un salon vivant : pièces pas encore liées (échéances de 15 min), effacées avec elles ou le salon",
+	"salon/manager.go:pieceIdx":         "§9.5 état d'un salon vivant : id de pièce → salon (routes à jeton d'envoi), effacé avec la pièce",
+	"salon/pieces.go:lus":               "§9.5 budget de lecture par (jeton de membre, pièce) (§24, M1), effacé avec la pièce",
 	"salon/manager.go:vivants":          "§9.5 salons vivants par bloc (§39.3.6, 12 novembre) : id interne → clé de bloc, jusqu'à la fin du salon",
 	"salon/manager.go:parBloc":          "§9.5 salons vivants par bloc (§39.3.6, 12 novembre) : clé de bloc → nombre, jusqu'à la fin du salon",
 }

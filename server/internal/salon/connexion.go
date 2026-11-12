@@ -322,6 +322,7 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 	}
 	s.conns[mb.siege] = c
 	x.horsLigneDepuis = time.Time{}
+	s.limites[mb.siege].vocal.ouvrir(now) // présence comptée pour la réserve vocale
 	s.diffuserLocked(EnrPresence(s.seq, mb.siege, true), genrePresence, c)
 	return c, 0
 }
@@ -350,6 +351,7 @@ func (m *Manager) desinscrire(c *connexion) {
 		return
 	}
 	s.conns[n] = nil
+	s.limites[n].vocal.fermer(m.cfg.Now())
 	x := s.sieges[n]
 	if x == nil {
 		return // parti (0x03)

@@ -211,6 +211,8 @@ type server struct {
 	dlTTL       time.Duration // durée des jetons de téléchargement
 	watchSlots  *limits.Slots // surveillances tenues
 	wsSlots     *limits.Slots // WebSocket du salon ouverts
+	// salons : gestionnaire du salon (nil : salon désactivé), pour validSegmentToken.
+	salons *salon.Manager
 	// wait : attente d'une surveillance (minuterie ; remplacée par les tests) ; stop la libère.
 	wait    func(time.Duration) (c <-chan time.Time, stop func() bool)
 	reports reportCounter
@@ -293,6 +295,7 @@ func newHandler(s *server, static http.Handler, sal Salons) http.Handler {
 	api.HandleFunc("GET /api/manage/status", s.manageStatus)
 	api.HandleFunc("POST /api/manage/destroy", s.manageDestroy)
 	// Salon (SHH_SALONS=1) : sans gestionnaire, aucune route /api/salons/* (404 uniforme).
+	s.salons = sal.M
 	if sal.M != nil {
 		salonAPI{server: s, m: sal.M, origin: sal.Origin}.routes(api)
 	}
@@ -350,9 +353,32 @@ func (s *server) guard(next http.Handler) http.Handler {
 
 // validSegmentToken : requête de segment (PUT avec jeton d'envoi, GET avec jeton de
 // téléchargement) ou surveillance (GET /api/shares/watch, hors des 60 requêtes par minute,
-// spec §41.8) dont le jeton est signé et non expiré. Ces requêtes ont leur propre limite
-// (SegmentsPerMin) ; l'état du partage est revérifié ensuite.
+// spec §41.8) dont le jeton est signé et non expiré ; salon actif : segment de pièce (PUT avec
+// jeton d'envoi de pièce, GET avec un X-Shh-Membre valable). Ces requêtes ont leur propre
+// limite (SegmentsPerMin) ; l'état du partage ou de la pièce est revérifié ensuite.
 func (s *server) validSegmentToken(r *http.Request) bool {
+	if n, ok := strings.CutPrefix(r.URL.Path, "/api/salons/pieces/segments/"); ok {
+		if s.salons == nil || n == "" || strings.Contains(n, "/") {
+			return false
+		}
+		switch r.Method {
+		case http.MethodPut:
+			tok, err := bearer(r)
+			if err != nil {
+				return false
+			}
+			_, _, err = s.sig.Subject(tok, token.SalonPiece)
+			return err == nil
+		case http.MethodGet:
+			j, err := headerSecret(r, "X-Shh-Membre")
+			if err != nil {
+				return false
+			}
+			_, err = s.salons.Membre(j)
+			return err == nil
+		}
+		return false
+	}
 	var kind byte
 	if r.URL.Path == "/api/shares/watch" && r.Method == http.MethodGet {
 		kind = token.Download

@@ -165,3 +165,25 @@ func TestSubject(t *testing.T) {
 		t.Fatal("jeton expiré accepté")
 	}
 }
+
+// Jeton d'envoi d'une pièce du salon : type distinct, jamais accepté comme jeton d'envoi ou
+// de téléchargement d'un partage (ni l'inverse).
+func TestSalonPieceType(t *testing.T) {
+	now := t0
+	s := newSigner(&now)
+	if SalonPiece != 'p' || SalonPiece == Upload || SalonPiece == Download || SalonPiece == CaptchaShown {
+		t.Fatal("type SalonPiece")
+	}
+	tok := s.Issue(SalonPiece, "AAAAAAAAAAAAAAAAAAAAAA", 0, now.Add(time.Hour))
+	if id, _, err := s.Subject(tok, SalonPiece); err != nil || id != "AAAAAAAAAAAAAAAAAAAAAA" {
+		t.Fatal(id, err)
+	}
+	for _, k := range []byte{Upload, Download} {
+		if _, _, err := s.Subject(tok, k); err == nil {
+			t.Fatalf("jeton de pièce accepté comme %q", k)
+		}
+		if _, _, err := s.Subject(s.Issue(k, "AAAAAAAAAAAAAAAAAAAAAA", 0, now.Add(time.Hour)), SalonPiece); err == nil {
+			t.Fatalf("jeton %q accepté comme jeton de pièce", k)
+		}
+	}
+}

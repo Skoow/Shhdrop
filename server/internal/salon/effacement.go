@@ -71,8 +71,9 @@ func (s *salon) chercherLocked(seq uint64) int {
 // pour un retrait ni une échéance.
 const drapeauLu uint8 = 0x80
 
-// marquerLocked : entrée i marquée effacée (plus jamais servie, plus aucun lecteur attendu) ;
-// rend son ancien emplacement à écraser (ok = false si déjà effacée). Appelé sous s.mu.
+// marquerLocked : entrée i marquée effacée (plus jamais servie, plus aucun lecteur attendu),
+// sa pièce liée aussi (flux coupés, fichier et ligne effacés ensuite par purger) ; rend son
+// ancien emplacement à écraser (ok = false si déjà effacée). Appelé sous s.mu.
 func (s *salon) marquerLocked(i int) (emplacement uint32, ok bool) {
 	e := &s.index[i]
 	e.attendus = 0
@@ -80,12 +81,12 @@ func (s *salon) marquerLocked(i int) (emplacement uint32, ok bool) {
 		return 0, false
 	}
 	emplacement, e.emplacement = e.emplacement, effaceMarque
+	s.pieceDeTrameLocked(e.seq) // la pièce liée suit sa trame (pieces.go)
 	return emplacement, true
 }
 
 // effacerLocked : effacement commun (retrait, règle, lectures) de l'entrée i : entrée
-// marquée effacée, emplacement écrasé de zéros ; la pièce liée et ses flux suivront (Task
-// 13). L'entrée est marquée effacée même si l'écriture des zéros échoue (erreur rendue) : la
+// marquée effacée (sa pièce liée aussi, marquerLocked), emplacement écrasé de zéros. L'entrée est marquée effacée même si l'écriture des zéros échoue (erreur rendue) : la
 // trame n'est plus jamais servie ; son emplacement, chiffré sous la clé du salon (en mémoire
 // seulement), disparaît avec la conversation. Sans effet sur une entrée déjà effacée.
 // Appelé sous s.mu.
@@ -163,6 +164,7 @@ func (m *Manager) Lu(mb Membre, seq uint64) error {
 	if s == nil {
 		return ErrNotFound
 	}
+	defer m.purger(s)
 	now := m.cfg.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()

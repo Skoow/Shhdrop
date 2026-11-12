@@ -48,7 +48,10 @@ func (s *salon) membreLocked(mb Membre, now time.Time) bool {
 }
 
 // Recevoir range la trame de mb et rend son rang. En-tête invalide (taille, marque, bit
-// réservé) ou pièce donnée (jusqu'à la Task 13) : ErrBadRequest, aucun rang consommé. Membre
+// réservé) : ErrBadRequest, aucun rang consommé. lien (facultatif, Task 13) : pièce
+// « ready » de ce salon et de cet auteur, pas encore liée, pour une trame non volatile
+// (pieceLiableLocked), sinon ErrBadRequest sans rang consommé ; elle suit ensuite la vie de la
+// trame (retrait, règle, lectures, fin du salon). Membre
 // périmé : ErrNotFound. Erreur d'écriture de la conversation (ErrES, fixe) : trame non rangée,
 // aucun rang consommé. L'écriture se fait sous le verrou du salon : l'ordre des emplacements
 // est celui des rangs. Règle « 10 min » ou « 1 h » : échéance rangée (effacement.go).
@@ -63,16 +66,13 @@ func (s *salon) membreLocked(mb Membre, now time.Time) bool {
 // quelle (fermeture 1011). Ajouter ramène le fichier à sa taille d'avant ; si ce Truncate
 // échoue, la conversation devient inutilisable (ErrInutilisable aux trames suivantes, 1011) :
 // ErrPlein est rendu quand même pour cette trame, jamais écrite.
-func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, error) {
+func (m *Manager) Recevoir(mb Membre, trame []byte, lien *[16]byte) (uint64, error) {
 	s := mb.salon
 	if s == nil {
 		return 0, ErrNotFound
 	}
-	if piece != nil {
-		return 0, ErrBadRequest
-	}
 	h, err := LireEnTete(trame)
-	if err != nil {
+	if err != nil || lien != nil && h.Volatile {
 		return 0, ErrBadRequest
 	}
 	// Usage lu avant s.mu (Manager.plein) : des trames rangées en même temps dans d'autres
@@ -86,6 +86,12 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 	now := m.cfg.Now()
 	if !s.membreLocked(mb, now) {
 		return 0, ErrNotFound
+	}
+	var p *piece
+	if lien != nil {
+		if p = s.pieceLiableLocked(mb, *lien); p == nil {
+			return 0, ErrBadRequest
+		}
 	}
 	if plein {
 		return 0, ErrPlein
@@ -126,8 +132,13 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 		drapeaux: drapeaux, attendus: attendus})
 	s.echeanceLocked(h.Regle, s.seq, now.UnixMilli())
 	s.relayerLocked(mb.siege, now.UnixMilli(), trame)
+	if p != nil {
+		s.lierLocked(p, s.seq)
+	}
 	if e == effaceMarque {
-		// Personne à attendre : 0x0E juste après le 0x01, sans écriture.
+		// Personne à attendre : 0x0E juste après le 0x01, sans écriture ; la pièce liée est
+		// effacée avec la trame (fichier et ligne au Tick suivant).
+		s.pieceDeTrameLocked(s.seq)
 		s.diffuserLocked(EnrEfface(s.seq, s.seq), genreEfface, nil)
 	}
 	return s.seq, nil
@@ -145,6 +156,7 @@ func (m *Manager) Retirer(mb Membre, seq uint64) error {
 	if s == nil {
 		return ErrNotFound
 	}
+	defer m.purger(s) // pièce liée : fichier et ligne effacés hors du verrou
 	now := m.cfg.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -173,6 +185,7 @@ func (m *Manager) Quitter(mb Membre) error {
 	if s == nil {
 		return ErrNotFound
 	}
+	defer m.purger(s)
 	now := m.cfg.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
