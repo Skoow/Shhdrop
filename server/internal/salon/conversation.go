@@ -292,14 +292,15 @@ func (c *Conversation) Effacer(e uint32) error {
 func (c *Conversation) Taille() int64 { return c.taille.Load() }
 
 // Detruire oublie la clé (mise à zéro), ferme le fichier puis le supprime. Idempotent : un
-// nouvel appel ne refait que la suppression si elle avait échoué.
+// nouvel appel ne refait que la suppression si elle avait échoué. La taille ne retombe à 0
+// qu'une fois le fichier supprimé : tant qu'il existe, sa place reste comptée (relecture
+// Task 12).
 func (c *Conversation) Detruire() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var errFermeture error
 	if !c.detruite {
 		c.detruite = true
-		c.poserTaille(0)
 		clear(c.cle[:])
 		c.aead = nil
 		if c.lecteur != nil {
@@ -316,6 +317,7 @@ func (c *Conversation) Detruire() error {
 		return es(err)
 	}
 	c.supprime = true
+	c.poserTaille(0)
 	// Fichier supprimé et clé oubliée : une erreur de fermeture est seulement signalée.
 	return es(errFermeture)
 }

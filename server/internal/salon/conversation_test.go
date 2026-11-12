@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -515,4 +516,39 @@ func TestLireConcurrent(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+}
+
+// Suppression du fichier en échec (relecture Task 12) : la taille n'est pas remise à zéro tant
+// que le fichier existe (l'usage n'est jamais sous-compté), ni dans le total du gestionnaire ;
+// elle l'est quand une nouvelle destruction réussit.
+func TestDetruireEchecGardeTaille(t *testing.T) {
+	dir := t.TempDir()
+	var total atomic.Int64
+	c := nouvelleConv(t, dir, idConv)
+	c.compterDans(&total)
+	ajouter(t, c, 2)
+	p := filepath.Join(dir, idConv)
+	// Simulé : à la place du fichier, un dossier non vide que os.Remove ne peut pas supprimer
+	// (même en root).
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(p, "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Detruire(); !errors.Is(err, ErrES) {
+		t.Fatal("suppression impossible :", err)
+	}
+	if c.Taille() != 2*TailleEmplacement || total.Load() != 2*TailleEmplacement {
+		t.Fatal("taille remise à zéro avant la suppression :", c.Taille(), total.Load())
+	}
+	if err := os.RemoveAll(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Detruire(); err != nil {
+		t.Fatal(err)
+	}
+	if c.Taille() != 0 || total.Load() != 0 {
+		t.Fatal("taille après suppression :", c.Taille(), total.Load())
+	}
 }

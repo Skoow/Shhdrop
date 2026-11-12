@@ -75,10 +75,10 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 	if err != nil {
 		return 0, ErrBadRequest
 	}
-	// Usage lu avant s.mu (Manager.plein) : des trames rangées en même temps dans d'autres salons, ou des partages créés en même
-	// temps, peuvent dépasser StorageMax d'autant : au plus une trame (4 168 o) par Recevoir
-	// simultané, environ 8 Mo pour 2 000 WebSocket. Accepté (décision du 12 novembre) : la
-	// création d'un salon garde 2 Gio de marge.
+	// Usage lu avant s.mu (Manager.plein) : des trames rangées en même temps dans d'autres
+	// salons, ou des partages créés en même temps, peuvent dépasser StorageMax d'autant : au
+	// plus une trame (4 168 o) par Recevoir simultané, environ 8 Mo pour 2 000 WebSocket.
+	// Accepté (décision du 12 novembre) : la création d'un salon garde 2 Gio de marge.
 	plein := !h.Volatile && m.plein(TailleEmplacement)
 	s.mu.Lock()
 	defer s.mu.Unlock()
