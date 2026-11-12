@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -96,6 +97,26 @@ type Conversation struct {
 	tailleMax    int64
 	detruite     bool
 	supprime     bool // fichier supprimé (Detruire réessaie sinon)
+	// taille : valeur de Taille, tenue à jour sous mu (poserTaille) et lue sans verrou ;
+	// total (nil : aucun) reçoit chaque écart (Manager.octetsConv, compterDans).
+	taille atomic.Int64
+	total  *atomic.Int64
+}
+
+// poserTaille : nouvelle valeur de Taille, écart reporté au total. Appelé sous c.mu.
+func (c *Conversation) poserTaille(t int64) {
+	if d := t - c.taille.Swap(t); c.total != nil {
+		c.total.Add(d)
+	}
+}
+
+// compterDans : la taille de la conversation (et chacun de ses changements) est ajoutée à
+// total, dès maintenant.
+func (c *Conversation) compterDans(total *atomic.Int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.total = total
+	total.Add(c.taille.Load())
 }
 
 // idValide : 22 caractères base64url canoniques (16 octets), anti traversée de chemin.
@@ -145,6 +166,7 @@ func (c *Conversation) annuler(taille, max int64) {
 	defer sansDate(c.chemin)
 	if c.f.Truncate(taille) != nil {
 		c.inutilisable, c.tailleMax = true, max
+		c.poserTaille(max)
 	}
 }
 
@@ -216,6 +238,7 @@ func (c *Conversation) Ajouter(trame []byte) (uint32, error) {
 		return 0, err
 	}
 	c.n++
+	c.poserTaille(decalage(c.n))
 	return e, nil
 }
 
@@ -265,18 +288,8 @@ func (c *Conversation) Effacer(e uint32) error {
 }
 
 // Taille : octets du fichier (emplacements effacés compris) ; 0 après Detruire. Une
-// conversation inutilisable compte la borne haute de son fichier.
-func (c *Conversation) Taille() int64 {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	switch {
-	case c.detruite:
-		return 0
-	case c.inutilisable:
-		return c.tailleMax
-	}
-	return decalage(c.n)
-}
+// conversation inutilisable compte la borne haute de son fichier. Sans verrou (atomique).
+func (c *Conversation) Taille() int64 { return c.taille.Load() }
 
 // Detruire oublie la clé (mise à zéro), ferme le fichier puis le supprime. Idempotent : un
 // nouvel appel ne refait que la suppression si elle avait échoué.
@@ -286,6 +299,7 @@ func (c *Conversation) Detruire() error {
 	var errFermeture error
 	if !c.detruite {
 		c.detruite = true
+		c.poserTaille(0)
 		clear(c.cle[:])
 		c.aead = nil
 		if c.lecteur != nil {

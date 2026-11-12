@@ -74,6 +74,10 @@ type Manager struct {
 
 	// arrete : FermerTout appelée (arrêt du serveur) ; plus aucune connexion inscrite.
 	arrete atomic.Bool
+	// octetsConv : somme des tailles des conversations ouvertes (Conversation.compterDans) :
+	// usage lu sans verrou ni parcours des salons (UsedBytes, plein).
+	octetsConv atomic.Int64
+
 	// sansLimiteSiege : tests seulement (limites par siège coupées, limites.go) ; jamais posé
 	// en production (NewManager le laisse à false : limites actives).
 	sansLimiteSiege bool
@@ -392,6 +396,7 @@ func (m *Manager) etat(id string, exp int64, maxMembers int) (*salon, error) {
 		if err != nil {
 			return nil, err
 		}
+		conv.compterDans(&m.octetsConv)
 		neuf := nouveauSalon(id, time.Unix(exp, 0), maxMembers, conv, m.now)
 		m.mu.Lock()
 		if s = m.salons[id]; s == nil {
@@ -578,28 +583,20 @@ func (m *Manager) entretenir(s *salon, now time.Time) (tombe bool) {
 // now : Config.Now lue à chaque appel (un test peut la remplacer après la création d'un salon).
 func (m *Manager) now() time.Time { return m.cfg.Now() }
 
-// usedBytes : octets des pièces et des fichiers de conversation.
+// usedBytes : octets des pièces (blob.Store, usage en cache) et des fichiers de conversation
+// (octetsConv, atomique) : O(1), sans Manager.mu ni parcours des salons.
 func (m *Manager) usedBytes() (int64, error) {
 	u, err := m.cfg.Pieces.UsedBytes()
 	if err != nil {
 		return 0, es(err)
 	}
-	m.mu.Lock()
-	convs := make([]*Conversation, 0, len(m.salons))
-	for _, s := range m.salons {
-		if s.conv != nil {
-			convs = append(convs, s.conv)
-		}
-	}
-	m.mu.Unlock()
-	for _, c := range convs {
-		u += c.Taille()
-	}
-	return u, nil
+	return u + m.octetsConv.Load(), nil
 }
 
 // plein : n octets de plus dépasseraient StorageMax (partages, pièces et conversations) ;
-// échec fermé : usage illisible → plein. Ne pas appeler sous salon.mu (prend Manager.mu).
+// échec fermé : usage illisible → plein. Sans Manager.mu ; pas sous salon.mu quand même :
+// UsedPartages et l'usage des pièces prennent leurs propres verrous et peuvent relire un
+// dossier (premier appel, Resync).
 func (m *Manager) plein(n int64) bool {
 	partages, err := m.cfg.UsedPartages()
 	if err != nil {

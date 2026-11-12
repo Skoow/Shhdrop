@@ -56,9 +56,13 @@ func (s *salon) membreLocked(mb Membre, now time.Time) bool {
 // jamais être écrite sur le disque.
 //
 // Garde-fous (Task 12), sans rang consommé ni jeton pris : trame non volatile alors que
-// l'usage (partages, pièces, conversations) plus une trame dépasse StorageMax, usage
-// illisible, ou disque réellement plein (ENOSPC, EDQUOT ; écriture annulée) → ErrPlein (0x0C) ; seaux
-// du siège vides (limites.go) → *Attente (0x0B).
+// l'usage (partages, pièces, conversations) plus une trame dépasse StorageMax, ou usage
+// illisible → ErrPlein (0x0C), avant les seaux ; seaux du siège vides (limites.go) →
+// *Attente (0x0B). Les jetons sont pris avant l'écriture et rendus si Ajouter échoue :
+// disque réellement plein (ENOSPC, EDQUOT) → ErrPlein ; toute autre erreur → rendue telle
+// quelle (fermeture 1011). Ajouter ramène le fichier à sa taille d'avant ; si ce Truncate
+// échoue, la conversation devient inutilisable (ErrInutilisable aux trames suivantes, 1011) :
+// ErrPlein est rendu quand même pour cette trame, jamais écrite.
 func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, error) {
 	s := mb.salon
 	if s == nil {
@@ -71,8 +75,7 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 	if err != nil {
 		return 0, ErrBadRequest
 	}
-	// Usage lu avant s.mu (il prend Manager.mu, pris avant salon.mu dans l'ordre des verrous) :
-	// des trames rangées en même temps dans d'autres salons, ou des partages créés en même
+	// Usage lu avant s.mu (Manager.plein) : des trames rangées en même temps dans d'autres salons, ou des partages créés en même
 	// temps, peuvent dépasser StorageMax d'autant : au plus une trame (4 168 o) par Recevoir
 	// simultané, environ 8 Mo pour 2 000 WebSocket. Accepté (décision du 12 novembre) : la
 	// création d'un salon garde 2 Gio de marge.
@@ -87,7 +90,8 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 	if plein {
 		return 0, ErrPlein
 	}
-	if !m.sansLimiteSiege {
+	limite := !m.sansLimiteSiege
+	if limite {
 		if d := s.limites[mb.siege].prendre(now, !h.Volatile); d > 0 {
 			return 0, &Attente{Retry: d}
 		}
@@ -104,8 +108,11 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 	e := uint32(effaceMarque)
 	if h.Regle != Instantane || attendus != 0 {
 		if e, err = s.conv.Ajouter(trame); err != nil {
+			if limite {
+				s.limites[mb.siege].rendre(true) // trame non rangée : jetons rendus
+			}
 			if errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT) {
-				return 0, ErrPlein // écriture annulée par Ajouter (fichier à sa taille d'avant)
+				return 0, ErrPlein
 			}
 			return 0, err
 		}

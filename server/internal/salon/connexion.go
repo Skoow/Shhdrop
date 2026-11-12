@@ -552,6 +552,9 @@ func (c *connexion) lecteur(ip netip.Addr, autoriser func(netip.Addr) bool) {
 func (c *connexion) traiter(d Demande, ip netip.Addr, autoriser func(netip.Addr) bool) bool {
 	switch d.Type {
 	case DemTrame:
+		// autoriser (limits.AllowFrame) compte toute trame reçue, même refusée ensuite par le
+		// salon (seaux du siège, disque plein) : voulu, anti-abus (un client qui insiste
+		// malgré 0x0B ou 0x0C épuise aussi le compte de sa connexion et de son /48).
 		if !autoriser(ip) {
 			// Fenêtre fixe d'une minute (limits.AllowFrame), même horloge que le limiteur.
 			t := c.m.cfg.Now().Unix()

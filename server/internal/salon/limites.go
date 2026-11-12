@@ -64,6 +64,9 @@ func (b *seau) prendre(now time.Time) (ok bool, attente time.Duration) {
 	return true, 0
 }
 
+// rendre : jeton rendu (au plus cap), pour une trame refusée après prendre.
+func (b *seau) rendre() { b.jetons = min(b.cap, b.jetons+1) }
+
 // limiteSiege : seaux d'un numéro de siège.
 type limiteSiege struct{ cadence, horaire seau }
 
@@ -91,4 +94,12 @@ func (l *limiteSiege) prendre(now time.Time, nonVolatile bool) time.Duration {
 		l.horaire.jetons--
 	}
 	return 0
+}
+
+// rendre : jetons de prendre(now, nonVolatile) rendus (écriture en échec, relais.go).
+func (l *limiteSiege) rendre(nonVolatile bool) {
+	l.cadence.rendre()
+	if nonVolatile {
+		l.horaire.rendre()
+	}
 }

@@ -374,3 +374,145 @@ func TestDisqueQuotaEDQUOT(t *testing.T) {
 		t.Fatal("rang consommé ou écriture partielle")
 	}
 }
+
+// limiteDe : copie des seaux du siège de mb.
+func limiteDe(mb Membre) limiteSiege {
+	s := mb.salon
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.limites[mb.siege]
+}
+
+// Relecture Task 12 (a) : un refus de la cadence ne prend aucun jeton horaire.
+func TestRefusCadenceSansJetonHoraire(t *testing.T) {
+	b := bancLimite(t)
+	c := b.creer(t, 4)
+	_, g := b.entrerMembre(t, c, true)
+	for i := range 20 {
+		b.essai(t, g, trameD(dVolatile, i))
+	}
+	h0 := limiteDe(g).horaire.jetons
+	for i := range 10 {
+		if b.essai(t, g, trameD(0, i)) == 0 {
+			t.Fatal("cadence non vide")
+		}
+	}
+	b.h.avancer(20 * time.Second)
+	if h := limiteDe(g).horaire.jetons; h != h0 {
+		t.Fatal("jetons horaires pris par des refus :", h0, "→", h)
+	}
+}
+
+// Relecture Task 12 (b) : un refus du seau horaire ne prend aucun jeton de cadence.
+func TestRefusHoraireSansJetonCadence(t *testing.T) {
+	b := bancLimite(t)
+	c := b.creer(t, 4)
+	_, g := b.entrerMembre(t, c, true)
+	sous(g.salon, func() { g.salon.limites[g.siege].horaire.jetons = 0 })
+	for i := range 10 {
+		if b.essai(t, g, trameD(0, i)) == 0 {
+			t.Fatal("horaire non vide")
+		}
+	}
+	for i := range 20 {
+		if d := b.essai(t, g, trameD(dVolatile, i)); d != 0 {
+			t.Fatal("cadence entamée par des refus horaires :", i, d)
+		}
+	}
+}
+
+// Relecture Task 12 (c) : un refus « disque plein » ne prend aucun jeton.
+func TestRefusDisqueSansJeton(t *testing.T) {
+	b := bancLimite(t)
+	partages := b.partagesInjectes()
+	c := b.creer(t, 4)
+	_, g := b.entrerMembre(t, c, true)
+	partages.Store(b.m.cfg.StorageMax)
+	for i := range 25 {
+		if _, err := b.m.Recevoir(g, trameD(0, i), nil); !errors.Is(err, ErrPlein) {
+			t.Fatal(i, err)
+		}
+	}
+	partages.Store(0)
+	for i := range 20 {
+		if d := b.essai(t, g, trameD(0, i)); d != 0 {
+			t.Fatal("jetons pris par des refus « disque plein » :", i, d)
+		}
+	}
+}
+
+// Relecture Task 12, mineur 1 : ENOSPC rend les jetons pris avant l'écriture.
+func TestENOSPCRendLeJeton(t *testing.T) {
+	b := bancLimite(t)
+	c := b.creer(t, 4)
+	_, g := b.entrerMembre(t, c, true)
+	f := avecPanne(t, g.salon.conv)
+	f.ecriturePartielle, f.errEcriture = true, syscall.ENOSPC
+	for i := range 5 {
+		if _, err := b.m.Recevoir(g, trameD(0, i), nil); !errors.Is(err, ErrPlein) {
+			t.Fatal(i, err)
+		}
+	}
+	h := limiteDe(g).horaire.jetons
+	f.ecriturePartielle = false
+	for i := range 20 {
+		if d := b.essai(t, g, trameD(0, i)); d != 0 {
+			t.Fatal("jetons non rendus après ENOSPC :", i, d)
+		}
+	}
+	if h != horaireMax {
+		t.Fatal("jetons horaires non rendus :", h)
+	}
+}
+
+// Relecture Task 12, mineur 2 : total atomique des conversations (Manager.octetsConv) égal à
+// la somme des tailles après des ajouts, des échecs (annulé, puis Truncate en échec) et des
+// destructions ; UsedBytes le lit sans parcourir les salons.
+func TestUsageAtomiqueCoherent(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c1, c2 := b.creer(t, 4), b.creer(t, 4)
+	_, g1 := b.entrerMembre(t, c1, true)
+	_, g2 := b.entrerMembre(t, c2, true)
+	verifier := func(quand string, attendu int64) {
+		t.Helper()
+		if got := b.m.octetsConv.Load(); got != attendu {
+			t.Fatalf("%s : total %d, attendu %d", quand, got, attendu)
+		}
+		if got := g1.salon.conv.Taille() + g2.salon.conv.Taille(); got != attendu {
+			t.Fatalf("%s : somme des tailles %d, attendu %d", quand, got, attendu)
+		}
+		if u := b.m.UsedBytes(); u != attendu { // aucune pièce
+			t.Fatalf("%s : UsedBytes %d", quand, u)
+		}
+	}
+	verifier("ouverture", 0)
+	for i := range 3 {
+		b.recevoir(t, g1, trameD(0, i))
+	}
+	b.recevoir(t, g2, trameD(0, 9))
+	verifier("ajouts", 4*TailleEmplacement)
+	f := avecPanne(t, g1.salon.conv)
+	f.ecriturePartielle = true
+	if _, err := b.m.Recevoir(g1, trameD(0, 3), nil); err == nil {
+		t.Fatal("écriture partielle acceptée")
+	}
+	verifier("échec annulé", 4*TailleEmplacement)
+	f.truncateEchoue = true
+	if _, err := b.m.Recevoir(g1, trameD(0, 4), nil); err == nil {
+		t.Fatal("écriture partielle acceptée")
+	}
+	verifier("Truncate en échec (borne haute)", 5*TailleEmplacement)
+	id1 := b.idDe(t, c1)
+	if err := b.m.detruire(id1); err != nil {
+		t.Fatal(err)
+	}
+	verifier("destruction", TailleEmplacement)
+	if err := b.m.detruire(id1); err != nil {
+		t.Fatal(err)
+	}
+	verifier("destruction répétée", TailleEmplacement)
+	if err := b.m.detruire(b.idDe(t, c2)); err != nil {
+		t.Fatal(err)
+	}
+	verifier("tout détruit", 0)
+}
