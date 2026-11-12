@@ -133,10 +133,10 @@ Le moteur Rust porte tout le protocole du salon (groupe MLS, enveloppe, découpa
 
 #### 3.6.2 Restes de C-1 à corriger avant C-3 (relecture finale, 12 novembre)
 
-- **N1 (faible)** **Corrigé (C-2 Task 1, commit 024736d).** : `appliquer_en_attente` retient un KeyPackage mis en file sans vérifier son en-tête ; un siège qui envoie un KeyPackage mal étiqueté puis un bon peut faire échouer l'entrée d'un autre arrivant (déni de service). Correction : n'appeler `key_package_recu` que si l'en-tête est celui des trames de contrôle ; test.
-- **N2 (faible)** **Corrigé (C-2 Task 1, commit 024736d).** : le Commit qui ajoute l'arrivant est repéré par des champs non authentifiés ; une trame injectée ou un Commit refusé par tous peut fausser le rang des annonces utilisé pour vérifier le Welcome. Correction : prendre le premier Commit de l'époque E−1 dont le siège attesté est celui de l'expéditeur du Welcome ; à défaut, réessayer au Commit suivant ; vérifier aussi le siège attesté du Welcome.
-- **N3 (doc)** **Corrigé (C-2 Task 1, commit 024736d).** : `message.rs` : la doc de `est_volatile` est passée au-dessus de `nouvel_id`.
-- **KeyPackages restants** **Corrigé (C-2 Task 1, commit 024736d).** : à l'entrée, effacer toutes les clés d'init des KeyPackages produits par ce salon, pas seulement celles nommées par le Welcome.
+- **N1 (faible)** : `appliquer_en_attente` retient un KeyPackage mis en file sans vérifier son en-tête ; un siège qui envoie un KeyPackage mal étiqueté puis un bon peut faire échouer l'entrée d'un autre arrivant (déni de service). Correction : n'appeler `key_package_recu` que si l'en-tête est celui des trames de contrôle ; test. **Corrigé (C-2 Task 1).**
+- **N2 (faible)** : le Commit qui ajoute l'arrivant est repéré par des champs non authentifiés ; une trame injectée ou un Commit refusé par tous peut fausser le rang des annonces utilisé pour vérifier le Welcome. Correction : prendre le premier Commit de l'époque E−1 dont le siège attesté est celui de l'expéditeur du Welcome ; à défaut, réessayer au Commit suivant ; vérifier aussi le siège attesté du Welcome. **Corrigé (C-2 Task 1).**
+- **N3 (doc)** : `message.rs` : la doc de `est_volatile` est passée au-dessus de `nouvel_id`. **Corrigé (C-2 Task 1).**
+- **KeyPackages restants** : à l'entrée, effacer toutes les clés d'init des KeyPackages produits par ce salon, pas seulement celles nommées par le Welcome. **Corrigé (C-2 Task 1).**
 
 ## 4. Messages
 
