@@ -131,13 +131,15 @@ func (mb Membre) Echeance() time.Time {
 	return mb.salon.expires
 }
 
-// membrePieceLocked : membreLocked, et ErrExcluded pour un jeton révoqué depuis (Membre
-// obtenu avant l'exclusion). Appelé sous s.mu.
+// membrePieceLocked : membreLocked, sinon ErrExcluded pour un jeton révoqué depuis (Membre
+// obtenu avant l'exclusion, siège libéré) et ErrNotFound pour tout autre membre périmé
+// (perimeLocked) ; un jeton révoqué encore assis (jamais le cas après Exclure, qui libère le
+// siège) est refusé aussi. Appelé sous s.mu.
 func (s *salon) membrePieceLocked(mb Membre, now time.Time) error {
 	if !s.membreLocked(mb, now) {
-		return ErrNotFound
+		return s.perimeLocked(mb, now)
 	}
-	if _, ok := s.revoques[s.sieges[mb.siege].jetonV]; ok {
+	if _, ok := s.revoques[mb.jetonV]; ok {
 		return ErrExcluded
 	}
 	return nil

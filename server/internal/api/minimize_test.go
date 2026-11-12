@@ -19,10 +19,11 @@ import (
 // (cmd/shhdrop/static.go) ; même valeur dans tous les navigateurs visés, jamais gardé ni journalisé.
 var readHeaders = []string{"Authorization", "X-Shh-Client-IP", "X-Shh-Access", "X-Shh-Manage", "X-Shh-Grant", "Accept-Encoding"}
 
-// salonHeaders : jeton de membre et identifiant de pièce du salon (plan C-2 Task 13), lus
-// seulement dans les fichiers handlers_salon*.go (audit des partages du 12 novembre, D3 : une
-// liste globale laissait un gestionnaire de partage les lire sans être vu).
-var salonHeaders = []string{"X-Shh-Membre", "X-Shh-Piece"}
+// salonHeaders : jeton de membre, identifiant de pièce (plan C-2 Task 13) et nouvelle
+// K_accès_s' d'une exclusion (Task 14), lus seulement dans les fichiers handlers_salon*.go
+// (audit des partages du 12 novembre, D3 : une liste globale laissait un gestionnaire de
+// partage les lire sans être vu).
+var salonHeaders = []string{"X-Shh-Membre", "X-Shh-Piece", "X-Shh-Access-New"}
 
 // headerAllowed : en-tête name lisible dans le fichier path (readHeaders partout,
 // salonHeaders dans handlers_salon*.go seulement).

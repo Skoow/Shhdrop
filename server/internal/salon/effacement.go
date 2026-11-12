@@ -169,7 +169,7 @@ func (m *Manager) Lu(mb Membre, seq uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.membreLocked(mb, now) {
-		return ErrNotFound
+		return s.perimeLocked(mb, now)
 	}
 	i := s.chercherLocked(seq)
 	if i < 0 {

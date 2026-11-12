@@ -47,13 +47,27 @@ func (s *salon) membreLocked(mb Membre, now time.Time) bool {
 	return x != nil && x.emis == mb.emis
 }
 
+// perimeLocked : erreur d'un membre qui ne l'est plus (membreLocked faux) : ErrExcluded pour
+// un jeton révoqué par une exclusion (son siège est pourtant libéré ; relecture de l'audit du
+// 12 novembre), ErrNotFound sinon (salon fini ou échu, jeton remplacé ou oublié). Appelé sous
+// s.mu.
+func (s *salon) perimeLocked(mb Membre, now time.Time) error {
+	if !s.fini && now.Before(s.expires) {
+		if _, ok := s.revoques[mb.jetonV]; ok {
+			return ErrExcluded
+		}
+	}
+	return ErrNotFound
+}
+
 // Recevoir range la trame de mb et rend son rang. En-tête invalide (taille, marque, bit
 // réservé) : ErrBadRequest, aucun rang consommé. lien (facultatif, Task 13) : pièce
 // « ready » de ce salon et de cet auteur, pas encore liée, pour une trame non volatile
 // (pieceLiableLocked) ; elle suit ensuite la vie de la trame (retrait, règle, lectures, fin du
 // salon). Trame volatile ou pièce d'un autre auteur : ErrBadRequest sans rang consommé ;
 // pièce disparue, pas prête ou déjà liée : trame rangée sans lien (audit D6). Membre
-// périmé : ErrNotFound. Erreur d'écriture de la conversation (ErrES, fixe) : trame non rangée,
+// périmé : ErrNotFound ; exclu : ErrExcluded (perimeLocked, de même pour Retirer, Quitter et
+// Lu). Erreur d'écriture de la conversation (ErrES, fixe) : trame non rangée,
 // aucun rang consommé. L'écriture se fait sous le verrou du salon : l'ordre des emplacements
 // est celui des rangs. Règle « 10 min » ou « 1 h » : échéance rangée (effacement.go).
 // « Instantané » sans aucun autre siège occupé : relayée puis effacée aussitôt (0x0E), sans
@@ -86,7 +100,7 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, lien *[16]byte) (uint64, err
 	// Heure lue sous le verrou : recuMs ne décroît jamais quand seq croît (TestHeureMonotone).
 	now := m.cfg.Now()
 	if !s.membreLocked(mb, now) {
-		return 0, ErrNotFound
+		return 0, s.perimeLocked(mb, now)
 	}
 	var p *piece // nil : trame sans lien (aucun, ou pièce disparue, pas prête, déjà liée)
 	if lien != nil {
@@ -162,7 +176,7 @@ func (m *Manager) Retirer(mb Membre, seq uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.membreLocked(mb, now) {
-		return ErrNotFound
+		return s.perimeLocked(mb, now)
 	}
 	i := s.chercherLocked(seq)
 	if i < 0 {
@@ -191,7 +205,7 @@ func (m *Manager) Quitter(mb Membre) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.membreLocked(mb, now) {
-		return ErrNotFound
+		return s.perimeLocked(mb, now)
 	}
 	m.departLocked(s, mb.siege)
 	return nil

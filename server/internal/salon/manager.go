@@ -508,11 +508,13 @@ func (m *Manager) Gestion(sGestion []byte) (expiresIn time.Duration, present int
 	return secs(exp - now), present, nil
 }
 
-// Membre : membre désigné par un jeton (accueil du WebSocket, routes des pièces).
+// Membre : membre désigné par un jeton (accueil du WebSocket, routes des pièces). jetonV :
+// SHA-256 du jeton (jamais le jeton), pour reconnaître un jeton révoqué depuis (perimeLocked).
 type Membre struct {
 	salon          *salon
 	siege          uint8
 	emis, plancher uint64
+	jetonV         [32]byte
 }
 
 // Membre : ErrExcluded pour un jeton révoqué ; ErrNotFound pour un jeton inconnu (jamais
@@ -544,22 +546,35 @@ func (m *Manager) Membre(jeton []byte) (Membre, error) {
 		return Membre{}, ErrNotFound
 	}
 	x := s.sieges[n]
-	return Membre{salon: s, siege: n, emis: x.emis, plancher: x.plancher}, nil
+	return Membre{salon: s, siege: n, emis: x.emis, plancher: x.plancher, jetonV: h}, nil
 }
 
-// departLocked : départ du siège n (Quitter, libération après 10 min hors ligne, exclusion) :
-// 0x03 au journal, jeton oublié et ses lectures de pièces en cours coupées, puis siège
-// retiré des lecteurs attendus de toutes les trames (effacements en chaîne, 0x0E après le
-// 0x03) ; sans effet s'il est libre. Ne peut pas échouer (invariant du journal,
-// annoncerLocked). Appelé sous s.mu.
+// departLocked : départ du siège n (Quitter, libération après 10 min hors ligne) : 0x03 au
+// journal (sortirLocked) ; sans effet s'il est libre. Appelé sous s.mu.
 func (m *Manager) departLocked(s *salon, n uint8) {
+	m.sortirLocked(s, n, func(seq uint64) []byte { return EnrDepart(seq, n) }, false)
+}
+
+// sortirLocked : le siège n est libéré, annoncé par enr (0x03 départ, ou 0x09 exclusion,
+// exclusion.go) : annonce au journal, siège retiré des lecteurs attendus de toutes les trames
+// (effacements en chaîne, 0x0E après l'annonce), jeton oublié et ses lectures de pièces en
+// cours coupées. revoquer (exclusion) : l'empreinte du jeton est gardée parmi les révoqués et
+// dans l'index jusqu'à la fin du salon (Membre rend alors ErrExcluded) ; sinon elle est
+// retirée de l'index. Sans effet si le siège est libre. Ne peut pas échouer (invariant du
+// journal, annoncerLocked : un siège occupé peut toujours être annoncé libéré). Appelé sous
+// s.mu.
+func (m *Manager) sortirLocked(s *salon, n uint8, enr func(seq uint64) []byte, revoquer bool) {
 	if s.sieges[n] == nil {
 		return
 	}
-	s.annoncerLocked(func(seq uint64) []byte { return EnrDepart(seq, n) }, true)
+	s.annoncerLocked(enr, true)
 	s.plusAttenduLocked(n)
 	jv, _ := s.oublierLocked(n)
-	m.indexer(func(index map[[32]byte]*salon) { delete(index, jv) })
+	if revoquer {
+		s.revoques[jv] = struct{}{}
+	} else {
+		m.indexer(func(index map[[32]byte]*salon) { delete(index, jv) })
+	}
 	m.flux.Revoke(cleFluxMembre(jv)) // lectures de pièces en cours de ce jeton coupées
 }
 

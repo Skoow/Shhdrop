@@ -275,7 +275,7 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 		return nil, CodeArret
 	}
 	if !s.membreLocked(mb, now) {
-		return nil, CodeInconnu
+		return nil, codeErreur(s.perimeLocked(mb, now)) // 4002 exclu entre-temps, sinon 4004
 	}
 	x := s.sieges[mb.siege]
 	var point uint64
@@ -619,14 +619,17 @@ func (c *connexion) traiter(d Demande, ip netip.Addr, autoriser func(netip.Addr)
 }
 
 // codeErreur : code de fermeture d'une erreur de Recevoir, Retirer, Lu ou Quitter. Requête
-// invalide : 4003 ; membre périmé (jeton remplacé, oublié, salon fini) : 4004 ; toute autre
-// erreur (ErrES, ErrInutilisable, ErrPleine…) : 1011, jamais 4003 (relecture Task 8).
+// invalide : 4003 ; membre périmé (jeton remplacé, oublié, salon fini) : 4004 ; exclu : 4002 ;
+// toute autre erreur (ErrES, ErrInutilisable, ErrPleine…) : 1011, jamais 4003 (relecture
+// Task 8).
 func codeErreur(err error) int {
 	switch {
 	case errors.Is(err, ErrBadRequest):
 		return CodeInvalide
 	case errors.Is(err, ErrNotFound):
 		return CodeInconnu
+	case errors.Is(err, ErrExcluded):
+		return CodeRevoque
 	}
 	return CodeInterne
 }

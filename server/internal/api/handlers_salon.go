@@ -27,6 +27,7 @@ func (a salonAPI) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/salons/meta", a.meta)
 	mux.HandleFunc("POST /api/salons/rejoindre", a.rejoindre)
 	mux.HandleFunc("GET /api/salons/gestion", a.gestion)
+	mux.HandleFunc("POST /api/salons/exclure", a.exclure)
 	mux.HandleFunc("GET /api/salons/ws", a.salonWS)
 	a.routesPieces(mux)
 }
@@ -231,4 +232,60 @@ func (a salonAPI) gestion(w http.ResponseWriter, r *http.Request) {
 		ExpiresIn int64 `json:"expires_in_s"`
 		Present   int   `json:"present"`
 	}{secs(left), present})
+}
+
+// exclure : POST /api/salons/exclure (X-Shh-Manage, X-Shh-Access-New = K_accès_s' ; corps
+// {seat?, nonce_arrivee?, r, proof_v, salt, kdf_ops, kdf_mem}) → {} (spec §39.13.2, plan C-2
+// Task 14). X-Shh-Manage absent, mal formé ou d'aucun salon vivant (jeton de membre à sa
+// place) : 403 forbidden, avant même la lecture du corps. seat et nonce_arrivee tous deux
+// présents (exclusion) ou tous deux absents (rotation seule) ; siège 0 : 400 ; siège
+// réattribué ou r déjà vu : 409 stale ; nouvelle K_accès_s' déjà prise : 400 (comme une
+// création en conflit).
+func (a salonAPI) exclure(w http.ResponseWriter, r *http.Request) {
+	sg, err := headerSecret(r, "X-Shh-Manage")
+	if err != nil {
+		failSalon(w, salon.ErrForbidden)
+		return
+	}
+	var b struct {
+		Seat   *int    `json:"seat"`
+		Nonce  *string `json:"nonce_arrivee"`
+		R      *uint32 `json:"r"`
+		ProofV string  `json:"proof_v"`
+		Salt   string  `json:"salt"`
+		KdfOps *int    `json:"kdf_ops"`
+		KdfMem *int    `json:"kdf_mem"`
+	}
+	if err := readJSON(w, r, &b); err != nil || b.R == nil || b.KdfOps == nil || b.KdfMem == nil ||
+		b.Seat != nil && (*b.Seat < 0 || *b.Seat > 255) {
+		failSalon(w, errBadRequest)
+		return
+	}
+	var errs [4]error
+	var kn []byte
+	kn, errs[0] = headerSecret(r, "X-Shh-Access-New")
+	req := salon.ExclureReq{ManageV: share.Verifier(sg), AccessNewV: share.Verifier(kn), KdfOps: *b.KdfOps,
+		KdfMem: *b.KdfMem, R: *b.R}
+	req.ProofV, errs[1] = secret(b.ProofV, 32)
+	req.Salt, errs[2] = secret(b.Salt, 16)
+	if b.Seat != nil {
+		siege := uint8(*b.Seat)
+		req.Siege = &siege
+	}
+	if b.Nonce != nil {
+		var n []byte
+		if n, errs[3] = secret(*b.Nonce, 16); errs[3] == nil {
+			nonce := [16]byte(n)
+			req.Nonce = &nonce
+		}
+	}
+	if errs != [4]error{} {
+		failSalon(w, errBadRequest)
+		return
+	}
+	if err := a.m.Exclure(req); err != nil {
+		failSalon(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct{}{})
 }
