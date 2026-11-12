@@ -1,6 +1,9 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 // securityHeaders : en-têtes de la spec §10, posés sur toutes les réponses
 // Trusted Types (10 novembre) : toute chaîne brute donnée à un point d'injection de script
@@ -40,12 +43,37 @@ const deniedFeatures = "geolocation=(), display-capture=(), clipboard-read=(), u
 	"payment=(), gyroscope=(), accelerometer=(), magnetometer=(), midi=(), " +
 	"xr-spatial-tracking=(), browsing-topics=(), interest-cohort=()"
 
-func withHeaders(next http.Handler) http.Handler {
+// cspFor : CSP commune. Salon actif (origin non vide, déjà vérifiée par config.originOK) :
+// connect-src permet aussi le WebSocket de cette origine (wss://, ou ws:// pour une origine
+// http:// de boucle locale) ; 'self' ne couvre pas ws(s) dans tous les navigateurs. Sans
+// salon, la CSP reste exactement celle d'avant le salon.
+func cspFor(origin string) string {
+	var ws string
+	switch {
+	case origin == "":
+		return securityHeaders[0][1]
+	case strings.HasPrefix(origin, "https://"):
+		ws = "wss://" + origin[len("https://"):]
+	case strings.HasPrefix(origin, "http://"):
+		ws = "ws://" + origin[len("http://"):]
+	default:
+		// Inaccessible (origine vérifiée au démarrage) : rien n'est ajouté.
+		return securityHeaders[0][1]
+	}
+	return strings.Replace(securityHeaders[0][1], cspConnect, "connect-src 'self' blob: "+ws+";", 1)
+}
+
+// cspConnect : directive connect-src de la CSP commune (unique dans securityHeaders[0]).
+const cspConnect = "connect-src 'self' blob:;"
+
+// withHeaders : en-têtes communs, CSP calculée une fois par cspFor.
+func withHeaders(csp string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		for _, kv := range securityHeaders {
 			h.Set(kv[0], kv[1])
 		}
+		h.Set("Content-Security-Policy", csp)
 		pathHeaders(h, r.URL.Path)
 		next.ServeHTTP(w, r)
 	})

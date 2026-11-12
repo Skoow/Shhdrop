@@ -26,12 +26,21 @@ type Config struct {
 	TrustedProxies []netip.Prefix
 	StaticDir      string // SHH_STATIC_DIR : fichiers du site (web/dist), chemin absolu ; vide = page d'attente
 	Now            func() time.Time
+	// Salons (SHH_SALONS=1) : active les routes /api/salons/* et le WebSocket du salon.
+	// Désactivé par défaut : activation publique seulement après le juriste (Q-SAL8).
+	Salons bool
+	// SalonsMax (SHH_SALONS_MAX, 1 à 10 000, défaut 200) : salons vivants au plus (spec §39.3.2).
+	SalonsMax int
+	// Origin (SHH_ORIGIN, obligatoire avec SHH_SALONS=1) : origine publique du site, comparée
+	// à l'en-tête Origin du WebSocket et copiée dans la CSP (connect-src wss://hôte).
+	Origin string
 }
 
 func FromEnv() (Config, error) {
 	c := Config{
 		Listen:          "127.0.0.1:8080",
 		StorageMaxBytes: 214748364800, // 200 Gio (spec §24, §41.2)
+		SalonsMax:       200,          // spec §39.3.2
 		Now:             time.Now,
 	}
 	var err error
@@ -78,7 +87,85 @@ func FromEnv() (Config, error) {
 	if c.StaticDir, err = absDir("SHH_STATIC_DIR", os.Getenv("SHH_STATIC_DIR")); err != nil {
 		return Config{}, err
 	}
+	switch v := os.Getenv("SHH_SALONS"); v {
+	case "", "0":
+	case "1":
+		c.Salons = true
+	default:
+		return Config{}, fmt.Errorf("SHH_SALONS invalide (0 ou 1): %q", v)
+	}
+	if v := os.Getenv("SHH_SALONS_MAX"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || !digits(v) || v[0] == '0' || n < 1 || n > 10000 {
+			return Config{}, fmt.Errorf("SHH_SALONS_MAX invalide (entier de 1 à 10000): %q", v)
+		}
+		c.SalonsMax = n
+	}
+	// Vérifiée même salon désactivé : une valeur fausse se voit dès le démarrage.
+	if v := os.Getenv("SHH_ORIGIN"); v != "" {
+		if !originOK(v) {
+			return Config{}, fmt.Errorf("SHH_ORIGIN invalide (https://hôte[:port] en minuscules, sans chemin, "+
+				"requête, fragment, identifiant ni barre finale, port par défaut omis ; http:// seulement pour "+
+				"localhost ou 127.0.0.0/8 ; IPv6 non pris en charge): %q", v)
+		}
+		c.Origin = v
+	}
+	if c.Salons && c.Origin == "" {
+		return Config{}, errors.New("SHH_SALONS=1 exige SHH_ORIGIN (origine publique du site, ex. https://shhdrop.app)")
+	}
 	return c, nil
+}
+
+// originOK : origine sous la forme exacte que les navigateurs envoient dans l'en-tête Origin
+// (schéma et hôte en minuscules, port par défaut omis), pour que la comparaison du WebSocket
+// soit une simple égalité. L'hôte n'a que des caractères [a-z0-9.-] : il est copié dans la
+// CSP, où « ; », une espace ou « * » changeraient la politique. IPv6 refusé : la syntaxe
+// host-source de la CSP ne l'accepte pas.
+func originOK(v string) bool {
+	var hostport, defPort string
+	var plain bool
+	switch {
+	case strings.HasPrefix(v, "https://"):
+		hostport, defPort = v[len("https://"):], "443"
+	case strings.HasPrefix(v, "http://"):
+		hostport, defPort, plain = v[len("http://"):], "80", true
+	default:
+		return false
+	}
+	host := hostport
+	if i := strings.LastIndexByte(hostport, ':'); i >= 0 {
+		host = hostport[:i]
+		port := hostport[i+1:]
+		if !digits(port) || port[0] == '0' || len(port) > 5 || port == defPort {
+			return false
+		}
+		if n, _ := strconv.Atoi(port); n > 65535 {
+			return false
+		}
+	}
+	if host == "" || len(host) > 253 {
+		return false
+	}
+	labels := strings.Split(host, ".")
+	for _, l := range labels {
+		if l == "" || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
+			return false
+		}
+		for i := 0; i < len(l); i++ {
+			if b := l[i]; (b < 'a' || b > 'z') && (b < '0' || b > '9') && b != '-' {
+				return false
+			}
+		}
+	}
+	// Dernier label numérique : adresse IPv4, en forme canonique (sinon le navigateur la récrit).
+	if digits(labels[len(labels)-1]) {
+		a, err := netip.ParseAddr(host)
+		if err != nil || !a.Is4() || a.String() != host {
+			return false
+		}
+		return !plain || a.IsLoopback()
+	}
+	return !plain || host == "localhost"
 }
 
 // localNets : réseaux acceptés à toute longueur de préfixe (sauf /0) : boucle locale,

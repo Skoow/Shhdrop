@@ -100,7 +100,7 @@ func newEnvFull(t *testing.T, behindProxy bool, proxies []netip.Prefix, static h
 	sig := token.New(rnd(32), c.Now)
 	srv := newServer(svc, sig, lim, captcha.New(rnd(32), c.Now), behindProxy, proxies)
 	srv.xfer = x
-	h := newHandler(srv, static)
+	h := newHandler(srv, static, Salons{})
 	return &env{h: h, srv: srv, svc: svc, sig: sig, clk: c, dir: dir}
 }
 

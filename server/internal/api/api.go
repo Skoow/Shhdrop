@@ -255,12 +255,19 @@ type ctxIP struct{}
 // behindProxy (SHH_BEHIND_PROXY) : une requête d'un pair qui n'est pas un proxy de
 // confiance (boucle locale ou proxies, SHH_TRUSTED_PROXY), ou sans X-Shh-Client-IP
 // valide, reçoit 500 au lieu de partager les limites du proxy (échec fermé).
+// sal : réglages du salon ; valeur zéro = salon désactivé.
 func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
-	static http.Handler, behindProxy bool, proxies []netip.Prefix) http.Handler {
-	return newHandler(newServer(svc, sig, lim, capt, behindProxy, proxies), static)
+	static http.Handler, behindProxy bool, proxies []netip.Prefix, sal Salons) http.Handler {
+	return newHandler(newServer(svc, sig, lim, capt, behindProxy, proxies), static, sal)
 }
 
-func newHandler(s *server, static http.Handler) http.Handler {
+// Salons : réglages du salon. Valeur zéro : salon désactivé (aucune route, CSP inchangée).
+// Origin : origine publique du site (config.Config.Origin), donnée seulement si SHH_SALONS=1.
+type Salons struct {
+	Origin string
+}
+
+func newHandler(s *server, static http.Handler, sal Salons) http.Handler {
 	api := http.NewServeMux()
 	api.HandleFunc("GET /api/captcha", s.captcha)
 	api.HandleFunc("POST /api/shares", s.create)
@@ -293,7 +300,7 @@ func newHandler(s *server, static http.Handler) http.Handler {
 		}
 		static.ServeHTTP(w, r)
 	}))
-	return withHeaders(recoverPanic(root))
+	return withHeaders(cspFor(sal.Origin), recoverPanic(root))
 }
 
 func notFoundAPI(w http.ResponseWriter, _ *http.Request) {

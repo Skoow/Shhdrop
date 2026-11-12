@@ -8,7 +8,8 @@ import (
 
 func env(t *testing.T, kv map[string]string) {
 	t.Helper()
-	for _, k := range []string{"SHH_DATA_DIR", "SHH_LISTEN", "SHH_STORAGE_MAX", "SHH_BEHIND_PROXY", "SHH_TRUSTED_PROXY", "SHH_STATIC_DIR"} {
+	for _, k := range []string{"SHH_DATA_DIR", "SHH_LISTEN", "SHH_STORAGE_MAX", "SHH_BEHIND_PROXY", "SHH_TRUSTED_PROXY", "SHH_STATIC_DIR",
+		"SHH_SALONS", "SHH_SALONS_MAX", "SHH_ORIGIN"} {
 		t.Setenv(k, kv[k])
 	}
 }

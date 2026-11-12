@@ -13,7 +13,7 @@ test-engine:
 	cd engine && cargo test --workspace --locked
 
 test-go:
-	cd server && go vet ./... && go test ./... && GOARCH=386 go build ./...
+	cd server && go vet ./... && go test -race ./... && GOARCH=386 go build ./...
 
 test-web:
 	cd web && npm test

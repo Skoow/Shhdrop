@@ -195,6 +195,15 @@ func tightenPerms(dataDir string) error {
 	return nil
 }
 
+// salonsOf : réglages du salon donnés à l'API, valeur zéro (désactivé) sans SHH_SALONS=1,
+// même si SHH_ORIGIN est posée (la CSP reste alors celle d'avant le salon).
+func salonsOf(cfg config.Config) api.Salons {
+	if !cfg.Salons {
+		return api.Salons{}
+	}
+	return api.Salons{Origin: cfg.Origin}
+}
+
 // shutdownTimeout : délai laissé aux requêtes en cours à l'arrêt (variable pour les tests).
 var shutdownTimeout = 30 * time.Second
 
@@ -287,7 +296,7 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 		return err
 	}
 	srv := newHTTPServer(api.New(svc, token.New(tokKey, cfg.Now), lim,
-		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy, cfg.TrustedProxies))
+		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy, cfg.TrustedProxies, salonsOf(cfg)))
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err

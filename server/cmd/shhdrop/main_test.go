@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/skoow/shhdrop/server/internal/api"
 	"github.com/skoow/shhdrop/server/internal/config"
 )
 
@@ -173,4 +174,14 @@ func TestServeTightensPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	check()
+}
+
+// Salon désactivé : l'API reçoit la valeur zéro, même avec SHH_ORIGIN posée.
+func TestSalonsOf(t *testing.T) {
+	if s := salonsOf(config.Config{Origin: "https://shhdrop.app"}); s != (api.Salons{}) {
+		t.Fatalf("salon désactivé : %+v", s)
+	}
+	if s := salonsOf(config.Config{Salons: true, Origin: "https://shhdrop.app"}); s.Origin != "https://shhdrop.app" {
+		t.Fatalf("salon actif : %+v", s)
+	}
 }
