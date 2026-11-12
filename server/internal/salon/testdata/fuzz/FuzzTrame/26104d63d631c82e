@@ -1,0 +1,4 @@
+go test fuzz v1
+[]byte("SHC30")
+uint16(4140)
+[]byte("")

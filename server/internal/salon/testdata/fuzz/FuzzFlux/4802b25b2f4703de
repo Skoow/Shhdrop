@@ -1,0 +1,6 @@
+go test fuzz v1
+[]byte("00000000000000000000000000000aaaaaaaaaaaaaaaa00000000")
+uint64(54)
+byte('Ë')
+int64(58)
+uint32(169)
