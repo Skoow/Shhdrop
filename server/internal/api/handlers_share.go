@@ -404,6 +404,10 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet { // HEAD
+		methodNotAllowed(w, r)
+		return
+	}
 	// openN vient du jeton signé : une ouverture terminée (done) ne lit plus rien.
 	id, openN, err := s.checkToken(r, token.Download)
 	if err != nil {

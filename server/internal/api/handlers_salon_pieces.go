@@ -27,6 +27,7 @@ func (a salonAPI) routesPieces(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/salons/pieces/segments/{n}", a.envoyerSegmentPiece)
 	mux.HandleFunc("POST /api/salons/pieces/finalize", a.finaliserPiece)
 	mux.HandleFunc("GET /api/salons/pieces/segments/{n}", a.lireSegmentPiece)
+	mux.HandleFunc("/api/salons/pieces/segments/{n}", methodNotAllowed)
 	mux.HandleFunc("POST /api/salons/pieces/retirer", a.retirerPiece)
 }
 
@@ -185,9 +186,13 @@ func (a salonAPI) finaliserPiece(w http.ResponseWriter, r *http.Request) {
 }
 
 // lireSegmentPiece : GET /api/salons/pieces/segments/{n} (X-Shh-Membre, X-Shh-Piece), en flux
-// sous débit minimal, patron de getSegment. Budget de lecture épuisé : 429 budget. Pièce
+// sous débit minimal, patron de getSegment ; HEAD et autres méthodes : 405. Budget de lecture épuisé : 429 budget. Pièce
 // effacée ou jeton révoqué pendant la lecture : connexion coupée tout de suite.
 func (a salonAPI) lireSegmentPiece(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet { // HEAD : 405 avant le budget de lecture
+		methodNotAllowed(w, r)
+		return
+	}
 	mb, jeton, err := a.membre(r)
 	if err != nil {
 		failSalon(w, err)

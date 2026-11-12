@@ -289,6 +289,7 @@ func newHandler(s *server, static http.Handler, sal Salons) http.Handler {
 	api.HandleFunc("GET /api/shares/meta", s.meta)
 	api.HandleFunc("POST /api/shares/unlock", s.unlock)
 	api.HandleFunc("GET /api/shares/segments/{n}", s.getSegment)
+	api.HandleFunc("/api/shares/segments/{n}", methodNotAllowed)
 	api.HandleFunc("POST /api/shares/done", s.done)
 	api.HandleFunc("POST /api/shares/destroy", s.destroy)
 	api.HandleFunc("GET /api/shares/watch", s.watch)
@@ -318,6 +319,15 @@ func newHandler(s *server, static http.Handler, sal Salons) http.Handler {
 
 func notFoundAPI(w http.ResponseWriter, _ *http.Request) {
 	writeErr(w, http.StatusNotFound, "not_found")
+}
+
+// methodNotAllowed : routes des segments (partages, pièces du salon) appelées par une autre
+// méthode que GET ou PUT, HEAD compris (le motif « GET » de ServeMux l'accepte aussi) : 405,
+// avant tout jeton ni budget de lecture (audit du 12 novembre, D4 : un HEAD consommait le
+// budget sans rien servir).
+func methodNotAllowed(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Allow", "GET, PUT")
+	writeErr(w, http.StatusMethodNotAllowed, "method_not_allowed")
 }
 
 // isAPIPath : « /api » ou « /api/… », sans tenir compte de la casse.

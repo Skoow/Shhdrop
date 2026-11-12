@@ -4,6 +4,7 @@ package api
 // scratchpad et changés en assertions : chacun échouait avant sa correction.
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
@@ -32,5 +33,46 @@ func TestAuditVocalReecritureHorsQuota(t *testing.T) {
 		for range 3 {
 			expect(t, e.putPiece(tok, 0, seg), 413, `{"error":"too_large"}`)
 		}
+	}
+}
+
+// D4 de l'audit : HEAD sur les routes GET des segments (pièce du salon, partage) répondait
+// 200 et consommait le budget de lecture sans rien servir. HEAD, et toute méthode autre que
+// GET et PUT, répondent 405 (Allow: GET, PUT), avant tout budget ; le GET suivant est servi.
+func TestAuditHeadConsommeBudget(t *testing.T) {
+	e, _ := salonEnv(t)
+	j := salonMembres(t, e, 2)
+	id, segs := e.envoyerPiece(t, j[0], 1)
+	c := e.create(t, "203.0.113.7:1", newKeys(), 1, 1)
+	e.upload(t, c, 1)
+	dl, _ := e.unlock(t, c.ID, c.k)
+	routes := map[string]map[string]string{
+		"/api/salons/pieces/segments/0": pieceHdr(j[1], id),
+		"/api/shares/segments/0":        auth(dl),
+	}
+	for chemin, hdr := range routes {
+		for _, m := range []string{"HEAD", "POST", "DELETE", "PATCH", "OPTIONS", "TRACE"} {
+			fois := 1 // sous les 60 requêtes par minute de l'adresse
+			if m == "HEAD" {
+				fois = 5
+			}
+			for range fois {
+				w := e.do(req{method: m, path: chemin, hdr: hdr})
+				if w.Code != 405 || w.Header().Get("Allow") != "GET, PUT" {
+					t.Fatal(chemin, m, w.Code, w.Header().Get("Allow"))
+				}
+				if m != "HEAD" && w.Body.String() != `{"error":"method_not_allowed"}` {
+					t.Fatal(chemin, m, w.Body.String())
+				}
+			}
+		}
+		// Budget de lecture du palier 1 : 4 segments ; 5 HEAD l'auraient épuisé.
+		w := e.do(req{method: "GET", path: chemin, hdr: hdr})
+		if w.Code != 200 {
+			t.Fatal(chemin, "GET après les HEAD :", w.Code, w.Body.String())
+		}
+	}
+	if w := e.getPiece(j[1], id, 0); w.Code == 200 && !bytes.Equal(w.Body.Bytes(), segs[0]) {
+		t.Fatal("contenu")
 	}
 }
