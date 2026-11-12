@@ -28,6 +28,12 @@ export function isCleanFailure(i: ItemClean): boolean {
   return i.clean === "echec" || i.clean === "protege";
 }
 
+/** Photo, vidéo ou son d'un format que le nettoyage ne lit pas : rien n'a été tenté (audit D5).
+ *  Compté à part : « N fichiers ne peuvent pas être nettoyés (format non pris en charge) ». */
+export function isUnsupportedFormat(i: ItemClean): boolean {
+  return i.clean === "echec" && i.cleanFormat !== undefined;
+}
+
 /** 2ᵉ ligne de la bulle du cadenas ; null pour un texte (rien à nettoyer). */
 export function cleanLineKey(i: ItemClean) {
   switch (i.clean) {

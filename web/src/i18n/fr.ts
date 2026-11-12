@@ -698,6 +698,8 @@ export const fr = {
   "clean.recv.fail.protege": "Non nettoyé\u202f: fichier signé ou protégé",
   "compose.uncleaned.one": "{n}\u202ffichier n'a pas pu être nettoyé",
   "compose.uncleaned.other": "{n}\u202ffichiers n'ont pas pu être nettoyés",
+  "compose.unsupported.one": "{n}\u202ffichier ne peut pas être nettoyé (format non pris en charge)",
+  "compose.unsupported.other": "{n}\u202ffichiers ne peuvent pas être nettoyés (format non pris en charge)",
   "settings.about": "À propos",
   "settings.about.body": "Shhdrop chiffre sur votre appareil avant l'envoi. Sans compte, sans traceur, code source public.",
   "confirm.title": "Confirmation",

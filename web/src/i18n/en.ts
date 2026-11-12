@@ -694,6 +694,8 @@ export const en = {
   "clean.recv.fail.protege": "Not cleaned: signed or protected file",
   "compose.uncleaned.one": "{n}\u00a0file couldn't be cleaned",
   "compose.uncleaned.other": "{n}\u00a0files couldn't be cleaned",
+  "compose.unsupported.one": "{n}\u00a0file can't be cleaned (unsupported format)",
+  "compose.unsupported.other": "{n}\u00a0files can't be cleaned (unsupported format)",
   "settings.about": "About",
   "settings.about.body": "Shhdrop encrypts on your device before sending. No account, no tracker, public source code.",
   "confirm.title": "Confirmation",

@@ -183,7 +183,8 @@ test("photo, vidéo ou son d'un format que le nettoyage ne lit pas : « format n
   await expect(row.locator('[data-clean="echec"] button')).toHaveAccessibleName(/^Nettoyage impossible\s: format non pris en charge$/);
   await expect(row.getByRole("button", { name: /^Nettoyer ce fichier/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Tout nettoyer" })).toHaveCount(0);
-  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("1 fichier n'a pas pu être nettoyé");
+  // Rien n'a été tenté : jamais « n'a pas pu » (audit D5).
+  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("1\u202ffichier ne peut pas être nettoyé (format non pris en charge)");
 });
 
 test("balai au clavier : Entrée, Tab, Entrée nettoie ; le focus va sur un bouton sûr de la ligne, jamais « Supprimer » (audit D3)", async ({ page, shh, isMobile }) => {

@@ -78,6 +78,7 @@ describe("createComposer : ajout", () => {
     expect(c.items.map((i) => cleanMark(i))).toEqual(["fail", "fail"]);
     expect(c.blockReason()).toBeNull();
     expect(c.uncleanedCount).toBe(2);
+    expect(c.unsupportedCount).toBe(0); // tenté et raté : « n'ont pas pu », jamais « format » (audit D5)
     await expect(gate(f)).resolves.toBe(f);
     c.remove(c.items[1]!.id);
     expect(c.uncleanedCount).toBe(1);
@@ -103,13 +104,16 @@ describe("createComposer : ajout", () => {
       expect(cleanMark(by(b)), b).toBeNull();
     }
     expect(seen).toEqual([]); // rien n'est analysé à l'ajout
-    expect(c.uncleanedCount).toBe(4);
+    // Décompte à part (audit D5) : rien n'a été tenté, ce n'est pas un échec du nettoyage.
+    expect(c.unsupportedCount).toBe(4);
+    expect(c.uncleanedCount).toBe(0);
     // Format lu par le nettoyage, mais qui dit « non pris en charge » au balai : même marque.
     await c.clean(by("e").id);
     expect(seen).toEqual(["e.jpg"]);
     expect(cleanLineKey(by("e"))).toBe("clean.fail.format");
     expect(c.blockReason()).toBeNull();
-    expect(c.uncleanedCount).toBe(5);
+    expect(c.unsupportedCount).toBe(5);
+    expect(c.uncleanedCount).toBe(0);
     for (const i of c.items) await expect(gate(i.data as Blob)).resolves.toBe(i.data);
   });
 
@@ -494,13 +498,20 @@ describe("blocages et textes de raison", () => {
     c.addText("t");
     expect(cleanLineKey(c.items[0]!)).toBeNull();
     expect(cleanMark(c.items[0]!)).toBeNull();
-    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.pdf", "clean.done.office", "clean.asis", "clean.fail.echec", "clean.fail.format", "clean.fail.protege", "compose.uncleaned.one", "compose.uncleaned.other"]) {
+    for (const k of ["clean.done.image", "clean.done.video", "clean.done.vocal", "clean.done.audio", "clean.done.pdf", "clean.done.office", "clean.asis", "clean.fail.echec", "clean.fail.format", "clean.fail.protege", "compose.uncleaned.one", "compose.uncleaned.other", "compose.unsupported.one", "compose.unsupported.other"]) {
       expect(fr[k as keyof typeof fr], k).toBeTruthy();
       expect(en[k as keyof typeof en], k).toBeTruthy();
     }
     expect(fr["clean.done.image"]).toBe("Nettoyé\u202f: position, appareil et dates retirés, vignette d'aperçu gardée");
     expect(fr["clean.asis"]).toBe("Fichier tel quel (non modifié)");
     for (const k of ["clean.mark", "clean.mark.not", "clean.original", "clean.original.hint"]) expect(k in fr, k).toBe(false);
+    // Deux décomptes distincts (audit D5) : format jamais lu ≠ nettoyage tenté et raté.
+    expect(fr["compose.unsupported.one"]).toBe("{n}\u202ffichier ne peut pas être nettoyé (format non pris en charge)");
+    expect(fr["compose.unsupported.other"]).toBe("{n}\u202ffichiers ne peuvent pas être nettoyés (format non pris en charge)");
+    expect(fr["compose.uncleaned.one"]).toBe("{n}\u202ffichier n'a pas pu être nettoyé");
+    expect(fr["compose.uncleaned.other"]).toBe("{n}\u202ffichiers n'ont pas pu être nettoyés");
+    expect(en["compose.unsupported.one"]).toBe("{n}\u00a0file can't be cleaned (unsupported format)");
+    expect(en["compose.unsupported.other"]).toBe("{n}\u00a0files can't be cleaned (unsupported format)");
   });
 });
 

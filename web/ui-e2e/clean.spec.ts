@@ -117,7 +117,8 @@ test("états à l'écran (D41-34) après « Tout nettoyer » : nettoyé (photo, 
   // Aucun choix à faire : plus de bouton, envoi permis, résumé discret près d'Envoyer.
   await expect(page.getByRole("button", { name: /^Envoyer tel quel/ })).toHaveCount(0);
   await expect(page.locator("#send-reason").filter({ visible: true })).toHaveCount(0);
-  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("3\u202ffichiers n'ont pas pu être nettoyés");
+  // Deux décomptes (audit D5) : abime.jpg et signe.pdf ont échoué ; dessin.svg n'est pas lu.
+  await expect(page.locator("[data-unclean-sum]").filter({ visible: true }).locator("span")).toHaveText(["2\u202ffichiers n'ont pas pu être nettoyés", "1\u202ffichier ne peut pas être nettoyé (format non pris en charge)"]);
   await expect(sendButton(page).filter({ visible: true })).toBeEnabled();
   // Chacun part dès l'ajout (une requête d'envoi par petit élément), puis la version nettoyée
   // remplace l'original (au moins une requête de plus par fichier nettoyé).

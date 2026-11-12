@@ -375,6 +375,8 @@
   const composerBlock = $derived(composer.blockReason());
   // Résumé discret près d'Envoyer (D41-23) : les lignes portent chacune leur marque et leur raison.
   const uncleaned = $derived(composer.uncleanedCount);
+  // Format jamais lu : dit à part, sans parler d'échec (audit D5).
+  const unsupported = $derived(composer.unsupportedCount);
   const reasonText = $derived(composerBlock ? t(blockKey(composerBlock), { max: composerBlock === "trop_gros" ? formatBytes(CONTENT_MAX, lang) : num(TEXT_MAX) }) : "");
   // Chaque fichier part dès son ajout ; un retrait interrompt son envoi et l'efface du serveur.
   // untrack : le brouillon met à jour l'état des lignes pendant l'appel (pas une dépendance).
@@ -693,7 +695,7 @@
           </button>
           <Button variant="primary" lock disabled={reasonText !== ""} aria-describedby={reasonText ? "send-reason" : undefined} onpress={send}>{t("options.submit")}</Button>
         </div>
-        {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{:else if uncleaned > 0}<p class="unclean-sum" data-unclean-sum>{t("compose.uncleaned", { n: uncleaned })}</p>{/if}
+        {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{:else if uncleaned + unsupported > 0}{@render uncleanSum()}{/if}
       </div>
     {:else}
       <!-- Ordinateur : colonne collée, défilement propre, pied collé : le bouton reste visible. -->
@@ -705,11 +707,18 @@
           <Options {options} {unviewable} part="summary" />
           <div class="offers side-offers">{@render offers()}</div>
           <Button variant="primary" lock disabled={reasonText !== ""} aria-describedby={reasonText ? "send-reason" : undefined} onpress={send}>{t("options.submit")}</Button>
-          {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{:else if uncleaned > 0}<p class="unclean-sum" data-unclean-sum>{t("compose.uncleaned", { n: uncleaned })}</p>{/if}
+          {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{:else if uncleaned + unsupported > 0}{@render uncleanSum()}{/if}
         </div>
       </div>
     {/if}
   </div>
+{/snippet}
+
+{#snippet uncleanSum()}
+  <p class="unclean-sum" data-unclean-sum>
+    {#if uncleaned > 0}<span>{t("compose.uncleaned", { n: uncleaned })}</span>{/if}
+    {#if unsupported > 0}<span>{t("compose.unsupported", { n: unsupported })}</span>{/if}
+  </p>
 {/snippet}
 
 <!-- Sélecteurs (hors du composeur : l'accueil vide s'en sert aussi). -->
@@ -1346,6 +1355,7 @@
     text-align: center;
   }
   .unclean-sum {
+    display: grid;
     margin: -4px 0 0;
     color: var(--text-2);
     font-size: var(--fs-micro);

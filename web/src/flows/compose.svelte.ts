@@ -8,7 +8,7 @@
 // personne ne le nettoie pas (`clean`, balai ou « Tout nettoyer », après confirmation). Échec,
 // format non pris en charge : l'élément part sans clic, marqué « Non nettoyé » avec sa raison.
 import { CONTENT_MAX, DATA_SEGMENTS, MANIFEST_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, cleanName, isRiskyName, segmentsNeeded, type Item } from "../index";
-import { isCleanFailure, manifestClean, type ItemCleanState } from "../media/clean-label";
+import { isCleanFailure, isUnsupportedFormat, manifestClean, type ItemCleanState } from "../media/clean-label";
 import { AV_FORMATS, DOC_FORMATS, IMAGE_FORMATS, detectFormat, type Format } from "../media/format";
 import { stripMetadata, type CleanFamily, type StripResult } from "../media/strip";
 import { approve } from "./clean-gate";
@@ -596,9 +596,13 @@ export function createComposer(deps: ComposeDeps = {}) {
     add,
     addText,
     updateText,
-    /** Fichiers dont le nettoyage a échoué (résumé près d'Envoyer, D41-34). */
+    /** Fichiers dont le nettoyage a été tenté et a échoué (résumé près d'Envoyer, D41-34). */
     get uncleanedCount() {
-      return items.filter(isCleanFailure).length;
+      return items.filter((i) => isCleanFailure(i) && !isUnsupportedFormat(i)).length;
+    },
+    /** Photos, vidéos, sons d'un format que le nettoyage ne lit pas (décompte à part, audit D5). */
+    get unsupportedCount() {
+      return items.filter(isUnsupportedFormat).length;
     },
     addVoice,
     clean,
