@@ -5,7 +5,9 @@ package salon
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -115,5 +117,46 @@ func TestAuditReecriturePlafonnee(t *testing.T) {
 			t.Fatal(vocal, "contenu")
 		}
 		fin()
+	}
+}
+
+// D3 de l'audit : la reprise du siège 0 (rejoindre, appareil perdu ou volé) et tout départ
+// (Quitter, libération hors ligne, exclusion) coupent la lecture en cours de l'ancien jeton
+// (clé "m:" + hex(SHA-256(jeton))), pas seulement les lectures suivantes.
+func TestAuditRepriseNeCoupePasLecture(t *testing.T) {
+	for _, cas := range []string{"reprise", "départ"} {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 3)
+		_, createur := b.entrerMembre(t, c, true)
+		_, invite := b.entrerMembre(t, c, false)
+		id := b.pretePiece(t, createur, 16, false)
+		ancien, autre := createur, invite
+		if cas == "départ" {
+			ancien, autre = invite, createur
+		}
+		l, err := b.m.OuvrirSegment(context.Background(), ancien, id, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		temoin, err := b.m.OuvrirSegment(context.Background(), autre, id, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cas == "reprise" {
+			b.entrer(t, c, true) // nouveau jeton, ancien oublié
+		} else if err := b.m.Quitter(invite); err != nil {
+			t.Fatal(err)
+		}
+		if !errors.Is(context.Cause(l.Context()), share.ErrRevoked) {
+			t.Fatal(cas, ": lecture de l'ancien jeton non coupée")
+		}
+		if _, err := io.Copy(io.Discard, l); err == nil {
+			t.Fatal(cas, ": lecture de l'ancien jeton menée à son terme")
+		}
+		if temoin.Context().Err() != nil {
+			t.Fatal(cas, ": lecture d'un autre membre coupée")
+		}
+		l.Close()
+		temoin.Close()
 	}
 }

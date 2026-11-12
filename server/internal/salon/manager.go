@@ -292,11 +292,12 @@ type Entree struct {
 }
 
 // Rejoindre : POST /api/salons/rejoindre. sGestion (nil si absent) juste : siège 0, repris
-// s'il est occupé (ancien jeton oublié, 0x0A). Invité : plus petit siège libre de 1 à 9, tant
-// que les invités sont moins de max_members − 1 et les arrivées d'invités moins de
-// 5 × max_members (sinon ErrFull). Reprise du siège 0 : plafond de repriseMax par heure
-// (sinon *Attente), et l'ancienne connexion du siège est fermée (4005). K_preuve_s fausse : *BadPassword, puis ErrNotFound au
-// 10ᵉ essai (salon détruit). sGestion faux : ErrBadRequest, sans essai compté.
+// s'il est occupé (ancien jeton oublié, ses lectures de pièces en cours coupées, 0x0A).
+// Invité : plus petit siège libre de 1 à 9, tant que les invités sont moins de
+// max_members − 1 et les arrivées d'invités moins de 5 × max_members (sinon ErrFull). Reprise
+// du siège 0 : plafond de repriseMax par heure (sinon *Attente), et l'ancienne connexion du
+// siège est fermée (4005). K_preuve_s fausse : *BadPassword, puis ErrNotFound au 10ᵉ essai
+// (salon détruit). sGestion faux : ErrBadRequest, sans essai compté.
 func (m *Manager) Rejoindre(kAcces, kPreuve, sGestion []byte) (Entree, error) {
 	v := share.Verifier(kAcces)
 	if v == nil {
@@ -359,6 +360,8 @@ func (m *Manager) Rejoindre(kAcces, kPreuve, sGestion []byte) (Entree, error) {
 	}
 	if ancien != nil {
 		delete(s.jetons, ancien.jetonV)
+		// Lectures de pièces en cours de l'ancien jeton coupées (Streams.mu : feuille).
+		m.flux.Revoke(cleFluxMembre(ancien.jetonV))
 	}
 	m.indexer(func(index map[[32]byte]*salon) {
 		if ancien != nil {
@@ -541,9 +544,10 @@ func (m *Manager) Membre(jeton []byte) (Membre, error) {
 }
 
 // departLocked : départ du siège n (Quitter, libération après 10 min hors ligne, exclusion) :
-// 0x03 au journal, jeton oublié, puis siège retiré des lecteurs attendus de toutes les trames
-// (effacements en chaîne, 0x0E après le 0x03) ; sans effet s'il est libre. Ne peut pas
-// échouer (invariant du journal, annoncerLocked). Appelé sous s.mu.
+// 0x03 au journal, jeton oublié et ses lectures de pièces en cours coupées, puis siège
+// retiré des lecteurs attendus de toutes les trames (effacements en chaîne, 0x0E après le
+// 0x03) ; sans effet s'il est libre. Ne peut pas échouer (invariant du journal,
+// annoncerLocked). Appelé sous s.mu.
 func (m *Manager) departLocked(s *salon, n uint8) {
 	if s.sieges[n] == nil {
 		return
@@ -552,6 +556,7 @@ func (m *Manager) departLocked(s *salon, n uint8) {
 	s.plusAttenduLocked(n)
 	jv, _ := s.oublierLocked(n)
 	m.indexer(func(index map[[32]byte]*salon) { delete(index, jv) })
+	m.flux.Revoke(cleFluxMembre(jv)) // lectures de pièces en cours de ce jeton coupées
 }
 
 // Tick : une passe d'entretien (chaque seconde, Run à la Task 15) : trames « 10 min » et
