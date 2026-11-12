@@ -32,14 +32,17 @@ type evenement struct {
 // siege : place occupée. jetonV : SHA-256 du jeton de membre (le jeton lui-même n'est
 // jamais gardé). emis : rang de l'annonce qui a donné le jeton (0x02 ou 0x0A) ; plancher :
 // rang à partir duquel le membre peut lire les pièces (Task 13). horsLigneDepuis : zéro
-// tant qu'un WebSocket du siège est ouvert (Task 9) ; posé à l'entrée. arrivee : rang de
-// l'arrivée (0x02) de l'occupant, gardé par une reprise (0x0A) : borne de Retirer.
+// tant qu'un WebSocket du siège est ouvert (Task 9) ; posé à l'entrée et à la déconnexion.
+// arrivee : rang de l'arrivée (0x02) de l'occupant, gardé par une reprise (0x0A) : borne de
+// Retirer. reprises : heures (Config.Now) des reprises par WebSocket de la dernière heure,
+// repriseMax au plus (connexion.go).
 type siege struct {
 	nonce           [16]byte
 	jetonV          [32]byte
 	emis, plancher  uint64
 	arrivee         uint64
 	horsLigneDepuis time.Time
+	reprises        []time.Time
 }
 
 // salon : état d'un salon vivant. Tous les champs sont protégés par mu.
@@ -59,6 +62,8 @@ type salon struct {
 	index  []entree
 	pieces map[uint64][16]byte
 	conv   *Conversation // nil pour la tombe d'un salon détruit sans état
+	// conns : connexion WebSocket de chaque siège (une au plus, connexion.go).
+	conns [nbSieges]*connexion
 	// fini : salon détruit ; plus rien n'y entre ni n'y est recréé (tombe gardée dans
 	// Manager.salons jusqu'à l'échéance).
 	fini bool
@@ -82,7 +87,8 @@ func (s *salon) occupesLocked() int {
 	return n
 }
 
-// annoncerLocked range une annonce au rang suivant. Invariant : len(journal) + sièges
+// annoncerLocked range une annonce au rang suivant et la diffuse aux connexions en direct.
+// Invariant : len(journal) + sièges
 // occupés ≤ journalMax, si bien qu'un siège occupé peut toujours être annoncé parti (0x03).
 // Toute annonce autre qu'un départ garde donc nbSieges places libres (sinon ErrLimit, rien
 // n'est changé) ; un départ ne peut pas échouer (il libère un siège et prend une place).
@@ -91,7 +97,9 @@ func (s *salon) annoncerLocked(enr func(seq uint64) []byte, depart bool) (uint64
 		return 0, ErrLimit
 	}
 	s.seq++
-	s.journal = append(s.journal, evenement{seq: s.seq, enr: enr(s.seq)})
+	ev := evenement{seq: s.seq, enr: enr(s.seq)}
+	s.journal = append(s.journal, ev)
+	s.diffuserLocked(ev.enr, true, nil)
 	return s.seq, nil
 }
 

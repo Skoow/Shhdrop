@@ -84,7 +84,11 @@ func lireEnr(t *testing.T, r []byte) enrLu {
 func lireSuite(t *testing.T, s *salon, apres uint64, max int) []enrLu {
 	t.Helper()
 	var l []enrLu
-	for _, r := range s.suite(apres, max) {
+	suite, err := s.suite(apres, max)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range suite {
 		l = append(l, lireEnr(t, r))
 	}
 	return l
