@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -24,10 +26,11 @@ const origineSalon = "https://shhdrop.app" // Origin de salonEnv
 
 // wsBanc : serveur HTTP réel (httptest) devant le gestionnaire du salon.
 type wsBanc struct {
-	e   *env
-	m   *salon.Manager
-	url string
-	k   keys // clés du dernier salon créé par membres
+	e    *env
+	m    *salon.Manager
+	url  string
+	addr string // hôte:port du serveur (requêtes brutes)
+	k    keys   // clés du dernier salon créé par membres
 }
 
 // nouveauWS : salonEnv servi par un vrai serveur HTTP ; cfg règle le http.Server (délais).
@@ -45,7 +48,128 @@ func nouveauWS(t *testing.T, cfg func(*http.Server)) *wsBanc {
 		attendre(t, 20*time.Second, func() bool { return e.srv.wsSlots.Len() == 0 })
 		ts.Close()
 	})
-	return &wsBanc{e: e, m: m, url: "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/salons/ws"}
+	return &wsBanc{e: e, m: m, url: "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/salons/ws",
+		addr: ts.Listener.Addr().String()}
+}
+
+// brut envoie la requête HTTP req telle quelle (TCP) et lit la réponse entière.
+func (b *wsBanc) brut(t *testing.T, req string) *rawResp {
+	t.Helper()
+	c, err := net.Dial("tcp", b.addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.WriteString(c, req); err != nil {
+		t.Fatal(err)
+	}
+	var raw bytes.Buffer
+	var hr *http.Request // HEAD : réponse sans corps
+	if strings.HasPrefix(req, "HEAD ") {
+		hr = &http.Request{Method: http.MethodHead}
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(io.TeeReader(c, &raw)), hr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &rawResp{StatusCode: resp.StatusCode, Header: resp.Header, Body: string(body), Raw: raw.String()}
+}
+
+type rawResp struct {
+	StatusCode int
+	Header     http.Header
+	Body, Raw  string
+}
+
+// I1 : une requête refusée (bonne origine, corps annoncé) garde les délais HTTP. Corps envoyé
+// au goutte-à-goutte : la connexion est coupée par ReadTimeout (1 s), pas tenue sans fin.
+func TestRefusGardeLesDelais(t *testing.T) {
+	b := nouveauWS(t, func(s *http.Server) { s.ReadTimeout, s.WriteTimeout = time.Second, time.Second })
+	for nom, h := range map[string]string{
+		"sans Upgrade": "",
+		"avec Upgrade": "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +
+			"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n",
+	} {
+		c, err := net.Dial("tcp", b.addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t0 := time.Now()
+		io.WriteString(c, "GET /api/salons/ws HTTP/1.1\r\nHost: x\r\nOrigin: "+origineSalon+"\r\n"+h+
+			"Content-Length: 100000\r\n\r\n")
+		stop := make(chan struct{})
+		go func() {
+			for {
+				select {
+				case <-stop:
+					return
+				case <-time.After(100 * time.Millisecond):
+					if _, err := c.Write([]byte{'x'}); err != nil {
+						return
+					}
+				}
+			}
+		}()
+		c.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_, err = io.Copy(io.Discard, c) // jusqu'à la coupure par le serveur
+		d := time.Since(t0)
+		close(stop)
+		c.Close()
+		if err != nil || d > 1500*time.Millisecond {
+			t.Fatalf("%s : coupée après %v (%v), attendu moins de 1,5 s", nom, d, err)
+		}
+	}
+	if n := b.e.srv.wsSlots.Len(); n != 0 {
+		t.Fatalf("%d places prises", n)
+	}
+}
+
+// Poignée de main invalide (bonne origine) : 400 bad_request fixe, avant toute place ; la
+// réponse ne recopie rien de la requête.
+func TestPoigneeInvalide(t *testing.T) {
+	b := nouveauWS(t, nil)
+	const m = "MARQUEURclient"
+	const ok = "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n"
+	const cle = "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+	debut := "GET /api/salons/ws HTTP/1.1\r\nHost: x\r\nOrigin: " + origineSalon + "\r\nX-Autre: " + m + "\r\n"
+	for nom, r := range map[string]string{
+		"sans Upgrade":    debut + "\r\n",
+		"Upgrade faux":    debut + "Upgrade: " + m + "\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" + cle + "\r\n",
+		"Connection faux": debut + "Upgrade: websocket\r\nConnection: " + m + "\r\nSec-WebSocket-Version: 13\r\n" + cle + "\r\n",
+		"version fausse":  debut + "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: " + m + "\r\n" + cle + "\r\n",
+		"version absente": debut + "Upgrade: websocket\r\nConnection: Upgrade\r\n" + cle + "\r\n",
+		"clé fausse":      debut + ok + "Sec-WebSocket-Key: " + m + "\r\n\r\n",
+		"clé courte":      debut + ok + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=\r\n\r\n",
+		"clé 17 octets":   debut + ok + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZSE=\r\n\r\n",
+		"clé absente":     debut + ok + "\r\n",
+		"clé en double":   debut + ok + cle + cle + "\r\n",
+		"corps":           debut + ok + cle + "Content-Length: 3\r\n\r\nabc",
+		"corps par blocs": debut + ok + cle + "Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+		"HEAD":            strings.Replace(debut, "GET", "HEAD", 1) + ok + cle + "\r\n",
+		"HTTP/1.0":        strings.Replace(debut, "HTTP/1.1", "HTTP/1.0", 1) + ok + cle + "\r\n",
+	} {
+		resp := b.brut(t, r)
+		want := `{"error":"bad_request"}`
+		if nom == "HEAD" {
+			want = ""
+		}
+		if resp.StatusCode != 400 || resp.Body != want || resp.Header.Get("Upgrade") != "" {
+			t.Errorf("%s : %d %q %v", nom, resp.StatusCode, resp.Body, resp.Header)
+		}
+		for _, x := range []string{m, "dGhl", "websocket", "Upgrade"} {
+			if strings.Contains(resp.Raw, x) {
+				t.Errorf("%s : la réponse recopie %q :\n%s", nom, x, resp.Raw)
+			}
+		}
+	}
+	if n := b.e.srv.wsSlots.Len(); n != 0 {
+		t.Fatalf("%d places prises", n)
+	}
 }
 
 func attendre(t *testing.T, d time.Duration, ok func() bool) {
@@ -169,6 +293,9 @@ func TestOrigineEtrangere(t *testing.T) {
 		"en double": {"Origin": {origineSalon, origineSalon}},
 		"casse":     {"Origin": {"https://SHHDROP.app"}},
 		"barre":     {"Origin": {origineSalon + "/"}},
+		"http":      {"Origin": {"http://shhdrop.app"}},
+		"port 443":  {"Origin": {"https://shhdrop.app:443"}},
+		"null":      {"Origin": {"null"}},
 	} {
 		c, resp, err := b.dial(t, h, nil)
 		if err == nil || c != nil {
@@ -208,6 +335,13 @@ func TestMessageTropGrand(t *testing.T) {
 	envoyer(t, c, append([]byte{0x01}, make([]byte, 4200)...)) // 4 201 octets
 	if code := codeFermeture(t, c); code != websocket.StatusMessageTooBig {
 		t.Fatalf("code %d, attendu 1009", code)
+	}
+	// 4 200 octets : lu (limite comprise), puis refusé par le salon (taille inexacte).
+	c = b.entrer(t, b.membres(t, 1)[0])
+	lireJusqua(t, c, 0x0D)
+	envoyer(t, c, append([]byte{0x01}, make([]byte, 4199)...))
+	if code := codeFermeture(t, c); code != salon.CodeInvalide {
+		t.Fatalf("4 200 octets : code %d, attendu 4003", code)
 	}
 }
 
@@ -258,6 +392,13 @@ func TestDeuxClientsEchangent(t *testing.T) {
 
 func TestWSPlaces(t *testing.T) {
 	b := nouveauWS(t, nil)
+	// Bonne origine, sans mise à niveau : refus, aucune place gardée.
+	if r := b.brut(t, "GET /api/salons/ws HTTP/1.1\r\nHost: x\r\nOrigin: "+origineSalon+"\r\n\r\n"); r.StatusCode != 400 {
+		t.Fatalf("sans Upgrade : %d", r.StatusCode)
+	}
+	if n := b.e.srv.wsSlots.Len(); n != 0 {
+		t.Fatalf("sans Upgrade : %d places prises", n)
+	}
 	var cs []*websocket.Conn
 	for range 4 {
 		cs = append(cs, b.ouvrir(t)) // sans accueil : tenus jusqu'à 5 s
@@ -324,20 +465,48 @@ func TestAucuneIPDansLeSalon(t *testing.T) {
 	envoyer(t, a, append([]byte{0x01}, trameWS()...))
 	lireJusqua(t, z, 0x01)
 	lireJusqua(t, a, 0x01)
-	// Lecture sous les verrous du gestionnaire et du salon (gestion), après la dernière
-	// écriture : le parcours qui suit ne court pas après les goroutines des connexions (au
-	// repos : aucun message en vue, pings toutes les 20 s).
-	time.Sleep(100 * time.Millisecond)
-	if g := b.e.do(req{method: "GET", path: "/api/salons/gestion", hdr: manage(b.k)}); jsonOf(t, g)["present"] != 2.0 {
-		t.Fatalf("gestion : %s", g.Body)
-	}
+	ip := netip.MustParseAddr("127.0.0.1")
+	// Places, connexions ouvertes : Len prend le verrou des places, qui ne changent plus
+	// ensuite (aucun WebSocket ouvert ni fermé pendant la lecture).
 	if b.e.srv.wsSlots.Len() != 2 {
 		t.Fatal("places")
 	}
+	k64, k48 := b.e.srv.lim.Key(ip)
+	if cles := clesSlots(b.e.srv.wsSlots); !reflect.DeepEqual(cles, map[string]bool{k64: true, k48: true}) {
+		t.Fatalf("clés des places : %v", cles)
+	}
+	parcourirSansAdresse(t, "places", b.e.srv.wsSlots, ip)
+	// État du salon : parcouru une fois toutes les connexions finies (places rendues après la
+	// fin de Servir et de ses goroutines) ; aucune goroutine ne l'écrit plus pendant le parcours.
+	b.m.FermerTout()
+	for _, c := range []*websocket.Conn{a, z} {
+		if code := codeFermeture(t, c); code != websocket.StatusGoingAway {
+			t.Fatalf("code %d, attendu 1001", code)
+		}
+	}
+	attendre(t, 20*time.Second, func() bool { return b.e.srv.wsSlots.Len() == 0 })
+	if g := b.e.do(req{method: "GET", path: "/api/salons/gestion", hdr: manage(b.k)}); g.Code != 200 {
+		t.Fatalf("gestion : %s", g.Body)
+	}
+	parcourirSansAdresse(t, "gestionnaire", b.m, ip)
 
-	ip := netip.MustParseAddr("127.0.0.1")
+	// Le parcours voit bien une adresse gardée (témoin).
+	var w marcheur
+	w.vu = map[uintptr]bool{}
+	w.marcher(reflect.ValueOf(&struct {
+		a netip.Addr
+		s string
+	}{ip, "x"}))
+	if w.adresse == "" || len(w.octets) != 1 || string(w.octets[0]) != "x" {
+		t.Fatalf("témoin : %+v", w)
+	}
+}
+
+// parcourirSansAdresse : aucune adresse (type ou octets de ip, ::1) dans v.
+func parcourirSansAdresse(t *testing.T, nom string, v any, ip netip.Addr) {
+	t.Helper()
 	interdits := [][]byte{[]byte(ip.String()), ip.AsSlice(), []byte(netip.MustParseAddr("::1").String())}
-	for nom, v := range map[string]any{"gestionnaire": b.m, "places": b.e.srv.wsSlots} {
+	{
 		var w marcheur
 		w.vu = map[uintptr]bool{}
 		w.marcher(reflect.ValueOf(v))
@@ -354,21 +523,6 @@ func TestAucuneIPDansLeSalon(t *testing.T) {
 				}
 			}
 		}
-	}
-	// Le parcours voit bien une adresse gardée (témoin).
-	var w marcheur
-	w.vu = map[uintptr]bool{}
-	w.marcher(reflect.ValueOf(&struct {
-		a netip.Addr
-		s string
-	}{ip, "x"}))
-	if w.adresse == "" || len(w.octets) != 1 || string(w.octets[0]) != "x" {
-		t.Fatalf("témoin : %+v", w)
-	}
-	k64, k48 := b.e.srv.lim.Key(ip)
-	cles := clesSlots(b.e.srv.wsSlots)
-	if !reflect.DeepEqual(cles, map[string]bool{k64: true, k48: true}) {
-		t.Fatalf("clés des places : %v", cles)
 	}
 }
 

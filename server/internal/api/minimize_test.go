@@ -19,6 +19,15 @@ import (
 // (cmd/shhdrop/static.go) ; même valeur dans tous les navigateurs visés, jamais gardé ni journalisé.
 var readHeaders = []string{"Authorization", "X-Shh-Client-IP", "X-Shh-Access", "X-Shh-Manage", "X-Shh-Grant", "Accept-Encoding"}
 
+// wsHeaders : poignée de main du WebSocket du salon (plan C-2 Task 10, spec §39.3.1
+// « Origine »), lus seulement dans handlers_salon_ws.go (salonWS, poigneeWS) : Origin comparé à
+// SHH_ORIGIN, les autres vérifiés (RFC 6455) avant toute place ; rien n'est gardé, journalisé
+// ni recopié dans une réponse. websocket.Accept (coder/websocket) relit ensuite Host,
+// Connection, Upgrade, Origin et Sec-WebSocket-* (Key, Version, Protocol, Extensions) pour la
+// mise à niveau, sans rien garder non plus. Caddy ne doit donc pas retirer Origin sur
+// /api/salons/ws (§36 S2 à amender).
+var wsHeaders = []string{"Origin", "Upgrade", "Connection", "Sec-WebSocket-Version", "Sec-WebSocket-Key"}
+
 type srcFile struct {
 	path string
 	fset *token.FileSet
@@ -95,10 +104,9 @@ func TestNoHeaderReadOutsideAllowList(t *testing.T) {
 					name, lit := strLit(x.Args[0])
 					switch {
 					case lit && slices.Contains(readHeaders, name):
-					case lit && name == "Origin" && enclosing(sf.f, x.Pos()) == "salonWS":
-						// Salon (spec §39.3.1, « Origine », plan C-2 Task 10) : comparé à SHH_ORIGIN
-						// avant la mise à niveau du WebSocket, jamais gardé ni journalisé. Caddy
-						// ne doit donc pas retirer Origin sur /api/salons/ws (§36 S2 à amender).
+					case lit && slices.Contains(wsHeaders, name) && filepath.Base(sf.path) == "handlers_salon_ws.go" &&
+						slices.Contains([]string{"salonWS", "poigneeWS"}, enclosing(sf.f, x.Pos())):
+						// Poignée de main du WebSocket du salon (wsHeaders).
 					case !lit && enclosing(sf.f, x.Pos()) == "headerSecret":
 						// nom passé par l'appelant : vérifié sur les appels de headerSecret
 					default:
