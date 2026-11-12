@@ -28,11 +28,11 @@ func allocate(f *os.File, size int64, noSparse bool) error {
 	return err
 }
 
-// openRead ouvre en lecture avec O_NOATIME : la lecture ne change pas la date d'accès
+// OpenRead ouvre en lecture avec O_NOATIME : la lecture ne change pas la date d'accès
 // (sinon, en relatime, la première lecture après l'écriture la fixe à la milliseconde).
 // O_NOATIME exige d'être propriétaire du fichier (EPERM sinon) : repli sur une ouverture
 // ordinaire ; le volume monté en noatime (spec §15.1) couvre alors ce cas.
-func openRead(path string) (*os.File, error) {
+func OpenRead(path string) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_RDONLY|unix.O_NOATIME, 0)
 	if errors.Is(err, unix.EPERM) {
 		return os.Open(path)

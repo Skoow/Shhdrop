@@ -265,7 +265,7 @@ type Section struct {
 func (s *Section) Close() error { return s.f.Close() }
 
 // Open ouvre exactement n octets à partir de off, pour une lecture en flux. Le fichier est
-// ouvert sans mise à jour de la date d'accès quand le système le permet (openRead) :
+// ouvert sans mise à jour de la date d'accès quand le système le permet (OpenRead) :
 // l'atime trahirait l'heure de la première lecture (audit de confidentialité P5).
 // La taille est vérifiée sur le fichier ouvert : un fichier plus court que la zone
 // demandée est refusé avant d'envoyer quoi que ce soit.
@@ -274,7 +274,7 @@ func (s *Store) Open(id string, off int64, n int64) (*Section, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := openRead(path)
+	f, err := OpenRead(path)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +297,7 @@ func (s *Store) OpenFile(id string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return openRead(path)
+	return OpenRead(path)
 }
 
 // Delete supprime le fichier ; sans erreur s'il est déjà absent.

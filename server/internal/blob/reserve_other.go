@@ -12,8 +12,8 @@ func allocate(f *os.File, size int64, noSparse bool) error {
 	return f.Truncate(size)
 }
 
-// openRead : hors Linux, pas d'O_NOATIME ; le volume doit être monté en noatime (spec §15.1).
-func openRead(path string) (*os.File, error) { return os.Open(path) }
+// OpenRead : hors Linux, pas d'O_NOATIME ; le volume doit être monté en noatime (spec §15.1).
+func OpenRead(path string) (*os.File, error) { return os.Open(path) }
 
 // punchHole : hors Linux, jamais (l'appelant écrit des zéros).
 func punchHole(*os.File, int64, int64) bool { return false }
