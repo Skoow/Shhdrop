@@ -197,6 +197,7 @@ func TestEnregistrements(t *testing.T) {
 		{"liste", EnrListe(seq, 0, []Annonce{{0, n1, 0}, {6, n2, 0x0102030405060708}}), 61,
 			cat(tete(0x0D), []byte{0, 2, 0}, n1[:], u64(0), []byte{6}, n2[:], u64(0x0102030405060708))},
 		{"effacée", EnrEfface(seq, 0x0102030405060708), 17, cat(tete(0x0E), u64(0x0102030405060708))},
+		{"acceptée", EnrAcceptee(seq), 9, tete(0x0F)},
 	}
 	for _, c := range cas {
 		if len(c.got) != c.taille || len(c.want) != c.taille || !bytes.Equal(c.got, c.want) {
@@ -387,7 +388,7 @@ func FuzzFlux(f *testing.F) {
 			EnrArrivee(seq, siege, nonce), EnrDepart(seq, siege), EnrFin(seq, siege),
 			EnrPresence(seq, siege, r&1 == 1, uint64(recu)), EnrPong(seq, ping), EnrExclusion(seq, siege, nonce, r),
 			EnrReprise(seq, siege, nonce), EnrLimite(seq, r), EnrPlein(seq),
-			EnrListe(seq, siege, liste), EnrEfface(seq, uint64(recu)),
+			EnrListe(seq, siege, liste), EnrEfface(seq, uint64(recu)), EnrAcceptee(seq),
 		} {
 			if d, err := LireDemande(e); err == nil {
 				t.Fatalf("enregistrement %#02x lu comme une demande %#02x", e[0], d.Type)
@@ -397,6 +398,10 @@ func FuzzFlux(f *testing.F) {
 			if _, err := LireAccueil(e); err == nil {
 				t.Fatalf("enregistrement %#02x lu comme un accueil", e[0])
 			}
+		}
+		// Accusé d'acceptation (revue finale C-2, I1) : 0x0F ‖ seq, 9 octets.
+		if a := EnrAcceptee(seq); len(a) != 9 || a[0] != 0x0F || binary.BigEndian.Uint64(a[1:]) != seq {
+			t.Fatalf("0x0F : %x", a)
 		}
 		// Dernière connexion (Task 9b) : 0x07 de 19 octets, minute nulle en ligne ; 0x0D de
 		// 11 + 25n octets, chaque annonce relue telle quelle.

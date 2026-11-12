@@ -113,6 +113,11 @@ type connexion struct {
 	// après le dernier lot au retour au direct, lotEffaces au plus à la fois. Vidés, avec file
 	// et prive, dès que la connexion est arrêtée (viderLocked).
 	effaces []uint64
+	// acceptees : rangs des 0x0F à écrire (trames 0x01 de ce client acceptées), hors de la
+	// file : jamais une cause de fermeture ni de sortie du direct ; écrits après la file (en
+	// direct, toujours après l'écho de leur trame), avant le lot de rattrapage suivant. Bornés
+	// par les seaux du siège (limites.go) et vidés à chaque passage de l'écrivain.
+	acceptees []uint64
 
 	reveil       chan struct{} // capacité 1
 	stop         chan struct{} // fermé par arreter
@@ -585,10 +590,11 @@ func (c *connexion) traiter(d Demande, ip netip.Addr, autoriser func(netip.Addr)
 			c.repondre(func(seq uint64) []byte { return EnrLimite(seq, attente) })
 			return true
 		}
-		_, err := c.m.Recevoir(c.mb, d.Trame, d.Piece)
+		seq, err := c.m.Recevoir(c.mb, d.Trame, d.Piece)
 		var at *Attente
 		switch {
 		case err == nil:
+			c.accepter(seq)
 		case errors.As(err, &at):
 			c.repondre(func(seq uint64) []byte { return EnrLimite(seq, secondesAuDessus(at.Retry)) })
 		case errors.Is(err, ErrPlein):
@@ -659,6 +665,19 @@ func (c *connexion) repondre(enr func(seq uint64) []byte) {
 		return
 	}
 	c.prive = append(c.prive, enr(s.seq))
+	c.signaler()
+}
+
+// accepter : 0x0F de la trame de rang seq pour ce client seul (revue finale C-2, I1), en
+// direct comme en rattrapage, sans jamais fermer ni faire sortir du direct.
+func (c *connexion) accepter(seq uint64) {
+	s := c.s
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c.arrete.Load() {
+		return
+	}
+	c.acceptees = append(c.acceptees, seq)
 	c.signaler()
 }
 
@@ -738,7 +757,7 @@ func (c *connexion) prochainLot() (lot [][]byte, continuer bool) {
 	}
 }
 
-// etapeLocked : réponses propres (l'accueil en premier) et file, qui précèdent ce que le
+// etapeLocked : réponses propres (l'accueil en premier), file puis 0x0F, qui précèdent ce que le
 // rattrapage lira ensuite (rang > curseur) ; sinon attente en direct ; sinon lot de
 // rattrapage complet à lire hors du verrou ; sinon dernier lot, lu sous le verrou, et passage
 // au direct dans la même section.
@@ -762,6 +781,10 @@ func (c *connexion) etapeLocked() (lot [][]byte, refs []ref, e etape) {
 		lot = append(lot, c.file...)
 		c.file = nil
 	}
+	for _, seq := range c.acceptees {
+		lot = append(lot, EnrAcceptee(seq))
+	}
+	c.acceptees = nil
 	if c.direct {
 		lot = c.ajouterEffaces(lot)
 	}
@@ -811,7 +834,7 @@ func (c *connexion) ajouterEffaces(lot [][]byte) [][]byte {
 // viderLocked : connexion arrêtée, plus rien à écrire : 0x0E, file et réponses en attente
 // oubliés (mémoire rendue sans attendre la fin de Servir). Sous s.mu.
 func (c *connexion) viderLocked() {
-	c.effaces, c.file, c.prive = nil, nil, nil
+	c.effaces, c.file, c.prive, c.acceptees = nil, nil, nil, nil
 }
 
 // avancer : curseur après un lot de rattrapage lu hors du verrou (seul l'écrivain le change

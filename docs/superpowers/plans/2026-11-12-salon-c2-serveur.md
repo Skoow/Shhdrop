@@ -76,7 +76,7 @@ Entiers gros-boutistes. Messages binaires seulement (un message texte → fermet
 
 | Type | Corps | Effet |
 |---|---|---|
-| `0x01` trame | 4 140 octets, ou 4 140 ‖ pièce (16 octets) | rangée, relayée à tous dont l'expéditeur ; pièce liée si elle est liable (ci-dessous) |
+| `0x01` trame | 4 140 octets, ou 4 140 ‖ pièce (16 octets) | rangée, relayée à tous les connectés en direct dont l'expéditeur, puis `0x0F` à l'expéditeur seul ; pièce liée si elle est liable (ci-dessous) |
 | `0x02` retirer | `seq` (8) | trame non volatile du siège attesté : écrasée, pièce liée effacée |
 | `0x03` quitter | vide | départ (`0x03` diffusé), jeton oublié, fermeture 1000 |
 | `0x04` ping | 8 octets | `0x08` avec les mêmes octets |
@@ -102,8 +102,11 @@ Autres messages de contrôle (`0x02`–`0x05`) : 600 par minute et par WebSocket
 | `0x0C` plein | — (trame non rangée : disque plein) | non |
 | `0x0D` liste | créateur (1, toujours 0) ‖ n (1) ‖ n × (siège (1) ‖ `nonce_arrivée` (16) ‖ dernière connexion (8), comme `0x07`) — 11 + 25n octets ; `seq` = rang où elle s'applique ; dernière connexion non nulle seulement pour un occupant encore là et hors ligne, jamais pour soi | non |
 | `0x0E` effacée | `seq` de la trame effacée (8) | non |
+| `0x0F` acceptée | — (9 octets en tout : `seq` = rang de la trame `0x01` acceptée) ; **à l'expéditeur seul**, pour chaque `0x01` rangé ou relayé, en direct comme en rattrapage (revue finale C-2, I1) | non |
 
 **Séquence d'accueil** : `0x0D` (état au rang `depuis` effectif = max(`depuis`, rang d'émission du jeton), plafonné au dernier rang) → un `0x07` par siège occupé → un `0x0E` par trame « instantané » effacée par lecture ou par départ dont le rang est dans (rang d'émission du jeton, `depuis` effectif] (trames que ce client a pu recevoir avant sa coupure ; jamais pour un retrait, que le client apprend par le message chiffré de l'expéditeur, ni pour 10 min et 1 h, qu'il compte lui-même) → rattrapage (trames non volatiles non effacées et `0x02`/`0x03`/`0x09`/`0x0A` de rang > `depuis`, fusionnés dans l'ordre `seq`) → direct. Dernière connexion (Task 9b, spec v3 §14.1, sans masquage) : minute de la dernière déconnexion d'un WebSocket du siège, en mémoire seulement, posée à la déconnexion (pas à une reprise, qui la garde), oubliée quand le siège est libéré ou le salon fini. **Quelle minute fait foi** (relecture Task 14) : celle du `0x07` (état présent du siège, envoyé après le `0x0D` puis à chaque connexion ou déconnexion) ; celle d'une entrée du `0x0D` décrit le siège au rang de la liste, un rang passé pendant le rattrapage : le client (C-3) la remplace par celle du `0x07` qui suit, jamais l'inverse. Reprise : `0x0A` diffusé, puis `0x0D` au rang de ce `0x0A`, `0x07`, direct (aucun rattrapage, aucun `0x0E` : nouvelle identité). Un `0x0E` ne fait jamais fermer une connexion ni sortir du direct : hors du direct, il est renvoyé au retour au direct (Task 11).
+
+**Accusé d'acceptation `0x0F`** (revue finale C-2, I1, 12 novembre) : le client n'a qu'une trame `0x01` en vol et la règle sur `0x0F` (acceptée, rang donné), `0x0B` (même octets renvoyés après le délai) ou `0x0C` (échec), **jamais sur l'écho** : une connexion en rattrapage ne reçoit pas l'écho d'une trame volatile, ni d'une trame « instantané » effacée avant que le rattrapage l'atteigne. `0x0F`, `0x0B` et `0x0C` atteignent toujours l'expéditeur, même en rattrapage, et à lui seul. `0x0F` passe hors de la file du direct (liste propre à la connexion) : il ne fait jamais fermer la connexion ni sortir du direct. En direct, il suit toujours l'écho de sa trame ; en rattrapage, il peut le précéder (l'écho d'une trame non volatile arrive ensuite par le rattrapage). Il ne prend pas de rang : le client ne s'en sert pas comme `depuis`.
 
 **Fin du rattrapage (relecture Task 16, pour C-3)** : rien ne la marque. Le client la déduit en envoyant un ping `0x04` après l'accueil : le pong `0x08` arrive après tout le rattrapage déjà en file. Tant qu'il ne l'a pas reçu, il n'ajoute personne au groupe MLS (un ajout en double reste sans gravité : le premier Commit gagne).
 

@@ -240,6 +240,12 @@ func minuteUnix(t time.Time) uint64 {
 	return uint64(u / 60)
 }
 
+// EnrAcceptee : 0x0F, 9 octets ; seq = rang de la trame 0x01 acceptée (revue finale C-2, I1).
+// Remis à l'expéditeur seul, en direct comme en rattrapage : il règle sa trame en vol même
+// s'il n'en verra jamais l'écho (volatile, « instantané » effacée avant son rattrapage). Ne
+// prend pas de rang ; en rattrapage, il peut précéder l'écho de sa trame.
+func EnrAcceptee(seq uint64) []byte { return enr(0x0F, seq, 0) }
+
 // EnrEfface : 0x0E, seq de la trame effacée.
 func EnrEfface(seq, cible uint64) []byte {
 	return binary.BigEndian.AppendUint64(enr(0x0E, seq, 8), cible)

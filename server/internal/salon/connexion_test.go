@@ -529,7 +529,7 @@ func TestRattrapagePuisDirectSansTrou(t *testing.T) {
 	})
 }
 
-// L'expéditeur reçoit sa trame avec son rang et son siège.
+// L'expéditeur reçoit sa trame avec son rang et son siège, puis 0x0F.
 func TestEchoExpediteur(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		b := nouveauBanc(t, 200)
@@ -542,9 +542,12 @@ func TestEchoExpediteur(t *testing.T) {
 		la.envoyer(demTrame(tr))
 		synctest.Wait()
 		l := la.enrs()
-		e := l[len(l)-1]
+		e := l[len(l)-2] // puis 0x0F (TestAccepteeApresEchoEnDirect)
 		if e.ty != 0x01 || e.seq != dernierSeq(a.salon) || e.corps[0] != ea.Siege || !bytes.Equal(e.corps[9:], tr) {
-			t.Fatalf("écho : %x %d %d", e.ty, e.seq, e.corps[0])
+			t.Fatalf("écho : %x %d", e.ty, e.seq)
+		}
+		if f := l[len(l)-1]; f.ty != 0x0F || f.seq != e.seq {
+			t.Fatalf("0x0F après l'écho : %x %d", f.ty, f.seq)
 		}
 		finir(t, la)
 	})
@@ -996,9 +999,19 @@ func TestTrameFrequenceIP(t *testing.T) {
 		if n != 120 {
 			t.Fatal("trames rangées", n)
 		}
-		l := la.enrs()
-		if !bytes.Equal(la.brut(len(l)-1), EnrLimite(dernierSeq(s), 30)) { // horloge à 10:07:30
-			t.Fatalf("0x0B : %x", la.brut(len(l)-1))
+		// Envoi en rafale (le client de C-3 n'a qu'une trame en vol) : le 0x0B peut précéder
+		// des 0x0F de trames d'avant ; un seul 0x0B, un 0x0F par trame rangée.
+		var limites [][]byte
+		for i, e := range la.enrs() {
+			if e.ty == 0x0B {
+				limites = append(limites, la.brut(i))
+			}
+		}
+		if len(limites) != 1 || !bytes.Equal(limites[0], EnrLimite(dernierSeq(s), 30)) { // horloge à 10:07:30
+			t.Fatalf("0x0B : %x", limites)
+		}
+		if n := len(acceptees(t, la)); n != 120 {
+			t.Fatal("0x0F :", n)
 		}
 		if la.codeFerme() != 0 {
 			t.Fatal("fermé")

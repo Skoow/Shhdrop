@@ -9,8 +9,9 @@
 // `remplacerAnnonces` avant toute trame ; `0x02`/`0x0A` → `annoncer` ; `0x03`/`0x09` →
 // `marquerParti` ; `0x01` → `recevoirTrame(trame, seq, siège)` ; événement `keyPackage` →
 // `ajouter` par le plus petit siège en ligne du groupe ; `commitAccepte { welcome }` → envoi du
-// Welcome. Les trames montantes partent une à une : chacune attend son écho (son rang) ou un
-// refus (`0x0B` : attente puis nouvel envoi des mêmes octets ; `0x0C` : échec).
+// Welcome. Les trames montantes partent une à une : chacune attend son accusé `0x0F` (son
+// rang ; revue finale C-2, I1 : il arrive même en rattrapage, quand l'écho ne viendra jamais)
+// ou un refus (`0x0B` : attente puis nouvel envoi des mêmes octets ; `0x0C` : échec).
 import { webcrypto } from "node:crypto";
 import { passwordKey, type KdfParams } from "../src/engine";
 import { loadSalonEngine, type ClesSalon, type EnveloppeEnvoi, type Evenement, type Salon, type SalonEngine } from "../src/salon/engine";
@@ -22,7 +23,7 @@ export const KDF: KdfParams = { ops: 3, mem: 67108864 };
 export const MDP = "Kq7!mP2#x?a";
 const TAILLE_TRAME = 4140;
 const DEPUIS_REPRISE = 0xffffffffffffffffn;
-/** Délai d'un envoi (écho ou refus) : au-delà, échec avec les écarts notés. */
+/** Délai d'un envoi (`0x0F` ou refus) : au-delà, échec avec les écarts notés. */
 const DELAI_ENVOI = 30_000;
 
 /**
@@ -44,6 +45,7 @@ const TAILLES: Record<number, number> = {
   0x0b: 9 + 4,
   0x0c: 9,
   0x0e: 9 + 8,
+  0x0f: 9,
 };
 /** Types qui prennent un nouveau rang. */
 const RANGES = new Set([0x01, 0x02, 0x03, 0x09, 0x0a]);
@@ -85,7 +87,7 @@ async function json(srv: Srv, method: string, path: string, headers: Record<stri
   return o;
 }
 
-/** Sortie d'une demande d'envoi en cours : écho (rang), ou refus. */
+/** Sortie d'une demande d'envoi en cours : accusé `0x0F` (rang), ou refus. */
 type EnCours = { trame: Uint8Array; resoudre: (seq: number) => void; refuser: (e: Error) => void; limite: (s: number) => void };
 
 export class ClientSalon {
@@ -311,6 +313,12 @@ export class ClientSalon {
       case 0x0e:
         this.effaces.push(u64(b, 9));
         break;
+      case 0x0f:
+        // Accusé d'acceptation, à l'expéditeur seul : seq = rang de la trame en vol. En direct,
+        // il suit l'écho ; en rattrapage, il peut le précéder (sans rang : dernierSeq inchangé).
+        if (this.#enCours) this.#enCours.resoudre(seq);
+        else this.erreurs.push(`0x0F ${seq} sans trame en vol`);
+        break;
     }
     this.#noter({ k: "enr", enr });
   }
@@ -344,7 +352,6 @@ export class ClientSalon {
   }
 
   #trame(seq: number, siege: number, recuMs: number, trame: Uint8Array): void {
-    if (siege === this.siege && this.#enCours && egal(trame, this.#enCours.trame)) this.#enCours.resoudre(seq);
     if (!this.#salon) return;
     let ev: Evenement;
     try {
@@ -406,8 +413,8 @@ export class ClientSalon {
   }
 
   /**
-   * Envoie une trame (et la pièce liée) ; rend son rang (écho). `0x0B` : attente puis nouvel
-   * envoi des mêmes octets ; `0x0C` : échec. Une trame à la fois. Ni écho ni refus en
+   * Envoie une trame (et la pièce liée) ; rend son rang (accusé `0x0F`). `0x0B` : attente puis
+   * nouvel envoi des mêmes octets ; `0x0C` : échec. Une trame à la fois. Ni accusé ni refus en
    * `DELAI_ENVOI` : échec, avec les écarts notés par ce client.
    */
   envoyerTrame(trame: Uint8Array, piece?: Uint8Array): Promise<number> {
@@ -444,7 +451,7 @@ export class ClientSalon {
             clearTimeout(this.#relance); // aucun nouvel envoi d'une trame abandonnée
             this.#relance = undefined;
           }
-          ko(new Error(`siège ${this.siege} : envoi sans écho après ${DELAI_ENVOI} ms ; écarts : ${JSON.stringify(this.erreurs)}`));
+          ko(new Error(`siège ${this.siege} : envoi sans 0x0F après ${DELAI_ENVOI} ms ; écarts : ${JSON.stringify(this.erreurs)}`));
         }, DELAI_ENVOI);
       });
       return Promise.race([envoi, delai]).finally(() => clearTimeout(t));
