@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/blob"
-	"github.com/skoow/shhdrop/server/internal/limits"
 	"github.com/skoow/shhdrop/server/internal/share"
 )
 
@@ -17,8 +16,8 @@ import (
 // membre. La base ne garde que les colonnes de §39.3.5 ; sièges, jetons (par SHA-256),
 // nonces et rangs vivent en mémoire.
 //
-// Ordre des verrous : essais (rayé par id) → Manager.mu → salon.mu → Manager.idxMu ;
-// Conversation a son propre verrou, pris en dernier. Aucune sortie (journal, stderr) : les
+// Ordre des verrous : createMu → Manager.mu ; essais (rayé par id) → Manager.mu → salon.mu →
+// Manager.idxMu ; Conversation a son propre verrou, pris en dernier. Aucune sortie (journal, stderr) : les
 // erreurs remontent à l'appelant, messages fixes.
 
 const (
@@ -30,6 +29,13 @@ const (
 	reserveCreation int64 = 2 << 30
 	kdfOps                = 3
 	kdfMem                = 67108864
+	// VivantsParBloc : salons vivants au plus par bloc /48 (par adresse en IPv4), pour que
+	// 14 blocs à 15 créations par jour ne prennent pas les SHH_SALONS_MAX places (spec
+	// §39.3.6, décision de l'équipe du 12 novembre, réglable).
+	VivantsParBloc = 5
+	// quart : arrondi des échéances (share.Ceil15) ; un salon ne peut pas échoir avant le
+	// prochain multiple.
+	quart = 900
 )
 
 // Config : dépendances du gestionnaire, toutes obligatoires (NewManager).
@@ -42,7 +48,6 @@ type Config struct {
 	StorageMax           int64 // SHH_STORAGE_MAX
 	// UsedPartages : octets des partages (blob.Store des partages).
 	UsedPartages func() (int64, error)
-	Limites      *limits.Limiter
 }
 
 // Manager : salons vivants du processus. Sûr pour un usage concurrent.
@@ -53,6 +58,11 @@ type Manager struct {
 
 	mu     sync.Mutex
 	salons map[string]*salon // id interne → état (créé au premier Rejoindre)
+	// vivants : salons créés par ce processus et pas encore finis (id interne → bloc et
+	// échéance) ; parBloc : leur nombre par bloc (clé opaque, CreerReq.Bloc). En mémoire
+	// seulement : un redémarrage les oublie (les salons d'avant ne comptent plus).
+	vivants map[string]vivant
+	parBloc map[[32]byte]int
 
 	idxMu sync.Mutex
 	// index : SHA-256 d'un jeton (valide ou révoqué) → salon ; la vérité est dans salon.jetons
@@ -65,7 +75,7 @@ var errConfig = errors.New("salon: configuration incomplète")
 // NewManager vérifie que chaque champ est posé.
 func NewManager(c Config) (*Manager, error) {
 	if c.DB == nil || c.Pieces == nil || c.DossierConversations == "" || c.Now == nil || c.Max <= 0 ||
-		c.StorageMax <= 0 || c.UsedPartages == nil || c.Limites == nil {
+		c.StorageMax <= 0 || c.UsedPartages == nil {
 		return nil, errConfig
 	}
 	// Dossier des pièces créé ici (0700) : absent, UsedBytes échouerait fermé et bloquerait
@@ -76,7 +86,36 @@ func NewManager(c Config) (*Manager, error) {
 	if err := os.MkdirAll(c.Pieces.Dir, 0o700); err != nil {
 		return nil, es(err)
 	}
-	return &Manager{cfg: c, salons: map[string]*salon{}, index: map[[32]byte]*salon{}}, nil
+	return &Manager{cfg: c, salons: map[string]*salon{}, index: map[[32]byte]*salon{},
+		vivants: map[string]vivant{}, parBloc: map[[32]byte]int{}}, nil
+}
+
+// vivant : bloc et échéance d'un salon compté dans parBloc.
+type vivant struct {
+	bloc [32]byte
+	exp  int64
+}
+
+// finirLocked retire le salon id du compte de son bloc ; sans effet s'il n'y est pas (déjà
+// fini, ou créé avant un redémarrage). Appelé sous m.mu.
+func (m *Manager) finirLocked(id string) {
+	v, ok := m.vivants[id]
+	if !ok {
+		return
+	}
+	delete(m.vivants, id)
+	if m.parBloc[v.bloc]--; m.parBloc[v.bloc] <= 0 {
+		delete(m.parBloc, v.bloc)
+	}
+}
+
+// echusLocked retire du compte les salons échus à now. Appelé sous m.mu.
+func (m *Manager) echusLocked(now int64) {
+	for id, v := range m.vivants {
+		if v.exp <= now {
+			m.finirLocked(id)
+		}
+	}
 }
 
 // essaiLock : verrou des entrées du salon id (rayé, comme share.attemptLock) : vérification
@@ -107,11 +146,13 @@ func base(err error) error {
 }
 
 // CreerReq : POST /api/salons. AccessV, ManageV, ProofV : SHA-256 de K_accès_s, S_gestion
-// et K_preuve_s (les deux premiers calculés par le serveur depuis les secrets reçus).
+// et K_preuve_s (les deux premiers calculés par le serveur depuis les secrets reçus). Bloc :
+// clé opaque du bloc du client (limits.CleBloc), non nulle, gardée en mémoire seulement.
 type CreerReq struct {
 	AccessV, ManageV, ProofV, Salt       []byte
 	TTLHours, MaxMembers, KdfOps, KdfMem int
 	MembersCanDestroy                    bool
+	Bloc                                 [32]byte
 }
 
 // Valide : valeurs de la spécification (durée, membres, Argon2id, longueurs, vérificateurs
@@ -121,12 +162,14 @@ func (r CreerReq) Valide() bool {
 		r.MaxMembers >= 2 && r.MaxMembers <= nbSieges && r.KdfOps == kdfOps && r.KdfMem == kdfMem &&
 		len(r.Salt) == 16 && len(r.AccessV) == 32 && len(r.ManageV) == 32 && len(r.ProofV) == 32 &&
 		share.NotEmptyHash(r.AccessV, r.ManageV, r.ProofV) && string(r.AccessV) != string(r.ManageV) &&
-		string(r.ProofV) != string(r.AccessV) && string(r.ProofV) != string(r.ManageV)
+		string(r.ProofV) != string(r.AccessV) && string(r.ProofV) != string(r.ManageV) && r.Bloc != [32]byte{}
 }
 
 // Creer range un salon et rend le délai jusqu'à son échéance (ceil15(now + ttl), seule date
 // stockée). ErrConflict si access_v ou manage_v est déjà pris ; ErrBusy si Max salons vivants
-// existent déjà ou si l'usage total plus 2 Gio dépasse StorageMax.
+// existent déjà ou si l'usage total plus 2 Gio dépasse StorageMax ; *Attente (jusqu'au
+// quart d'heure suivant, où une échéance peut libérer une place) si le bloc a déjà
+// VivantsParBloc salons vivants. Un refus ne prend aucune place du bloc.
 func (m *Manager) Creer(r CreerReq) (time.Duration, error) {
 	if !r.Valide() {
 		return 0, ErrBadRequest
@@ -161,13 +204,28 @@ func (m *Manager) Creer(r CreerReq) (time.Duration, error) {
 	if partages+salons+reserveCreation > m.cfg.StorageMax {
 		return 0, ErrBusy
 	}
+	// Place du bloc prise avant l'insertion (une destruction de ce salon, même immédiate,
+	// la retrouve), rendue si l'insertion échoue.
+	id := share.NewID()
+	m.mu.Lock()
+	m.echusLocked(now)
+	if m.parBloc[r.Bloc] >= VivantsParBloc {
+		m.mu.Unlock()
+		return 0, &Attente{Retry: secs(quart - (now%quart+quart)%quart)}
+	}
+	m.vivants[id] = vivant{bloc: r.Bloc, exp: exp}
+	m.parBloc[r.Bloc]++
+	m.mu.Unlock()
 	mcd := 0
 	if r.MembersCanDestroy {
 		mcd = 1
 	}
 	if _, err := m.cfg.DB.Exec(`INSERT INTO salons(id,access_v,manage_v,proof_v,salt,kdf_ops,kdf_mem,expires_at,
-		max_members,members_can_destroy) VALUES(?,?,?,?,?,?,?,?,?,?)`, share.NewID(), r.AccessV, r.ManageV, r.ProofV,
+		max_members,members_can_destroy) VALUES(?,?,?,?,?,?,?,?,?,?)`, id, r.AccessV, r.ManageV, r.ProofV,
 		r.Salt, r.KdfOps, r.KdfMem, exp, r.MaxMembers, mcd); err != nil {
+		m.mu.Lock()
+		m.finirLocked(id)
+		m.mu.Unlock()
 		return 0, base(err)
 	}
 	return secs(exp - now), nil
@@ -365,6 +423,7 @@ func (m *Manager) detruire(id string) error {
 		s = nouveauSalon(id, m.cfg.Now().Add(25*time.Hour), 0, nil)
 		m.salons[id] = s
 	}
+	m.finirLocked(id)
 	m.mu.Unlock()
 	var errs []error
 	s.mu.Lock()
@@ -485,10 +544,12 @@ func (m *Manager) departLocked(s *salon, n uint8) {
 }
 
 // Tick : une passe d'entretien. Task 6 : libère les sièges hors ligne depuis 10 min et
-// oublie les tombes échues (complétée aux Tasks 11, 13 et 15).
+// oublie les tombes échues ; rend les places de bloc des salons échus (complétée aux Tasks
+// 11, 13 et 15).
 func (m *Manager) Tick() {
 	now := m.cfg.Now()
 	m.mu.Lock()
+	m.echusLocked(now.Unix())
 	salons := make([]*salon, 0, len(m.salons))
 	for _, s := range m.salons {
 		salons = append(salons, s)

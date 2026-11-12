@@ -111,6 +111,8 @@ type Limiter struct {
 	// oublié d'office.
 	prev      []byte
 	prevUntil int64
+	// bloc : clé de processus de CleBloc (crypto/rand à New), jamais tournée ni écrite.
+	bloc []byte
 }
 
 type upload struct {
@@ -122,7 +124,10 @@ type upload struct {
 }
 
 func New(now func() time.Time) *Limiter {
-	l := &Limiter{now: now, day: -1, minute: -1, hour: -1}
+	l := &Limiter{now: now, day: -1, minute: -1, hour: -1, bloc: make([]byte, 32)}
+	if _, err := rand.Read(l.bloc); err != nil {
+		panic(err) // crypto/rand ne renvoie pas d'erreur sous Linux
+	}
 	l.mu.Lock()
 	l.rotateLocked(now())
 	l.mu.Unlock()
@@ -533,6 +538,34 @@ func (l *Limiter) AllowSalonCreate(ip netip.Addr) bool {
 	defer l.mu.Unlock()
 	l.rotateLocked(l.now())
 	return l.allowPairLocked(ip, l.salon64, l.salon48, SalonCreatesPer64, SalonCreatesPer48)
+}
+
+// RefundSalonCreate rend une création comptée par AllowSalonCreate quand le gestionnaire l'a
+// refusée sans faute du client (service occupé, plafond de salons vivants). Un compteur à
+// zéro reste à zéro. Une requête à cheval sur minuit UTC rend la création au compteur du
+// jour neuf (au plus une création de plus, ce jour-là).
+func (l *Limiter) RefundSalonCreate(ip netip.Addr) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rotateLocked(l.now())
+	k64, k48 := l.keyLocked(ip)
+	if l.salon64[k64] > 0 {
+		decr(l.salon64, k64)
+	}
+	if l.salon48[k48] > 0 {
+		decr(l.salon48, k48)
+	}
+}
+
+// CleBloc : clé du bloc /48 de ip (l'adresse elle-même en IPv4), pour le plafond des salons
+// vivants par bloc (spec §39.3.6, décision du 12 novembre). HMAC-SHA-256 sous une clé tirée
+// au démarrage, qui ne tourne pas à minuit (un salon vit 24 h au plus) : pseudonyme du
+// processus, gardé en mémoire seulement, jamais écrit.
+func (l *Limiter) CleBloc(ip netip.Addr) [32]byte {
+	_, p48 := Prefixes(ip)
+	h := hmac.New(sha256.New, l.bloc)
+	h.Write([]byte("salons-vivants|48|" + p48))
+	return [32]byte(h.Sum(nil))
 }
 
 // AllowJoin : entrée dans un salon (rejoindre), 20 par heure (fenêtre fixe UTC) par connexion

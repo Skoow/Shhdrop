@@ -265,7 +265,7 @@ func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captc
 // Salons : réglages du salon. Valeur zéro : salon désactivé (aucune route, CSP inchangée).
 // Origin : origine publique du site (config.Config.Origin), donnée seulement si SHH_SALONS=1.
 // M : gestionnaire des salons ; nil → aucune route /api/salons/* (même 404 qu'une route
-// inconnue). Son Config.Limites doit être le limiteur lim passé à New (quotas communs).
+// inconnue). Les quotas du salon restent dans cette couche (limiteur lim passé à New).
 type Salons struct {
 	Origin string
 	M      *salon.Manager

@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/skoow/shhdrop/server/internal/captcha"
 	"github.com/skoow/shhdrop/server/internal/salon"
@@ -14,9 +13,6 @@ import (
 // gestion. Enregistrées seulement si le gestionnaire est donné (SHH_SALONS=1) : sinon la 404
 // uniforme des routes inconnues. Secrets en en-tête ou dans le corps (base64url sans
 // bourrage, longueur exacte), jamais dans l'URL ; aucun identifiant de salon dans le chemin.
-
-// limitRetry : Retry-After d'une limite du gestionnaire sans délai propre (salon.ErrLimit).
-const limitRetry = 60 * time.Second
 
 // salonAPI : gestionnaires HTTP du salon.
 type salonAPI struct {
@@ -32,7 +28,9 @@ func (a salonAPI) routes(mux *http.ServeMux) {
 }
 
 // failSalon traduit une erreur du gestionnaire en réponse fixe ; toute autre erreur (base,
-// disque) → 500 sans détail.
+// disque) → 500 sans détail. salon.ErrLimit (journal des annonces du salon saturé, seule
+// source sur ces routes) est définitif pour ce salon : 409 full, sans délai. salon.ErrBusy :
+// 503 busy avec le délai fixe des partages (slotRetry).
 func failSalon(w http.ResponseWriter, err error) {
 	var bp *salon.BadPassword
 	var at *salon.Attente
@@ -45,7 +43,7 @@ func failSalon(w http.ResponseWriter, err error) {
 	case errors.As(err, &bp), errors.Is(err, salon.ErrNotFound):
 		// Sans essai restant : salon détruit, réponse « introuvable » uniforme.
 		writeErr(w, http.StatusNotFound, "not_found")
-	case errors.Is(err, salon.ErrFull):
+	case errors.Is(err, salon.ErrFull), errors.Is(err, salon.ErrLimit):
 		writeErr(w, http.StatusConflict, "full")
 	case errors.Is(err, salon.ErrBudget):
 		writeErr(w, http.StatusConflict, "budget")
@@ -57,10 +55,8 @@ func failSalon(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusForbidden, "forbidden")
 	case errors.As(err, &at) && at != nil:
 		writeLimit(w, at.Retry)
-	case errors.Is(err, salon.ErrLimit):
-		writeLimit(w, limitRetry)
 	case errors.Is(err, salon.ErrBusy):
-		writeErr(w, http.StatusServiceUnavailable, "busy")
+		writeRetry(w, http.StatusServiceUnavailable, "busy", slotRetry)
 	case errors.Is(err, salon.ErrBadRequest), errors.Is(err, salon.ErrConflict), errors.Is(err, errBadRequest),
 		errors.Is(err, captcha.ErrInvalid):
 		writeErr(w, http.StatusBadRequest, "bad_request")
@@ -88,7 +84,8 @@ type creerBody struct {
 // creer : patron de create des partages : format → gel → anti-robot → quota → création →
 // difficulté suivante. Une requête invalide ou un serveur gelé ne consomme ni le défi ni le
 // quota. access_v ou manage_v déjà pris : 400 comme une création invalide (§29.8), compté au
-// quota et dans la difficulté.
+// quota et dans la difficulté. Refus du gestionnaire sans faute du client (503 busy,
+// plafond des salons vivants du bloc : 429 limit) : quota du jour rendu.
 func (a salonAPI) creer(w http.ResponseWriter, r *http.Request) {
 	var b creerBody
 	if err := readJSON(w, r, &b); err != nil || b.MembersCanDestroy == nil {
@@ -99,8 +96,10 @@ func (a salonAPI) creer(w http.ResponseWriter, r *http.Request) {
 	var ka, sg []byte
 	ka, errs[0] = headerSecret(r, "X-Shh-Access")
 	sg, errs[1] = headerSecret(r, "X-Shh-Manage")
+	ip := ipOf(r)
 	req := salon.CreerReq{AccessV: share.Verifier(ka), ManageV: share.Verifier(sg), TTLHours: b.TTLHours,
-		MaxMembers: b.MaxMembers, KdfOps: b.KdfOps, KdfMem: b.KdfMem, MembersCanDestroy: *b.MembersCanDestroy}
+		MaxMembers: b.MaxMembers, KdfOps: b.KdfOps, KdfMem: b.KdfMem, MembersCanDestroy: *b.MembersCanDestroy,
+		Bloc: a.lim.CleBloc(ip)}
 	req.Salt, errs[2] = secret(b.Salt, 16)
 	req.ProofV, errs[3] = secret(b.ProofV, 32)
 	if errs != [4]error{} || !req.Valide() {
@@ -111,7 +110,6 @@ func (a salonAPI) creer(w http.ResponseWriter, r *http.Request) {
 		fail(w, share.ErrFrozen)
 		return
 	}
-	ip := ipOf(r)
 	if err := a.antiRobot(b.Altcha, b.ShownAt, b.HP, ip); err != nil {
 		failSalon(w, err)
 		return
@@ -122,8 +120,12 @@ func (a salonAPI) creer(w http.ResponseWriter, r *http.Request) {
 	}
 	left, err := a.m.Creer(req)
 	if err != nil {
-		if errors.Is(err, salon.ErrConflict) {
+		var at *salon.Attente
+		switch {
+		case errors.Is(err, salon.ErrConflict):
 			a.cap.RecordCreate(ip)
+		case errors.Is(err, salon.ErrBusy), errors.As(err, &at):
+			a.lim.RefundSalonCreate(ip)
 		}
 		failSalon(w, err)
 		return

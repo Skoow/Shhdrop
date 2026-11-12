@@ -992,3 +992,77 @@ func TestCompteursSalonEffaces(t *testing.T) {
 		t.Fatal("minuit UTC", m, h, d)
 	}
 }
+
+// Création refusée par le gestionnaire (service occupé) : le quota du jour est rendu, sans
+// jamais descendre sous zéro ni toucher une autre connexion.
+func TestRefundSalonCreate(t *testing.T) {
+	now := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
+	l := newLim(&now)
+	a := ip("2001:db8:7:1::1")
+	for i := 0; i < SalonCreatesPer64; i++ {
+		if !l.AllowSalonCreate(a) {
+			t.Fatal("création", i+1)
+		}
+	}
+	if l.AllowSalonCreate(a) {
+		t.Fatal("6e création acceptée")
+	}
+	l.RefundSalonCreate(a)
+	if !l.AllowSalonCreate(a) {
+		t.Fatal("quota non rendu")
+	}
+	if l.AllowSalonCreate(a) {
+		t.Fatal("rendu deux fois")
+	}
+	// Rendre sans création comptée : sans effet (aucun compteur négatif, aucune clé gardée).
+	b := ip("198.51.100.77")
+	l.RefundSalonCreate(b)
+	l.mu.Lock()
+	k64, k48 := l.keyLocked(b)
+	_, ok64 := l.salon64[k64]
+	_, ok48 := l.salon48[k48]
+	l.mu.Unlock()
+	if ok64 || ok48 {
+		t.Fatal("compteur créé par un remboursement")
+	}
+	for i := 0; i < SalonCreatesPer64; i++ {
+		if !l.AllowSalonCreate(b) {
+			t.Fatal("autre connexion, création", i+1)
+		}
+	}
+	if l.AllowSalonCreate(b) {
+		t.Fatal("remboursement à vide compté comme crédit")
+	}
+}
+
+// CleBloc : HMAC-SHA-256 du /48 (de l'adresse en IPv4) sous une clé de processus : même bloc →
+// même clé, y compris après minuit ; autre bloc ou autre processus → autre clé ; jamais
+// l'adresse en clair.
+func TestCleBloc(t *testing.T) {
+	now := time.Date(2026, 11, 12, 23, 59, 0, 0, time.UTC)
+	l := newLim(&now)
+	a := l.CleBloc(ip("2001:db8:9:1::1"))
+	if a != l.CleBloc(ip("2001:db8:9:ffff::2")) {
+		t.Fatal("même /48, clés différentes")
+	}
+	if a == l.CleBloc(ip("2001:db8:a::1")) {
+		t.Fatal("autre /48, même clé")
+	}
+	v4 := l.CleBloc(ip("198.51.100.1"))
+	if v4 == l.CleBloc(ip("198.51.100.2")) {
+		t.Fatal("IPv4 : deux adresses, même clé")
+	}
+	if v4 != l.CleBloc(ip("::ffff:198.51.100.1")) {
+		t.Fatal("IPv4 mappée : clé différente")
+	}
+	now = now.Add(2 * time.Minute) // lendemain : la clé ne tourne pas (salon de 24 h au plus)
+	if a != l.CleBloc(ip("2001:db8:9:1::1")) {
+		t.Fatal("clé changée à minuit")
+	}
+	if a == newLim(&now).CleBloc(ip("2001:db8:9:1::1")) {
+		t.Fatal("deux processus, même clé")
+	}
+	if a == ([32]byte{}) {
+		t.Fatal("clé nulle")
+	}
+}

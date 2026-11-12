@@ -2,8 +2,10 @@ package api
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -57,14 +59,20 @@ func TestCSPWebSocket(t *testing.T) {
 
 // ---- Routes JSON du salon (plan C-2 Task 7) ----
 
-// salonEnv : environnement de test avec le salon actif (gestionnaire sur la même base, la même
-// horloge et le même limiteur que les partages).
+// salonEnv : environnement de test avec le salon actif (gestionnaire sur la même base et la
+// même horloge que les partages).
 func salonEnv(t *testing.T) (*env, *salon.Manager) {
+	t.Helper()
+	return salonEnvMax(t, 200)
+}
+
+// salonEnvMax : salonEnv avec SHH_SALONS_MAX = max.
+func salonEnvMax(t *testing.T, max int) (*env, *salon.Manager) {
 	t.Helper()
 	e := newEnv(t, false, nil)
 	m, err := salon.NewManager(salon.Config{DB: e.db, Pieces: &blob.Store{Dir: filepath.Join(e.dir, "salon-pieces")},
-		DossierConversations: filepath.Join(e.dir, "salons"), Now: e.clk.Now, Max: 200, StorageMax: 1 << 40,
-		UsedPartages: e.svc.Blobs.UsedBytes, Limites: e.srv.lim})
+		DossierConversations: filepath.Join(e.dir, "salons"), Now: e.clk.Now, Max: max, StorageMax: 1 << 40,
+		UsedPartages: e.svc.Blobs.UsedBytes})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,8 +527,9 @@ func TestFailSalon(t *testing.T) {
 		{salon.ErrForbidden, 403, `{"error":"forbidden"}`, ""},
 		{&salon.Attente{Retry: 1500 * time.Millisecond}, 429, `{"error":"limit","retry_after_s":2}`, "2"},
 		{&salon.Attente{Retry: -time.Second}, 429, `{"error":"limit","retry_after_s":1}`, "1"},
-		{salon.ErrLimit, 429, `{"error":"limit","retry_after_s":60}`, "60"},
-		{salon.ErrBusy, 503, `{"error":"busy"}`, ""},
+		// Journal des annonces saturé : définitif pour ce salon (aucun délai utile).
+		{salon.ErrLimit, 409, `{"error":"full"}`, ""},
+		{salon.ErrBusy, 503, `{"error":"busy","retry_after_s":5}`, "5"},
 		{salon.ErrBadRequest, 400, badRequest, ""},
 		{salon.ErrConflict, 400, badRequest, ""},
 		{errBadRequest, 400, badRequest, ""},
@@ -538,5 +547,104 @@ func TestFailSalon(t *testing.T) {
 		if w.Code != c.code || w.Body.String() != c.body || w.Header().Get("Retry-After") != c.retry {
 			t.Errorf("%v : %d %q %q", c.err, w.Code, w.Body.String(), w.Header().Get("Retry-After"))
 		}
+	}
+}
+
+// Création refusée par le gestionnaire (SHH_SALONS_MAX atteint) : 503 busy avec Retry-After,
+// et le quota du jour est rendu (un conflit, lui, reste compté : TestCreerSalonConflit).
+func TestCreerSalonBusyRembourse(t *testing.T) {
+	e, _ := salonEnvMax(t, 1)
+	e.creerSalon(t, newKeys(), 2)
+	for i := 0; i < 6; i++ {
+		k := newKeys()
+		alt, shown := e.captchaFor(t, "")
+		w := e.do(req{method: "POST", path: "/api/salons", hdr: k.createHdr(), body: mustJSON(k.salonBody(2, alt, shown))})
+		expect(t, w, 503, `{"error":"busy","retry_after_s":5}`)
+		if w.Header().Get("Retry-After") != "5" {
+			t.Fatalf("Retry-After = %q", w.Header().Get("Retry-After"))
+		}
+	}
+	// 1 création réussie : il en reste 4 pour la connexion aujourd'hui.
+	ip := netip.MustParseAddr("203.0.113.7")
+	for i := 0; i < 4; i++ {
+		if !e.srv.lim.AllowSalonCreate(ip) {
+			t.Fatalf("quota non rendu : création %d refusée", i+2)
+		}
+	}
+	if e.srv.lim.AllowSalonCreate(ip) {
+		t.Fatal("quota rendu en trop")
+	}
+}
+
+// Plafond de 5 salons vivants par /48 (décision du 12 novembre) : 6ᵉ création d'un autre /64
+// du même /48 → 429 limit (même forme que les quotas de création, délai jusqu'au quart
+// d'heure suivant), quota du jour rendu ; place rendue après une destruction ; ni l'adresse
+// ni la clé du bloc dans la base ou son WAL.
+func TestVivantsParBlocHTTP(t *testing.T) {
+	e, _ := salonEnv(t)
+	const r1, r2 = "[2001:db8:77:1::1]:443", "[2001:db8:77:2::1]:443"
+	creer := func(remote string, k keys) *httptest.ResponseRecorder {
+		alt, shown := e.captchaFor(t, remote)
+		return e.do(req{method: "POST", path: "/api/salons", hdr: k.createHdr(), body: mustJSON(k.salonBody(2, alt, shown)),
+			remote: remote})
+	}
+	var premier keys
+	for i := 0; i < 5; i++ {
+		k := newKeys()
+		if i == 0 {
+			premier = k
+		}
+		expect(t, creer(r1, k), 201, "")
+	}
+	w := creer(r2, newKeys())
+	now := e.clk.Now().Unix()
+	secs := strconv.FormatInt(900-now%900, 10)
+	expect(t, w, 429, `{"error":"limit","retry_after_s":`+secs+`}`)
+	if w.Header().Get("Retry-After") != secs {
+		t.Fatalf("Retry-After = %q, attendu %s", w.Header().Get("Retry-After"), secs)
+	}
+	// Quota du jour de r2 rendu : 5 créations encore permises pour sa connexion.
+	a2 := netip.MustParseAddr("2001:db8:77:2::1")
+	for i := 0; i < 5; i++ {
+		if !e.srv.lim.AllowSalonCreate(a2) {
+			t.Fatal("quota du jour pris par un refus du plafond", i)
+		}
+	}
+	for i := 0; i < 5; i++ {
+		e.srv.lim.RefundSalonCreate(a2)
+	}
+	// Destruction (10ᵉ mot de passe faux) : une place revient.
+	faux := premier
+	faux.preuve = rnd(32)
+	for i := 0; i < 10; i++ {
+		e.rejoindre(faux, false)
+	}
+	expect(t, e.rejoindre(premier, false), 404, notFound)
+	expect(t, creer(r2, newKeys()), 201, "")
+	if w := creer(r2, newKeys()); w.Code != 429 {
+		t.Fatalf("7ᵉ : %d %s", w.Code, w.Body.String())
+	}
+	// Rien du bloc sur disque : ni l'adresse (texte, octets), ni la clé du bloc (brute, hexa).
+	cle := e.srv.lim.CleBloc(netip.MustParseAddr("2001:db8:77:1::1"))
+	brut := netip.MustParseAddr("2001:db8:77::").AsSlice()[:6]
+	motifs := [][]byte{[]byte("2001:db8:77"), brut, cle[:], []byte(hex.EncodeToString(cle[:]))}
+	lus := 0
+	for _, f := range []string{"shares.db", "shares.db-wal"} {
+		b, err := os.ReadFile(filepath.Join(e.dir, f))
+		if err != nil {
+			if f == "shares.db-wal" && errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			t.Fatal(err)
+		}
+		lus++
+		for _, m := range motifs {
+			if bytes.Contains(b, m) {
+				t.Fatalf("%s contient %x", f, m)
+			}
+		}
+	}
+	if lus == 0 {
+		t.Fatal("aucun fichier de base lu")
 	}
 }

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/blob"
-	"github.com/skoow/shhdrop/server/internal/limits"
 	"github.com/skoow/shhdrop/server/internal/share"
 	"github.com/skoow/shhdrop/server/internal/store"
 )
@@ -62,7 +61,6 @@ func nouveauBanc(t *testing.T, max int) *banc {
 		DB: db, Pieces: &blob.Store{Dir: filepath.Join(dir, "pieces")},
 		DossierConversations: filepath.Join(dir, "salons"), Now: h.Now, Max: max,
 		StorageMax: 200 << 30, UsedPartages: func() (int64, error) { return 0, nil },
-		Limites: limits.New(h.Now),
 	}
 	m, err := NewManager(cfg)
 	if err != nil {
@@ -86,10 +84,12 @@ func aleatoire() []byte {
 // nouvellesCles : secrets tirés au hasard (jamais égaux entre eux ni à secret(0xEE)).
 func nouvellesCles() cles { return cles{aleatoire(), aleatoire(), aleatoire()} }
 
+// reqValide : création valide, d'un bloc tiré au hasard (le plafond par bloc ne joue pas).
 func reqValide(c cles) CreerReq {
 	return CreerReq{
 		AccessV: share.Verifier(c.acces), ManageV: share.Verifier(c.gestion), ProofV: share.Verifier(c.preuve),
 		Salt: bytes.Repeat([]byte{7}, 16), TTLHours: 24, MaxMembers: 10, KdfOps: 3, KdfMem: 67108864,
+		Bloc: [32]byte(aleatoire()),
 	}
 }
 
@@ -153,7 +153,6 @@ func TestNewManagerChampManquant(t *testing.T) {
 		"Max":                  func(c *Config) { c.Max = 0 },
 		"StorageMax":           func(c *Config) { c.StorageMax = 0 },
 		"UsedPartages":         func(c *Config) { c.UsedPartages = nil },
-		"Limites":              func(c *Config) { c.Limites = nil },
 	}
 	for nom, casser := range casses {
 		c := b.cfg
@@ -224,6 +223,7 @@ func TestCreerRefuse(t *testing.T) {
 		"access = manage": func(r *CreerReq) { r.ManageV = r.AccessV },
 		"proof = access":  func(r *CreerReq) { r.ProofV = r.AccessV },
 		"proof = manage":  func(r *CreerReq) { r.ProofV = r.ManageV },
+		"bloc nul":        func(r *CreerReq) { r.Bloc = [32]byte{} },
 	}
 	for nom, casser := range cas {
 		r := reqValide(nouvellesCles())
@@ -940,5 +940,145 @@ func TestErreursGestionnaireFixes(t *testing.T) {
 		if !errors.Is(err, ErrBase) || err.Error() != ErrBase.Error() {
 			t.Errorf("%s : %v", nom, err)
 		}
+	}
+}
+
+// Plafond de salons vivants par bloc (/48, ou adresse IPv4 ; décision du 12 novembre) : la
+// 6ᵉ création d'un bloc est refusée (Attente jusqu'au quart d'heure suivant), sans ligne ;
+// la place revient quand un salon du bloc est détruit (10ᵉ essai) ou échu (Tick), et un
+// autre bloc n'est pas touché. Le compte vit en mémoire seulement.
+func TestVivantsParBloc(t *testing.T) {
+	if VivantsParBloc != 5 {
+		t.Fatal("VivantsParBloc", VivantsParBloc)
+	}
+	b := nouveauBanc(t, 200)
+	bloc := [32]byte(aleatoire())
+	creer := func(ttl int) (cles, error) {
+		c := nouvellesCles()
+		r := reqValide(c)
+		r.Bloc, r.TTLHours = bloc, ttl
+		_, err := b.m.Creer(r)
+		return c, err
+	}
+	var salons []cles
+	for i := 0; i < VivantsParBloc; i++ {
+		ttl := 24
+		if i == 0 {
+			ttl = 1
+		}
+		c, err := creer(ttl)
+		if err != nil {
+			t.Fatal("création", i+1, err)
+		}
+		salons = append(salons, c)
+	}
+	compter := func() int {
+		var n int
+		if err := b.db.QueryRow(`SELECT count(*) FROM salons`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	_, err := creer(24)
+	var at *Attente
+	// 10:07:30 → quart d'heure suivant 10:15:00 : 7 min 30 s.
+	if !errors.As(err, &at) || at.Retry != 7*time.Minute+30*time.Second {
+		t.Fatal("6ᵉ création :", err)
+	}
+	if compter() != VivantsParBloc {
+		t.Fatal("ligne écrite pour une création refusée")
+	}
+	// Autre bloc : permis.
+	if _, err := b.m.Creer(reqValide(nouvellesCles())); err != nil {
+		t.Fatal("autre bloc :", err)
+	}
+	// Destruction au 10ᵉ essai : la place revient (une seule).
+	for range maxEssais {
+		b.m.Rejoindre(salons[1].acces, secret(0xEE), nil)
+	}
+	if _, err := creer(24); err != nil {
+		t.Fatal("après destruction :", err)
+	}
+	if _, err := creer(24); !errors.As(err, &at) {
+		t.Fatal("place rendue deux fois :", err)
+	}
+	// Une destruction répétée (purge) ne rend rien de plus.
+	id2 := b.idDe(t, salons[2])
+	b.m.detruire(id2)
+	b.m.detruire(id2)
+	if _, err := creer(24); err != nil {
+		t.Fatal("après la 2ᵉ destruction :", err)
+	}
+	if _, err := creer(24); !errors.As(err, &at) {
+		t.Fatal("destruction comptée deux fois :", err)
+	}
+	// Salon d'une heure échu : rendu par Tick.
+	b.h.avancer(time.Hour + 10*time.Minute) // 11:17:30 > 11:15:00
+	b.m.Tick()
+	b.m.mu.Lock()
+	n := b.m.parBloc[bloc]
+	b.m.mu.Unlock()
+	if n != VivantsParBloc-1 {
+		t.Fatal("Tick n'a pas rendu la place du salon échu", n)
+	}
+	if _, err := creer(24); err != nil {
+		t.Fatal("après échéance :", err)
+	}
+	// Tout échu : le compte du bloc est oublié (aucune clé gardée sans salon).
+	b.h.avancer(25 * time.Hour)
+	b.m.Tick()
+	b.m.mu.Lock()
+	restes := len(b.m.parBloc) + len(b.m.vivants)
+	b.m.mu.Unlock()
+	if restes != 0 {
+		t.Fatal("compte gardé après la fin de tous les salons", restes)
+	}
+}
+
+// Salons échus sans Tick : la création suivante les retire elle-même du compte.
+func TestVivantsEchusSansTick(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	bloc := [32]byte(aleatoire())
+	for i := 0; i < VivantsParBloc; i++ {
+		r := reqValide(nouvellesCles())
+		r.Bloc, r.TTLHours = bloc, 1
+		if _, err := b.m.Creer(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b.h.avancer(2 * time.Hour)
+	r := reqValide(nouvellesCles())
+	r.Bloc = bloc
+	if _, err := b.m.Creer(r); err != nil {
+		t.Fatal("salons échus encore comptés :", err)
+	}
+}
+
+// Création refusée pour une autre raison (conflit, service occupé) : aucune place prise.
+func TestVivantsRefusNonCompte(t *testing.T) {
+	b := nouveauBanc(t, 1)
+	bloc := [32]byte(aleatoire())
+	c := nouvellesCles()
+	r := reqValide(c)
+	r.Bloc = bloc
+	if _, err := b.m.Creer(r); err != nil {
+		t.Fatal(err)
+	}
+	for range 10 {
+		r := reqValide(nouvellesCles())
+		r.Bloc = bloc
+		if _, err := b.m.Creer(r); !errors.Is(err, ErrBusy) {
+			t.Fatal("Max atteint :", err)
+		}
+		r.AccessV = share.Verifier(c.acces)
+		if _, err := b.m.Creer(r); !errors.Is(err, ErrConflict) {
+			t.Fatal("conflit :", err)
+		}
+	}
+	b.m.mu.Lock()
+	n := b.m.parBloc[bloc]
+	b.m.mu.Unlock()
+	if n != 1 {
+		t.Fatal("refus comptés", n)
 	}
 }

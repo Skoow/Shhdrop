@@ -377,6 +377,7 @@ Interdits, côté serveur comme côté navigateur : mesure d'audience, télémé
 | Écritures du coffre de compte, essais de secours (§37.5) | `H` ; HMAC de connexion | 1 h | 60 écritures par heure ; 10 essais par heure |
 | Octets Plus du jour (§38.6) | HMAC(secret du jour, /64 ou IPv4, /48) | minuit UTC | Plus 40 et 80 Gio, Pro 100 et 200 Gio par jour (v2.9) |
 | Salons créés du jour, entrées de l'heure (§39.3.6) | HMAC(secret du jour, /64 ou IPv4, /48) | minuit UTC ; 1 h | 5 et 15 salons par jour ; 20 et 60 entrées par heure |
+| Salons vivants par bloc (`vivants`, `parBloc`, §39.3.6, 12 novembre) | HMAC-SHA-256(clé tirée au démarrage du processus, /48 ou IPv4) ; id interne du salon → cette clé et l'échéance | jusqu'à la fin du salon (échéance, destruction) ; un redémarrage oublie tout | 5 salons vivants au plus par /48, pour que quelques blocs ne prennent pas les `SHH_SALONS_MAX` places |
 | Trames de la minute, flux ouverts (§39.3.6) | jeton de membre (SHA-256) ; HMAC de connexion | 1 min ; durée du flux | 60 par siège, 120 par connexion, 600 par /48 ; 4, 16 et 2 000 flux |
 | (plus tard, §41.3) Identifiants TURN de l'heure, octets relayés du jour (§40.4) | HMAC(secret du jour, /64 ou IPv4, /48) | 1 h ; minuit UTC | 30 identifiants par heure ; 5 Go relayés par jour (gratuit) |
 | État d'un salon vivant (§39.3.2) : file de 200 trames, sièges, budget des trames | id interne du salon | vie du salon | relais et règles du salon ; pas une statistique |
@@ -1989,7 +1990,7 @@ Toutes les étiquettes commencent par `shhdrop/v2/salon/` : séparation de domai
 
 #### 39.3.3 Sièges, plafond, jetons
 
-- `POST /api/salons/rejoindre` (`X-Shh-Access`, `{ "proof" }`) : `K_preuve_s` juste → le serveur, en une opération atomique, vérifie `sièges occupés < max_members` et `arrivées totales < 5 × max_members`, attribue le plus petit siège libre (0 à 9), tire un **jeton de membre** (32 octets, gardé en mémoire par SHA-256) et un `nonce_arrivée` (16 octets, diffusé dans l'enregistrement 0x02, signé dans l'annonce : un membre ne peut pas rejouer l'annonce d'un autre). Réponse : `{ member_token, seat, seq, expires_in_s, max_members, members_can_destroy, budget_left }`. Complet → 409 `full` (« Ce salon est complet. ») ; faux → 403 `bad_password` avec essais restants.
+- `POST /api/salons/rejoindre` (`X-Shh-Access`, `{ "proof" }`) : `K_preuve_s` juste → le serveur, en une opération atomique, vérifie `sièges occupés < max_members` et `arrivées totales < 5 × max_members`, attribue le plus petit siège libre (0 à 9), tire un **jeton de membre** (32 octets, gardé en mémoire par SHA-256) et un `nonce_arrivée` (16 octets, diffusé dans l'enregistrement 0x02, signé dans l'annonce : un membre ne peut pas rejouer l'annonce d'un autre). Réponse : `{ member_token, seat, seq, nonce_arrivee, expires_in_s, max_members, members_can_destroy, budget_left }` (`nonce_arrivee` : 16 octets en base64url, nécessaire au client avant le WebSocket ; plan C-2, point 21). Complet → 409 `full` (« Ce salon est complet. ») ; faux → 403 `bad_password` avec essais restants.
 - Le plafond est donc imposé par le serveur sur les jetons ; un siège pris sans pseudonyme choisi est libéré après 10 min.
 
 #### 39.3.4 Pièces jointes sur disque
@@ -2008,7 +2009,8 @@ Toutes les étiquettes commencent par `shhdrop/v2/salon/` : séparation de domai
 
 | Limite | Valeur |
 |---|---|
-| Créations de salons | 5 par jour par connexion, 15 par /48 ; preuve anti-robot ; difficulté partagée avec les partages (§22) |
+| Créations de salons | 5 par jour par connexion, 15 par /48 ; preuve anti-robot ; difficulté partagée avec les partages (§22). Création refusée par le serveur sans faute du client (503 `busy`, plafond des salons vivants) : non comptée ; `access_v` ou `manage_v` déjà vus : comptée |
+| Salons vivants (décision de l'équipe du 12 novembre, réglable : constante `VivantsParBloc`) | **5 par /48** (par adresse en IPv4) en même temps ; au-delà 429 `limit` avec `Retry-After` jusqu'au quart d'heure suivant (première échéance possible). Sans lui, 14 blocs /48 à 15 créations par jour prennent les 200 places de `SHH_SALONS_MAX`. Compte en mémoire seulement (clé : HMAC-SHA-256 du /48 sous une clé de processus tirée au démarrage, jamais écrite) ; la place revient à la fin du salon (échéance, destruction). Limite : un redémarrage oublie le compte, les salons d'avant ne comptent plus |
 | Entrées (`rejoindre`) | 20 par heure par connexion, 60 par /48 ; mots de passe faux : compteur du salon, 10 → destruction |
 | Trames montantes | 60 par minute par siège (rafale 20), 120 par minute par connexion, 600 par /48 ; au-delà 429 et l'écran temporise |
 | WebSocket ouverts (v2.9) | 4 par connexion, 16 par /48, 2 000 au total |
@@ -2044,7 +2046,7 @@ Clés : HMAC du jour comme §9.3, jamais d'adresse. L'état d'un salon vivant (f
 
 #### 39.3.9 Routes (toutes sous `/api/salons/`, JSON strict de §8 sauf trames et segments)
 
-Longueurs exactes en base64url : secrets et jetons 43 caractères, identifiants de pièce 22. Erreurs : `not_found` (salon inconnu, expiré, détruit, mauvaise `K_accès_s` : même corps), `bad_password` (avec `tries_left`), `full`, `budget` (salon plein), `limit`, `busy`, `bad_request`.
+Longueurs exactes en base64url : secrets et jetons 43 caractères, identifiants de pièce 22. Erreurs : `not_found` (salon inconnu, expiré, détruit, mauvaise `K_accès_s` : même corps), `bad_password` (avec `attempts_left`, comme les partages ; plan C-2, point 18), `full` (409 : salon complet, ou journal des annonces du salon saturé, définitif), `budget` (salon plein), `limit` (429, `Retry-After`), `busy` (503, `Retry-After: 5` comme les partages), `bad_request`.
 
 | Route | Authentification | Corps | Réponse |
 |---|---|---|---|
