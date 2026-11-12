@@ -54,7 +54,7 @@ Chaque point : gravité, endroit, problème, correction retenue ici.
   - créations de salons : **5 par jour par connexion, 15 par /48**, preuve anti-robot (difficulté partagée avec les partages) ; `rejoindre` : **20 par heure par connexion, 60 par /48** ; `SHH_SALONS_MAX` défaut **200** salons vivants ;
   - effacement : 10 min = **600 000 ms**, 1 h = **3 600 000 ms**, comptés depuis l'heure de réception du serveur (jamais `heure_ms`).
 - `GOARCH=386 go build ./...` doit passer (`make test-go`) : tailles en `int64`, `seq` en `uint64`.
-- Vérifications : `cd server && go test -race ./...` puis `make test-go` à chaque tâche Go ; `make test-engine` à la Task 1 ; `make test-e2e` aux Tasks 16 et 17.
+- Vérifications : `cd server && go test -race ./...` puis `make test-go` **et `make test-e2e`** à chaque tâche Go (**12 novembre** : le test bloquant « le serveur ne voit rien » de `make test-e2e` a échoué en CI de la Task 4 à la vérification complète sans être vu, parce qu'il n'était prévu qu'aux Tasks 16 et 17) ; `make test-engine` à la Task 1 ; le contrôleur vérifie l'état de la CI après chaque push.
 
 ## Review Focus
 
