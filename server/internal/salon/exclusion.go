@@ -45,12 +45,15 @@ var crochetExclure func()
 //     rien n'est révélé) ; valeurs hors de la spécification, siège 0 (on ne s'exclut pas),
 //     siège sans nonce ou l'inverse : ErrBadRequest ;
 //   - sous essaiLock (aucune entrée ni autre rotation en même temps) : le siège ne porte pas
-//     ce nonce_arrivée (réattribué, libre) ou R ≤ dernier r : ErrStale ; rotation seule avec
-//     le journal des annonces plein : ErrLimit ;
-//   - une transaction remplace access_v, proof_v, salt, kdf_* et remet failed_attempts à 0,
-//     sur la ligne vivante seulement (failed_attempts<10 : une ligne bloquée ne revit jamais)
-//     et exactement une ligne, sinon ErrNotFound ; nouvelle access_v déjà prise (n'importe
-//     quel salon, celui-ci compris) : ErrConflict ; erreur de la base : ErrBase, rien changé ;
+//     ce nonce_arrivée (réattribué, libre) : ErrStale ; rotation seule avec le journal des
+//     annonces plein : ErrLimit ;
+//   - une transaction remplace access_v, proof_v, salt, kdf_*, rotation_r et remet
+//     failed_attempts à 0, sur la ligne vivante seulement (failed_attempts<10 : une ligne
+//     bloquée ne revit jamais) et si R > rotation_r (en base : un rejeu après un redémarrage
+//     est refusé aussi), exactement une ligne ; sinon, relue : vivante → ErrStale (R ≤ dernier
+//     r), morte entre-temps (10 essais, échue) → ErrForbidden ; nouvelle access_v déjà prise
+//     (n'importe quel salon, celui-ci compris) : ErrConflict ; erreur de la base : ErrBase,
+//     rien changé ;
 //   - puis, sous le verrou du salon : WebSocket de l'exclu fermé (0x05 raison 5, 4002 ; il ne
 //     reçoit pas le 0x09), siège libéré par sortirLocked (0x09 au journal et diffusé, siège
 //     plus attendu par aucune trame « instantané » : effacements et 0x0E, jeton révoqué et
@@ -62,6 +65,11 @@ var crochetExclure func()
 // d'autre ne peut prendre le siège (essaiLock). La rotation faite, le 0x09 est émis dans tous
 // les cas : le titulaire vérifié est exclu s'il est encore là. L'annonce ne peut alors plus
 // échouer (annoncerLocked avec depart : au pire une annonce de plus que la borne du journal).
+//
+// Un PUT de segment de l'exclu déjà en cours (pièce en envoi) n'est pas coupé : il finit
+// d'écrire au plus ce segment dans une pièce de l'exclu. C'est sans risque : la pièce ne peut
+// plus être finalisée ni liée (jeton révoqué : FinalizePiece, Recevoir rendent ErrExcluded),
+// elle n'est lue par personne, et elle est effacée sous PieceSansSegment (15 min) par Tick.
 func (m *Manager) Exclure(r ExclureReq) error {
 	if len(r.ManageV) != 32 {
 		return ErrForbidden
@@ -84,6 +92,9 @@ func (m *Manager) Exclure(r ExclureReq) error {
 	mu.Lock()
 	defer mu.Unlock()
 	s, err := m.etat(id, exp, maxMembers)
+	if errors.Is(err, ErrNotFound) {
+		return ErrForbidden // détruit (tombe) : « introuvable » d'Exclure
+	}
 	if err != nil {
 		return err
 	}
@@ -101,13 +112,14 @@ func (m *Manager) Exclure(r ExclureReq) error {
 	return m.appliquerExclusion(s, r, cible)
 }
 
-// verifierExclusion : siège et nonce, r, place au journal, sous le verrou du salon ; rend le
-// titulaire à exclure (nil pour une rotation seule).
+// verifierExclusion : siège et nonce, place au journal, sous le verrou du salon ; rend le
+// titulaire à exclure (nil pour une rotation seule). Le numéro r est vérifié en base
+// (tourner : rotation_r).
 func (s *salon) verifierExclusion(r ExclureReq) (*siege, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fini {
-		return nil, ErrNotFound
+		return nil, ErrForbidden
 	}
 	var cible *siege
 	if r.Siege != nil {
@@ -115,9 +127,6 @@ func (s *salon) verifierExclusion(r ExclureReq) (*siege, error) {
 		if cible == nil || cible.nonce != *r.Nonce {
 			return nil, ErrStale
 		}
-	}
-	if r.R <= s.dernierR {
-		return nil, ErrStale
 	}
 	if cible == nil && len(s.journal) >= journalMax-nbSieges {
 		return nil, ErrLimit // même borne qu'annoncerLocked pour une annonce sans départ
@@ -140,19 +149,31 @@ func (m *Manager) tourner(id string, r ExclureReq, now int64) error {
 	case !errors.Is(err, sql.ErrNoRows):
 		return base(err)
 	}
-	res, err := tx.Exec(`UPDATE salons SET access_v=?, proof_v=?, salt=?, kdf_ops=?, kdf_mem=?, failed_attempts=0
-		WHERE id=? AND manage_v=? AND expires_at>? AND failed_attempts<?`,
-		r.AccessNewV, r.ProofV, r.Salt, r.KdfOps, r.KdfMem, id, r.ManageV, now, maxEssais)
+	res, err := tx.Exec(`UPDATE salons SET access_v=?, proof_v=?, salt=?, kdf_ops=?, kdf_mem=?, failed_attempts=0,
+		rotation_r=? WHERE id=? AND manage_v=? AND expires_at>? AND failed_attempts<? AND rotation_r<?`,
+		r.AccessNewV, r.ProofV, r.Salt, r.KdfOps, r.KdfMem, r.R, id, r.ManageV, now, maxEssais, r.R)
 	if err != nil {
 		return base(err)
 	}
-	if k, err := res.RowsAffected(); err != nil || k != 1 {
-		if err != nil {
-			return base(err)
-		}
-		return ErrNotFound
+	k, err := res.RowsAffected()
+	if err != nil {
+		return base(err)
 	}
-	return base(tx.Commit())
+	if k == 1 {
+		return base(tx.Commit())
+	}
+	// Aucune ligne touchée : relue dans la même transaction. Vivante : R trop petit (rejeu,
+	// même après un redémarrage : rotation_r est en base), ErrStale. Sinon (10 essais, échue
+	// ou supprimée entre-temps) : ErrForbidden, comme les autres cas « introuvable ».
+	switch err := tx.QueryRow(`SELECT 1 FROM salons WHERE id=? AND manage_v=? AND expires_at>? AND failed_attempts<?`,
+		id, r.ManageV, now, maxEssais).Scan(&un); {
+	case err == nil:
+		return ErrStale
+	case errors.Is(err, sql.ErrNoRows):
+		return ErrForbidden
+	default:
+		return base(err)
+	}
 }
 
 // appliquerExclusion : partie mémoire, une fois la rotation écrite (sous le verrou du salon).
@@ -160,12 +181,16 @@ func (m *Manager) appliquerExclusion(s *salon, r ExclureReq, cible *siege) error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fini {
-		return ErrNotFound // détruit entre-temps : plus rien à annoncer
+		return ErrForbidden // détruit entre-temps : plus rien à annoncer
 	}
-	s.dernierR = r.R
 	n, nonce := SansExclu, [16]byte{}
 	if r.Siege != nil {
 		n, nonce = *r.Siege, *r.Nonce
+		if cible != nil && s.sieges[n] == cible {
+			// Reprise par WebSocket entre la vérification et ici (0x0A, même titulaire) : le
+			// 0x09 porte le nonce courant du siège, celui de la feuille que les membres retirent.
+			nonce = cible.nonce
+		}
 	}
 	enr := func(seq uint64) []byte { return EnrExclusion(seq, n, nonce, r.R) }
 	if cible == nil || s.sieges[n] != cible {

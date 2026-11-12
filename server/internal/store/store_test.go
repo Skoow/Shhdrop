@@ -450,7 +450,7 @@ func TestSalonsColonnes(t *testing.T) {
 	}
 	defer db.Close()
 	want := "id,access_v,manage_v,proof_v,salt,kdf_ops,kdf_mem,expires_at,max_members," +
-		"members_can_destroy,failed_attempts,pieces_bytes"
+		"members_can_destroy,failed_attempts,pieces_bytes,rotation_r"
 	if got := strings.Join(tableColumns(t, db, "salons"), ","); got != want {
 		t.Fatalf("colonnes de salons = %s, attendu %s", got, want)
 	}

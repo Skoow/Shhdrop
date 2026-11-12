@@ -90,9 +90,6 @@ type salon struct {
 	// fini : salon détruit ; plus rien n'y entre ni n'y est recréé (tombe gardée dans
 	// Manager.salons jusqu'à l'échéance).
 	fini bool
-	// dernierR : numéro de la dernière rotation de l'invitation (exclusion.go) ; 0 : aucune.
-	// En mémoire seulement, comme le reste de l'état.
-	dernierR uint32
 }
 
 func nouveauSalon(id string, expires time.Time, maxMembers int, conv *Conversation, now func() time.Time) *salon {

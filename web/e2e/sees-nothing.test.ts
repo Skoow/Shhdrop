@@ -461,7 +461,7 @@ describe("le serveur ne voit rien : repères de requête, base minimale (spec §
       ]);
       expect(s.salonCols, label).toEqual([
         "id", "access_v", "manage_v", "proof_v", "salt", "kdf_ops", "kdf_mem", "expires_at",
-        "max_members", "members_can_destroy", "failed_attempts", "pieces_bytes",
+        "max_members", "members_can_destroy", "failed_attempts", "pieces_bytes", "rotation_r",
       ]);
       expect(s.pieceCols, label).toEqual(["id", "salon_id", "bucket", "state", "segments_mask"]);
       expect(s.salonRows, label).toBe(0);

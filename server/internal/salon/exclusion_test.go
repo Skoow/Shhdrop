@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"testing/synctest"
 
@@ -421,7 +422,8 @@ func TestRotationAtomique(t *testing.T) {
 }
 
 // Une ligne arrivée à 10 essais entre la lecture et la transaction ne revit jamais : l'UPDATE
-// filtré par failed_attempts<10 ne touche aucune ligne → ErrNotFound, rien de changé.
+// filtré par failed_attempts<10 ne touche aucune ligne → ErrForbidden (relecture Task 14,
+// comme les autres cas « introuvable » d'Exclure), rien de changé.
 func TestRotationLigneBloquee(t *testing.T) {
 	b := nouveauBanc(t, 200)
 	c := b.creer(t, 4)
@@ -435,7 +437,7 @@ func TestRotationLigneBloquee(t *testing.T) {
 	}
 	t.Cleanup(func() { crochetExclure = nil })
 	avant := b.ligne(t, s)
-	if err := b.m.Exclure(reqExclure(c, invitation(c), siegeP(eb.Siege), &eb.Nonce, 1)); !errors.Is(err, ErrNotFound) {
+	if err := b.m.Exclure(reqExclure(c, invitation(c), siegeP(eb.Siege), &eb.Nonce, 1)); !errors.Is(err, ErrForbidden) {
 		t.Fatal("Exclure :", err)
 	}
 	apres := b.ligne(t, s)
@@ -608,4 +610,127 @@ func TestRevoquesJusquaLaFin(t *testing.T) {
 			t.Fatal("révoqués gardés après la fin", n, len(s.revoques))
 		}
 	})
+}
+
+// Relecture Task 14 : l'exclu reprend son siège par WebSocket (0x0A, nonce neuf) entre la
+// vérification et la transaction ; le 0x09 porte alors le nonce COURANT du siège (celui du
+// 0x0A), pas celui de la requête : les membres retrouvent la feuille à retirer.
+func TestExclusionApresRepriseWS(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		e0, g := b.entrerMembre(t, c, true)
+		eb := b.entrer(t, c, false)
+		s := g.salon
+		l0 := b.connecter(e0.Jeton, e0.Seq)
+		synctest.Wait()
+		var lb *fauxLien
+		crochetExclure = func() {
+			lb = b.connecter(eb.Jeton, DepuisReprise)
+			synctest.Wait()
+		}
+		t.Cleanup(func() { crochetExclure = nil })
+		if err := b.m.Exclure(reqExclure(c, invitation(c), siegeP(eb.Siege), &eb.Nonce, 1)); err != nil {
+			t.Fatal("Exclure :", err)
+		}
+		attendreFin(t, lb)
+		synctest.Wait()
+		rep := de(l0, 0x0A)
+		if len(rep) != 1 {
+			t.Fatalf("0x0A chez le créateur : %d", len(rep))
+		}
+		var nonce [16]byte
+		copy(nonce[:], rep[0].corps[1:17])
+		if nonce == eb.Nonce {
+			t.Fatal("la reprise n'a pas changé le nonce")
+		}
+		ex := de(l0, 0x09)
+		if len(ex) != 1 {
+			t.Fatalf("0x09 chez le créateur : %d", len(ex))
+		}
+		if want := EnrExclusion(ex[0].seq, eb.Siege, nonce, 1); !bytes.Equal(ex[0].corps, want[9:]) {
+			t.Fatalf("0x09 : %x, attendu le nonce du 0x0A", ex[0].corps)
+		}
+		if lb.codeFerme() != CodeRevoque {
+			t.Fatal("exclu non fermé en 4002 :", lb.codeFerme())
+		}
+		finir(t, l0)
+		invariantJournal(t, s)
+	})
+}
+
+// Relecture Task 14 (spec §39.13.1b) : le numéro de rotation vit en base (rotation_r). Après
+// un redémarrage (nouveau Manager sur la même base, mémoire vide), un ancien exclure rejoué
+// ne fait pas revivre l'invitation morte : ErrStale, ligne inchangée.
+func TestRotationRejoueeApresRedemarrage(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	_, g := b.entrerMembre(t, c, true)
+	s := g.salon
+	vieille := reqExclure(c, invitation(c), nil, nil, 1)
+	if err := b.m.Exclure(vieille); err != nil {
+		t.Fatal("r = 1 :", err)
+	}
+	if err := b.m.Exclure(reqExclure(c, invitation(c), nil, nil, 2)); err != nil {
+		t.Fatal("r = 2 :", err)
+	}
+	var r int
+	if err := b.db.QueryRow(`SELECT rotation_r FROM salons WHERE id=?`, s.id).Scan(&r); err != nil || r != 2 {
+		t.Fatal("rotation_r :", r, err)
+	}
+	// Redémarrage simulé : conversation effacée (purge au démarrage), mémoire neuve.
+	if err := os.RemoveAll(b.cfg.DossierConversations); err != nil {
+		t.Fatal(err)
+	}
+	m2, err := NewManager(b.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	avant := b.ligne(t, s)
+	for _, k := range []uint32{1, 2} {
+		rejeu := vieille
+		rejeu.R = k
+		if err := m2.Exclure(rejeu); !errors.Is(err, ErrStale) {
+			t.Errorf("rejeu r = %d : %v, attendu ErrStale", k, err)
+		}
+	}
+	if !memeLigne(avant, b.ligne(t, s)) {
+		t.Fatal("invitation morte revenue après le redémarrage")
+	}
+	if err := m2.Exclure(reqExclure(c, invitation(c), nil, nil, 3)); err != nil {
+		t.Fatal("r = 3 après le redémarrage :", err)
+	}
+}
+
+// Relecture Task 14 : une ligne passée à 10 essais, ou échue, pendant la transaction rend
+// ErrForbidden, comme les autres cas « introuvable » d'Exclure ; rien n'est changé.
+func TestRotationLigneMorteForbidden(t *testing.T) {
+	for nom, q := range map[string]string{
+		"10 essais": `UPDATE salons SET failed_attempts=10 WHERE id=?`,
+		"échue":     `UPDATE salons SET expires_at=0 WHERE id=?`,
+	} {
+		t.Run(nom, func(t *testing.T) {
+			b := nouveauBanc(t, 200)
+			c := b.creer(t, 4)
+			_, g := b.entrerMembre(t, c, true)
+			eb := b.entrer(t, c, false)
+			s := g.salon
+			crochetExclure = func() {
+				if _, err := b.db.Exec(q, s.id); err != nil {
+					t.Error(err)
+				}
+			}
+			t.Cleanup(func() { crochetExclure = nil })
+			avant := b.ligne(t, s)
+			if err := b.m.Exclure(reqExclure(c, invitation(c), siegeP(eb.Siege), &eb.Nonce, 1)); !errors.Is(err, ErrForbidden) {
+				t.Fatal("Exclure :", err)
+			}
+			if apres := b.ligne(t, s); !bytes.Equal(apres.accessV, avant.accessV) {
+				t.Fatal("ligne réécrite")
+			}
+			if len(exclusions(s)) != 0 || occupes(s) != 2 {
+				t.Fatal("mémoire changée")
+			}
+		})
+	}
 }
