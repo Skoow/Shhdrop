@@ -90,6 +90,8 @@ type salon struct {
 	// fini : salon détruit ; plus rien n'y entre ni n'y est recréé (tombe gardée dans
 	// Manager.salons jusqu'à l'échéance).
 	fini bool
+	// etatFin : partie disque de la fin (fin.go : finRien, finAFaire, finEnCours).
+	etatFin uint8
 }
 
 func nouveauSalon(id string, expires time.Time, maxMembers int, conv *Conversation, now func() time.Time) *salon {

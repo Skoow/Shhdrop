@@ -1261,3 +1261,32 @@ func TestPartagesVoientLeSalon(t *testing.T) {
 		t.Fatal("agrandissement juste :", err)
 	}
 }
+
+// Plan C-2 Task 15 (relecture Task 12) : UsedShares n'inclut jamais ExtraUsed (le salon compte
+// les partages par elle : aucun double compte) ; un téléchargement de partage reste servi
+// pendant que le salon remplit le disque (seules les créations sont refusées).
+func TestUsedSharesSansSalon(t *testing.T) {
+	s, _ := newSvc(t)
+	k := newKeys()
+	id := ready(t, s, k, 1, 1, 2)
+	blobs, err := s.Blobs.UsedBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.ExtraUsed = func() int64 { return s.StorageMax } // salon plein
+	if u, err := s.UsedShares(); err != nil || u != blobs || u != totalSize(1) {
+		t.Fatal("UsedShares :", u, err, blobs)
+	}
+	if _, _, err := s.createAny(newKeys().req(1, 1, 1)); !errors.Is(err, ErrFull) {
+		t.Fatal("création pendant que le salon est plein :", err)
+	}
+	open, _, err := s.Unlock(id, k.acces, k.preuve)
+	if err != nil {
+		t.Fatal("ouverture pendant que le salon est plein :", err)
+	}
+	seg, err := s.OpenSegment(id, 0, open)
+	if err != nil {
+		t.Fatal("téléchargement pendant que le salon est plein :", err)
+	}
+	seg.Close()
+}

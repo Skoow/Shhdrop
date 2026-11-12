@@ -85,6 +85,10 @@ var (
 	// ErrNewerSchema : message fixe, sans chemin.
 	ErrNewerSchema = errors.New("base créée par une version plus récente de Shhdrop : refus d'ouvrir " +
 		"(retour arrière : réinstaller la version récente, ou effacer la base)")
+	// ErrOldSchema : base d'une version antérieure (commandes d'administration du salon) ;
+	// message fixe, sans chemin.
+	ErrOldSchema = errors.New("base d'une version antérieure de Shhdrop (sans les tables du salon) : " +
+		"démarrer le serveur une fois pour la mettre à jour (rien n'a été fait)")
 	// ErrCheckpointBusy : le vidage du WAL n'a pas pu finir (lecteur ou écrivain en cours) ;
 	// le WAL garde encore des pages, à revider au prochain passage (spec §9.1).
 	ErrCheckpointBusy = errors.New("vidage du WAL incomplet (base occupée)")
@@ -129,6 +133,20 @@ func OpenExisting(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("base %s illisible : %w", path, err)
 	}
 	return db, nil
+}
+
+// RequireCurrent : la base est au schéma courant (SchemaVersion), sinon ErrOldSchema. Pour les
+// commandes d'administration du salon : OpenExisting accepte une base plus ancienne, que
+// seul le serveur met à jour (plan C-2 Task 15).
+func RequireCurrent(db *sql.DB) error {
+	v, err := checkVersion(db)
+	if err != nil {
+		return err
+	}
+	if v != SchemaVersion {
+		return ErrOldSchema
+	}
+	return nil
 }
 
 // Open ouvre (ou crée) la base : WAL, effacement sûr, temporaires en mémoire, une seule connexion.

@@ -487,6 +487,17 @@ func validFill(from, to, segs int) bool {
 	return from >= 0 && from <= to && to <= segs-1 && (from == to || from >= 1)
 }
 
+// UsedShares : octets des partages seuls (fichiers et descripteurs détachés), jamais
+// ExtraUsed : c'est la valeur que le salon ajoute à son propre usage (salon.Config.UsedPartages),
+// sans double compte (plan C-2 Task 15).
+func (s *Service) UsedShares() (int64, error) {
+	used, err := s.Blobs.UsedBytes()
+	if err != nil {
+		return 0, err
+	}
+	return used + s.detachedBytes(), nil
+}
+
 // extraUsed : Config.ExtraUsed, 0 sans elle.
 func (s *Service) extraUsed() int64 {
 	if s.ExtraUsed == nil {

@@ -1,0 +1,459 @@
+package salon
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/skoow/shhdrop/server/internal/blob"
+	"github.com/skoow/shhdrop/server/internal/share"
+	"github.com/skoow/shhdrop/server/internal/store"
+)
+
+// Fin de vie d'un salon (plan C-2 Task 15) : échéance, destruction (créateur, membre si
+// permis, 10 mots de passe faux, administrateur), purge au démarrage.
+//
+// Une fin se fait en deux temps :
+//   - oublier, sous le verrou du salon : 0x05 (raison) décidé pour chaque connexion, en direct
+//     ou en rattrapage, puis fermeture 1000 (connexion.arreter : l'écrivain écrit ce 0x05 en
+//     dernier) ; pièces marquées effacées (flux coupés) ; état oublié (fini, jetons, révoqués,
+//     journal, index) ; la tombe reste dans Manager.salons jusqu'à l'échéance + margeTombe et
+//     tant que la fin n'est pas complète ;
+//   - achever, hors de tout verrou : conversation détruite (clé mise à zéro, fichier
+//     supprimé), ligne du salon rendue morte (failed_attempts = 10 : plus aucune requête ne la
+//     voit, même si la suite échoue), pièces effacées (fichier puis ligne), ligne du salon
+//     supprimée une fois ses pièces parties. Un échec laisse la fin « à faire » : Tick la
+//     reprend à chaque passage (aucun salon ne reste à moitié détruit sans nouvel essai).
+
+// État de la partie disque d'une fin (salon.etatFin, sous salon.mu).
+const (
+	finRien    uint8 = iota // aucune fin, ou fin complète
+	finAFaire               // à reprendre par Tick
+	finEnCours              // achever en cours (un seul à la fois)
+)
+
+// crochetAchever : tests seulement (appelé au début d'achever, hors de tout verrou) ; nil en
+// production.
+var crochetAchever func(*salon)
+
+// Detruire : POST /api/salons/detruire. sGestion (créateur) s'il est donné, sinon jeton (membre,
+// seulement si members_can_destroy). S_gestion ou jeton inconnu, salon échu ou détruit :
+// ErrNotFound ; jeton révoqué : ErrExcluded ; membre sans la permission, ni S_gestion ni
+// jeton : ErrForbidden. Le salon est fini en raison 2 ; une erreur de la partie disque est
+// reprise par Tick (pas rendue : le salon est déjà détruit pour tous).
+func (m *Manager) Detruire(sGestion, jeton []byte) error {
+	now := m.cfg.Now().Unix()
+	switch {
+	case sGestion != nil:
+		v := share.Verifier(sGestion)
+		if v == nil {
+			return ErrNotFound
+		}
+		var id string
+		if err := m.cfg.DB.QueryRow(`SELECT id FROM salons WHERE manage_v=? AND expires_at>? AND failed_attempts<?`,
+			v, now, maxEssais).Scan(&id); err != nil {
+			return notFound(err)
+		}
+		_ = m.detruire(id) // partie disque ratée : reprise par Tick
+		return nil
+	case jeton != nil:
+		mb, err := m.Membre(jeton)
+		if err != nil {
+			return err
+		}
+		var mcd int
+		if err := m.cfg.DB.QueryRow(`SELECT members_can_destroy FROM salons WHERE id=? AND expires_at>? AND failed_attempts<?`,
+			mb.salon.id, now, maxEssais).Scan(&mcd); err != nil {
+			return notFound(err)
+		}
+		if mcd != 1 {
+			return ErrForbidden
+		}
+		_ = m.finir(mb.salon, RaisonDetruit) // partie disque ratée : reprise par Tick
+		return nil
+	}
+	return ErrForbidden
+}
+
+// detruire : fin en raison 2 du salon id, avec ou sans état en mémoire (10ᵉ mot de passe faux,
+// Detruire). Sans état, une tombe est créée d'abord : etat ne recrée ensuite ni état ni
+// fichier. Sûre sans essaiLock. Rend l'erreur de la partie disque (reprise par Tick).
+func (m *Manager) detruire(id string) error {
+	m.mu.Lock()
+	s := m.salons[id]
+	if s == nil {
+		// Échéance inconnue sans la ligne : la plus lointaine possible (24 h, arrondie).
+		s = nouveauSalon(id, m.cfg.Now().Add(25*time.Hour), 0, nil, m.now)
+		m.salons[id] = s
+	}
+	m.mu.Unlock()
+	return m.finir(s, RaisonDetruit)
+}
+
+// finir : fin commune (raison 1 expiration, 2 destruction) : place du bloc rendue, état
+// mémoire oublié (oublier), puis partie disque (achever). Sans effet sur une tombe (salon
+// déjà fini) : sa partie disque éventuellement restante est reprise par Tick.
+func (m *Manager) finir(s *salon, raison uint8) error {
+	m.mu.Lock()
+	m.finirLocked(s.id)
+	m.mu.Unlock()
+	if !m.oublier(s, raison) {
+		return nil
+	}
+	return m.achever(s)
+}
+
+// oublier : partie mémoire d'une fin, sous le verrou du salon ; faux pour une tombe.
+func (m *Manager) oublier(s *salon, raison uint8) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fini {
+		return false
+	}
+	// Connexions d'abord : 0x05 au rang courant, en direct comme en rattrapage (l'écrivain
+	// l'écrit après son lot en cours), puis 1000 ; plus rien d'autre ne leur est remis.
+	for _, c := range s.conns {
+		if c != nil {
+			c.arreter(CodeFin, EnrFin(s.seq, raison))
+		}
+	}
+	s.fini = true
+	s.etatFin = finEnCours // achever suit, appelé par finir
+	m.indexer(func(index map[[32]byte]*salon) {
+		for h := range s.jetons {
+			delete(index, h)
+		}
+		for h := range s.revoques {
+			delete(index, h)
+		}
+	})
+	for h := range s.jetons {
+		m.flux.Revoke(cleFluxMembre(h))
+	}
+	// Pièces : plus jamais servies, flux coupés ; fichier puis ligne effacés par achever.
+	for _, p := range s.lesPieces {
+		s.supprimerPieceLocked(p)
+	}
+	clear(s.jetons)
+	clear(s.revoques)
+	s.sieges = [nbSieges]*siege{}
+	s.journal = nil
+	s.index = nil
+	s.pieces = nil
+	s.echeances = nil
+	return true
+}
+
+// achever : partie disque d'une fin (voir l'en-tête), hors de tout verrou ; appelée par finir
+// (etatFin = finEnCours) ou par Tick (reprendreFin). Rend la première erreur ; la fin reste
+// alors à faire.
+func (m *Manager) achever(s *salon) (err error) {
+	defer func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.etatFin = finRien
+		if err != nil {
+			s.etatFin = finAFaire
+		}
+	}()
+	if crochetAchever != nil {
+		crochetAchever(s)
+	}
+	var errs []error
+	if s.conv != nil { // jamais réaffecté après nouveauSalon
+		errs = append(errs, s.conv.Detruire())
+	}
+	_, e := m.cfg.DB.Exec(`UPDATE salons SET failed_attempts=? WHERE id=? AND failed_attempts<?`, maxEssais, s.id, maxEssais)
+	errs = append(errs, base(e))
+	m.purger(s) // pièces connues en mémoire : fichier, ligne, index, quotas
+	if s.resteAPurger() {
+		errs = append(errs, ErrES)
+	}
+	errs = append(errs, m.effacerPiecesEnBase(s.id))
+	// Ligne du salon : seulement sans pièce restante (sinon ON DELETE CASCADE effacerait la
+	// ligne d'une pièce dont le fichier est encore là).
+	_, e = m.cfg.DB.Exec(`DELETE FROM salons WHERE id=? AND NOT EXISTS (SELECT 1 FROM salon_pieces WHERE salon_id=?)`,
+		s.id, s.id)
+	errs = append(errs, base(e))
+	var un int
+	switch e := m.cfg.DB.QueryRow(`SELECT 1 FROM salons WHERE id=?`, s.id).Scan(&un); {
+	case e == nil:
+		errs = append(errs, ErrBase) // ligne encore là : à reprendre
+	case !errors.Is(e, sql.ErrNoRows):
+		errs = append(errs, base(e))
+	}
+	return errors.Join(errs...)
+}
+
+// effacerPiecesEnBase : pièces du salon id encore en base (inconnues en mémoire : création
+// interrompue) : fichier puis ligne ; une pièce dont le fichier reste garde sa ligne.
+func (m *Manager) effacerPiecesEnBase(id string) error {
+	rows, err := m.cfg.DB.Query(`SELECT id FROM salon_pieces WHERE salon_id=?`, id)
+	if err != nil {
+		return base(err)
+	}
+	var ids []string
+	for rows.Next() {
+		var p string
+		if rows.Scan(&p) == nil {
+			ids = append(ids, p)
+		}
+	}
+	errs := []error{base(errors.Join(rows.Err(), rows.Close()))}
+	for _, p := range ids {
+		if err := m.cfg.Pieces.Delete(p); err != nil {
+			errs = append(errs, es(err))
+			continue
+		}
+		_, err := m.cfg.DB.Exec(`DELETE FROM salon_pieces WHERE id=?`, p)
+		errs = append(errs, base(err))
+	}
+	return errors.Join(errs...)
+}
+
+// reprendreFin : Tick reprend une fin restée à faire ; une seule reprise à la fois.
+func (m *Manager) reprendreFin(s *salon) {
+	s.mu.Lock()
+	prise := s.etatFin == finAFaire
+	if prise {
+		s.etatFin = finEnCours
+	}
+	s.mu.Unlock()
+	if prise {
+		_ = m.achever(s)
+	}
+}
+
+// finIncomplete : la partie disque de la fin n'est pas complète (à faire ou en cours).
+func (s *salon) finIncomplete() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.etatFin != finRien
+}
+
+// lotLignes : identifiants par requête IN (bien sous la limite de variables de SQLite).
+const lotLignes = 500
+
+// lignes : passe de Tick sur la base. Lignes à 10 essais supprimées (sans pièce restante :
+// celles d'une fin en cours sont effacées par achever d'abord) ; salons vivants de ce
+// processus (état en mémoire non fini, ou place de bloc comptée) dont la ligne vivante a
+// disparu (admin destroy, wipe, 10 essais) : fin en raison 2, place du bloc rendue. Les
+// tombes n'y sont pas. Sous createMu : une création en cours a déjà sa ligne ou n'est pas
+// encore comptée.
+func (m *Manager) lignes() {
+	_, _ = m.cfg.DB.Exec(`DELETE FROM salons WHERE failed_attempts>=? AND NOT EXISTS
+		(SELECT 1 FROM salon_pieces WHERE salon_pieces.salon_id=salons.id)`, maxEssais)
+	m.createMu.Lock()
+	m.mu.Lock()
+	ids := make([]string, 0, len(m.salons)+len(m.vivants))
+	etats := map[string]*salon{}
+	for id, s := range m.salons {
+		if !s.estFini() {
+			ids = append(ids, id)
+			etats[id] = s
+		}
+	}
+	for id := range m.vivants {
+		if etats[id] == nil {
+			ids = append(ids, id)
+		}
+	}
+	m.mu.Unlock()
+	presents := map[string]bool{}
+	ok := true
+	for i := 0; i < len(ids); i += lotLignes {
+		lot := ids[i:min(i+lotLignes, len(ids))]
+		args := make([]any, 0, len(lot)+1)
+		for _, id := range lot {
+			args = append(args, id)
+		}
+		args = append(args, maxEssais)
+		rows, err := m.cfg.DB.Query(`SELECT id FROM salons WHERE id IN (?`+strings.Repeat(",?", len(lot)-1)+
+			`) AND failed_attempts<?`, args...)
+		if err != nil {
+			ok = false
+			break
+		}
+		for rows.Next() {
+			var id string
+			if rows.Scan(&id) == nil {
+				presents[id] = true
+			}
+		}
+		if errors.Join(rows.Err(), rows.Close()) != nil {
+			ok = false
+			break
+		}
+	}
+	var partis []*salon
+	if ok {
+		m.mu.Lock()
+		for _, id := range ids {
+			if presents[id] {
+				continue
+			}
+			m.finirLocked(id)
+			if s := etats[id]; s != nil {
+				partis = append(partis, s)
+			}
+		}
+		m.mu.Unlock()
+	}
+	m.createMu.Unlock()
+	for _, s := range partis {
+		_ = m.finir(s, RaisonDetruit)
+	}
+	if len(partis) > 0 {
+		// Fichiers de pièces supprimés par un autre processus : usage relu (blob.Store).
+		_ = m.cfg.Pieces.Resync()
+	}
+}
+
+// Run : Tick chaque seconde jusqu'à l'annulation de ctx.
+func (m *Manager) Run(ctx context.Context) {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		m.Tick()
+	}
+}
+
+// PurgerAuDemarrage (plan, point 11) : à appeler une fois, avant toute autre méthode et avant
+// l'écoute. Les clés des conversations, les jetons et les planchers des pièces étaient en
+// mémoire : tout fichier de conversation et toute pièce sont effacés (fichiers d'abord, puis
+// toutes les lignes salon_pieces, pieces_bytes = 0) ; les lignes des salons vivants restent
+// (lien et mot de passe valables) ; salons échus et lignes à 10 essais supprimés. Dossiers
+// ramenés à 0700 (MkdirAll ne resserre pas un dossier existant), puis vidage du WAL.
+func (m *Manager) PurgerAuDemarrage() error {
+	for _, d := range []string{m.cfg.DossierConversations, m.cfg.Pieces.Dir} {
+		if err := viderDossier(d); err != nil {
+			return err
+		}
+	}
+	if err := m.cfg.Pieces.Resync(); err != nil {
+		return es(err)
+	}
+	tx, err := m.cfg.DB.Begin()
+	if err != nil {
+		return base(err)
+	}
+	defer tx.Rollback()
+	for _, q := range []string{
+		`DELETE FROM salon_pieces`,
+		`UPDATE salons SET pieces_bytes=0`,
+		`DELETE FROM salons WHERE expires_at<=? OR failed_attempts>=?`,
+	} {
+		args := []any{}
+		if strings.Contains(q, "?") {
+			args = []any{m.cfg.Now().Unix(), maxEssais}
+		}
+		if _, err := tx.Exec(q, args...); err != nil {
+			return base(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return base(err)
+	}
+	return base(store.Checkpoint(m.cfg.DB))
+}
+
+// viderDossier : dossier d créé s'il manque, ramené à 0700, vidé, dates à l'epoch.
+func viderDossier(d string) error {
+	if err := os.MkdirAll(d, 0o700); err != nil {
+		return es(err)
+	}
+	if err := os.Chmod(d, 0o700); err != nil {
+		return es(err)
+	}
+	es0, err := os.ReadDir(d)
+	if err != nil {
+		return es(err)
+	}
+	for _, e := range es0 {
+		if err := os.RemoveAll(filepath.Join(d, e.Name())); err != nil {
+			return es(err)
+		}
+	}
+	return sansDate(d)
+}
+
+// DetruireHorsLigne : commande d'administration (shhdrop admin destroy - d'un lien #c…),
+// hors du serveur : le salon dont access_v = SHA-256(kAcces), vivant ou non, est supprimé :
+// pièces (fichier puis ligne), fichier de conversation, ligne du salon ; puis vidage du WAL.
+// Salon inconnu : ErrNotFound. Le serveur en marche voit la ligne disparue au tick suivant
+// (Tick, lignes) : connexions fermées en raison 2, état oublié, place du bloc rendue.
+func DetruireHorsLigne(db *sql.DB, pieces *blob.Store, dossierConv string, kAcces []byte) error {
+	v := share.Verifier(kAcces)
+	if v == nil {
+		return ErrNotFound
+	}
+	var id string
+	if err := db.QueryRow(`SELECT id FROM salons WHERE access_v=?`, v).Scan(&id); err != nil {
+		return notFound(err)
+	}
+	if !idValide(id) {
+		return ErrBase
+	}
+	m := &Manager{cfg: Config{DB: db, Pieces: pieces}}
+	if err := m.effacerPiecesEnBase(id); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(dossierConv, id)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return es(err)
+	}
+	if _, err := db.Exec(`DELETE FROM salons WHERE id=? AND NOT EXISTS (SELECT 1 FROM salon_pieces WHERE salon_id=?)`,
+		id, id); err != nil {
+		return base(err)
+	}
+	return base(store.Checkpoint(db))
+}
+
+// EffacerTout : commande d'administration (shhdrop admin wipe --yes) : fichiers de pièces et
+// de conversations effacés (fichiers d'abord ; les dossiers absents ne sont pas créés), puis
+// toutes les lignes salon_pieces et salons ; rend le nombre de salons supprimés.
+func EffacerTout(db *sql.DB, dossierPieces, dossierConv string) (int64, error) {
+	for _, d := range []string{dossierPieces, dossierConv} {
+		es0, err := os.ReadDir(d)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return 0, es(err)
+		}
+		for _, e := range es0 {
+			if err := os.RemoveAll(filepath.Join(d, e.Name())); err != nil {
+				return 0, es(err)
+			}
+		}
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, base(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM salon_pieces`); err != nil {
+		return 0, base(err)
+	}
+	res, err := tx.Exec(`DELETE FROM salons`)
+	if err != nil {
+		return 0, base(err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, base(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, base(err)
+	}
+	return n, base(store.Checkpoint(db))
+}

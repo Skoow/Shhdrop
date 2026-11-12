@@ -648,3 +648,23 @@ func TestRefuseV3(t *testing.T) {
 		t.Fatal("schéma touché :", got)
 	}
 }
+
+// Plan C-2 Task 15 : les commandes d'administration du salon exigent le schéma courant
+// (tables du salon) ; une base d'une version antérieure donne ErrOldSchema (message fixe).
+func TestRequireCurrent(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "s.db")
+	db, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := RequireCurrent(db); err != nil {
+		t.Fatal("schéma courant refusé :", err)
+	}
+	if _, err := db.Exec(`PRAGMA user_version=1`); err != nil {
+		t.Fatal(err)
+	}
+	if err := RequireCurrent(db); !errors.Is(err, ErrOldSchema) {
+		t.Fatal("schéma 1 :", err)
+	}
+}

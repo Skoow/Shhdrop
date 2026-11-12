@@ -17,7 +17,7 @@ import (
 // membre. La base ne garde que les colonnes de §39.3.5 ; sièges, jetons (par SHA-256),
 // nonces et rangs vivent en mémoire.
 //
-// Ordre des verrous : createMu → Manager.mu ; essais (rayé par id) → Manager.mu → salon.mu →
+// Ordre des verrous : createMu → Manager.mu → salon.mu (fin.go, lignes) ; essais (rayé par id) → Manager.mu → salon.mu →
 // Manager.idxMu ; Conversation a son propre verrou, pris en dernier ; connexion.cmu
 // (connexion.go) est un verrou feuille, pris sous salon.mu (diffusion) ou seul, sous lequel
 // aucun autre verrou n'est pris ; le verrou de Manager.flux (share.Streams) aussi. placeMu
@@ -77,6 +77,8 @@ type Manager struct {
 
 	// arrete : FermerTout appelée (arrêt du serveur) ; plus aucune connexion inscrite.
 	arrete atomic.Bool
+	// servis : appels de Servir en cours (AttendreConnexions).
+	servis atomic.Int64
 	// octetsConv : somme des tailles des conversations ouvertes (Conversation.compterDans) :
 	// usage lu sans verrou ni parcours des salons (UsedBytes, plein).
 	octetsConv atomic.Int64
@@ -442,48 +444,10 @@ func (m *Manager) echec(id string) error {
 		return &BadPassword{AttemptsLeft: maxEssais - failed}
 	}
 	// failed_attempts = 10 : la ligne est déjà exclue de toute requête (failed_attempts<10)
-	// et l'état mémoire est détruit en premier ; si la suppression de la ligne échoue, elle
-	// reste « détruite » partout (la purge de la Task 15 la supprimera).
-	m.detruire(id)
+	// et l'état mémoire est détruit en premier (0x05 raison 2 aux connectés, fin.go) ; si la
+	// suppression de la ligne échoue, elle reste « détruite » partout, et Tick la reprend.
+	_ = m.detruire(id)
 	return ErrNotFound
-}
-
-// detruire détruit le salon id : d'abord l'état mémoire (drapeau fini, jetons oubliés,
-// conversation : clé mise à zéro, fichier supprimé), puis la ligne (pièces en base, ON DELETE
-// CASCADE), puis les fichiers des pièces. Sûre sans essaiLock (purge de la Task 15) : la tombe
-// laissée dans Manager.salons empêche de recréer état ou fichier. Erreurs fixes, sans chemin.
-// Complétée à la Task 15 (0x05 aux connectés).
-func (m *Manager) detruire(id string) error {
-	m.mu.Lock()
-	s := m.salons[id]
-	if s == nil {
-		// Échéance inconnue sans la ligne : la plus lointaine possible (24 h, arrondie).
-		s = nouveauSalon(id, m.cfg.Now().Add(25*time.Hour), 0, nil, m.now)
-		m.salons[id] = s
-	}
-	m.finirLocked(id)
-	m.mu.Unlock()
-	errs := []error{m.viderEtat(s)}
-
-	var pieces []string
-	rows, err := m.cfg.DB.Query(`SELECT id FROM salon_pieces WHERE salon_id=?`, id)
-	if err == nil {
-		for rows.Next() {
-			var p string
-			if rows.Scan(&p) == nil {
-				pieces = append(pieces, p)
-			}
-		}
-		err = errors.Join(rows.Err(), rows.Close())
-	}
-	errs = append(errs, base(err))
-	_, err = m.cfg.DB.Exec(`DELETE FROM salons WHERE id=?`, id)
-	errs = append(errs, base(err))
-	for _, p := range pieces {
-		errs = append(errs, es(m.cfg.Pieces.Delete(p)))
-	}
-	m.purger(s) // pièces marquées par viderEtat : index, quotas (fichiers déjà effacés)
-	return errors.Join(errs...)
 }
 
 // Gestion : GET /api/salons/gestion ; present = sièges occupés.
@@ -578,13 +542,14 @@ func (m *Manager) sortirLocked(s *salon, n uint8, enr func(seq uint64) []byte, r
 	m.flux.Revoke(cleFluxMembre(jv)) // lectures de pièces en cours de ce jeton coupées
 }
 
-// Tick : une passe d'entretien (chaque seconde, Run à la Task 15) : trames « 10 min » et
-// « 1 h » échues effacées (Task 11), sièges hors ligne depuis 10 min libérés (leurs lectures
-// « instantané » ne sont plus attendues), pièces effacées (celles de ces trames, celles qui
-// ne sont jamais liées ou finalisées : Task 13), salons arrivés à échéance détruits (detruire :
-// pièces, fichier puis ligne, conversation, ligne du salon ; la Task 15 y ajoutera le 0x05
-// aux connectés, finir), tombes échues oubliées une fois leurs pièces purgées (un effacement
-// raté est retenté au Tick suivant), places de bloc des salons échus rendues.
+// Tick : une passe d'entretien (chaque seconde, Run) : trames « 10 min » et « 1 h » échues
+// effacées (Task 11), sièges hors ligne depuis 10 min libérés (leurs lectures « instantané »
+// ne sont plus attendues), pièces effacées (celles de ces trames, celles qui ne sont jamais
+// liées ou finalisées : Task 13), salons arrivés à échéance finis en raison 1 (finir : 0x05
+// aux connectés, conversation, pièces fichier puis ligne, ligne du salon), fins restées à
+// faire reprises, tombes échues oubliées une fois leur fin complète et leurs pièces purgées
+// (un effacement raté est retenté au Tick suivant), places de bloc des salons échus rendues,
+// puis passe sur la base (lignes, fin.go : lignes à 10 essais, lignes disparues).
 func (m *Manager) Tick() {
 	now := m.cfg.Now()
 	m.mu.Lock()
@@ -598,11 +563,12 @@ func (m *Manager) Tick() {
 		tombe, echu, aPurger := m.entretenir(s, now)
 		switch {
 		case echu:
-			_ = m.detruire(s.id) // purger compris ; une pièce non effacée reste dans aPurger
+			_ = m.finir(s, RaisonExpire) // une partie disque ratée reste à faire (reprendreFin)
 		case aPurger:
 			m.purger(s) // hors du verrou du salon
 		}
-		if tombe && !s.resteAPurger() {
+		m.reprendreFin(s)
+		if tombe && !s.resteAPurger() && !s.finIncomplete() {
 			m.mu.Lock()
 			if m.salons[s.id] == s {
 				delete(m.salons, s.id)
@@ -610,6 +576,7 @@ func (m *Manager) Tick() {
 			m.mu.Unlock()
 		}
 	}
+	m.lignes()
 }
 
 // margeTombe : une tombe est gardée jusqu'à l'échéance plus cette marge (plan, Task 15) : un
@@ -672,6 +639,10 @@ func (m *Manager) plein(n int64) bool {
 	return partages+m.UsedBytes()+n > m.cfg.StorageMax
 }
 
+// Usage : octets des pièces et des conversations (usedBytes), avec l'erreur de lecture
+// (démarrage : checkStorage).
+func (m *Manager) Usage() (int64, error) { return m.usedBytes() }
+
 // UsedBytes : usedBytes pour le décompte des partages ; échec fermé : usage illisible des
 // pièces → StorageMax (aucune création tant qu'il ne se relit pas).
 func (m *Manager) UsedBytes() int64 {
@@ -680,41 +651,6 @@ func (m *Manager) UsedBytes() int64 {
 		return m.cfg.StorageMax
 	}
 	return u
-}
-
-// viderEtat : état mémoire du salon détruit sous son verrou (drapeau fini, jetons oubliés,
-// index, journal et échéances vidés), puis conversation détruite (idempotent : réessaie la
-// suppression du fichier).
-func (m *Manager) viderEtat(s *salon) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.fini {
-		s.fini = true
-		m.indexer(func(index map[[32]byte]*salon) {
-			for h := range s.jetons {
-				delete(index, h)
-			}
-			for h := range s.revoques {
-				delete(index, h)
-			}
-		})
-		// Pièces : plus jamais servies, flux coupés ; fichiers et lignes effacés par detruire,
-		// index et quotas par purger.
-		for _, p := range s.lesPieces {
-			s.supprimerPieceLocked(p)
-		}
-		clear(s.jetons)
-		clear(s.revoques)
-		s.sieges = [nbSieges]*siege{}
-		s.journal = nil
-		s.index = nil
-		s.pieces = nil
-		s.echeances = nil
-	}
-	if s.conv != nil {
-		return s.conv.Detruire()
-	}
-	return nil
 }
 
 // occupes : sièges occupés, sous le verrou du salon.

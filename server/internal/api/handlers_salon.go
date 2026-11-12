@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -28,6 +29,7 @@ func (a salonAPI) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/salons/rejoindre", a.rejoindre)
 	mux.HandleFunc("GET /api/salons/gestion", a.gestion)
 	mux.HandleFunc("POST /api/salons/exclure", a.exclure)
+	mux.HandleFunc("POST /api/salons/detruire", a.detruire)
 	mux.HandleFunc("GET /api/salons/ws", a.salonWS)
 	a.routesPieces(mux)
 }
@@ -286,6 +288,52 @@ func (a salonAPI) exclure(w http.ResponseWriter, r *http.Request) {
 	if err := a.m.Exclure(req); err != nil {
 		failSalon(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+// detruire : POST /api/salons/detruire (X-Shh-Manage du créateur, ou X-Shh-Membre si
+// members_can_destroy ; exactement l'un des deux ; corps {reason?: "report"}) → {} (spec
+// §39.3.9, plan C-2 Task 15). Ni l'un ni l'autre, ou membre sans la permission : 403
+// forbidden ; les deux, en-tête mal formé, raison autre que "report" : 400 ; salon inconnu,
+// échu ou détruit, jeton inconnu : 404 ; jeton révoqué : 403 excluded. Un signalement réussi
+// compte dans l'entier horaire des signalements (§9.5, sans identifiant), comme les partages.
+func (a salonAPI) detruire(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Reason json.RawMessage `json:"reason"` // valeur brute : null, "" ou "REPORT" refusés
+	}
+	if err := readJSON(w, r, &b); err != nil {
+		failSalon(w, err)
+		return
+	}
+	report := b.Reason != nil
+	if report && string(b.Reason) != `"report"` {
+		failSalon(w, errBadRequest)
+		return
+	}
+	avecGestion := len(r.Header.Values("X-Shh-Manage")) != 0
+	avecMembre := len(r.Header.Values("X-Shh-Membre")) != 0
+	var sg, jeton []byte
+	var err error
+	switch {
+	case avecGestion && avecMembre:
+		err = errBadRequest
+	case avecGestion:
+		sg, err = headerSecret(r, "X-Shh-Manage")
+	case avecMembre:
+		jeton, err = headerSecret(r, "X-Shh-Membre")
+	default:
+		err = salon.ErrForbidden
+	}
+	if err == nil {
+		err = a.m.Detruire(sg, jeton)
+	}
+	if err != nil {
+		failSalon(w, err)
+		return
+	}
+	if report {
+		a.reports.add(a.svc.Now())
 	}
 	writeJSON(w, http.StatusOK, struct{}{})
 }

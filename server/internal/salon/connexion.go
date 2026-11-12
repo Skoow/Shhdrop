@@ -147,6 +147,8 @@ func (f *fermeur) fermer(code int) {
 // minute suivante, trame non rangée. ctx annulé : 1001. Rend nil, ou une erreur fixe si une
 // panique a été récupérée (rien n'est écrit dans un journal).
 func (m *Manager) Servir(ctx context.Context, l Lien, ip netip.Addr, autoriser func(netip.Addr) bool) (err error) {
+	m.servis.Add(1)
+	defer m.servis.Add(-1) // en dernier : après desinscrire (AttendreConnexions)
 	f := &fermeur{l: l}
 	var c *connexion
 	defer func() {
@@ -841,6 +843,19 @@ func (m *Manager) FermerTout() {
 	for _, s := range salons {
 		s.arreterConnexions()
 	}
+}
+
+// AttendreConnexions : attend au plus d que tous les Servir aient rendu (arrêt du serveur :
+// après FermerTout, avant la fermeture de la base) ; faux si le délai passe d'abord.
+func (m *Manager) AttendreConnexions(d time.Duration) bool {
+	fin := time.Now().Add(d)
+	for m.servis.Load() > 0 {
+		if !time.Now().Before(fin) {
+			return false
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return true
 }
 
 // arreterConnexions : chaque connexion du salon fermée en 1001 (FermerTout).

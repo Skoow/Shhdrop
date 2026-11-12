@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ import (
 	"github.com/skoow/shhdrop/server/internal/config"
 	"github.com/skoow/shhdrop/server/internal/janitor"
 	"github.com/skoow/shhdrop/server/internal/limits"
+	"github.com/skoow/shhdrop/server/internal/salon"
 	"github.com/skoow/shhdrop/server/internal/share"
 	"github.com/skoow/shhdrop/server/internal/store"
 	"github.com/skoow/shhdrop/server/internal/token"
@@ -90,7 +92,8 @@ func publicMessage(err error) string {
 	switch {
 	case errors.As(err, &s):
 		return s.msg
-	case errors.Is(err, store.ErrNewerSchema), errors.Is(err, store.ErrCheckpointBusy), errors.Is(err, blob.ErrNoAllocate):
+	case errors.Is(err, store.ErrNewerSchema), errors.Is(err, store.ErrOldSchema), errors.Is(err, store.ErrCheckpointBusy),
+		errors.Is(err, blob.ErrNoAllocate):
 		return firstKnown(err).Error()
 	}
 	return "échec (erreur système, détail non affiché : il peut contenir un identifiant de partage)"
@@ -98,7 +101,7 @@ func publicMessage(err error) string {
 
 // firstKnown : l'erreur connue de publicMessage contenue dans err.
 func firstKnown(err error) error {
-	for _, k := range []error{store.ErrNewerSchema, store.ErrCheckpointBusy, blob.ErrNoAllocate} {
+	for _, k := range []error{store.ErrNewerSchema, store.ErrOldSchema, store.ErrCheckpointBusy, blob.ErrNoAllocate} {
 		if errors.Is(err, k) {
 			return k
 		}
@@ -197,11 +200,54 @@ func tightenPerms(dataDir string) error {
 
 // salonsOf : réglages du salon donnés à l'API, valeur zéro (désactivé) sans SHH_SALONS=1,
 // même si SHH_ORIGIN est posée (la CSP reste alors celle d'avant le salon).
-func salonsOf(cfg config.Config) api.Salons {
+func salonsOf(cfg config.Config, m *salon.Manager) api.Salons {
 	if !cfg.Salons {
 		return api.Salons{}
 	}
-	return api.Salons{Origin: cfg.Origin}
+	return api.Salons{Origin: cfg.Origin, M: m}
+}
+
+// Dossiers du salon sous SHH_DATA_DIR : conversations et pièces (jamais blobs/, que
+// janitor.Reconcile vide de ce qu'il n'y connaît pas).
+const dirSalons, dirSalonPieces = "salons", "salon-pieces"
+
+// salonWait : attente, à l'arrêt, de la fin des WebSocket du salon avant la fermeture de la
+// base (FermerTout ne les attend pas ; l'écrivain d'un client qui ne lit plus rend au plus
+// après 1 s).
+const salonWait = 5 * time.Second
+
+// setupSalons : sans SHH_SALONS=1, rien (nil : aucune route, ExtraUsed des partages non câblé,
+// aucun dossier créé). Sinon le gestionnaire du salon, dossiers en 0700, purge au démarrage
+// faite (plan C-2, point 11 : avant l'écoute), et l'usage du salon ajouté à celui des
+// partages (ExtraUsed). Le gestionnaire voit les partages par UsedShares, qui n'inclut
+// jamais ExtraUsed : aucun double compte.
+func setupSalons(cfg config.Config, db *sql.DB, svc *share.Service, lim *limits.Limiter) (*salon.Manager, error) {
+	if !cfg.Salons {
+		return nil, nil
+	}
+	m, err := salon.NewManager(salon.Config{DB: db,
+		Pieces:               &blob.Store{Dir: filepath.Join(cfg.DataDir, dirSalonPieces), NoSparse: cfg.BehindProxy},
+		DossierConversations: filepath.Join(cfg.DataDir, dirSalons), Now: cfg.Now, Max: cfg.SalonsMax,
+		StorageMax: cfg.StorageMaxBytes, UsedPartages: svc.UsedShares, OnAbandon: lim.AbandonUpload})
+	if err != nil {
+		return nil, err
+	}
+	if err := m.PurgerAuDemarrage(); err != nil {
+		return nil, err
+	}
+	svc.ExtraUsed = m.UsedBytes
+	return m, nil
+}
+
+// usedAtStart : place déjà prise sous SHH_STORAGE_MAX au démarrage (checkStorage) : partages
+// et, salon actif, pièces et conversations (rien après la purge, compté quand même).
+func usedAtStart(svc *share.Service, m *salon.Manager) (int64, error) {
+	used, err := svc.UsedShares()
+	if err != nil || m == nil {
+		return used, err
+	}
+	u, err := m.Usage()
+	return used + u, err
 }
 
 // shutdownTimeout : délai laissé aux requêtes en cours à l'arrêt (variable pour les tests).
@@ -269,7 +315,11 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if err := janitor.Reconcile(svc); err != nil {
 		return err
 	}
-	used, err := svc.Blobs.UsedBytes()
+	sm, err := setupSalons(cfg, db, svc, lim)
+	if err != nil {
+		return err
+	}
+	used, err := usedAtStart(svc, sm)
 	if err != nil {
 		return err
 	}
@@ -296,7 +346,16 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 		return err
 	}
 	srv := newHTTPServer(api.New(svc, token.New(tokKey, cfg.Now), lim,
-		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy, cfg.TrustedProxies, salonsOf(cfg)))
+		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy, cfg.TrustedProxies, salonsOf(cfg, sm)))
+	if sm != nil {
+		// net/http ne suit plus une connexion mise à niveau : Shutdown ne l'attend pas.
+		srv.RegisterOnShutdown(sm.FermerTout)
+		// Exécuté avant db.Close (defer) : WebSocket fermés et attendus (au plus salonWait).
+		defer func() {
+			sm.FermerTout()
+			sm.AttendreConnexions(salonWait)
+		}()
+	}
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return err
@@ -312,7 +371,15 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	// Chaque seconde : partages effacés hors du serveur (shhdrop admin destroy) → flux
 	// coupés et surveillances prévenues (spec §41.8).
 	go func() { janitor.Watch(jctx, svc, time.Second); close(wdone) }()
-	defer func() { jcancel(); <-jdone; <-wdone }()
+	// Salon : Tick chaque seconde (échéances, sièges hors ligne, pièces, salons échus, lignes
+	// supprimées par l'administrateur), arrêté avant la fermeture de la base.
+	rdone := make(chan struct{})
+	if sm != nil {
+		go func() { sm.Run(jctx); close(rdone) }()
+	} else {
+		close(rdone)
+	}
+	defer func() { jcancel(); <-jdone; <-wdone; <-rdone }()
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {

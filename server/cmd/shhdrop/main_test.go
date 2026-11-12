@@ -178,10 +178,10 @@ func TestServeTightensPermissions(t *testing.T) {
 
 // Salon désactivé : l'API reçoit la valeur zéro, même avec SHH_ORIGIN posée.
 func TestSalonsOf(t *testing.T) {
-	if s := salonsOf(config.Config{Origin: "https://shhdrop.app"}); s != (api.Salons{}) {
+	if s := salonsOf(config.Config{Origin: "https://shhdrop.app"}, nil); s != (api.Salons{}) {
 		t.Fatalf("salon désactivé : %+v", s)
 	}
-	if s := salonsOf(config.Config{Salons: true, Origin: "https://shhdrop.app"}); s.Origin != "https://shhdrop.app" {
+	if s := salonsOf(config.Config{Salons: true, Origin: "https://shhdrop.app"}, nil); s.Origin != "https://shhdrop.app" {
 		t.Fatalf("salon actif : %+v", s)
 	}
 }

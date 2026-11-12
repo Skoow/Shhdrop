@@ -15,6 +15,7 @@ import (
 
 	"github.com/skoow/shhdrop/server/internal/blob"
 	"github.com/skoow/shhdrop/server/internal/config"
+	"github.com/skoow/shhdrop/server/internal/salon"
 	"github.com/skoow/shhdrop/server/internal/share"
 	"github.com/skoow/shhdrop/server/internal/store"
 )
@@ -59,16 +60,20 @@ func runAdmin(args []string, cfg config.Config, stdin io.Reader, stdout, stderr 
 		return usage("commande admin inconnue")
 	}
 
-	// destroy : le lien est lu avant d'ouvrir quoi que ce soit ; seule K_accès en est gardée.
+	// destroy : le lien est lu avant d'ouvrir quoi que ce soit ; seule K_accès en est gardée
+	// (K_accès_s pour un lien de salon #c<43>).
 	var kAcces []byte
+	var estSalon bool
 	if args[0] == "destroy" {
 		link, err := readLink(stdin)
 		if err != nil {
 			return usage(err.Error())
 		}
 		var ok bool
-		if kAcces, ok = accessKeyOf(link); !ok {
-			return usage("lien invalide (attendu : https://…/#<clé de 43 caractères>)")
+		if kAcces, estSalon = salonAccessKeyOf(link); !estSalon {
+			if kAcces, ok = accessKeyOf(link); !ok {
+				return usage("lien invalide (attendu : https://…/#<clé de 43 caractères>, ou #c<clé> pour un salon)")
+			}
 		}
 	}
 
@@ -99,6 +104,9 @@ func runAdmin(args []string, cfg config.Config, stdin io.Reader, stdout, stderr 
 		}
 		fmt.Fprintf(stdout, "créations rétablies (%s)\n", dir)
 	case "destroy":
+		if estSalon {
+			return destroySalon(svc, dir, kAcces, stdout, stderr, fail)
+		}
 		if err := svc.DestroyAdmin(kAcces); err != nil {
 			if errors.Is(err, share.ErrNotFound) {
 				fmt.Fprintf(stderr, "introuvable (%s ; 0 partage détruit)\n", dir)
@@ -132,6 +140,21 @@ func runAdmin(args []string, cfg config.Config, stdin io.Reader, stdout, stderr 
 			return fail(err)
 		}
 		fmt.Fprintf(stdout, "%d partages effacés, fichiers compris (%s)\n", n, dir)
+		// Salons : pièces, conversations et lignes ; le serveur en marche ferme leurs
+		// connexions au tick suivant (lignes disparues). Base d'une version antérieure : pas
+		// de table du salon, aucun salon à effacer.
+		switch err := store.RequireCurrent(svc.DB); {
+		case err == nil:
+			ns, err := salon.EffacerTout(svc.DB, filepath.Join(dir, dirSalonPieces), filepath.Join(dir, dirSalons))
+			if err != nil {
+				return fail(err)
+			}
+			fmt.Fprintf(stdout, "%d salons effacés, pièces et conversations comprises (%s)\n", ns, dir)
+		case errors.Is(err, store.ErrOldSchema):
+			fmt.Fprintf(stdout, "aucun salon (base d'une version antérieure) (%s)\n", dir)
+		default:
+			return fail(err)
+		}
 		// Un téléchargement commencé sur un partage déjà retiré finit sur un descripteur que
 		// seul le serveur en marche tient (grâce de 2 h, spec §41.8) : il doit le couper (revue B5).
 		cut, err := svc.CutAllDetached()
@@ -230,6 +253,49 @@ func accessKeyOf(link string) ([]byte, bool) {
 		return nil, false
 	}
 	k, err := hkdf.Key(sha256.New, kLien, nil, "shhdrop/v2/acces", 32)
+	clear(kLien)
+	return k, err == nil
+}
+
+// destroySalon : destroy - d'un lien de salon : ligne, pièces et conversation supprimées
+// (salon.DetruireHorsLigne) ; le serveur en marche ferme les connexions en raison 2 au tick
+// suivant. Exige le schéma courant (tables du salon). Ni le lien ni l'identifiant ne sont
+// affichés.
+func destroySalon(svc *share.Service, dir string, kAcces []byte, stdout, stderr io.Writer, fail func(error) int) int {
+	if err := store.RequireCurrent(svc.DB); err != nil {
+		return fail(err)
+	}
+	err := salon.DetruireHorsLigne(svc.DB, &blob.Store{Dir: filepath.Join(dir, dirSalonPieces)},
+		filepath.Join(dir, dirSalons), kAcces)
+	if errors.Is(err, salon.ErrNotFound) {
+		fmt.Fprintf(stderr, "introuvable (%s ; 0 salon détruit)\n", dir)
+		return 1
+	}
+	if err != nil {
+		return fail(err)
+	}
+	fmt.Fprintf(stdout, "1 salon détruit (%s)\n", dir)
+	return 0
+}
+
+// salonAccessKeyOf : K_accès_s = HKDF-SHA-256(K_lien, sel vide, « shhdrop/v2/salon/acces »,
+// 32) (vecteurs « cles » de engine/vectors/salon-v3.json), K_lien étant les 43 caractères
+// après « #c » d'un lien de salon (spec §39.3), ou « c<43> » seul. Faux pour tout autre lien
+// (partage #<43>, gestion #m<43>).
+func salonAccessKeyOf(link string) ([]byte, bool) {
+	key := link
+	if i := strings.LastIndexByte(link, '#'); i >= 0 {
+		key = link[i+1:]
+	}
+	rest, ok := strings.CutPrefix(key, "c")
+	if !ok || len(rest) != 43 {
+		return nil, false
+	}
+	kLien, err := share.DecodeB64(rest, 32)
+	if err != nil {
+		return nil, false
+	}
+	k, err := hkdf.Key(sha256.New, kLien, nil, "shhdrop/v2/salon/acces", 32)
 	clear(kLien)
 	return k, err == nil
 }
