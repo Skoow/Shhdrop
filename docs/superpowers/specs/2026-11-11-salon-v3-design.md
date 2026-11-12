@@ -262,3 +262,45 @@ Vecteurs communs du moteur (groupe, Commit, Welcome, découpage, enveloppe) ; te
 5. **C-5** Règle d'effacement, code de vérification, exclusion, fin du salon, signalement.
 
 Chaque étape a son plan détaillé, ses tests et sa revue avant la suivante.
+
+## 14. Demandes du propriétaire du 12 novembre
+
+Le propriétaire veut une conversation aussi proche que possible d'une messagerie moderne. Décisions prises par délégation (« prends les meilleures décisions »), avec les signalements.
+
+### 14.1 En ligne, hors ligne, dernière connexion
+
+- **En ligne** : point vert sur l'avatar et « en ligne » sous le pseudonyme, d'après `0x07`.
+- **Hors ligne** : « vu aujourd'hui à 14:32 », « vu hier à 22:05 » ou « vu le 11 nov. à 09:10 », à la minute près, heure de l'appareil qui affiche.
+- **Source de l'heure** : le serveur, qui connaît déjà les connexions (§10). Il garde **en mémoire seulement** l'heure de la dernière déconnexion de chaque siège, arrondie à la minute, et la joint à `0x07` hors ligne et à l'accueil (`0x0D` étendu). Rien sur le disque, rien après la fin du salon. Changement de protocole : tâche serveur C-2 Task 9b (ci-dessous).
+- **Masquer ma dernière connexion** : réglage par personne. Le client l'annonce au serveur par un message de contrôle `0x06` (vide ou 1 octet, en mémoire seulement). Le serveur n'envoie alors plus l'heure de ce siège. Comme sur WhatsApp, l'effet est **réciproque** : qui masque la sienne ne voit plus celle des autres, appliqué par le serveur, pas seulement par l'écran.
+- **Signalement (moyen, confidentialité)** : l'heure de dernière connexion apprend aux autres membres quand chacun utilise le salon. Elle est montrée par défaut, comme le veut le propriétaire. Correction proposée : réglage « Masquer » visible dès la page d'explication.
+- **Signalement (faible)** : « en ligne » veut dire « WebSocket ouvert ». Un onglet ouvert en arrière-plan compte comme en ligne, comme sur les messageries web.
+
+### 14.2 Coches des messages et des documents
+
+- **Messages** (rappel de §6) : une coche grise = envoyé (accepté par le serveur), deux coches grises = reçu (déchiffré par chaque participant), deux coches de couleur = vu. Dans un groupe : « Vu par 2 / 3 » et la liste détaillée au toucher.
+- **Documents et photos, nouveau** : deux accusés de plus, chiffrés comme les autres (sortes `piece_ouverte` et `piece_telechargee`) :
+  - **Ouvert** (icône d'œil) : le fichier a été affiché dans la visionneuse de l'application ;
+  - **Téléchargé** (flèche vers le bas) : le fichier a été enregistré sur l'appareil.
+  Dans la fiche du message (appui long ou survol, « Infos ») : pour chaque participant, envoyé, reçu, vu, ouvert, téléchargé, avec l'heure.
+- Toujours actifs, comme « Vu » (décision du propriétaire pour §6). **Signalement (faible, confidentialité)** : l'expéditeur sait si et quand chacun a ouvert ou enregistré son fichier ; c'est dit sur la page d'explication. Le serveur sait déjà qui télécharge une pièce (requête `GET`), pas qui l'ouvre ni qui l'enregistre.
+
+### 14.3 Sélection multiple
+
+- **Envoi** : choisir plusieurs photos, vidéos ou documents d'un coup (galerie, fichiers, glisser-déposer). Chaque fichier devient une pièce et un message ; les photos et vidéos envoyées ensemble s'affichent groupées en **album** (grille de 2 à 4 vignettes, « +N »). La limite de 120 pièces par heure et par personne (C-2 Task 13) s'applique ; au-delà, l'écran dit combien attendre.
+- **Réception** : mode sélection (appui long sur un message, ou case à cocher au survol) ; barre d'actions « Télécharger (N) », « Tout sélectionner ». Plusieurs fichiers partent en une seule archive `.zip` faite dans l'appareil (module `zip` existant, sans compression ni métadonnée), ou un par un si l'appareil le permet mieux (application native). Chaque fichier téléchargé envoie son accusé « Téléchargé ».
+- Le budget de lecture par pièce (C-2 Task 13) s'applique : télécharger dix fois la même archive finit par être refusé, avec un message clair.
+
+### 14.4 Son de nouveau message et mode silencieux
+
+- **Son** : court, original, de style « tir laser de vaisseau spatial », **synthétisé dans l'appareil** (Web Audio : oscillateur en balayage descendant et petite enveloppe, environ 150 ms, volume modéré). Aucun fichier son, aucune ressource tierce. **Signalement (moyen, légal)** : ne pas reprendre un son connu d'un film ou d'un jeu (droits d'auteur) ; le son est créé pour Shhdrop.
+- **Quand** : à la réception d'un message d'un autre participant (jamais pour ses propres messages, accusés, « écrit » ou présences) ; au plus un son toutes les 2 secondes ; pas de son si la conversation est affichée, au premier plan et déjà en bas (on voit le message).
+- **Silencieux** : bouton cloche barrée dans l'en-tête de la conversation, « Mettre en silencieux » (toujours, 1 h, 8 h). Le titre de l'onglet compte encore les non-lus.
+- **Où le réglage est gardé** : la leçon du nettoyage automatique (un réglage perdu à chaque visite est inutile) s'applique. Le réglage est gardé dans la base locale chiffrée de l'appareil (même principe que `shhdrop-returns` : AES-GCM, clé non extractible), rattachée au salon et **effacée à la fin du salon** ou par « Effacer l'historique ». Aucun réglage n'est envoyé au serveur.
+- **Refusé** : notifications push par un service tiers (§9, point 10). Une notification système locale (« Nouveau message », sans contenu ni pseudonyme) pourra être proposée plus tard, après accord explicite du navigateur.
+
+### 14.5 Tâches ajoutées
+
+- **C-2 Task 9b** (serveur) : heure de dernière déconnexion en mémoire, arrondie à la minute ; `0x07` hors ligne et `0x0D` étendus de 8 octets (minutes Unix, 0 = inconnue ou masquée) ; contrôle `0x06` « masquer », réciproque ; tests : heure jamais sur disque, masquage réciproque, fin du salon. Les tailles du protocole (§ « Protocole » du plan C-2) changent : `0x07` passe de 11 à 19 octets, une annonce de `0x0D` de 17 à 25.
+- **C-3** : présence, dernière connexion, coches des messages, son, silencieux.
+- **C-4** : coches des documents, sélection multiple à l'envoi et à la réception, albums, archive.
