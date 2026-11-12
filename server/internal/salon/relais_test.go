@@ -334,7 +334,9 @@ func TestSuiteFusionnee(t *testing.T) {
 	b.recevoir(t, g, trameD(dVolatile, 2))
 	e0b, g := b.entrerMembre(t, c, true) // reprise du créateur
 	attendu = append(attendu, att{0x0A, e0b.Seq})
-	attendu = append(attendu, att{0x01, b.recevoir(t, g, trameD(dInstantane, 3))})
+	// « Instantané » dont A est le seul lecteur attendu : effacée à son départ (plus bas,
+	// Task 11), donc absente de la suite.
+	b.recevoir(t, g, trameD(dInstantane, 3))
 	eb, bb := b.entrerMembre(t, c, false)
 	attendu = append(attendu, att{0x02, eb.Seq})
 	attendu = append(attendu, att{0x01, b.recevoir(t, bb, trameD(byte(UneHeure)<<1, 4))})
@@ -495,8 +497,8 @@ func TestEnTeteRefuse(t *testing.T) {
 	}
 }
 
-// « Instantané » : lecteurs attendus = sièges occupés à la réception, moins l'expéditeur ;
-// autres règles : 0.
+// « Instantané » : lecteurs attendus = sièges occupés à la réception, moins l'expéditeur, un
+// bit par siège (Task 11) ; autres règles : 0.
 func TestAttendus(t *testing.T) {
 	b := nouveauBanc(t, 200)
 	c := b.creer(t, 4)
@@ -509,7 +511,7 @@ func TestAttendus(t *testing.T) {
 	b.recevoir(t, g, trameD(0, 3))
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.index) != 3 || s.index[0].attendus != 2 || s.index[1].attendus != 0 || s.index[2].attendus != 0 {
+	if len(s.index) != 3 || s.index[0].attendus != 0b110 || s.index[1].attendus != 0 || s.index[2].attendus != 0 {
 		t.Fatal("attendus", s.index)
 	}
 	if s.index[0].drapeaux != dInstantane || s.index[1].drapeaux != byte(DixMinutes)<<1 || s.index[0].siege != 0 {

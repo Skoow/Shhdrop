@@ -456,6 +456,7 @@ func (m *Manager) detruire(id string) error {
 		s.journal = nil
 		s.index = nil
 		s.pieces = nil
+		s.echeances = nil
 	}
 	if s.conv != nil {
 		errs = append(errs, s.conv.Detruire()) // idempotent : réessaie la suppression
@@ -545,22 +546,26 @@ func (m *Manager) Membre(jeton []byte) (Membre, error) {
 	return Membre{salon: s, siege: n, emis: x.emis, plancher: x.plancher}, nil
 }
 
-// departLocked : départ du siège n (0x03 au journal, jeton oublié) ; sans effet s'il est
-// libre. Ne peut pas échouer (invariant du journal, annoncerLocked). Appelé sous s.mu.
+// departLocked : départ du siège n (Quitter, libération après 10 min hors ligne, exclusion) :
+// 0x03 au journal, jeton oublié, puis siège retiré des lecteurs attendus de toutes les trames
+// (effacements en chaîne, 0x0E après le 0x03) ; sans effet s'il est libre. Ne peut pas
+// échouer (invariant du journal, annoncerLocked). Appelé sous s.mu.
 func (m *Manager) departLocked(s *salon, n uint8) {
 	if s.sieges[n] == nil {
 		return
 	}
 	s.annoncerLocked(func(seq uint64) []byte { return EnrDepart(seq, n) }, true)
+	s.plusAttenduLocked(n)
 	jv, _ := s.oublierLocked(n)
 	m.idxMu.Lock()
 	delete(m.index, jv)
 	m.idxMu.Unlock()
 }
 
-// Tick : une passe d'entretien. Task 6 : libère les sièges hors ligne depuis 10 min et
-// oublie les tombes échues ; rend les places de bloc des salons échus (complétée aux Tasks
-// 11, 13 et 15).
+// Tick : une passe d'entretien (chaque seconde, Run à la Task 15) : trames « 10 min » et
+// « 1 h » échues effacées (Task 11), sièges hors ligne depuis 10 min libérés (leurs lectures
+// « instantané » ne sont plus attendues), tombes échues oubliées, places de bloc des salons
+// échus rendues (complétée aux Tasks 13 et 15).
 func (m *Manager) Tick() {
 	now := m.cfg.Now()
 	m.mu.Lock()
@@ -571,15 +576,7 @@ func (m *Manager) Tick() {
 	}
 	m.mu.Unlock()
 	for _, s := range salons {
-		s.mu.Lock()
-		tombe := s.fini && !now.Before(s.expires)
-		for n, x := range s.sieges {
-			if x != nil && !x.horsLigneDepuis.IsZero() && now.Sub(x.horsLigneDepuis) >= horsLigneMax {
-				m.departLocked(s, uint8(n))
-			}
-		}
-		s.mu.Unlock()
-		if tombe {
+		if m.entretenir(s, now) {
 			m.mu.Lock()
 			if m.salons[s.id] == s {
 				delete(m.salons, s.id)
@@ -587,6 +584,20 @@ func (m *Manager) Tick() {
 			m.mu.Unlock()
 		}
 	}
+}
+
+// entretenir : passe de Tick sur un salon, sous son verrou (defer : une panique ne le garde
+// jamais) ; rend vrai pour une tombe échue.
+func (m *Manager) entretenir(s *salon, now time.Time) (tombe bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.effacerEchuesLocked(now.UnixMilli())
+	for n, x := range s.sieges {
+		if x != nil && !x.horsLigneDepuis.IsZero() && now.Sub(x.horsLigneDepuis) >= horsLigneMax {
+			m.departLocked(s, uint8(n))
+		}
+	}
+	return s.fini && !now.Before(s.expires)
 }
 
 // usedBytes : octets des pièces et des fichiers de conversation.

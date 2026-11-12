@@ -62,7 +62,9 @@ type salon struct {
 	// par rang de trame (Task 13, bornée par le budget des pièces) ; nil tant qu'aucune.
 	index  []entree
 	pieces map[uint64][16]byte
-	conv   *Conversation // nil pour la tombe d'un salon détruit sans état
+	// echeances : effacements « 10 min » et « 1 h » à venir (effacement.go), vidés par Tick.
+	echeances echeances
+	conv      *Conversation // nil pour la tombe d'un salon détruit sans état
 	// conns : connexion WebSocket de chaque siège (une au plus, connexion.go).
 	conns [nbSieges]*connexion
 	// fini : salon détruit ; plus rien n'y entre ni n'y est recréé (tombe gardée dans
@@ -100,12 +102,13 @@ func (s *salon) annoncerLocked(enr func(seq uint64) []byte, depart bool) (uint64
 	s.seq++
 	ev := evenement{seq: s.seq, enr: enr(s.seq)}
 	s.journal = append(s.journal, ev)
-	s.diffuserLocked(ev.enr, true, nil)
+	s.diffuserLocked(ev.enr, genreRang, nil)
 	return s.seq, nil
 }
 
 // installerLocked tire jeton et nonce, annonce le siège (0x02 arrivée, ou 0x0A reprise si
 // reprise) et l'installe. Le jeton n'est rendu qu'à l'appelant ; seul son SHA-256 reste.
+// Une reprise retire le siège des lecteurs attendus des trames déjà rangées (plan, point 8).
 // Une reprise d'un siège occupé compte dans le plafond des reprises du siège (repriseMax par
 // heure, partagé avec les reprises par WebSocket) : au-delà, *Attente, rien n'est changé.
 func (s *salon) installerLocked(n uint8, reprise bool, now time.Time) (jeton [32]byte, x *siege, err error) {
@@ -130,6 +133,7 @@ func (s *salon) installerLocked(n uint8, reprise bool, now time.Time) (jeton [32
 	x.emis, x.plancher, x.arrivee = seq, seq, seq
 	if reprise && s.sieges[n] != nil {
 		x.arrivee = s.sieges[n].arrivee
+		s.plusAttenduLocked(n) // nouvelle identité : trames d'avant le 0x0A illisibles pour elle
 	}
 	s.sieges[n] = x
 	s.jetons[x.jetonV] = n

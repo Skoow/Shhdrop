@@ -16,9 +16,10 @@ import (
 // entree : trame non volatile rangée, 24 octets (plan, point 10 ; TestTailleEntree).
 // recuMs : heure de réception du serveur (ms Unix), jamais lue dans la trame ni écrite sur
 // disque. emplacement : numéro dans la conversation, ou effaceMarque une fois l'emplacement
-// écrasé (retrait, règle). attendus : lecteurs attendus d'une trame « instantané » (sièges
-// occupés à la réception, moins l'expéditeur ; plan, point 8), 0 sinon. La pièce liée d'une
-// trame est rangée à part (salon.pieces, Task 13).
+// écrasé (retrait, règle). attendus : lecteurs attendus d'une trame « instantané », un bit
+// par siège (bitSiege ; sièges occupés à la réception, moins l'expéditeur ; plan, point 8),
+// retirés à chaque lecture, départ ou reprise (effacement.go) ; 0 pour les autres règles. La
+// pièce liée d'une trame est rangée à part (salon.pieces, Task 13).
 type entree struct {
 	seq         uint64
 	recuMs      int64
@@ -49,7 +50,9 @@ func (s *salon) membreLocked(mb Membre, now time.Time) bool {
 // réservé) ou pièce donnée (jusqu'à la Task 13) : ErrBadRequest, aucun rang consommé. Membre
 // périmé : ErrNotFound. Erreur d'écriture de la conversation (ErrES, fixe) : trame non rangée,
 // aucun rang consommé. L'écriture se fait sous le verrou du salon : l'ordre des emplacements
-// est celui des rangs.
+// est celui des rangs. Règle « 10 min » ou « 1 h » : échéance rangée (effacement.go).
+// « Instantané » sans aucun autre siège occupé : relayée puis effacée aussitôt (0x0E), sans
+// jamais être écrite sur le disque.
 func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, error) {
 	s := mb.salon
 	if s == nil {
@@ -74,18 +77,25 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 		s.relayerLocked(mb.siege, now.UnixMilli(), trame)
 		return s.seq, nil
 	}
-	e, err := s.conv.Ajouter(trame)
-	if err != nil {
-		return 0, err
-	}
 	var attendus uint16
 	if h.Regle == Instantane {
-		attendus = uint16(s.occupesLocked() - 1) // l'expéditeur occupe son siège (membreLocked)
+		attendus = s.attendusLocked(mb.siege)
+	}
+	e := uint32(effaceMarque)
+	if h.Regle != Instantane || attendus != 0 {
+		if e, err = s.conv.Ajouter(trame); err != nil {
+			return 0, err
+		}
 	}
 	s.seq++
 	s.index = append(s.index, entree{seq: s.seq, emplacement: e, recuMs: now.UnixMilli(), siege: mb.siege,
 		drapeaux: trame[len(marque)], attendus: attendus})
+	s.echeanceLocked(h.Regle, s.seq, now.UnixMilli())
 	s.relayerLocked(mb.siege, now.UnixMilli(), trame)
+	if e == effaceMarque {
+		// Personne à attendre : 0x0E juste après le 0x01, sans écriture.
+		s.diffuserLocked(EnrEfface(s.seq, s.seq), genreEfface, nil)
+	}
 	return s.seq, nil
 }
 
@@ -94,7 +104,8 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 // l'occupant actuel, qu'une reprise (0x0A) ne change pas ; au siège 0, toujours le créateur,
 // tout depuis la création. Une trame d'un ancien titulaire d'un siège invité n'est pas à lui.
 // Toute autre trame (autre auteur, volatile, rang inconnu, déjà effacée) : ignorée sans
-// erreur. Membre périmé : ErrNotFound.
+// erreur. Membre périmé : ErrNotFound. Effacement commun (effacerLocked), sans 0x0E : échec
+// d'écriture des zéros → ErrES, la trame n'étant quand même plus servie.
 func (m *Manager) Retirer(mb Membre, seq uint64) error {
 	s := mb.salon
 	if s == nil {
@@ -106,8 +117,8 @@ func (m *Manager) Retirer(mb Membre, seq uint64) error {
 	if !s.membreLocked(mb, now) {
 		return ErrNotFound
 	}
-	i := sort.Search(len(s.index), func(i int) bool { return s.index[i].seq >= seq })
-	if i == len(s.index) || s.index[i].seq != seq {
+	i := s.chercherLocked(seq)
+	if i < 0 {
 		return nil
 	}
 	e := &s.index[i]
@@ -118,15 +129,11 @@ func (m *Manager) Retirer(mb Membre, seq uint64) error {
 	if e.efface() || e.siege != mb.siege || e.seq <= borne {
 		return nil
 	}
-	if err := s.conv.Effacer(e.emplacement); err != nil {
-		return err
-	}
-	e.emplacement = effaceMarque
-	return nil
+	return s.effacerLocked(i)
 }
 
-// Quitter : départ de mb (0x03 au journal, diffusé à la Task 9), jeton oublié, siège libéré.
-// Membre périmé : ErrNotFound.
+// Quitter : départ de mb (0x03 au journal, diffusé à la Task 9), jeton oublié, siège libéré,
+// plus attendu par aucune trame « instantané » (departLocked). Membre périmé : ErrNotFound.
 func (m *Manager) Quitter(mb Membre) error {
 	s := mb.salon
 	if s == nil {

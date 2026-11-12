@@ -104,6 +104,9 @@ type connexion struct {
 	curseur         uint64   // dernier rang remis à l'écrivain (lu ou mis dans la file)
 	retardDepuis    time.Time
 	presenceManquee bool // une présence (0x07) diffusée hors du direct : état renvoyé au retour
+	// effacesManques : cibles des 0x0E diffusés hors du direct (sans rang, le rattrapage ne
+	// les sert pas) : renvoyés au retour au direct, après tout ce qui a été écrit avant.
+	effacesManques []uint64
 
 	reveil       chan struct{} // capacité 1
 	stop         chan struct{} // fermé par arreter
@@ -282,6 +285,7 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 		}
 		x.nonce = nonce
 		x.reprises = append(x.reprises, now)
+		s.plusAttenduLocked(mb.siege) // nouvelle identité (plan, point 8)
 		point = seq
 	} else {
 		point = min(max(a.Depuis, x.emis), s.seq)
@@ -301,7 +305,7 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 	}
 	s.conns[mb.siege] = c
 	x.horsLigneDepuis = time.Time{}
-	s.diffuserLocked(EnrPresence(s.seq, mb.siege, true), false, c)
+	s.diffuserLocked(EnrPresence(s.seq, mb.siege, true), genrePresence, c)
 	return c, 0
 }
 
@@ -335,7 +339,7 @@ func (m *Manager) desinscrire(c *connexion) {
 	if x.emis == c.mb.emis {
 		x.horsLigneDepuis = m.cfg.Now()
 	}
-	s.diffuserLocked(EnrPresence(s.seq, n, false), false, nil)
+	s.diffuserLocked(EnrPresence(s.seq, n, false), genrePresence, nil)
 }
 
 // relayerLocked diffuse la trame de rang s.seq (rangée ou volatile) aux connexions en direct ;
@@ -343,38 +347,53 @@ func (m *Manager) desinscrire(c *connexion) {
 func (s *salon) relayerLocked(siege uint8, recuMs int64, trame []byte) {
 	for _, c := range s.conns {
 		if c != nil {
-			s.diffuserLocked(EnrTrame(s.seq, siege, recuMs, trame), true, nil)
+			s.diffuserLocked(EnrTrame(s.seq, siege, recuMs, trame), genreRang, nil)
 			return
 		}
 	}
 }
 
-// diffuserLocked remet enr à chaque connexion sauf sauf, sans jamais attendre. rang : enr
-// prend un rang (0x01, 0x02, 0x03, 0x09, 0x0A) ; sinon c'est une présence (0x07). Hors du
+// genre : ce que diffuserLocked remet.
+type genre uint8
+
+const (
+	genreRang     genre = iota // 0x01, 0x02, 0x03, 0x09, 0x0A : prend un rang
+	genrePresence              // 0x07
+	genreEfface                // 0x0E (cible en enr[9:17])
+)
+
+// diffuserLocked remet enr à chaque connexion sauf sauf, sans jamais attendre. Hors du
 // direct, un rang manqué sera servi par le rattrapage (sauf une trame volatile, perdue :
-// normal) ; une présence manquée fait renvoyer l'état des présences au retour au direct.
-// Appelé sous s.mu.
-func (s *salon) diffuserLocked(enr []byte, rang bool, sauf *connexion) {
+// normal) ; une présence manquée fait renvoyer l'état des présences au retour au direct ; un
+// 0x0E manqué est renvoyé au retour au direct (effacesManques ; plus de priveMax en attente :
+// le client ne suit plus, 4006). Appelé sous s.mu.
+func (s *salon) diffuserLocked(enr []byte, g genre, sauf *connexion) {
 	for _, c := range s.conns {
 		if c == nil || c == sauf || c.arrete.Load() {
 			continue
 		}
+		if c.direct && len(c.file) >= fileMax {
+			c.direct = false
+			c.retardDepuis = time.Now()
+		} else if !c.direct && g == genreRang && !c.retardDepuis.IsZero() && time.Since(c.retardDepuis) > retardMax {
+			c.arreter(CodeTropLent, EnrFin(s.seq, RaisonTropLent))
+			continue
+		}
 		if !c.direct {
-			if !rang {
+			switch g {
+			case genrePresence:
 				c.presenceManquee = true
-			} else if !c.retardDepuis.IsZero() && time.Since(c.retardDepuis) > retardMax {
-				c.arreter(CodeTropLent, EnrFin(s.seq, RaisonTropLent))
+			case genreEfface:
+				if len(c.effacesManques) >= priveMax {
+					c.arreter(CodeTropLent, EnrFin(s.seq, RaisonTropLent))
+					continue
+				}
+				c.effacesManques = append(c.effacesManques, binary.BigEndian.Uint64(enr[9:17]))
 			}
 			continue
 		}
-		if len(c.file) >= fileMax {
-			c.direct = false
-			c.retardDepuis = time.Now()
-			c.presenceManquee = c.presenceManquee || !rang
-			continue
-		}
 		c.file = append(c.file, enr)
-		if rang {
+		if g == genreRang {
 			c.curseur = binary.BigEndian.Uint64(enr[1:9])
 		}
 		c.signaler()
@@ -549,12 +568,15 @@ func (c *connexion) traiter(d Demande, ip netip.Addr, autoriser func(netip.Addr)
 	case DemPing:
 		c.repondre(func(seq uint64) []byte { return EnrPong(seq, d.Ping) })
 	case DemLu:
-		// Lecture « instantané » : Task 11.
+		if err := c.m.Lu(c.mb, d.Seq); err != nil {
+			c.arreter(codeErreur(err), nil)
+			return false
+		}
 	}
 	return true
 }
 
-// codeErreur : code de fermeture d'une erreur de Recevoir, Retirer ou Quitter. Requête
+// codeErreur : code de fermeture d'une erreur de Recevoir, Retirer, Lu ou Quitter. Requête
 // invalide : 4003 ; membre périmé (jeton remplacé, oublié, salon fini) : 4004 ; toute autre
 // erreur (ErrES, ErrInutilisable, ErrPleine…) : 1011, jamais 4003 (relecture Task 8).
 func codeErreur(err error) int {
@@ -710,6 +732,10 @@ func (c *connexion) etapeLocked() (lot [][]byte, refs []ref, e etape) {
 		lot = append(lot, s.presencesLocked(c.mb.siege)...)
 		c.presenceManquee = false
 	}
+	for _, cible := range c.effacesManques {
+		lot = append(lot, EnrEfface(s.seq, cible))
+	}
+	c.effacesManques = nil
 	return lot, nil, eEcrire
 }
 
