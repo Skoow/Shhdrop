@@ -240,3 +240,31 @@ test("confirmation du balai : Tab au-delà de la bulle la ferme ; Échap la ferm
   await expect(broom).toBeFocused();
   await expect(photoRow.locator('[data-clean="nettoye"]')).toHaveCount(0);
 });
+
+// Audit R4 : à 720 px (zoom 200 %) et sur téléphone, les offres ne coupent jamais la carte
+// « Votre envoi » entre ses boutons et son compteur : avant la carte entière.
+for (const vp of [null, { width: 720, height: 450 }]) {
+  test(`offres hors de la carte « Votre envoi » (${vp ? "720 px" : "projet"}), liste vide puis remplie (audit R4)`, async ({ page, shh, isMobile }) => {
+    if (vp) {
+      test.skip(isMobile, "720 px : projet ordinateur");
+      await page.setViewportSize(vp);
+    } else test.skip(!isMobile, "téléphone");
+    await openSend(page, shh.origin);
+    const strip = page.locator("[data-offer-strip]").filter({ visible: true });
+    const title = page.locator("#compose-title");
+    const cap = page.locator(".capg");
+    const check = async () => {
+      await expect(strip).toHaveCount(1);
+      const [o, h, c] = [(await strip.boundingBox())!, (await title.boundingBox())!, (await cap.boundingBox())!];
+      // Avant le titre de la carte : ni entre le titre et le compteur, ni dedans.
+      expect(o.y + o.height).toBeLessThanOrEqual(h.y);
+      expect(h.y).toBeLessThan(c.y);
+    };
+    await check();
+    await addPdfAndPhoto(page);
+    await check();
+    // Boutons de la carte, puis compteur, sans rien entre eux.
+    const clear = page.getByRole("button", { name: "Tout supprimer" });
+    expect((await clear.boundingBox())!.y).toBeLessThan((await cap.boundingBox())!.y);
+  });
+}

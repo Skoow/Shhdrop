@@ -576,6 +576,12 @@
 {#snippet app()}
   <div class={["app", { narrow }]} data-composer {@attach narrow ? null : fitViewport}>
     <div class="list-col">
+      <!-- Offres (retours du propriétaire du 12 novembre, remplace la ligne discrète d'audit M17) :
+           Gratuit, Plus, Pro et leurs limites, « bientôt », lien vers /offres (nouvel onglet si la
+           liste n'est pas vide : elle serait perdue en quittant la page). Téléphone : avant la
+           carte « Votre envoi » entière, jamais entre ses boutons et son compteur (audit R4) ;
+           ordinateur : au-dessus de « Chiffrer et envoyer », la liste garde sa hauteur. -->
+      {#if narrow}<div class="offers">{@render offers()}</div>{/if}
       <div class="top">
         <div class="tt">
           <h2 id="compose-title" class="title" tabindex="-1" data-large-title bind:this={title}>{t("compose.title")}</h2>
@@ -597,11 +603,6 @@
             </Button>
           </div>
         {/if}
-        <!-- Offres (retours du propriétaire du 12 novembre, remplace la ligne discrète d'audit M17) :
-             Gratuit, Plus, Pro et leurs limites, « bientôt », lien vers /offres (nouvel onglet si la
-             liste n'est pas vide : elle serait perdue en quittant la page). Téléphone : ici ;
-             ordinateur : au-dessus de « Chiffrer et envoyer », la liste garde sa hauteur. -->
-        {#if narrow}<div class="offers">{@render offers()}</div>{/if}
         <div class="cap">
           <div class="capg"><CapacityGauge bytes={composer.totalBytes + removing} count={composer.count} head /></div>
         </div>
@@ -923,6 +924,10 @@
   .offers {
     grid-column: 1 / -1;
     min-width: 0;
+  }
+  /* Téléphone : avant la carte « Votre envoi », un peu détachées de son titre (audit R4). */
+  .list-col > .offers {
+    margin-block-end: var(--sp-2);
   }
 
   /* Zone de dépôt : un clic ouvre le sélecteur ; on peut aussi déposer n'importe où sur la page. */
