@@ -1611,15 +1611,29 @@ fn n1_kp_mal_etiquete_ignore() {
 
 /// N2 : à l'époque E−1, un Commit refusé par tous (siège 2, non créateur, qui retire un
 /// présent) est rangé avant le vrai Commit du créateur ; entre les deux, le siège 4 fait une
-/// reprise (l'arrivant X, nouveau nonce) et le vrai Commit remplace sa feuille. Le Welcome de X,
+/// reprise (l'arrivant X, `nonce(4, 1)`) et le vrai Commit remplace sa feuille. Le Welcome de X,
 /// envoyé par le siège 0, est vérifié avec les annonces au rang du Commit **de ce siège**.
 #[test]
 fn n2_commit_refuse_avant_le_vrai() {
+    commit_refuse_puis_vrai(2);
+}
+
+/// N2, second candidat : le Commit refusé est remis à X sous le siège attesté 0 (celui du
+/// Welcome) : premier candidat, il ne vérifie pas le Welcome (siège 4 encore à `nonce(4, 0)`) ;
+/// le candidat suivant, le vrai Commit, le fait entrer.
+#[test]
+fn n2_second_candidat_du_meme_siege() {
+    commit_refuse_puis_vrai(0);
+}
+
+/// Scénario des deux tests N2 ; `atteste_pour_x` : siège sous lequel X reçoit le Commit refusé.
+fn commit_refuse_puis_vrai(atteste_pour_x: u8) {
     let mut r = groupe(5);
     // Ancienne instance du siège 4 et le siège 2 (qui va diverger) hors du réseau.
     let _ancien = r.m[4].take().unwrap();
     let mut s2 = r.m[2].take().unwrap();
-    // X (futur siège 4) suit le réseau dès sa création ; liste de l'accueil : siège 4 au nonce n1.
+    // X (futur siège 4) suit le réseau dès sa création ; liste de l'accueil : siège 4 à
+    // `nonce(4, 0)`.
     let mut x = Salon::creer(nouvelle_identite(4, nonce(4, 1)).unwrap(), &cles(), false).unwrap();
     x.remplacer_annonces(0, &r.liste);
     let kp_x = x.key_package(&cles()).unwrap();
@@ -1627,15 +1641,16 @@ fn n2_commit_refuse_avant_le_vrai() {
     // Le siège 2 croit le siège 3 parti et le retire : refusé par tous les autres.
     s2.marquer_parti(3);
     let faux = s2.retirer(&cles(), 3).unwrap();
+    let mut x = r.m[4].take().unwrap();
     for (i, ev) in r.diffuser(2, &faux) {
-        let attendu = if i == 4 {
-            Ok(Evenement::Ignore)
-        } else {
-            Err(Error::CommitRefuse)
-        };
-        assert_eq!(ev, attendu, "membre {i}");
+        assert_eq!(ev, Err(Error::CommitRefuse), "membre {i}");
     }
-    // Reprise du siège 4 (nonce n2), puis le vrai Commit du créateur.
+    assert_eq!(
+        x.recevoir_trame(&cles(), &faux, r.seq, atteste_pour_x),
+        Ok(Evenement::Ignore)
+    );
+    r.m[4] = Some(x);
+    // Reprise du siège 4 (`nonce(4, 1)`), puis le vrai Commit du créateur.
     r.annoncer(4, nonce(4, 1));
     for (i, ev) in r.diffuser(4, &kp_x) {
         let attendu = if i == 4 {

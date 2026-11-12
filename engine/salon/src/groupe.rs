@@ -322,6 +322,12 @@ fn suite_annoncee(mls: &[u8]) -> Option<[u8; 2]> {
     mls.get(6..8)?.try_into().ok()
 }
 
+#[cfg(test)]
+thread_local! {
+    // Nombre de KeyPackages vérifiés (signature) dans ce fil : borne du coût de `entrer`.
+    static VALIDATIONS: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
+}
+
 /// KeyPackage reçu (`kp`, lu dans les octets MLS `mls`) : suite 0x0001 (contrôlée **avant** toute
 /// vérification de signature : une autre suite atteindrait P-256/P-384, jamais utilisées ici),
 /// valide (signature), durée de vie sans horloge.
@@ -333,6 +339,8 @@ fn lire_key_package(
     if suite_annoncee(mls) != Some(u16::from(SUITE).to_be_bytes()) {
         return Err(Error::MlsInvalide);
     }
+    #[cfg(test)]
+    VALIDATIONS.with(|v| v.set(v.get() + 1));
     let kp = kp
         .validate(crypto, ProtocolVersion::Mls10)
         .map_err(|_| Error::MlsInvalide)?;
@@ -600,6 +608,15 @@ impl Salon {
     /// se vérifie est retenu (un Commit refusé par tous ou une trame injectée du même siège ne
     /// suffit pas à fausser le rang). En cas de refus, rien ne change (file et annonces
     /// gardées) : un vrai Welcome peut encore venir.
+    ///
+    /// Limites connues : un serveur qui ment sur le siège attesté du Welcome (un autre membre de
+    /// l'arbre, sans Commit de lui dans la file) force le repli « sans candidat » : annonces
+    /// courantes, et toute la file est rendue `Ignore` pour cette entrée (rien n'est lu en plus :
+    /// aucun gain de confidentialité, seulement des trames manquées). Le premier candidat qui
+    /// vérifie le Welcome peut aussi précéder le vrai Commit (Commit refusé du même siège, avec
+    /// les mêmes annonces) : les trames d'entre les deux reviennent alors en `Ignore` ou en
+    /// erreur dans `rejoues`. Si l'effacement d'une clé d'init échoue, l'entrée est faite mais l'appel rend
+    /// `mls_interne` (les `rejoues` sont perdus).
     fn entrer(&mut self, welcome: Welcome, siege_welcome: u8) -> Result<Vec<Rejoue>> {
         if self.attente_pleine {
             return Err(Error::AttentePleine);
@@ -663,11 +680,18 @@ impl Salon {
                 avant = Some(file.len());
             }
         } else {
+            // Un seul registre, avancé de candidat en candidat (mêmes états que s'il était
+            // refait depuis le début de la file pour chacun) : chaque entrée de la file est
+            // appliquée une fois au plus, donc au plus `ATTENTE_MAX` vérifications de KeyPackage
+            // quel que soit le nombre de candidats (une file remplie de copies par un serveur
+            // malveillant reste linéaire).
+            self.registre = Registre::default();
+            let mut pos = 0;
             for &i in &candidats {
-                self.registre = Registre::default();
-                for a in &file[..i] {
+                for a in &file[pos..i] {
                     self.appliquer_en_attente(a);
                 }
+                pos = i;
                 if self.verifier_welcome(&prepare, createur_siege).is_ok() {
                     avant = Some(i);
                     break;
@@ -690,14 +714,14 @@ impl Salon {
         self.createur_siege = createur_siege;
         self.groupe = Some(groupe);
         // Entré : les clés d'init de tous nos KeyPackages (celui du Welcome et les autres
-        // publiés) ne servent plus (confidentialité persistante).
-        for r in &self.nos_key_packages {
-            self.fournisseur
-                .storage()
-                .delete_key_package(r)
-                .map_err(|_| Error::MlsInterne)?;
+        // publiés) ne servent plus (confidentialité persistante). Chaque effacement est tenté ;
+        // un échec est signalé (`mls_interne`) après le rejeu, l'entrée étant déjà faite.
+        let mut effacement = Ok(());
+        for r in core::mem::take(&mut self.nos_key_packages) {
+            if self.fournisseur.storage().delete_key_package(&r).is_err() {
+                effacement = Err(Error::MlsInterne);
+            }
         }
-        self.nos_key_packages.clear();
         // Ce qui précède le Commit qui nous ajoute est d'avant notre entrée : illisible, ignoré.
         let mut rejoues = Vec::new();
         for a in &file[..avant] {
@@ -716,7 +740,7 @@ impl Salon {
                 autre => self.appliquer_en_attente(&autre),
             }
         }
-        Ok(rejoues)
+        effacement.map(|()| rejoues)
     }
 
     /// Avant l'entrée : applique une annonce de la file, ou retient un KeyPackage qu'elle porte.
@@ -1557,6 +1581,61 @@ mod tests {
             assert_eq!(m[i].epoque(), e0);
             assert_eq!(m[i].membres(), vec![0, 1, 2]);
         }
+    }
+
+    /// IMPORTANT 1 (relecture) : un serveur malveillant remplit la file de copies d'un vrai
+    /// KeyPackage et du vrai Commit (siège attesté 0, époque E−1) rangées avant l'annonce qui
+    /// rend le Welcome vérifiable : chaque copie du Commit est un candidat refusé. Le registre
+    /// avance d'un seul passage : au plus une vérification par KeyPackage de la file (coût
+    /// linéaire), et le dernier candidat fait entrer.
+    #[test]
+    fn candidats_cout_lineaire() {
+        let (mut m, mut seq) = trois();
+        // Reprise du siège 2 (nonce [9; 16]) ; l'ancienne instance quitte le réseau.
+        m.pop();
+        let mut x = Salon::creer(nouvelle_identite(2, [9; 16]).unwrap(), &cles(), false).unwrap();
+        x.remplacer_annonces(0, &[(0, [0; 16]), (1, [1; 16]), (2, [2; 16])]);
+        for s in m.iter_mut() {
+            s.annoncer(2, [9; 16]);
+        }
+        let kp = x.key_package(&cles()).unwrap();
+        let ev = diffuser(&mut m, &mut seq, &kp, 2);
+        assert!(matches!(ev[1], Ok(Evenement::KeyPackage { .. })), "{ev:?}");
+        let Ok(Evenement::KeyPackage { octets }) = &ev[0] else {
+            panic!("{ev:?}")
+        };
+        let c = m[0].ajouter(&cles(), octets).unwrap();
+        let ev = diffuser(&mut m, &mut seq, &c, 0);
+        let Ok(Evenement::CommitAccepte { welcome: Some(w) }) = &ev[0] else {
+            panic!("{ev:?}")
+        };
+        // La file de X : copies (KeyPackage, Commit) avant l'annonce de la reprise.
+        const COPIES: usize = 40;
+        for _ in 0..COPIES {
+            seq += 1;
+            assert_eq!(
+                x.recevoir_trame(&cles(), &kp, seq, 2),
+                Ok(Evenement::Ignore)
+            );
+            seq += 1;
+            assert_eq!(x.recevoir_trame(&cles(), &c, seq, 0), Ok(Evenement::Ignore));
+        }
+        x.annoncer(2, [9; 16]);
+        seq += 1;
+        assert_eq!(
+            x.recevoir_trame(&cles(), &kp, seq, 2),
+            Ok(Evenement::Ignore)
+        );
+        seq += 1;
+        assert_eq!(x.recevoir_trame(&cles(), &c, seq, 0), Ok(Evenement::Ignore));
+        let avant = VALIDATIONS.with(|v| v.get());
+        seq += 1;
+        assert!(matches!(
+            x.recevoir_trame(&cles(), w, seq, 0),
+            Ok(Evenement::Entree { .. })
+        ));
+        let faites = VALIDATIONS.with(|v| v.get()) - avant;
+        assert!(faites <= COPIES + 1, "{faites} vérifications de KeyPackage");
     }
 
     /// Clés restantes : l'arrivant a publié deux KeyPackages (republication) ; le Welcome vise
