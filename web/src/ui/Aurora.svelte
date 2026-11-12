@@ -18,6 +18,9 @@
 <svelte:window onresize={() => (k = scales())} />
 <svelte:document onvisibilitychange={() => (hidden = document.hidden)} />
 
+<!-- Refonte du 12 novembre : nuit bleue sous l'aurore, et « la trame » (grille de petites
+     croix, signature de Shhdrop, comme les points du logo) : CSS pur, ni image ni data:. -->
+<div class="night" aria-hidden="true"></div>
 <div class={["aurora", { paused: hidden }]} aria-hidden="true" data-ambient style:--kx={k.x} style:--ky={k.y}>
   <img class="aur ink" src="{base}assets/aurora-ink.png" alt="" width="128" height="128" decoding="async" />
   <img class="aur tide" src="{base}assets/aurora-tide.png" alt="" width="128" height="128" decoding="async" />
@@ -26,6 +29,7 @@
 </div>
 <div class="grain" aria-hidden="true"></div>
 <div class="sides" aria-hidden="true" data-sides></div>
+<div class="trame" aria-hidden="true" data-trame><i></i></div>
 
 <style>
   .aurora {
@@ -158,6 +162,50 @@
     animation: aurora-burst 1600ms linear 560ms both;
   }
 
+  .night {
+    position: fixed;
+    inset: 0;
+    z-index: -3;
+    pointer-events: none;
+    background: linear-gradient(180deg, #070C1F 0%, #060A1A 45%, #05070F 100%);
+  }
+  /* Croix de 9 px tous les 32 px, en trois masques : le calque fond la grille vers le bas,
+     <i> découpe un disque par case, <i>::before peint les deux traits d'un pixel (union : le
+     centre n'est pas plus clair que les bras). Plafond K5 tenu, centre compris (aurora.spec.ts). */
+  .trame,
+  .trame i,
+  .trame i::before {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+  }
+  .trame {
+    z-index: -1;
+    -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.35), #000 260px, rgb(0 0 0 / 0.5) 65%, transparent);
+    mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.35), #000 260px, rgb(0 0 0 / 0.5) 65%, transparent);
+  }
+  .trame i {
+    -webkit-mask-image: radial-gradient(circle at center, #000 0 4.5px, transparent 5px);
+    mask-image: radial-gradient(circle at center, #000 0 4.5px, transparent 5px);
+    -webkit-mask-size: 32px 32px;
+    mask-size: 32px 32px;
+    -webkit-mask-position: center top;
+    mask-position: center top;
+  }
+  .trame i::before {
+    content: "";
+    background: rgb(150 175 255 / 0.07);
+    -webkit-mask-image:
+      linear-gradient(90deg, transparent calc(50% - 0.5px), #000 calc(50% - 0.5px), #000 calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+      linear-gradient(0deg, transparent calc(50% - 0.5px), #000 calc(50% - 0.5px), #000 calc(50% + 0.5px), transparent calc(50% + 0.5px));
+    mask-image:
+      linear-gradient(90deg, transparent calc(50% - 0.5px), #000 calc(50% - 0.5px), #000 calc(50% + 0.5px), transparent calc(50% + 0.5px)),
+      linear-gradient(0deg, transparent calc(50% - 0.5px), #000 calc(50% - 0.5px), #000 calc(50% + 0.5px), transparent calc(50% + 0.5px));
+    -webkit-mask-size: 32px 32px;
+    mask-size: 32px 32px;
+    -webkit-mask-position: center top;
+    mask-position: center top;
+  }
   .grain {
     position: fixed;
     inset: 0;
@@ -202,7 +250,8 @@
   @media (prefers-contrast: more), (forced-colors: active) {
     .aurora,
     .grain,
-    .sides {
+    .sides,
+    .trame {
       display: none;
     }
   }

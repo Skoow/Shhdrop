@@ -34,6 +34,9 @@
   --pro: #5C80FF;
   --pro-tint: #121B40;
   --pro-line: #3461FF;
+  /* Refonte de l'accueil (12 novembre) : bleu vif des boutons pleins (texte blanc ≥ 4,5:1). */
+  --sig-blue: #3366FF;
+  --sig-blue-hover: #2A55E8;
   /* Icônes de format (retours UI6) : une pastille de couleur par famille, libellé toujours
      écrit en --on-fmt (≥ 4,5:1 sur chacune). Teintes écartées du vert « vérifié » (--accent)
      et des bleus Plus et Pro : 12° au moins sur la roue, plus clair (tokens.test.ts). */

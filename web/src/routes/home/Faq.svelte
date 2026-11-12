@@ -5,17 +5,16 @@
   import { t, type Key } from "../../i18n/i18n.svelte";
   import { magnet, reveal } from "../../ui/attach";
   import { ChevronDown } from "../../ui/Icon";
-  import SectionBg from "../../ui/SectionBg.svelte";
 
   const qs = ["server", "lost", "back", "scan", "copy"] as const;
 </script>
 
 <section class="faq" aria-labelledby="faq-title">
-  <SectionBg kind="cipher" />
   <h2 id="faq-title" class="rv" {@attach reveal}>{t("home.faq.title")}</h2>
   <div class="qa">
     {#each qs as k (k)}
-      <details name="faq" class="rv" {@attach reveal} {@attach magnet}>
+      <!-- « Ce que voit le serveur » (menu Sécurité de la barre du haut) ouvre la première question. -->
+      <details name="faq" id="faq-{k}" class="rv" {@attach reveal} {@attach magnet}>
         <summary><span>{t(`home.faq.${k}.q` as Key)}</span><ChevronDown size={22} strokeWidth={1.75} aria-hidden="true" /></summary>
         <div class="a"><p>{t(`home.faq.${k}.a` as Key)}</p></div>
       </details>
@@ -36,14 +35,19 @@
     margin-inline: auto;
     padding-block-start: 120px;
   }
+  details {
+    scroll-margin-top: 96px;
+  }
   h2 {
+    text-align: center;
+    text-wrap: balance;
     min-width: 0;
     overflow-wrap: break-word;
-    font-size: var(--fs-section);
-    line-height: 1;
-    font-weight: 680;
-    font-stretch: 116%;
-    letter-spacing: -0.04em;
+    font-size: clamp(2rem, 1.4rem + 2vw, 3rem);
+    line-height: 1.05;
+    font-weight: 700;
+    font-stretch: 112%;
+    letter-spacing: -0.035em;
   }
   .qa {
     display: grid;
@@ -58,8 +62,8 @@
     border: 1px solid transparent;
     border-radius: 18px;
     background:
-      linear-gradient(180deg, rgb(19 23 30 / 0.94), rgb(13 16 21 / 0.94)) padding-box,
-      linear-gradient(180deg, rgb(233 236 242 / 0.14), rgb(233 236 242 / 0.03)) border-box;
+      linear-gradient(180deg, rgb(15 22 42 / 0.92), rgb(10 15 30 / 0.92)) padding-box,
+      linear-gradient(180deg, rgb(150 175 255 / 0.18), rgb(150 175 255 / 0.04)) border-box;
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
   }
   details::before {

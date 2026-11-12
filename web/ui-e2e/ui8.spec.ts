@@ -40,10 +40,10 @@ test("accueil : « Comment ça marche » sur un fond sobre (ni biais, ni réglur
   await page.goto(shh.origin + "/");
   const how = page.locator("#comment");
   await how.scrollIntoViewIfNeeded();
-  const bg = how.locator(".sec-bg.tide");
-  const st = await bg.evaluate((e) => ({ clip: getComputedStyle(e).clipPath, tex: getComputedStyle(e.querySelector(".tex")!).backgroundImage }));
+  // Refonte du 12 novembre : plus de fond propre à la section, seul le fond de page (nuit, trame).
+  const st = await how.evaluate((e) => ({ clip: getComputedStyle(e).clipPath, tex: getComputedStyle(e).backgroundImage }));
   expect(st.clip).toBe("none");
-  expect(st.tex).not.toMatch(/repeating|url\(/);
+  expect(st.tex).toBe("none");
   await settle(page);
   await captureOf(how, { path: `${SHOTS}accueil-comment-${w(isMobile)}.png`, animations: "disabled" });
 });

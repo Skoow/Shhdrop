@@ -24,49 +24,46 @@ afterEach(() => {
 });
 
 describe("Home (UI §9.1)", () => {
-  it("titre, phrase, schéma nommé, lien Comment ça marche, emplacement du composeur", () => {
+  it("accueil (refonte du 12 novembre) : sur-titre, titre, phrase, deux boutons, méta, infographie, composeur, sections", () => {
     show();
     const h1 = document.querySelector("h1")!;
     expect(title(h1)).toBe("Un lien, un mot de passe, puis plus rien.");
+    expect(document.querySelectorAll("h1")).toHaveLength(1);
     expect(h1.getAttribute("tabindex")).toBe("-1");
     expect(h1.classList.contains("compact")).toBe(false);
-    expect(document.body.textContent).toContain(
-      "Texte, photos, vidéos, vocaux, documents, envoyés en qualité d'origine.",
-    );
-    // Libellés visibles en HTML (taille de texte relative), cachés aux lecteurs d'écran : le nom est l'aria-label.
-    const labels = [...document.querySelectorAll("[data-label]")].map((e) => e.textContent);
-    expect(labels).toEqual([
-      "Votre appareil",
-      "Chiffré ici",
-      "Serveur",
-      "Illisible",
-      "Destinataire",
-      "Déchiffré ici",
-      "La clé ne passe jamais par le serveur",
-    ]);
-    for (const e of document.querySelectorAll("[data-label]")) expect(e.closest('[aria-hidden="true"]')).not.toBeNull();
-    const svg = document.querySelector('[role="img"]')!;
-    expect(svg.getAttribute("aria-label")).toBe(
-      "Chiffré sur votre appareil, illisible pour le serveur, déchiffré chez le destinataire\u202f; la clé passe à part, jamais par le serveur.",
-    );
+    expect(document.querySelector("[data-eyebrow]")!.textContent).toBe("Chiffré de bout en bout · Hébergé en Europe");
+    expect(document.querySelector(".lede")!.textContent!.length).toBeGreaterThan(20);
+    const pick = document.querySelector<HTMLButtonElement>("[data-pick]")!;
+    expect(pick.textContent!.trim()).toBe("Choisir des fichiers");
+    expect(pick.querySelector("svg")).not.toBeNull();
+    const room = document.querySelector<HTMLButtonElement>("[data-room] button")!;
+    expect(room.textContent).toContain("Ouvrir un salon");
+    expect(room.textContent).toContain("bientôt");
+    expect(room.getAttribute("aria-disabled")).toBe("true");
+    const meta = [...document.querySelectorAll("[data-meta] li")].map((l) => l.textContent!.trim());
+    expect(meta).toEqual(["Gratuit jusqu'à 2\u202fGo", "Sans compte", "S'efface après ouverture"]);
+    expect(document.querySelector("[data-demo]")).not.toBeNull();
     const a = [...document.querySelectorAll("a")].find((x) => x.textContent?.trim() === "Tous les détails de sécurité")!;
     expect(a.getAttribute("href")).toBe("/securite");
-    // « Comment ça marche » fait défiler vers sa section : un bouton, jamais un « # » dans l'adresse.
-    const how = [...document.querySelectorAll("button")].find((x) => x.textContent?.trim() === "Comment ça marche")!;
-    expect(how).toBeDefined();
     expect([...document.querySelectorAll("a")].some((x) => x.getAttribute("href")?.includes("#"))).toBe(false);
     // Sections sous le pli, chacune titrée.
     const h2 = [...document.querySelectorAll("h2")].map((h) => h.textContent!.trim());
     expect(h2).toEqual([
+      "Ce qui se passe quand vous partagez",
+      "Nos engagements",
       "Glissez vos fichiers iciQue voulez-vous envoyer\u202f?",
       "Comment ça marche",
-      "Pourquoi c'est sûr",
+      "Pensé pour la confidentialité",
+      "Offres",
       "Vos questions",
-      "Quelque chose à transmettre\u202f?",
     ]);
-    expect(document.querySelectorAll(".claim")).toHaveLength(4);
+    expect(document.querySelectorAll("[data-how-card]")).toHaveLength(3);
+    const priv = [...document.querySelectorAll("[data-priv-card]")];
+    expect(priv).toHaveLength(4);
+    expect(priv.map((c) => c.querySelector("h3")!.textContent!.trim())).toEqual(["Sans compte", "Rien de lisible sur le serveur", "Photos nettoyées", "Salon éphémère bientôt"]);
+    for (const c of [...document.querySelectorAll("[data-how-card], [data-priv-card]")]) expect(c.querySelector(".tile-ic svg")).not.toBeNull();
+    expect([...document.querySelectorAll("[data-offer]")].map((o) => o.getAttribute("data-offer"))).toEqual(["free", "plus", "pro"]);
     expect(document.querySelectorAll("details[name=faq]")).toHaveLength(5);
-    expect(document.querySelectorAll(".certs > li")).toHaveLength(3);
     expect(document.querySelector('[data-slot="compose"]')).not.toBeNull();
   });
 
@@ -75,8 +72,9 @@ describe("Home (UI §9.1)", () => {
     const h1 = document.querySelector("h1")!;
     expect(title(h1)).toBe("Un lien, un mot de passe, puis plus rien.");
     expect(h1.classList.contains("compact")).toBe(true);
-    expect(document.querySelector('[role="img"]')).toBeNull();
-    expect(document.body.textContent).not.toContain("en qualité d'origine");
+    expect(document.querySelector("[data-demo]")).toBeNull();
+    expect(document.querySelector("[data-pick]")).toBeNull();
+    expect(document.querySelector("[data-eyebrow]")).toBeNull();
     expect(document.querySelector("a")).toBeNull();
     expect(document.querySelector('[data-slot="compose"]')).not.toBeNull();
   });
@@ -130,30 +128,34 @@ describe("Home (UI §9.1)", () => {
     }
   });
 
-  it("fenêtre de dépôt : « Commencer » (fenêtre, téléphone, appel final) mène à la page d'envoi (onadd, retours DROP) ; « Photo ou vidéo » passe par onaction ; un clic sur le verre n'ouvre rien", () => {
+  it("« Choisir des fichiers » ouvre le sélecteur du composeur (onpick) ; « Commencer » (fenêtre, téléphone) mène à la page d'envoi (onadd) ; un clic sur le verre n'ouvre rien", () => {
     const onfiles = vi.fn();
     const onaction = vi.fn();
     const onadd = vi.fn();
-    show({ onfiles, onaction, onadd });
+    const onpick = vi.fn();
+    show({ onfiles, onaction, onadd, onpick });
     // Plus de sélecteur propre à l'accueil : le composeur tient le seul champ fichier.
     expect(document.querySelectorAll('input[type="file"]')).toHaveLength(0);
+    (document.querySelector("[data-pick]") as HTMLButtonElement).click();
+    expect(onpick).toHaveBeenCalledTimes(1);
+    expect(onadd).not.toHaveBeenCalled();
     const buttons = (name: string) => [...document.querySelectorAll("button")].filter((b) => b.textContent!.trim() === name);
     const starts = buttons("Commencer");
-    expect(starts).toHaveLength(2); // fenêtre de dépôt et appel final ; le grand bouton du téléphone a aussi un sous-titre
-    for (const b of starts) expect(b.hasAttribute("aria-haspopup")).toBe(false); // une navigation, pas une feuille
-    for (const b of starts) b.click();
-    expect(onadd).toHaveBeenCalledTimes(2);
+    expect(starts).toHaveLength(1); // fenêtre de dépôt ; le grand bouton du téléphone a aussi un sous-titre
+    expect(starts[0]!.hasAttribute("aria-haspopup")).toBe(false); // une navigation, pas une feuille
+    starts[0]!.click();
+    expect(onadd).toHaveBeenCalledTimes(1);
     buttons("Photo ou vidéo")[0]!.click();
     expect(onaction.mock.calls).toEqual([["media"]]);
-    // Téléphone : le grand bouton « Commencer » mène au même endroit.
     const big = document.querySelector(".add-big") as HTMLButtonElement;
     expect(big.querySelector(".ab-t")!.textContent).toBe("Commencer");
     big.click();
-    expect(onadd).toHaveBeenCalledTimes(3);
+    expect(onadd).toHaveBeenCalledTimes(2);
     // Le verre n'est qu'une cible de dépôt (décision du propriétaire).
     (document.querySelector(".empty") as HTMLElement).click();
     (document.querySelector(".drop-title") as HTMLElement).click();
-    expect(onadd).toHaveBeenCalledTimes(3);
+    expect(onadd).toHaveBeenCalledTimes(2);
+    expect(onpick).toHaveBeenCalledTimes(1);
     expect(onfiles).not.toHaveBeenCalled();
   });
 
@@ -166,7 +168,7 @@ describe("Home (UI §9.1)", () => {
       if (clip) Object.defineProperty(navigator, "clipboard", clip);
       else delete (navigator as { clipboard?: unknown }).clipboard;
     }
-    const group = document.querySelector('[role="group"]')!;
+    const group = document.querySelector('.make[role="group"]')!;
     expect(document.getElementById(group.getAttribute("aria-labelledby")!)!.textContent).toBe("Ou créez sur place");
     const names = [...group.querySelectorAll("button")].map((b) => b.textContent!.trim());
     expect(names).toEqual(["Photo ou vidéo", "Note"]);
@@ -177,7 +179,7 @@ describe("Home (UI §9.1)", () => {
     try {
       const onaction = vi.fn();
       show({ onaction });
-      const group = document.querySelector('[role="group"]')!;
+      const group = document.querySelector('.make[role="group"]')!;
       const buttons = [...group.querySelectorAll("button")];
       expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Photo ou vidéo", "Vocal", "Note"]);
       buttons[1]!.click();
@@ -209,8 +211,8 @@ describe("Home (UI §9.1)", () => {
     setLang("en");
     show();
     expect(title(document.querySelector("h1")!)).toBe("One link, one password, then nothing.");
-    expect(document.querySelector('[role="img"]')!.getAttribute("aria-label")).toBe(
-      "Encrypted on your device, unreadable to the server, decrypted at the recipient; the key travels separately, never through the server.",
-    );
+    expect(document.querySelector("[data-eyebrow]")!.textContent).toBe("End-to-end encrypted · Hosted in Europe");
+    expect(document.querySelector("[data-pick]")!.textContent!.trim()).toBe("Choose files");
+    expect([...document.querySelectorAll("[data-meta] li")].map((l) => l.textContent!.trim())).toEqual(["Free up to 2\u00a0GB", "No account", "Erased after opening"]);
   });
 });

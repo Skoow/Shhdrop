@@ -141,7 +141,7 @@
     animation: in var(--dur-base) var(--ease-out);
   }
   /* Téléphone avec barre d'onglets : le toast se pose au-dessus d'elle. */
-  @media (max-width: 899px) {
+  @media (max-width: 767px) {
     :global(html.has-tabbar) .toast {
       z-index: 21;
       inset-block-end: calc(64px + var(--sp-3) + env(safe-area-inset-bottom, 0px));

@@ -208,6 +208,12 @@ html.vt-reduced::view-transition-new(root) {
     padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   }
 }
+/* Tablette (768 à 899 px, refonte du 12 novembre) : la barre du haut remplace la barre d'onglets. */
+@media (min-width: 768px) {
+  html.has-tabbar body {
+    padding-bottom: 0;
+  }
+}
 
 /* Barre d'actions collée en bas sur téléphone (classe .dock, UI §9). Elle repasse dans le flux
    quand le clavier virtuel est ouvert (html.kbd-open, app/viewport.ts) pour ne jamais couvrir
@@ -269,6 +275,8 @@ html.kbd-open .dock {
     transition:
       opacity 640ms var(--ease-out),
       transform 720ms var(--ease-settle);
+    /* Cartes d'une même rangée : légèrement décalées (--i, refonte du 12 novembre). */
+    transition-delay: var(--i, 0ms);
   }
   .rv-wait:not(.in) {
     opacity: 0;

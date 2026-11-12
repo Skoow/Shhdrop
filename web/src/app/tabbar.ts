@@ -1,4 +1,4 @@
-// Barre d'onglets du téléphone (< 900 px) : façon app, jusqu'à la vraie version mobile.
+// Barre d'onglets du téléphone (< 768 px, refonte du 12 novembre) : façon app, jusqu'à la vraie version mobile.
 // Visible seulement sur les écrans « racine » de l'expéditeur : accueil (composeur vide),
 // Mes partages, Sécurité, Confidentialité, page introuvable. Masquée chez le destinataire (ouverture,
 // contenu), sur la gestion, pendant la composition (l'étape a sa propre barre d'action),

@@ -69,6 +69,14 @@ const PAIRS: [string, string, number, number][] = [
   ["--line-strong", "--surface-2", 3.5, 3],
 ];
 
+describe("bleu des boutons pleins (refonte du 12 novembre)", () => {
+  it("texte blanc ≥ 4,5:1 sur --sig-blue et --sig-blue-hover ; bouton ≥ 3:1 sur --bg", () => {
+    expect(contrast("#FFFFFF", hex("--sig-blue"))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast("#FFFFFF", hex("--sig-blue-hover"))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(hex("--sig-blue"), hex("--bg"))).toBeGreaterThanOrEqual(3);
+  });
+});
+
 describe("jetons de couleur (UI §3.1, §3.2)", () => {
   for (const [fg, bg, published, min] of PAIRS) {
     it(`${fg} / ${bg} ≥ ${min} et conforme à la spécification (${published})`, () => {
@@ -159,6 +167,8 @@ describe("autres jetons (UI §4.2, §5, §7.2)", () => {
       "--warn-tint", "--info", "--selection", "--scrim",
       // retours UI4 : formules payantes
       "--plus", "--plus-tint", "--plus-line", "--pro", "--pro-tint", "--pro-line",
+      // refonte de l'accueil (12 novembre) : boutons pleins
+      "--sig-blue", "--sig-blue-hover",
       // §20.3 matière et aurore
       "--bg-deep", "--hair", "--hair-2", "--vessel", "--edge-hi", "--seal-light", "--seal-halo",
       "--paper", "--ink", "--aur-mint-o", "--aur-tide-o", "--aur-ink-o",

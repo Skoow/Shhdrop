@@ -16,7 +16,8 @@ const SEG = /\/api\/shares\/segments\/\d+(\?from=\d+)?$/;
 async function noSettings(page: Page) {
   await expect(page.getByRole("button", { name: /^(Réglages|Settings)$/ })).toHaveCount(0);
   await expect(page.getByRole("dialog", { name: /^(Réglages|Settings)$/ })).toHaveCount(0);
-  await expect(page.getByRole("banner").getByRole("button")).toHaveCount(0);
+  // En-tête : ni roue ni langue ; ses seuls boutons sont les menus de la barre du haut (12 novembre).
+  await expect(page.getByRole("banner").getByRole("button", { name: /Réglages|Settings|Langue|Language|Français|English/ })).toHaveCount(0);
 }
 
 /** Pied présent, avec ses liens et « À propos » ; ni langue ni nettoyage automatique (12 novembre). */
@@ -95,7 +96,8 @@ test.describe("fr-FR", () => {
 
   test("accueil : bouton Salon à part, visible, « bientôt », désactivé avec sa raison", async ({ page, shh }) => {
     await page.goto(shh.origin + "/");
-    const room = page.locator("[data-room]").getByRole("button", { name: /^Salon/ });
+    // Refonte du 12 novembre : bouton secondaire « Ouvrir un salon » à côté de « Choisir des fichiers ».
+    const room = page.locator("[data-room]").getByRole("button", { name: /^Ouvrir un salon/ });
     await expect(room).toBeVisible();
     await expect(room).toBeInViewport();
     await expect(room).toHaveAttribute("aria-disabled", "true");

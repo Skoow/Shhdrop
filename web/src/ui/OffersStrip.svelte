@@ -6,13 +6,16 @@
   // d'achat, ni adresse demandée (D41-16). Plus et Pro ouvrent leur feuille d'information sur
   // place (`onpaid`, la liste reste). `newTab` : la liste en cours serait perdue en quittant la
   // page, la page des offres s'ouvre alors dans un nouvel onglet.
+  // `cards` (accueil, refonte du 12 novembre) : trois grandes cartes, chacune un lien vers
+  // /offres (« → ») ; le titre est celui de la section de l'accueil.
   import { followLink, href } from "../app/router.svelte";
   import { formatBytes, formatDuration } from "../i18n/format";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { CONTENT_MAX, MAX_OPENS, PAID, TTL_MAX_HOURS, type PaidTier } from "../limits";
+  import { reveal } from "./attach";
   import { ArrowRight } from "./Icon";
 
-  let { newTab = false, onpaid }: { newTab?: boolean; onpaid?: (tier: PaidTier) => void } = $props();
+  let { newTab = false, onpaid, cards = false }: { newTab?: boolean; onpaid?: (tier: PaidTier) => void; cards?: boolean } = $props();
   type Tier = "free" | PaidTier;
   const TIERS: readonly Tier[] = ["free", "plus", "pro"];
   const lang = $derived(getLang());
@@ -25,6 +28,24 @@
   const uid = $props.id();
 </script>
 
+{#if cards}
+  <ul class="tiers big" data-offer-cards>
+    {#each TIERS as x, i (x)}
+      <li data-offer={x} class="rv" style:--i="{i * 70}ms" {@attach reveal}>
+        <a class="tier {x}" href={href("/offres")} onclick={(e) => followLink(e, "/offres")}>
+          <span class="nm">
+            <span class="tn">{name(x)}</span>
+            <span class={["tag", { soon: x !== "free" }]}>{x === "free" ? t("offers.strip.now") : t("foot.soon")}</span>
+          </span>
+          <span class="lim num">
+            {#each lines(x) as l, k (k)}<span class="l">{l}</span>{/each}
+          </span>
+          <span class="go" aria-hidden="true"><ArrowRight size={18} strokeWidth={2} /></span>
+        </a>
+      </li>
+    {/each}
+  </ul>
+{:else}
 <section class="strip" aria-labelledby="{uid}-t" data-offer-strip>
   <div class="hd">
     <h3 class="t" id="{uid}-t">{t("offers.strip.title")}</h3>
@@ -56,6 +77,7 @@
     {/each}
   </ul>
 </section>
+{/if}
 
 <style>
   .strip {
@@ -218,6 +240,94 @@
     }
     .l:first-child {
       font-size: var(--fs-micro);
+    }
+  }
+  /* Accueil : trois grandes cartes, nom et « bientôt » en haut, limites, flèche qui avance au survol. */
+  .big {
+    gap: var(--sp-4);
+  }
+  .big .tier {
+    position: relative;
+    gap: var(--sp-4);
+    min-height: 180px;
+    padding: 22px 22px 20px;
+    border-radius: 20px;
+    background: linear-gradient(180deg, rgb(15 22 42 / 0.9), rgb(10 15 30 / 0.9));
+    box-shadow: inset 0 0 0 1px rgb(150 175 255 / 0.14);
+    text-decoration: none;
+    transition:
+      transform 420ms var(--ease-settle),
+      box-shadow var(--dur-base) var(--ease-out);
+  }
+  .big .tier.plus {
+    background: linear-gradient(180deg, rgb(11 36 51 / 0.85), rgb(10 15 30 / 0.9));
+    box-shadow: inset 0 0 0 1px rgb(31 168 230 / 0.45);
+  }
+  .big .tier.pro {
+    background: linear-gradient(180deg, rgb(18 27 64 / 0.85), rgb(10 15 30 / 0.9));
+    box-shadow: inset 0 0 0 1px rgb(52 97 255 / 0.55);
+  }
+  .big .tn {
+    font-size: 1.375rem;
+    letter-spacing: -0.015em;
+  }
+  .big .tag {
+    padding: 1px 8px;
+    border-radius: var(--r-pill);
+    background: rgb(255 255 255 / 0.06);
+    font-size: 0.75rem;
+  }
+  .big .lim {
+    gap: 4px;
+    font-size: var(--fs-small);
+  }
+  .big .l:first-child {
+    font-size: 1.75rem;
+    font-weight: 680;
+    letter-spacing: -0.02em;
+  }
+  .go {
+    position: absolute;
+    inset-block-end: 18px;
+    inset-inline-end: 18px;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgb(255 255 255 / 0.05);
+    color: var(--text-2);
+    transition: transform 420ms var(--ease-settle), color var(--dur-fast) var(--ease-out);
+  }
+  .big .tier:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+  @media (hover: hover) {
+    .big .tier:hover {
+      transform: translateY(-3px);
+    }
+    .big .tier:hover .go {
+      transform: translateX(3px);
+      color: var(--text);
+    }
+  }
+  @media (max-width: 759px) {
+    .big {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .big .tier {
+      min-height: 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .big .tier,
+    .go {
+      transition: none;
+    }
+    .big .tier:hover,
+    .big .tier:hover .go {
+      transform: none;
     }
   }
   @media (forced-colors: active) {

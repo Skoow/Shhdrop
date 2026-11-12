@@ -9,33 +9,34 @@
 </script>
 
 <script lang="ts">
-  // Accueil v3 (UI §9.1) : titre, phrase et sceaux de confiance ; fenêtre de dépôt (le coffre)
-  // avec le volet de scellement, le bouton principal « Commencer » (mène à la page d'envoi
-  // « /envoyer », retours DROP) et les actions de création ; voile de dépôt pleine page (un dépôt
-  // ouvre le composeur avec ses fichiers) ; sous le pli, « Comment ça marche », « Pourquoi c'est
-  // sûr », questions et appel final (même « Commencer »). Un clic sur le verre n'ouvre rien.
+  // Accueil, refonte du 12 novembre (décision du propriétaire) : sur-titre, titre, phrase, deux
+  // boutons (« Choisir des fichiers » ouvre le sélecteur du composeur ; « Ouvrir un salon »,
+  // bientôt), ligne de méta lue dans limits.ts ; l'infographie animée à côté (ordinateur) ou
+  // dessous (téléphone) ; puis la carte de dépôt (le composeur vide : « Commencer » mène à la
+  // page d'envoi « /envoyer », retours DROP), « Comment ça marche », « Pensé pour la
+  // confidentialité », « Offres » et les questions. Voile de dépôt pleine page : un dépôt ouvre
+  // le composeur avec ses fichiers. Un clic sur le verre n'ouvre rien.
+  // Composeur rempli ou page d'envoi (`compact`) : le titre replié, trois assurances, le Salon.
   import { untrack, type Snippet } from "svelte";
   import { dragDepth, dragHasFiles, filesFromDrop } from "../flows/intake";
+  import { formatBytes } from "../i18n/format";
   import { t, getLang } from "../i18n/i18n.svelte";
   import { limitParams } from "../i18n/limit-params";
-  import { magnet, tilt } from "../ui/attach";
+  import { CONTENT_MAX } from "../limits";
+  import { magnet } from "../ui/attach";
   import DropOverlay from "../ui/DropOverlay.svelte";
-  import Guilloche from "../ui/Guilloche.svelte";
-  import { ArrowRight, Camera, ChevronDown, Lock, Mic, Timer, Type, UserX } from "../ui/Icon";
-  import { reducedMotion } from "../ui/motion";
-  import SealBand from "../ui/SealBand.svelte";
-  import SectionBg from "../ui/SectionBg.svelte";
+  import { ArrowRight, Camera, Check, Lock, Mic, Timer, Type, Upload, UserX } from "../ui/Icon";
   import Vessel from "../ui/Vessel.svelte";
   import ActiveSharesStrip from "../ui/ActiveSharesStrip.svelte";
+  import PromiseBand from "../ui/PromiseBand.svelte";
+  import SecureDemo from "../ui/SecureDemo.svelte";
   import TabIcon from "../ui/TabIcon.svelte";
   import { announce } from "../ui/announce";
-  import Closing from "./home/Closing.svelte";
   import Faq from "./home/Faq.svelte";
-  import HowItWorks from "./home/HowItWorks.svelte";
-  import WhySafe from "./home/WhySafe.svelte";
+  import Sections from "./home/Sections.svelte";
 
   type Props = {
-    /** Vrai dès qu'un élément est ajouté : le titre se replie (UI §9.1), le reste du Persuade part. */
+    /** Vrai dès qu'un élément est ajouté : le titre se replie (UI §9.1), le reste de l'accueil part. */
     compact?: boolean;
     /** Le composeur (Task 10), posé dans le réceptacle. Sans lui, le réceptacle vide. */
     children?: Snippet;
@@ -45,10 +46,12 @@
     onaction?: (action: Action) => void;
     /** Faux pendant un envoi : le glisser-déposer n'ouvre pas le voile et n'ajoute rien (S9). */
     active?: boolean;
-    /** « Commencer » (ordinateur, téléphone, appel final) : mène à la page d'envoi « /envoyer » (Compose, retours DROP). */
+    /** « Commencer » (carte de dépôt, téléphone) : mène à la page d'envoi « /envoyer » (Compose, retours DROP). */
     onadd?: () => void;
+    /** « Choisir des fichiers » (héros) : ouvre directement le sélecteur de fichiers du composeur. */
+    onpick?: () => void;
   };
-  let { compact = false, children, onfiles, onaction, active = true, onadd }: Props = $props();
+  let { compact = false, children, onfiles, onaction, active = true, onadd, onpick }: Props = $props();
 
   // Décidé au montage seulement : un repli ultérieur ne rejoue pas l'entrée.
   let reveal = $state(!revealed && !untrack(() => compact));
@@ -71,12 +74,15 @@
     list.forEach((w, i) => {
       if (w.endsWith(",") && i < list.length - 1) breath = i;
     });
-    return list.map((w, i) => ({ w, delay: i * 35 + (breath >= 0 && i > breath ? 30 : 0) }));
+    // Seconde ligne colorée (référence du propriétaire, 12 novembre) : « puis plus rien. ».
+    return list.map((w, i) => ({ w, delay: i * 35 + (breath >= 0 && i > breath ? 30 : 0), hl: breath >= 0 && i > breath, br: breath >= 0 && i === breath + 1 }));
   });
+
+  // Ligne de méta : la limite gratuite vient de limits.ts (jamais écrite dans les textes).
+  const meta = $derived([t("hero.meta.free", { size: formatBytes(CONTENT_MAX, getLang()) }), t("home.fact.account"), t("hero.meta.erase")]);
 
   // UI §9.2.1 : Vocal masqué sans MediaRecorder. Pas de bouton Coller (décision du propriétaire) : Ctrl/Cmd + V suffit.
   const canVoice = typeof MediaRecorder !== "undefined";
-
 
   function give(list: File[], source: Source, folders: string[] = []) {
     if (list.length > 0 || folders.length > 0) onfiles?.(list, source, folders);
@@ -113,11 +119,6 @@
     close();
     void filesFromDrop(e.dataTransfer!).then(({ files, folders }) => give(files, "depot", folders));
   }
-
-  /** « Comment ça marche » : défilement vers la section, sans « # » dans l'adresse. */
-  function scrollToEl(el: Element | null | undefined, block: ScrollLogicalPosition) {
-    el?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block });
-  }
 </script>
 
 <svelte:window
@@ -140,31 +141,38 @@
   </button>
 {/snippet}
 
-{#snippet cert(Icon: typeof Lock, title: string)}
-  <li class="cert" {@attach magnet}>
-    <span class="cm" aria-hidden="true"><Icon size={18} strokeWidth={1.9} /></span>
-    <span class="cert-t">{title}</span>
-  </li>
-{/snippet}
-
 <div class={["home", { compact, reveal }]}>
   <section class="hero" aria-labelledby="hero-title">
-    {#if !compact}<SectionBg kind="night" />{/if}
     <div class="pitch">
+      {#if !compact}
+        <!-- Téléphone : une ligne par moitié, le « · » s'efface. -->
+        <p class="eyebrow" data-eyebrow>{#each t("hero.eyebrow").split(" · ") as part, i (i)}{#if i > 0}<span class="sep">{" · "}</span>{/if}<span class="part">{part}</span>{/each}</p>
+      {/if}
       <h1 id="hero-title" tabindex="-1" class:compact>
         <!-- K8 : phrase entière pour les lecteurs d'écran, copie animée cachée. -->
         <span class="sr-only">{t("hero.title")}</span>
         <span class="words" aria-hidden="true">
-          {#each words as { w, delay }, i (i)}<span class="w" style:--d="{delay}ms">{w}</span>{" "}{/each}
+          {#each words as { w, delay, hl, br }, i (i)}{#if br && !compact}<br />{/if}<span class={["w", { hl: hl && !compact }]} style:--d="{delay}ms">{w}</span>{" "}{/each}
         </span>
       </h1>
 
       {#if !compact}
         <p class="lede">{t("hero.lede")}</p>
-        <ul class="certs" aria-label={t("home.facts.label")}>
-          {@render cert(Lock, t("home.fact.e2e"))}
-          {@render cert(Timer, t("home.fact.erase"))}
-          {@render cert(UserX, t("home.fact.account"))}
+        <div class="ctas">
+          <button type="button" class="pick" data-pick onclick={() => onpick?.()}>
+            <Upload size={20} strokeWidth={2} aria-hidden="true" /><span>{t("hero.pick")}</span>
+          </button>
+          <!-- Salon (spec §39 : « le bouton du salon est à part, pour qu'on le voie ») : pas encore
+               construit (désactivé, « bientôt ») ; même icône que l'onglet du téléphone. -->
+          <div class="room" data-room>
+            <button type="button" class="room-b hero-room" aria-disabled="true" aria-describedby="room-soon" onclick={() => announce(t("tabs.soon.chat"))}>
+              <TabIcon id="chat" size={20} /><span>{t("hero.room")}</span><span class="room-soon">{t("foot.soon")}</span>
+            </button>
+            <p id="room-soon" class="sr-only">{t("tabs.soon.chat")}</p>
+          </div>
+        </div>
+        <ul class="meta" aria-label={t("home.facts.label")} data-meta>
+          {#each meta as m, i (i)}<li><span class="ck" aria-hidden="true"><Check size={12} strokeWidth={2.6} /></span>{m}</li>{/each}
         </ul>
       {:else}
         <!-- Page d'envoi (retours du propriétaire du 12 novembre) : le titre reste visible, avec
@@ -174,79 +182,62 @@
           <li><UserX size={15} strokeWidth={2} aria-hidden="true" />{t("home.fact.account")}</li>
           <li><Timer size={15} strokeWidth={2} aria-hidden="true" />{t("send.assure.burn")}</li>
         </ul>
+        <div class="room compact" data-room>
+          <button type="button" class="room-b" aria-disabled="true" aria-describedby="room-soon" onclick={() => announce(t("tabs.soon.chat"))}>
+            <span class="room-ic" aria-hidden="true"><TabIcon id="chat" size={22} /></span>
+            <span class="room-t">{t("foot.room")}</span>
+            <span class="room-soon">{t("foot.soon")}</span>
+          </button>
+          <p id="room-soon" class="sr-only">{t("tabs.soon.chat")}</p>
+        </div>
       {/if}
-      <!-- Salon (spec §39 : « le bouton du salon est à part, pour qu'on le voie ») : à part des
-           actions d'envoi, bien visible, pas encore construit (désactivé, « bientôt ») ; aussi sur
-           la page d'envoi (retours du 12 novembre), même icône et même mot que l'onglet du téléphone. -->
-      <div class={["room", { compact }]} data-room>
-        <button type="button" class="room-b" aria-disabled="true" aria-describedby="room-soon" onclick={() => announce(t("tabs.soon.chat"))}>
-          <span class="room-ic" aria-hidden="true"><TabIcon id="chat" size={22} /></span>
-          <span class="room-t">{t("foot.room")}</span>
-          <span class="room-soon">{t("foot.soon")}</span>
-        </button>
-        <p id="room-soon" class={["room-s", { "sr-only": compact }]}>{t("tabs.soon.chat")}</p>
-      </div>
     </div>
-
-    <!-- « Vos partages actifs » (spec §33.1, UI §9.6.1) : lecture locale seulement, rien sans
-         partage actif. Téléphone : au-dessus du coffre ; ordinateur : sous le coffre. -->
-    {#if !compact}<div class="shares"><ActiveSharesStrip /></div>{/if}
-
-    <div class="compose" data-slot="compose" {@attach !children && tilt}>
-      {#if !children}
-        <span class="sheet-back b2" aria-hidden="true"></span>
-        <span class="sheet-back b1" aria-hidden="true"></span>
-      {/if}
-      <Vessel empty={!children} drop={over} >
-        {#if children}
-          {@render children()}
-        {:else}
-          <div class="empty">
-            <span class="guil-clip" aria-hidden="true"><Guilloche lines={22} /></span>
-            <div class="band-wrap">
-              <SealBand />
-              <p class="band-cap"><Lock size={13} strokeWidth={2.2} aria-hidden="true" />{t("home.band.caption")}</p>
-            </div>
-            <div class="drop-say">
-              <h2 class="drop-title">
-                <span class="t-fine">{t("compose.drop.title")}</span><span class="t-touch">{t("compose.drop.titleTouch")}</span>
-              </h2>
-            </div>
-            <button type="button" class="browse" onclick={() => onadd?.()}>
-              <span>{t("home.end.cta")}</span>
-              <ArrowRight size={20} strokeWidth={1.9} aria-hidden="true" />
-            </button>
-            <div class="make" role="group" aria-labelledby="make-title">
-              <p class="make-t" id="make-title">{t("compose.add.make")}</p>
-              <div class="tiles">
-                {@render tile(t("compose.add.media"), Camera, () => act("media"), "flash")}
-                {#if canVoice}{@render tile(t("compose.add.voice"), Mic, () => act("vocal"), "bars")}{/if}
-                {@render tile(t("compose.add.text"), Type, () => act("texte"), "caret")}
-              </div>
-            </div>
-            <p class="proof num">{t("home.proof", limitParams(getLang()))}</p>
-            <!-- Téléphone : une seule action, « Commencer », vers la page d'envoi (retours DROP). -->
-            <button type="button" class="add-big" onclick={() => onadd?.()}>
-              <span class="ab-ic" aria-hidden="true"><ArrowRight size={26} strokeWidth={2.2} /></span>
-              <span class="ab-tx"><span class="ab-t">{t("home.end.cta")}</span><span class="ab-s">{t("add.big.sub")}</span></span>
-            </button>
-          </div>
-        {/if}
-      </Vessel>
-    </div>
-
-    {#if !compact}
-      <button type="button" class="next" onclick={() => scrollToEl(document.getElementById("comment"), "start")}>
-        {t("hero.how")}<ChevronDown size={18} strokeWidth={1.75} aria-hidden="true" />
-      </button>
-    {/if}
+    {#if !compact}<div class="demo-slot"><SecureDemo /></div>{/if}
   </section>
 
+  {#if !compact}<div class="band-slot"><PromiseBand /></div>{/if}
+
+  <!-- « Vos partages actifs » (spec §33.1, UI §9.6.1) : lecture locale seulement, rien sans partage actif. -->
+  {#if !compact}<div class="shares"><ActiveSharesStrip /></div>{/if}
+
+  <div class="compose" data-slot="compose">
+    <Vessel empty={!children} drop={over}>
+      {#if children}
+        {@render children()}
+      {:else}
+        <div class="empty">
+          <span class="drop-ic" aria-hidden="true"><Upload size={22} strokeWidth={1.9} /></span>
+          <div class="drop-say">
+            <h2 class="drop-title">
+              <span class="t-fine">{t("compose.drop.title")}</span><span class="t-touch">{t("compose.drop.titleTouch")}</span>
+            </h2>
+          </div>
+          <button type="button" class="browse" onclick={() => onadd?.()}>
+            <span>{t("home.end.cta")}</span>
+            <ArrowRight size={20} strokeWidth={1.9} aria-hidden="true" />
+          </button>
+          <div class="make" role="group" aria-labelledby="make-title">
+            <p class="make-t" id="make-title">{t("compose.add.make")}</p>
+            <div class="tiles">
+              {@render tile(t("compose.add.media"), Camera, () => act("media"), "flash")}
+              {#if canVoice}{@render tile(t("compose.add.voice"), Mic, () => act("vocal"), "bars")}{/if}
+              {@render tile(t("compose.add.text"), Type, () => act("texte"), "caret")}
+            </div>
+          </div>
+          <p class="proof num">{t("home.proof", limitParams(getLang()))}</p>
+          <!-- Téléphone : une seule action, « Commencer », vers la page d'envoi (retours DROP). -->
+          <button type="button" class="add-big" onclick={() => onadd?.()}>
+            <span class="ab-ic" aria-hidden="true"><ArrowRight size={26} strokeWidth={2.2} /></span>
+            <span class="ab-tx"><span class="ab-t">{t("home.end.cta")}</span><span class="ab-s">{t("add.big.sub")}</span></span>
+          </button>
+        </div>
+      {/if}
+    </Vessel>
+  </div>
+
   {#if !compact}
-    <HowItWorks />
-    <WhySafe />
+    <Sections />
     <Faq />
-    <Closing onstart={() => onadd?.()} />
   {/if}
 </div>
 
@@ -258,29 +249,72 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  /* ---------- Héros ---------- */
+  /* ---------- Héros : texte centré, infographie dessous (téléphone), à droite (ordinateur) ---------- */
   .hero {
     position: relative;
     isolation: isolate;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: var(--sp-4);
-    padding-block: var(--sp-2) var(--sp-6);
+    gap: var(--sp-6);
+    padding-block: var(--sp-4) var(--sp-6);
+  }
+  /* Halo : menthe et bleu derrière l'infographie, lumière fixe (rien ne bouge). */
+  .home:not(.compact) .hero::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset: -80px 0 0;
+    pointer-events: none;
+    background:
+      radial-gradient(38% 46% at 74% 42%, rgb(51 102 255 / 0.16), transparent 70%),
+      radial-gradient(30% 40% at 62% 62%, rgb(95 227 181 / 0.09), transparent 70%);
   }
   .pitch {
-    display: contents;
+    display: grid;
+    justify-items: start;
+    align-content: center;
+    gap: var(--sp-4);
+    min-width: 0;
+  }
+  .pitch > * {
+    max-width: 100%;
+  }
+  .eyebrow {
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: #9fb3e8;
+    font-size: 0.75rem;
+    font-weight: 640;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+  .sep {
+    padding-inline: 0.2em;
+  }
+  /* La trame du logo en miniature : trois points qui s'éteignent, « puis plus rien ». */
+  .eyebrow::before {
+    content: "";
+    width: 22px;
+    height: 6px;
+    background:
+      radial-gradient(circle, var(--accent) 2.4px, transparent 2.8px) 0 50% / 8px 6px no-repeat,
+      radial-gradient(circle, rgb(95 227 181 / 0.55) 2.4px, transparent 2.8px) 8px 50% / 8px 6px no-repeat,
+      radial-gradient(circle, rgb(95 227 181 / 0.22) 2.4px, transparent 2.8px) 16px 50% / 8px 6px no-repeat;
   }
   h1 {
-    order: 1;
-    font-size: clamp(2.5rem, 1.2rem + 3.9vw, 4.5rem);
-    line-height: var(--lh-display);
-    font-weight: var(--fw-display);
+    margin: 0;
+    font-size: clamp(2.5rem, 1.1rem + 4.4vw, 4.75rem);
+    line-height: 1;
+    font-weight: 700;
     font-stretch: var(--wd-display);
-    letter-spacing: var(--ls-display);
-    max-width: 12ch;
+    letter-spacing: -0.04em;
+    max-width: 13ch;
     /* Texte agrandi sur téléphone : un mot plus large que l'écran se coupe au lieu de déborder. */
     overflow-wrap: break-word;
     min-width: 0;
+    text-wrap: balance;
     view-transition-name: hero-title;
   }
   h1.compact {
@@ -293,6 +327,146 @@
   }
   h1:focus {
     outline: none;
+  }
+  .w {
+    display: inline-block;
+  }
+  .lede {
+    margin: 0;
+    max-width: 44ch;
+    overflow-wrap: break-word;
+    color: #aab6d3;
+    font-size: 1.0625rem;
+    line-height: 1.55;
+    text-wrap: pretty;
+  }
+  .ctas {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-3);
+    margin-top: var(--sp-2);
+  }
+  /* Bouton principal : blanc plein, icône ; un léger halo vert au survol (le « scellé »). */
+  .pick {
+    max-width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 52px;
+    padding: 0 22px;
+    border: 0;
+    border-radius: 14px;
+    background: #fff;
+    color: #07102a;
+    font: inherit;
+    font-size: 1rem;
+    font-weight: 650;
+    cursor: pointer;
+    box-shadow:
+      0 14px 30px -14px rgb(51 102 255 / 0.7),
+      inset 0 -2px 0 rgb(7 16 42 / 0.12);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      transform 360ms var(--ease-settle),
+      box-shadow var(--dur-base) var(--ease-out);
+  }
+  .pick :global(svg) {
+    transition: transform 420ms var(--ease-settle);
+  }
+  @media (hover: hover) {
+    .pick:hover {
+      transform: translateY(-2px);
+      box-shadow:
+        0 18px 36px -14px rgb(51 102 255 / 0.85),
+        0 0 0 4px rgb(95 227 181 / 0.18),
+        inset 0 -2px 0 rgb(7 16 42 / 0.12);
+    }
+    .pick:hover :global(svg) {
+      transform: translateY(-2px);
+    }
+  }
+  .pick:active {
+    transform: scale(0.97);
+    transition-duration: var(--dur-press);
+  }
+  .pick:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+  /* Secondaire : contour, désactivé (bientôt) mais lisible. */
+  .room-b.hero-room {
+    min-height: 52px;
+    padding: 0 18px;
+    gap: 10px;
+    border-style: solid;
+    border-color: rgb(150 175 255 / 0.26);
+    border-radius: 14px;
+    background: rgb(255 255 255 / 0.02);
+    color: var(--text);
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    margin: var(--sp-1) 0 0;
+    padding: 0;
+    list-style: none;
+    color: #8f9cbd;
+    font-size: var(--fs-small);
+  }
+  .meta li {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  /* Petites cases cochées (référence du propriétaire, 12 novembre). */
+  .ck {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    background: rgb(95 227 181 / 0.14);
+    box-shadow: inset 0 0 0 1px rgb(95 227 181 / 0.35);
+    color: var(--accent);
+  }
+  .w.hl {
+    color: var(--accent);
+  }
+  .band-slot {
+    min-width: 0;
+    margin-block: 0 var(--sp-6);
+  }
+  @media (max-width: 599px) {
+    .eyebrow {
+      display: grid;
+      grid-template-columns: 22px auto;
+      align-items: center;
+      gap: 2px 10px;
+      line-height: 1.5;
+    }
+    .sep {
+      display: none;
+    }
+    .eyebrow .part {
+      grid-column: 2;
+    }
+    .ctas,
+    .ctas > .room {
+      display: grid;
+      width: 100%;
+    }
+    .pick,
+    .ctas .room-b.hero-room {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+  .demo-slot {
+    min-width: 0;
   }
   /* Page d'envoi (retours du 12 novembre) : le titre visible, plus petit, à gauche ; trois
      assurances dessous ; le Salon à droite (ordinateur) ou dessous (téléphone). */
@@ -353,133 +527,6 @@
       margin-inline-start: 0;
     }
   }
-  .w {
-    display: inline-block;
-  }
-  .lede {
-    order: 2;
-    margin: 0;
-    max-width: 42ch;
-    overflow-wrap: break-word;
-    color: var(--text-2);
-    font-size: 1rem;
-    line-height: 1.55;
-  }
-
-  /* Arguments (retours HOME5) : pastilles de verre, contour lumineux par masque qui s'éclaire
-     sous le pointeur (magnet : --lx, --ly), médaillon d'icône qui se soulève au survol. */
-  .certs {
-    order: 5;
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--sp-2);
-  }
-  .cert {
-    position: relative;
-    isolation: isolate;
-    overflow: hidden;
-    display: inline-flex;
-    gap: 10px;
-    align-items: center;
-    min-width: 0;
-    padding: 6px 16px 6px 6px;
-    border-radius: 999px;
-    background: rgb(20 25 33 / 0.5);
-    -webkit-backdrop-filter: blur(12px) saturate(150%);
-    backdrop-filter: blur(12px) saturate(150%);
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.07),
-      0 18px 36px -26px rgb(0 0 0 / 0.95);
-    transition:
-      translate 520ms var(--ease-settle),
-      background-color var(--dur-base) var(--ease-out);
-  }
-  /* Contour : un filet de verre, plus clair en haut, et un reflet menthe qui suit le pointeur. */
-  .cert::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    padding: 1px;
-    border-radius: inherit;
-    background:
-      radial-gradient(120px 120px at var(--lx, 30%) var(--ly, 0%), rgb(95 227 181 / 0.55), transparent 70%),
-      linear-gradient(170deg, rgb(233 236 242 / 0.22), rgb(233 236 242 / 0.05) 45%, rgb(95 227 181 / 0.14));
-    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor;
-    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    mask-composite: exclude;
-    opacity: 0.75;
-    pointer-events: none;
-    transition: opacity var(--dur-base) var(--ease-out);
-  }
-  .cert::before {
-    content: "";
-    position: absolute;
-    z-index: -1;
-    left: 0;
-    top: 0;
-    width: 240px;
-    height: 240px;
-    margin: -120px 0 0 -120px;
-    border-radius: 50%;
-    background: radial-gradient(closest-side, rgb(95 227 181 / 0.12), transparent);
-    opacity: 0;
-    transform: translate(var(--lx, 50%), var(--ly, 50%));
-    transition: opacity var(--dur-base) var(--ease-out);
-  }
-  .cm {
-    flex: none;
-    display: grid;
-    place-items: center;
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    color: var(--accent);
-    background: radial-gradient(closest-side, rgb(95 227 181 / 0.18), rgb(95 227 181 / 0.05));
-    box-shadow:
-      inset 0 0 0 1px rgb(95 227 181 / 0.32),
-      inset 0 1px 0 rgb(255 255 255 / 0.08),
-      0 0 22px -6px var(--seal-halo);
-    transition:
-      transform 520ms var(--ease-settle),
-      box-shadow var(--dur-base) var(--ease-out);
-  }
-  @media (hover: hover) {
-    .cert:hover {
-      background-color: rgb(24 30 40 / 0.62);
-    }
-    .cert:hover::after {
-      opacity: 1;
-    }
-    .cert:hover .cm {
-      box-shadow:
-        inset 0 0 0 1px rgb(95 227 181 / 0.5),
-        inset 0 1px 0 rgb(255 255 255 / 0.1),
-        0 0 30px -4px var(--seal-halo);
-    }
-  }
-  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
-    .cert:hover {
-      translate: 0 -2px;
-    }
-    .cert:hover::before {
-      opacity: 1;
-    }
-    .cert:hover .cm {
-      transform: translateY(-2px) rotate(-6deg) scale(1.06);
-    }
-  }
-  .cert-t {
-    min-width: 0;
-    font-size: 0.9375rem;
-    line-height: 1.3;
-    font-weight: 640;
-    letter-spacing: -0.005em;
-  }
-
   /* Salon (bientôt) : à part des actions d'envoi, désactivé mais lisible. */
   .room {
     order: 4;
@@ -525,12 +572,6 @@
     font-size: var(--fs-micro);
     font-weight: 560;
   }
-  .room-s {
-    margin: 0;
-    padding-inline: 6px;
-    color: var(--text-3);
-    font-size: var(--fs-small);
-  }
   @media (forced-colors: active) {
     .room-b {
       border: 1px dashed GrayText;
@@ -538,116 +579,6 @@
     }
   }
 
-  /* ---------- Le coffre : fenêtre de dépôt ---------- */
-  .shares {
-    order: 3;
-    min-width: 0;
-  }
-  .shares:empty {
-    display: none;
-  }
-  .compose {
-    order: 3;
-    position: relative;
-    isolation: isolate;
-    min-width: 0;
-    perspective: 1400px;
-  }
-  .compose :global(.vessel) {
-    transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
-    transition:
-      transform 700ms var(--ease-settle),
-      background-color var(--dur-base) var(--ease-out);
-  }
-  .home:not(.compact) .compose {
-    padding-top: 14px;
-  }
-  /* Feuillets empilés derrière la fenêtre : la profondeur d'un coffre, d'une enveloppe. */
-  /* Au défilement, quand le héros sort : les feuillets rentrent dans le coffre, qui recule. */
-  @media (prefers-reduced-motion: no-preference) {
-    @supports (animation-timeline: view()) {
-      .hero {
-        view-timeline: --hero;
-      }
-      .sheet-back {
-        animation: lid linear both;
-        animation-timeline: --hero;
-        animation-range: exit 0% exit 70%;
-      }
-      .home:not(.reveal):not(.compact) .compose {
-        animation: recede linear both;
-        animation-timeline: --hero;
-        animation-range: exit 0% exit 100%;
-      }
-    }
-  }
-  @keyframes lid {
-    to {
-      translate: 0 34px;
-    }
-  }
-  @keyframes recede {
-    to {
-      scale: 0.94;
-      translate: 0 40px;
-      opacity: 0.7;
-    }
-  }
-  .sheet-back {
-    position: absolute;
-    z-index: -1;
-    left: 50%;
-    height: 56px;
-    border-radius: 22px 22px 0 0;
-    box-shadow:
-      inset 0 0 0 1px var(--hair),
-      var(--edge-hi);
-  }
-  .b1 {
-    top: 7px;
-    width: 92%;
-    margin-left: -46%;
-    background: #141821;
-  }
-  .b2 {
-    top: 0;
-    width: 84%;
-    margin-left: -42%;
-    background: #0f1218;
-  }
-
-  .empty {
-    position: relative;
-    display: grid;
-    gap: var(--sp-4);
-    padding: var(--sp-4) var(--sp-4) var(--sp-5);
-  }
-  .guil-clip {
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    overflow: hidden;
-    border-radius: var(--r-2xl);
-    -webkit-mask-image: radial-gradient(120% 70% at 50% 100%, #000 25%, transparent 80%);
-    mask-image: radial-gradient(120% 70% at 50% 100%, #000 25%, transparent 80%);
-  }
-  .band-wrap {
-    display: grid;
-    gap: var(--sp-2);
-  }
-  .band-cap {
-    margin: 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding-inline: 4px;
-    color: var(--text-2);
-    font-size: 0.8125rem;
-  }
-  .band-cap :global(svg) {
-    flex: none;
-    color: var(--accent);
-  }
   .drop-say {
     display: grid;
     gap: var(--sp-1);
@@ -672,25 +603,22 @@
     }
   }
 
-  /* Action principale : papier sur encre, la menthe reste le signe « scellé ». */
+  /* « Commencer » (page d'envoi) : bouton contour ; le blanc plein reste au héros (refonte du 12 novembre). */
   .browse {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 10px;
-    min-height: 56px;
+    min-height: 52px;
     padding: 0 var(--sp-5);
-    border: 0;
+    border: 1px solid rgb(150 175 255 / 0.28);
     border-radius: 14px;
-    background: var(--paper);
-    color: var(--ink);
+    background: rgb(255 255 255 / 0.03);
+    color: var(--text);
     font: inherit;
-    font-size: 1.0625rem;
+    font-size: 1rem;
     font-weight: 620;
     cursor: pointer;
-    box-shadow:
-      0 10px 24px -14px rgb(0 0 0 / 0.9),
-      inset 0 -2px 0 rgb(11 13 18 / 0.12);
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
     transition:
@@ -702,7 +630,8 @@
   }
   @media (hover: hover) {
     .browse:hover {
-      background: #fff;
+      border-color: rgb(150 175 255 / 0.5);
+      background: rgb(255 255 255 / 0.06);
     }
     .browse:hover :global(svg) {
       transform: translateX(4px);
@@ -723,9 +652,7 @@
   }
   @media (max-width: 759px) {
     .browse,
-    .make,
-    .band-wrap,
-    .guil-clip {
+    .make {
       display: none;
     }
     .add-big {
@@ -991,8 +918,39 @@
     font-size: 0.8125rem;
   }
 
-  .next {
+
+  /* ---------- Carte de dépôt : le composeur vide ---------- */
+  .shares {
+    min-width: 0;
+  }
+  .shares:empty {
     display: none;
+  }
+  .compose {
+    position: relative;
+    isolation: isolate;
+    min-width: 0;
+  }
+  .home:not(.compact) .compose {
+    width: 100%;
+    max-width: 880px;
+    margin-inline: auto;
+  }
+  .empty {
+    position: relative;
+    display: grid;
+    gap: var(--sp-4);
+    padding: var(--sp-5) var(--sp-4);
+  }
+  .drop-ic {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: rgb(95 227 181 / 0.12);
+    box-shadow: inset 0 0 0 1px rgb(95 227 181 / 0.25);
+    color: var(--accent);
   }
 
   /* ---------- Entrée (K1 : tout fini à 900 ms au plus, tout cliquable dès l'affichage) ---------- */
@@ -1002,61 +960,26 @@
     .reveal .w {
       animation: word-in var(--dur-reveal) var(--ease-out) var(--d) both;
     }
+    .reveal .eyebrow,
+    .reveal .lede,
+    .reveal .ctas,
+    .reveal .meta {
+      animation: rise-only 560ms var(--ease-out) var(--i, 0ms) both;
+    }
     .reveal .lede {
-      animation: rise-only 600ms var(--ease-out) 120ms both;
+      --i: 120ms;
     }
-    .reveal .cert {
-      animation: rise-only 560ms var(--ease-out) both;
-    }
-    .reveal .cert:nth-child(1) {
-      animation-delay: 240ms;
-    }
-    .reveal .cert:nth-child(2) {
-      animation-delay: 285ms;
-    }
-    .reveal .cert:nth-child(3) {
-      animation-delay: 330ms;
-    }
-    .reveal .compose {
-      animation: vault-in var(--dur-moment) var(--ease-settle) both;
-    }
-    .reveal .band-wrap,
-    .reveal .drop-say,
-    .reveal .browse,
-    .reveal .make-t,
-    .reveal .tile,
-    .reveal .proof {
-      animation: rise-in 480ms var(--ease-settle) var(--i, 0ms) both;
-    }
-    .reveal .band-wrap {
-      --i: 100ms;
-    }
-    .reveal .drop-say {
-      --i: 150ms;
-    }
-    .reveal .browse {
+    .reveal .ctas {
       --i: 200ms;
     }
-    .reveal .make-t {
-      --i: 240ms;
+    .reveal .meta {
+      --i: 260ms;
     }
-    .reveal .tile:nth-child(1) {
-      --i: 270ms;
+    .reveal .demo-slot {
+      animation: vault-in var(--dur-moment) var(--ease-settle) 120ms both;
     }
-    .reveal .tile:nth-child(2) {
-      --i: 310ms;
-    }
-    .reveal .tile:nth-child(3) {
-      --i: 350ms;
-    }
-    .reveal .tile:nth-child(4) {
-      --i: 390ms;
-    }
-    .reveal .tile:nth-child(5) {
-      --i: 420ms;
-    }
-    .reveal .proof {
-      --i: 400ms;
+    .reveal .compose {
+      animation: rise-in 560ms var(--ease-settle) 240ms both;
     }
   }
   @keyframes word-in {
@@ -1085,52 +1008,39 @@
 
   @media (min-width: 600px) {
     .empty {
-      padding: var(--sp-5) var(--sp-5) var(--sp-5);
+      padding: var(--sp-6) var(--sp-6) var(--sp-5);
     }
   }
-
-  /* Ordinateur : texte et sceaux à gauche, coffre à droite, sur le premier écran. */
+  /* Tablette : texte centré, infographie dessous, à largeur lisible. */
+  @media (min-width: 600px) and (max-width: 1023px) {
+    .home:not(.compact) .pitch {
+      justify-items: center;
+      text-align: center;
+    }
+    .home:not(.compact) .ctas,
+    .home:not(.compact) .meta {
+      justify-content: center;
+    }
+    .demo-slot {
+      width: 100%;
+      max-width: 560px;
+      margin-inline: auto;
+    }
+  }
+  /* Ordinateur : texte à gauche, l'écran de démonstration à droite, sur le premier écran. */
   @media (min-width: 1024px) {
     .hero {
-      grid-template-columns: minmax(0, 0.95fr) minmax(480px, 620px);
+      grid-template-columns: minmax(0, 1fr) minmax(440px, 540px);
       align-items: center;
-      column-gap: 88px;
-      min-height: min(calc(100svh - 64px), 860px);
-      padding-block: var(--sp-5) 88px;
+      column-gap: clamp(48px, 6vw, 96px);
+      padding-block: var(--sp-6) var(--sp-7);
     }
-    .pitch {
-      display: grid;
-      gap: var(--sp-5);
-      align-content: center;
+    .home.compact .hero {
+      grid-template-columns: minmax(0, 1fr);
+      padding-block: 0;
     }
     .lede {
-      font-size: 1.125rem;
-    }
-    .certs {
-      margin-top: var(--sp-2);
-    }
-    .room {
-      order: 6;
-    }
-    .compose {
-      order: 0;
-    }
-    /* Sous le coffre, dans la colonne de droite ; le texte occupe les deux rangées. */
-    .hero:has(.shares :global([data-active-shares])) {
-      align-content: center;
-    }
-    .hero:has(.shares :global([data-active-shares])) .compose {
-      grid-column: 2;
-      grid-row: 1;
-    }
-    .shares {
-      grid-column: 2;
-      grid-row: 2;
-      align-self: start;
-    }
-    .hero:has(.shares :global([data-active-shares])) .pitch {
-      grid-column: 1;
-      grid-row: 1 / span 2;
+      font-size: 1.1875rem;
     }
     .drop-title {
       font-size: 1.625rem;
@@ -1138,49 +1048,30 @@
     .tile {
       min-height: 92px;
     }
-    .next {
-      position: absolute;
-      left: 0;
-      bottom: var(--sp-5);
-      display: inline-flex;
+    /* Carte vide : titre et « Commencer » sur une ligne, gestes dessous. */
+    .home:not(.compact) .empty {
+      grid-template-columns: auto minmax(0, 1fr) auto;
       align-items: center;
-      gap: var(--sp-2);
-      min-height: 44px;
-      padding: 0;
-      border: 0;
-      background: none;
-      color: var(--text-2);
-      font: inherit;
-      font-size: var(--fs-small);
-      cursor: pointer;
+      column-gap: var(--sp-4);
     }
-    .next :global(svg) {
-      color: var(--accent);
-      transition: transform 500ms var(--ease-settle);
-    }
-    .next:hover {
-      color: var(--text);
-    }
-    .next:hover :global(svg) {
-      transform: translateY(3px);
-    }
-    .home.compact .hero {
-      grid-template-columns: minmax(0, 1fr);
-      min-height: 0;
-      padding-block: 0;
+    .home:not(.compact) .make,
+    .home:not(.compact) .proof {
+      grid-column: 1 / -1;
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .compose :global(.vessel),
     .tile,
     .ic,
-    .cm,
+    .pick,
+    .pick :global(svg),
     .browse,
     .browse :global(svg) {
       transition: none;
     }
     .tile:active,
+    .pick:active,
+    .pick:hover,
     .browse:active {
       transform: none;
     }
@@ -1191,30 +1082,18 @@
     h1 {
       line-height: 1.15;
     }
-    .sheet-back,
-    .guil-clip,
+    .home:not(.compact) .hero::before,
+    .eyebrow::before,
     .tile::before,
     .flash {
       display: none;
     }
     .tile,
-    .cert,
-    .browse {
-      border: 1px solid ButtonText;
-      box-shadow: none;
-    }
-    .cert::after,
-    .cert::before {
-      display: none;
-    }
-    .cm {
-      box-shadow: none;
-      background: Canvas;
-    }
-  }
-  @media (forced-colors: active) {
+    .pick,
+    .browse,
     .add-big {
       border: 1px solid ButtonText;
+      box-shadow: none;
     }
   }
 </style>

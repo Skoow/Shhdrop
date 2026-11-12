@@ -5,7 +5,7 @@
   // Tout reste en mémoire (aucun stockage) ; l'envoi lui-même est la Task 17 (`onsend`).
   import { flushSync, tick, untrack } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
-  import { chrome } from "../app/chrome.svelte";
+  import { chrome, type AddGesture } from "../app/chrome.svelte";
   import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, generatePassword, type ElementStatus, type Item, type KeepTtl } from "../index";
   import type { PaidTier } from "../limits";
   import { blockKey, canClean, createComposer, type AddReport, type ComposeItem, type Source } from "../flows/compose.svelte";
@@ -281,6 +281,25 @@
       node.style.removeProperty("--app-h");
     };
   }
+  // Barre du haut (refonte du 12 novembre) : les gestes du menu « Partager » passent par ici
+  // tant que ce composeur est monté et actif ; un geste choisi ailleurs (chrome.pending, page
+  // d'envoi) est joué au montage.
+  $effect(() => {
+    const run = (g: AddGesture) => {
+      if (!active) return;
+      if (g === "fichiers") addAct("files");
+      else act(g);
+    };
+    chrome.add = run;
+    const g = untrack(() => chrome.pending);
+    if (g) {
+      chrome.pending = null;
+      run(g);
+    }
+    return () => {
+      if (chrome.add === run) chrome.add = null;
+    };
+  });
   // Ordinateur, composeur ouvert : <main> resserré (règle globale plus bas).
   $effect(() => {
     document.documentElement.classList.toggle("composing", shown && !narrow);
@@ -729,7 +748,7 @@
 <input bind:this={videoIn} type="file" accept="video/*" capture="environment" hidden tabindex="-1" onchange={(e) => picked(e.currentTarget, "video")} />
 
 <!-- « Commencer » (accueil) mène à la page d'envoi « /envoyer » (retours DROP). -->
-<Home {active} compact={shown} onadd={() => navigate("/envoyer")} children={shown ? app : undefined} onfiles={(f, s, folders) => void addFiles(f, s, folders)} onaction={act} />
+<Home {active} compact={shown} onadd={() => navigate("/envoyer")} onpick={() => filesIn?.click()} children={shown ? app : undefined} onfiles={(f, s, folders) => void addFiles(f, s, folders)} onaction={act} />
 
 <Sheet bind:open={editorOpen} title={editorId ? t("text.title.edit") : t("text.title.new")}>
   <div class="editor">

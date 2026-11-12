@@ -10,6 +10,7 @@
   import LiveRegion from "./LiveRegion.svelte";
   import Logo from "./Logo.svelte";
   import TabBar from "./TabBar.svelte";
+  import TopNav from "./TopNav.svelte";
 
   type Props = {
     children: Snippet;
@@ -18,7 +19,7 @@
     /** Vrai pendant un envoi : le pied reste affiché mais ses liens sont désactivés, pour
      *  qu'aucun clic ne quitte la page et coupe l'envoi. */
     busy?: boolean;
-    /** Barre d'onglets du téléphone (app/tabbar.ts) ; rendue sous 900 px seulement (CSS). */
+    /** Barre d'onglets du téléphone (app/tabbar.ts) ; rendue sous 768 px seulement (CSS). */
     tabs?: boolean;
   };
   let { children, banner, busy = false, tabs = false }: Props = $props();
@@ -162,6 +163,8 @@
       <!-- Logo « Trame » (scripts/gen-logo.mjs) ; l'introduction ne se joue que sur l'accueil, une fois par chargement. -->
       <Logo />
     </a>
+    <!-- Ordinateur et tablette (≥ 768 px, refonte du 12 novembre) : menus et actions. -->
+    <TopNav {busy} />
   </div>
 </header>
 
@@ -681,7 +684,7 @@
       outline: 2px solid var(--accent);
     }
     .small {
-      display: block;
+      display: none;
       position: absolute;
       inset-inline: 104px;
       margin: 0;
@@ -701,6 +704,12 @@
     .small.on {
       opacity: 1;
       transform: none;
+    }
+    /* Téléphone seulement : la tablette a la barre du haut complète. */
+    @media (max-width: 767px) {
+      .small {
+        display: block;
+      }
     }
     .small.on ~ .logo {
       opacity: 0;

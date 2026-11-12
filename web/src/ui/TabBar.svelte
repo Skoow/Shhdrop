@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Barre d'onglets du téléphone (< 900 px), façon app : Envoyer, Mes partages, Salon (bientôt). Plus d'onglet Réglages : langue, nettoyage et liens sont dans le pied de page.
+  // Barre d'onglets du téléphone (< 768 px), façon app : Envoyer, Mes partages, Salon (bientôt). Plus d'onglet Réglages : langue, nettoyage et liens sont dans le pied de page.
   // Visibilité décidée par app/tabbar.ts ; masquée sur ordinateur par la CSS seule.
   import { currentTab, TABS, type TabId } from "../app/tabbar";
   import { followLink, href, router } from "../app/router.svelte";
@@ -38,7 +38,7 @@
   .tabbar {
     display: none;
   }
-  @media (max-width: 899px) {
+  @media (max-width: 767px) {
     .tabbar {
       display: block;
       position: fixed;

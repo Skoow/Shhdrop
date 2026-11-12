@@ -1,26 +1,11 @@
-// Accueil v3 (UI §9.1, §20.4) : titre mot par mot, sceaux de confiance, fenêtre de dépôt
-// (Commencer, qui mène à la page d'envoi « /envoyer » ; Photo ou vidéo, Vocal, Note), voile de dépôt pleine page, sections sous le
-// pli (Comment ça marche, Pourquoi c'est sûr, questions, appel final), révélations au défilement.
+// Accueil (UI §9.1, §20.4 ; refonte du 12 novembre, UI §25) : titre mot par mot, cases cochées,
+// infographie, fenêtre de dépôt (Commencer, qui mène à la page d'envoi « /envoyer » ; Photo ou
+// vidéo, Vocal, Note), voile de dépôt pleine page, sections sous le pli (Comment ça marche,
+// Pensé pour la confidentialité, Offres, questions), révélations au défilement.
 import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
 import { maxRelLuminance } from "./png";
 import { MIMES } from "../src/media/capture";
-
-/** Paires de libellés du schéma dont les boîtes se croisent (texte réel, pas la cellule). */
-function labelOverlaps(page: Page) {
-  return page.evaluate(() => {
-    const els = [...document.querySelectorAll("[data-label]")];
-    const r = els.map((e) => e.getBoundingClientRect());
-    const out: string[] = [];
-    for (let i = 0; i < r.length; i++)
-      for (let j = i + 1; j < r.length; j++) {
-        const a = r[i]!, b = r[j]!;
-        if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom)
-          out.push(`${els[i]!.textContent} × ${els[j]!.textContent}`);
-      }
-    return out;
-  });
-}
 
 const noHScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 
@@ -38,16 +23,15 @@ async function drag(page: Page, type: "dragenter" | "dragover" | "dragleave" | "
 }
 
 const TITLE_FR = "Un lien, un mot de passe, puis plus rien.";
-const SCHEMA_FR = "Chiffré sur votre appareil, illisible pour le serveur, déchiffré chez le destinataire\u202f; la clé passe à part, jamais par le serveur.";
 
 test.describe("fr-FR", () => {
   test.use({ locale: "fr-FR" });
 
-  test("titre, phrase, sceaux, fenêtre de dépôt, sections titrées, schéma nommé ; axe", async ({ page, shh, isMobile }) => {
+  test("titre, phrase, cases cochées, fenêtre de dépôt, sections titrées, infographie lisible ; axe", async ({ page, shh, isMobile }) => {
     await page.setViewportSize(isMobile ? { width: 390, height: 844 } : { width: 1280, height: 900 });
     await page.goto(shh.origin + "/");
     await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
-    await expect(page.getByText(/^Texte, photos, vidéos, vocaux, documents, envoyés en qualité d'origine\./)).toBeVisible();
+    await expect(page.getByText(/^Fichiers, photos, vidéos, vocaux et notes, chiffrés sur votre appareil/)).toBeVisible();
     const certs = page.getByRole("list", { name: "En bref" }).getByRole("listitem");
     await expect(certs).toHaveCount(3);
     // « Commencer » partout (téléphone : une seule action, grande). Plus de « Parcourir ».
@@ -55,14 +39,14 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("button", { name: "Parcourir les fichiers" })).toHaveCount(0);
     // Limites gratuites (spec §41.2), lues des constantes.
     await expect(page.locator("p.proof")).toHaveText("200\u202féléments · 2\u202fGo au total");
-    for (const h of ["Comment ça marche", "Pourquoi c'est sûr", "Vos questions", "Quelque chose à transmettre ?"])
+    for (const h of ["Ce qui se passe quand vous partagez", "Comment ça marche", "Pensé pour la confidentialité", "Offres", "Vos questions"])
       await expect(page.getByRole("heading", { level: 2, name: h, exact: true })).toHaveCount(1);
-    await expect(page.getByRole("img", { name: SCHEMA_FR })).toHaveCount(1);
+    // Infographie : sept étapes lisibles en liste, le dessin caché.
+    await expect(page.locator("[data-demo-steps] li")).toHaveCount(7);
+    await expect(page.locator("[data-demo] svg").first()).toHaveAttribute("focusable", "false");
     await expect(page.getByRole("link", { name: "Tous les détails de sécurité" })).toHaveAttribute("href", "/securite");
-    // Le code public : lien sortant sans référent (aucune ressource chargée, une simple navigation).
-    await expect(page.getByRole("link", { name: "Voir le code sur GitHub" })).toHaveAttribute("rel", "noopener noreferrer");
-    await expect(page.getByText("Sous licence AGPL-3.0\u202f: chacun peut le lire et le vérifier.")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Voir le code sur GitHub" })).toHaveAttribute("href", "https://github.com/Skoow/shhdrop");
+    // Le code public (pied de page) : lien sortant sans référent.
+    await expect(page.locator("footer").getByRole("link", { name: /^Code source sur GitHub/ })).toHaveAttribute("rel", "noopener noreferrer");
     // Aucun « # » dans un lien de la page (réservé aux clés, UI §12.1).
     expect(await page.locator("main a[href*='#']").count()).toBe(0);
     expect(await noHScroll(page)).toBe(true);
@@ -74,7 +58,7 @@ test.describe("fr-FR", () => {
     await expect(page).toHaveURL(shh.origin + "/securite");
   });
 
-  test("téléphone 390 × 844 : les actions sont dans le premier écran, le schéma sous le réceptacle (S4)", async ({ page, shh, isMobile }) => {
+  test("téléphone 390 × 844 : « Choisir des fichiers » dans le premier écran ; infographie dessous, puis le réceptacle (S4)", async ({ page, shh, isMobile }) => {
     test.skip(!isMobile, "projets téléphone seulement");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(shh.origin + "/");
@@ -84,13 +68,16 @@ test.describe("fr-FR", () => {
     // Une seule action (« Commencer », vers la page d'envoi), grande, dans le premier écran ; ni « Commencer » du coffre ni tuiles en double.
     await expect(page.getByRole("group", { name: "Ou créez sur place" })).toBeHidden();
     await expect(page.locator(".browse")).toBeHidden();
+    const pick = (await page.locator("[data-pick]").boundingBox())!;
+    expect(pick.height).toBeGreaterThanOrEqual(48);
+    expect(pick.y + pick.height).toBeLessThanOrEqual(844 - 64); // au-dessus de la barre d'onglets
+    expect(await page.evaluate(() => scrollY)).toBe(0);
     const add = (await page.locator(".add-big").boundingBox())!;
     expect(add.height).toBeGreaterThanOrEqual(56);
-    expect(add.y + add.height).toBeLessThanOrEqual(844 - 64); // au-dessus de la barre d'onglets
-    expect(await page.evaluate(() => scrollY)).toBe(0);
     const vessel = (await page.locator('[data-slot="compose"]').boundingBox())!;
-    const schema = (await page.locator('main [role="img"]').boundingBox())!;
-    expect(schema.y).toBeGreaterThan(vessel.y + vessel.height);
+    const demo = (await page.locator("[data-demo]").boundingBox())!;
+    expect(demo.y).toBeGreaterThan(pick.y + pick.height);
+    expect(vessel.y).toBeGreaterThan(demo.y + demo.height);
   });
 
   test("320 px : rien ne déborde ; capture", async ({ page, shh }) => {
@@ -98,46 +85,33 @@ test.describe("fr-FR", () => {
     await page.goto(shh.origin + "/");
     await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
     expect(await noHScroll(page)).toBe(true);
-    expect(await labelOverlaps(page)).toEqual([]);
     await page.waitForTimeout(900);
     await capture(page, "home-320");
   });
 
-  test("texte à 200 % sur 320 px : aucun débordement, libellés du schéma sans chevauchement ; capture", async ({ page, shh }) => {
+  test("texte à 200 % sur 320 px : aucun débordement ; capture", async ({ page, shh }) => {
     await page.setViewportSize({ width: 320, height: 720 });
     await page.goto(shh.origin + "/");
     await page.evaluate(() => {
       document.documentElement.style.fontSize = "200%"; // CSSOM : permis par la CSP
     });
-    await expect(page.locator("[data-label]")).toHaveCount(7);
-    expect(await labelOverlaps(page)).toEqual([]);
-    // Les libellés restent dans le flux : sous le dessin, au-dessus du lien qui le suit.
-    const drawing = (await page.locator('main [role="img"]').boundingBox())!;
-    const next = (await page.getByRole("link", { name: "Tous les détails de sécurité" }).boundingBox())!;
-    const boxes = await page.locator(".labels [data-label], .keynote [data-label]").evaluateAll((es) => es.map((e) => e.getBoundingClientRect().toJSON()));
-    for (const box of boxes) {
-      expect(box.top).toBeGreaterThanOrEqual(drawing.y + drawing.height);
-      expect(box.bottom).toBeLessThanOrEqual(next.y);
-    }
+    await expect(page.locator("[data-pick]")).toBeVisible();
     expect(await noHScroll(page)).toBe(true);
     // Plus strict que la page : aucune section ne déborde de sa colonne. Dans Chromium, un mot trop
     // long (« s'autodétruit », question de la FAQ) débordait de 14 px dans la marge sans créer de
     // défilement ; dans WebKit, aux métriques un peu plus larges, il en créait un (CI b155911).
-    // Les fonds de section (.sec-bg) débordent exprès sur toute la fenêtre : écartés de la mesure.
-    const overflow = await page.evaluate(() => {
-      const bgs = [...document.querySelectorAll<HTMLElement>(".sec-bg")];
-      for (const b of bgs) b.style.display = "none";
-      const out = [document.querySelector(".home")!, ...document.querySelectorAll(".home > *, .home section *")]
-        .filter((e) => getComputedStyle(e).overflowX === "visible" && !e.closest(".band, .tile, .ill"))
+    // La bande des engagements défile exprès (sa piste est plus large que sa fenêtre) : écartée ;
+    // le texte réservé aux lecteurs d'écran (.sr-only, 1 px, sur une ligne) aussi.
+    const overflow = await page.evaluate(() =>
+      [document.querySelector(".home")!, ...document.querySelectorAll(".home > *, .home section *")]
+        .filter((e) => getComputedStyle(e).overflowX === "visible" && !e.closest(".band, .tile, .sr-only"))
         .filter((e) => e.scrollWidth > e.clientWidth + 1 && e.clientWidth > 0)
-        .map((e) => `${e.tagName}.${(e as HTMLElement).className} ${e.scrollWidth} > ${e.clientWidth}`);
-      for (const b of bgs) b.style.display = "";
-      return out;
-    });
+        .map((e) => `${e.tagName}.${(e as HTMLElement).className} ${e.scrollWidth} > ${e.clientWidth}`),
+    );
     expect(overflow).toEqual([]);
     await page.waitForTimeout(900);
     await capture(page, "home-320-200pct");
-    await page.locator(".schema").evaluate((e) => e.scrollIntoView({ block: "center" }));
+    await page.locator("[data-demo]").evaluate((e) => e.scrollIntoView({ block: "center" }));
     await page.waitForTimeout(900);
     expect(await noHScroll(page)).toBe(true);
     await capture(page, "home-320-200pct-securite");
@@ -175,9 +149,9 @@ test.describe("fr-FR", () => {
     await page.goto(shh.origin + "/");
     type Rec = { name: string; end: number; ambient: boolean; infinite: boolean };
     const recorded = () => page.evaluate(() => (window as unknown as { __anims: Rec[] }).__anims);
-    // Titre (9 mots), phrase, 3 sceaux, coffre et ses parties : au moins 20 entrées (16 sur
-    // téléphone : le coffre s'y résume à « Ajouter »), attendues jusqu'à ce que tous les départs aient eu lieu.
-    await expect.poll(async () => (await recorded()).filter((r) => !r.ambient).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(isMobile ? 16 : 20);
+    // Titre (9 mots), sur-titre, phrase, boutons, cases cochées, infographie et carte de dépôt :
+    // 15 entrées (refonte du 12 novembre), attendues jusqu'à ce que tous les départs aient eu lieu.
+    await expect.poll(async () => (await recorded()).filter((r) => !r.ambient).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(15);
     const all = await recorded();
     for (const e of all.filter((r) => !r.ambient)) expect(e.end, e.name).toBeLessThanOrEqual(900);
     // Seule l'ambiance boucle.
@@ -204,7 +178,7 @@ test.describe("fr-FR", () => {
     page.on("filechooser", () => opened++);
     // force : pas d'attente de stabilité (le coffre monte encore de quelques pixels).
     await page.locator(".drop-title").click({ force: true });
-    await page.locator(".band-cap").click({ force: true });
+    await page.locator(".drop-ic").click({ force: true });
     await page.waitForTimeout(300);
     expect(opened).toBe(0);
     await start.click({ force: true });
@@ -311,12 +285,10 @@ test.describe("fr-FR", () => {
     expect(page.url()).toBe(shh.origin + "/");
   });
 
-  test("« Commencer » (appel final) mène à la page d'envoi ; retour : l'accueil ; « Comment ça marche » descend à sa section", async ({ page, shh, isMobile }) => {
+  test("« Commencer » (carte de dépôt) mène à la page d'envoi ; retour : l'accueil ; Sécurité › Comment ça marche descend à sa section", async ({ page, shh, isMobile }) => {
     await page.goto(shh.origin + "/");
-    const cta = page.locator("section.end").getByRole("button", { name: "Commencer" });
-    // Bouton au centre de l'écran, révélation au défilement finie, avant l'appui.
+    const cta = isMobile ? page.locator(".add-big") : page.locator('[data-slot="compose"]').getByRole("button", { name: "Commencer" });
     await cta.evaluate((e) => e.scrollIntoView({ block: "center" }));
-    await expect.poll(() => cta.evaluate((e) => Number(getComputedStyle(e.closest(".rv")!).opacity))).toBe(1);
     await cta.click();
     await expect(page).toHaveURL(shh.origin + "/envoyer");
     await expect(page.getByRole("heading", { name: "Votre envoi" })).toBeVisible();
@@ -325,7 +297,8 @@ test.describe("fr-FR", () => {
     await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
     if (!isMobile) {
       await page.evaluate(() => scrollTo(0, 0));
-      await page.getByRole("button", { name: "Comment ça marche" }).click();
+      await page.getByRole("button", { name: "Sécurité" }).click();
+      await page.locator("[data-nav-item]").filter({ hasText: "Comment ça marche" }).click();
       await expect(page.getByRole("heading", { level: 2, name: "Comment ça marche" })).toBeInViewport();
       expect(page.url()).toBe(shh.origin + "/");
     }
@@ -346,7 +319,7 @@ test.describe("fr-FR", () => {
 
   test("révélations : chaque section apparaît en entier une fois dans l'écran", async ({ page, shh }) => {
     await page.goto(shh.origin + "/");
-    for (const sel of ["section.how h2", ".claim:last-child", "section.faq h2", "section.end h2"]) {
+    for (const sel of ["section.how h2", "[data-priv-card]:last-child", "[data-offer]:last-child", "section.faq h2"]) {
       const el = page.locator(sel).first();
       await el.evaluate((e) => e.scrollIntoView({ block: "center" }));
       await expect
@@ -355,57 +328,62 @@ test.describe("fr-FR", () => {
     }
   });
 
-  test("v4 : chaque section a son fond, sur toute la largeur, sous le plafond de luminance K5", async ({ page, shh, browserName }) => {
+  test("fond : nuit et trame en CSS pur (ni image ni data:), sans défilement horizontal, sous le plafond de luminance K5", async ({ page, shh, browserName }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(shh.origin + "/");
-    const kinds = await page.locator(".sec-bg").evaluateAll((es) => es.map((e) => [...e.classList].find((c) => c !== "sec-bg" && !c.startsWith("svelte-"))));
-    expect(kinds).toEqual(["night", "tide", "vault", "cipher", "dawn"]);
-    // Pleine largeur de la fenêtre, sans défilement horizontal.
-    for (const w of await page.locator(".sec-bg").evaluateAll((es) => es.map((e) => Math.round(e.getBoundingClientRect().width))))
-      expect(w).toBe(await page.evaluate(() => document.documentElement.clientWidth));
+    const trame = await page.locator("[data-trame] i").evaluate((e) => {
+      const c = getComputedStyle(e, "::before");
+      return { bg: c.backgroundImage, lines: c.maskImage || c.webkitMaskImage, disc: getComputedStyle(e).maskImage || getComputedStyle(e).webkitMaskImage, pos: getComputedStyle(e.parentElement!).position };
+    });
+    expect(trame.bg).toBe("none");
+    expect(trame.lines).toMatch(/linear-gradient/);
+    expect(trame.disc).toMatch(/radial-gradient/);
+    expect(`${trame.lines} ${trame.disc}`).not.toMatch(/url\(|data:/);
+    expect(trame.pos).toBe("fixed");
     expect(await noHScroll(page)).toBe(true);
     test.skip(browserName !== "chromium", "luminance mesurée sur la capture Chromium");
-    // K5 étendu aux fonds de section : contenu caché (CSSOM), fonds seuls, aurore retirée.
+    // K5 : contenu caché (CSSOM), fonds seuls (nuit, trame, aurore), en haut et plus bas dans la page.
     const max: number[] = [];
-    for (const sel of ["section.how", "section.why", "section.faq", "section.end"]) {
-      await page.locator(sel).evaluate((e) => e.scrollIntoView({ block: "center" }));
+    for (const y of [0, 1600]) {
+      await page.evaluate((y) => scrollTo(0, y), y);
       await page.waitForTimeout(300);
-      const hide = ".aurora, main, header, footer, .skip, .banner-slot";
+      const hide = "main, header, footer, .skip, .banner-slot";
       await page.evaluate(async (sel) => {
         for (const el of document.querySelectorAll<HTMLElement>(sel)) el.style.visibility = "hidden";
-        for (const bg of document.querySelectorAll<HTMLElement>(".sec-bg")) bg.style.visibility = "visible";
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       }, hide);
       max.push(maxRelLuminance(await page.screenshot()));
       await page.evaluate((sel) => {
-        for (const el of document.querySelectorAll<HTMLElement>(`${sel}, .sec-bg`)) el.style.visibility = "";
+        for (const el of document.querySelectorAll<HTMLElement>(sel)) el.style.visibility = "";
       }, hide);
     }
     for (const m of max) expect(m).toBeLessThanOrEqual(0.05);
   });
 
   test("ambiance : pause hors écran et onglet caché, reprise ensuite", async ({ page, shh }) => {
-    // Le volet animé du coffre n'existe qu'à partir de 760 px (téléphone : le coffre se résume à « Ajouter »).
-    await page.setViewportSize({ width: 800, height: 560 });
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(shh.origin + "/");
+    await page.mouse.move(1, 1);
     const state = () =>
       page.evaluate(() => {
         const out: Record<string, string[]> = {};
         for (const a of document.getAnimations()) {
           const el = (a.effect as KeyframeEffect).target as Element;
           const root = el.closest("[data-ambient]");
-          if (!root) continue;
-          const k = el.closest(".aurora") ? "aurora" : root.classList.contains("band") ? "band" : el.closest(".schema") ? "schema" : "other";
+          if (!root || a.effect?.getComputedTiming().iterations !== Infinity) continue;
+          const k = el.closest(".aurora") ? "aurora" : el.closest("[data-demo]") ? "demo" : el.closest("[data-band]") ? "band" : "other";
           (out[k] ??= []).push(a.playState);
         }
         return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, [...new Set(v)].sort().join(",")]));
       });
-    // Haut de page : le volet du coffre tourne, le schéma (loin dessous) est en pause.
+    // Haut de page : l'infographie (curseur du journal) et la bande tournent.
+    await expect.poll(async () => (await state()).demo).toBe("running");
     await expect.poll(async () => (await state()).band).toBe("running");
-    await expect.poll(async () => (await state()).schema).toBe("paused");
-    await page.locator(".schema").evaluate((e) => e.scrollIntoView({ block: "center" }));
-    await expect.poll(async () => (await state()).schema).toBe("running");
+    await page.locator("footer[data-foot]").evaluate((e) => e.scrollIntoView({ block: "end" }));
+    await expect.poll(async () => (await state()).demo).toBe("paused");
     await expect.poll(async () => (await state()).band).toBe("paused");
+    await page.evaluate(() => scrollTo(0, 0));
+    await expect.poll(async () => (await state()).demo).toBe("running");
     const setHidden = (v: boolean) =>
       page.evaluate((hidden) => {
         Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
@@ -414,7 +392,7 @@ test.describe("fr-FR", () => {
     await setHidden(true);
     await expect.poll(async () => Object.values(await state()).every((s) => s === "paused")).toBe(true);
     await setHidden(false);
-    await expect.poll(async () => (await state()).schema).toBe("running");
+    await expect.poll(async () => (await state()).demo).toBe("running");
   });
 
   test("mouvement réduit : aucune animation, ni au chargement ni au défilement ; capture", async ({ page, shh, isMobile }) => {
@@ -472,7 +450,7 @@ test.describe("fr-FR", () => {
     await page.setViewportSize(isMobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
     await page.goto(shh.origin + "/");
     await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
-    for (const sel of [".aurora", ".grain", ".guil"])
+    for (const sel of [".aurora", ".grain", ".trame"])
       expect(await page.locator(sel).first().evaluate((e) => getComputedStyle(e).display), sel).toBe("none");
     for (const name of isMobile ? ["Commencer Photo, vidéo, vocal, note ou fichiers"] : ["Commencer", "Photo ou vidéo"]) {
       const b = page.getByRole("button", { name, exact: true }).first();
@@ -480,7 +458,7 @@ test.describe("fr-FR", () => {
     }
     await page.waitForTimeout(900);
     await capture(page, "home-v3-forced");
-    await page.locator("section.why").evaluate((e) => e.scrollIntoView());
+    await page.locator("section.priv").evaluate((e) => e.scrollIntoView());
     await page.waitForTimeout(900);
     await capture(page, "home-v3-forced-securite");
   });
@@ -491,7 +469,7 @@ test.describe("fr-FR", () => {
     await page.waitForTimeout(1000);
     const tag = isMobile ? "390" : "1440";
     await capture(page, `home-v3-${tag}`);
-    for (const s of ["how", "why", "faq", "end"]) {
+    for (const s of ["how", "priv", "offers", "faq"]) {
       await page.locator(`section.${s}`).evaluate((e) => e.scrollIntoView({ block: "start" }));
       await page.evaluate(() => scrollBy(0, -72));
       await page.waitForTimeout(900);
@@ -504,15 +482,14 @@ test.describe("fr-FR", () => {
 test.describe("en-US", () => {
   test.use({ locale: "en-US" });
 
-  test("titre, schéma, sections en anglais ; axe ; capture", async ({ page, shh, isMobile }) => {
+  test("titre, infographie, sections en anglais ; axe ; capture", async ({ page, shh, isMobile }) => {
     await page.setViewportSize(isMobile ? { width: 390, height: 844 } : { width: 1280, height: 900 });
     await page.goto(shh.origin + "/");
     await expect(page.getByRole("heading", { level: 1, name: "One link, one password, then nothing." })).toBeVisible();
-    await expect(
-      page.getByRole("img", { name: "Encrypted on your device, unreadable to the server, decrypted at the recipient; the key travels separately, never through the server." }),
-    ).toHaveCount(1);
+    await expect(page.locator("[data-demo-steps] li").nth(1)).toContainText("Encrypted on your device");
+    await expect(page.getByRole("button", { name: "Choose files" })).toBeVisible();
     await expect(page.getByRole("button", { name: /^Get started/ }).filter({ visible: true }).first()).toBeVisible();
-    for (const h of ["How it works", "Why it's safe", "Your questions", "Something to pass on?"])
+    for (const h of ["What happens when you share", "How it works", "Built for privacy", "Plans", "Your questions"])
       await expect(page.getByRole("heading", { level: 2, name: h, exact: true })).toHaveCount(1);
     expect(await noHScroll(page)).toBe(true);
     expect(await axe(page)).toEqual([]);
