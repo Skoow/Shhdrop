@@ -483,6 +483,11 @@ func TestPieceSansSegment(t *testing.T) {
 	}
 }
 
+// Lien d'une trame à une pièce (audit D6, décision du 12 novembre) : une pièce d'un autre
+// auteur (autre siège, ou ancien occupant du siège) ou une trame volatile → ErrBadRequest
+// (4003), sans rang consommé ; une pièce disparue (inconnue, effacée, d'un autre salon), pas
+// encore prête ou déjà liée (course honnête : PieceSansLien, retrait depuis un autre onglet,
+// message modifié) → trame rangée SANS lien (le client affichera « pièce indisponible »).
 func TestLienRefuse(t *testing.T) {
 	b := nouveauBanc(t, 200)
 	c := b.creer(t, 3)
@@ -492,16 +497,13 @@ func TestLienRefuse(t *testing.T) {
 	aAutre := b.pretePiece(t, autre, 1, false)
 	enCours := b.creerPiece(t, mb, 1, false)
 	liee := b.pretePiece(t, mb, 1, false)
-	b.lier(t, mb, 0, liee)
+	premier := b.lier(t, mb, 0, liee)
 	libre := b.pretePiece(t, mb, 1, false)
 	inconnue := [16]byte{9}
 	avant := dernierSeq(s)
 	for nom, f := range map[string]func() error{
-		"autre siège":   func() error { _, err := b.m.Recevoir(mb, trameD(0, 1), idPiece(aAutre)); return err },
-		"non finalisée": func() error { _, err := b.m.Recevoir(mb, trameD(0, 1), idPiece(enCours)); return err },
-		"déjà liée":     func() error { _, err := b.m.Recevoir(mb, trameD(0, 1), idPiece(liee)); return err },
-		"volatile":      func() error { _, err := b.m.Recevoir(mb, trameD(dVolatile, 1), idPiece(libre)); return err },
-		"inconnue":      func() error { _, err := b.m.Recevoir(mb, trameD(0, 1), &inconnue); return err },
+		"autre siège": func() error { _, err := b.m.Recevoir(mb, trameD(0, 1), idPiece(aAutre)); return err },
+		"volatile":    func() error { _, err := b.m.Recevoir(mb, trameD(dVolatile, 1), idPiece(libre)); return err },
 	} {
 		if err := f(); !errors.Is(err, ErrBadRequest) {
 			t.Errorf("%s : %v", nom, err)
@@ -510,7 +512,27 @@ func TestLienRefuse(t *testing.T) {
 	if dernierSeq(s) != avant {
 		t.Fatal("rang consommé par un refus")
 	}
-	// Ancien occupant du siège : sa pièce n'est pas au nouveau.
+	for nom, id := range map[string]*[16]byte{"non finalisée": idPiece(enCours), "déjà liée": idPiece(liee),
+		"inconnue": &inconnue} {
+		seq, err := b.m.Recevoir(mb, trameD(0, 1), id)
+		if err != nil || seq != dernierSeq(s) {
+			t.Fatalf("%s : trame refusée : %v", nom, err)
+		}
+		sous(s, func() {
+			if s.pieces[seq] != nil {
+				t.Errorf("%s : trame liée", nom)
+			}
+		})
+	}
+	sous(s, func() {
+		if p := s.pieces[premier]; p == nil || p.id != liee || p.lien != premier {
+			t.Error("pièce déjà liée détachée de sa trame")
+		}
+		if p := s.lesPieces[enCours]; p == nil || p.lien != 0 {
+			t.Error("pièce non finalisée liée")
+		}
+	})
+	// Ancien occupant du siège : sa pièce n'est pas au nouveau (autre auteur : 4003).
 	b.depart(s, autre.siege)
 	_, nouveau := b.entrerMembre(t, c, false)
 	if nouveau.siege != autre.siege {

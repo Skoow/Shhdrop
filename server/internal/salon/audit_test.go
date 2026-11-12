@@ -244,3 +244,57 @@ func TestAuditEcheanceNaturelle(t *testing.T) {
 		t.Fatal("usage des pièces :", u)
 	}
 }
+
+// D6 de l'audit : une pièce effacée entre-temps (PieceSansLien, puis Tick) fermait le
+// WebSocket en 4003 et perdait la trame. La trame est désormais rangée sans lien.
+func TestAuditLienPieceEchue(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 3)
+	_, mb := b.entrerMembre(t, c, true)
+	defer b.connecte(t, mb)()
+	id := b.pretePiece(t, mb, 1, false)
+	b.h.avancer(PieceSansLien)
+	b.m.Tick()
+	seq, err := b.m.Recevoir(mb, trameD(0, 1), idPiece(id))
+	if err != nil {
+		t.Fatalf("Recevoir après l'échéance de la pièce : %v → code %d", err, codeErreur(err))
+	}
+	sous(mb.salon, func() {
+		if mb.salon.pieces[seq] != nil {
+			t.Fatal("trame liée à une pièce effacée")
+		}
+	})
+	if f, l := b.surDisque(t, id); f || l {
+		t.Fatal("pièce effacée revenue :", f, l)
+	}
+}
+
+// Pièce d'un autre salon : jamais liable (trame rangée sans lien, la pièce reste libre dans
+// son salon), ni lisible, ni retirable.
+func TestAuditAutreSalon(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	ca, cb := b.creer(t, 3), b.creer(t, 3)
+	_, ma := b.entrerMembre(t, ca, true)
+	_, mbb := b.entrerMembre(t, cb, true)
+	id := b.pretePiece(t, ma, 1, false)
+	seq, err := b.m.Recevoir(mbb, trameD(0, 1), idPiece(id))
+	if err != nil {
+		t.Fatal("trame d'un autre salon :", err)
+	}
+	sous(mbb.salon, func() {
+		if mbb.salon.pieces[seq] != nil {
+			t.Fatal("pièce d'un autre salon liée")
+		}
+	})
+	sous(ma.salon, func() {
+		if p := ma.salon.libres[id]; p == nil || p.lien != 0 {
+			t.Fatal("pièce de son salon touchée")
+		}
+	})
+	if _, err := b.lire(t, mbb, id, 0); !errors.Is(err, ErrNotFound) {
+		t.Fatal("lecture depuis un autre salon :", err)
+	}
+	if err := b.m.RetirerPiece(mbb, id); !errors.Is(err, ErrNotFound) {
+		t.Fatal("retrait depuis un autre salon :", err)
+	}
+}

@@ -627,14 +627,23 @@ func (m *Manager) RetirerPiece(mb Membre, id string) error {
 	return nil
 }
 
-// pieceLiableLocked : pièce de la trame que mb envoie : « ready », de ce salon, de cet auteur,
-// pas encore liée ; nil sinon. Appelé sous s.mu.
-func (s *salon) pieceLiableLocked(mb Membre, id [16]byte) *piece {
+// pieceLiableLocked : pièce de la trame que mb envoie (audit D6, décision du 12 novembre).
+// Pièce d'un autre auteur (autre siège, ou ancien occupant du siège) : ErrBadRequest (4003).
+// Pièce disparue (inconnue, effacée, d'un autre salon), pas encore « ready » ou déjà liée :
+// nil sans erreur, la trame est rangée sans lien (course honnête : PieceSansLien, retrait
+// depuis un autre onglet, message modifié ; le client affichera « pièce indisponible »).
+// Sinon la pièce, à lier. Appelé sous s.mu.
+func (s *salon) pieceLiableLocked(mb Membre, id [16]byte) (*piece, error) {
 	p := s.lesPieces[b64.EncodeToString(id[:])]
-	if p == nil || p.etat != prete || p.lien != 0 || !s.auteurDeLocked(mb, p) {
-		return nil
+	switch {
+	case p == nil:
+		return nil, nil
+	case !s.auteurDeLocked(mb, p):
+		return nil, ErrBadRequest
+	case p.etat != prete || p.lien != 0:
+		return nil, nil
 	}
-	return p
+	return p, nil
 }
 
 // lierLocked : p suit désormais la trame de rang seq. Appelé sous s.mu.

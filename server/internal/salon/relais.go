@@ -50,8 +50,9 @@ func (s *salon) membreLocked(mb Membre, now time.Time) bool {
 // Recevoir range la trame de mb et rend son rang. En-tête invalide (taille, marque, bit
 // réservé) : ErrBadRequest, aucun rang consommé. lien (facultatif, Task 13) : pièce
 // « ready » de ce salon et de cet auteur, pas encore liée, pour une trame non volatile
-// (pieceLiableLocked), sinon ErrBadRequest sans rang consommé ; elle suit ensuite la vie de la
-// trame (retrait, règle, lectures, fin du salon). Membre
+// (pieceLiableLocked) ; elle suit ensuite la vie de la trame (retrait, règle, lectures, fin du
+// salon). Trame volatile ou pièce d'un autre auteur : ErrBadRequest sans rang consommé ;
+// pièce disparue, pas prête ou déjà liée : trame rangée sans lien (audit D6). Membre
 // périmé : ErrNotFound. Erreur d'écriture de la conversation (ErrES, fixe) : trame non rangée,
 // aucun rang consommé. L'écriture se fait sous le verrou du salon : l'ordre des emplacements
 // est celui des rangs. Règle « 10 min » ou « 1 h » : échéance rangée (effacement.go).
@@ -87,10 +88,10 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, lien *[16]byte) (uint64, err
 	if !s.membreLocked(mb, now) {
 		return 0, ErrNotFound
 	}
-	var p *piece
+	var p *piece // nil : trame sans lien (aucun, ou pièce disparue, pas prête, déjà liée)
 	if lien != nil {
-		if p = s.pieceLiableLocked(mb, *lien); p == nil {
-			return 0, ErrBadRequest
+		if p, err = s.pieceLiableLocked(mb, *lien); err != nil {
+			return 0, err
 		}
 	}
 	if plein {

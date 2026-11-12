@@ -449,7 +449,8 @@ func TestKeyPackageGardePourLeRattrapage(t *testing.T) {
 	}
 }
 
-// En-tête invalide, pièce (jusqu'à la Task 13) : ErrBadRequest, rang non consommé, rien écrit.
+// En-tête invalide, pièce sur une trame volatile : ErrBadRequest, rang non consommé, rien
+// écrit (une pièce inconnue sur une trame non volatile : trame rangée sans lien, TestLienRefuse).
 // Membre périmé : ErrNotFound.
 func TestEnTeteRefuse(t *testing.T) {
 	b := nouveauBanc(t, 200)
@@ -467,7 +468,7 @@ func TestEnTeteRefuse(t *testing.T) {
 		"4 139":       func() error { _, err := b.m.Recevoir(mb, trameD(0, 1)[:TailleTrame-1], nil); return err },
 		"4 141":       func() error { _, err := b.m.Recevoir(mb, append(trameD(0, 1), 0), nil); return err },
 		"vide":        func() error { _, err := b.m.Recevoir(mb, nil, nil); return err },
-		"pièce":       func() error { _, err := b.m.Recevoir(mb, trameD(0, 1), &piece); return err },
+		"pièce":       func() error { _, err := b.m.Recevoir(mb, trameD(dVolatile, 1), &piece); return err },
 	} {
 		if err := f(); !errors.Is(err, ErrBadRequest) {
 			t.Errorf("%s : %v", nom, err)
