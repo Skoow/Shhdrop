@@ -268,9 +268,9 @@
     {:else if !editing}
       {@render broom()}
       {#if item.kind === "text"}
-        <IconButton label={t("compose.edit", { name: item.base })} onpress={onedit}><Pencil size={18} strokeWidth={1.75} /></IconButton>
+        <IconButton label={t("compose.edit", { name: item.base })} onpress={onedit} data-rename><Pencil size={18} strokeWidth={1.75} /></IconButton>
       {:else}
-        <IconButton bind:el={renameBtn} label={t("compose.rename", { name })} onpress={startRename}><Pencil size={18} strokeWidth={1.75} /></IconButton>
+        <IconButton bind:el={renameBtn} label={t("compose.rename", { name })} onpress={startRename} data-rename><Pencil size={18} strokeWidth={1.75} /></IconButton>
       {/if}
       <IconButton label={t("compose.remove", { name })} onpress={onremove} data-remove><X size={18} strokeWidth={1.75} /></IconButton>
     {/if}

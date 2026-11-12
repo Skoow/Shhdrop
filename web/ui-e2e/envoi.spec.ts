@@ -185,3 +185,57 @@ test("photo, vidéo ou son d'un format que le nettoyage ne lit pas : « format n
   await expect(page.getByRole("button", { name: "Tout nettoyer" })).toHaveCount(0);
   await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("1 fichier n'a pas pu être nettoyé");
 });
+
+test("balai au clavier : Entrée, Tab, Entrée nettoie ; le focus va sur un bouton sûr de la ligne, jamais « Supprimer » (audit D3)", async ({ page, shh, isMobile }) => {
+  await openSend(page, shh.origin);
+  await addPdfAndPhoto(page);
+  const photoRow = rows(page).filter({ hasText: "foret-brume" });
+  const broom = photoRow.getByRole("button", { name: /^Nettoyer ce fichier\s:\sforet-brume\.jpg$/ });
+  await broom.focus();
+  await page.keyboard.press("Enter");
+  const dlg = page.getByRole("dialog", { name: "Nettoyer ce fichier ?" });
+  await expect(dlg.getByRole("button", { name: "Annuler" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(dlg.getByRole("button", { name: "Nettoyer", exact: true })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(photoRow.locator('[data-clean="nettoye"]')).toHaveCount(1);
+  const safe = photoRow.getByRole("button", { name: isMobile ? "Actions pour foret-brume.jpg" : "Renommer foret-brume.jpg" });
+  await expect(safe).toBeFocused();
+  // Un second Entrée réflexe ne retire rien.
+  if (!isMobile) {
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
+  }
+  await expect(rows(page)).toHaveCount(2);
+});
+
+test("confirmation du balai : Tab au-delà de la bulle la ferme ; Échap la ferme et rend le focus au balai (audit D4)", async ({ page, shh }) => {
+  await openSend(page, shh.origin);
+  await addPdfAndPhoto(page);
+  const photoRow = rows(page).filter({ hasText: "foret-brume" });
+  const broom = photoRow.getByRole("button", { name: /^Nettoyer ce fichier\s:\sforet-brume\.jpg$/ });
+  const dlg = page.getByRole("dialog", { name: "Nettoyer ce fichier ?" });
+  // Tab, Tab : le focus sort de la bulle, qui se ferme ; rien n'est nettoyé.
+  await broom.focus();
+  await page.keyboard.press("Enter");
+  await expect(dlg.getByRole("button", { name: "Annuler" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(dlg).toBeHidden();
+  expect(await page.evaluate(() => document.activeElement?.closest("[data-clean-confirm]") ?? null)).toBeNull();
+  await expect(photoRow.locator('[data-clean="nettoye"]')).toHaveCount(0);
+  // Maj+Tab depuis « Annuler » : fermée aussi.
+  await broom.focus();
+  await page.keyboard.press("Enter");
+  await expect(dlg.getByRole("button", { name: "Annuler" })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(dlg).toBeHidden();
+  // Échap (ouverte au clavier) : fermée, focus rendu au balai.
+  await broom.focus();
+  await page.keyboard.press("Enter");
+  await expect(dlg.getByRole("button", { name: "Annuler" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dlg).toBeHidden();
+  await expect(broom).toBeFocused();
+  await expect(photoRow.locator('[data-clean="nettoye"]')).toHaveCount(0);
+});

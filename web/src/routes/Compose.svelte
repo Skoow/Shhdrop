@@ -301,10 +301,12 @@
   let barH = $state(0);
   let toastSeq = 0;
 
-  async function focusRow(id: string | undefined) {
+  /** `safe` : jamais « Supprimer » (après un nettoyage, un second Entrée réflexe retirerait le
+   *  fichier, audit D3) : « Réessayer », « Renommer »/« Modifier » ou le menu « … ». */
+  async function focusRow(id: string | undefined, safe = false) {
     await tick();
     const row = id ? document.querySelector(`[data-row="${CSS.escape(id)}"]`) : null;
-    const btn = row?.querySelector<HTMLButtonElement>("[data-remove], [data-menu]");
+    const btn = row?.querySelector<HTMLButtonElement>(safe ? "[data-fix], [data-rename], [data-menu]" : "[data-remove], [data-menu]");
     if (btn) btn.focus();
     else if (composer.count === 0) focusBrowse();
   }
@@ -517,7 +519,7 @@
   async function runClean(ids: string[]) {
     if (ids.length === 1) {
       await fixRun(ids[0]!);
-      void focusRow(ids[0]);
+      void focusRow(ids[0], true);
       return;
     }
     focusTitle();
