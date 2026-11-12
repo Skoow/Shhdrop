@@ -1408,7 +1408,9 @@ func TestBasculeSousEnvoiContinu(t *testing.T) {
 			cc := s.conns[ec.Siege]
 			return cc != nil && cc.direct
 		})
-		time.Sleep(2 * time.Millisecond)
+		// Au moins une trame reçue avant de partir (audit D4 : 2 ms d'attente ne suffisaient
+		// pas sous -race avec tous les paquets en parallèle).
+		attendre(t, func() bool { return len(rangs(l.enrs())) > 0 })
 		finir(t, l)
 		recu := rangs(l.enrs())
 		if len(recu) == 0 {
