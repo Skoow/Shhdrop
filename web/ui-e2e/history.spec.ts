@@ -83,7 +83,10 @@ test.describe("fr-FR", () => {
     test.setTimeout(180_000);
     await page.clock.install();
     const calls = statusCalls(page);
-    const sent = await sendShare(page, shh.origin + "/", { text: "Le code de la porte est 4471.", isMobile });
+    // Repère cherché dans la base : long et hors de l'alphabet hexadécimal, il ne peut pas surgir par
+    // hasard de l'hex des octets chiffrés (« 4471 » y tombait parfois), ni, en pratique, de leurs octets bruts.
+    const MARK = "REPERE-HISTORIQUE-QZWXKJ";
+    const sent = await sendShare(page, shh.origin + "/", { text: `Le code de la porte est ${MARK}.`, isMobile });
     // « Lien prêt » : bascule activée par défaut (Q-H2), avec sa phrase honnête.
     await expect(keepSwitch(page)).toHaveAttribute("aria-checked", "true");
     await expect(page.getByText("jamais le lien de partage ni le mot de passe", { exact: false })).toBeVisible();
@@ -93,7 +96,7 @@ test.describe("fr-FR", () => {
     const raw = await rawDb(page);
     const secret = sent.manage.split("#m")[1]!;
     expect(secret).toHaveLength(43);
-    for (const s of [secret, sent.link.split("#")[1]!, sent.password, "127.0.0.1", "4471", "Note", "createdAt"]) expect(raw.text).not.toContain(s);
+    for (const s of [secret, sent.link.split("#")[1]!, sent.password, "127.0.0.1", MARK, "Note", "createdAt"]) expect(raw.text).not.toContain(s);
     expect(raw.extractable).toBe(false);
     expect(raw.algo).toBe('{"name":"AES-GCM","length":256}');
     await finish(page);

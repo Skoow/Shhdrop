@@ -62,6 +62,9 @@ test("listes compactes : groupes, icônes par format, types, tailles, temps esti
   // (audit D2) ; jamais sur SVG, programme, archive : seulement « Télécharger ».
   for (const n of ["foret-brume.jpg", "anniversaire-lou.webm", "contrat.pdf"]) await expect(row(page, n).getByRole("button", { name: `Voir ${n}` })).toBeVisible();
   await expect(row(page, "vocal.ogg").getByRole("button", { name: "Écouter vocal.ogg" })).toHaveText("Écouter");
+  // Icône de haut-parleur maison, pas l'œil de « Voir » (retours du 12 novembre).
+  await expect(row(page, "vocal.ogg").getByRole("button", { name: "Écouter vocal.ogg" }).locator("svg.ic-volume")).toHaveCount(1);
+  await expect(row(page, "vocal.ogg").getByRole("button", { name: "Écouter vocal.ogg" }).locator("svg.ic-eye")).toHaveCount(0);
   for (const n of ["trap.svg", "installer.exe", "archive.zip"]) {
     await expect(row(page, n).getByRole("button", { name: /^(Voir|Écouter)/ })).toHaveCount(0);
     await expect(row(page, n).getByRole("button", { name: `Télécharger ${n}` })).toBeVisible();
@@ -357,4 +360,5 @@ test("mémo vocal WebM (audio/webm) : « Audio » chez l'expéditeur et chez le 
   await expect(r).not.toContainText("Vidéo");
   await expect(page.locator('[data-group="audio"]')).toContainText("Mémo vocal 1.webm");
   await expect(r.getByRole("button", { name: "Écouter Mémo vocal 1.webm" })).toHaveText("Écouter");
+  await expect(r.getByRole("button", { name: "Écouter Mémo vocal 1.webm" }).locator("svg.ic-volume")).toHaveCount(1);
 });

@@ -48,6 +48,8 @@ export const GLYPHS = {
   "timer": [{ c: [12, 13.5, 7] }, { d: "M10 2.8h4M12 13.5l3-3M18.2 6.8l1.3-1.3" }],
   "pause": [{ r: [6.5, 5, 3.5, 14, 1.2] }, { r: [14, 5, 3.5, 14, 1.2] }],
   "play": [{ d: "M7.5 5.6a1 1 0 0 1 1.5-.9l9.6 6.4a1 1 0 0 1 0 1.7L9 19.2a1 1 0 0 1-1.5-.8z" }],
+  // Haut-parleur (« Écouter » chez le destinataire) : caisse et deux ondes.
+  "volume": [{ d: "M4.5 9.5h3l4.5-4v13l-4.5-4h-3a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z" }, { d: "M15.5 9.2a4 4 0 0 1 0 5.6M18.2 6.6a7.6 7.6 0 0 1 0 10.8" }],
   "download": [{ d: "M12 4v11M7 10.5l5 5 5-5M4.5 19.5h15" }],
   "upload": [{ d: "M12 15.5v-11M7 9l5-5 5 5M4.5 19.5h15" }],
   "file": [{ d: FILE }],

@@ -321,11 +321,14 @@
   let toastSeq = 0;
 
   /** `safe` : jamais « Supprimer » (après un nettoyage, un second Entrée réflexe retirerait le
-   *  fichier, audit D3) : « Réessayer », « Renommer »/« Modifier » ou le menu « … ». */
-  async function focusRow(id: string | undefined, safe = false) {
+   *  fichier, audit D3) : « Réessayer », « Renommer »/« Modifier » ou le menu « … ».
+   *  `after-remove` : après un retrait, la ligne suivante prend le focus sur « Renommer »/« Modifier »
+   *  ou le menu « … », jamais « Supprimer » (une double frappe sur Entrée retirerait deux éléments). */
+  async function focusRow(id: string | undefined, safe: boolean | "after-remove" = false) {
     await tick();
     const row = id ? document.querySelector(`[data-row="${CSS.escape(id)}"]`) : null;
-    const btn = row?.querySelector<HTMLButtonElement>(safe ? "[data-fix], [data-rename], [data-menu]" : "[data-remove], [data-menu]");
+    const sel = safe === "after-remove" ? "[data-rename], [data-menu]" : safe ? "[data-fix], [data-rename], [data-menu]" : "[data-remove], [data-menu]";
+    const btn = row?.querySelector<HTMLButtonElement>(sel);
     if (btn) btn.focus();
     else if (composer.count === 0) focusBrowse();
   }
@@ -344,7 +347,7 @@
     if (composer.count === 1) viewChange(run, focusBrowse);
     else {
       run();
-      void focusRow(next);
+      void focusRow(next, "after-remove");
     }
   }
   function clearAll() {

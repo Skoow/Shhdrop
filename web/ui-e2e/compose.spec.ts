@@ -372,6 +372,32 @@ test.describe("fr-FR", () => {
     await expect(rows(page)).toHaveCount(3);
   });
 
+  test("retrait au clavier : le focus va sur un bouton non destructif de la ligne suivante ; un second Entrée ne supprime rien", async ({ page, shh, isMobile }) => {
+    await open(page, shh.origin);
+    await browse(page, [...PHOTOS.slice(0, 2), f("contrat.pdf")]);
+    if (isMobile) {
+      await removeItem(page, "plage-nuit.jpg");
+    } else {
+      await page.getByRole("button", { name: "Supprimer plage-nuit.jpg" }).focus();
+      await page.keyboard.press("Enter");
+    }
+    await expect(rows(page)).toHaveCount(2);
+    const focused = () =>
+      page.evaluate(() => {
+        const a = document.activeElement as HTMLElement | null;
+        return { inRow: !!a?.closest("[data-row]"), remove: !!a?.closest("[data-remove]"), label: a?.getAttribute("aria-label") ?? a?.textContent ?? "" };
+      });
+    await expect.poll(async () => (await focused()).inRow).toBe(true);
+    const f0 = await focused();
+    expect(f0.remove, f0.label).toBe(false);
+    expect(f0.label).not.toMatch(/^Supprimer/);
+    if (!isMobile) {
+      await page.keyboard.press("Enter"); // réflexe : double frappe
+      await page.keyboard.press("Escape");
+      await expect(rows(page)).toHaveCount(2);
+    }
+  });
+
   test("ordinateur : lignes (Alt + ↓, renommer en place), notes (glisser, Alt + ↓) ; doublon ; nom long", async ({ page, shh, isMobile }) => {
     test.skip(isMobile, "ordinateur : lignes avec poignée et boutons");
     await open(page, shh.origin);

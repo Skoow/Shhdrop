@@ -14,7 +14,7 @@
   import Button from "./Button.svelte";
   import IconButton from "./IconButton.svelte";
   import InlineConfirm from "./InlineConfirm.svelte";
-  import { Copy, Download, Eye, Pause, Play, RefreshCw, Square } from "./Icon";
+  import { Copy, Download, Eye, Pause, Play, RefreshCw, Square, Volume } from "./Icon";
   import Tip from "./Tip.svelte";
   import CleanMark from "./CleanMark.svelte";
   import { receivedClean, type ManifestClean } from "../media/clean-label";
@@ -104,7 +104,7 @@
     {#if canView}
       <!-- Son (mémo vocal compris, audit D2) : « Écouter » ; le reste : « Voir ». -->
       <Button variant="secondary" dense {disabled} bind:el={viewBtn} onpress={() => onview(viewBtn ?? null)} aria-label={t(listen ? "dl.row.listen" : "dl.row.view", { name })}>
-        {#snippet icon()}<Eye size={18} />{/snippet}
+        {#snippet icon()}{#if listen}<Volume size={18} />{:else}<Eye size={18} />{/if}{/snippet}
         <span class="hide-narrow">{t(listen ? "content.listen" : "dl.view")}</span>
       </Button>
     {/if}

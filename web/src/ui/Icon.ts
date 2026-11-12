@@ -61,3 +61,4 @@ export { default as Hourglass } from "./icons/Hourglass.svelte";
 export { default as Wrench } from "./icons/Wrench.svelte";
 export { default as MonitorX } from "./icons/MonitorX.svelte";
 export { default as Send } from "./icons/Send.svelte";
+export { default as Volume } from "./icons/Volume.svelte";
