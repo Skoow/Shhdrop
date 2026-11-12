@@ -102,6 +102,7 @@ Le moteur Rust porte tout le protocole du salon (groupe MLS, enveloppe, découpa
 
 **Risques résiduels**
 - **Membres fantômes** : un serveur malveillant peut faire ajouter un faux membre, et un membre malveillant peut construire pour un nouveau venu un **faux groupe**, qui peut aussi omettre des membres. Seuls les **codes de vérification** (§9, point 4) les révèlent (Ruling 19) ; aucun service d'authentification.
+- **Siège attesté du Welcome** (C-2 Task 1) : un serveur qui ment sur l'expéditeur d'un Welcome force le repli « aucun candidat » : la file d'attente n'est pas rejouée pour cette entrée (messages perdus pour l'arrivant), sans gain de confidentialité ; le premier instantané d'annonces qui valide peut précéder le vrai Commit (risque « faux groupe », Ruling 19).
 - **Clés volées** (remplace le risque 21 de la spec principale) : un attaquant qui a volé les clés d'un membre peut lire jusqu'à ce que ce membre soit retiré ou qu'un nouveau Commit renouvelle sa feuille ; ensuite la confidentialité est rétablie (sécurité après compromission de MLS).
 - Un Commit qui échoue chez une partie du groupe est inhérent à MLS : ce membre est en retard (`epoque_perdue`).
 - Les tampons temporaires d'OpenMLS ne sont **pas** effacés ; notre stockage efface ses valeurs (postcard, à l'écrasement, à la suppression et à la destruction). Le texte des messages (`String`) n'est pas effacé non plus : « secrets » vise les clés.
