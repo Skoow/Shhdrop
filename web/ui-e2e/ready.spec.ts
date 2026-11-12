@@ -74,7 +74,7 @@ test.describe("fr-FR", () => {
     await page.getByRole("button", { name: "Copier le lien et le mot de passe" }).first().click();
     expect(await clip(page)).toBe(`Lien\u202f: ${link}\nMot de passe\u202f: ${password}`);
     // Partager : feuille à trois choix ; « Envoyer vers une app » → { text } avec les deux lignes.
-    await page.getByRole("button", { name: "Partager", exact: true }).click();
+    await page.locator("main").getByRole("button", { name: "Partager", exact: true }).click(); // « Partager » de la barre du haut : un menu, hors de <main>
     const sheet = page.getByRole("dialog", { name: "Partager le lien et le mot de passe" });
     await sheet.getByRole("button", { name: "Envoyer vers une app" }).click();
     expect(await page.evaluate(() => (window as unknown as { __shared: unknown[] }).__shared)).toEqual([
@@ -250,7 +250,7 @@ test.describe("390 × 844", () => {
     const [d, b] = [await del.boundingBox(), await page.locator(".done").boundingBox()];
     expect(d!.y + d!.height).toBeLessThan(b!.y - 40);
     await capture(page, "ready-390-bottom");
-    await page.getByRole("button", { name: "Partager", exact: true }).click();
+    await page.locator("main").getByRole("button", { name: "Partager", exact: true }).click();
     const sheet = page.getByRole("dialog", { name: "Partager le lien et le mot de passe" });
     await sheet.getByRole("button", { name: "Afficher le QR code" }).click();
     await expect(sheet.getByRole("img", { name: "QR code du lien et du mot de passe" })).toBeVisible();

@@ -107,7 +107,7 @@ test("expéditeur : chaque fenêtre a « Fermer » en haut à droite", async ({ 
   await sendButton(page).click();
   await expect(readyHeading(page)).toBeVisible({ timeout: 60_000 });
   // Partager, puis le QR dans la même feuille.
-  await page.getByRole("button", { name: "Partager", exact: true }).click();
+  await page.locator("main").getByRole("button", { name: "Partager", exact: true }).click();
   const share = page.getByRole("dialog", { name: "Partager le lien et le mot de passe" });
   await closeTopRight(share);
   await share.getByRole("button", { name: "Afficher le QR code" }).click();
