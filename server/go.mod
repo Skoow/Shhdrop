@@ -6,6 +6,7 @@ toolchain go1.27.4
 
 require (
 	github.com/altcha-org/altcha-lib-go v1.0.0
+	github.com/coder/websocket v1.8.15
 	golang.org/x/sys v0.50.0
 	modernc.org/sqlite v1.62.0
 )

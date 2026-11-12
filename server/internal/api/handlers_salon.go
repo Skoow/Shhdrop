@@ -17,7 +17,8 @@ import (
 // salonAPI : gestionnaires HTTP du salon.
 type salonAPI struct {
 	*server
-	m *salon.Manager
+	m      *salon.Manager
+	origin string // SHH_ORIGIN : seule origine admise pour le WebSocket
 }
 
 func (a salonAPI) routes(mux *http.ServeMux) {
@@ -25,6 +26,7 @@ func (a salonAPI) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/salons/meta", a.meta)
 	mux.HandleFunc("POST /api/salons/rejoindre", a.rejoindre)
 	mux.HandleFunc("GET /api/salons/gestion", a.gestion)
+	mux.HandleFunc("GET /api/salons/ws", a.salonWS)
 }
 
 // failSalon traduit une erreur du gestionnaire en réponse fixe ; toute autre erreur (base,

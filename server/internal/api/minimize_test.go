@@ -95,6 +95,10 @@ func TestNoHeaderReadOutsideAllowList(t *testing.T) {
 					name, lit := strLit(x.Args[0])
 					switch {
 					case lit && slices.Contains(readHeaders, name):
+					case lit && name == "Origin" && enclosing(sf.f, x.Pos()) == "salonWS":
+						// Salon (spec §39.3.1, « Origine », plan C-2 Task 10) : comparé à SHH_ORIGIN
+						// avant la mise à niveau du WebSocket, jamais gardé ni journalisé. Caddy
+						// ne doit donc pas retirer Origin sur /api/salons/ws (§36 S2 à amender).
 					case !lit && enclosing(sf.f, x.Pos()) == "headerSecret":
 						// nom passé par l'appelant : vérifié sur les appels de headerSecret
 					default:

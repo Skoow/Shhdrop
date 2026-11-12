@@ -6,6 +6,7 @@ import (
 	"hash/fnv"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/blob"
@@ -70,6 +71,9 @@ type Manager struct {
 	// index : SHA-256 d'un jeton (valide ou révoqué) → salon ; la vérité est dans salon.jetons
 	// et salon.revoques (une entrée ici sans eux vaut « inconnu »).
 	index map[[32]byte]*salon
+
+	// arrete : FermerTout appelée (arrêt du serveur) ; plus aucune connexion inscrite.
+	arrete atomic.Bool
 }
 
 var errConfig = errors.New("salon: configuration incomplète")

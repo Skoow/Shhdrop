@@ -1506,3 +1506,31 @@ func TestAccueilAbsentLireSourd(t *testing.T) {
 		}
 	})
 }
+
+// FermerTout (arrêt du serveur) : toute connexion ouverte est fermée en 1001 ; une connexion
+// dont l'accueil arrive ensuite aussi, sans être inscrite.
+func TestFermerTout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 3)
+		e0, _ := b.entrerMembre(t, c, true)
+		e1, _ := b.entrerMembre(t, c, false)
+		l0, l1 := b.connecter(e0.Jeton, e0.Seq), b.connecter(e1.Jeton, e1.Seq)
+		synctest.Wait()
+		b.m.FermerTout()
+		for _, l := range []*fauxLien{l0, l1} {
+			attendreFin(t, l)
+			if code := l.codeFerme(); code != CodeArret {
+				t.Fatalf("code %d, attendu 1001", code)
+			}
+		}
+		l := b.connecter(e0.Jeton, e0.Seq)
+		attendreFin(t, l)
+		if code := l.codeFerme(); code != CodeArret {
+			t.Fatalf("après l'arrêt : code %d, attendu 1001", code)
+		}
+		if connDe(b.etat(t, c), 0) != nil {
+			t.Fatal("connexion inscrite après l'arrêt")
+		}
+	})
+}

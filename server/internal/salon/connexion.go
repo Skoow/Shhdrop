@@ -260,6 +260,11 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 	now := m.cfg.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Lu sous s.mu : FermerTout pose arrete avant de parcourir les connexions sous ce même
+	// verrou ; une connexion inscrite ici est donc vue par FermerTout, ou refusée.
+	if m.arrete.Load() {
+		return nil, CodeArret
+	}
 	if !s.membreLocked(mb, now) {
 		return nil, CodeInconnu
 	}
@@ -720,4 +725,27 @@ func (s *salon) estFini() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.fini
+}
+
+// FermerTout (arrêt du serveur, srv.RegisterOnShutdown, Task 15) ferme toutes les connexions
+// en 1001 sans attendre leur fin ; une connexion dont l'accueil arrive ensuite est fermée en
+// 1001 sans être inscrite (net/http ne suit plus une connexion mise à niveau : Shutdown ne
+// l'attend pas). Définitif pour ce Manager.
+func (m *Manager) FermerTout() {
+	m.arrete.Store(true)
+	m.mu.Lock()
+	salons := make([]*salon, 0, len(m.salons))
+	for _, s := range m.salons {
+		salons = append(salons, s)
+	}
+	m.mu.Unlock()
+	for _, s := range salons {
+		s.mu.Lock()
+		for _, c := range s.conns {
+			if c != nil {
+				c.arreter(CodeArret, nil)
+			}
+		}
+		s.mu.Unlock()
+	}
 }

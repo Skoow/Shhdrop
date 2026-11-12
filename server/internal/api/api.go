@@ -210,6 +210,7 @@ type server struct {
 	xfer        transfers
 	dlTTL       time.Duration // durée des jetons de téléchargement
 	watchSlots  *limits.Slots // surveillances tenues
+	wsSlots     *limits.Slots // WebSocket du salon ouverts
 	// wait : attente d'une surveillance (minuterie ; remplacée par les tests) ; stop la libère.
 	wait    func(time.Duration) (c <-chan time.Time, stop func() bool)
 	reports reportCounter
@@ -247,7 +248,8 @@ func newServer(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt 
 	behindProxy bool, proxies []netip.Prefix) *server {
 	return &server{svc: svc, sig: sig, lim: lim, cap: capt, behindProxy: behindProxy, proxies: proxies,
 		xfer: defaultTransfers(), dlTTL: downloadTTL, watchSlots: limits.NewSlots(watchTotal, watchPer64, watch48),
-		wait: timerWait}
+		wsSlots: limits.NewSlots(wsTotal, wsPer64, wsPer48),
+		wait:    timerWait}
 }
 
 type ctxIP struct{}
@@ -292,7 +294,7 @@ func newHandler(s *server, static http.Handler, sal Salons) http.Handler {
 	api.HandleFunc("POST /api/manage/destroy", s.manageDestroy)
 	// Salon (SHH_SALONS=1) : sans gestionnaire, aucune route /api/salons/* (404 uniforme).
 	if sal.M != nil {
-		salonAPI{s, sal.M}.routes(api)
+		salonAPI{server: s, m: sal.M, origin: sal.Origin}.routes(api)
 	}
 	api.HandleFunc("/api/", notFoundAPI)
 
