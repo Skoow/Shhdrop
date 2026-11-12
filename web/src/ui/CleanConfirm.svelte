@@ -3,7 +3,7 @@
   // balai d'une ligne ou par « Tout nettoyer », posée près du bouton (couche supérieure, rien ne
   // la rogne). Elle dit ce que le nettoyage retire ; rien n'est nettoyé avant « Nettoyer ».
   // Non modale : Échap, « Annuler » ou un appui ailleurs la ferment, le focus revient au bouton.
-  // Le focus qui la quitte au clavier (Tab au-delà de « Nettoyer », Maj+Tab) la ferme aussi :
+  // Le focus qui la quitte par Tab (au-delà de « Nettoyer ») ou Maj+Tab la ferme aussi :
   // jamais de dialogue affiché loin du focus (audit D4) ; le focus reste où il est allé.
   import { tick } from "svelte";
   import { t } from "../i18n/i18n.svelte";
@@ -61,15 +61,20 @@
     const n = e.target as Node;
     if (!box.contains(n) && !anchor.contains(n)) close(false);
   }
+  // Seul Tab (ou Maj+Tab) qui sort de la bulle la ferme : un focus déplacé par programme (la
+  // feuille « … » qui se referme et rend le focus à son bouton, téléphone) ne la ferme pas.
+  let tabbing = false;
   function left(e: FocusEvent) {
-    if (!anchor || !box) return;
+    if (!anchor || !box || !tabbing) return;
     const n = e.relatedTarget as Node | null;
-    // Fenêtre quittée (autre onglet, autre app) : relatedTarget nul, la bulle reste.
-    if (n === null && !document.hasFocus()) return;
     if (n && (box.contains(n) || anchor.contains(n))) return;
     close(false);
   }
   function key(e: KeyboardEvent) {
+    if (e.key === "Tab") {
+      tabbing = true;
+      setTimeout(() => (tabbing = false));
+    }
     if (anchor && e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
