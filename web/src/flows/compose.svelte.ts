@@ -152,10 +152,11 @@ function cleared<T extends { data: Blob | Uint8Array<ArrayBuffer> } & CleanField
  * « Nettoyer » (élément laissé « Original » par le réglage) ou « Réessayer » (échec) : seulement
  * un fichier qui pourrait être nettoyé. Archive : jamais ouverte (D41-27), donc jamais proposée.
  */
-export function canClean(i: Pick<ComposeItem, "kind" | "clean" | "category" | "cleanable">): "nettoyer" | "reessayer" | null {
+export function canClean(i: Pick<ComposeItem, "kind" | "clean" | "category" | "cleanable"> & { cleanFormat?: ComposeItem["cleanFormat"] }): "nettoyer" | "reessayer" | null {
   if (i.kind !== "file" || i.category === "archives") return null;
   if (i.clean === "original") return i.cleanable ? "nettoyer" : null;
-  if (i.clean === "echec") return "reessayer";
+  // Échec de lecture d'un format que le nettoyage ne traite pas : réessayer n'y changerait rien.
+  if (i.clean === "echec") return i.cleanFormat === undefined ? "reessayer" : null;
   return null;
 }
 
@@ -280,12 +281,18 @@ export function createComposer(deps: ComposeDeps = {}) {
         const exec = isExecutableSniff(sniffed) || sniffed === "iso";
         const risky = exec || isRiskyName(base + ext);
         const mismatch = exec && !isRiskyName(base + ext);
-        const { data, c } = cleanOf(f, source, category, captureStripped);
         const fmt = formats.get(f) ?? "inconnu";
+        const added = cleanOf(f, source, category, captureStripped);
+        const data = added.data;
         const recorded = source === "video-ici";
         // Images, documents, vidéos et sons que le nettoyage lit (§35.2). Sans réglage automatique
         // (12 novembre), le balai est le seul moyen de nettoyer une vidéo ou un son importés.
         const cleanable = ([...IMAGE_FORMATS, ...DOC_FORMATS, ...AV_FORMATS] as readonly string[]).includes(fmt);
+        // Photo, vidéo ou son d'un format que le nettoyage ne lit pas (TIFF, SVG, AVI…) : dit dès
+        // l'ajout (« format non pris en charge », marque ambre, décompte), rien n'est modifié ni
+        // analysé (retours du 12 novembre ; même état qu'un nettoyage qui n'a pas abouti, 10 novembre).
+        const av = category === "photos" || category === "videos" || category === "audio";
+        const c = added.c.clean === "original" && av && !cleanable ? unsupported(category, fmt) : added.c;
         ready.push(cleared({ id: nextId(), kind: "file", category, base, ext, mime, size: data.size, data, ...c, duplicate: false, sniffed, risky, mismatch, cleanable, ...(recorded ? { recorded } : {}) }));
       }
       if (ready.length > 0) {

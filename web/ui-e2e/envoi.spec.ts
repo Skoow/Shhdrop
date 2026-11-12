@@ -166,3 +166,15 @@ test.describe("langue du navigateur", () => {
     await expect(page.getByRole("list", { name: "In short" }).getByRole("listitem")).toHaveText(["Encrypted in your browser", "No account", "The link self-destructs"]);
   });
 });
+
+test("photo, vidéo ou son d'un format que le nettoyage ne lit pas : « format non pris en charge » dès l'ajout, sans balai, fichier tel quel", async ({ page, shh }) => {
+  await openSend(page, shh.origin);
+  const bytes = Buffer.from("II*\0 contenu tiff factice avec repère");
+  await (await openFilePicker(page)).setFiles([{ name: "scan.tiff", mimeType: "image/tiff", buffer: bytes }]);
+  const row = rows(page).filter({ hasText: "scan" });
+  await expect(row).toHaveCount(1);
+  await expect(row.locator('[data-clean="echec"] button')).toHaveAccessibleName(/^Nettoyage impossible\s: format non pris en charge$/);
+  await expect(row.getByRole("button", { name: /^Nettoyer ce fichier/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Tout nettoyer" })).toHaveCount(0);
+  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("1 fichier n'a pas pu être nettoyé");
+});

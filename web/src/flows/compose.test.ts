@@ -83,25 +83,33 @@ describe("createComposer : ajout", () => {
     expect(c.uncleanedCount).toBe(1);
   });
 
-  it("format que le nettoyage ne lit pas : rien à proposer, part tel quel sans marque ; archive jamais ouverte (D41-27) ; photo dont le nettoyage dit « non pris en charge » : marque ambre et décompte (décision du 10 novembre)", async () => {
+  it("format que le nettoyage ne lit pas : photo, vidéo ou son → « format non pris en charge » dès l'ajout (marque ambre, décompte, rien de modifié ni proposé) ; document et autre : tel quel sans marque ; archive jamais ouverte (D41-27)", async () => {
     const seen: string[] = [];
     const c = make({ probe: head, strip: async (f) => (seen.push((f as File).name), { state: "non_pris_en_charge", format: "inconnu" }) });
-    const files = [file("b.zip", 3, "application/zip"), file("c.tiff", 3, "image/tiff"), file("d.avi", 3, "video/x-msvideo"), file("f.bin", 3, "application/x-thing")];
+    const files = [file("b.zip", 3, "application/zip"), file("c.tiff", 3, "image/tiff"), file("d.avi", 3, "video/x-msvideo"), file("g.aac", 3, "audio/aac"), file("h.svg", 3, "image/svg+xml"), file("f.bin", 3, "application/x-thing")];
     await c.add([...files, realJpeg("e.jpg")], "fichiers");
     const by = (b: string) => c.items.find((i) => i.base === b)!;
-    for (const b of ["b", "c", "d", "f"]) {
+    for (const b of ["c", "d", "g", "h"]) {
+      expect(by(b).clean, b).toBe("echec");
+      expect(cleanLineKey(by(b)), b).toBe("clean.fail.format");
+      expect(cleanMark(by(b)), b).toBe("fail");
+      expect(canClean(by(b)), b).toBeNull(); // ni balai ni « Réessayer » : le nettoyage ne le lit pas
+      expect(by(b).data, b).toBe(files.find((f) => f.name.startsWith(b))); // rien de modifié
+    }
+    for (const b of ["b", "f"]) {
       expect(by(b).clean, b).toBe("original");
       expect(canClean(by(b)), b).toBeNull();
       expect(cleanLineKey(by(b)), b).toBe("clean.asis");
       expect(cleanMark(by(b)), b).toBeNull();
     }
+    expect(seen).toEqual([]); // rien n'est analysé à l'ajout
+    expect(c.uncleanedCount).toBe(4);
+    // Format lu par le nettoyage, mais qui dit « non pris en charge » au balai : même marque.
     await c.clean(by("e").id);
     expect(seen).toEqual(["e.jpg"]);
-    expect(by("e").clean).toBe("echec");
     expect(cleanLineKey(by("e"))).toBe("clean.fail.format");
-    expect(cleanMark(by("e"))).toBe("fail");
     expect(c.blockReason()).toBeNull();
-    expect(c.uncleanedCount).toBe(1);
+    expect(c.uncleanedCount).toBe(5);
     for (const i of c.items) await expect(gate(i.data as Blob)).resolves.toBe(i.data);
   });
 
@@ -111,9 +119,9 @@ describe("createComposer : ajout", () => {
 
   it("ajout : rien n'est nettoyé ni analysé sans le balai (décision du propriétaire du 12 novembre, plus de réglage), marque « Original », envoi libre", async () => {
     const strip = vi.fn(async () => nettoye(new Blob(["x"])));
-    const c = make({ strip });
-    const f = jpeg();
-    await c.add([f, jpeg("b.jpg")], "fichiers");
+    const c = make({ strip, probe: head });
+    const f = realJpeg();
+    await c.add([f, realJpeg("b.jpg")], "fichiers");
     expect(strip).not.toHaveBeenCalled();
     expect(c.items.map((i) => i.clean)).toEqual(["original", "original"]);
     expect(cleanLineKey(c.items[0]!)).toBe("clean.asis");

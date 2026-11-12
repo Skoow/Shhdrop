@@ -102,9 +102,13 @@ test("états à l'écran (D41-34) après « Tout nettoyer » : nettoyé (photo, 
   await expect(lock(page, "devis")).toHaveAccessibleName(detail("Nettoyé : propriétés du document retirées (auteur, logiciel, dates)"));
   await expect(fail("signe")).toBeVisible();
   await expect(lock(page, "signe")).toHaveAccessibleName(detail("Nettoyage impossible : fichier signé ou protégé"));
-  // Archive (jamais ouverte, D41-27) et image d'un format que le nettoyage ne lit pas : jamais
-  // proposées au balai (12 novembre : plus de nettoyage tenté à l'ajout), « Fichier tel quel ».
-  for (const n of ["archive", "dessin"]) {
+  // Image d'un format que le nettoyage ne lit pas (décision du 10 novembre ; dit dès l'ajout
+  // depuis le 12 novembre) : pastille ambre, sans balai.
+  await expect(fail("dessin")).toBeVisible();
+  await expect(lock(page, "dessin")).toHaveAccessibleName(detail("Nettoyage impossible : format non pris en charge"));
+  await expect(row(page, "dessin").getByRole("button", { name: /^Nettoyer ce fichier/ })).toHaveCount(0);
+  // Archive (jamais ouverte, D41-27) : « Fichier tel quel », rien sur la ligne.
+  for (const n of ["archive"]) {
     await expect(lock(page, n)).toHaveAccessibleName(detail("Fichier tel quel (non modifié)"));
     await expect(row(page, n).locator("[data-clean]")).toHaveCount(0);
   }
@@ -113,7 +117,7 @@ test("états à l'écran (D41-34) après « Tout nettoyer » : nettoyé (photo, 
   // Aucun choix à faire : plus de bouton, envoi permis, résumé discret près d'Envoyer.
   await expect(page.getByRole("button", { name: /^Envoyer tel quel/ })).toHaveCount(0);
   await expect(page.locator("#send-reason").filter({ visible: true })).toHaveCount(0);
-  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("2\u202ffichiers n'ont pas pu être nettoyés");
+  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("3\u202ffichiers n'ont pas pu être nettoyés");
   await expect(sendButton(page).filter({ visible: true })).toBeEnabled();
   // Chacun part dès l'ajout (une requête d'envoi par petit élément), puis la version nettoyée
   // remplace l'original (au moins une requête de plus par fichier nettoyé).
