@@ -455,6 +455,8 @@ export const fr = {
   "content.opensLeft.one": "Ce lien peut encore être ouvert {n}\u202ffois. En général, vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.",
   "content.opensLeft.other": "Ce lien peut encore être ouvert {n}\u202ffois. En général, vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.",
   "content.allTaken": "Toutes les ouvertures sont prises. En général, vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.",
+  "content.forget": "Oublier ce partage sur cet appareil",
+  "content.forgotten": "Oublié sur cet appareil. Ce qui est affiché disparaît quand vous quittez la page.",
   "content.return.limits": "Le retour n'est plus possible après la fermeture d'une navigation privée, si ce navigateur refuse le stockage, après un redémarrage de notre serveur ou après 20\u202fretours. Un gros fichier ne se retélécharge que quelques fois.",
   "content.destroy.confirm": "Détruire ce partage pour tout le monde\u202f? C'est immédiat et définitif.",
   "content.destroy.yes": "Détruire",

@@ -137,6 +137,13 @@ export type Receiver = {
    */
   forget(): void;
   /**
+   * « Oublier ce partage sur cet appareil » (audit R2), contenu affiché : retour gardé
+   * (IndexedDB, base supprimée si vide) et entrée de l'onglet effacés, plus de réponse aux
+   * autres onglets. Le contenu reste affiché jusqu'à la sortie de la page ; y revenir comptera
+   * une ouverture (ou sera impossible si toutes sont prises). Rien n'est demandé au serveur.
+   */
+  forgetHere(): Promise<void>;
+  /**
    * Écran démonté (autre route, nouveau lien) : un calcul ou une lecture en cours n'aboutit plus
    * à rien ; minuteries arrêtées. L'entrée de l'onglet n'est gardée que si le contenu était
    * affiché (spec §41.4) ; sinon, comme forget.
@@ -230,13 +237,13 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
   let opened = $state.raw<Opened | undefined>(undefined);
 
   /** L'ouverture gardée s'arrête ici : plus d'entrée d'onglet, de retour gardé ni de réponse. */
-  const drop = () => {
+  const drop = (): Promise<void> => {
     grant = null;
     held = null;
     stopAnswer();
     stopAnswer = () => undefined;
     d.grants.clear();
-    void tagP.then((t) => (t === null ? undefined : d.returns.forget(t))).catch(() => undefined);
+    return tagP.then((t) => (t === null ? undefined : d.returns.forget(t))).catch(() => undefined);
   };
 
   const end = (state: "invalid" | "destroyed_by_password" | "incomplete" | "return_lost") => {
@@ -423,6 +430,10 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
       opened = undefined;
       drop();
       guard.stop();
+    },
+    async forgetHere() {
+      if (s.state !== "open") return;
+      await drop();
     },
     dispose() {
       // Contenu déjà affiché : son entrée d'onglet et son retour gardé restent (spec §41.4,

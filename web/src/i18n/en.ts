@@ -451,6 +451,8 @@ export const en = {
   "content.opensLeft.one": "This link can be opened {n}\u00a0more time. Usually, you can come back to this share from this browser until it expires without using an open.",
   "content.opensLeft.other": "This link can be opened {n}\u00a0more times. Usually, you can come back to this share from this browser until it expires without using an open.",
   "content.allTaken": "All opens are used. Usually, you can come back to this share from this browser until it expires without using an open.",
+  "content.forget": "Forget this share on this device",
+  "content.forgotten": "Forgotten on this device. What's shown disappears when you leave the page.",
   "content.return.limits": "Coming back is no longer possible once a private window is closed, if this browser refuses storage, after our server restarts or after 20\u00a0returns. A large file can only be downloaded again a few times.",
   "content.destroy.confirm": "Destroy this share for everyone? It is immediate and final.",
   "content.destroy.yes": "Destroy",

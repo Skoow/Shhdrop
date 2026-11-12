@@ -330,6 +330,7 @@
         opened={r.opened}
         {expired}
         {gone}
+        onforget={() => r.forgetHere()}
         onend={(k) => {
           end = k;
           r.forget(); // clés déjà effacées ; le contenu déchiffré n'est plus référencé

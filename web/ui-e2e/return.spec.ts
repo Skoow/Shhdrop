@@ -126,6 +126,9 @@ test("retour impossible : octroi gardé, partage supprimé entre-temps → écra
   await settle(other);
   expect(await axe(other)).toEqual([]);
   await shot(other, "retour-impossible", isMobile);
+  // Déjà oublié sur cet appareil, base comprise (audit R2) : aucun lien « Oublier » n'y servirait.
+  await expect.poll(() => storedReturns(other).then((x) => x.dbs), { timeout: 10_000 }).not.toContain("shhdrop-returns");
+  await expect(other.getByRole("button", { name: "Oublier ce partage sur cet appareil" })).toHaveCount(0);
   // Le retour gardé est oublié : la fois suivante, l'écran ordinaire du lien invalide.
   await other.goto(sent.link);
   await expect(other.getByRole("heading", { name: "Ce lien n'existe pas ou n'est plus disponible." })).toBeVisible({ timeout: 30_000 });
@@ -213,4 +216,30 @@ test("relecture (A) : deux onglets ; B tient la base des retours, A efface l'his
   await page.goto(shh.origin + "/envois");
   await expect(page.getByRole("heading", { level: 1, name: "Mes partages" })).toBeVisible({ timeout: 10_000 });
   await b.close();
+});
+
+test("audit R2 : « Oublier ce partage sur cet appareil » efface le retour gardé (base supprimée) et l'entrée de l'onglet ; le contenu reste affiché ; rouvrir le lien demande une nouvelle ouverture", async ({ page, shh, browser }) => {
+  test.setTimeout(180_000);
+  const s = await freshPage(browser);
+  const sent = await sendShare(s.page, shh.origin + "/", { text: TEXT, opens: 3 });
+  await s.ctx.close();
+  await page.goto(sent.link);
+  await unlock(page, sent.password);
+  await expect.poll(() => storedReturns(page).then((x) => x.n), { timeout: 10_000 }).toBe(1);
+  expect(await page.evaluate(() => sessionStorage.getItem("shh.og"))).not.toBeNull();
+  const forget = page.getByRole("button", { name: "Oublier ce partage sur cet appareil" });
+  await forget.scrollIntoViewIfNeeded();
+  await forget.click();
+  await expect(page.locator("[data-forgotten]")).toHaveText("Oublié sur cet appareil. Ce qui est affiché disparaît quand vous quittez la page.");
+  await expect(forget).toHaveCount(0);
+  await expect(noteRow(page)).toBeVisible();
+  await expect.poll(() => storedReturns(page).then((x) => x.dbs), { timeout: 10_000 }).not.toContain("shhdrop-returns");
+  expect(await page.evaluate(() => sessionStorage.getItem("shh.og"))).toBeNull();
+  await settle(page);
+  expect(await axe(page)).toEqual([]);
+  // Rouvert depuis le message : plus « Rouvrir », une ouverture sera comptée.
+  await page.goto(sent.link);
+  await expect(page.getByRole("button", { name: /^Déverrouiller/ })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Rouvrir ce partage" })).toHaveCount(0);
+  expect(await shareStatus(sent.manage, shh.origin)).toMatchObject({ opensUsed: 1 });
 });

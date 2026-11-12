@@ -462,6 +462,40 @@ describe("rechargement et autres onglets (spec §41.4, UI §9.7.1)", () => {
     expect(returns.m.size).toBe(0);
   });
 
+  it("audit R2 : « Oublier ce partage sur cet appareil » sur le contenu ouvert : retour gardé et entrée de l'onglet effacés, plus de réponse aux autres onglets ; le contenu reste affiché", async () => {
+    const store = memStore();
+    const stop = vi.fn();
+    const { r, returns } = setup({ grants: store, answerTabs: () => stop });
+    await flush();
+    await r.unlock(PW);
+    expect(r.state).toBe("open");
+    expect(returns.m.get(TAG)?.grant).toBe(GRANT);
+    expect(store.value).not.toBeNull();
+    await r.forgetHere();
+    expect(returns.forget).toHaveBeenCalledWith(TAG);
+    expect(returns.m.size).toBe(0);
+    expect(store.value).toBeNull();
+    expect(stop).toHaveBeenCalled();
+    expect(r.state).toBe("open");
+    expect(r.opened).toBeDefined();
+    // Sortie de page ensuite : rien n'est réécrit.
+    r.dispose();
+    expect(store.value).toBeNull();
+    expect(returns.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("audit R2 : « Impossible de revenir » (return_lost) a déjà tout oublié : aucun lien d'oubli n'y servirait", async () => {
+    const store = memStore();
+    const returns = memReturns({ [TAG]: GRANT });
+    const { r } = setup({ grants: store, returns, fetchMeta: vi.fn(async () => Promise.reject(new NotFoundError())) });
+    await flush();
+    await flush();
+    expect(r.state).toBe("return_lost");
+    expect(returns.forget).toHaveBeenCalledWith(TAG);
+    expect(returns.m.size).toBe(0);
+    expect(store.value).toBeNull();
+  });
+
   it("sans retour gardé (autre appareil, navigation privée) et introuvable : lien invalide", async () => {
     const { r } = setup({ fetchMeta: vi.fn(async () => Promise.reject(new NotFoundError())) });
     await flush();

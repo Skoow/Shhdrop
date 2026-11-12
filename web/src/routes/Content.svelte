@@ -47,8 +47,10 @@
     onend: (kind: "destroyed" | "gone") => void;
     /** Fermeture « partage disparu » (spec §41.8) : suit les enregistrements en cours. */
     gone: Gone;
+    /** « Oublier ce partage sur cet appareil » (audit R2) : retour gardé et entrée de l'onglet effacés. */
+    onforget?: () => Promise<void>;
   };
-  let { opened, expired, onend, gone: closer }: Props = $props();
+  let { opened, expired, onend, gone: closer, onforget }: Props = $props();
   const lang = $derived(getLang());
 
   // Le manifeste ne change pas pendant la vie de l'écran : lu une fois.
@@ -348,6 +350,19 @@
     return null;
   }
   let reportOpen = $state(false);
+  // Audit R2 : le destinataire efface la trace du partage dans ce navigateur, sans attendre l'échéance.
+  let forgotten = $state(false);
+  let forgetting = false;
+  async function forgetHere() {
+    if (!onforget || forgetting || forgotten) return;
+    forgetting = true;
+    try {
+      await onforget();
+      forgotten = true;
+    } finally {
+      forgetting = false;
+    }
+  }
   // Signaler (retours UI7) : plus de bouton en haut ; le lien « Signaler » du pied de page ouvre
   // la confirmation de CE partage tant qu'il est ouvert (AppShell lit chrome.report).
   $effect(() => {
@@ -493,6 +508,11 @@
         <p class="hint num">{o.opensLeft > 0 ? t("content.opensLeft", { n: o.opensLeft }) : t("content.allTaken")}</p>
       {/if}
       <p class="hint" data-return-limits>{t("content.return.limits")}</p>
+      {#if onforget}
+        <!-- role=status toujours présent : l'annonce est lue quand son texte apparaît. -->
+        <p class="hint" role="status" data-forgotten>{forgotten ? t("content.forgotten") : ""}</p>
+        {#if !forgotten}<button type="button" class="forget" onclick={() => void forgetHere()} data-forget>{t("content.forget")}</button>{/if}
+      {/if}
     </footer>
   {/if}
 </div>
@@ -611,6 +631,32 @@
     max-width: 60ch;
     color: var(--text-2);
     font-size: var(--fs-small);
+  }
+  .hint:empty {
+    display: none;
+  }
+  /* Lien discret (audit R2) : texte souligné, cible d'appui de 44 px. */
+  .forget {
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-2);
+    font: inherit;
+    font-size: var(--fs-small);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+  .forget:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  @media (hover: hover) {
+    .forget:hover {
+      color: var(--text);
+    }
   }
   /* Téléphone : tout ce qui suit le contenu est centré (retours UI4). */
   @media (max-width: 559px) {
