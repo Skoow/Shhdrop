@@ -1,10 +1,12 @@
 // Lance le vrai binaire `server/shhdrop serve` pour les tests d'intégration :
-// dossier de données temporaire, port libre (SHH_LISTEN=127.0.0.1:0, lu sur stdout),
+// dossier de données temporaire, port libre (SHH_LISTEN=127.0.0.1:0, lu sur stdout ; salon
+// activé : port choisi avant, voir StartOpts.salons),
 // stdout et stderr capturés en octets bruts (fouillés par le test « le serveur ne voit rien »).
 // SHH_STORAGE_MAX = 4 Gio : le serveur refuse de démarrer si le plafond dépasse l'espace
 // disque libre moins 1 Gio (audit F6), et le défaut de 200 Gio dépasse souvent un poste de test.
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,14 +43,34 @@ export type StartOpts = {
   timeoutMs?: number;
   /** Binaire à lancer (BINARY par défaut). */
   binary?: string;
+  /**
+   * Salon activé (SHH_SALONS=1) : SHH_ORIGIN est obligatoire et doit être l'origine exacte
+   * que les clients envoient (en-tête Origin du WebSocket) ; le port est donc choisi avant le
+   * lancement (port libre, puis SHH_LISTEN=127.0.0.1:<port>, SHH_ORIGIN=http://127.0.0.1:<port>).
+   */
+  salons?: boolean;
 };
+
+/** Port TCP libre sur 127.0.0.1 (ouvert puis refermé : une course est possible, sans conséquence en test). */
+async function portLibre(): Promise<number> {
+  const s = createServer();
+  await new Promise<void>((ok, ko) => s.listen(0, "127.0.0.1", ok).once("error", ko));
+  const { port } = s.address() as { port: number };
+  await new Promise<void>((ok) => s.close(() => ok()));
+  return port;
+}
 
 export async function startServer(opts: StartOpts = {}): Promise<TestServer> {
   const bin = opts.binary ?? BINARY;
   if (!existsSync(bin)) throw new Error(`binaire absent : ${bin} (lancer make test-e2e)`);
+  let salons: Record<string, string> = {};
+  if (opts.salons) {
+    const port = await portLibre();
+    salons = { SHH_LISTEN: `127.0.0.1:${port}`, SHH_ORIGIN: `http://127.0.0.1:${port}`, SHH_SALONS: "1" };
+  }
   const dataDir = mkdtempSync(join(tmpdir(), "shh-e2e-"));
   const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries({ PATH: process.env.PATH ?? "", SHH_DATA_DIR: dataDir, SHH_LISTEN: "127.0.0.1:0", SHH_STORAGE_MAX: "4294967296", ...opts.env })) {
+  for (const [k, v] of Object.entries({ PATH: process.env.PATH ?? "", SHH_DATA_DIR: dataDir, SHH_LISTEN: "127.0.0.1:0", SHH_STORAGE_MAX: "4294967296", ...salons, ...opts.env })) {
     if (v !== undefined) env[k] = v;
   }
   const proc = spawn(bin, ["serve"], { env, stdio: ["ignore", "pipe", "pipe"] });
