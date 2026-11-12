@@ -338,6 +338,9 @@ func match(x, stored []byte) bool {
 	return subtle.ConstantTimeCompare(h[:], stored) == 1
 }
 
+// Match : match pour les autres paquets (vérification de K_preuve_s et S_gestion du salon).
+func Match(x, stored []byte) bool { return match(x, stored) }
+
 // emptyHash : SHA-256 de la chaîne vide, refusé comme vérificateur (audit F4).
 var emptyHash = sha256.Sum256(nil)
 
@@ -391,6 +394,9 @@ func validID(id string) bool {
 // pour ne pas révéler la minute de création ou d'ouverture (spec §9.2).
 func ceil15(t int64) int64 { return (t + 899) / 900 * 900 }
 
+// Ceil15 : ceil15 pour les autres paquets (échéance des salons, plan C-2 Task 6).
+func Ceil15(t int64) int64 { return ceil15(t) }
+
 // minute : précision de progress_at, qui n'existe que pendant l'envoi (spec §9.1).
 func minute(t int64) int64 { return t - t%60 }
 
@@ -407,6 +413,9 @@ func (s *Service) Frozen() bool {
 	_, err := os.Stat(s.FrozenFile)
 	return !errors.Is(err, fs.ErrNotExist)
 }
+
+// NotEmptyHash : notEmptyHash pour les autres paquets (création d'un salon).
+func NotEmptyHash(vs ...[]byte) bool { return notEmptyHash(vs...) }
 
 // notEmptyHash : un vérificateur égal à SHA-256("") serait satisfait par un secret vide (audit F4).
 func notEmptyHash(vs ...[]byte) bool {

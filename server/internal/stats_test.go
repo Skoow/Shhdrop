@@ -50,6 +50,10 @@ var allowedMaps = map[string]string{
 	"share/detached.go:grants":          "§9.5 octrois d'ouverture (§41.4)",
 	"share/streams.go:live":             "§9.5 flux de segments annulables (§41.8)",
 	"api/static_paths.go:pdfFrameFiles": "constante (liste de fichiers), aucun compteur",
+	"salon/manager.go:salons":           "§39.3.6 état d'un salon vivant (pas une statistique au sens de §9.5), effacé avec le salon",
+	"salon/manager.go:index":            "§39.3.6 empreintes des jetons de membre → salon vivant, effacées avec le salon",
+	"salon/salon.go:jetons":             "§39.3.6 empreintes des jetons de membre → siège, effacées avec le salon",
+	"salon/salon.go:revoques":           "§39.3.6 empreintes des jetons révoqués (exclusion, §39.13), effacées avec le salon",
 }
 
 type goFile struct {

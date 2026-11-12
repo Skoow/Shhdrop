@@ -1,0 +1,736 @@
+package salon
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"database/sql"
+	"errors"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/skoow/shhdrop/server/internal/blob"
+	"github.com/skoow/shhdrop/server/internal/limits"
+	"github.com/skoow/shhdrop/server/internal/share"
+	"github.com/skoow/shhdrop/server/internal/store"
+)
+
+// horloge : horloge figée, avancée à la main.
+type horloge struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (h *horloge) Now() time.Time {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.t
+}
+
+func (h *horloge) avancer(d time.Duration) {
+	h.mu.Lock()
+	h.t = h.t.Add(d)
+	h.mu.Unlock()
+}
+
+type banc struct {
+	m   *Manager
+	db  *sql.DB
+	h   *horloge
+	dir string
+	cfg Config
+}
+
+// nouveauBanc : base temporaire (shares.db), horloge figée au 12 novembre 2026, 10:07:30.
+func nouveauBanc(t *testing.T, max int) *banc {
+	t.Helper()
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "shares.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := os.MkdirAll(filepath.Join(dir, "pieces"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	h := &horloge{t: time.Date(2026, 11, 12, 10, 7, 30, 0, time.UTC)}
+	cfg := Config{
+		DB: db, Pieces: &blob.Store{Dir: filepath.Join(dir, "pieces")},
+		DossierConversations: filepath.Join(dir, "salons"), Now: h.Now, Max: max,
+		StorageMax: 200 << 30, UsedPartages: func() (int64, error) { return 0, nil },
+		Limites: limits.New(h.Now),
+	}
+	m, err := NewManager(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &banc{m: m, db: db, h: h, dir: dir, cfg: cfg}
+}
+
+// secret : 32 octets reconnaissables.
+func secret(graine byte) []byte { return bytes.Repeat([]byte{graine}, 32) }
+
+type cles struct{ acces, preuve, gestion []byte }
+
+var compteurCles byte
+
+func nouvellesCles() cles {
+	compteurCles += 3
+	return cles{secret(compteurCles), secret(compteurCles + 1), secret(compteurCles + 2)}
+}
+
+func reqValide(c cles) CreerReq {
+	return CreerReq{
+		AccessV: share.Verifier(c.acces), ManageV: share.Verifier(c.gestion), ProofV: share.Verifier(c.preuve),
+		Salt: bytes.Repeat([]byte{7}, 16), TTLHours: 24, MaxMembers: 10, KdfOps: 3, KdfMem: 67108864,
+	}
+}
+
+// creer : salon valide de max membres.
+func (b *banc) creer(t *testing.T, max int) cles {
+	t.Helper()
+	c := nouvellesCles()
+	r := reqValide(c)
+	r.MaxMembers = max
+	if _, err := b.m.Creer(r); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// etat : état mémoire du salon (nil s'il n'existe pas).
+func (b *banc) etat(t *testing.T, c cles) *salon {
+	t.Helper()
+	var id string
+	if err := b.db.QueryRow(`SELECT id FROM salons WHERE access_v=?`, share.Verifier(c.acces)).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	b.m.mu.Lock()
+	defer b.m.mu.Unlock()
+	return b.m.salons[id]
+}
+
+func (b *banc) entrer(t *testing.T, c cles, createur bool) Entree {
+	t.Helper()
+	var g []byte
+	if createur {
+		g = c.gestion
+	}
+	e, err := b.m.Rejoindre(c.acces, c.preuve, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+// depart : libère le siège (comme 0x03 ou la libération après 10 min hors ligne).
+func (b *banc) depart(s *salon, siege uint8) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := b.m.departLocked(s, siege); err != nil {
+		panic(err)
+	}
+}
+
+func occupes(s *salon) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.occupesLocked()
+}
+
+func TestNewManagerChampManquant(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	casses := map[string]func(*Config){
+		"DB":                   func(c *Config) { c.DB = nil },
+		"Pieces":               func(c *Config) { c.Pieces = nil },
+		"DossierConversations": func(c *Config) { c.DossierConversations = "" },
+		"Now":                  func(c *Config) { c.Now = nil },
+		"Max":                  func(c *Config) { c.Max = 0 },
+		"StorageMax":           func(c *Config) { c.StorageMax = 0 },
+		"UsedPartages":         func(c *Config) { c.UsedPartages = nil },
+		"Limites":              func(c *Config) { c.Limites = nil },
+	}
+	for nom, casser := range casses {
+		c := b.cfg
+		casser(&c)
+		if _, err := NewManager(c); err == nil {
+			t.Errorf("%s manquant accepté", nom)
+		}
+	}
+}
+
+func TestCreerValide(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := nouvellesCles()
+	r := reqValide(c)
+	r.TTLHours, r.MaxMembers, r.MembersCanDestroy = 6, 4, true
+	d, err := b.m.Creer(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10:07:30 + 6 h → 16:15:00.
+	if d != 6*time.Hour+7*time.Minute+30*time.Second {
+		t.Fatal("expires_in", d)
+	}
+	var (
+		id                     string
+		av, mv, pv, salt       []byte
+		ops, mem, max, mcd, fa int
+		exp, pb                int64
+	)
+	if err := b.db.QueryRow(`SELECT id,access_v,manage_v,proof_v,salt,kdf_ops,kdf_mem,expires_at,max_members,
+		members_can_destroy,failed_attempts,pieces_bytes FROM salons`).Scan(&id, &av, &mv, &pv, &salt, &ops, &mem, &exp,
+		&max, &mcd, &fa, &pb); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := share.DecodeB64(id, 16); err != nil {
+		t.Fatal("id", id)
+	}
+	if !bytes.Equal(av, r.AccessV) || !bytes.Equal(mv, r.ManageV) || !bytes.Equal(pv, r.ProofV) || !bytes.Equal(salt, r.Salt) ||
+		ops != 3 || mem != 67108864 || max != 4 || mcd != 1 || fa != 0 || pb != 0 ||
+		exp != time.Date(2026, 11, 12, 16, 15, 0, 0, time.UTC).Unix() {
+		t.Fatal("ligne", ops, mem, max, mcd, fa, pb, exp)
+	}
+	m, err := b.m.Meta(c.acces)
+	if err != nil || m.ExpiresIn != d || !bytes.Equal(m.Salt, r.Salt) || m.KdfOps != 3 || m.KdfMem != 67108864 {
+		t.Fatal("meta", m, err)
+	}
+}
+
+func TestCreerRefuse(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	vide := sha256.Sum256(nil)
+	cas := map[string]func(*CreerReq){
+		"ttl 2":           func(r *CreerReq) { r.TTLHours = 2 },
+		"ttl 0":           func(r *CreerReq) { r.TTLHours = 0 },
+		"ttl énorme":      func(r *CreerReq) { r.TTLHours = 1 << 62 },
+		"max_members 1":   func(r *CreerReq) { r.MaxMembers = 1 },
+		"max_members 11":  func(r *CreerReq) { r.MaxMembers = 11 },
+		"kdf_ops 2":       func(r *CreerReq) { r.KdfOps = 2 },
+		"kdf_mem 32 Mio":  func(r *CreerReq) { r.KdfMem = 32 << 20 },
+		"sel de 15":       func(r *CreerReq) { r.Salt = r.Salt[:15] },
+		"sel absent":      func(r *CreerReq) { r.Salt = nil },
+		"proof_v vide":    func(r *CreerReq) { r.ProofV = vide[:] },
+		"proof_v de 31":   func(r *CreerReq) { r.ProofV = r.ProofV[:31] },
+		"access_v vide":   func(r *CreerReq) { r.AccessV = vide[:] },
+		"access_v absent": func(r *CreerReq) { r.AccessV = nil },
+		"manage_v vide":   func(r *CreerReq) { r.ManageV = vide[:] },
+		"manage_v de 33":  func(r *CreerReq) { r.ManageV = append(r.ManageV, 0) },
+		"access = manage": func(r *CreerReq) { r.ManageV = r.AccessV },
+	}
+	for nom, casser := range cas {
+		r := reqValide(nouvellesCles())
+		casser(&r)
+		if _, err := b.m.Creer(r); !errors.Is(err, ErrBadRequest) {
+			t.Errorf("%s : %v", nom, err)
+		}
+	}
+	var n int
+	if err := b.db.QueryRow(`SELECT count(*) FROM salons`).Scan(&n); err != nil || n != 0 {
+		t.Fatal("salons créés :", n, err)
+	}
+}
+
+func TestCreerConflit(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 10)
+	autre := reqValide(nouvellesCles())
+	autre.AccessV = share.Verifier(c.acces)
+	if _, err := b.m.Creer(autre); !errors.Is(err, ErrConflict) {
+		t.Fatal("access_v repris :", err)
+	}
+	autre = reqValide(nouvellesCles())
+	autre.ManageV = share.Verifier(c.gestion)
+	if _, err := b.m.Creer(autre); !errors.Is(err, ErrConflict) {
+		t.Fatal("manage_v repris :", err)
+	}
+	var n int
+	if err := b.db.QueryRow(`SELECT count(*) FROM salons`).Scan(&n); err != nil || n != 1 {
+		t.Fatal("salons :", n, err)
+	}
+	if _, err := b.m.Meta(c.acces); err != nil {
+		t.Fatal("salon existant touché :", err)
+	}
+	if e := b.entrer(t, c, true); e.Siege != 0 {
+		t.Fatal("siège", e.Siege)
+	}
+}
+
+func TestCreerMax(t *testing.T) {
+	b := nouveauBanc(t, 2)
+	b.creer(t, 10)
+	b.creer(t, 10)
+	if _, err := b.m.Creer(reqValide(nouvellesCles())); !errors.Is(err, ErrBusy) {
+		t.Fatal("3ᵉ salon :", err)
+	}
+	// Un salon échu ne compte plus.
+	b.h.avancer(25 * time.Hour)
+	if _, err := b.m.Creer(reqValide(nouvellesCles())); err != nil {
+		t.Fatal("après échéance :", err)
+	}
+}
+
+// Usage total + 2 Gio > StorageMax → ErrBusy ; erreur de l'usage des partages → refus.
+func TestCreerStockage(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	used := int64(200<<30 - 2<<30)
+	var errUsage error
+	b.m.cfg.UsedPartages = func() (int64, error) { return used, errUsage }
+	if _, err := b.m.Creer(reqValide(nouvellesCles())); err != nil {
+		t.Fatal("pile à la limite :", err)
+	}
+	used++
+	if _, err := b.m.Creer(reqValide(nouvellesCles())); !errors.Is(err, ErrBusy) {
+		t.Fatal("un octet de trop :", err)
+	}
+	used, errUsage = 0, errors.New("usage illisible")
+	if _, err := b.m.Creer(reqValide(nouvellesCles())); err == nil {
+		t.Fatal("usage illisible : création acceptée")
+	}
+}
+
+func TestEcheanceAuQuart(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	r := reqValide(nouvellesCles())
+	r.TTLHours = 1
+	d, err := b.m.Creer(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exp int64
+	if err := b.db.QueryRow(`SELECT expires_at FROM salons`).Scan(&exp); err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 11, 12, 11, 15, 0, 0, time.UTC); exp != want.Unix() || d != want.Sub(b.h.Now()) {
+		t.Fatal(time.Unix(exp, 0).UTC(), d)
+	}
+}
+
+func TestMetaInconnu(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	if _, err := b.m.Meta(secret(0xEE)); !errors.Is(err, ErrNotFound) {
+		t.Fatal("clé inconnue :", err)
+	}
+	for _, k := range [][]byte{nil, secret(0xEE)[:31], append(secret(0xEE), 0)} {
+		if _, err := b.m.Meta(k); !errors.Is(err, ErrNotFound) {
+			t.Fatal("clé de longueur", len(k), err)
+		}
+	}
+	r := reqValide(nouvellesCles())
+	r.TTLHours = 1
+	expire := nouvellesCles()
+	r = reqValide(expire)
+	r.TTLHours = 1
+	if _, err := b.m.Creer(r); err != nil {
+		t.Fatal(err)
+	}
+	detruit := b.creer(t, 10)
+	for range 10 {
+		b.m.Rejoindre(detruit.acces, secret(0xEF), nil)
+	}
+	b.h.avancer(68*time.Minute - 30*time.Second) // 11:15:00 : échéance atteinte
+	for nom, k := range map[string][]byte{"expiré": expire.acces, "détruit": detruit.acces} {
+		if _, err := b.m.Meta(k); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s : %v", nom, err)
+		}
+		if _, err := b.m.Rejoindre(k, expire.preuve, nil); !errors.Is(err, ErrNotFound) {
+			t.Errorf("rejoindre %s : %v", nom, err)
+		}
+	}
+}
+
+func TestRejoindreCreateurSiege0(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	e := b.entrer(t, c, true)
+	if e.Siege != 0 || e.MaxMembers != 4 || e.MembersCanDestroy || e.BudgetLeft != 1073741824 ||
+		e.ExpiresIn != 24*time.Hour+7*time.Minute+30*time.Second {
+		t.Fatalf("créateur : %+v", e)
+	}
+	g := b.entrer(t, c, false)
+	if g.Siege != 1 || g.Seq != e.Seq+1 {
+		t.Fatalf("invité : siège %d, seq %d", g.Siege, g.Seq)
+	}
+	for _, x := range []Entree{e, g} {
+		mb, err := b.m.Membre(x.Jeton[:])
+		if err != nil || mb.siege != x.Siege || mb.emis != x.Seq || mb.plancher != x.Seq {
+			t.Fatalf("Membre : %+v %v", mb, err)
+		}
+	}
+	// Invité d'abord : siège 1 même si le 0 est libre.
+	c2 := b.creer(t, 4)
+	if g := b.entrer(t, c2, false); g.Siege != 1 {
+		t.Fatal("invité sans créateur : siège", g.Siege)
+	}
+	if e := b.entrer(t, c2, true); e.Siege != 0 {
+		t.Fatal("créateur après l'invité : siège", e.Siege)
+	}
+}
+
+func TestRejoindreCreateurReprend0(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	e1 := b.entrer(t, c, true)
+	e2 := b.entrer(t, c, true)
+	if e2.Siege != 0 || e2.Seq <= e1.Seq || e2.Nonce == e1.Nonce || e2.Jeton == e1.Jeton {
+		t.Fatalf("reprise : %+v", e2)
+	}
+	if _, err := b.m.Membre(e1.Jeton[:]); !errors.Is(err, ErrNotFound) {
+		t.Fatal("ancien jeton :", err)
+	}
+	if _, err := b.m.Membre(e2.Jeton[:]); err != nil {
+		t.Fatal("nouveau jeton :", err)
+	}
+	s := b.etat(t, c)
+	s.mu.Lock()
+	dernier := s.journal[len(s.journal)-1]
+	s.mu.Unlock()
+	if dernier.seq != e2.Seq || !bytes.Equal(dernier.enr, EnrReprise(e2.Seq, 0, e2.Nonce)) {
+		t.Fatalf("journal : %+v", dernier)
+	}
+	if n := occupes(s); n != 1 {
+		t.Fatal("sièges occupés", n)
+	}
+}
+
+func TestPlaceDuCreateurGardee(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 2)
+	if g := b.entrer(t, c, false); g.Siege != 1 {
+		t.Fatal("siège", g.Siege)
+	}
+	if _, err := b.m.Rejoindre(c.acces, c.preuve, nil); !errors.Is(err, ErrFull) {
+		t.Fatal("deuxième invité :", err)
+	}
+	if e := b.entrer(t, c, true); e.Siege != 0 {
+		t.Fatal("créateur : siège", e.Siege)
+	}
+}
+
+func TestArriveesPlafond(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 2)
+	for i := range 10 {
+		g := b.entrer(t, c, false)
+		if g.Siege != 1 {
+			t.Fatalf("entrée %d : siège %d", i, g.Siege)
+		}
+		b.depart(b.etat(t, c), g.Siege)
+	}
+	if _, err := b.m.Rejoindre(c.acces, c.preuve, nil); !errors.Is(err, ErrFull) {
+		t.Fatal("11ᵉ arrivée :", err)
+	}
+}
+
+func TestRejoindreConcurrent(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 3)
+	b.entrer(t, c, false)
+	var wg sync.WaitGroup
+	res := make(chan error, 8)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := b.m.Rejoindre(c.acces, c.preuve, nil)
+			res <- err
+		}()
+	}
+	wg.Wait()
+	close(res)
+	ok := 0
+	for err := range res {
+		switch {
+		case err == nil:
+			ok++
+		case !errors.Is(err, ErrFull):
+			t.Fatal(err)
+		}
+	}
+	if ok != 1 || occupes(b.etat(t, c)) != 2 {
+		t.Fatal("sièges donnés :", ok)
+	}
+}
+
+func TestManageFaux(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	for _, g := range [][]byte{secret(0xEE), secret(0xEE)[:31], {}} {
+		if _, err := b.m.Rejoindre(c.acces, c.preuve, g); !errors.Is(err, ErrBadRequest) {
+			t.Fatalf("sGestion de %d octets : %v", len(g), err)
+		}
+	}
+	if s := b.etat(t, c); s != nil && occupes(s) != 0 {
+		t.Fatal("siège donné")
+	}
+	var fa int
+	if err := b.db.QueryRow(`SELECT failed_attempts FROM salons`).Scan(&fa); err != nil || fa != 0 {
+		t.Fatal("essais comptés :", fa, err)
+	}
+	if _, err := b.m.Rejoindre(c.acces, c.preuve[:31], nil); !errors.Is(err, ErrBadRequest) {
+		t.Fatal("preuve de 31 octets :", err)
+	}
+}
+
+func TestMauvaisMotDePasse(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	b.entrer(t, c, false)
+	for i := 1; i <= 9; i++ {
+		_, err := b.m.Rejoindre(c.acces, secret(0xEE), nil)
+		var bp *BadPassword
+		if !errors.As(err, &bp) || bp.AttemptsLeft != 10-i {
+			t.Fatalf("essai %d : %v", i, err)
+		}
+		var fa int
+		if err := b.db.QueryRow(`SELECT failed_attempts FROM salons`).Scan(&fa); err != nil || fa != i {
+			t.Fatal("failed_attempts", fa, err)
+		}
+	}
+	if _, err := b.m.Rejoindre(c.acces, secret(0xEE), nil); !errors.Is(err, ErrNotFound) {
+		t.Fatal("10ᵉ essai :", err)
+	}
+	var n int
+	if err := b.db.QueryRow(`SELECT count(*) FROM salons`).Scan(&n); err != nil || n != 0 {
+		t.Fatal("ligne restante :", n, err)
+	}
+	if _, err := b.m.Rejoindre(c.acces, c.preuve, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatal("bon mot de passe après destruction :", err)
+	}
+	if es, _ := os.ReadDir(b.cfg.DossierConversations); len(es) != 0 {
+		t.Fatal("fichier de conversation restant")
+	}
+	b.m.mu.Lock()
+	n = len(b.m.salons)
+	b.m.mu.Unlock()
+	b.m.idxMu.Lock()
+	n += len(b.m.index)
+	b.m.idxMu.Unlock()
+	if n != 0 {
+		t.Fatal("état mémoire restant")
+	}
+}
+
+func TestEssaisConcurrents(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	var wg sync.WaitGroup
+	res := make(chan error, 20)
+	for range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := b.m.Rejoindre(c.acces, secret(0xEE), nil)
+			res <- err
+		}()
+	}
+	wg.Wait()
+	close(res)
+	vus := map[int]bool{}
+	introuvable := 0
+	for err := range res {
+		var bp *BadPassword
+		switch {
+		case errors.As(err, &bp):
+			if vus[bp.AttemptsLeft] || bp.AttemptsLeft < 1 || bp.AttemptsLeft > 9 {
+				t.Fatal("essais restants", bp.AttemptsLeft)
+			}
+			vus[bp.AttemptsLeft] = true
+		case errors.Is(err, ErrNotFound):
+			introuvable++
+		default:
+			t.Fatal(err)
+		}
+	}
+	if len(vus) != 9 || introuvable != 11 {
+		t.Fatal("évalués :", len(vus), introuvable)
+	}
+}
+
+func TestEntreeAnnoncee(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	for _, createur := range []bool{false, true, false} {
+		e := b.entrer(t, c, createur)
+		s := b.etat(t, c)
+		s.mu.Lock()
+		var trouve bool
+		for _, ev := range s.journal {
+			if ev.seq == e.Seq {
+				trouve = bytes.Equal(ev.enr, EnrArrivee(e.Seq, e.Siege, e.Nonce))
+			}
+		}
+		seq := s.seq
+		s.mu.Unlock()
+		if !trouve || seq != e.Seq || e.Nonce == [16]byte{} {
+			t.Fatalf("arrivée %+v absente du journal", e)
+		}
+	}
+}
+
+func TestJetonAleatoire(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	e1 := b.entrer(t, c, false)
+	e2 := b.entrer(t, c, false)
+	if e1.Jeton == e2.Jeton || e1.Jeton == [32]byte{} {
+		t.Fatal("jetons identiques ou nuls")
+	}
+	var brut []byte
+	for _, suffixe := range []string{"", "-wal"} {
+		d, err := os.ReadFile(filepath.Join(b.dir, "shares.db"+suffixe))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		brut = append(brut, d...)
+	}
+	// Témoin : access_v est bien trouvé dans ces octets.
+	if !bytes.Contains(brut, share.Verifier(c.acces)) {
+		t.Fatal("témoin : access_v absent de la base")
+	}
+	for _, e := range []Entree{e1, e2} {
+		h := sha256.Sum256(e.Jeton[:])
+		if bytes.Contains(brut, e.Jeton[:]) || bytes.Contains(brut, h[:]) || bytes.Contains(brut, e.Nonce[:]) {
+			t.Fatal("jeton, empreinte ou nonce dans la base")
+		}
+	}
+}
+
+func TestGestion(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	d, n, err := b.m.Gestion(c.gestion)
+	if err != nil || n != 0 || d != 24*time.Hour+7*time.Minute+30*time.Second {
+		t.Fatal(d, n, err)
+	}
+	b.entrer(t, c, true)
+	b.entrer(t, c, false)
+	g := b.entrer(t, c, false)
+	if _, n, err := b.m.Gestion(c.gestion); err != nil || n != 3 {
+		t.Fatal("présents", n, err)
+	}
+	b.depart(b.etat(t, c), g.Siege)
+	if _, n, err := b.m.Gestion(c.gestion); err != nil || n != 2 {
+		t.Fatal("présents après départ", n, err)
+	}
+	for _, k := range [][]byte{secret(0xEE), c.acces, nil, c.gestion[:31]} {
+		if _, _, err := b.m.Gestion(k); !errors.Is(err, ErrNotFound) {
+			t.Fatal("sGestion inconnu :", err)
+		}
+	}
+}
+
+// Jeton révoqué (exclusion, Task 14) : ErrExcluded ; jeton inconnu ou de mauvaise longueur :
+// ErrNotFound ; salon échu : ErrNotFound.
+func TestMembre(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	e := b.entrer(t, c, false)
+	for _, j := range [][]byte{secret(0xEE), nil, e.Jeton[:31]} {
+		if _, err := b.m.Membre(j); !errors.Is(err, ErrNotFound) {
+			t.Fatal("jeton inconnu :", err)
+		}
+	}
+	s := b.etat(t, c)
+	h := sha256.Sum256(e.Jeton[:])
+	s.mu.Lock()
+	delete(s.jetons, h)
+	s.revoques[h] = struct{}{}
+	s.mu.Unlock()
+	if _, err := b.m.Membre(e.Jeton[:]); !errors.Is(err, ErrExcluded) {
+		t.Fatal("jeton révoqué :", err)
+	}
+	g := b.entrer(t, c, false)
+	b.h.avancer(25 * time.Hour)
+	if _, err := b.m.Membre(g.Jeton[:]); !errors.Is(err, ErrNotFound) {
+		t.Fatal("salon échu :", err)
+	}
+}
+
+// Tick libère un siège hors ligne depuis 10 min : 0x03 au journal, jeton oublié, place rendue.
+func TestTickLibereHorsLigne(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 2)
+	g := b.entrer(t, c, false)
+	b.h.avancer(10*time.Minute - time.Second)
+	b.m.Tick()
+	if _, err := b.m.Membre(g.Jeton[:]); err != nil {
+		t.Fatal("libéré trop tôt :", err)
+	}
+	b.h.avancer(time.Second)
+	b.m.Tick()
+	if _, err := b.m.Membre(g.Jeton[:]); !errors.Is(err, ErrNotFound) {
+		t.Fatal("jeton après libération :", err)
+	}
+	s := b.etat(t, c)
+	s.mu.Lock()
+	dernier := s.journal[len(s.journal)-1]
+	s.mu.Unlock()
+	if !bytes.Equal(dernier.enr, EnrDepart(dernier.seq, g.Siege)) || dernier.seq != g.Seq+1 {
+		t.Fatalf("journal : %+v", dernier)
+	}
+	if g2 := b.entrer(t, c, false); g2.Siege != 1 {
+		t.Fatal("place non rendue", g2.Siege)
+	}
+	b.m.idxMu.Lock()
+	n := len(b.m.index)
+	b.m.idxMu.Unlock()
+	if n != 1 {
+		t.Fatal("index des jetons :", n)
+	}
+}
+
+// UsedBytes : pièces + conversations.
+func TestUsedBytes(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	if err := os.WriteFile(filepath.Join(b.cfg.Pieces.Dir, "AAAAAAAAAAAAAAAAAAAAAA"), make([]byte, 1000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := b.creer(t, 4)
+	b.entrer(t, c, false)
+	if _, err := b.etat(t, c).conv.Ajouter(trameTest(0)); err != nil {
+		t.Fatal(err)
+	}
+	if u := b.m.UsedBytes(); u != 1000+TailleEmplacement {
+		t.Fatal("UsedBytes", u)
+	}
+}
+
+// Journal plein : une entrée est refusée (ErrLimit) sans rien changer ; un départ passe
+// toujours (nbSieges places gardées) et le journal ne dépasse jamais journalMax.
+func TestJournalPlein(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 10)
+	g := b.entrer(t, c, false)
+	s := b.etat(t, c)
+	s.mu.Lock()
+	for len(s.journal) < journalMax-nbSieges {
+		s.annoncerLocked(func(seq uint64) []byte { return EnrDepart(seq, 9) }, false)
+	}
+	seq := s.seq
+	s.mu.Unlock()
+	if _, err := b.m.Rejoindre(c.acces, c.preuve, nil); !errors.Is(err, ErrLimit) {
+		t.Fatal("entrée, journal plein :", err)
+	}
+	if _, err := b.m.Rejoindre(c.acces, c.preuve, c.gestion); !errors.Is(err, ErrLimit) {
+		t.Fatal("créateur, journal plein :", err)
+	}
+	s.mu.Lock()
+	if s.seq != seq || s.occupesLocked() != 1 || s.arrivees != 1 || len(s.jetons) != 1 {
+		s.mu.Unlock()
+		t.Fatal("état changé par une entrée refusée")
+	}
+	s.mu.Unlock()
+	b.depart(s, g.Siege)
+	s.mu.Lock()
+	n := len(s.journal)
+	s.mu.Unlock()
+	if n != journalMax-nbSieges+1 || n > journalMax {
+		t.Fatal("journal", n)
+	}
+	if _, err := b.m.Membre(g.Jeton[:]); !errors.Is(err, ErrNotFound) {
+		t.Fatal("jeton après départ :", err)
+	}
+}
