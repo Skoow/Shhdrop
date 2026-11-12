@@ -131,6 +131,13 @@ Le moteur Rust porte tout le protocole du salon (groupe MLS, enveloppe, découpa
 12. **Renouvellement** (I5) : `renouveler` toutes les 100 trames envoyées (volatiles comprises) et toutes les heures ; un `commit_en_cours` ou `commitPerdu` se rejoue ensuite.
 13. **« Instantané » après rechargement** (I5, §3.6) : l'expéditeur renvoie sous la nouvelle époque, pour le revenant, ses messages « instantané » qu'il n'a pas encore lus ; le serveur libère l'ancienne trame quand tous les sièges présents l'ont lue sous l'une ou l'autre forme (l'ancienne feuille du revenant ne compte plus).
 
+#### 3.6.2 Restes de C-1 à corriger avant C-3 (relecture finale, 12 novembre)
+
+- **N1 (faible)** : `appliquer_en_attente` retient un KeyPackage mis en file sans vérifier son en-tête ; un siège qui envoie un KeyPackage mal étiqueté puis un bon peut faire échouer l'entrée d'un autre arrivant (déni de service). Correction : n'appeler `key_package_recu` que si l'en-tête est celui des trames de contrôle ; test.
+- **N2 (faible)** : le Commit qui ajoute l'arrivant est repéré par des champs non authentifiés ; une trame injectée ou un Commit refusé par tous peut fausser le rang des annonces utilisé pour vérifier le Welcome. Correction : prendre le premier Commit de l'époque E−1 dont le siège attesté est celui de l'expéditeur du Welcome ; à défaut, réessayer au Commit suivant ; vérifier aussi le siège attesté du Welcome.
+- **N3 (doc)** : `message.rs` : la doc de `est_volatile` est passée au-dessus de `nouvel_id`.
+- **KeyPackages restants** : à l'entrée, effacer toutes les clés d'init des KeyPackages produits par ce salon, pas seulement celles nommées par le Welcome.
+
 ## 4. Messages
 
 ### 4.1 Sortes (dans le chiffré, JSON strict de §8)
