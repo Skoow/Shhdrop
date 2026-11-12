@@ -254,7 +254,7 @@
     <!-- Balai (retours du 12 novembre) : la bulle dit ce que le nettoyage retire (survol, focus) ;
          l'appui ouvre la confirmation du parent, rien n'est nettoyé avant « Nettoyer ». -->
     {#if fix === "nettoyer" && onclean && !cleaning}
-      <Tip label={t("compose.clean.button")} tip={t(cleanWhatKey(item.category))} class="broom" onpress={onclean} data-fix="nettoyer"><Broom size={18} strokeWidth={1.75} /></Tip>
+      <Tip label={t("compose.clean.button", { name })} tip={t(cleanWhatKey(item.category))} class="broom" onpress={onclean} data-fix="nettoyer"><Broom size={18} strokeWidth={1.75} /></Tip>
     {/if}
   {/snippet}
   <div class="acts">

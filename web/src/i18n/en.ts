@@ -633,7 +633,7 @@ export const en = {
   "compose.clean.retry": "Try again to clean {name}",
   "compose.cleaning": "Cleaning…",
   "compose.cleaned": "{name} cleaned",
-  "compose.clean.button": "Clean this file",
+  "compose.clean.button": "Clean this file: {name}",
   "compose.clean.all": "Clean all",
   "compose.cleaned.all.one": "{n}\u00a0file cleaned",
   "compose.cleaned.all.other": "{n}\u00a0files cleaned",

@@ -91,10 +91,12 @@ test("balai : bulle au survol (ordinateur), confirmation au clic, rien de nettoy
   await addPdfAndPhoto(page);
   // Plus de mot « Nettoyer » écrit sur les lignes.
   for (const t of await rows(page).allInnerTexts()) expect(t).not.toContain("Nettoyer");
-  const brooms = page.getByRole("button", { name: "Nettoyer ce fichier", exact: true }).filter({ visible: true });
+  // Nom accessible : l'action et le fichier (« Nettoyer ce fichier : nom »), FR et EN.
+  const brooms = page.getByRole("button", { name: /^Nettoyer ce fichier\s:\s/ }).filter({ visible: true });
   await expect(brooms).toHaveCount(2);
   const photoRow = rows(page).filter({ hasText: "foret-brume" });
-  const broom = photoRow.getByRole("button", { name: "Nettoyer ce fichier" });
+  const broom = photoRow.getByRole("button", { name: /^Nettoyer ce fichier\s:\sforet-brume\.jpg$/ });
+  await expect(rows(page).filter({ hasText: "contrat" }).getByRole("button", { name: /^Nettoyer ce fichier\s:\scontrat\.pdf$/ })).toHaveCount(1);
   await expect(broom).toHaveAccessibleDescription(/lieu, appareil et dates/);
   if (!isMobile) {
     // La bulle se ferme au défilement de la fenêtre (Tip) : un défilement tardif après l'ajout
@@ -160,10 +162,15 @@ test("pied de page : ni choix de langue ni « Nettoyage automatique »", async (
 
 test.describe("langue du navigateur", () => {
   test.use({ locale: "en-US" });
-  test("anglais choisi tout seul, sans bouton", async ({ page, shh }) => {
+  test("anglais choisi tout seul, sans bouton ; balai nommé « Clean this file: nom »", async ({ page, shh, isMobile }) => {
     await openSend(page, shh.origin);
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.getByRole("list", { name: "In short" }).getByRole("listitem")).toHaveText(["Encrypted in your browser", "No account", "The link self-destructs"]);
+    if (isMobile) return; // sélecteur ouvert par la zone de dépôt : ordinateur
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator(".dropzone").click();
+    await (await chooser).setFiles([{ name: "foret-brume.jpg", mimeType: "image/jpeg", buffer: readFileSync(file("foret-brume.jpg")) }]);
+    await expect(rows(page).getByRole("button", { name: "Clean this file: foret-brume.jpg", exact: true })).toHaveCount(1);
   });
 });
 

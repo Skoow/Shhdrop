@@ -637,7 +637,7 @@ export const fr = {
   "compose.clean.retry": "Réessayer le nettoyage de {name}",
   "compose.cleaning": "Nettoyage…",
   "compose.cleaned": "{name} nettoyé",
-  "compose.clean.button": "Nettoyer ce fichier",
+  "compose.clean.button": "Nettoyer ce fichier\u202f: {name}",
   "compose.clean.all": "Tout nettoyer",
   "compose.cleaned.all.one": "{n}\u202ffichier nettoyé",
   "compose.cleaned.all.other": "{n}\u202ffichiers nettoyés",
