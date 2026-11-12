@@ -6,7 +6,7 @@
 // contenu, ni les noms, ni le mot de passe, ni K_lien, ni l'id dérivé du lien ne doivent y être.
 import { shareId, type KLien } from "../src/engine";
 import { findIn, needle, scanDir, type Needle } from "../e2e/scan";
-import { expect, test } from "./fixtures";
+import { expect, gotoRetrying, test } from "./fixtures";
 import { addText, openFilePicker, readyHeading, sendButton } from "./send-helpers";
 
 const TEXT = "MOT-REPERE-NAVIGATEUR-5d1e : le code de la porte est 4471";
@@ -75,7 +75,7 @@ test.describe("fr-FR", () => {
       });
     });
     await page.goto("about:blank"); // nouveau document : le script ci-dessus s'applique
-    await page.goto(link);
+    await gotoRetrying(page, shh.origin, link);
     await page.getByLabel("Mot de passe", { exact: true }).fill(password + "x");
     await page.getByRole("button", { name: "Déverrouiller" }).click();
     await expect(page.locator("#open-err").getByText(/^Mot de passe incorrect/)).toBeVisible({ timeout: 20_000 });

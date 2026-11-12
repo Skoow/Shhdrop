@@ -108,6 +108,32 @@ function retryFirstGoto(page: Page, origin: string): void {
   }) as Page["goto"];
 }
 
+/**
+ * `page.goto` d'une navigation EN COURS DE TEST (pas la première) : même relance que
+ * retryFirstGoto (au plus 2 fois, 15 s chacune, jamais silencieuse). Constat (CI du 11 novembre,
+ * sees-nothing.spec.ts:22, webkit-mobile) : la navigation vers le lien, depuis about:blank, n'a
+ * jamais atteint « load » en 120 s alors que la même étape passe aux autres exécutions.
+ * Cause probable (non prouvée, pas de WebKit ici) : le même blocage de transport que la première
+ * requête. Si la page restait vraiment bloquée à 3 essais, le test échoue comme avant.
+ */
+export async function gotoRetrying(page: Page, origin: string, url: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.goto(url, { timeout: 15_000 });
+      return;
+    } catch (e) {
+      if (!(e instanceof errors.TimeoutError) || attempt >= 3) throw e;
+      let serveur: string;
+      try {
+        serveur = `HTTP ${await probe(origin + "/", 3_000)}`;
+      } catch (pe) {
+        serveur = (pe as Error).message;
+      }
+      test.info().annotations.push({ type: "goto relancé", description: `essai ${attempt} expiré (15 s) ; serveur : ${serveur}` });
+    }
+  }
+}
+
 /** Gardes de fin de test : violations CSP et requêtes du cadre principal hors de `origin`. */
 async function guard(page: Page, origin: string): Promise<{ cspViolations: string[]; foreignRequests: string[] }> {
   const cspViolations: string[] = [];

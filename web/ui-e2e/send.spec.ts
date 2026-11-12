@@ -57,12 +57,22 @@ test.describe("fr-FR", () => {
     await addText(page, "Le code de la porte est 4471.");
     await addRealFile(page, "plage-nuit.jpg");
     await addFile(page, "archive-photos.bin", 3 * MIB);
-    // Chaque PUT retardé de 2 s, puis finalize retardé de 2 s.
-    await slowSegments(page, 2000, [], 1);
+    // Premier PUT libre, les suivants retenus, puis finalize retenu : chaque phase reste affichée
+    // jusqu'à ce que le test l'ait vue (des délais fixes laissaient WebKit, lent en CI, manquer
+    // la fenêtre de « Chiffrement et envoi » : CI du 11 novembre, 45 s au lieu de 15 à 20 s).
+    let openSegments!: () => void;
+    const segmentsGate = new Promise<void>((r) => (openSegments = r));
+    let openFinalize!: () => void;
+    const finalizeGate = new Promise<void>((r) => (openFinalize = r));
+    let puts = 0;
+    await page.route(SEG, async (route) => {
+      if (++puts > 1) await segmentsGate;
+      await route.continue().catch(() => undefined);
+    });
     let finalizing = false;
     await page.route("**/api/shares/finalize", async (route) => {
       finalizing = true;
-      await sleep(2500);
+      await finalizeGate;
       await route.continue();
     });
     const titles: string[] = [];
@@ -101,6 +111,7 @@ test.describe("fr-FR", () => {
     await page.waitForTimeout(300);
     await capture(page, "seal-progress");
     await expect(page.locator(".sealing")).not.toContainText("palier");
+    openSegments();
 
     // Finalisation retardée : « Envoyé » attend le lien (audit M12), « Scellé » aussi ; aucun lien nulle part.
     await expect.poll(() => finalizing, { timeout: 30_000 }).toBe(true);
@@ -113,6 +124,7 @@ test.describe("fr-FR", () => {
     expect(await page.evaluate(() => location.hash)).toBe("");
     expect(await page.evaluate(() => document.body.innerText.includes("/#"))).toBe(false);
     await expect(readyHeading(page)).toHaveCount(0);
+    openFinalize();
 
     await expect(readyHeading(page)).toBeVisible({ timeout: 30_000 });
     expect(await page.locator("[data-capsule]").first().evaluate((e) => getComputedStyle(e).viewTransitionName)).toBe("capsule");

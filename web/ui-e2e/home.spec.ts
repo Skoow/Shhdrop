@@ -226,6 +226,14 @@ test.describe("fr-FR", () => {
     });
     await page.goto(shh.origin + "/");
     await page.waitForTimeout(900);
+    // Compte les événements « close » des boîtes de dialogue (écouteur en phase de capture : il passe avant le
+    // site) : on attend l'événement lui-même, qui remet `open` à faux, au lieu d'un délai fixe.
+    await page.evaluate(() => {
+      const w = window as unknown as { __closes: number };
+      w.__closes = 0;
+      document.addEventListener("close", () => w.__closes++, true);
+    });
+    let closes = 0;
     for (const [mode, accept, fallback] of [["Photo", "image/*", "Choisir une photo"], ["Vidéo", "video/*", "Choisir une vidéo"]] as const) {
       await page.getByRole("group", { name: "Ou créez sur place" }).getByRole("button", { name: "Photo ou vidéo", exact: true }).click();
       const cam = page.locator("dialog[data-capture]");
@@ -239,6 +247,8 @@ test.describe("fr-FR", () => {
         // L'événement « close » (qui remet `open` à faux) arrive après la fermeture visible : sans
         // attente, WebKit rouvrait puis refermait la boîte et le tour suivant ne trouvait rien.
         await expect(cam).toBeHidden();
+        closes++;
+        await expect.poll(() => page.evaluate(() => (window as unknown as { __closes: number }).__closes), { message: "événement close de la boîte caméra non reçu après Échap" }).toBe(closes);
         await page.waitForTimeout(100);
         continue;
       }
