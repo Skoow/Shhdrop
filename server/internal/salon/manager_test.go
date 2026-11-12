@@ -852,8 +852,8 @@ func TestPasDeRecreationApresDestruction(t *testing.T) {
 	if es, _ := os.ReadDir(b.cfg.DossierConversations); len(es) != 0 {
 		t.Fatal("fichier de conversation recréé")
 	}
-	// Les tombes sont oubliées après l'échéance.
-	b.h.avancer(25 * time.Hour)
+	// Les tombes sont oubliées après l'échéance et sa marge.
+	b.h.avancer(25*time.Hour + margeTombe)
 	b.m.Tick()
 	b.m.mu.Lock()
 	n := len(b.m.salons)

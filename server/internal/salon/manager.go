@@ -562,8 +562,10 @@ func (m *Manager) departLocked(s *salon, n uint8) {
 // Tick : une passe d'entretien (chaque seconde, Run à la Task 15) : trames « 10 min » et
 // « 1 h » échues effacées (Task 11), sièges hors ligne depuis 10 min libérés (leurs lectures
 // « instantané » ne sont plus attendues), pièces effacées (celles de ces trames, celles qui
-// ne sont jamais liées ou finalisées : Task 13), tombes échues oubliées, places de bloc des
-// salons échus rendues (complétée à la Task 15).
+// ne sont jamais liées ou finalisées : Task 13), salons arrivés à échéance détruits (detruire :
+// pièces, fichier puis ligne, conversation, ligne du salon ; la Task 15 y ajoutera le 0x05
+// aux connectés, finir), tombes échues oubliées une fois leurs pièces purgées (un effacement
+// raté est retenté au Tick suivant), places de bloc des salons échus rendues.
 func (m *Manager) Tick() {
 	now := m.cfg.Now()
 	m.mu.Lock()
@@ -574,11 +576,14 @@ func (m *Manager) Tick() {
 	}
 	m.mu.Unlock()
 	for _, s := range salons {
-		tombe, aPurger := m.entretenir(s, now)
-		if aPurger {
+		tombe, echu, aPurger := m.entretenir(s, now)
+		switch {
+		case echu:
+			_ = m.detruire(s.id) // purger compris ; une pièce non effacée reste dans aPurger
+		case aPurger:
 			m.purger(s) // hors du verrou du salon
 		}
-		if tombe {
+		if tombe && !s.resteAPurger() {
 			m.mu.Lock()
 			if m.salons[s.id] == s {
 				delete(m.salons, s.id)
@@ -588,19 +593,34 @@ func (m *Manager) Tick() {
 	}
 }
 
+// margeTombe : une tombe est gardée jusqu'à l'échéance plus cette marge (plan, Task 15) : un
+// Rejoindre qui a lu la ligne juste avant l'échéance ne recrée ni état ni fichier.
+const margeTombe = time.Minute
+
 // entretenir : passe de Tick sur un salon, sous son verrou (defer : une panique ne le garde
-// jamais) ; rend vrai pour une tombe échue, et aPurger s'il reste des pièces à effacer
-// (pièces de trames échues, pièces non liées échues : pieces.go).
-func (m *Manager) entretenir(s *salon, now time.Time) (tombe, aPurger bool) {
+// jamais) ; rend vrai pour une tombe échue (échéance + margeTombe), echu pour un salon vivant
+// arrivé à son échéance (à détruire), et aPurger s'il reste des pièces à effacer (pièces de
+// trames échues, pièces non liées échues : pieces.go).
+func (m *Manager) entretenir(s *salon, now time.Time) (tombe, echu, aPurger bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.fini && !now.Before(s.expires) {
+		return false, true, false
+	}
 	s.effacerEchuesLocked(now.UnixMilli())
 	for n, x := range s.sieges {
 		if x != nil && !x.horsLigneDepuis.IsZero() && now.Sub(x.horsLigneDepuis) >= horsLigneMax {
 			m.departLocked(s, uint8(n))
 		}
 	}
-	return s.fini && !now.Before(s.expires), s.echuesPiecesLocked(now)
+	return s.fini && !now.Before(s.expires.Add(margeTombe)), false, s.echuesPiecesLocked(now)
+}
+
+// resteAPurger : des pièces du salon attendent encore leur effacement (purger en échec).
+func (s *salon) resteAPurger() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.aPurger) > 0
 }
 
 // now : Config.Now lue à chaque appel (un test peut la remplacer après la création d'un salon).

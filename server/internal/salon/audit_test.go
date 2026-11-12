@@ -8,6 +8,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -158,5 +161,86 @@ func TestAuditRepriseNeCoupePasLecture(t *testing.T) {
 		}
 		l.Close()
 		temoin.Close()
+	}
+}
+
+// D5 de l'audit : un effacement de pièce en échec se perdait avec la tombe (index et fichier
+// gardés pour toujours). La tombe reste tant que des pièces sont à purger ; Tick réessaie.
+func TestAuditPurgeEchoueePerdueAvecTombe(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 3)
+	_, mb := b.entrerMembre(t, c, true)
+	s := mb.salon
+	id := b.pretePiece(t, mb, 1, false)
+	p := filepath.Join(b.cfg.Pieces.Dir, id)
+	// Fichier remplacé par un dossier non vide : os.Remove échoue (ENOTEMPTY), même en root.
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(p, "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.m.RetirerPiece(mb, id); err != nil {
+		t.Fatal(err)
+	}
+	_ = b.m.detruire(s.id)
+	b.h.avancer(26 * time.Hour)
+	tombe := func() bool {
+		b.m.mu.Lock()
+		defer b.m.mu.Unlock()
+		return b.m.salons[s.id] == s
+	}
+	for range 3 {
+		b.m.Tick()
+		if !tombe() || b.m.salonDePiece(id) == nil {
+			t.Fatal("tombe oubliée avant la purge de sa pièce")
+		}
+	}
+	if err := os.RemoveAll(p); err != nil { // suppression de nouveau possible
+		t.Fatal(err)
+	}
+	b.m.Tick()
+	if tombe() || b.m.salonDePiece(id) != nil {
+		t.Fatal("tombe ou index gardés après la purge :", tombe())
+	}
+}
+
+// Constat de l'audit pour la Task 15 : à l'échéance naturelle (sans destruction), Tick
+// n'effaçait ni le fichier ni la ligne d'une pièce, ni la conversation. Il détruit désormais
+// le salon échu : pièces (fichier puis ligne), conversation, ligne du salon, index.
+func TestAuditEcheanceNaturelle(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 3)
+	e, mb := b.entrerMembre(t, c, true)
+	s := mb.salon
+	liee := b.pretePiece(t, mb, 1, false)
+	b.lier(t, mb, 0, liee)
+	enCours := b.creerPiece(t, mb, 16, false)
+	conv := filepath.Join(b.cfg.DossierConversations, s.id)
+	if _, err := os.Stat(conv); err != nil {
+		t.Fatal("conversation absente avant l'échéance :", err)
+	}
+	b.h.avancer(25 * time.Hour)
+	b.m.Tick()
+	for _, id := range []string{liee, enCours} {
+		if f, l := b.surDisque(t, id); f || l {
+			t.Fatalf("pièce après l'échéance : fichier=%v ligne=%v", f, l)
+		}
+		if b.m.salonDePiece(id) != nil {
+			t.Fatal("index de la pièce gardé")
+		}
+	}
+	if _, err := os.Stat(conv); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("conversation gardée après l'échéance :", err)
+	}
+	var n int
+	if b.db.QueryRow(`SELECT count(*) FROM salons WHERE id=?`, s.id).Scan(&n); n != 0 {
+		t.Fatal("ligne du salon gardée")
+	}
+	if _, err := b.m.Membre(e.Jeton[:]); !errors.Is(err, ErrNotFound) {
+		t.Fatal("membre après l'échéance :", err)
+	}
+	if u, _ := b.cfg.Pieces.UsedBytes(); u != 0 {
+		t.Fatal("usage des pièces :", u)
 	}
 }
