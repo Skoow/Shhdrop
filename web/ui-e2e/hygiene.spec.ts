@@ -129,9 +129,13 @@ for (const [kind, frag] of [
     // ajouté d'entrée (replaceState) : une seule entrée « / » de l'origine avant « /securite ».
     await goSecurity(page);
     await expect(page).toHaveURL(`${shh.origin}/securite`);
-    expectOnlyOwnEntries(await walkHistory(page, [KEY], browserName !== "webkit"), shh.origin, ["/", "/securite"]);
-    // Rechargement : rien ne revient.
-    await page.goBack();
+    const forward = browserName !== "webkit";
+    expectOnlyOwnEntries(await walkHistory(page, [KEY], forward), shh.origin, ["/", "/securite"]);
+    // Rechargement : rien ne revient. Sans parcours Avant (WebKit, voir walkHistory), l'onglet est
+    // resté sur la première entrée : on rouvre « / » directement (l'entrée « / » de l'historique
+    // vient d'être vérifiée sans # par le parcours Retour).
+    if (forward) await page.goBack();
+    else await page.goto(`${shh.origin}/`);
     await expect(page).toHaveURL(`${shh.origin}/`);
     await page.reload();
     expect(page.url()).toBe(`${shh.origin}/`);
