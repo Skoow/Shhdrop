@@ -121,7 +121,7 @@ describe("envoi anticipé puis nettoyage ou retrait : aucun octet lisible de l'o
       { id: "s", item: { kind: "file", name: "photo.jpg", mime: "image/jpeg", data: s2 } },
       { id: "b", item: { kind: "file", name: "video.mp4", mime: "video/mp4", data: b2 } },
     ];
-    const r = await d.finalize(items, { ttlHours: 1, maxOpens: 2, password: PW });
+    const r = await d.finalize(items, { ttlHours: 1, maxOpens: 2, password: PW, solveCaptcha: solveAltcha });
     // Le destinataire ouvre et reçoit les versions nettoyées.
     const o = await openShare(r.link, PW, srv.origin);
     expect(Buffer.from(await o.item(0)).equals(Buffer.from(cleanedSmall))).toBe(true);
