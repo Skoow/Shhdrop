@@ -1213,20 +1213,89 @@ func TestRetirerWS(t *testing.T) {
 	})
 }
 
-// Jeton remplacé (le créateur rentre par rejoindre) : la connexion de l'ancien jeton ne peut
-// plus envoyer : 4004.
-func TestMembrePerime(t *testing.T) {
+// Le créateur rentre par rejoindre (appareil perdu ou volé) : la connexion de l'ancien
+// jeton du siège 0 reçoit 0x05 raison 4, est fermée en 4005 et ne reçoit plus rien ; le
+// siège passe hors ligne pour les autres.
+func TestRejoindreFermeAncienneConnexion(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		b := nouveauBanc(t, 200)
 		c := b.creer(t, 4)
 		e0 := b.entrer(t, c, true)
+		ea, a := b.entrerMembre(t, c, false)
 		l0 := b.connecter(e0.Jeton, e0.Seq)
+		la := b.connecter(ea.Jeton, ea.Seq)
 		synctest.Wait()
+		n := len(l0.enrs())
 		b.entrer(t, c, true)
-		l0.envoyer(demTrame(trameD(0, 1)))
 		attendreFin(t, l0)
-		if c := l0.codeFerme(); c != CodeInconnu {
+		if c := l0.codeFerme(); c != CodeRemplace {
 			t.Fatal("code", c)
+		}
+		l := l0.enrs()
+		if len(l) != n+1 || l[n].ty != 0x05 || !bytes.Equal(l[n].corps, []byte{RaisonRemplace}) {
+			t.Fatalf("après rejoindre : %d enregistrements, dernier %x", len(l)-n, l[len(l)-1].ty)
+		}
+		b.recevoir(t, a, trameD(0, 1))
+		synctest.Wait()
+		if len(l0.enrs()) != n+1 {
+			t.Fatal("trame reçue après rejoindre")
+		}
+		if connDe(a.salon, 0) != nil {
+			t.Fatal("ancienne connexion encore inscrite")
+		}
+		var hors bool
+		for i, e := range la.enrs() {
+			if e.ty == 0x07 && bytes.Equal(la.brut(i)[9:], []byte{0, 0}) {
+				hors = true
+			}
+		}
+		if !hors {
+			t.Fatal("siège 0 non annoncé hors ligne")
+		}
+		finir(t, la)
+	})
+}
+
+// Point 4 : les reprises par rejoindre (créateur) et par WebSocket (0x0A) partagent le
+// plafond de 20 par heure et par siège. Au-delà : rejoindre rend *Attente (429 limit)
+// jusqu'à ce que la plus ancienne sorte de l'heure, le WebSocket ferme en 4003.
+func TestReprisesRejoindrePlafonnees(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		e := b.entrer(t, c, true) // première entrée : pas une reprise
+		s := b.etat(t, c)
+		for i := 0; i < 20; i++ {
+			if i%2 == 0 {
+				e = b.entrer(t, c, true)
+			} else {
+				l := b.connecter(e.Jeton, DepuisReprise)
+				synctest.Wait()
+				if l.codeFerme() != 0 {
+					t.Fatal("reprise", i+1, "refusée :", l.codeFerme())
+				}
+				finir(t, l)
+			}
+			b.h.avancer(time.Minute)
+		}
+		seq := dernierSeq(s)
+		_, err := b.m.Rejoindre(c.acces, c.preuve, c.gestion)
+		var at *Attente
+		if !errors.As(err, &at) || at.Retry != 40*time.Minute {
+			t.Fatal("21ᵉ reprise par rejoindre :", err)
+		}
+		l := b.connecter(e.Jeton, DepuisReprise)
+		attendreFin(t, l)
+		if c := l.codeFerme(); c != CodeInvalide || dernierSeq(s) != seq {
+			t.Fatal("21ᵉ reprise par WebSocket :", c, dernierSeq(s)-seq)
+		}
+		if _, err := b.m.Membre(e.Jeton[:]); err != nil {
+			t.Fatal("jeton perdu par un refus :", err)
+		}
+		invariantJournal(t, s)
+		b.h.avancer(40 * time.Minute)
+		if _, err := b.m.Rejoindre(c.acces, c.preuve, c.gestion); err != nil {
+			t.Fatal("reprise l'heure suivante :", err)
 		}
 	})
 }

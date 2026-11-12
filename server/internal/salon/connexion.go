@@ -46,8 +46,9 @@ const (
 	silenceMax    = 45 * time.Second
 	// controlesParMinute : messages 0x02 à 0x05 par minute et par connexion (au-delà, 4003).
 	controlesParMinute = 600
-	// repriseMax : reprises (0x0A) par heure et par siège (au-delà, 4003) : un membre qui
-	// recharge en boucle ne remplit pas le journal des annonces (relecture Task 6).
+	// repriseMax : reprises (0x0A) par heure et par siège, par WebSocket (au-delà, 4003) ou
+	// par rejoindre du créateur (au-delà, *Attente : 429 limit) : un membre qui recharge en
+	// boucle ne remplit pas le journal des annonces (relecture Task 6).
 	repriseMax = 20
 	// priveMax : réponses propres à la connexion (pong, limite, plein) en attente au plus ;
 	// au-delà, le client ne lit plus : 4006.
@@ -256,15 +257,7 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 	x := s.sieges[mb.siege]
 	var point uint64
 	if a.Reprise {
-		k := 0
-		for _, t := range x.reprises {
-			if now.Sub(t) < time.Hour {
-				x.reprises[k] = t
-				k++
-			}
-		}
-		x.reprises = x.reprises[:k]
-		if len(x.reprises) >= repriseMax {
+		if x.attenteReprise(now) > 0 {
 			return nil, CodeInvalide
 		}
 		var nonce [16]byte

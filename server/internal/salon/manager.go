@@ -271,7 +271,8 @@ type Entree struct {
 // Rejoindre : POST /api/salons/rejoindre. sGestion (nil si absent) juste : siège 0, repris
 // s'il est occupé (ancien jeton oublié, 0x0A). Invité : plus petit siège libre de 1 à 9, tant
 // que les invités sont moins de max_members − 1 et les arrivées d'invités moins de
-// 5 × max_members (sinon ErrFull). K_preuve_s fausse : *BadPassword, puis ErrNotFound au
+// 5 × max_members (sinon ErrFull). Reprise du siège 0 : plafond de repriseMax par heure
+// (sinon *Attente), et l'ancienne connexion du siège est fermée (4005). K_preuve_s fausse : *BadPassword, puis ErrNotFound au
 // 10ᵉ essai (salon détruit). sGestion faux : ErrBadRequest, sans essai compté.
 func (m *Manager) Rejoindre(kAcces, kPreuve, sGestion []byte) (Entree, error) {
 	v := share.Verifier(kAcces)
@@ -326,6 +327,12 @@ func (m *Manager) Rejoindre(kAcces, kPreuve, sGestion []byte) (Entree, error) {
 	}
 	if !createur {
 		s.arrivees++
+	}
+	if c := s.conns[n]; ancien != nil && c != nil {
+		// Ancien jeton remplacé (appareil perdu ou volé) : sa connexion ne reçoit plus rien,
+		// 0x05 raison 4 puis 4005 (une seule connexion par siège ; 4004 pousserait un client
+		// à refaire rejoindre, et deux appareils du créateur se délogeraient en boucle).
+		c.arreter(CodeRemplace, EnrFin(s.seq, RaisonRemplace))
 	}
 	m.idxMu.Lock()
 	if ancien != nil {

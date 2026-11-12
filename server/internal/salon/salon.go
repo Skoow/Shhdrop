@@ -3,6 +3,7 @@ package salon
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"slices"
 	"sync"
 	"time"
 )
@@ -105,8 +106,16 @@ func (s *salon) annoncerLocked(enr func(seq uint64) []byte, depart bool) (uint64
 
 // installerLocked tire jeton et nonce, annonce le siège (0x02 arrivée, ou 0x0A reprise si
 // reprise) et l'installe. Le jeton n'est rendu qu'à l'appelant ; seul son SHA-256 reste.
+// Une reprise d'un siège occupé compte dans le plafond des reprises du siège (repriseMax par
+// heure, partagé avec les reprises par WebSocket) : au-delà, *Attente, rien n'est changé.
 func (s *salon) installerLocked(n uint8, reprise bool, now time.Time) (jeton [32]byte, x *siege, err error) {
 	x = &siege{horsLigneDepuis: now}
+	if ancien := s.sieges[n]; reprise && ancien != nil {
+		if d := ancien.attenteReprise(now); d > 0 {
+			return [32]byte{}, nil, &Attente{Retry: d}
+		}
+		x.reprises = append(slices.Clone(ancien.reprises), now)
+	}
 	rand.Read(jeton[:]) // ne rend jamais d'erreur (Go ≥ 1.24)
 	rand.Read(x.nonce[:])
 	x.jetonV = sha256.Sum256(jeton[:])
@@ -125,6 +134,23 @@ func (s *salon) installerLocked(n uint8, reprise bool, now time.Time) (jeton [32
 	s.sieges[n] = x
 	s.jetons[x.jetonV] = n
 	return jeton, x, nil
+}
+
+// attenteReprise oublie les reprises de plus d'une heure et rend le délai avant la prochaine
+// reprise permise (0 : permise tout de suite).
+func (x *siege) attenteReprise(now time.Time) time.Duration {
+	k := 0
+	for _, t := range x.reprises {
+		if now.Sub(t) < time.Hour {
+			x.reprises[k] = t
+			k++
+		}
+	}
+	x.reprises = x.reprises[:k]
+	if len(x.reprises) < repriseMax {
+		return 0
+	}
+	return x.reprises[0].Add(time.Hour).Sub(now)
 }
 
 // oublierLocked retire le siège n et son jeton (sans annonce) ; rend l'empreinte oubliée.

@@ -550,6 +550,13 @@ func TestJournalBorne(t *testing.T) {
 	c := b.creer(t, 3)
 	_, a := b.entrerMembre(t, c, false)
 	s := a.salon
+	// Journal rempli directement jusqu'à deux places du seuil (les reprises par rejoindre
+	// sont plafonnées à repriseMax par heure, Task 9).
+	s.mu.Lock()
+	for len(s.journal) < journalMax-nbSieges-2 {
+		s.annoncerLocked(func(seq uint64) []byte { return EnrDepart(seq, 9) }, false)
+	}
+	s.mu.Unlock()
 	var err error
 	n := 0
 	for ; n <= journalMax; n++ {
@@ -558,7 +565,7 @@ func TestJournalBorne(t *testing.T) {
 		}
 		invariantJournal(t, s)
 	}
-	if !errors.Is(err, ErrLimit) {
+	if !errors.Is(err, ErrLimit) || n != 2 {
 		t.Fatal("reprises :", n, err)
 	}
 	s.mu.Lock()
