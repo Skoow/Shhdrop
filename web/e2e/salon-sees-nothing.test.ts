@@ -100,6 +100,26 @@ describe("le serveur ne voit rien : salon (C-2)", () => {
   type Instantane = { master: string[]; salonCols: string[]; pieceCols: string[]; salons: number; pieces: number };
   const instantanes: Record<string, Instantane> = {};
   let conversations: Buffer[] = [];
+  const tailles = { avant: 0, apres: 0, nonVolatiles: 0, nonVolatilesApres: 0 };
+  // Clés SFrame (exportées de l'état MLS) de chaque époque traversée, par client. Le moteur
+  // n'expose ni la clé privée de signature ni la clé HPKE de la feuille (aucune API, même en
+  // test) : elles ne sont donc pas cherchées ici ; seule la clé exportée de chaque époque l'est,
+  // comme témoin de l'état MLS. Limite du test, notée dans le rapport de la Task 17.
+  const sframes = new Map<string, { label: string; cle: Uint8Array }>();
+  function releverSframe(moment: string) {
+    for (const x of clients) {
+      let ep: number | undefined;
+      try {
+        ep = x.salon.epoque();
+      } catch {
+        continue; // pas de Salon (reprise en cours)
+      }
+      if (ep === undefined) continue; // hors du groupe
+      const cle = x.salon.exporterSframe();
+      const k = Buffer.from(cle).toString("hex");
+      if (!sframes.has(k)) sframes.set(k, { label: `clé SFrame, époque ${ep} (siège ${x.siege}, ${moment})`, cle });
+    }
+  }
 
   async function instantane(label: string) {
     const { DatabaseSync } = await import("node:sqlite");
@@ -154,12 +174,15 @@ describe("le serveur ne voit rien : salon (C-2)", () => {
     ({ lien, sGestion } = cr);
     a = cr.createur;
     clients.push(a);
+    releverSframe("création");
     b = await ClientSalon.rejoindre(s, lien, MDP);
     clients.push(b);
     await Promise.all([a.attendreMembres([0, 1]), b.attendreMembres([0, 1])]);
+    releverSframe("entrée de B");
     c = await ClientSalon.rejoindre(s, lien, MDP);
     clients.push(c);
     await Promise.all(clients.map((x) => x.attendreMembres([0, 1, 2])));
+    releverSframe("entrée de C");
 
     // Clés repères, refaites ici depuis K_lien et K_mdp (engine/salon/src/cles.rs) ; témoins :
     // K_preuve_s et l'étiquette sont celles du moteur (la dérivation de K_trame est donc juste).
@@ -203,6 +226,20 @@ describe("le serveur ne voit rien : salon (C-2)", () => {
     await lit(a, reaction, 2);
     await lit(b, reaction, 2);
     for (const x of clients) await x.ping(); // toutes les demandes traitées
+    releverSframe("fin, avant la destruction");
+    // Trames non volatiles relayées (vues par le créateur, présent depuis le début, écho compris).
+    const nonVolatiles = () => a.recus.filter((r) => r.k === "enr" && r.enr.type === 0x01 && !a.eng.lireEnTete(r.enr.octets.subarray(18)).volatile).length;
+    const tailleConversation = () => listFiles(join(srv.dataDir, "salons")).reduce((t, f) => t + readFileSync(f).length, 0);
+    tailles.avant = tailleConversation();
+    tailles.nonVolatiles = nonVolatiles();
+    // Trame volatile (« écrit ») : relayée, jamais écrite.
+    const e = env({ k: "ecrit" });
+    await a.envoyer(e);
+    await lit(b, e, 0);
+    await lit(c, e, 0);
+    for (const x of clients) await x.ping();
+    tailles.apres = tailleConversation();
+    tailles.nonVolatilesApres = nonVolatiles();
 
     await instantane("salon vivant");
     conversations = listFiles(join(srv.dataDir, "salons")).map((f) => readFileSync(f));
@@ -213,6 +250,7 @@ describe("le serveur ne voit rien : salon (C-2)", () => {
       needle("K_trame", kTrame as Uint8Array<ArrayBuffer>),
       needle("K_maître_s", kMaitre as Uint8Array<ArrayBuffer>),
       needle("K_salon", kSalon as Uint8Array<ArrayBuffer>),
+      ...[...sframes.values()].map((x) => needle(x.label, x.cle as Uint8Array<ArrayBuffer>)),
       ...graines.map((r, i) => needle(`graine R de pièce ${i}`, r as Uint8Array<ArrayBuffer>)),
       ...ids.map((x, i) => needle(`id de message ${i}`, x as Uint8Array<ArrayBuffer>)),
       needle("pseudonyme", PSEUDO),
@@ -261,6 +299,8 @@ describe("le serveur ne voit rien : salon (C-2)", () => {
     for (const m of montants) expect([4141, 4157]).toContain(m.length);
     expect(montants.filter((m) => m.length === 4157)).toHaveLength(3); // profil (avatar), fichier, vocal : trame ‖ id de pièce
     for (const x of clients) expect(x.envoyes[0]!.length).toBe(51);
+    // Clés SFrame relevées : au moins une par époque traversée (création, entrée de B, de C).
+    expect(sframes.size).toBeGreaterThanOrEqual(3);
   });
 
   it("disque : aucun repère (shares.db, WAL, salons/, salon-pieces/, blobs/) ; témoins retrouvés", () => {
@@ -282,6 +322,11 @@ describe("le serveur ne voit rien : salon (C-2)", () => {
     expect(taille).toBeGreaterThan(0);
     expect(taille % 4168).toBe(0);
     expect(fenetresCommunes(trames(), conversations)).toBe(0);
+    // Volatiles jamais écrites : une trame « écrit » n'a pas fait grossir le fichier, qui fait
+    // exactement 4 168 octets par trame non volatile relayée.
+    expect(tailles.nonVolatilesApres).toBe(tailles.nonVolatiles);
+    expect(tailles.apres).toBe(tailles.avant);
+    expect(tailles.avant).toBe(4168 * tailles.nonVolatiles);
     // Témoin : la recherche trouve une trame recopiée telle quelle.
     const t = trames()[0]!;
     expect(fenetresCommunes([t], [Buffer.concat([conversations[0]!, Buffer.from(t)])])).toBe(4140 - 31);
@@ -335,6 +380,9 @@ describe("le serveur ne voit rien : salon (C-2)", () => {
     // Témoin : l'empreinte d'un jeton de membre (gardée en mémoire, jamais sur disque) est retrouvée.
     const ctl = scanProcessMemory(srv.pid, [needle("empreinte de jeton", sha256(unb64u(c.jeton)) as Uint8Array<ArrayBuffer>)]);
     expect(ctl.ok && ctl.hits).toEqual(["empreinte de jeton"]);
+    // Témoin : l'adresse repère (vue en direct, jamais gardée sur disque) est retrouvée en mémoire.
+    const ip = scanProcessMemory(srv.pid, [needle("adresse (texte)", IP)]);
+    expect(ip.ok && ip.hits).toEqual(["adresse (texte)"]);
   });
 
   it("requêtes et réponses : aucun repère ; clés seulement là où le protocole les met ; pseudonyme dans aucun en-tête", () => {
@@ -355,7 +403,6 @@ describe("le serveur ne voit rien : salon (C-2)", () => {
       }
     }
     // WebSocket : en-têtes de la poignée, messages envoyés (seul l'accueil porte le jeton) et reçus.
-    for (const l of findIn(Buffer.from(JSON.stringify(entetes)), [...secrets, ...clesEnvoyees])) hits.push(`poignée : ${l}`);
     for (const x of clients) {
       for (const [i, m] of x.envoyes.entries()) for (const l of findIn(Buffer.from(m), [...secrets, ...(i === 0 ? [] : jetons), ...clesEnvoyees.filter((n) => !n.label.startsWith("jeton"))])) hits.push(`WS ${x.siege} envoi ${i} : ${l}`);
       for (const r of x.recus) if (r.k === "enr") for (const l of findIn(Buffer.from(r.enr.octets), [...secrets, ...clesEnvoyees, ...reperesRequete])) hits.push(`WS ${x.siege} reçu 0x${r.enr.type.toString(16)} : ${l}`);

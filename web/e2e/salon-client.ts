@@ -439,7 +439,11 @@ export class ClientSalon {
       let t: ReturnType<typeof setTimeout> | undefined;
       const delai = new Promise<never>((_, ko) => {
         t = setTimeout(() => {
-          if (this.#enCours === enCours) this.#enCours = undefined;
+          if (this.#enCours === enCours) {
+            this.#enCours = undefined;
+            clearTimeout(this.#relance); // aucun nouvel envoi d'une trame abandonnée
+            this.#relance = undefined;
+          }
           ko(new Error(`siège ${this.siege} : envoi sans écho après ${DELAI_ENVOI} ms ; écarts : ${JSON.stringify(this.erreurs)}`));
         }, DELAI_ENVOI);
       });
