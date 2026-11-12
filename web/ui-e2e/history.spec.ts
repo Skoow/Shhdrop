@@ -114,8 +114,8 @@ test.describe("fr-FR", () => {
     // « Tout voir (1) » → /envois : état local d'abord ; partage lu il y a moins de 5 min → aucune requête.
     await strip.getByRole("link", { name: "Tout voir (1)" }).click();
     await expect(page).toHaveURL(/\/envois$/);
-    await expect(page.getByRole("heading", { level: 1, name: "Vos envois" })).toBeVisible();
-    await expect(page).toHaveTitle("Vos envois · Shhdrop");
+    await expect(page.getByRole("heading", { level: 1, name: "Mes partages" })).toBeVisible();
+    await expect(page).toHaveTitle("Mes partages · Shhdrop");
     await expect(page.locator("[data-counts]")).toHaveText("1 actif · 0 terminé");
     await expect(card(page)).toHaveCount(1);
     await expect(card(page)).toContainText(/Créé (à l'instant|il y a \d+ min) · \d+ nov\., \d+ h \d\d/);
@@ -290,11 +290,11 @@ test.describe("fr-FR", () => {
 
 test.describe("en-US", () => {
   test.use({ locale: "en-US", timezoneId: "America/New_York" });
-  test("Your shares : textes anglais, pied de page", async ({ page, shh, isMobile }) => {
+  test("My shares : textes anglais, pied de page", async ({ page, shh, isMobile }) => {
     await page.goto(shh.origin + "/envois");
-    await expect(page.getByRole("heading", { level: 1, name: "Your shares" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "My shares" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Nothing sent yet" })).toBeVisible();
-    const foot = page.locator("footer.foot").getByRole("link", { name: "Your shares", exact: true });
+    const foot = page.locator("footer.foot").getByRole("link", { name: "My shares", exact: true });
     await expect(foot).toHaveAttribute("aria-current", "page");
     // Une simple visite (accueil, « Vos envois ») ne crée aucune base dans le navigateur.
     await page.goto(shh.origin + "/");

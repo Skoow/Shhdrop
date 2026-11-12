@@ -12,7 +12,7 @@ describe("match", () => {
     // Page d'envoi vide (retours DROP) : « Commencer » y mène ; un « # » n'y ouvre rien.
     expect(match("/envoyer")).toEqual({ name: "envoyer" });
     expect(match("/envoyer", `#${KEY}`)).toEqual({ name: "envoyer" });
-    // Task H : tableau de bord « Vos envois » (spec §33).
+    // Task H : tableau de bord « Mes partages » (spec §33).
     expect(match("/envois")).toEqual({ name: "envois" });
     expect(match("/envois", `#m${KEY}`)).toEqual({ name: "envois" });
   });

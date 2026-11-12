@@ -94,6 +94,9 @@ test.describe("téléphone façon app", () => {
     await expect(page).toHaveURL(/\/envois$/);
     await expect(tabbar(page)).toBeVisible();
     await expect(shares).toHaveAttribute("aria-current", "page");
+    // Onglet racine : titre « Mes partages », sans bouton Retour (revue du 12 novembre).
+    await expect(page.getByRole("heading", { level: 1, name: "Mes partages" })).toBeVisible();
+    await expect(page.getByRole("banner").getByRole("button", { name: "Retour" })).toHaveCount(0);
     await expect(tabbar(page).getByRole("link", { name: "Envoyer" })).not.toHaveAttribute("aria-current", "page");
     expect(await noHScroll(page)).toBe(true);
     await shot(page, "barre-onglets-mes-partages");

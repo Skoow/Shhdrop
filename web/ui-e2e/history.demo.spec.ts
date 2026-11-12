@@ -16,7 +16,7 @@ test("démo : envoi → « Vos envois » (en mémoire), aucune base IndexedDB d'
   await page.getByRole("dialog").getByRole("button", { name: "Terminer" }).or(page.locator(".ready").getByRole("button", { name: "Terminer" })).filter({ visible: true }).first().click();
   await expect(readyHeading(page)).toBeHidden();
   // Navigation dans l'application (aucun rechargement : la démo garde l'historique en mémoire).
-  const link = page.locator("footer.foot").getByRole("link", { name: "Vos envois", exact: true });
+  const link = page.locator("footer.foot").getByRole("link", { name: "Mes partages", exact: true });
   await link.scrollIntoViewIfNeeded();
   await link.click();
   await expect(page).toHaveURL(/\/shhdrop\/envois$/);

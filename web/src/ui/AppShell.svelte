@@ -119,7 +119,8 @@
   const tierParts = (label: string) => label.split(/\b(Plus|Pro)\b/).map((text, i) => ({ text, tier: i % 2 === 1 ? text.toLowerCase() : null }));
   // « Envoyer » (/) n'est la page courante que sur l'accueil : un partage ouvert a aussi « / » pour chemin.
   const pathHere = (p: string) => (router.current.name !== "notfound" && location.pathname === href(p) && (p !== "/" || router.current.name === "home") ? "page" : undefined);
-  const back = $derived(BACK.has(router.current.name));
+  // « Mes partages » est un onglet racine quand la barre d'onglets est là : pas de Retour.
+  const back = $derived(BACK.has(router.current.name) && !(tabs && router.current.name === "envois"));
   let small = $state("");
   let raf = 0;
   function measure() {
