@@ -31,6 +31,7 @@ function setup(opts: FakeServerOpts = {}) {
   const fake = createFakeServer(opts);
   const seen: Seen[] = [];
   const statuses: string[] = [];
+  const unlocks: string[] = []; // corps des réponses 200 d'unlock (audit D2 : longueur)
   const fetch = (async (u: RequestInfo | URL, i?: RequestInit) => {
     const req = new Request(u, i);
     const copy = req.clone();
@@ -42,9 +43,10 @@ function setup(opts: FakeServerOpts = {}) {
     });
     const r = await fake.handle(req);
     statuses.push(`${req.method} ${new URL(req.url).pathname} ${r.status}`);
+    if (r.status === 200 && new URL(req.url).pathname === "/api/shares/unlock") unlocks.push(await r.clone().text());
     return r;
   }) as typeof globalThis.fetch;
-  return { fake, seen, statuses, net: { fetch, retryDelayMs: 1 } };
+  return { fake, seen, statuses, unlocks, net: { fetch, retryDelayMs: 1 } };
 }
 
 const text = (s: string) => ({ kind: "text" as const, name: "", mime: "text/plain", data: utf8(s) });
@@ -200,6 +202,16 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     // Revue D42-22 : la deuxième personne qui revient n'est pas la dernière, même à 0.
     const back = await openShare(r.link, PW, ORIGIN, { grant: second.grant }, net);
     expect([back.opensLeft, back.lastOpen]).toEqual([0, false]);
+  });
+
+  it("unlock : last_open entier 0 ou 1, même longueur de réponse pour les deux (audit D2 du 12 novembre)", async ({ expect }) => {
+    const { net, unlocks } = setup();
+    const r = await share(net, 2);
+    await openShare(r.link, PW, ORIGIN, undefined, net);
+    await openShare(r.link, PW, ORIGIN, undefined, net);
+    const bodies = unlocks.map((t) => JSON.parse(t) as Record<string, unknown>);
+    expect(bodies.map((b) => b["last_open"])).toEqual([0, 1]);
+    expect(unlocks[0]!.length).toBe(unlocks[1]!.length);
   });
 
   it("destroyShare par le lien de gestion, puis par lien + mot de passe", async ({ expect }) => {

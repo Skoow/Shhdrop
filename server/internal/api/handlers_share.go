@@ -398,9 +398,19 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 		Grant     string `json:"grant"`
 		OpensLeft int    `json:"opens_left"`
 		// last_open : dernière ouverture permise (n = opens_issued, plus aucune) ; seule
-		// celle-ci se voit proposer « Détruire » (revue D42-22).
-		LastOpen bool `json:"last_open"`
-	}{s.sig.Issue(token.Download, id, openN, time.Unix(exp, 0)), m.Segments, b64.EncodeToString(envelope), o.Grant, o.OpensLeft, o.LastOpen})
+		// celle-ci se voit proposer « Détruire » (revue D42-22). Entier 0 ou 1, pas un
+		// booléen : true et false n'ont pas la même longueur, que verrait un observateur du
+		// trafic chiffré (audit des partages du 12 novembre, D2 ; spec §29.8).
+		LastOpen int `json:"last_open"`
+	}{s.sig.Issue(token.Download, id, openN, time.Unix(exp, 0)), m.Segments, b64.EncodeToString(envelope), o.Grant, o.OpensLeft, b2i(o.LastOpen)})
+}
+
+// b2i : 1 pour vrai, 0 pour faux.
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {

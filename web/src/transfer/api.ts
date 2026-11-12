@@ -366,11 +366,15 @@ function opensLeft(n: number, reopen: boolean): number {
   return n;
 }
 
-/** last_open (revue D42-22) : booléen exigé ; vrai seulement à 0 ouverture restante. */
+/**
+ * last_open (revue D42-22) : entier 0 ou 1 exactement, tout le reste refusé (un booléen
+ * aussi : true et false n'ont pas la même longueur, que verrait un observateur du trafic
+ * chiffré ; audit D2 du 12 novembre, spec §29.8). 1 seulement à 0 ouverture restante.
+ */
 function lastOpenOf(o: Record<string, unknown>, left: number): boolean {
   const v = o["last_open"];
-  if (typeof v !== "boolean" || (v && left !== 0)) throw new BadResponse();
-  return v;
+  if ((v !== 0 && v !== 1) || (v === 1 && left !== 0)) throw new BadResponse();
+  return v === 1;
 }
 
 function grantOf(o: Record<string, unknown>): string {

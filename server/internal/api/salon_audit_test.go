@@ -76,3 +76,27 @@ func TestAuditHeadConsommeBudget(t *testing.T) {
 		t.Fatal("contenu")
 	}
 }
+
+// D2 de l'audit des partages : la longueur de la réponse d'unlock révélait la dernière
+// ouverture (true fait un octet de moins que false) à un observateur du trafic chiffré.
+// last_open est un entier 0 ou 1 : même longueur pour les deux. Reste opens_left (1 ou 2
+// chiffres, risque résiduel faible, spec §36).
+func TestAuditUnlockLength(t *testing.T) {
+	e := newEnv(t, false, nil)
+	k := newKeys()
+	c := e.create(t, "", k, 1, 2)
+	e.upload(t, c, 1)
+	var longueurs []int
+	for i, attendu := range []float64{0, 1} {
+		w := e.do(req{method: "POST", path: "/api/shares/unlock", hdr: access(k),
+			body: mustJSON(map[string]string{"proof": enc.EncodeToString(k.preuve)})})
+		expect(t, w, 200, "")
+		if m := jsonOf(t, w); m["last_open"] != attendu {
+			t.Fatalf("ouverture %d : last_open = %v (%T)", i+1, m["last_open"], m["last_open"])
+		}
+		longueurs = append(longueurs, w.Body.Len())
+	}
+	if longueurs[0] != longueurs[1] {
+		t.Fatal("longueurs des réponses d'unlock :", longueurs)
+	}
+}
