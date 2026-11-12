@@ -193,9 +193,10 @@ func TestVolatileNonEcrite(t *testing.T) {
 	if err != nil || fi.Size() != 0 {
 		t.Fatal("fichier de conversation", fi, err)
 	}
-	s.mu.Lock()
-	n := len(s.index)
-	s.mu.Unlock()
+	var n int
+	sous(s, func() {
+		n = len(s.index)
+	})
 	if n != 0 || len(lireSuite(t, s, avant, 100)) != 0 {
 		t.Fatal("volatile indexée ou servie", n)
 	}
@@ -273,18 +274,20 @@ func TestRetirerParAuteurSeul(t *testing.T) {
 			t.Fatal(seq, err)
 		}
 	}
-	s.mu.Lock()
-	emplacementX := s.index[0].emplacement
-	s.mu.Unlock()
+	var emplacementX uint32
+	sous(s, func() {
+		emplacementX = s.index[0].emplacement
+	})
 	if err := b.m.Retirer(a, x); err != nil {
 		t.Fatal(err)
 	}
 	if servie(x) {
 		t.Fatal("trame retirée encore servie")
 	}
-	s.mu.Lock()
-	e := s.index[0]
-	s.mu.Unlock()
+	var e entree
+	sous(s, func() {
+		e = s.index[0]
+	})
 	if !e.efface() || e.seq != x {
 		t.Fatal("entrée", e)
 	}
@@ -423,9 +426,9 @@ func TestKeyPackageGardePourLeRattrapage(t *testing.T) {
 	c := b.creer(t, 3)
 	eg, g := b.entrerMembre(t, c, true)
 	s := g.salon
-	s.mu.Lock()
-	s.sieges[g.siege].horsLigneDepuis = time.Time{} // WebSocket ouvert (Task 9)
-	s.mu.Unlock()
+	sous(s, func() {
+		s.sieges[g.siege].horsLigneDepuis = time.Time{} // WebSocket ouvert (Task 9)
+	})
 	vu := dernierSeq(s) // dernier rang reçu par le créateur avant la coupure
 	_, arrivant := b.entrerMembre(t, c, false)
 	kp := trameD(0, 42) // en-tête de contrôle : non volatile, règle « désactivé »
@@ -529,10 +532,12 @@ func TestQuitter(t *testing.T) {
 	if err := b.m.Quitter(a); err != nil {
 		t.Fatal(err)
 	}
-	s.mu.Lock()
-	dernier := s.journal[len(s.journal)-1]
-	libre := s.sieges[a.siege] == nil
-	s.mu.Unlock()
+	var dernier evenement
+	var libre bool
+	sous(s, func() {
+		dernier = s.journal[len(s.journal)-1]
+		libre = s.sieges[a.siege] == nil
+	})
 	if !bytes.Equal(dernier.enr, EnrDepart(dernier.seq, a.siege)) || !libre {
 		t.Fatal("départ", dernier, libre)
 	}
@@ -554,11 +559,11 @@ func TestJournalBorne(t *testing.T) {
 	s := a.salon
 	// Journal rempli directement jusqu'à deux places du seuil (les reprises par rejoindre
 	// sont plafonnées à repriseMax par heure, Task 9).
-	s.mu.Lock()
-	for len(s.journal) < journalMax-nbSieges-2 {
-		s.annoncerLocked(func(seq uint64) []byte { return EnrDepart(seq, 9) }, false)
-	}
-	s.mu.Unlock()
+	sous(s, func() {
+		for len(s.journal) < journalMax-nbSieges-2 {
+			s.annoncerLocked(func(seq uint64) []byte { return EnrDepart(seq, 9) }, false)
+		}
+	})
 	var err error
 	n := 0
 	for ; n <= journalMax; n++ {
@@ -570,9 +575,10 @@ func TestJournalBorne(t *testing.T) {
 	if !errors.Is(err, ErrLimit) || n != 2 {
 		t.Fatal("reprises :", n, err)
 	}
-	s.mu.Lock()
-	lj := len(s.journal)
-	s.mu.Unlock()
+	var lj int
+	sous(s, func() {
+		lj = len(s.journal)
+	})
 	if lj > journalMax || lj != journalMax-nbSieges {
 		t.Fatal("journal", lj)
 	}
@@ -597,9 +603,10 @@ func TestRecevoirApresDestruction(t *testing.T) {
 	if _, err := b.m.Recevoir(mb, trameD(0, 2), nil); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	mb.salon.mu.Lock()
-	n := len(mb.salon.index)
-	mb.salon.mu.Unlock()
+	var n int
+	sous(mb.salon, func() {
+		n = len(mb.salon.index)
+	})
 	if n != 0 || len(lireSuite(t, mb.salon, 0, 100)) != 0 {
 		t.Fatal("index gardé après destruction", n)
 	}
@@ -624,17 +631,18 @@ func TestRetirerApresReprise(t *testing.T) {
 	}
 	// Invité : reprise (0x0A, nouveau jeton) simulée comme la fera la Task 9.
 	xa := b.recevoir(t, a, trameD(0, 1))
-	s.mu.Lock()
-	jeton, x, err := s.installerLocked(a.siege, true, b.h.Now())
-	s.mu.Unlock()
+	var jeton [32]byte
+	var x *siege
+	var err error
+	sous(s, func() {
+		jeton, x, err = s.installerLocked(a.siege, true, b.h.Now())
+	})
 	if err != nil || x.emis <= xa {
 		t.Fatal("reprise", err)
 	}
-	s.mu.Lock()
-	b.m.idxMu.Lock()
-	b.m.index[x.jetonV] = s
-	b.m.idxMu.Unlock()
-	s.mu.Unlock()
+	sous(s, func() {
+		b.m.indexer(func(index map[[32]byte]*salon) { index[x.jetonV] = s })
+	})
 	a2, err := b.m.Membre(jeton[:])
 	if err != nil {
 		t.Fatal(err)

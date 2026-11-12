@@ -383,9 +383,10 @@ func TestAbsentRevientAvant10Min(t *testing.T) {
 		}
 		b.h.avancer(2 * time.Minute)
 		b.m.Tick()
-		s.mu.Lock()
-		libere := s.sieges[ec.Siege] == nil
-		s.mu.Unlock()
+		var libere bool
+		sous(s, func() {
+			libere = s.sieges[ec.Siege] == nil
+		})
 		if libere {
 			t.Fatal("siège de C libéré alors qu'il est en ligne")
 		}
@@ -417,9 +418,9 @@ func TestEffaceePendantRattrapage(t *testing.T) {
 			b.recevoir(t, g, trameD(0, i))
 			time.Sleep(time.Millisecond)
 			cb := connDe(s, eb.Siege)
-			s.mu.Lock()
-			sorti = !cb.direct
-			s.mu.Unlock()
+			sous(s, func() {
+				sorti = !cb.direct
+			})
 		}
 		if !sorti {
 			t.Fatal("jamais sorti du direct")
@@ -789,10 +790,12 @@ func TestEffacesParLots(t *testing.T) {
 	}
 	var recus []uint64
 	for tour := 0; ; tour++ {
-		s.mu.Lock()
-		lot := cn.ajouterEffaces(nil)
-		reste := len(cn.effaces)
-		s.mu.Unlock()
+		var lot [][]byte
+		var reste int
+		sous(s, func() {
+			lot = cn.ajouterEffaces(nil)
+			reste = len(cn.effaces)
+		})
 		if len(lot) > lotEffaces {
 			t.Fatal("lot trop grand :", len(lot))
 		}
@@ -991,6 +994,34 @@ func TestReconnexion0x0EInstantaneSeul(t *testing.T) {
 		synctest.Wait()
 		if got := effaces(l); !slices.Equal(got, []uint64{x}) {
 			t.Fatal("0x0E à l'accueil :", got)
+		}
+		finir(t, l)
+	})
+}
+
+// Décision du 12 novembre (réserve 6) : reprise par WebSocket, puis reconnexion ordinaire
+// avec depuis = 0 : le rattrapage part du dernier 0x0A ; aucune trame antérieure n'est servie.
+func TestReprisePuisReconnexionDepuisZero(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		_, g := b.entrerMembre(t, c, true)
+		eb, _ := b.entrerMembre(t, c, false)
+		s := g.salon
+		avant := b.recevoir(t, g, trameD(0, 1))
+		lr := b.connecter(eb.Jeton, DepuisReprise)
+		synctest.Wait()
+		reprise := dernierSeq(s)
+		finir(t, lr)
+		apres := b.recevoir(t, g, trameD(0, 2))
+		l := b.connecter(eb.Jeton, 0)
+		synctest.Wait()
+		r := rangs(l.enrs())
+		if slices.Contains(r, avant) || !slices.Equal(r, []uint64{apres}) {
+			t.Fatal("rattrapage après la reprise :", r, "reprise au rang", reprise)
+		}
+		if l.enrs()[0].seq != reprise {
+			t.Fatal("0x0D au rang", l.enrs()[0].seq)
 		}
 		finir(t, l)
 	})

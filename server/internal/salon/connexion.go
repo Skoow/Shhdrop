@@ -295,7 +295,9 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 		s.plusAttenduLocked(mb.siege) // nouvelle identité (plan, point 8)
 		point = seq
 	} else {
-		point = min(max(a.Depuis, x.emis), s.seq)
+		// Borne dédiée (borneEffaces) : après une reprise par WebSocket, rien d'antérieur au
+		// 0x0A n'est servi, comme pour les 0x0E ci-dessous (décision du 12 novembre).
+		point = min(max(a.Depuis, x.borneEffaces()), s.seq)
 	}
 	// Accueil construit avant toute inscription : une panique ici ne laisse ni connexion
 	// fantôme ni siège « en ligne ».
@@ -810,12 +812,17 @@ func (m *Manager) FermerTout() {
 	}
 	m.mu.Unlock()
 	for _, s := range salons {
-		s.mu.Lock()
-		for _, c := range s.conns {
-			if c != nil {
-				c.arreter(CodeArret, nil)
-			}
+		s.arreterConnexions()
+	}
+}
+
+// arreterConnexions : chaque connexion du salon fermée en 1001 (FermerTout).
+func (s *salon) arreterConnexions() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.conns {
+		if c != nil {
+			c.arreter(CodeArret, nil)
 		}
-		s.mu.Unlock()
 	}
 }

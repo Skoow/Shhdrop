@@ -390,9 +390,10 @@ func TestRejoindreCreateurReprend0(t *testing.T) {
 		t.Fatal("nouveau jeton :", err)
 	}
 	s := b.etat(t, c)
-	s.mu.Lock()
-	dernier := s.journal[len(s.journal)-1]
-	s.mu.Unlock()
+	var dernier evenement
+	sous(s, func() {
+		dernier = s.journal[len(s.journal)-1]
+	})
 	if dernier.seq != e2.Seq || !bytes.Equal(dernier.enr, EnrReprise(e2.Seq, 0, e2.Nonce)) {
 		t.Fatalf("journal : %+v", dernier)
 	}
@@ -511,11 +512,11 @@ func TestMauvaisMotDePasse(t *testing.T) {
 	// Seule reste la tombe (fini, sans siège ni jeton), oubliée à l'échéance.
 	b.m.mu.Lock()
 	for _, s := range b.m.salons {
-		s.mu.Lock()
-		if !s.fini || s.occupesLocked() != 0 || len(s.jetons) != 0 || len(s.journal) != 0 {
-			t.Error("état mémoire restant")
-		}
-		s.mu.Unlock()
+		sous(s, func() {
+			if !s.fini || s.occupesLocked() != 0 || len(s.jetons) != 0 || len(s.journal) != 0 {
+				t.Error("état mémoire restant")
+			}
+		})
 	}
 	b.m.mu.Unlock()
 	b.m.idxMu.Lock()
@@ -568,15 +569,16 @@ func TestEntreeAnnoncee(t *testing.T) {
 	for _, createur := range []bool{false, true, false} {
 		e := b.entrer(t, c, createur)
 		s := b.etat(t, c)
-		s.mu.Lock()
+		var seq uint64
 		var trouve bool
-		for _, ev := range s.journal {
-			if ev.seq == e.Seq {
-				trouve = bytes.Equal(ev.enr, EnrArrivee(e.Seq, e.Siege, e.Nonce))
+		sous(s, func() {
+			for _, ev := range s.journal {
+				if ev.seq == e.Seq {
+					trouve = bytes.Equal(ev.enr, EnrArrivee(e.Seq, e.Siege, e.Nonce))
+				}
 			}
-		}
-		seq := s.seq
-		s.mu.Unlock()
+			seq = s.seq
+		})
 		if !trouve || seq != e.Seq || e.Nonce == [16]byte{} {
 			t.Fatalf("arrivée %+v absente du journal", e)
 		}
@@ -648,10 +650,10 @@ func TestMembre(t *testing.T) {
 	}
 	s := b.etat(t, c)
 	h := sha256.Sum256(e.Jeton[:])
-	s.mu.Lock()
-	delete(s.jetons, h)
-	s.revoques[h] = struct{}{}
-	s.mu.Unlock()
+	sous(s, func() {
+		delete(s.jetons, h)
+		s.revoques[h] = struct{}{}
+	})
 	if _, err := b.m.Membre(e.Jeton[:]); !errors.Is(err, ErrExcluded) {
 		t.Fatal("jeton révoqué :", err)
 	}
@@ -678,9 +680,10 @@ func TestTickLibereHorsLigne(t *testing.T) {
 		t.Fatal("jeton après libération :", err)
 	}
 	s := b.etat(t, c)
-	s.mu.Lock()
-	dernier := s.journal[len(s.journal)-1]
-	s.mu.Unlock()
+	var dernier evenement
+	sous(s, func() {
+		dernier = s.journal[len(s.journal)-1]
+	})
 	if !bytes.Equal(dernier.enr, EnrDepart(dernier.seq, g.Siege)) || dernier.seq != g.Seq+1 {
 		t.Fatalf("journal : %+v", dernier)
 	}
@@ -718,28 +721,29 @@ func TestJournalPlein(t *testing.T) {
 	c := b.creer(t, 10)
 	g := b.entrer(t, c, false)
 	s := b.etat(t, c)
-	s.mu.Lock()
-	for len(s.journal) < journalMax-nbSieges {
-		s.annoncerLocked(func(seq uint64) []byte { return EnrDepart(seq, 9) }, false)
-	}
-	seq := s.seq
-	s.mu.Unlock()
+	var seq uint64
+	sous(s, func() {
+		for len(s.journal) < journalMax-nbSieges {
+			s.annoncerLocked(func(seq uint64) []byte { return EnrDepart(seq, 9) }, false)
+		}
+		seq = s.seq
+	})
 	if _, err := b.m.Rejoindre(c.acces, c.preuve, nil); !errors.Is(err, ErrLimit) {
 		t.Fatal("entrée, journal plein :", err)
 	}
 	if _, err := b.m.Rejoindre(c.acces, c.preuve, c.gestion); !errors.Is(err, ErrLimit) {
 		t.Fatal("créateur, journal plein :", err)
 	}
-	s.mu.Lock()
-	if s.seq != seq || s.occupesLocked() != 1 || s.arrivees != 1 || len(s.jetons) != 1 {
-		s.mu.Unlock()
-		t.Fatal("état changé par une entrée refusée")
-	}
-	s.mu.Unlock()
+	sous(s, func() {
+		if s.seq != seq || s.occupesLocked() != 1 || s.arrivees != 1 || len(s.jetons) != 1 {
+			t.Fatal("état changé par une entrée refusée")
+		}
+	})
 	b.depart(s, g.Siege)
-	s.mu.Lock()
-	n := len(s.journal)
-	s.mu.Unlock()
+	var n int
+	sous(s, func() {
+		n = len(s.journal)
+	})
 	if n != journalMax-nbSieges+1 || n > journalMax {
 		t.Fatal("journal", n)
 	}
@@ -823,9 +827,10 @@ func TestPasDeRecreationApresDestruction(t *testing.T) {
 	if err := b.m.detruire(id); err != nil {
 		t.Fatal(err)
 	}
-	s.mu.Lock()
-	fini := s.fini
-	s.mu.Unlock()
+	var fini bool
+	sous(s, func() {
+		fini = s.fini
+	})
 	if !fini {
 		t.Fatal("drapeau fini absent")
 	}
@@ -873,12 +878,12 @@ func TestInvariantJournal(t *testing.T) {
 			invariantJournal(t, s)
 		}
 		if tour == 0 {
-			s.mu.Lock()
-			for len(s.journal)+s.occupesLocked() < journalMax-nbSieges {
-				s.seq++
-				s.journal = append(s.journal, evenement{seq: s.seq, enr: EnrDepart(s.seq, 9)})
-			}
-			s.mu.Unlock()
+			sous(s, func() {
+				for len(s.journal)+s.occupesLocked() < journalMax-nbSieges {
+					s.seq++
+					s.journal = append(s.journal, evenement{seq: s.seq, enr: EnrDepart(s.seq, 9)})
+				}
+			})
 		}
 		b.h.avancer(10 * time.Minute)
 		b.m.Tick()
@@ -1084,4 +1089,11 @@ func TestVivantsRefusNonCompte(t *testing.T) {
 	if n != 1 {
 		t.Fatal("refus comptés", n)
 	}
+}
+
+// sous : f sous le verrou du salon (defer : jamais d'Unlock explicite, même sur t.Fatal).
+func sous(s *salon, f func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f()
 }

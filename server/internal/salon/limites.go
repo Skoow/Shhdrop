@@ -11,14 +11,19 @@ import (
 //   - cadence : toute trame, rafale de 20 puis 1 par seconde (60 par minute) ;
 //   - horaire : trames non volatiles, 1 200 puis 1 200 par heure (1 par 3 s).
 //
-// Un seau plein au départ autorise sa capacité d'un coup : sur une heure glissante, un siège
-// peut ranger jusqu'à 1 200 + 1 200 trames non volatiles (en moyenne 1 200 par heure).
-// Les seaux sont ceux du numéro de siège, pas de son occupant : ni une reprise (nouveau jeton)
-// ni un départ suivi d'une arrivée ne les remplissent.
+// Les seaux d'un siège sont remis à neuf à l'arrivée d'un nouvel occupant (0x02,
+// installerLocked) : il n'hérite pas du compte d'un autre (une arrivée coûte déjà une place
+// sur 5 × max_members et un rejoindre limité). Une reprise (0x0A, par WebSocket ou du
+// créateur par rejoindre) les garde : recharger la page ne remet rien à zéro.
 
 const (
-	rafaleSiege     = 20
-	cadenceSeconde  = 1.0
+	rafaleSiege    = 20
+	cadenceSeconde = 1.0
+	// horaireMax, horaireParHeure : les messages sont illimités pour un usage normal (décision
+	// du propriétaire) ; ce seau n'arrête que les abus. Plein au départ, il laisse passer une
+	// rafale : sur une heure glissante, un siège peut ranger jusqu'à environ 2 400 trames non
+	// volatiles (1 200 d'un coup, plus la recharge), 1 200 par heure en régime établi. Accepté
+	// (décision du 12 novembre) : environ +4 % sur le dimensionnement du disque (plan, point 10).
 	horaireMax      = 1200
 	horaireParHeure = 1200.0
 )

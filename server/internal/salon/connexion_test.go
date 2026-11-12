@@ -333,9 +333,9 @@ func TestJetonRevoque(t *testing.T) {
 		s := b.etat(t, c)
 		jeton := [32]byte(aleatoire())
 		h := sha256.Sum256(jeton[:])
-		s.mu.Lock()
-		s.revoques[h] = struct{}{}
-		s.mu.Unlock()
+		sous(s, func() {
+			s.revoques[h] = struct{}{}
+		})
 		b.m.idxMu.Lock()
 		b.m.index[h] = s
 		b.m.idxMu.Unlock()
@@ -563,10 +563,12 @@ func TestReprise(t *testing.T) {
 		la := b.connecter(ea.Jeton, DepuisReprise)
 		synctest.Wait()
 		s := g.salon
-		s.mu.Lock()
-		ev := s.journal[len(s.journal)-1]
-		nonce := s.sieges[ea.Siege].nonce
-		s.mu.Unlock()
+		var ev evenement
+		var nonce [16]byte
+		sous(s, func() {
+			ev = s.journal[len(s.journal)-1]
+			nonce = s.sieges[ea.Siege].nonce
+		})
 		if nonce == ea.Nonce {
 			t.Fatal("nonce inchangé")
 		}
@@ -675,16 +677,16 @@ func TestClientLentBascule(t *testing.T) {
 			seq := b.recevoir(t, g, trameD(d, i))
 			envoi[seq] = time.Now()
 			recuAvantSuivant(t, la, seq)
-			s.mu.Lock()
-			cb := s.conns[eb.Siege]
-			if len(cb.file) > fileMax {
-				s.mu.Unlock()
-				t.Fatal("file", len(cb.file))
-			}
-			if !cb.direct {
-				bascule = true
-			}
-			s.mu.Unlock()
+			var cb *connexion
+			sous(s, func() {
+				cb = s.conns[eb.Siege]
+				if len(cb.file) > fileMax {
+					t.Fatal("file", len(cb.file))
+				}
+				if !cb.direct {
+					bascule = true
+				}
+			})
 			time.Sleep(time.Millisecond)
 		}
 		if !bascule {
@@ -778,12 +780,11 @@ func TestClientLentFerme(t *testing.T) {
 			seq := b.recevoir(t, g, trameD(0, i))
 			envoi[seq] = time.Now()
 			recuAvantSuivant(t, la, seq)
-			s.mu.Lock()
-			if cb := s.conns[eb.Siege]; cb != nil && len(cb.file) > fileMax {
-				s.mu.Unlock()
-				t.Fatal("file", len(cb.file))
-			}
-			s.mu.Unlock()
+			sous(s, func() {
+				if cb := s.conns[eb.Siege]; cb != nil && len(cb.file) > fileMax {
+					t.Fatal("file", len(cb.file))
+				}
+			})
 			time.Sleep(10 * time.Millisecond)
 		}
 		attendreFin(t, lb)
@@ -985,9 +986,10 @@ func TestTrameFrequenceIP(t *testing.T) {
 		}
 		synctest.Wait()
 		s := a.salon
-		s.mu.Lock()
-		n := len(s.index)
-		s.mu.Unlock()
+		var n int
+		sous(s, func() {
+			n = len(s.index)
+		})
 		if n != 120 {
 			t.Fatal("trames rangées", n)
 		}
@@ -1234,9 +1236,10 @@ func TestRetirerWS(t *testing.T) {
 		la.envoyer(binary.BigEndian.AppendUint64([]byte{DemRetirer}, seq))
 		synctest.Wait()
 		s := a.salon
-		s.mu.Lock()
-		eff := s.index[0].efface()
-		s.mu.Unlock()
+		var eff bool
+		sous(s, func() {
+			eff = s.index[0].efface()
+		})
 		if !eff || la.codeFerme() != 0 {
 			t.Fatal("trame non retirée", la.codeFerme())
 		}
@@ -1482,9 +1485,11 @@ func TestPaniqueAccueilSansFantome(t *testing.T) {
 		if err := <-la.fini; !errors.Is(err, errPanique) || la.codeFerme() != 1011 {
 			t.Fatal("Servir :", err, la.codeFerme())
 		}
-		s.mu.Lock()
-		fantome, hors := s.conns[ea.Siege] != nil, !s.sieges[ea.Siege].horsLigneDepuis.IsZero()
-		s.mu.Unlock()
+		var fantome bool
+		var hors bool
+		sous(s, func() {
+			fantome, hors = s.conns[ea.Siege] != nil, !s.sieges[ea.Siege].horsLigneDepuis.IsZero()
+		})
 		if fantome || !hors {
 			t.Fatal("connexion fantôme :", fantome, "hors ligne :", hors)
 		}

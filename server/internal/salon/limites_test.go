@@ -315,3 +315,62 @@ func TestDisquePleinENOSPC(t *testing.T) {
 		finir(t, lg)
 	})
 }
+
+// Décision du 12 novembre (réserve 3) : un nouvel occupant (0x02) trouve des seaux neufs, il
+// n'hérite pas du compte de l'occupant précédent ; une reprise (0x0A par WebSocket, ou le
+// créateur qui revient par rejoindre) garde les compteurs.
+func TestLimiteNouvelOccupant(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := bancLimite(t)
+		c := b.creer(t, 4)
+		b.entrerMembre(t, c, true)
+		ea, a := b.entrerMembre(t, c, false)
+		vider := func(mb Membre) {
+			t.Helper()
+			for i := range 20 {
+				b.essai(t, mb, trameD(dVolatile, i))
+			}
+			if b.essai(t, mb, trameD(dVolatile, 20)) == 0 {
+				t.Fatal("seau non vidé")
+			}
+		}
+		vider(a)
+		// Reprise par WebSocket : même siège, compteurs gardés.
+		lr := b.connecter(ea.Jeton, DepuisReprise)
+		synctest.Wait()
+		if b.essai(t, a, trameD(dVolatile, 21)) == 0 {
+			t.Fatal("reprise par WebSocket : compteurs remis à zéro")
+		}
+		finir(t, lr)
+		// Départ, puis un nouvel arrivant prend le même siège : seaux neufs.
+		if err := b.m.Quitter(a); err != nil {
+			t.Fatal(err)
+		}
+		_, n := b.entrerMembre(t, c, false)
+		if n.siege != a.siege {
+			t.Fatal("siège :", n.siege)
+		}
+		for i := range 20 {
+			if d := b.essai(t, n, trameD(dVolatile, i)); d != 0 {
+				t.Fatal("nouvel occupant : compte hérité", i, d)
+			}
+		}
+	})
+}
+
+// Quota disque dépassé (EDQUOT, injecté) : traité comme un disque plein.
+func TestDisqueQuotaEDQUOT(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	_, g := b.entrerMembre(t, c, true)
+	s := g.salon
+	f := avecPanne(t, s.conv)
+	f.ecriturePartielle, f.errEcriture = true, syscall.EDQUOT
+	seq := dernierSeq(s)
+	if _, err := b.m.Recevoir(g, trameD(0, 1), nil); !errors.Is(err, ErrPlein) {
+		t.Fatal(err)
+	}
+	if dernierSeq(s) != seq || s.conv.Taille() != 0 {
+		t.Fatal("rang consommé ou écriture partielle")
+	}
+}

@@ -343,13 +343,15 @@ func (m *Manager) Rejoindre(kAcces, kPreuve, sGestion []byte) (Entree, error) {
 		// à refaire rejoindre, et deux appareils du créateur se délogeraient en boucle).
 		c.arreter(CodeRemplace, EnrFin(s.seq, RaisonRemplace))
 	}
-	m.idxMu.Lock()
 	if ancien != nil {
 		delete(s.jetons, ancien.jetonV)
-		delete(m.index, ancien.jetonV)
 	}
-	m.index[x.jetonV] = s
-	m.idxMu.Unlock()
+	m.indexer(func(index map[[32]byte]*salon) {
+		if ancien != nil {
+			delete(index, ancien.jetonV)
+		}
+		index[x.jetonV] = s
+	})
 	return Entree{
 		Jeton: jeton, Siege: n, Seq: x.emis, Nonce: x.nonce, ExpiresIn: secs(exp - now.Unix()),
 		MaxMembers: maxMembers, MembersCanDestroy: mcd == 1, BudgetLeft: BudgetPieces - piecesBytes,
@@ -400,10 +402,7 @@ func (m *Manager) etat(id string, exp int64, maxMembers int) (*salon, error) {
 			conv.Detruire() // une destruction (tombe) ou une autre création est passée entre-temps
 		}
 	}
-	s.mu.Lock()
-	fini := s.fini
-	s.mu.Unlock()
-	if fini {
+	if s.estFini() {
 		return nil, ErrNotFound
 	}
 	return s, nil
@@ -441,30 +440,7 @@ func (m *Manager) detruire(id string) error {
 	}
 	m.finirLocked(id)
 	m.mu.Unlock()
-	var errs []error
-	s.mu.Lock()
-	if !s.fini {
-		s.fini = true
-		m.idxMu.Lock()
-		for h := range s.jetons {
-			delete(m.index, h)
-		}
-		for h := range s.revoques {
-			delete(m.index, h)
-		}
-		m.idxMu.Unlock()
-		clear(s.jetons)
-		clear(s.revoques)
-		s.sieges = [nbSieges]*siege{}
-		s.journal = nil
-		s.index = nil
-		s.pieces = nil
-		s.echeances = nil
-	}
-	if s.conv != nil {
-		errs = append(errs, s.conv.Detruire()) // idempotent : réessaie la suppression
-	}
-	s.mu.Unlock()
+	errs := []error{m.viderEtat(s)}
 
 	var pieces []string
 	rows, err := m.cfg.DB.Query(`SELECT id FROM salon_pieces WHERE salon_id=?`, id)
@@ -503,9 +479,7 @@ func (m *Manager) Gestion(sGestion []byte) (expiresIn time.Duration, present int
 	s := m.salons[id]
 	m.mu.Unlock()
 	if s != nil {
-		s.mu.Lock()
-		present = s.occupesLocked()
-		s.mu.Unlock()
+		present = s.occupes()
 	}
 	return secs(exp - now), present, nil
 }
@@ -560,9 +534,7 @@ func (m *Manager) departLocked(s *salon, n uint8) {
 	s.annoncerLocked(func(seq uint64) []byte { return EnrDepart(seq, n) }, true)
 	s.plusAttenduLocked(n)
 	jv, _ := s.oublierLocked(n)
-	m.idxMu.Lock()
-	delete(m.index, jv)
-	m.idxMu.Unlock()
+	m.indexer(func(index map[[32]byte]*salon) { delete(index, jv) })
 }
 
 // Tick : une passe d'entretien (chaque seconde, Run à la Task 15) : trames « 10 min » et
@@ -644,4 +616,49 @@ func (m *Manager) UsedBytes() int64 {
 		return m.cfg.StorageMax
 	}
 	return u
+}
+
+// viderEtat : état mémoire du salon détruit sous son verrou (drapeau fini, jetons oubliés,
+// index, journal et échéances vidés), puis conversation détruite (idempotent : réessaie la
+// suppression du fichier).
+func (m *Manager) viderEtat(s *salon) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.fini {
+		s.fini = true
+		m.indexer(func(index map[[32]byte]*salon) {
+			for h := range s.jetons {
+				delete(index, h)
+			}
+			for h := range s.revoques {
+				delete(index, h)
+			}
+		})
+		clear(s.jetons)
+		clear(s.revoques)
+		s.sieges = [nbSieges]*siege{}
+		s.journal = nil
+		s.index = nil
+		s.pieces = nil
+		s.echeances = nil
+	}
+	if s.conv != nil {
+		return s.conv.Detruire()
+	}
+	return nil
+}
+
+// occupes : sièges occupés, sous le verrou du salon.
+func (s *salon) occupes() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.occupesLocked()
+}
+
+// indexer : f sur Manager.index, sous idxMu (souvent pris sous salon.mu : defer, jamais
+// d'Unlock explicite sous ce verrou).
+func (m *Manager) indexer(f func(index map[[32]byte]*salon)) {
+	m.idxMu.Lock()
+	defer m.idxMu.Unlock()
+	f(m.index)
 }

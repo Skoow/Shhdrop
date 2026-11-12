@@ -57,7 +57,7 @@ func (s *salon) membreLocked(mb Membre, now time.Time) bool {
 //
 // Garde-fous (Task 12), sans rang consommé ni jeton pris : trame non volatile alors que
 // l'usage (partages, pièces, conversations) plus une trame dépasse StorageMax, usage
-// illisible, ou disque réellement plein (ENOSPC, écriture annulée) → ErrPlein (0x0C) ; seaux
+// illisible, ou disque réellement plein (ENOSPC, EDQUOT ; écriture annulée) → ErrPlein (0x0C) ; seaux
 // du siège vides (limites.go) → *Attente (0x0B).
 func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, error) {
 	s := mb.salon
@@ -72,7 +72,10 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 		return 0, ErrBadRequest
 	}
 	// Usage lu avant s.mu (il prend Manager.mu, pris avant salon.mu dans l'ordre des verrous) :
-	// des trames rangées en même temps dans d'autres salons peuvent le dépasser d'autant.
+	// des trames rangées en même temps dans d'autres salons, ou des partages créés en même
+	// temps, peuvent dépasser StorageMax d'autant : au plus une trame (4 168 o) par Recevoir
+	// simultané, environ 8 Mo pour 2 000 WebSocket. Accepté (décision du 12 novembre) : la
+	// création d'un salon garde 2 Gio de marge.
 	plein := !h.Volatile && m.plein(TailleEmplacement)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -101,7 +104,7 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, piece *[16]byte) (uint64, er
 	e := uint32(effaceMarque)
 	if h.Regle != Instantane || attendus != 0 {
 		if e, err = s.conv.Ajouter(trame); err != nil {
-			if errors.Is(err, syscall.ENOSPC) {
+			if errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT) {
 				return 0, ErrPlein // écriture annulée par Ajouter (fichier à sa taille d'avant)
 			}
 			return 0, err

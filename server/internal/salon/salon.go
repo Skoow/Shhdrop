@@ -69,7 +69,8 @@ type salon struct {
 	conv      *Conversation // nil pour la tombe d'un salon détruit sans état
 	// conns : connexion WebSocket de chaque siège (une au plus, connexion.go).
 	conns [nbSieges]*connexion
-	// limites : seaux des trames montantes de chaque numéro de siège (limites.go).
+	// limites : seaux des trames montantes de chaque siège, remis à neuf à chaque nouvel
+	// occupant, gardés par une reprise (limites.go).
 	limites [nbSieges]limiteSiege
 	// now : horloge du gestionnaire (Config.Now), pour les échéances lues hors de Tick.
 	now func() time.Time
@@ -139,6 +140,9 @@ func (s *salon) installerLocked(n uint8, reprise bool, now time.Time) (jeton [32
 	seq, err := s.annoncerLocked(enr, false)
 	if err != nil {
 		return [32]byte{}, nil, err
+	}
+	if !reprise {
+		s.limites[n] = nouvelleLimite() // nouvel occupant (0x02) : seaux neufs (limites.go)
 	}
 	x.emis, x.plancher, x.arrivee = seq, seq, seq
 	if reprise && s.sieges[n] != nil {
