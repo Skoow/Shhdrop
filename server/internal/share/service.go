@@ -901,9 +901,10 @@ func (s *Service) UnlockGrant(id string, kAcces, kPreuve []byte, grant string) (
 			// invalide les octrois, l'efface, PurgeAtStart).
 			s.setPurge(id, exp)
 		}
-		s.gone.mu.Lock()
-		g := s.grantLocked(openKey{id, openN}, exp)
-		s.gone.unlock()
+		g, err := s.grantIfLive(id, openN, exp)
+		if err != nil {
+			return Opened{}, err
+		}
 		return Opened{N: openN, Envelope: envelope, Grant: g, OpensLeft: left, LastOpen: left == 0}, nil
 	}
 	left, err := s.countFailure(id)
@@ -911,6 +912,26 @@ func (s *Service) UnlockGrant(id string, kAcces, kPreuve []byte, grant string) (
 		return Opened{}, err
 	}
 	return Opened{}, &BadPassword{AttemptsLeft: left}
+}
+
+// grantIfLive inscrit l'octroi de l'ouverture openN (grantLocked) si le partage existe encore
+// (audit des partages du 12 novembre, D1) : une destruction passée entre l'UPDATE qui consomme
+// l'ouverture et ce point a déjà oublié octrois et budgets (retire), qui ne doivent pas être
+// recréés pour un partage effacé. Sous gone.mu : partage mort ou en retrait → ErrNotFound ;
+// sinon la ligne est relue (retire prend gone.mu pour son oubli final : une ligne encore là
+// sera oubliée après nous) ; absente → ErrNotFound.
+func (s *Service) grantIfLive(id string, openN int, exp int64) (string, error) {
+	s.gone.mu.Lock()
+	defer s.gone.unlock()
+	s.gone.init()
+	if s.gone.dead[id] != nil || s.gone.retiringLocked(id) {
+		return "", ErrNotFound
+	}
+	var one int
+	if err := s.DB.QueryRow(`SELECT 1 FROM shares WHERE id=?`, id).Scan(&one); err != nil {
+		return "", notFound(err)
+	}
+	return s.grantLocked(openKey{id, openN}, exp), nil
 }
 
 // countFailure compte un mauvais K_preuve (Unlock et Destroy partagent le compteur)
