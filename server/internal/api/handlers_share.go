@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"sync"
 	"time"
@@ -54,6 +55,22 @@ func (s *server) captcha(w http.ResponseWriter, r *http.Request) {
 	}{ch, s.sig.Issue(token.CaptchaShown, saltID(ch.Salt), 0, s.svc.Now().Add(captchaTTL))})
 }
 
+// antiRobot vérifie la preuve anti-robot d'une création (partage ou salon) et consomme le
+// défi. shown_at ne vient que d'un jeton signé, lié au sel du défi résolu ; absent, invalide,
+// expiré ou d'un autre défi → errBadRequest ; solution fausse, trop rapide ou champ piège
+// rempli → captcha.ErrInvalid.
+func (s *server) antiRobot(alt, shownAt, hp string, ip netip.Addr) error {
+	salt, err := altchaSalt(alt)
+	if err != nil {
+		return err
+	}
+	_, exp, err := s.sig.CheckExp(shownAt, token.CaptchaShown, saltID(salt))
+	if err != nil || exp.IsZero() {
+		return errBadRequest
+	}
+	return s.cap.Verify(alt, ip, hp, exp.Add(-captchaTTL))
+}
+
 // createBody : création v2 (spec §29.8). Ni id, ni durée, ni ouvertures, ni sel, ni
 // V_preuve ; K_accès et S_gestion passent en en-tête (X-Shh-Access, X-Shh-Manage).
 type createBody struct {
@@ -89,20 +106,8 @@ func (s *server) create(w http.ResponseWriter, r *http.Request) {
 		fail(w, share.ErrFrozen)
 		return
 	}
-	// shown_at ne vient que d'un jeton signé, lié au sel du défi résolu ;
-	// absent, invalide, expiré ou d'un autre défi → 400.
-	salt, err := altchaSalt(b.Altcha)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	_, exp, err := s.sig.CheckExp(b.ShownAt, token.CaptchaShown, saltID(salt))
-	if err != nil || exp.IsZero() {
-		fail(w, errBadRequest)
-		return
-	}
 	ip := ipOf(r)
-	if err := s.cap.Verify(b.Altcha, ip, b.HP, exp.Add(-captchaTTL)); err != nil {
+	if err := s.antiRobot(b.Altcha, b.ShownAt, b.HP, ip); err != nil {
 		fail(w, err)
 		return
 	}

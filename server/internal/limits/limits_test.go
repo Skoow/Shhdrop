@@ -829,3 +829,166 @@ func TestFullBucketThreePerDay(t *testing.T) {
 		t.Fatal("4ᵉ partage accepté", err)
 	}
 }
+
+// Salon (plan C-2 Task 7, spec §39.3.6) : créations de salons, 5 par jour par connexion et
+// 15 par /48 ; un refus n'est compté nulle part ; remise à zéro à minuit UTC.
+func TestAllowSalonCreateJour(t *testing.T) {
+	if SalonCreatesPer64 != 5 || SalonCreatesPer48 != 15 {
+		t.Fatal(SalonCreatesPer64, SalonCreatesPer48)
+	}
+	now := time.Date(2026, 11, 4, 23, 0, 0, 0, time.UTC)
+	l := newLim(&now)
+	for i := 0; i < 5; i++ {
+		// Deux adresses du même /64 partagent le compteur.
+		if !l.AllowSalonCreate(ip(fmt.Sprintf("2001:db8:5:1::%x", i+1))) {
+			t.Fatalf("création %d refusée", i+1)
+		}
+	}
+	if l.AllowSalonCreate(ip("2001:db8:5:1::ff")) {
+		t.Fatal("6e création du /64 acceptée")
+	}
+	// /48 découpé en /64 : 15 au plus pour le bloc.
+	for p := 2; p <= 3; p++ {
+		for i := 0; i < 5; i++ {
+			if !l.AllowSalonCreate(ip(fmt.Sprintf("2001:db8:5:%x::1", p))) {
+				t.Fatalf("/64 n° %d, création %d refusée", p, i+1)
+			}
+		}
+	}
+	if l.AllowSalonCreate(ip("2001:db8:5:ff::1")) {
+		t.Fatal("/48 plein mais création acceptée depuis un /64 neuf")
+	}
+	if !l.AllowSalonCreate(ip("2001:db8:6::1")) || !l.AllowSalonCreate(ip("198.51.100.1")) {
+		t.Fatal("autre bloc refusé")
+	}
+	// Une heure plus tard, même jour : toujours refusé ; minuit UTC : remis à zéro.
+	now = time.Date(2026, 11, 4, 23, 59, 59, 0, time.UTC)
+	if l.AllowSalonCreate(ip("2001:db8:5:1::1")) {
+		t.Fatal("quota du jour remis à zéro avant minuit")
+	}
+	now = time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC)
+	if !l.AllowSalonCreate(ip("2001:db8:5:1::1")) {
+		t.Fatal("pas de remise à zéro à minuit UTC")
+	}
+	// Indépendant des créations de partages (compteurs à part).
+	if ok, _ := l.AllowCreate(ip("2001:db8:5:1::1"), 1); !ok {
+		t.Fatal("créations de partages touchées par les salons")
+	}
+}
+
+// Entrées (rejoindre) : 20 par heure par connexion, 60 par /48, fenêtre horaire fixe UTC.
+func TestAllowJoinHeure(t *testing.T) {
+	if JoinsPer64 != 20 || JoinsPer48 != 60 {
+		t.Fatal(JoinsPer64, JoinsPer48)
+	}
+	now := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
+	l := newLim(&now)
+	for i := 0; i < 20; i++ {
+		if !l.AllowJoin(ip(fmt.Sprintf("2001:db8:9:1::%x", i+1))) {
+			t.Fatalf("entrée %d refusée", i+1)
+		}
+	}
+	if l.AllowJoin(ip("2001:db8:9:1::ff")) {
+		t.Fatal("21e entrée de l'heure acceptée")
+	}
+	for p := 2; p <= 3; p++ {
+		for i := 0; i < 20; i++ {
+			if !l.AllowJoin(ip(fmt.Sprintf("2001:db8:9:%x::1", p))) {
+				t.Fatalf("/64 n° %d, entrée %d refusée", p, i+1)
+			}
+		}
+	}
+	if l.AllowJoin(ip("2001:db8:9:ff::1")) {
+		t.Fatal("/48 plein mais entrée acceptée depuis un /64 neuf")
+	}
+	if !l.AllowJoin(ip("2001:db8:a::1")) {
+		t.Fatal("autre /48 refusé")
+	}
+	// Fenêtre fixe : 10:59:59 encore refusé, 11:00:00 remis à zéro.
+	now = time.Date(2026, 11, 4, 10, 59, 59, 0, time.UTC)
+	if l.AllowJoin(ip("2001:db8:9:1::1")) {
+		t.Fatal("remis à zéro avant l'heure")
+	}
+	now = time.Date(2026, 11, 4, 11, 0, 0, 0, time.UTC)
+	if !l.AllowJoin(ip("2001:db8:9:1::1")) {
+		t.Fatal("pas de remise à zéro à l'heure UTC")
+	}
+	if got := l.JoinRetry(); got != time.Hour {
+		t.Fatalf("JoinRetry à 11:00:00 = %v", got)
+	}
+	now = time.Date(2026, 11, 4, 11, 59, 30, 0, time.UTC)
+	if got := l.JoinRetry(); got != 30*time.Second {
+		t.Fatalf("JoinRetry à 11:59:30 = %v", got)
+	}
+}
+
+// Trames montantes : 120 par minute par connexion, 600 par /48.
+func TestAllowFrameMinute(t *testing.T) {
+	if FramesPer64 != 120 || FramesPer48 != 600 {
+		t.Fatal(FramesPer64, FramesPer48)
+	}
+	now := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
+	l := newLim(&now)
+	for i := 0; i < 120; i++ {
+		if !l.AllowFrame(ip("2001:db8:b:1::1")) {
+			t.Fatalf("trame %d refusée", i+1)
+		}
+	}
+	if l.AllowFrame(ip("2001:db8:b:1::2")) {
+		t.Fatal("121e trame de la minute acceptée")
+	}
+	for p := 2; p <= 5; p++ {
+		for i := 0; i < 120; i++ {
+			if !l.AllowFrame(ip(fmt.Sprintf("2001:db8:b:%x::1", p))) {
+				t.Fatalf("/64 n° %d, trame %d refusée", p, i+1)
+			}
+		}
+	}
+	if l.AllowFrame(ip("2001:db8:b:ff::1")) {
+		t.Fatal("/48 plein mais trame acceptée depuis un /64 neuf")
+	}
+	if !l.AllowFrame(ip("2001:db8:c::1")) {
+		t.Fatal("autre /48 refusé")
+	}
+	// Indépendant des requêtes HTTP (compteur à part).
+	if !l.AllowRequest(ip("2001:db8:b:1::1")) {
+		t.Fatal("requêtes touchées par les trames")
+	}
+	now = now.Add(59 * time.Second)
+	if l.AllowFrame(ip("2001:db8:b:1::1")) {
+		t.Fatal("remis à zéro avant la minute")
+	}
+	now = now.Add(time.Second)
+	if !l.AllowFrame(ip("2001:db8:b:1::1")) {
+		t.Fatal("pas de remise à zéro à la minute")
+	}
+}
+
+// Les compteurs du salon sont oubliés à leur fenêtre (minute, heure, jour) : aucune clé de
+// la veille ne survit.
+func TestCompteursSalonEffaces(t *testing.T) {
+	now := time.Date(2026, 11, 4, 23, 58, 10, 0, time.UTC)
+	l := newLim(&now)
+	lens := func() (minute, hour, day int) {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		l.rotateLocked(now)
+		return len(l.frame64) + len(l.frame48), len(l.join64) + len(l.join48), len(l.salon64) + len(l.salon48)
+	}
+	for _, a := range []string{"2001:db8:1:1::1", "198.51.100.9"} {
+		l.AllowFrame(ip(a))
+		l.AllowJoin(ip(a))
+		l.AllowSalonCreate(ip(a))
+	}
+	if m, h, d := lens(); m != 4 || h != 4 || d != 4 {
+		t.Fatal("compteurs non remplis", m, h, d)
+	}
+	now = now.Add(time.Minute) // 23:59:10
+	if m, h, d := lens(); m != 0 || h != 4 || d != 4 {
+		t.Fatal("minute", m, h, d)
+	}
+	now = time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC)
+	if m, h, d := lens(); m != 0 || h != 0 || d != 0 {
+		t.Fatal("minuit UTC", m, h, d)
+	}
+}

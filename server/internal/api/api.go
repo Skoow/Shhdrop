@@ -24,6 +24,7 @@ import (
 
 	"github.com/skoow/shhdrop/server/internal/captcha"
 	"github.com/skoow/shhdrop/server/internal/limits"
+	"github.com/skoow/shhdrop/server/internal/salon"
 	"github.com/skoow/shhdrop/server/internal/share"
 	"github.com/skoow/shhdrop/server/internal/token"
 )
@@ -263,8 +264,11 @@ func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captc
 
 // Salons : réglages du salon. Valeur zéro : salon désactivé (aucune route, CSP inchangée).
 // Origin : origine publique du site (config.Config.Origin), donnée seulement si SHH_SALONS=1.
+// M : gestionnaire des salons ; nil → aucune route /api/salons/* (même 404 qu'une route
+// inconnue). Son Config.Limites doit être le limiteur lim passé à New (quotas communs).
 type Salons struct {
 	Origin string
+	M      *salon.Manager
 }
 
 func newHandler(s *server, static http.Handler, sal Salons) http.Handler {
@@ -286,6 +290,10 @@ func newHandler(s *server, static http.Handler, sal Salons) http.Handler {
 	api.HandleFunc("GET /api/shares/watch", s.watch)
 	api.HandleFunc("GET /api/manage/status", s.manageStatus)
 	api.HandleFunc("POST /api/manage/destroy", s.manageDestroy)
+	// Salon (SHH_SALONS=1) : sans gestionnaire, aucune route /api/salons/* (404 uniforme).
+	if sal.M != nil {
+		salonAPI{s, sal.M}.routes(api)
+	}
 	api.HandleFunc("/api/", notFoundAPI)
 
 	root := http.NewServeMux()

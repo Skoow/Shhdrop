@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -48,6 +49,7 @@ type env struct {
 	sig *token.Signer
 	clk *clock
 	dir string
+	db  *sql.DB
 }
 
 func rnd(n int) []byte {
@@ -101,7 +103,7 @@ func newEnvFull(t *testing.T, behindProxy bool, proxies []netip.Prefix, static h
 	srv := newServer(svc, sig, lim, captcha.New(rnd(32), c.Now), behindProxy, proxies)
 	srv.xfer = x
 	h := newHandler(srv, static, Salons{})
-	return &env{h: h, srv: srv, svc: svc, sig: sig, clk: c, dir: dir}
+	return &env{h: h, srv: srv, svc: svc, sig: sig, clk: c, dir: dir, db: db}
 }
 
 type req struct {

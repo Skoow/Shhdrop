@@ -39,6 +39,21 @@ const (
 	// pendingRetry : Retry-After quand la connexion a déjà ses envois en cours.
 	pendingRetry = 60 * time.Second
 	day          = 86400
+	hour         = 3600
+)
+
+// Salon (spec §39.3.6, plan C-2 Task 7) : compteurs à part de ceux des partages, sous les
+// mêmes clés HMAC du jour.
+const (
+	// Créations de salons par jour (UTC).
+	SalonCreatesPer64 = 5
+	SalonCreatesPer48 = 15
+	// Entrées (POST /api/salons/rejoindre) par heure (fenêtre fixe UTC).
+	JoinsPer64 = 20
+	JoinsPer48 = 60
+	// Trames montantes par minute (fenêtre fixe), toutes connexions WebSocket confondues.
+	FramesPer64 = 120
+	FramesPer48 = 600
 )
 
 // UploadLife : vie maximale d'un envoi non finalisé, 6 h arrondies au quart d'heure supérieur
@@ -76,6 +91,14 @@ type Limiter struct {
 	req     map[string]int
 	seg     map[string]int
 	seg48   map[string]int
+	// Salon : créations du jour, entrées de l'heure, trames de la minute.
+	salon64 map[string]int
+	salon48 map[string]int
+	hour    int64 // heure courante (heures depuis 1970)
+	join64  map[string]int
+	join48  map[string]int
+	frame64 map[string]int
+	frame48 map[string]int
 	// Envois en cours (BeginUpload → FinishUpload / CancelUpload / AbandonUpload) : id →
 	// clés pseudonymisées du jour de la création, en mémoire seulement (spec §29.5).
 	uploads map[string]upload
@@ -99,7 +122,7 @@ type upload struct {
 }
 
 func New(now func() time.Time) *Limiter {
-	l := &Limiter{now: now, day: -1, minute: -1}
+	l := &Limiter{now: now, day: -1, minute: -1, hour: -1}
 	l.mu.Lock()
 	l.rotateLocked(now())
 	l.mu.Unlock()
@@ -140,6 +163,12 @@ func (l *Limiter) rotateLocked(now time.Time) {
 		l.pend48 = map[string]int{}
 		l.aband64 = map[string]int64{}
 		l.aband48 = map[string]int64{}
+		l.salon64 = map[string]int{}
+		l.salon48 = map[string]int{}
+		l.join64 = map[string]int{}
+		l.join48 = map[string]int{}
+		l.frame64 = map[string]int{}
+		l.frame48 = map[string]int{}
 		// Les envois gardés repartent dans les compteurs du jour sous leurs clés de la veille
 		// (aucune adresse n'est gardée : BeginUpload recalcule ces clés avec l.prev). Les
 		// envois terminés la veille, eux, sont oubliés avec leurs compteurs.
@@ -161,11 +190,18 @@ func (l *Limiter) rotateLocked(now time.Time) {
 	if l.prev != nil && t >= l.prevUntil {
 		l.dropPrevLocked()
 	}
+	if h := floorDiv(t, hour); h != l.hour {
+		l.hour = h
+		l.join64 = map[string]int{}
+		l.join48 = map[string]int{}
+	}
 	if m := floorDiv(t, 60); m != l.minute {
 		l.minute = m
 		l.req = map[string]int{}
 		l.seg = map[string]int{}
 		l.seg48 = map[string]int{}
+		l.frame64 = map[string]int{}
+		l.frame48 = map[string]int{}
 	}
 }
 
@@ -474,6 +510,59 @@ func (l *Limiter) AllowSegment(ip netip.Addr) bool {
 	l.seg[k64]++
 	l.seg48[k48]++
 	return true
+}
+
+// allowPairLocked : un de plus pour la connexion et pour son bloc, si aucun des deux n'a
+// atteint son plafond ; un refus n'est compté nulle part. Appelé après rotateLocked : les
+// maps reçues sont celles de la fenêtre en cours (rotateLocked les remplace).
+func (l *Limiter) allowPairLocked(ip netip.Addr, c64, c48 map[string]int, max64, max48 int) bool {
+	k64, k48 := l.keyLocked(ip)
+	if c64[k64] >= max64 || c48[k48] >= max48 {
+		return false
+	}
+	c64[k64]++
+	c48[k48]++
+	return true
+}
+
+// AllowSalonCreate : création de salon, 5 par jour (UTC) par connexion et 15 par /48 (spec
+// §39.3.6), comptée à l'appel (avant la création : un conflit ou un refus du gestionnaire
+// reste compté).
+func (l *Limiter) AllowSalonCreate(ip netip.Addr) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rotateLocked(l.now())
+	return l.allowPairLocked(ip, l.salon64, l.salon48, SalonCreatesPer64, SalonCreatesPer48)
+}
+
+// AllowJoin : entrée dans un salon (rejoindre), 20 par heure (fenêtre fixe UTC) par connexion
+// et 60 par /48 (spec §39.3.6), mot de passe juste ou faux.
+func (l *Limiter) AllowJoin(ip netip.Addr) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rotateLocked(l.now())
+	return l.allowPairLocked(ip, l.join64, l.join48, JoinsPer64, JoinsPer48)
+}
+
+// AllowFrame : trame montante du salon, 120 par minute (fenêtre fixe) par connexion et 600
+// par /48 (spec §39.3.6).
+func (l *Limiter) AllowFrame(ip netip.Addr) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rotateLocked(l.now())
+	return l.allowPairLocked(ip, l.frame64, l.frame48, FramesPer64, FramesPer48)
+}
+
+// JoinRetry : délai jusqu'à l'heure UTC suivante (refus d'AllowJoin).
+func (l *Limiter) JoinRetry() time.Duration {
+	t := l.now().Unix()
+	return time.Duration(hour-(t-floorDiv(t, hour)*hour)) * time.Second
+}
+
+// SalonCreateRetry : délai jusqu'à minuit UTC (refus d'AllowSalonCreate).
+func (l *Limiter) SalonCreateRetry() time.Duration {
+	t := l.now().Unix()
+	return time.Duration(day-(t-floorDiv(t, day)*day)) * time.Second
 }
 
 func decr(m map[string]int, k string) {

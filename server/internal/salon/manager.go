@@ -114,7 +114,9 @@ type CreerReq struct {
 	MembersCanDestroy                    bool
 }
 
-func (r CreerReq) valide() bool {
+// Valide : valeurs de la spécification (durée, membres, Argon2id, longueurs, vérificateurs
+// distincts et non vides). Vérifiée par la couche HTTP avant l'anti-robot et le quota.
+func (r CreerReq) Valide() bool {
 	return (r.TTLHours == 1 || r.TTLHours == 6 || r.TTLHours == 12 || r.TTLHours == 24) &&
 		r.MaxMembers >= 2 && r.MaxMembers <= nbSieges && r.KdfOps == kdfOps && r.KdfMem == kdfMem &&
 		len(r.Salt) == 16 && len(r.AccessV) == 32 && len(r.ManageV) == 32 && len(r.ProofV) == 32 &&
@@ -126,7 +128,7 @@ func (r CreerReq) valide() bool {
 // stockée). ErrConflict si access_v ou manage_v est déjà pris ; ErrBusy si Max salons vivants
 // existent déjà ou si l'usage total plus 2 Gio dépasse StorageMax.
 func (m *Manager) Creer(r CreerReq) (time.Duration, error) {
-	if !r.valide() {
+	if !r.Valide() {
 		return 0, ErrBadRequest
 	}
 	now := m.cfg.Now().Unix()
