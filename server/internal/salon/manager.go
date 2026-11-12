@@ -17,8 +17,10 @@ import (
 // nonces et rangs vivent en mémoire.
 //
 // Ordre des verrous : createMu → Manager.mu ; essais (rayé par id) → Manager.mu → salon.mu →
-// Manager.idxMu ; Conversation a son propre verrou, pris en dernier. Aucune sortie (journal, stderr) : les
-// erreurs remontent à l'appelant, messages fixes.
+// Manager.idxMu ; Conversation a son propre verrou, pris en dernier ; connexion.cmu
+// (connexion.go) est un verrou feuille, pris sous salon.mu (diffusion) ou seul, sous lequel
+// aucun autre verrou n'est pris. Aucune sortie (journal, stderr) : les erreurs remontent à
+// l'appelant, messages fixes.
 
 const (
 	// maxEssais : 10 K_preuve_s fausses détruisent le salon (§39.3.6).

@@ -66,6 +66,10 @@ const CodeInterne = 1011
 
 var errPanique = errors.New("salon: panique récupérée dans une connexion")
 
+// crochetAccueil : tests seulement (panique injectée en préparant l'accueil) ; nil en
+// production.
+var crochetAccueil func()
+
 // Lien : WebSocket d'un membre, vu du salon (adaptateur coder/websocket à la Task 10).
 //   - Lire rend le message binaire suivant ; un message texte rend ErrProtocole.
 //   - Ecrire envoie b en un message binaire ; b ne doit pas être modifié ni gardé.
@@ -220,10 +224,12 @@ func accueillir(ctx context.Context, l Lien, f *fermeur) (Accueil, int) {
 	case r = <-ch:
 	case <-t.C:
 		f.fermer(CodeAccueil)
+		cancel() // débloque aussi un Lire qui n'attend que son ctx
 		<-ch
 		return Accueil{}, CodeAccueil
 	case <-ctx.Done():
 		f.fermer(CodeArret)
+		cancel() // débloque aussi un Lire qui n'attend que son ctx
 		<-ch
 		return Accueil{}, CodeArret
 	}
@@ -272,27 +278,32 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 	} else {
 		point = min(max(a.Depuis, x.emis), s.seq)
 	}
+	// Accueil construit avant toute inscription : une panique ici ne laisse ni connexion
+	// fantôme ni siège « en ligne ».
+	if crochetAccueil != nil {
+		crochetAccueil()
+	}
+	accueil := append([][]byte{EnrListe(point, 0, s.etatAuLocked(point))}, s.presencesLocked(mb.siege)...)
 	c := &connexion{
 		m: m, s: s, mb: mb, l: l, ctx: ctx, t0: time.Now(), curseur: point, direct: point == s.seq,
-		reveil: make(chan struct{}, 1), stop: make(chan struct{}), ecrivainFini: make(chan struct{}),
+		prive: accueil, reveil: make(chan struct{}, 1), stop: make(chan struct{}), ecrivainFini: make(chan struct{}),
 	}
 	if old := s.conns[mb.siege]; old != nil {
 		old.arreter(CodeRemplace, EnrFin(s.seq, RaisonRemplace))
 	}
 	s.conns[mb.siege] = c
 	x.horsLigneDepuis = time.Time{}
-	c.prive = append(c.prive, EnrListe(point, 0, s.etatAuLocked(point)))
-	c.prive = append(c.prive, s.presencesLocked()...)
 	s.diffuserLocked(EnrPresence(s.seq, mb.siege, true), false, c)
 	return c, 0
 }
 
-// presencesLocked : un 0x07 par siège occupé (en ligne s'il a une connexion).
-func (s *salon) presencesLocked() [][]byte {
+// presencesLocked : un 0x07 par siège occupé (en ligne s'il a une connexion ; soi, le siège
+// de la connexion servie, toujours en ligne).
+func (s *salon) presencesLocked(soi uint8) [][]byte {
 	var out [][]byte
 	for n, x := range s.sieges {
 		if x != nil {
-			out = append(out, EnrPresence(s.seq, uint8(n), s.conns[n] != nil))
+			out = append(out, EnrPresence(s.seq, uint8(n), s.conns[n] != nil || uint8(n) == soi))
 		}
 	}
 	return out
@@ -423,12 +434,17 @@ func (c *connexion) veiller(ctx context.Context) {
 			return
 		}
 		if d := c.ecritDepuis.Load(); d != 0 && time.Duration(now-(d-1)) >= ecritureMax {
-			c.s.mu.Lock()
-			c.arreter(CodeTropLent, EnrFin(c.s.seq, RaisonTropLent))
-			c.s.mu.Unlock()
+			c.arreterTropLent()
 			return
 		}
 	}
+}
+
+// arreterTropLent : 0x05 raison 6 au rang courant, puis 4006.
+func (c *connexion) arreterTropLent() {
+	c.s.mu.Lock()
+	defer c.s.mu.Unlock()
+	c.arreter(CodeTropLent, EnrFin(c.s.seq, RaisonTropLent))
 }
 
 // pingeur : Ping toutes les periodePing (délai delaiPing) ; un pong compte comme activité.
@@ -601,59 +617,36 @@ func (c *connexion) ecrire(b []byte) bool {
 	return true
 }
 
+// etape : ce que fait l'écrivain ensuite.
+type etape uint8
+
+const (
+	eEcrire   etape = iota // écrire lot
+	eAttendre              // direct, rien à écrire : attendre un réveil
+	eLire                  // lire refs hors du verrou (lot de rattrapage complet)
+	eArreter               // fermeture décidée ; lot éventuel écrit d'abord
+)
+
 // prochainLot : enregistrements à écrire ensuite, dans l'ordre ; continuer = false quand la
-// fermeture est décidée (le lot rendu avec, s'il y en a un, est écrit d'abord).
+// fermeture est décidée (le lot rendu avec, s'il y en a un, est écrit d'abord). Chaque
+// section sous le verrou du salon est une fonction à defer Unlock : une panique (EnrTrame,
+// EnrPresence) ne garde jamais le verrou.
 func (c *connexion) prochainLot() (lot [][]byte, continuer bool) {
 	s := c.s
 	for {
-		s.mu.Lock()
-		if c.arrete.Load() {
-			s.mu.Unlock()
-			return nil, false
-		}
-		// Réponses propres (l'accueil en premier), puis la file : tous précèdent ce que le
-		// rattrapage lira ensuite (rang > curseur).
-		lot = c.prive
-		c.prive = nil
-		if len(c.file) > 0 {
-			lot = append(lot, c.file...)
-			c.file = nil
-		}
-		if len(lot) > 0 {
-			s.mu.Unlock()
+		lot, refs, e := c.etapeLocked()
+		switch e {
+		case eEcrire:
 			return lot, true
-		}
-		if c.direct {
-			s.mu.Unlock()
+		case eArreter:
+			return lot, false
+		case eAttendre:
 			select {
 			case <-c.reveil:
 			case <-c.stop:
 			}
 			continue
 		}
-		if s.fini {
-			s.mu.Unlock()
-			c.arreter(CodeInconnu, nil)
-			return nil, false
-		}
-		refs := s.refsLocked(c.curseur, lotRattrapage)
-		if len(refs) < lotRattrapage {
-			// Dernier lot : lu sous le verrou, passage au direct dans la même section.
-			lot, err := s.lireRefs(refs, nil)
-			if err != nil {
-				s.mu.Unlock()
-				c.arreter(CodeInterne, nil)
-				return lot, false
-			}
-			c.direct, c.retardDepuis, c.curseur = true, time.Time{}, s.seq
-			if c.presenceManquee {
-				lot = append(lot, s.presencesLocked()...)
-				c.presenceManquee = false
-			}
-			s.mu.Unlock()
-			return lot, true
-		}
-		s.mu.Unlock()
 		lot, err := s.lireRefs(refs, s.effaceeDepuis)
 		if err != nil {
 			code := CodeInterne
@@ -663,11 +656,61 @@ func (c *connexion) prochainLot() (lot [][]byte, continuer bool) {
 			c.arreter(code, nil)
 			return lot, false
 		}
-		s.mu.Lock()
-		c.curseur = refs[len(refs)-1].seq // seul l'écrivain le change hors du direct
-		s.mu.Unlock()
+		c.avancer(refs[len(refs)-1].seq)
 		return lot, true
 	}
+}
+
+// etapeLocked : réponses propres (l'accueil en premier) et file, qui précèdent ce que le
+// rattrapage lira ensuite (rang > curseur) ; sinon attente en direct ; sinon lot de
+// rattrapage complet à lire hors du verrou ; sinon dernier lot, lu sous le verrou, et passage
+// au direct dans la même section.
+func (c *connexion) etapeLocked() (lot [][]byte, refs []ref, e etape) {
+	s := c.s
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c.arrete.Load() {
+		return nil, nil, eArreter
+	}
+	lot = c.prive
+	c.prive = nil
+	if len(c.file) > 0 {
+		lot = append(lot, c.file...)
+		c.file = nil
+	}
+	if len(lot) > 0 {
+		return lot, nil, eEcrire
+	}
+	if c.direct {
+		return nil, nil, eAttendre
+	}
+	if s.fini {
+		c.arreter(CodeInconnu, nil)
+		return nil, nil, eArreter
+	}
+	refs = s.refsLocked(c.curseur, lotRattrapage)
+	if len(refs) == lotRattrapage {
+		return nil, refs, eLire
+	}
+	lot, err := s.lireRefs(refs, nil)
+	if err != nil {
+		c.arreter(CodeInterne, nil)
+		return lot, nil, eArreter
+	}
+	c.direct, c.retardDepuis, c.curseur = true, time.Time{}, s.seq
+	if c.presenceManquee {
+		lot = append(lot, s.presencesLocked(c.mb.siege)...)
+		c.presenceManquee = false
+	}
+	return lot, nil, eEcrire
+}
+
+// avancer : curseur après un lot de rattrapage lu hors du verrou (seul l'écrivain le change
+// hors du direct).
+func (c *connexion) avancer(seq uint64) {
+	c.s.mu.Lock()
+	defer c.s.mu.Unlock()
+	c.curseur = seq
 }
 
 func (s *salon) estFini() bool {

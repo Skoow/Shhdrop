@@ -221,6 +221,9 @@ func (s *salon) refsLocked(apres uint64, max int) []ref {
 // un Commit MLS, n'est jamais sautée sans rien dire). Les enregistrements rendus ne doivent
 // pas être modifiés.
 func (s *salon) lireRefs(refs []ref, efface func(seq uint64) bool) ([][]byte, error) {
+	if crochetLireRefs != nil {
+		crochetLireRefs()
+	}
 	out := make([][]byte, 0, len(refs))
 	for _, r := range refs {
 		if r.enr != nil {
@@ -238,6 +241,10 @@ func (s *salon) lireRefs(refs []ref, efface func(seq uint64) bool) ([][]byte, er
 	}
 	return out, nil
 }
+
+// crochetLireRefs : tests seulement (panique injectée sous le verrou du salon) ; nil en
+// production.
+var crochetLireRefs func()
 
 // effaceeDepuis : la trame de rang seq n'est plus servie (effacée, ou salon détruit).
 func (s *salon) effaceeDepuis(seq uint64) bool {

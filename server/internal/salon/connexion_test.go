@@ -45,6 +45,7 @@ type fauxLien struct {
 	pings         int
 	paniqueEcrire bool
 	paniqueLire   bool
+	ignoreFerme   bool // Lire ne rend qu'à l'annulation de son ctx (adaptateur moins coopératif)
 }
 
 func nouveauLien() *fauxLien {
@@ -54,10 +55,18 @@ func nouveauLien() *fauxLien {
 
 func (f *fauxLien) Lire(ctx context.Context) ([]byte, error) {
 	f.mu.Lock()
-	p := f.paniqueLire
+	p, ignore := f.paniqueLire, f.ignoreFerme
 	f.mu.Unlock()
 	if p {
 		panic("salon: panique injectée (Lire)")
+	}
+	if ignore {
+		select {
+		case b := <-f.entree:
+			return b, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	select {
 	case b := <-f.entree:
@@ -663,7 +672,9 @@ func TestClientLentBascule(t *testing.T) {
 			if i%10 == 0 {
 				d = dVolatile
 			}
-			envoi[b.recevoir(t, g, trameD(d, i))] = time.Now()
+			seq := b.recevoir(t, g, trameD(d, i))
+			envoi[seq] = time.Now()
+			recuAvantSuivant(t, la, seq)
 			s.mu.Lock()
 			cb := s.conns[eb.Siege]
 			if len(cb.file) > fileMax {
@@ -706,7 +717,25 @@ func TestClientLentBascule(t *testing.T) {
 	})
 }
 
-// verifierRapide : chaque trame envoyée (volatiles comprises) reçue par l en moins de 50 ms.
+// recuAvantSuivant : sous synctest, une goroutine qui attend un mutex ne fait pas avancer
+// l'horloge simulée ; verifierRapide seul ne prouverait donc pas qu'aucun verrou ne retarde
+// l'autre membre. synctest.Wait rend quand toutes les goroutines sont durablement bloquées :
+// l doit alors avoir reçu la trame seq, avant que la suivante ne soit envoyée.
+func recuAvantSuivant(t *testing.T, l *fauxLien, seq uint64) {
+	t.Helper()
+	synctest.Wait()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := len(l.recus) - 1; i >= 0; i-- {
+		if r := l.recus[i]; r[0] == 0x01 && binary.BigEndian.Uint64(r[1:9]) == seq {
+			return
+		}
+	}
+	t.Fatal("trame", seq, "non reçue par l'autre membre avant l'envoi suivant")
+}
+
+// verifierRapide : chaque trame envoyée (volatiles comprises) reçue par l en moins de 50 ms
+// d'horloge simulée (complété par recuAvantSuivant, voir sa limite).
 func verifierRapide(t *testing.T, l *fauxLien, envoi map[uint64]time.Time) {
 	t.Helper()
 	l.mu.Lock()
@@ -746,7 +775,9 @@ func TestClientLentFerme(t *testing.T) {
 		s := g.salon
 		envoi := map[uint64]time.Time{}
 		for i := 0; i < 1500; i++ {
-			envoi[b.recevoir(t, g, trameD(0, i))] = time.Now()
+			seq := b.recevoir(t, g, trameD(0, i))
+			envoi[seq] = time.Now()
+			recuAvantSuivant(t, la, seq)
 			s.mu.Lock()
 			if cb := s.conns[eb.Siege]; cb != nil && len(cb.file) > fileMax {
 				s.mu.Unlock()
@@ -1398,4 +1429,80 @@ func TestBasculeSousEnvoiContinu(t *testing.T) {
 		}
 		depuis = dernier
 	}
+}
+
+// Relecture Task 9, point 1 : une panique sous le verrou du salon (dernier lot du
+// rattrapage) est récupérée sans garder le verrou : la connexion ferme en 1011, puis
+// Recevoir d'un autre membre et Tick rendent la main. Temps réel (un verrou gardé ne
+// bloque pas durablement sous synctest).
+func TestPaniqueSousVerrouRendLeVerrou(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	_, g := b.entrerMembre(t, c, true)
+	ea := b.entrer(t, c, false)
+	for i := 0; i < 5; i++ {
+		b.recevoir(t, g, trameD(0, i))
+	}
+	crochetLireRefs = func() { panic("salon: panique injectée (lireRefs)") }
+	t.Cleanup(func() { crochetLireRefs = nil })
+	la := b.connecter(ea.Jeton, ea.Seq)
+	select {
+	case <-la.fini:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Servir ne rend pas : verrou du salon gardé après la panique")
+	}
+	crochetLireRefs = nil
+	if c := la.codeFerme(); c != 1011 {
+		t.Fatal("code", c)
+	}
+	fait := make(chan struct{})
+	go func() {
+		defer close(fait)
+		b.m.Recevoir(g, trameD(0, 9), nil)
+		b.m.Tick()
+	}()
+	select {
+	case <-fait:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Recevoir ou Tick bloqué : verrou du salon gardé")
+	}
+}
+
+// Point 2 : une panique en préparant l'accueil (0x0D, 0x07) ne laisse ni connexion fantôme
+// ni siège « en ligne » : rien n'est inscrit avant que l'accueil soit prêt.
+func TestPaniqueAccueilSansFantome(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		ea := b.entrer(t, c, false)
+		s := b.etat(t, c)
+		crochetAccueil = func() { panic("salon: panique injectée (accueil)") }
+		defer func() { crochetAccueil = nil }()
+		la := b.connecter(ea.Jeton, ea.Seq)
+		if err := <-la.fini; !errors.Is(err, errPanique) || la.codeFerme() != 1011 {
+			t.Fatal("Servir :", err, la.codeFerme())
+		}
+		s.mu.Lock()
+		fantome, hors := s.conns[ea.Siege] != nil, !s.sieges[ea.Siege].horsLigneDepuis.IsZero()
+		s.mu.Unlock()
+		if fantome || !hors {
+			t.Fatal("connexion fantôme :", fantome, "hors ligne :", hors)
+		}
+	})
+}
+
+// Point 3 : accueil absent avec un lien dont Lire ne rend qu'à l'annulation du ctx : 4001
+// et Servir rend quand même (ctx annulé juste après Fermer).
+func TestAccueilAbsentLireSourd(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		l := nouveauLien()
+		l.ignoreFerme = true
+		b.servir(l, toujours)
+		time.Sleep(delaiAccueil)
+		attendreFin(t, l)
+		if c := l.codeFerme(); c != CodeAccueil {
+			t.Fatal("code", c)
+		}
+	})
 }
