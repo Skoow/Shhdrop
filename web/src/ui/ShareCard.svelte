@@ -7,6 +7,7 @@
   import { getLang, t } from "../i18n/i18n.svelte";
   import type { ShareInfo } from "../history/live.svelte";
   import { effectiveState, type HistoryEntry } from "../history/store";
+  import { REFRESH_MIN_MS } from "../history/poll";
   import { announce } from "./announce";
   import Button from "./Button.svelte";
   import { copyText } from "./clipboard";
@@ -33,6 +34,13 @@
   const shown = $derived(effectiveState(entry, now));
   const active = $derived(shown === "ready" || shown === "draining");
   const leftS = $derived(Math.max(0, (entry.expiresAt - now) / 1000));
+  // Audit R3 : l'heure réelle de la dernière lecture du serveur et le rythme des relectures
+  // (REFRESH_MIN_MS), jamais « à l'instant » à côté d'un compteur qui peut dater de 5 min.
+  const seen = $derived(
+    new Date(entry.lastSeenAt).toDateString() === new Date(now).toDateString()
+      ? t("hist.seen.today", { time: formatClock(entry.lastSeenAt, lang), n: REFRESH_MIN_MS / 60_000 })
+      : t("hist.seen.day", { date: formatDayTime(entry.lastSeenAt, lang), n: REFRESH_MIN_MS / 60_000 }),
+  );
   const created = $derived(t("hist.created", { ago: formatAgo(now - entry.createdAt, lang), date: formatDayTime(entry.createdAt, lang) }));
   const opens = $derived(t("hist.opens", { u: entry.opensUsed, max: entry.maxOpens }));
   // L'échéance du serveur est au quart d'heure ; arrondie à la minute pour l'affichage.
@@ -152,7 +160,7 @@
             {#snippet icon()}<RefreshCw size={18} strokeWidth={1.75} />{/snippet}
             {t("hist.refresh")}
           </Button>
-          <p class="sub num" data-seen>{t("hist.seen", { ago: formatAgo(now - entry.lastSeenAt, lang) })}</p>
+          <p class="sub num" data-seen>{seen}</p>
         </div>
         {#if freshText}<p class="sub" role="status" data-fresh>{freshText}</p>{/if}
       {:else}
@@ -161,7 +169,7 @@
       <p class="sub">{t("hist.nolink")}</p>
     </div>
   {:else if active}
-    <p class="sub num seen" data-seen>{t("hist.seen", { ago: formatAgo(now - entry.lastSeenAt, lang) })}</p>
+    <p class="sub num seen" data-seen>{seen}</p>
     {#if freshText}<p class="sub" role="status" data-fresh>{freshText}</p>{/if}
   {/if}
 </li>
