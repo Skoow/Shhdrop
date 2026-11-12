@@ -343,9 +343,10 @@ func (a salonAPI) detruire(w http.ResponseWriter, r *http.Request) {
 // (spec §39.5, §39.3.9). Le membre part comme par un 0x03 du WebSocket (Quitter : départ
 // diffusé, jeton oublié, WebSocket fermé en 1000), puis le signalement compte dans l'entier
 // horaire des signalements (§9.5, sans identifiant, le même que pour un partage) : seulement
-// après un départ réussi, comme detruire. Un jeton ne signale donc qu'une fois (oublié
-// aussitôt). En-tête absent ou mal formé, corps autre que {} : 400 ; jeton inconnu, salon
-// échu ou détruit : 404 ; jeton révoqué : 403 excluded.
+// après un départ réussi, comme detruire, et une fois par salon (salon.signale : les
+// signalements suivants du même salon font partir sans compter). Un jeton ne signale donc
+// qu'une fois (oublié aussitôt). En-tête absent ou mal formé, corps autre que {} : 400 ;
+// jeton inconnu, salon échu ou détruit : 404 ; jeton révoqué : 403 excluded.
 func (a salonAPI) signaler(w http.ResponseWriter, r *http.Request) {
 	var b struct{}
 	if err := readJSON(w, r, &b); err != nil {
@@ -357,13 +358,16 @@ func (a salonAPI) signaler(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		mb, err = a.m.Membre(jeton)
 	}
+	premier := false
 	if err == nil {
-		err = a.m.Quitter(mb)
+		premier, err = a.m.QuitterSignaler(mb)
 	}
 	if err != nil {
 		failSalon(w, err)
 		return
 	}
-	a.reports.add(a.svc.Now())
+	if premier {
+		a.reports.add(a.svc.Now())
+	}
 	writeJSON(w, http.StatusOK, struct{}{})
 }

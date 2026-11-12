@@ -198,23 +198,38 @@ func (m *Manager) Retirer(mb Membre, seq uint64) error {
 // un, fermé en 1000 (demande 0x03, ou POST /api/salons/signaler hors du WebSocket). Membre
 // périmé : ErrNotFound ; exclu : ErrExcluded.
 func (m *Manager) Quitter(mb Membre) error {
+	_, err := m.quitter(mb, false)
+	return err
+}
+
+// QuitterSignaler : « Quitter et signaler » (POST /api/salons/signaler, spec §39.5) : départ
+// comme Quitter ; premier vaut vrai pour le premier signalement réussi de ce salon seulement
+// (salon.signale), que l'appelant compte dans l'entier horaire des signalements.
+func (m *Manager) QuitterSignaler(mb Membre) (premier bool, err error) {
+	return m.quitter(mb, true)
+}
+
+func (m *Manager) quitter(mb Membre, signaler bool) (premier bool, err error) {
 	s := mb.salon
 	if s == nil {
-		return ErrNotFound
+		return false, ErrNotFound
 	}
 	defer m.purger(s)
 	now := m.cfg.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.membreLocked(mb, now) {
-		return s.perimeLocked(mb, now)
+		return false, s.perimeLocked(mb, now)
 	}
 	c := s.conns[mb.siege] // membreLocked : connexion de ce titulaire, s'il y en a une
 	m.departLocked(s, mb.siege)
 	if c != nil {
 		c.arreter(CodeFin, nil)
 	}
-	return nil
+	if signaler && !s.signale {
+		s.signale, premier = true, true
+	}
+	return premier, nil
 }
 
 // etatAu : sièges occupés et leurs nonces au rang seq (enregistrement 0x0D), refaits depuis

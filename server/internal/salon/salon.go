@@ -65,7 +65,11 @@ type salon struct {
 	arrivees   int    // arrivées d'invités depuis la création de l'état
 	jetons     map[[32]byte]uint8
 	revoques   map[[32]byte]struct{}
-	journal    []evenement
+	// signale : un membre a déjà fait « Quitter et signaler » (QuitterSignaler) : seul le
+	// premier signalement du salon compte. Un booléen, sans identifiant ni adresse ; oublié
+	// avec l'état du salon (fin, redémarrage).
+	signale bool
+	journal []evenement
 	// index : trames non volatiles rangées, triées par seq (relais.go).
 	index []entree
 	// Pièces (pieces.go) : lesPieces, toutes les pièces vivantes par identifiant ; libres,

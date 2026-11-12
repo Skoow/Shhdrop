@@ -125,6 +125,7 @@ func TestSignalerRefus(t *testing.T) {
 		{"gestion seule", manage(k), `{}`, 400, ""},
 		{"clé inconnue", membre, `{"reason":"report"}`, 400, ""},
 		{"corps vide", membre, ``, 400, ""},
+		{"corps nul", membre, `null`, 400, ""},
 	}
 	for _, c := range cas {
 		r := e.signaler(c.hdr, c.body)
@@ -142,5 +143,29 @@ func TestSignalerRefus(t *testing.T) {
 	}
 	if n := e.signalements(); n != 0 {
 		t.Fatal("refus comptés :", n)
+	}
+}
+
+// Un seul signalement compté par salon (relecture C-2 Task 17) : le second membre qui signale
+// part aussi, mais l'entier horaire ne bouge plus ; un autre salon compte de nouveau.
+func TestSignalerUneFoisParSalon(t *testing.T) {
+	e, _ := salonEnv(t)
+	k := newKeys()
+	ms := salonExclusion(t, e, k, 4, 2)
+	for i, m := range ms[1:] {
+		if r := e.signaler(map[string]string{"X-Shh-Membre": m.jeton}, `{}`); r.code != 200 {
+			t.Fatalf("signalement %d : %d %q", i, r.code, r.body)
+		}
+		if n := e.signalements(); n != 1 {
+			t.Fatalf("après le signalement %d : compteur %d, attendu 1", i, n)
+		}
+	}
+	if g := jsonOf(t, e.do(req{method: "GET", path: "/api/salons/gestion", hdr: manage(k)})); g["present"].(float64) != 1 {
+		t.Fatalf("présents : %v", g)
+	}
+	k2 := newKeys()
+	ms2 := salonExclusion(t, e, k2, 4, 1)
+	if r := e.signaler(map[string]string{"X-Shh-Membre": ms2[1].jeton}, `{}`); r.code != 200 || e.signalements() != 2 {
+		t.Fatalf("autre salon : %d, compteur %d", r.code, e.signalements())
 	}
 }
