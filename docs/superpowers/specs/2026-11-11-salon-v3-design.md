@@ -301,6 +301,6 @@ Le propriétaire veut une conversation aussi proche que possible d'une messageri
 
 ### 14.5 Tâches ajoutées
 
-- **C-2 Task 9b** (serveur) : heure de dernière déconnexion en mémoire, arrondie à la minute ; `0x07` hors ligne et `0x0D` étendus de 8 octets (minutes Unix, 0 = inconnue ou masquée) ; tests : heure jamais sur disque, oubliée à la fin du salon, arrondie à la minute. Les tailles du protocole (§ « Protocole » du plan C-2) changent : `0x07` passe de 11 à 19 octets, une annonce de `0x0D` de 17 à 25.
+- **C-2 Task 9b** (serveur) : heure de dernière déconnexion en mémoire, arrondie à la minute ; `0x07` hors ligne et `0x0D` étendus de 8 octets (minutes Unix, 0 = inconnue) ; tests : heure jamais sur disque, oubliée à la fin du salon, arrondie à la minute. Les tailles du protocole (§ « Protocole » du plan C-2) changent : `0x07` passe de 11 à 19 octets, une annonce de `0x0D` de 17 à 25.
 - **C-3** : présence, dernière connexion, coches des messages, son, silencieux.
 - **C-4** : coches des documents, sélection multiple à l'envoi et à la réception, albums, archive.
