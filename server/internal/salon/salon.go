@@ -7,9 +7,10 @@ import (
 	"time"
 )
 
-// État en mémoire d'un salon (plan C-2 Task 6, sans le relais) : sièges, jetons, rangs et
-// journal des annonces. Rien de tout cela n'est écrit sur disque (spec §39.3.5, v3 §5.1) :
-// un redémarrage l'oublie (plan, point 11).
+// État en mémoire d'un salon (plan C-2 Tasks 6 et 8) : sièges, jetons, rangs, journal des
+// annonces et index des trames. Rien de tout cela n'est écrit sur disque (spec §39.3.5, v3
+// §5.1) : seules les trames non volatiles le sont, chiffrées (Conversation), sans rang,
+// siège, heure ni drapeau. Un redémarrage l'oublie (plan, point 11).
 
 const (
 	// nbSieges : sièges 0 à 9 ; le 0 est réservé au créateur (plan, point 1).
@@ -51,7 +52,9 @@ type salon struct {
 	jetons     map[[32]byte]uint8
 	revoques   map[[32]byte]struct{}
 	journal    []evenement
-	conv       *Conversation // nil pour la tombe d'un salon détruit sans état
+	// index : trames non volatiles rangées, triées par seq (relais.go).
+	index []entree
+	conv  *Conversation // nil pour la tombe d'un salon détruit sans état
 	// fini : salon détruit ; plus rien n'y entre ni n'y est recréé (tombe gardée dans
 	// Manager.salons jusqu'à l'échéance).
 	fini bool
