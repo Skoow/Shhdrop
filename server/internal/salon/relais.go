@@ -194,7 +194,9 @@ func (m *Manager) Retirer(mb Membre, seq uint64) error {
 }
 
 // Quitter : départ de mb (0x03 au journal, diffusé à la Task 9), jeton oublié, siège libéré,
-// plus attendu par aucune trame « instantané » (departLocked). Membre périmé : ErrNotFound.
+// plus attendu par aucune trame « instantané » (departLocked), puis son WebSocket, s'il en a
+// un, fermé en 1000 (demande 0x03, ou POST /api/salons/signaler hors du WebSocket). Membre
+// périmé : ErrNotFound ; exclu : ErrExcluded.
 func (m *Manager) Quitter(mb Membre) error {
 	s := mb.salon
 	if s == nil {
@@ -207,7 +209,11 @@ func (m *Manager) Quitter(mb Membre) error {
 	if !s.membreLocked(mb, now) {
 		return s.perimeLocked(mb, now)
 	}
+	c := s.conns[mb.siege] // membreLocked : connexion de ce titulaire, s'il y en a une
 	m.departLocked(s, mb.siege)
+	if c != nil {
+		c.arreter(CodeFin, nil)
+	}
 	return nil
 }
 

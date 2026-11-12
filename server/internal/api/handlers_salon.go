@@ -30,6 +30,7 @@ func (a salonAPI) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/salons/gestion", a.gestion)
 	mux.HandleFunc("POST /api/salons/exclure", a.exclure)
 	mux.HandleFunc("POST /api/salons/detruire", a.detruire)
+	mux.HandleFunc("POST /api/salons/signaler", a.signaler)
 	mux.HandleFunc("GET /api/salons/ws", a.salonWS)
 	a.routesPieces(mux)
 }
@@ -335,5 +336,34 @@ func (a salonAPI) detruire(w http.ResponseWriter, r *http.Request) {
 	if report {
 		a.reports.add(a.svc.Now())
 	}
+	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+// signaler : POST /api/salons/signaler (X-Shh-Membre, corps {}) → {} : « Quitter et signaler »
+// (spec §39.5, §39.3.9). Le membre part comme par un 0x03 du WebSocket (Quitter : départ
+// diffusé, jeton oublié, WebSocket fermé en 1000), puis le signalement compte dans l'entier
+// horaire des signalements (§9.5, sans identifiant, le même que pour un partage) : seulement
+// après un départ réussi, comme detruire. Un jeton ne signale donc qu'une fois (oublié
+// aussitôt). En-tête absent ou mal formé, corps autre que {} : 400 ; jeton inconnu, salon
+// échu ou détruit : 404 ; jeton révoqué : 403 excluded.
+func (a salonAPI) signaler(w http.ResponseWriter, r *http.Request) {
+	var b struct{}
+	if err := readJSON(w, r, &b); err != nil {
+		failSalon(w, err)
+		return
+	}
+	jeton, err := headerSecret(r, "X-Shh-Membre")
+	var mb salon.Membre
+	if err == nil {
+		mb, err = a.m.Membre(jeton)
+	}
+	if err == nil {
+		err = a.m.Quitter(mb)
+	}
+	if err != nil {
+		failSalon(w, err)
+		return
+	}
+	a.reports.add(a.svc.Now())
 	writeJSON(w, http.StatusOK, struct{}{})
 }

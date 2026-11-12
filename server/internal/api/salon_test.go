@@ -134,6 +134,8 @@ func TestRoutesSalonAbsentes(t *testing.T) {
 			{method: "POST", path: "/api/salons/rejoindre", hdr: acces(k), body: []byte(`{"proof":"x"}`)},
 			{method: "GET", path: "/api/salons/gestion", hdr: manage(k)},
 			{method: "POST", path: "/api/salons/detruire", hdr: manage(k), body: []byte(`{}`)},
+			{method: "POST", path: "/api/salons/signaler", hdr: map[string]string{"X-Shh-Membre": enc.EncodeToString(rnd(32))},
+				body: []byte(`{}`)},
 		} {
 			w := e.do(r)
 			if w.Code != ref.Code || !bytes.Equal(w.Body.Bytes(), ref.Body.Bytes()) || !reflect.DeepEqual(w.Header(), ref.Header()) {
