@@ -12,8 +12,8 @@ import (
 //     sans 0x0E (chaque membre compte lui-même depuis l'heure de réception de 0x01) ;
 //   - « instantané » : lecteurs attendus = sièges occupés à la réception, moins l'expéditeur
 //     (bits de entree.attendus) ; chacun envoie 0x05 lu ; au dernier, la trame est effacée
-//     pour tous (0x0E, expéditeur compris). Un siège qui part (Quitter, libération après
-//     10 min hors ligne, exclusion à la Task 14) ou reprend (0x0A, plan point 8) n'est plus
+//     pour tous (0x0E, expéditeur compris). Un siège qui part (Quitter, exclusion à la
+//     Task 14 ; jamais pour une absence, revue finale C-2, I3) ou reprend (0x0A, plan point 8) n'est plus
 //     attendu nulle part : effacements en chaîne, avec 0x0E.
 
 const (
@@ -107,8 +107,8 @@ func (s *salon) effacerLuLocked(i int) error {
 	return err
 }
 
-// plusAttenduLocked : le siège n n'est plus attendu par aucune trame (départ, libération,
-// exclusion, reprise : au moment de l'appel, toutes les trames rangées sont d'un rang
+// plusAttenduLocked : le siège n n'est plus attendu par aucune trame (départ, exclusion,
+// reprise : au moment de l'appel, toutes les trames rangées sont d'un rang
 // inférieur à l'annonce) ; celles qui n'attendaient plus que lui sont effacées en un lot
 // (EffacerPlusieurs), puis un 0x0E par trame est diffusé. Une erreur d'écriture des zéros est
 // ignorée ici (trames quand même plus servies, marquerLocked) : l'annonce est déjà faite et

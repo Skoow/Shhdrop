@@ -20,8 +20,6 @@ const (
 	nbSieges = 10
 	// journalMax : annonces (0x02, 0x03, 0x09, 0x0A) gardées au plus par salon.
 	journalMax = 4096
-	// horsLigneMax : un siège hors ligne depuis ce délai est libéré (plan, point 4 ; D41-26).
-	horsLigneMax = 10 * time.Minute
 	// arriveesParMembre : arrivées totales < arriveesParMembre × max_members (§39.3.3).
 	arriveesParMembre = 5
 )
@@ -34,24 +32,24 @@ type evenement struct {
 
 // siege : place occupée. jetonV : SHA-256 du jeton de membre (le jeton lui-même n'est
 // jamais gardé). emis : rang de l'annonce qui a donné le jeton (0x02 ou 0x0A) ; plancher :
-// rang à partir duquel le membre peut lire les pièces (Task 13). horsLigneDepuis : zéro
-// tant qu'un WebSocket du siège est ouvert (Task 9) ; posé à l'entrée et à la déconnexion.
+// rang à partir duquel le membre peut lire les pièces (Task 13). Un siège reste réservé
+// pendant toute la vie du salon, en ligne ou non (revue finale C-2, I3, 12 novembre : règle
+// « instantané » du propriétaire) ; seuls un départ (0x03) ou une exclusion le libèrent.
 // arrivee : rang de l'arrivée (0x02) de l'occupant, gardé par une reprise (0x0A) : borne de
 // Retirer. repris : rang du dernier 0x0A d'une reprise par WebSocket du titulaire (0 : aucune),
 // borne des 0x0E renvoyés à l'accueil (borneEffaces). reprises : heures (Config.Now) des
 // reprises par WebSocket de la dernière heure, repriseMax au plus (connexion.go). derniere :
 // minute Unix (arrondie à la minute inférieure) de la dernière déconnexion d'un WebSocket du
 // siège, 0 si inconnue (Task 9b, spec v3 §14.1) : en mémoire seulement, gardée par une
-// reprise (0x0A), oubliée avec le siège (départ, libération, fin du salon).
+// reprise (0x0A), oubliée avec le siège (départ, exclusion, fin du salon).
 type siege struct {
-	nonce           [16]byte
-	jetonV          [32]byte
-	emis, plancher  uint64
-	arrivee         uint64
-	repris          uint64
-	horsLigneDepuis time.Time
-	derniere        uint64
-	reprises        []time.Time
+	nonce          [16]byte
+	jetonV         [32]byte
+	emis, plancher uint64
+	arrivee        uint64
+	repris         uint64
+	derniere       uint64
+	reprises       []time.Time
 }
 
 // salon : état d'un salon vivant. Tous les champs sont protégés par mu.
@@ -142,7 +140,7 @@ func (s *salon) annoncerLocked(enr func(seq uint64) []byte, depart bool) (uint64
 // Une reprise d'un siège occupé compte dans le plafond des reprises du siège (repriseMax par
 // heure, partagé avec les reprises par WebSocket) : au-delà, *Attente, rien n'est changé.
 func (s *salon) installerLocked(n uint8, reprise bool, now time.Time) (jeton [32]byte, x *siege, err error) {
-	x = &siege{horsLigneDepuis: now}
+	x = &siege{}
 	if ancien := s.sieges[n]; reprise && ancien != nil {
 		if d := ancien.attenteReprise(now); d > 0 {
 			return [32]byte{}, nil, &Attente{Retry: d}

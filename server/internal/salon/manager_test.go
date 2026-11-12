@@ -133,7 +133,7 @@ func (b *banc) entrer(t *testing.T, c cles, createur bool) Entree {
 	return e
 }
 
-// depart : libère le siège (comme 0x03 ou la libération après 10 min hors ligne).
+// depart : libère le siège (comme 0x03).
 func (b *banc) depart(s *salon, siege uint8) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -664,28 +664,44 @@ func TestMembre(t *testing.T) {
 	}
 }
 
-// Tick libère un siège hors ligne depuis 10 min : 0x03 au journal, jeton oublié, place rendue.
-func TestTickLibereHorsLigne(t *testing.T) {
+// Revue finale C-2, I3 (règle « instantané » du propriétaire) : un siège hors ligne reste
+// réservé pendant toute la vie du salon, quel que soit le temps d'absence ; Tick ne le libère
+// jamais. Seuls un départ (0x03) ou une exclusion le libèrent : 0x03 au journal, jeton oublié,
+// place rendue.
+func TestSiegeReserveHorsLigne(t *testing.T) {
 	b := nouveauBanc(t, 200)
 	c := b.creer(t, 2)
-	g := b.entrer(t, c, false)
-	b.h.avancer(10*time.Minute - time.Second)
-	b.m.Tick()
-	if _, err := b.m.Membre(g.Jeton[:]); err != nil {
-		t.Fatal("libéré trop tôt :", err)
-	}
-	b.h.avancer(time.Second)
-	b.m.Tick()
-	if _, err := b.m.Membre(g.Jeton[:]); !errors.Is(err, ErrNotFound) {
-		t.Fatal("jeton après libération :", err)
-	}
+	g := b.entrer(t, c, false) // jamais connecté
 	s := b.etat(t, c)
+	seq := dernierSeq(s)
+	for range 23 {
+		b.h.avancer(time.Hour)
+		b.m.Tick()
+	}
+	b.h.avancer(59 * time.Minute) // échéance à 10:15 le lendemain : encore vivant
+	b.m.Tick()
+	mb, err := b.m.Membre(g.Jeton[:])
+	if err != nil {
+		t.Fatal("siège libéré pendant la vie du salon :", err)
+	}
+	if dernierSeq(s) != seq || occupes(s) != 1 {
+		t.Fatal("annonce ou siège changé par Tick :", dernierSeq(s), occupes(s))
+	}
+	if _, err := b.m.Rejoindre(c.acces, c.preuve, nil); !errors.Is(err, ErrFull) {
+		t.Fatal("place d'un absent donnée à un autre :", err)
+	}
+	if err := b.m.Quitter(mb); err != nil {
+		t.Fatal(err)
+	}
 	var dernier evenement
 	sous(s, func() {
 		dernier = s.journal[len(s.journal)-1]
 	})
-	if !bytes.Equal(dernier.enr, EnrDepart(dernier.seq, g.Siege)) || dernier.seq != g.Seq+1 {
+	if !bytes.Equal(dernier.enr, EnrDepart(dernier.seq, g.Siege)) || dernier.seq != seq+1 {
 		t.Fatalf("journal : %+v", dernier)
+	}
+	if _, err := b.m.Membre(g.Jeton[:]); !errors.Is(err, ErrNotFound) {
+		t.Fatal("jeton après départ :", err)
 	}
 	if g2 := b.entrer(t, c, false); g2.Siege != 1 {
 		t.Fatal("place non rendue", g2.Siege)
@@ -885,8 +901,9 @@ func TestInvariantJournal(t *testing.T) {
 				}
 			})
 		}
-		b.h.avancer(10 * time.Minute)
-		b.m.Tick()
+		for n := range uint8(nbSieges) { // départs (0x03) : ne peuvent pas échouer, journal presque plein
+			b.depart(s, n)
+		}
 		invariantJournal(t, s)
 		if occupes(s) != 0 {
 			t.Fatal("sièges non libérés", occupes(s))

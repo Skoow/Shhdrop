@@ -267,7 +267,7 @@ func accueillir(ctx context.Context, l Lien, f *fermeur) (Accueil, int) {
 // max(depuis, rang d'émission du jeton) plafonné au dernier rang (plan, point 7), puis un
 // 0x07 par siège occupé ; le rattrapage suit (écrivain). Reprise : 0x0A diffusé avec un
 // nonce neuf, 0x0D au rang de ce 0x0A, 0x07, direct. L'ancienne connexion du siège est
-// remplacée ; horsLigneDepuis est remis à zéro (un membre en ligne garde son siège).
+// remplacée.
 // En reprise, si la construction de l'accueil panique, il reste un 0x0A diffusé sans
 // connexion et une reprise décomptée : accepté, on ne peut pas faire autrement, puisque le
 // 0x0D est au rang de ce 0x0A (il faut l'avoir annoncé pour construire l'accueil).
@@ -328,7 +328,6 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 		old.arreter(CodeRemplace, EnrFin(s.seq, RaisonRemplace))
 	}
 	s.conns[mb.siege] = c
-	x.horsLigneDepuis = time.Time{}
 	s.limites[mb.siege].vocal.ouvrir(now) // présence comptée pour la réserve vocale
 	s.diffuserLocked(EnrPresence(s.seq, mb.siege, true, 0), genrePresence, c)
 	return c, 0
@@ -360,9 +359,9 @@ func (s *salon) listeLocked(point uint64, soi uint8) []Annonce {
 	return l
 }
 
-// desinscrire retire c de son siège s'il l'occupe encore (pas remplacé) : siège hors ligne
-// depuis maintenant (libéré 10 min plus tard par Tick), minute de la déconnexion gardée en
-// mémoire (Task 9b) et 0x07 hors ligne diffusé avec elle.
+// desinscrire retire c de son siège s'il l'occupe encore (pas remplacé) : siège hors ligne,
+// toujours réservé (revue finale C-2, I3), minute de la déconnexion gardée en mémoire
+// (Task 9b) et 0x07 hors ligne diffusé avec elle.
 func (m *Manager) desinscrire(c *connexion) {
 	s := c.s
 	s.mu.Lock()
@@ -379,9 +378,6 @@ func (m *Manager) desinscrire(c *connexion) {
 		return // parti (0x03)
 	}
 	now := m.cfg.Now()
-	if x.emis == c.mb.emis {
-		x.horsLigneDepuis = now
-	}
 	// Posée même pour la connexion d'un jeton remplacé par rejoindre du créateur : c'est la
 	// dernière déconnexion d'un WebSocket de ce siège.
 	x.derniere = minuteUnix(now)

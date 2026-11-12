@@ -513,7 +513,7 @@ func (m *Manager) Membre(jeton []byte) (Membre, error) {
 	return Membre{salon: s, siege: n, emis: x.emis, plancher: x.plancher, jetonV: h}, nil
 }
 
-// departLocked : départ du siège n (Quitter, libération après 10 min hors ligne) : 0x03 au
+// departLocked : départ du siège n (Quitter, « Quitter et signaler ») : 0x03 au
 // journal (sortirLocked) ; sans effet s'il est libre. Appelé sous s.mu.
 func (m *Manager) departLocked(s *salon, n uint8) {
 	m.sortirLocked(s, n, func(seq uint64) []byte { return EnrDepart(seq, n) }, false)
@@ -543,8 +543,7 @@ func (m *Manager) sortirLocked(s *salon, n uint8, enr func(seq uint64) []byte, r
 }
 
 // Tick : une passe d'entretien (chaque seconde, Run) : trames « 10 min » et « 1 h » échues
-// effacées (Task 11), sièges hors ligne depuis 10 min libérés (leurs lectures « instantané »
-// ne sont plus attendues), pièces effacées (celles de ces trames, celles qui ne sont jamais
+// effacées (Task 11), pièces effacées (celles de ces trames, celles qui ne sont jamais
 // liées ou finalisées : Task 13), salons arrivés à échéance finis en raison 1 (finir : 0x05
 // aux connectés, conversation, pièces fichier puis ligne, ligne du salon), fins restées à
 // faire reprises, tombes échues oubliées une fois leur fin complète et leurs pièces purgées
@@ -595,11 +594,9 @@ func (m *Manager) entretenir(s *salon, now time.Time) (tombe, echu, aPurger bool
 		return false, true, false
 	}
 	s.effacerEchuesLocked(now.UnixMilli())
-	for n, x := range s.sieges {
-		if x != nil && !x.horsLigneDepuis.IsZero() && now.Sub(x.horsLigneDepuis) >= horsLigneMax {
-			m.departLocked(s, uint8(n))
-		}
-	}
+	// Aucun siège n'est libéré ici : un absent reste réservé et attendu par les trames
+	// « instantané » jusqu'à son retour, son départ, son exclusion ou la fin du salon (revue
+	// finale C-2, I3). Le créateur libère un siège fantôme par l'exclusion.
 	return s.fini && !now.Before(s.expires.Add(margeTombe)), false, s.echuesPiecesLocked(now)
 }
 

@@ -1045,8 +1045,8 @@ func TestPresence(t *testing.T) {
 	})
 }
 
-// Relecture Task 6, bloquant : un membre en ligne ne perd jamais son siège ; hors ligne, il
-// le perd 10 min après la déconnexion (pas après l'entrée).
+// Relecture Task 6, bloquant : un membre en ligne ne perd jamais son siège ; hors ligne non
+// plus (revue finale C-2, I3 : siège réservé pour la vie du salon), jusqu'à l'échéance.
 func TestEnLigneGardeSonSiege(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		b := nouveauBanc(t, 200)
@@ -1067,15 +1067,17 @@ func TestEnLigneGardeSonSiege(t *testing.T) {
 			t.Fatal("siège perdu en ligne :", err)
 		}
 		finir(t, la)
-		b.h.avancer(10*time.Minute - time.Second)
-		b.m.Tick()
-		if _, err := b.m.Membre(ea.Jeton[:]); err != nil {
-			t.Fatal("siège perdu avant 10 min hors ligne :", err)
+		for range 22 {
+			b.h.avancer(time.Hour)
+			b.m.Tick()
 		}
-		b.h.avancer(time.Second)
+		if _, err := b.m.Membre(ea.Jeton[:]); err != nil {
+			t.Fatal("siège perdu hors ligne pendant la vie du salon :", err)
+		}
+		b.h.avancer(2 * time.Hour) // échéance passée
 		b.m.Tick()
 		if _, err := b.m.Membre(ea.Jeton[:]); !errors.Is(err, ErrNotFound) {
-			t.Fatal("siège gardé après 10 min hors ligne :", err)
+			t.Fatal("siège gardé après la fin du salon :", err)
 		}
 	})
 }
@@ -1503,13 +1505,12 @@ func TestPaniqueAccueilSansFantome(t *testing.T) {
 		if err := <-la.fini; !errors.Is(err, errPanique) || la.codeFerme() != 1011 {
 			t.Fatal("Servir :", err, la.codeFerme())
 		}
-		var fantome bool
-		var hors bool
+		var fantome, garde bool
 		sous(s, func() {
-			fantome, hors = s.conns[ea.Siege] != nil, !s.sieges[ea.Siege].horsLigneDepuis.IsZero()
+			fantome, garde = s.conns[ea.Siege] != nil, s.sieges[ea.Siege] != nil
 		})
-		if fantome || !hors {
-			t.Fatal("connexion fantôme :", fantome, "hors ligne :", hors)
+		if fantome || !garde {
+			t.Fatal("connexion fantôme :", fantome, "siège gardé :", garde)
 		}
 	})
 }
@@ -1704,6 +1705,35 @@ func TestDerniereConnexionAccueil(t *testing.T) {
 		}
 		if _, m := derniere07(t, la, 0); m != want {
 			t.Errorf("0x07 du créateur repris : minute %d, attendu %d", m, want)
+		}
+		finir(t, la)
+	})
+}
+
+// Revue finale C-2, I3 : la dernière connexion d'un absent reste annoncée (0x0D et 0x07) tant
+// que son siège existe, même après des heures d'absence.
+func TestDerniereConnexionGardeeLongtemps(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		ea := b.entrer(t, c, false)
+		eb := b.entrer(t, c, false)
+		s := b.etat(t, c)
+		lb := b.connecter(eb.Jeton, eb.Seq)
+		synctest.Wait()
+		b.h.poser(heureB)
+		finir(t, lb)
+		for range 19 { // 9 h 32 le lendemain : échéance à 10 h 15
+			b.h.avancer(time.Hour)
+			b.m.Tick()
+		}
+		la := b.connecter(ea.Jeton, dernierSeq(s))
+		synctest.Wait()
+		if m, ok := annonce0D(t, la, eb.Siege); !ok || m != minuteDe(heureB) {
+			t.Fatalf("0x0D de l'absent : minute %d (%v), attendu %d", m, ok, minuteDe(heureB))
+		}
+		if en, m := derniere07(t, la, eb.Siege); en || m != minuteDe(heureB) {
+			t.Fatalf("0x07 de l'absent : %v, minute %d", en, m)
 		}
 		finir(t, la)
 	})

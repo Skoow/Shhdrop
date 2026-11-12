@@ -426,17 +426,17 @@ func TestKeyPackageGardePourLeRattrapage(t *testing.T) {
 	c := b.creer(t, 3)
 	eg, g := b.entrerMembre(t, c, true)
 	s := g.salon
-	sous(s, func() {
-		s.sieges[g.siege].horsLigneDepuis = time.Time{} // WebSocket ouvert (Task 9)
-	})
 	vu := dernierSeq(s) // dernier rang reçu par le créateur avant la coupure
-	_, arrivant := b.entrerMembre(t, c, false)
+	earr, arrivant := b.entrerMembre(t, c, false)
 	kp := trameD(0, 42) // en-tête de contrôle : non volatile, règle « désactivé »
 	seq := b.recevoir(t, arrivant, kp)
 	b.h.avancer(30 * time.Minute)
-	b.m.Tick() // libère l'arrivant (hors ligne depuis 30 min), pas le créateur
+	b.m.Tick() // ne libère personne (revue finale C-2, I3 : siège réservé pour la vie du salon)
 	if _, err := b.m.Membre(eg.Jeton[:]); err != nil {
 		t.Fatal("créateur libéré :", err)
+	}
+	if _, err := b.m.Membre(earr.Jeton[:]); err != nil {
+		t.Fatal("arrivant libéré après 30 min hors ligne :", err)
 	}
 	trouve := false
 	for _, e := range lireSuite(t, s, vu, 1000) {

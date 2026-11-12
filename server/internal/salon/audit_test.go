@@ -124,7 +124,7 @@ func TestAuditReecriturePlafonnee(t *testing.T) {
 }
 
 // D3 de l'audit : la reprise du siège 0 (rejoindre, appareil perdu ou volé) et tout départ
-// (Quitter, libération hors ligne, exclusion) coupent la lecture en cours de l'ancien jeton
+// (Quitter, exclusion) coupent la lecture en cours de l'ancien jeton
 // (clé "m:" + hex(SHA-256(jeton))), pas seulement les lectures suivantes.
 func TestAuditRepriseNeCoupePasLecture(t *testing.T) {
 	for _, cas := range []string{"reprise", "départ"} {

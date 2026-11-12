@@ -245,9 +245,10 @@ func TestDesactiveReste(t *testing.T) {
 	}
 }
 
-// Review Focus 5 : C, hors ligne, n'a pas lu ; la trame attend ; à 10 min hors ligne, son
-// siège est libéré (0x03) puis les trames qui n'attendaient plus que lui sont effacées (0x0E).
-func TestInstantaneLibereParDepart(t *testing.T) {
+// Review Focus 5 (revue finale C-2, I3) : C, hors ligne, n'a pas lu ; la trame l'attend
+// pendant toute la vie du salon (aucune libération après une absence) ; à son départ (0x03),
+// les trames qui n'attendaient plus que lui sont effacées (0x0E).
+func TestInstantaneAttendLAbsent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		b := nouveauBanc(t, 200)
 		c := b.creer(t, 4)
@@ -263,14 +264,20 @@ func TestInstantaneLibereParDepart(t *testing.T) {
 		trois := b.recevoir(t, g, trameD(dInstantane, 3)) // A ne la lit pas
 		b.lu(t, a, un)
 		b.lu(t, g, deux)
-		b.h.avancer(horsLigneMax - time.Second)
-		b.m.Tick()
-		synctest.Wait()
-		if !servie(t, s, un) || !servie(t, s, deux) || len(effaces(lg)) != 0 {
-			t.Fatal("effacée avant la libération")
+		for range 23 { // jusqu'à 1 h de l'échéance (24 h, arrondie au quart d'heure)
+			b.h.avancer(time.Hour)
+			b.m.Tick()
 		}
-		b.h.avancer(time.Second)
-		b.m.Tick()
+		synctest.Wait()
+		if !servie(t, s, un) || !servie(t, s, deux) || len(effaces(lg)) != 0 || len(effaces(la)) != 0 {
+			t.Fatal("effacée sans que l'absent ait lu ni soit parti")
+		}
+		if e, _ := entreeDe(s, un); e.attendus != 1<<cm.siege {
+			t.Fatalf("attendus de la 1ʳᵉ : %b", e.attendus)
+		}
+		if err := b.m.Quitter(cm); err != nil {
+			t.Fatal(err)
+		}
 		synctest.Wait()
 		depart := dernierSeq(s)
 		for _, l := range []*fauxLien{lg, la} {
@@ -285,7 +292,7 @@ func TestInstantaneLibereParDepart(t *testing.T) {
 			}
 		}
 		if servie(t, s, un) || servie(t, s, deux) || !servie(t, s, trois) {
-			t.Fatal("rattrapage après la libération")
+			t.Fatal("rattrapage après le départ")
 		}
 		if e, _ := entreeDe(s, trois); e.attendus != 1<<a.siege {
 			t.Fatalf("attendus de la 3ᵉ : %b", e.attendus)
@@ -356,8 +363,9 @@ func TestRepriseNeComptePlus(t *testing.T) {
 	})
 }
 
-// C revient à 9 min : il reçoit la trame au rattrapage, la lit → effacée, 0x0E pour tous.
-func TestAbsentRevientAvant10Min(t *testing.T) {
+// C revient après 23 h d'absence (I3 : siège réservé pour la vie du salon) : il reçoit la
+// trame au rattrapage, la lit → effacée, 0x0E pour tous.
+func TestAbsentRevientTard(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		b := nouveauBanc(t, 200)
 		c := b.creer(t, 4)
@@ -369,8 +377,10 @@ func TestAbsentRevientAvant10Min(t *testing.T) {
 		s := g.salon
 		seq := b.recevoir(t, g, trameD(dInstantane, 1))
 		b.lu(t, a, seq)
-		b.h.avancer(9 * time.Minute)
-		b.m.Tick()
+		for range 23 {
+			b.h.avancer(time.Hour)
+			b.m.Tick()
+		}
 		lc := b.connecter(ec.Jeton, ec.Seq)
 		synctest.Wait()
 		if !slices.Contains(rangs(lc.enrs()), seq) {
@@ -381,7 +391,7 @@ func TestAbsentRevientAvant10Min(t *testing.T) {
 		if servie(t, s, seq) || !slices.Equal(effaces(lg), []uint64{seq}) || !slices.Equal(effaces(lc), []uint64{seq}) {
 			t.Fatal("non effacée après la lecture de C")
 		}
-		b.h.avancer(2 * time.Minute)
+		b.h.avancer(30 * time.Minute)
 		b.m.Tick()
 		var libere bool
 		sous(s, func() {
@@ -683,7 +693,7 @@ func TestReconnexion0x0EExclus(t *testing.T) {
 			b.lu(t, bm, seq)
 		}
 		b.h.avancer(10 * time.Minute)
-		func() { // échéance sans Tick, qui libérerait aussi les sièges hors ligne
+		func() { // échéance sans Tick
 			s := g.salon
 			s.mu.Lock()
 			defer s.mu.Unlock()
