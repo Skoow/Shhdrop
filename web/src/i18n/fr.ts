@@ -559,6 +559,7 @@ export const fr = {
   "dl.row.download": "Télécharger {name}",
   "dl.row.again": "Télécharger à nouveau {name}",
   "dl.row.view": "Voir {name}",
+  "dl.row.listen": "Écouter {name}",
   "dl.row.pause": "Mettre en pause {name}",
   "dl.row.resume": "Reprendre {name}",
   "dl.row.stop": "Arrêter {name}",

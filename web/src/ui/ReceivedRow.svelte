@@ -56,6 +56,7 @@
   let viewBtn: HTMLButtonElement | undefined = $state();
   const lock = $derived(receiveLock(kind, row.state));
   const cl = $derived(kind === "file" ? receivedClean(clean) : null);
+  const listen = $derived(kind === "file" && format.family === "audio");
 </script>
 
 <li class="row" data-item={i} data-kind={format.family} data-state={row.state}>
@@ -101,9 +102,10 @@
 
   <div class="actions">
     {#if canView}
-      <Button variant="secondary" dense {disabled} bind:el={viewBtn} onpress={() => onview(viewBtn ?? null)} aria-label={t("dl.row.view", { name })}>
+      <!-- Son (mémo vocal compris, audit D2) : « Écouter » ; le reste : « Voir ». -->
+      <Button variant="secondary" dense {disabled} bind:el={viewBtn} onpress={() => onview(viewBtn ?? null)} aria-label={t(listen ? "dl.row.listen" : "dl.row.view", { name })}>
         {#snippet icon()}<Eye size={18} />{/snippet}
-        <span class="hide-narrow">{t("dl.view")}</span>
+        <span class="hide-narrow">{t(listen ? "content.listen" : "dl.view")}</span>
       </Button>
     {/if}
     {#if !viewOnly}

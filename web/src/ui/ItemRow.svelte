@@ -65,7 +65,7 @@
   const shownExt = $derived(item.kind === "text" || item.voice ? "" : item.ext);
   const name = $derived(item.base + shownExt);
   const mid = $derived(midSplit(item.base));
-  const format = $derived(formatOf({ kind: item.kind, ext: item.ext.slice(1).toLowerCase(), sniffed: item.sniffed ?? null }));
+  const format = $derived(formatOf({ kind: item.kind, ext: item.ext.slice(1).toLowerCase(), sniffed: item.sniffed ?? null, mime: item.mime, category: item.category }));
 
   let duration = $state<number | null>(null);
   $effect(() => {

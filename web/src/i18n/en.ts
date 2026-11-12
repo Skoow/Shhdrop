@@ -555,6 +555,7 @@ export const en = {
   "dl.row.download": "Download {name}",
   "dl.row.again": "Download {name} again",
   "dl.row.view": "View {name}",
+  "dl.row.listen": "Listen to {name}",
   "dl.row.pause": "Pause {name}",
   "dl.row.resume": "Resume {name}",
   "dl.row.stop": "Stop {name}",

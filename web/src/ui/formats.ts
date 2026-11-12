@@ -80,7 +80,18 @@ export type FormatInput = {
   sniffed?: Sniffed;
   /** Visionneuse permise chez le destinataire (liste blanche de types MIME). */
   preview?: "image" | "audio" | "video" | "text" | "pdf" | "none";
+  /** Type MIME déclaré (composeur : celui du fichier ou de l'enregistreur). */
+  mime?: string;
+  /** Catégorie du composeur (flows/kinds.ts) ; « audio » pour un mémo vocal. */
+  category?: string;
 };
+
+/** Conteneurs qui portent aussi bien du son seul que de la vidéo : l'extension ne tranche pas. */
+const AV_CONTAINER = new Set(["webm", "mp4"]);
+/** Un mémo vocal WebM ou MP4 est du son (audit D2) : type MIME, catégorie ou visionneuse le disent. */
+function saysAudio(x: FormatInput): boolean {
+  return (x.mime ?? "").trim().toLowerCase().startsWith("audio/") || x.category === "audio" || x.preview === "audio";
+}
 
 
 export function formatOf(x: FormatInput): Format {
@@ -92,13 +103,16 @@ export function formatOf(x: FormatInput): Format {
     if (x.sniffed === "zip" && byExt && byExt.family !== "archive") return labelled(byExt, x.ext);
     if (s && STRICT.has(s.family)) return s;
     if (x.sniffed === "mp4" || x.sniffed === "webm") {
-      const audio = byExt?.family === "audio";
+      const audio = byExt?.family === "audio" || saysAudio(x);
       const media = byExt && (byExt.family === "audio" || byExt.family === "video");
       return { family: audio ? "audio" : "video", label: media ? byExt.label : x.sniffed === "webm" ? "WEBM" : "MP4" };
     }
     if (s) return s;
   }
-  if (byExt) return labelled(byExt, x.ext);
+  if (byExt) {
+    if (byExt.family === "video" && AV_CONTAINER.has(x.ext) && saysAudio(x)) return { family: "audio", label: byExt.label };
+    return labelled(byExt, x.ext);
+  }
   // Inconnu par l'extension : la visionneuse permise donne au moins la famille.
   if (x.preview === "image" || x.preview === "video" || x.preview === "audio") return { family: x.preview, label: short(x.ext) };
   if (x.preview === "pdf") return { family: "pdf", label: "PDF" };

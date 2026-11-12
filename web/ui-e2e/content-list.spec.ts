@@ -58,11 +58,12 @@ test("listes compactes : groupes, icônes par format, types, tailles, temps esti
   await expect(row(page, "contrat.pdf")).not.toContainText(/env\.\s/);
   await expect(page.locator(".sum")).not.toContainText("(estimation)");
   await expect(page.locator(".gm.eta")).toHaveCount(0);
-  // « Voir » sur image, vidéo, audio, texte et PDF (cadre isolé, CLEAN5) ; jamais sur SVG,
-  // programme, archive : seulement « Télécharger ».
-  for (const n of ["foret-brume.jpg", "vocal.ogg", "anniversaire-lou.webm", "contrat.pdf"]) await expect(row(page, n).getByRole("button", { name: `Voir ${n}` })).toBeVisible();
+  // « Voir » sur image, vidéo, texte et PDF (cadre isolé, CLEAN5), « Écouter » sur le son
+  // (audit D2) ; jamais sur SVG, programme, archive : seulement « Télécharger ».
+  for (const n of ["foret-brume.jpg", "anniversaire-lou.webm", "contrat.pdf"]) await expect(row(page, n).getByRole("button", { name: `Voir ${n}` })).toBeVisible();
+  await expect(row(page, "vocal.ogg").getByRole("button", { name: "Écouter vocal.ogg" })).toHaveText("Écouter");
   for (const n of ["trap.svg", "installer.exe", "archive.zip"]) {
-    await expect(row(page, n).getByRole("button", { name: /^Voir/ })).toHaveCount(0);
+    await expect(row(page, n).getByRole("button", { name: /^(Voir|Écouter)/ })).toHaveCount(0);
     await expect(row(page, n).getByRole("button", { name: `Télécharger ${n}` })).toBeVisible();
   }
   // Aucune vignette : aucune image ni canvas dans la liste.
@@ -341,4 +342,19 @@ test.describe("mouvement réduit", () => {
     await expect(art).toBeVisible({ timeout: 20_000 });
     expect(await art.evaluate((e) => e.getAnimations({ subtree: true }).length)).toBe(0);
   });
+});
+
+test("mémo vocal WebM (audio/webm) : « Audio » chez l'expéditeur et chez le destinataire, action « Écouter » (audit D2)", async ({ page, shh, browser }) => {
+  test.setTimeout(120_000);
+  const memo = { name: "Mémo vocal 1.webm", mimeType: "audio/webm", buffer: readFileSync(new URL("../src/media/fixtures/chromium-audio.webm", import.meta.url)) };
+  const s = await freshPage(browser);
+  const sent = await sendShare(s.page, shh.origin + "/", { files: [memo], opens: 5 });
+  await s.ctx.close();
+  await page.goto(sent.link);
+  await unlock(page, sent.password);
+  const r = row(page, "Mémo vocal 1.webm");
+  await expect(r).toContainText("Audio");
+  await expect(r).not.toContainText("Vidéo");
+  await expect(page.locator('[data-group="audio"]')).toContainText("Mémo vocal 1.webm");
+  await expect(r.getByRole("button", { name: "Écouter Mémo vocal 1.webm" })).toHaveText("Écouter");
 });

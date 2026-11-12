@@ -66,7 +66,7 @@ test("groupes et ordre de l'envoi ; texte, image, audio, vidéo ; pièges jamais
   }
 
   // Audio et vidéo : téléchargés à la demande, lisibles dans le panneau.
-  await page.getByRole("button", { name: "Voir vocal.ogg" }).click();
+  await page.getByRole("button", { name: "Écouter vocal.ogg" }).click(); // son : « Écouter » (audit D2)
   const audio = viewer.locator("audio");
   await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
   await page.keyboard.press("Escape");

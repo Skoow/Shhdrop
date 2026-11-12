@@ -29,6 +29,20 @@ describe("formatOf", () => {
     expect(f("m4a", "mp4")).toEqual({ label: "M4A", family: "audio" });
     expect(f("bin", "mp4")).toEqual({ label: "MP4", family: "video" });
   });
+  it("mémo vocal en WebM ou MP4 : audio dès que le type MIME ou la catégorie le dit (audit D2), vidéo sinon", () => {
+    // Composeur : octets lus (webm), type MIME de l'enregistreur, catégorie « audio ».
+    expect(formatOf({ kind: "file", ext: "webm", sniffed: "webm", mime: "audio/webm;codecs=opus" })).toEqual({ label: "WEBM", family: "audio" });
+    expect(formatOf({ kind: "file", ext: "webm", sniffed: "webm", category: "audio" })).toEqual({ label: "WEBM", family: "audio" });
+    expect(formatOf({ kind: "file", ext: "mp4", sniffed: "mp4", mime: "audio/mp4" })).toEqual({ label: "MP4", family: "audio" });
+    // Destinataire : pas d'octets lus, la visionneuse permise vient du type MIME du manifeste.
+    expect(f("webm", null, "audio")).toEqual({ label: "WEBM", family: "audio" });
+    expect(f("mp4", null, "audio")).toEqual({ label: "MP4", family: "audio" });
+    // Une vraie vidéo reste une vidéo ; un indice audio ne change pas une famille stricte.
+    expect(formatOf({ kind: "file", ext: "webm", sniffed: "webm", mime: "video/webm" })).toEqual({ label: "WEBM", family: "video" });
+    expect(f("webm", null, "video")).toEqual({ label: "WEBM", family: "video" });
+    expect(formatOf({ kind: "file", ext: "mov", mime: "audio/mp4" })).toEqual({ label: "MOV", family: "video" });
+    expect(formatOf({ kind: "file", ext: "webm", sniffed: "exe", mime: "audio/webm" })).toEqual({ label: "EXE", family: "exec" });
+  });
   it("inconnu : famille par la visionneuse permise, sinon fichier ; étiquette de 4 caractères au plus", () => {
     expect(f("xyz", null, "image")).toEqual({ label: "XYZ", family: "image" });
     expect(f("", null, "video")).toEqual({ label: "", family: "video" });

@@ -181,7 +181,11 @@ test("arrêter → « Valider » sans réécouter → ligne ajoutée", async ({ 
   if (isMobile) await captureOf(rec, { path: `${SHOTS}voice-stopped-390.png` });
   await ok.click();
   await expect(rec).toBeHidden();
-  await expect(page.locator("[data-row]").filter({ hasText: "Mémo vocal 1" })).toBeVisible();
+  const row = page.locator("[data-row]").filter({ hasText: "Mémo vocal 1" });
+  await expect(row).toBeVisible();
+  // WebM de l'enregistreur : du son, jamais « Vidéo » (audit D2).
+  await expect(row).toContainText("Audio");
+  await expect(row).not.toContainText("Vidéo");
 });
 
 test("ligne vocale : nom générique renommable (Entrée, Échap, vide → générique) ; lecteur sous le nom, aligné à gauche ; alignée sur les autres lignes", async ({ page, shh, isMobile }) => {
