@@ -104,6 +104,8 @@ jobs:
   ui:
     needs: [go, web]
     runs-on: ubuntu-latest
+    # ≈ 1 h 30 normalement ; un blocage échoue au bout de 2 h 30 au lieu de 6 h.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

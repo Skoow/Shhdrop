@@ -18,6 +18,9 @@ export default defineConfig({
   fullyParallel: true,
   retries: 0,
   forbidOnly: !!process.env.CI,
+  // CI : arrêt après 20 échecs, pour que le rapport (avec les erreurs) sorte au lieu d'un job
+  // de plusieurs heures quand tout un navigateur échoue (CI du 12 novembre : 94 échecs WebKit).
+  maxFailures: process.env.CI ? 20 : 0,
   use: { trace: "retain-on-failure", screenshot: "off", video: "off" },
   // Démo GitHub Pages (UI §14.3) : demo.spec.ts sur ses propres projets seulement (un projet = un appareil).
   projects: [
