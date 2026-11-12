@@ -43,7 +43,7 @@ test("mauvais mot de passe deux fois → « 3 essais restants », bon → conten
   // M9 : le geste irréversible annoncé avant, relié au bouton ; textes de confiance.
   // Ruling 5 : ouvertures restantes lues par fetchMeta (partage à 3 ouvertures).
   // Une ligne (audit M20).
-  const cost = "Ouvrir compte 1\u00a0ouverture sur les 3\u00a0restantes\u202f; recharger ensuite n'en compte pas d'autre pendant 30\u00a0min.";
+  const cost = "Ouvrir compte 1\u00a0ouverture sur les 3\u00a0restantes\u202f; ensuite, revenir depuis ce navigateur n'en compte pas d'autre, jusqu'à l'échéance.";
   await expect(page.getByText(cost)).toBeVisible();
   await expect(unlockButton(page)).toHaveAccessibleDescription(cost);
   await expect(page.getByText("Le serveur ne reçoit que des données chiffrées, jamais la clé.")).toBeVisible();

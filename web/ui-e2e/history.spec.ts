@@ -144,7 +144,7 @@ test.describe("fr-FR", () => {
     await expect(card(page)).toContainText("Ouvert 1 / 1", { timeout: 15_000 });
     expect(calls).toHaveLength(1);
     await expect(card(page)).toContainText(/Ouvert entre \d+ h \d\d et \d+ h \d\d · 1 \/ 1/);
-    await expect(card(page).locator("[data-state-chip]")).toHaveText(/En cours d'effacement|Actif/);
+    await expect(card(page).locator("[data-state-chip]")).toHaveText(/Toutes les ouvertures utilisées|Actif/);
     await shot(page, "history-details", isMobile);
 
     // Détruire en un geste (confirmation sur place) → « Détruit », reçu ; le serveur ne l'a plus.

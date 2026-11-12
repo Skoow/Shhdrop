@@ -182,7 +182,7 @@ test.describe("en-US", () => {
     await s.ctx.close();
     await page.goto(sent.link);
     await expect(page.getByRole("heading", { name: "An encrypted share is waiting for you" })).toBeVisible();
-    await expect(page.getByText("Last open left; reloading afterwards does not count another one for 30\u00a0min.")).toBeVisible();
+    await expect(page.getByText("Last open left; afterwards, coming back from this browser does not count another one, until it expires.")).toBeVisible();
     await settle(page);
     await capture(page, "open-en");
     await page.getByLabel("Password", { exact: true }).fill(sent.password);

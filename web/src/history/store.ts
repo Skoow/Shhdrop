@@ -86,11 +86,12 @@ function done(tx: IDBTransaction): Promise<void> {
   });
 }
 
-export function idbBackend(idb: IDBFactory): Backend {
+/** Base `name` (l'historique par défaut ; history/returns.ts a la sienne, même mécanisme). */
+export function idbBackend(idb: IDBFactory, name = DB): Backend {
   let opened: Promise<IDBDatabase> | undefined;
   const db = () =>
     (opened ??= new Promise<IDBDatabase>((ok, ko) => {
-      const r = idb.open(DB, 1);
+      const r = idb.open(name, 1);
       r.onupgradeneeded = () => {
         const d = r.result;
         if (!d.objectStoreNames.contains(META)) d.createObjectStore(META);
@@ -111,7 +112,7 @@ export function idbBackend(idb: IDBFactory): Backend {
       if (opened) return true;
       // Ouverture sans création : une base neuve voit sa création annulée (rien n'est écrit).
       const found = await new Promise<IDBDatabase | null>((ok, ko) => {
-        const r = idb.open(DB, 1);
+        const r = idb.open(name, 1);
         let fresh = false;
         r.onupgradeneeded = () => {
           fresh = true;

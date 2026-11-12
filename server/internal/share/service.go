@@ -872,12 +872,13 @@ func (s *Service) UnlockGrant(id string, kAcces, kPreuve []byte, grant string) (
 			return Opened{}, notFound(err)
 		}
 		if state == "draining" {
-			// Purge (dernière ouverture émise + 6 h, durée de son jeton) en mémoire seulement :
-			// en base, elle daterait la dernière ouverture à 15 min près (spec §36 S12).
-			s.setPurge(id, min(ceil15(now+purgeWindow), exp))
+			// D42-22 : toutes les ouvertures sont prises ; le partage reste jusqu'à son échéance
+			// pour que leurs détentrices y reviennent (purge en mémoire : un redémarrage, qui
+			// invalide les octrois, l'efface, PurgeAtStart).
+			s.setPurge(id, exp)
 		}
 		s.gone.mu.Lock()
-		g := s.grantLocked(openKey{id, openN}, exp, now)
+		g := s.grantLocked(openKey{id, openN}, exp)
 		s.gone.unlock()
 		return Opened{N: openN, Envelope: envelope, Grant: g, OpensLeft: left}, nil
 	}
@@ -1155,7 +1156,6 @@ func (s *Service) DestroyAdmin(kAcces []byte) error {
 // aussi les descripteurs détachés qui ne servent plus. Continue malgré les erreurs.
 func (s *Service) Sweep() (int, error) {
 	now := s.now()
-	gerr := s.sweepGrants(now)
 	s.sweepGone(now)
 	rows, err := s.DB.Query(`SELECT id FROM shares WHERE state<>'ready' OR expires_at<=? OR failed_attempts>=?`, now, maxAttempts)
 	if err != nil {
@@ -1175,7 +1175,7 @@ func (s *Service) Sweep() (int, error) {
 		return 0, err
 	}
 	removed := 0
-	errs := []error{gerr, s.sweepOrphanUploads()}
+	errs := []error{s.sweepOrphanUploads()}
 	for _, id := range ids {
 		ok, err := s.sweepOne(id, now)
 		if err != nil {

@@ -62,7 +62,8 @@ const FR: Record<InfoName, (v: V) => InfoPage> = {
         id: "sortie",
         h: "Après la dernière ouverture",
         p: [
-          "Quand la dernière personne autorisée quitte la page, le partage est supprimé du serveur environ 3 minutes plus tard (un rechargement ne compte pas). Si l'onglet se ferme brutalement, il est effacé au plus tard 6 heures après cette ouverture, ou à la fin de sa durée.",
+          "Quand toutes les ouvertures sont prises, personne d'autre ne peut entrer. Chaque personne qui a ouvert le partage peut y revenir depuis le même navigateur jusqu'à la fin de sa durée, sans compter d'ouverture : le contenu chiffré reste donc sur le serveur jusque-là. La dernière personne peut le détruire tout de suite ; sinon, il est effacé à la fin de la durée choisie à l'envoi.",
+          "Pour revenir, ce navigateur garde l'autorisation d'ouverture, chiffrée, jamais la clé ni le mot de passe ; il faut rouvrir le lien et retaper le mot de passe. Depuis un autre appareil, en navigation privée ou après un redémarrage de notre serveur, le retour n'est plus possible si toutes les ouvertures sont prises.",
         ],
       },
       {
@@ -232,7 +233,8 @@ const EN: Record<InfoName, (v: V) => InfoPage> = {
         id: "sortie",
         h: "After the last open",
         p: [
-          "When the last person allowed to open a share leaves the page, the share is deleted from the server about 3 minutes later (a reload doesn't count). If the tab closes abruptly, it is erased at most 6 hours after that open, or when its time runs out.",
+          "Once all opens are used, nobody else can get in. Each person who opened the share can come back to it from the same browser until its time runs out, without using an open: the encrypted content therefore stays on the server until then. The last person can destroy it right away; otherwise it is erased at the end of the duration chosen when sending.",
+          "To come back, this browser keeps the open permission, encrypted, never the key or the password; you reopen the link and type the password again. From another device, in a private window or after our server restarts, coming back is no longer possible once all opens are used.",
         ],
       },
       {

@@ -2,7 +2,8 @@
 // - Fin de lecture complète (fermeture « partage disparu », gone.svelte.ts) : done() → wipe() →
 //   révocation des URL. Plus de bouton « Terminer et effacer » (retours UI4, décision du propriétaire).
 // - Sortie de page (pagehide, démontage) : wipe() et révocation seulement, SANS done() (spec
-//   §41.4) : l'ouverture reste valable le temps de l'octroi, pour qu'un rechargement la rouvre.
+//   §41.4, D42-22) : l'ouverture reste valable jusqu'à l'échéance, pour qu'un rechargement ou un
+//   retour depuis ce navigateur la rouvre.
 // - Détruire, Signaler : opened.destroy() (ou destroy("report"), motif non conservé), puis
 //   wipe() ; la dissolution (onDestroyed) ne commence qu'après la réponse du serveur.
 import { LimitError, NotFoundError, type Opened } from "../index";

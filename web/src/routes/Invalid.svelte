@@ -1,5 +1,6 @@
 <script lang="ts">
-  // Lien invalide, lien incomplet (UI §9.11) : message unique (spec §5.2), retour à l'envoi,
+  // Lien invalide, lien incomplet, retour impossible (UI §9.11, D42-22) : message unique pour
+  // un lien inconnu (spec §5.2, avec la limite des retours : même navigateur seulement), retour à l'envoi,
   // dans la facture commune des pages d'état (StatusPage, tâche UP). En démo seulement, une
   // phrase explique pourquoi un lien de démo ouvert ailleurs est invalide (crochet getDemo,
   // jamais une chaîne du dictionnaire de production).
@@ -9,13 +10,19 @@
   import { Link2 } from "../ui/Icon";
   import StatusPage from "../ui/StatusPage.svelte";
 
-  type Props = { kind: "invalid" | "incomplete" };
+  type Props = { kind: "invalid" | "incomplete" | "return_lost" };
   let { kind }: Props = $props();
   const demo = getDemo();
 </script>
 
 <div class="invalid" data-invalid={kind}>
-  <StatusPage kind={kind} screen={kind} icon={Link2} title={t(kind === "invalid" ? "invalid" : "incomplete")} lede={kind === "incomplete" ? t("incomplete.hint") : undefined}>
+  <StatusPage
+    {kind}
+    screen={kind === "incomplete" ? "incomplete" : "invalid"}
+    icon={Link2}
+    title={t(kind === "invalid" ? "invalid" : kind === "incomplete" ? "incomplete" : "lost")}
+    lede={t(kind === "invalid" ? "invalid.hint" : kind === "incomplete" ? "incomplete.hint" : "lost.hint")}
+  >
     {#if kind === "invalid" && demo}<p class="lede demo-note">{demo.invalidLinkNote}</p>{/if}
     {#snippet action()}<a class="send" href={href("/")} onclick={(e) => followLink(e, "/")}>{t("invalid.send")}</a>{/snippet}
   </StatusPage>

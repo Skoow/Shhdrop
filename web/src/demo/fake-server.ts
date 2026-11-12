@@ -33,9 +33,7 @@ const MIN_FILL_S = 3; // création refusée moins de 3 s après l'émission du d
 const ACTIVE_S = 120; // ouverture active : un segment dans les 120 s (spec §41.8)
 const GRACE_S = 2 * 3600; // grâce après l'échéance ou la suppression
 const WATCH_HOLD_MS = 25_000;
-const GRANT_TTL_S = 30 * 60; // octroi d'ouverture (spec §41.4)
-const MAX_REOPENS = 10;
-const LEAVE_DELAY_S = 180; // « je pars » de la dernière ouverture → suppression (D41-28)
+const MAX_REOPENS = 20; // retours par ouverture sur la vie du lien (D42-22)
 // D42-6 (comme server/internal/share) : palier de création plafonné, réservation agrandie par
 // grow jusqu'à 2 segments au-delà du plus haut segment reçu, aléa de finalize borné par les
 // morceaux reçus (renvois et morceaux effacés compris).
@@ -94,9 +92,7 @@ export type Snapshot = {
   active: [string, number][]; // dernier segment (s) ; les lectures en cours ne survivent pas
   revoked: string[];
   grantStr: [string, { id: string; openN: number; exp: number }][];
-  grantOf: [string, { exp: number; reopens: number }][];
-  /** Départs de la dernière ouverture (D41-28) : (id:n) → heure du « je pars » (s). */
-  leaves?: [string, number][];
+  grantOf: [string, { reopens: number }][];
 };
 
 export type FakeServerOpts = {
@@ -238,11 +234,10 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
   const watchers = new Map<string, Set<() => void>>();
   const revoked = new Set<string>();
   const ak = (id: string, n: number) => `${id}:${n}`;
-  // Octrois d'ouverture (spec §41.4) : chaîne opaque → ouverture ; (id, n) → échéance et
-  // rechargements, comme le serveur (en mémoire ; rien n'est gardé ailleurs).
+  // Octrois d'ouverture (spec §41.4, D42-22) : chaîne opaque → ouverture, valable jusqu'à
+  // l'échéance du partage ; (id, n) → retours acceptés, comme le serveur (en mémoire).
   const grantStr = new Map<string, { id: string; openN: number; exp: number }>();
-  const grantOf = new Map<string, { exp: number; reopens: number }>();
-  const leaves = new Map<string, number>(); // D41-28, même contrat que le serveur (share/leave.go)
+  const grantOf = new Map<string, { reopens: number }>();
   if (opts.restore !== undefined) restoreFrom(opts.restore);
   function restoreFrom(r: NonNullable<FakeServerOpts["restore"]>): void {
     const { snap } = r;
@@ -258,8 +253,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     for (const [k, last] of snap.active) active.set(k, { last, inflight: 0 });
     for (const id of snap.revoked) revoked.add(id);
     for (const [k, v] of snap.grantStr) grantStr.set(k, v);
-    for (const [k, v] of snap.grantOf) grantOf.set(k, v);
-    for (const [k, v] of snap.leaves ?? []) leaves.set(k, v);
+    for (const [k, v] of snap.grantOf) grantOf.set(k, { reopens: v.reopens });
   }
   function snapshot(): Snapshot {
     const freeze = (x: Share): SnapShare => {
@@ -276,15 +270,11 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
       revoked: [...revoked],
       grantStr: [...grantStr].map(([k, v]) => [k, { ...v }]),
       grantOf: [...grantOf].map(([k, v]) => [k, { ...v }]),
-      leaves: [...leaves],
     };
   }
-  function grant(id: string, openN: number, cap: number): string {
-    const t = now();
-    const exp = Math.min(t + GRANT_TTL_S, cap);
-    const e = grantOf.get(ak(id, openN)) ?? { exp: 0, reopens: 0 };
-    e.exp = Math.max(e.exp, exp);
-    grantOf.set(ak(id, openN), e);
+  /** Octroi de l'ouverture openN, valable jusqu'à exp (échéance du partage, D42-22). */
+  function grant(id: string, openN: number, exp: number): string {
+    if (!grantOf.has(ak(id, openN))) grantOf.set(ak(id, openN), { reopens: 0 });
     const g = randomId(40);
     grantStr.set(g, { id, openN, exp });
     return g;
@@ -339,19 +329,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
       else if (s.state !== "uploading" && s.expiresAt <= t) retire(id, true, s.expiresAt);
       else if ((s.state === "draining" && s.purgeAt <= t) || s.failed >= MAX_ATTEMPTS) retire(id, true, t);
     }
-    for (const [k, at] of leaves) {
-      if (t < at + LEAVE_DELAY_S) continue;
-      const a = active.get(k);
-      if (a !== undefined && (a.inflight > 0 || (a.last >= at && t - a.last < LEAVE_DELAY_S))) continue;
-      leaves.delete(k);
-      retire(k.slice(0, k.lastIndexOf(":")), true, t);
-    }
-    for (const [k, e] of grantOf) {
-      const i = k.lastIndexOf(":");
-      const id = k.slice(0, i);
-      const n = Number(k.slice(i + 1));
-      if (e.exp <= t && !isActive(id, n, t)) endOpen(id, n);
-    }
+    for (const k of grantOf.keys()) if (!shares.has(k.slice(0, k.lastIndexOf(":")))) grantOf.delete(k);
     for (const [g, x] of grantStr) if (x.exp <= t || !grantOf.has(ak(x.id, x.openN))) grantStr.delete(g);
     for (const [id, d] of dead) {
       for (const n of d.opens) if (t >= d.graceEnd || !isActive(id, n, t)) d.opens.delete(n);
@@ -688,8 +666,6 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
   async function meta(req: Request): Promise<Response> {
     const g = grantHeader(req);
     const [id, s] = await reopenable(headerSecret(req, "X-Shh-Access"), g);
-    const n = g === null ? null : liveGrant(g, id, s);
-    if (n !== null) leaves.delete(ak(id, n)); // rechargement : la page revient (D41-28)
     return json(200, {
       expires_in_s: s.expiresAt - now(),
       salt: b64(s.salt!),
@@ -719,17 +695,16 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
         if (e === undefined) throw new HttpFail(409, "grant_invalid");
         if (e.reopens >= MAX_REOPENS) throw new HttpFail(429, "reopen_limit");
         e.reopens++;
-        leaves.delete(ak(id, reopenN)); // rechargement : la personne n'est pas partie
         openN = reopenN;
-        if (s.state === "draining") s.purgeAt = Math.max(s.purgeAt, Math.min(ceil15(now() + PURGE_WINDOW_S), s.expiresAt));
       } else {
         if (s.state !== "ready" || s.opensLeft <= 0) throw notFound();
         s.opensLeft--;
         s.opensIssued++;
         openN = s.opensIssued;
+        // D42-22 : toutes les ouvertures prises, gardé jusqu'à l'échéance pour les retours.
         if (s.opensLeft === 0) {
           s.state = "draining";
-          s.purgeAt = Math.min(ceil15(now() + PURGE_WINDOW_S), s.expiresAt);
+          s.purgeAt = s.expiresAt;
         }
       }
       return json(200, {
@@ -743,16 +718,6 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     const left = await countFailure(id, s);
     if (left > 0) throw new HttpFail(403, "bad_password", { attempts_left: left });
     throw notFound(); // 5ᵉ essai faux : détruit
-  }
-
-  /** POST /api/shares/regrant : octroi renouvelé, jamais au-delà du jeton ni de l'échéance. */
-  function regrant(req: Request): Response {
-    const tok = checkToken(req, "download");
-    const s = shares.get(tok.id);
-    const cap = s === undefined ? 0 : Math.min(tok.exp, s.expiresAt);
-    if (s === undefined || dead.has(tok.id) || !grantOf.has(ak(tok.id, tok.openN)) || cap <= now()) throw goneFail();
-    leaves.delete(ak(tok.id, tok.openN)); // une page de cette ouverture vit encore
-    return json(200, { grant: grant(tok.id, tok.openN, cap) });
   }
 
   /** Segments lisibles par l'ouverture tok, ou 410 (partage disparu, ouverture finie). */
@@ -799,7 +764,7 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     });
   }
 
-  /** Fin de l'ouverture n (done, ou octroi expiré sans renouvellement) ; rend faux si déjà disparue. */
+  /** Fin de l'ouverture n (done) ; rend faux si déjà disparue. */
   function endOpen(id: string, n: number): "ok" | "gone" | "unknown" {
     grantOf.delete(ak(id, n));
     const d = dead.get(id);
@@ -812,25 +777,6 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
     for (let m = s.doneMask; m !== 0; m >>>= 1) bits += m & 1;
     if (s.state === "draining" && bits === s.opensIssued) retire(id, true, now());
     return "ok";
-  }
-
-  /** POST /api/shares/leave (D41-28) : corps vide ; seule la dernière ouverture permise arme. */
-  async function leave(req: Request): Promise<Response> {
-    if ((await req.arrayBuffer()).byteLength !== 0) throw badRequest();
-    const tok = checkToken(req, "download");
-    const s = shares.get(tok.id);
-    const k = ak(tok.id, tok.openN);
-    if (
-      s !== undefined &&
-      s.state === "draining" &&
-      s.opensLeft === 0 &&
-      tok.openN === s.opensIssued &&
-      (s.doneMask & (1 << (tok.openN - 1))) === 0 &&
-      grantOf.has(k) &&
-      !dead.has(tok.id)
-    )
-      leaves.set(k, now());
-    return empty(204);
   }
 
   function done(req: Request): Response {
@@ -946,10 +892,6 @@ export function createFakeServer(opts: FakeServerOpts = {}): FakeServer {
         return unlock(req);
       case "POST /api/shares/done":
         return done(req);
-      case "POST /api/shares/leave":
-        return await leave(req);
-      case "POST /api/shares/regrant":
-        return regrant(req);
       case "POST /api/shares/destroy":
         return destroy(req);
       case "GET /api/shares/watch":

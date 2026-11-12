@@ -265,8 +265,9 @@
   const disabled = $derived(expired || closer.closed || ended !== null);
   let wiped = false;
 
-  // UI §12.2, spec §41.4 : sortie de page → wipe, révocation, mais plus de done : l'ouverture
-  // reste valable le temps de son octroi, pour qu'un rechargement la rouvre sans en consommer.
+  // UI §12.2, spec §41.4, D42-22 : sortie de page → wipe, révocation, mais ni done ni « je
+  // pars » : l'ouverture reste valable jusqu'à l'échéance, pour qu'un rechargement ou un retour
+  // depuis ce navigateur la rouvre sans en consommer.
   // Démontage (nouveau lien collé dans la barre, autre route) : même effacement. Partage disparu : la lecture en cours
   // continue (spec §41.8), le reste s'arrête ; la fin de lecture l'attend (gone.svelte.ts).
   function leave() {
@@ -276,9 +277,6 @@
     }
     if (wiped) return;
     wiped = true;
-    // D41-28 : dernière ouverture permise → « je pars » (le serveur supprime 3 min plus tard,
-    // sauf rechargement, qui rouvre par l'octroi et annule).
-    o.leave();
     dl.dispose();
     previews.clear();
     release(o);

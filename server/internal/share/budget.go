@@ -61,13 +61,16 @@ func (b *readBudget) charge(k openKey, n, limit, now int64) bool {
 	return true
 }
 
-// extend : l'entrée de k (si elle existe) vit au moins jusqu'à until : un rechargement
-// (nouveau jeton) ne remet jamais le compteur à zéro (spec §41.4).
-func (b *readBudget) extend(k openKey, until int64) {
+// keep : l'entrée de k (créée au besoin, à zéro) vit au moins jusqu'à until, l'échéance du
+// partage : un retour (nouveau jeton, D42-22), même plus de 6 h après, ne remet jamais le
+// compteur à zéro (spec §41.4).
+func (b *readBudget) keep(k openKey, until int64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if e, ok := b.m[k]; ok && e.until < until {
-		e.until = until
-		b.m[k] = e
+	if b.m == nil {
+		b.m = map[openKey]budgetEntry{}
 	}
+	e := b.m[k]
+	e.until = max(e.until, until)
+	b.m[k] = e
 }

@@ -1,13 +1,12 @@
 package api
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
 
-// Octroi d'ouverture par HTTP (spec §41.4) : X-Shh-Grant, 409 grant_invalid, 429
-// reopen_limit, regrant ; ni adresse, ni cookie dans les réponses.
+// Octroi d'ouverture par HTTP (spec §41.4, D42-22) : X-Shh-Grant, 409 grant_invalid, 429
+// reopen_limit au 21ᵉ retour ; plus de regrant ni de leave ; ni adresse, ni cookie.
 func TestGrantHTTP(t *testing.T) {
 	e := newEnv(t, false, nil)
 	k := newKeys()
@@ -29,6 +28,7 @@ func TestGrantHTTP(t *testing.T) {
 	}
 	r := unlock("", k.preuve)
 	g, _ := r["grant"].(string)
+	dl0, _ := r["download_token"].(string)
 	if r["code"] != 200.0 || len(g) != 54 || r["opens_left"] != 0.0 {
 		t.Fatal(r)
 	}
@@ -43,7 +43,7 @@ func TestGrantHTTP(t *testing.T) {
 	if r := unlock(g, rnd(32)); r["code"] != 403.0 || r["attempts_left"] != 4.0 {
 		t.Fatal(r)
 	}
-	for i := 1; i <= 10; i++ {
+	for i := 1; i <= 20; i++ {
 		r := unlock(g, k.preuve)
 		if r["code"] != 200.0 || r["opens_left"] != 0.0 {
 			t.Fatal(i, r)
@@ -54,12 +54,11 @@ func TestGrantHTTP(t *testing.T) {
 	if r := unlock(g, k.preuve); r["code"] != 429.0 || r["error"] != "reopen_limit" {
 		t.Fatal(r)
 	}
-	// regrant avec le jeton de téléchargement.
-	dl := r["download_token"].(string)
-	w := e.do(req{method: "POST", path: "/api/shares/regrant", hdr: auth(dl)})
-	expect(t, w, 200, "")
-	if ng, _ := jsonOf(t, w)["grant"].(string); len(ng) != 54 || strings.Contains(w.Body.String(), "192.0.2") {
-		t.Fatal(w.Body.String())
+	// D42-22 : regrant et leave n'existent plus (l'octroi vaut jusqu'à l'échéance).
+	for _, p := range []string{"/api/shares/regrant", "/api/shares/leave"} {
+		if w := e.do(req{method: "POST", path: p, hdr: auth(dl0)}); w.Code != 404 && w.Code != 405 {
+			t.Fatal(p, w.Code)
+		}
 	}
 	// Octroi falsifié sur un partage « ready » : 409 sans essai.
 	k2 := newKeys()
@@ -76,13 +75,12 @@ func TestGrantHTTP(t *testing.T) {
 	if r := unlock(string(bad), rnd(32)); r["code"] != 409.0 || r["error"] != "grant_invalid" {
 		t.Fatal(r)
 	}
-	// done explicite : l'octroi ne rouvre plus ; regrant → 410.
+	// done explicite : l'octroi ne rouvre plus.
 	dl2 := r2["download_token"].(string)
 	expect(t, e.do(req{method: "POST", path: "/api/shares/done", hdr: auth(dl2)}), 204, "")
 	if r := unlock(r2["grant"].(string), k.preuve); r["code"] != 409.0 {
 		t.Fatal(r)
 	}
-	expect(t, e.do(req{method: "POST", path: "/api/shares/regrant", hdr: auth(dl2)}), 410, `{"error":"gone"}`)
 	m := e.do(req{method: "GET", path: "/api/shares/meta", hdr: access(k)})
 	if jsonOf(t, m)["opens_left"] != 2.0 {
 		t.Fatal(m.Body.String())

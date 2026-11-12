@@ -125,7 +125,7 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     expect(statuses.at(-1)).toBe("POST /api/shares/done 410"); // jeton valide, partage disparu (spec §41.8)
   });
 
-  it("spec §41.4 : l'octroi rouvre la même ouverture (même en draining), 10 fois au plus ; faux → GrantInvalidError", async ({ expect }) => {
+  it("spec §41.4, D42-22 : l'octroi rouvre la même ouverture (même en draining) jusqu'à l'échéance, 20 fois au plus ; faux → GrantInvalidError", async ({ expect }) => {
     let offset = 0;
     const { fake, net } = setup({ now: () => Date.now() + offset });
     const r = await share(net, 1);
@@ -133,7 +133,10 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     expect(o.grant).toMatch(/^[A-Za-z0-9_-]{54}$/);
     let g = o.grant;
     expect((await fetchMeta(r.link, ORIGIN, net, g)).opensLeft).toBe(0); // draining, rouvrable
-    for (let i = 0; i < 10; i++) {
+    // D42-22 : plus de fin d'ouverture à 30 min ; le « draining » reste jusqu'à l'échéance (1 h).
+    offset += 50 * 60_000;
+    expect(fake.shares()).toBe(1);
+    for (let i = 0; i < 20; i++) {
       const again = await openShare(r.link, PW, ORIGIN, { grant: g }, net);
       g = again.grant;
     }
@@ -141,8 +144,8 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     await expect(openShare(r.link, PW, ORIGIN, { grant: g }, net)).rejects.toBeInstanceOf(ReopenLimitError);
     const bad = await openShare(r.link, "faux", ORIGIN, { grant: "A".repeat(54) }, net).catch((x: unknown) => x);
     expect(bad).toBeInstanceOf(NotFoundError); // draining sans octroi valable : introuvable
-    // Octroi expiré sans renouvellement (30 min) : l'ouverture finit, le draining est effacé.
-    offset += 31 * 60_000;
+    // Échéance du lien (1 h arrondie au quart d'heure, lue par meta) : effacé.
+    offset += ((await fetchMeta(r.link, ORIGIN, net, g)).expiresInS + 1) * 1000;
     expect(fake.shares()).toBe(0);
   });
 
@@ -153,41 +156,21 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     await expect(openShare(r.link, "faux", ORIGIN, { grant: "A".repeat(54) }, net)).rejects.toBeInstanceOf(GrantInvalidError);
     const again = await openShare(r.link, PW, ORIGIN, { grant: o.grant }, net);
     expect(await shareStatus(r.manage, ORIGIN, net)).toMatchObject({ opensUsed: 1 });
-    expect(await again.regrant()).toMatch(/^[A-Za-z0-9_-]{54}$/);
     await again.done();
     await expect(openShare(r.link, PW, ORIGIN, { grant: again.grant }, net)).rejects.toBeInstanceOf(GrantInvalidError);
     const bad = await openShare(r.link, "faux", ORIGIN, undefined, net).catch((x: unknown) => x);
     expect((bad as BadPasswordError).attemptsLeft).toBe(4); // l'octroi falsifié n'a compté aucun essai
   });
 
-  it("D41-28 : « je pars » de la dernière ouverture → effacé après 3 min ; rechargement → annulé ; ouverture non dernière → rien", async ({ expect }) => {
-    // Horloge figée une fois le partage créé (seul `offset` l'avance ensuite) : sous charge, les
-    // secondes réelles d'Argon2id s'ajoutaient aux 179 s simulées et effaçaient le partage trop
-    // tôt (test instable). La création, elle, a besoin d'une horloge qui avance.
-    let offset = 0;
-    let frozen: number | null = null;
-    const { fake, net, statuses } = setup({ now: () => (frozen ?? Date.now()) + offset });
-    const r = await share(net, 2);
-    frozen = Date.now();
-    const first = await openShare(r.link, PW, ORIGIN, undefined, net);
-    first.leave(); // non dernière : aucune requête
-    const last = await openShare(r.link, PW, ORIGIN, undefined, net);
-    expect(last.opensLeft).toBe(0);
-    last.leave();
-    await vi.waitFor(() => expect(statuses).toContain("POST /api/shares/leave 204"));
-    expect(statuses.filter((x) => x.includes("/leave"))).toHaveLength(1);
-    // Rechargement dans les 3 min : annulé.
-    offset += 30_000;
-    const again = await openShare(r.link, PW, ORIGIN, { grant: last.grant }, net);
-    offset += 181_000;
-    expect(fake.shares()).toBe(1);
-    // Départ réel : effacé 3 min plus tard.
-    again.leave();
-    await vi.waitFor(() => expect(statuses.filter((x) => x.includes("/leave"))).toHaveLength(2));
-    offset += 179_000;
-    expect(fake.shares()).toBe(1);
-    offset += 1_000;
-    expect(fake.shares()).toBe(0);
+  it("D42-22 : plus de « je pars » ni de renouvellement d'octroi (routes absentes)", async ({ expect }) => {
+    const { fake, net } = setup();
+    const r = await share(net, 1);
+    const o = await openShare(r.link, PW, ORIGIN, undefined, net);
+    expect("leave" in o || "regrant" in o).toBe(false);
+    for (const p of ["/api/shares/leave", "/api/shares/regrant"]) {
+      const res = await fake.handle(new Request(ORIGIN + p, { method: "POST", headers: { Authorization: "Bearer x" } }));
+      expect(res.status, p).toBe(404);
+    }
   });
 
   it("dernière ouverture lue (done) : le partage « draining » est effacé", async ({ expect }) => {
@@ -303,14 +286,8 @@ describe.concurrent("faux serveur de démo contre le vrai client", { timeout: 60
     const r = await share(net, 3, [big]);
     const a = await openShare(r.link, PW, ORIGIN, undefined, net);
     const b = await openShare(r.link, PW, ORIGIN, undefined, net);
-    // 30 s avant l'échéance, octrois renouvelés au moins toutes les 25 min (comme la page,
-    // spec §41.4) : sinon l'ouverture finirait 30 min après le déverrouillage.
-    const target = ((await fetchMeta(r.link, ORIGIN, net)).expiresInS - 30) * 1000;
-    while (offset < target) {
-      offset = Math.min(target, offset + 25 * 60_000);
-      await a.regrant();
-      await b.regrant();
-    }
+    // 30 s avant l'échéance (D42-22 : l'ouverture vit jusque-là sans renouvellement).
+    offset = ((await fetchMeta(r.link, ORIGIN, net)).expiresInS - 30) * 1000;
     expect(Buffer.from(await a.item(0)).equals(Buffer.from(big.data))).toBe(true);
     offset += 100_000; // échu, segment servi il y a 100 s : active
     expect(Buffer.from(await a.item(0)).equals(Buffer.from(big.data))).toBe(true);

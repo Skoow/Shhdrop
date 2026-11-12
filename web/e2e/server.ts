@@ -10,8 +10,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const BINARY = fileURLToPath(new URL("../../server/shhdrop", import.meta.url));
-/** Binaire de test seulement (go build -tags e2etime) : SHH_E2E_LEAVE_DELAY lu (D41-28). */
-export const BINARY_E2ETIME = fileURLToPath(new URL("../../server/shhdrop-e2etime", import.meta.url));
 
 export type TestServer = {
   origin: string;

@@ -74,9 +74,9 @@ describe("règles de sources", () => {
     expect(offenders(RE_FORBIDDEN_IMPORT, inUiDir)).toEqual([]));
   it("pas de fetch( ni XMLHttpRequest dans les écrans", () =>
     expect(offenders(/\bfetch\s*\(|XMLHttpRequest/, inUiDir)).toEqual([]));
-  it("aucun stockage navigateur (hors historique local, ci-dessous)", () =>
+  it("aucun stockage navigateur (hors historique local et retours, ci-dessous)", () =>
     expect(
-      offenders(/localStorage|indexedDB|document\.cookie/, (r) => r !== "history/live.svelte.ts"),
+      offenders(/localStorage|indexedDB|document\.cookie/, (r) => r !== "history/live.svelte.ts" && r !== "history/returns.ts"),
     ).toEqual([]));
   // Spec §33, §33.1 : exception écrite, l'historique local chiffré des envois. Seul
   // history/live.svelte.ts lit `indexedDB` (pour le passer à history/store.ts, qui chiffre) ;
@@ -86,6 +86,18 @@ describe("règles de sources", () => {
     expect(live?.text).toMatch(/indexedDB/);
     expect(live?.text).not.toMatch(/localStorage|document\.cookie|sessionStorage/);
     expect(offenders(/\bIDB(?:Factory|Database|ObjectStore|Transaction)\b/, (r) => !r.startsWith("history/"))).toEqual([]);
+  });
+  // D42-22 : exception écrite, l'octroi d'ouverture gardé chiffré pour revenir jusqu'à
+  // l'échéance (history/returns.ts, voisin de l'historique et même mécanisme : AES-GCM, clé non
+  // extractible, base IndexedDB à part). Il lit `indexedDB` lui-même (base à part, sans passer
+  // par l'état des écrans de l'historique) ; jamais localStorage, sessionStorage ni cookie ;
+  // l'entrée n'a que l'étiquette, l'octroi et l'échéance (jamais K_lien ni mot de passe).
+  it("retours : indexedDB seulement, entrée sans K_lien ni mot de passe", () => {
+    const r = files.find((f) => f.rel === "history/returns.ts")!;
+    expect(r.text).toMatch(/indexedDB/);
+    expect(r.text).not.toMatch(/localStorage|document\.cookie|sessionStorage/);
+    const type = r.text.match(/export type ReturnEntry = \{([\s\S]*?)\n\};/)![1]!;
+    expect([...type.matchAll(/^\s+(\w+):/gm)].map((m) => m[1])).toEqual(["tag", "grant", "expiresAt"]);
   });
   it("historique : aucun secret de partage ni nom d'élément dans HistoryEntry", () => {
     const store = files.find((f) => f.rel === "history/store.ts")!;

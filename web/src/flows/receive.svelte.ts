@@ -10,8 +10,15 @@
 // l'octroi d'ouverture sont gardés dans l'onglet (session/open-grant.ts, jamais le mot de
 // passe) ; un rechargement (adresse sans « # ») passe à l'état « reopen » et rouvre la même
 // ouverture, mot de passe ressaisi. Un nouvel onglet avec le lien demande l'octroi aux autres
-// onglets (session/tabs.ts). L'octroi est renouvelé toutes les 10 min, page visible et active.
+// onglets (session/tabs.ts).
+//
+// Retour plus tard (D42-22) : l'octroi vaut jusqu'à l'échéance du partage ; il est aussi gardé
+// chiffré dans le navigateur (history/returns.ts, jamais K_lien ni le mot de passe), sous
+// l'étiquette du partage. Rouvrir le lien du message dans ce navigateur, même après avoir
+// fermé l'onglet, passe à l'état « reopen » (mot de passe ressaisi, aucune ouverture de plus).
+// Octroi gardé mais partage introuvable : « return_lost » (retour impossible, dit clairement).
 import type { LinkState } from "../app/link";
+import { pageReturns, type Returns } from "../history/returns";
 import {
   BadPasswordError,
   GrantInvalidError,
@@ -35,9 +42,6 @@ import {
 } from "../session/open-grant";
 import { answerOtherTabs, askOtherTabs } from "../session/tabs";
 
-/** Renouvellement de l'octroi d'ouverture (spec §41.4 : toutes les 10 min, page visible et active). */
-export const REGRANT_MS = 10 * 60_000;
-
 export type ReceiveState =
   | "meta" // fetchMeta en cours (squelette)
   | "inapp" // navigateur intégré : bandeau, rien n'est demandé au serveur
@@ -48,6 +52,7 @@ export type ReceiveState =
   | "invalid"
   | "destroyed_by_password"
   | "incomplete"
+  | "return_lost" // octroi gardé ici, mais le serveur ne connaît plus le partage (D42-22)
   | "error"; // fetchMeta impossible (réseau, limite, serveur, maintenance) : page d'erreur, Réessayer
 
 /** Message affiché à l'état « locked », ou page d'erreur de l'état « error » (tâche UP). */
@@ -58,7 +63,7 @@ export type ReceiveError =
   | "network"
   | "server"
   | "maintenance"
-  | "grant_invalid" // l'ouverture précédente a expiré : déverrouiller en utilisera une nouvelle
+  | "grant_invalid" // l'ouverture précédente n'est plus reconnue : déverrouiller en utilisera une nouvelle
   | "reopen_limit" // trop de rechargements : une nouvelle ouverture sera comptée
   | null;
 
@@ -75,9 +80,9 @@ export type ReceiverDeps = {
   askTabs: (tag: string) => Promise<string | null>;
   /** Répondre aux autres onglets (answerOtherTabs) ; rend l'arrêt. */
   answerTabs: (getGrant: (tag: string) => string | null) => () => void;
-  /** Page visible (document.visibilityState === "visible"). */
-  visible: () => boolean;
-  /** Minuterie répétée (renouvellement, garde d'inactivité) ; rend l'arrêt. */
+  /** Octrois gardés pour revenir jusqu'à l'échéance (history/returns.ts, D42-22). */
+  returns: Returns;
+  /** Minuterie répétée (garde d'inactivité) ; rend l'arrêt. */
   every: (ms: number, f: () => void) => () => void;
   /** Horloge en millisecondes. */
   now: () => number;
@@ -147,7 +152,7 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
     tag: grantTag,
     askTabs: (t) => askOtherTabs(t),
     answerTabs: (g) => answerOtherTabs(g),
-    visible: () => typeof document === "undefined" || document.visibilityState === "visible",
+    returns: pageReturns(),
     every: (ms, f) => {
       const id = setInterval(f, ms);
       return () => clearInterval(id);
@@ -180,7 +185,6 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
   let reloaded = false;
   let held: { key: string; grant: string; tag: string | null } | null = null;
   let tagP: Promise<string | null> = Promise.resolve(null);
-  let stopRegrant: () => void = () => undefined;
   let stopAnswer: () => void = () => undefined;
   const stored = d.grants.load();
   if (secret !== null && stored !== null && stored.link !== keyOf(secret)) d.grants.clear(); // autre partage
@@ -219,28 +223,28 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
   });
   let opened = $state.raw<Opened | undefined>(undefined);
 
-  /** L'ouverture gardée s'arrête ici : plus d'entrée d'onglet, de renouvellement ni de réponse. */
+  /** L'ouverture gardée s'arrête ici : plus d'entrée d'onglet, de retour gardé ni de réponse. */
   const drop = () => {
     grant = null;
     held = null;
-    stopRegrant();
     stopAnswer();
-    stopRegrant = stopAnswer = () => undefined;
+    stopAnswer = () => undefined;
     d.grants.clear();
+    void tagP.then((t) => (t === null ? undefined : d.returns.forget(t))).catch(() => undefined);
   };
 
-  const end = (state: "invalid" | "destroyed_by_password" | "incomplete") => {
+  const end = (state: "invalid" | "destroyed_by_password" | "incomplete" | "return_lost") => {
     secret = null;
     drop();
     s.state = state;
     s.error = null;
   };
 
-  // 30 min sans activité : l'entrée de l'onglet est effacée, plus de renouvellement ni de
-  // réponse aux autres onglets (l'écran ouvert reste utilisable ; un rechargement comptera).
+  // 30 min sans activité : l'entrée de l'onglet (qui contient K_lien) est effacée, plus de
+  // réponse aux autres onglets (l'écran ouvert reste utilisable). Le retour gardé (sans K_lien)
+  // reste : rouvrir le lien du message reviendra sur la même ouverture (D42-22).
   const onIdle = () => {
     held = null;
-    stopRegrant();
     stopAnswer();
     d.grants.clear();
   };
@@ -250,18 +254,9 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
     if (guard.stopped) guard = startInactivityGuard(d.now, onIdle, d.every);
     held = { key, grant: o.grant, tag };
     d.grants.save({ v: 1, link: key, grant: o.grant, last: d.now() });
+    // D42-22 : gardé jusqu'à l'échéance du partage (celle de l'octroi), pour revenir plus tard.
+    if (tag !== null && expiresAt > 0) void d.returns.save({ tag, grant: o.grant, expiresAt }).catch(() => undefined);
     stopAnswer = tag === null ? () => undefined : d.answerTabs((t) => (held !== null && t === held.tag ? held.grant : null));
-    stopRegrant = d.every(REGRANT_MS, () => {
-      if (held === null || !d.visible() || (expiresAt > 0 && d.now() >= expiresAt)) return;
-      o.regrant().then(
-        (g) => {
-          if (held === null) return;
-          held.grant = g;
-          d.grants.save({ v: 1, link: held.key, grant: g, last: d.now() });
-        },
-        () => undefined, // disparition : l'écran le sait par la surveillance (watch) ou la lecture
-      );
-    });
   }
 
   async function loadMeta(): Promise<void> {
@@ -285,6 +280,15 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
         if (g !== null) {
           grant = g;
           s.otherTab = true;
+        } else if (tag !== null) {
+          // Retour plus tard depuis ce navigateur (D42-22) : même ouverture, mot de passe ressaisi.
+          const kept = await d.returns.find(tag).catch(() => null);
+          if (secret === null || disposed) return;
+          if (kept !== null) {
+            grant = kept;
+            reloaded = true;
+            s.reopening = true;
+          }
         }
       }
       const m = grant === null ? await d.fetchMeta(l, d.origin) : await d.fetchMeta(l, d.origin, grant);
@@ -297,7 +301,11 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
       else s.state = "locked";
     } catch (e) {
       if (disposed) return;
-      if (e instanceof NotFoundError || isCode(e, "lien_invalide") || isCode(e, "origine_invalide")) end("invalid");
+      // Octroi présenté (rechargement, retour gardé, autre onglet) et partage introuvable : la
+      // personne l'avait ouvert, mais ne peut plus y revenir (détruit, expiré, ou serveur
+      // redémarré alors que toutes les ouvertures sont prises) : écran dédié (D42-22).
+      if (e instanceof NotFoundError && grant !== null) end("return_lost");
+      else if (e instanceof NotFoundError || isCode(e, "lien_invalide") || isCode(e, "origine_invalide")) end("invalid");
       else if (e instanceof LimitError) {
         s.retryAfterS = e.retryAfterS;
         s.error = "limit";
@@ -398,17 +406,16 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
       guard.stop();
     },
     dispose() {
-      // Contenu déjà affiché : son entrée d'onglet reste (spec §41.4 : un retour ou un
-      // rechargement rouvre la même ouverture le temps de son octroi), mais plus rien ne tourne
-      // ici (renouvellement, réponses aux autres onglets). Sinon : comme forget (audit M2).
+      // Contenu déjà affiché : son entrée d'onglet et son retour gardé restent (spec §41.4,
+      // D42-22 : un retour ou un rechargement rouvre la même ouverture jusqu'à l'échéance), mais
+      // plus rien ne tourne ici (réponses aux autres onglets). Sinon : comme forget (audit M2).
       if (s.state !== "open") return this.forget();
       disposed = true;
       secret = null;
       opened = undefined;
       held = null;
-      stopRegrant();
       stopAnswer();
-      stopRegrant = stopAnswer = () => undefined;
+      stopAnswer = () => undefined;
       guard.stop();
     },
     async unlock(password: string) {
@@ -450,7 +457,7 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
           grantRefused("reopen_limit");
         } else if (e instanceof NotFoundError) {
           // A23 : le dernier essai a échoué → le partage vient d'être détruit (la personne sait qu'il existait).
-          end(s.attemptsLeft === 1 ? "destroyed_by_password" : "invalid");
+          end(s.attemptsLeft === 1 ? "destroyed_by_password" : grant !== null ? "return_lost" : "invalid");
         } else if (e instanceof LimitError) {
           s.retryAfterS = e.retryAfterS;
           limitedUntil = d.now() + e.retryAfterS * 1000;

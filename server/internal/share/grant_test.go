@@ -10,7 +10,8 @@ import (
 	"github.com/skoow/shhdrop/server/internal/blob"
 )
 
-// Octroi d'ouverture (spec §41.4, plan amendement v2.9).
+// Octroi d'ouverture (spec §41.4, plan amendement v2.9 ; D42-22 : valable jusqu'à l'échéance
+// du partage, retours bornés à MaxReopens par ouverture).
 
 func opensOf(t *testing.T, s *Service, id string) (left, issued, failed int) {
 	t.Helper()
@@ -27,7 +28,7 @@ func TestGrantFormat(t *testing.T) {
 	var id, id2 [16]byte
 	id2[0] = 1
 	now := time.Unix(1_800_000_000, 0)
-	g := IssueGrant(key, id, 3, now.Add(GrantTTL))
+	g := IssueGrant(key, id, 3, now.Add(time.Hour))
 	if len(g) != 54 {
 		t.Fatal("54 caractères attendus", len(g))
 	}
@@ -41,7 +42,7 @@ func TestGrantFormat(t *testing.T) {
 		"falsifié":       func() bool { _, ok := VerifyGrant(key, id, forged, now); return ok },
 		"autre partage":  func() bool { _, ok := VerifyGrant(key, id2, g, now); return ok },
 		"autre clé":      func() bool { _, ok := VerifyGrant(other, id, g, now); return ok },
-		"expiré":         func() bool { _, ok := VerifyGrant(key, id, g, now.Add(GrantTTL)); return ok },
+		"expiré":         func() bool { _, ok := VerifyGrant(key, id, g, now.Add(time.Hour)); return ok },
 		"vide":           func() bool { _, ok := VerifyGrant(key, id, "", now); return ok },
 		"mauvaise forme": func() bool { _, ok := VerifyGrant(key, id, g[:53]+"=", now); return ok },
 	} {
@@ -51,7 +52,7 @@ func TestGrantFormat(t *testing.T) {
 	}
 }
 
-// Recharger : même ouverture, aucune consommée, jeton neuf, octroi renouvelé.
+// Recharger : même ouverture, aucune consommée, jeton neuf, octroi valable jusqu'à l'échéance.
 func TestReopenKeepsOpening(t *testing.T) {
 	s, c := newSvc(t)
 	k := newKeys()
@@ -62,20 +63,27 @@ func TestReopenKeepsOpening(t *testing.T) {
 	}
 	c.Add(5 * time.Minute)
 	r, err := s.UnlockGrant(id, k.acces, k.preuve, o.Grant)
-	if err != nil || r.N != 1 || r.Grant == o.Grant || len(r.Envelope) != EnvelopeLen || r.OpensLeft != 2 {
+	if err != nil || r.N != 1 || len(r.Grant) != 54 || len(r.Envelope) != EnvelopeLen || r.OpensLeft != 2 {
 		t.Fatal(r, err)
 	}
 	if left, issued, _ := opensOf(t, s, id); left != 2 || issued != 1 {
 		t.Fatal("ouverture consommée", left, issued)
 	}
-	// L'octroi renouvelé vaut 30 min depuis le rechargement.
-	c.Add(29 * time.Minute)
-	if _, err := s.UnlockGrant(id, k.acces, k.preuve, r.Grant); err != nil {
+	// D42-22 : l'octroi vaut jusqu'à l'échéance du partage (24 h), sans renouvellement ;
+	// le balayage ne termine pas l'ouverture.
+	c.Add(23 * time.Hour)
+	if _, err := s.Sweep(); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := s.UnlockGrant(id, k.acces, k.preuve, o.Grant); err != nil {
+		t.Fatal("retour 23 h plus tard", err)
 	}
 	m, err := s.MetaGrant(k.acces, r.Grant)
 	if err != nil || m.OpensLeft != 2 {
 		t.Fatal(m, err)
+	}
+	if left, issued, _ := opensOf(t, s, id); left != 2 || issued != 1 {
+		t.Fatal("ouverture consommée", left, issued)
 	}
 }
 
@@ -147,24 +155,15 @@ func TestReopenInvalidGrant(t *testing.T) {
 	check("falsifié", b64.EncodeToString(raw), k.preuve)
 	check("autre partage", o2.Grant, k.preuve)
 	check("autre partage, mauvais mot de passe", o2.Grant, rnd(32))
-	c.Add(GrantTTL)
-	check("expiré", o.Grant, k.preuve)
-	// Renouvelé par regrant, puis terminé par done.
-	c.Add(-GrantTTL)
-	g, err := s.Regrant(id, o.N, c.Now().Add(6*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
+	idb, _ := idBytes(id)
+	check("expiré", IssueGrant(s.grantKey, idb, uint32(o.N), c.Now()), k.preuve)
 	if err := s.Done(id, o.N); err != nil {
 		t.Fatal(err)
 	}
-	check("ouverture terminée", g, k.preuve)
-	if _, err := s.Regrant(id, o.N, c.Now().Add(6*time.Hour)); !errors.Is(err, ErrGone) {
-		t.Fatal("regrant après done", err)
-	}
+	check("ouverture terminée", o.Grant, k.preuve)
 }
 
-// Au plus 10 rechargements par ouverture ; budget de lecture (2 + r) × le fichier.
+// Au plus MaxReopens (20) retours par ouverture ; budget de lecture (2 + r) × le fichier.
 func TestReopenLimitAndBudget(t *testing.T) {
 	s, _ := newSvc(t)
 	k := newKeys()
@@ -198,12 +197,12 @@ func TestReopenLimitAndBudget(t *testing.T) {
 		g = r.Grant
 	}
 	if _, err := s.UnlockGrant(id, k.acces, k.preuve, g); !errors.Is(err, ErrReopenLimit) {
-		t.Fatal("11ᵉ rechargement", err)
+		t.Fatal("21ᵉ retour", err)
 	}
 	if left, issued, failed := opensOf(t, s, id); left != 2 || issued != 1 || failed != 0 {
 		t.Fatal(left, issued, failed)
 	}
-	// 10 rechargements : 10 lectures complètes de plus (le compteur n'a pas été remis à zéro).
+	// 20 retours : 20 lectures complètes de plus (le compteur n'a pas été remis à zéro).
 	for i := 0; i < MaxReopens; i++ {
 		if err := readAll(); err != nil {
 			t.Fatal(i, err)
@@ -214,66 +213,84 @@ func TestReopenLimitAndBudget(t *testing.T) {
 	}
 }
 
-// regrant : 30 min de plus, jamais au-delà du jeton de téléchargement.
-func TestRegrantCapped(t *testing.T) {
-	s, c := newSvc(t)
-	k := newKeys()
-	id := ready(t, s, k, 1, 24, 3)
-	o, _ := s.UnlockGrant(id, k.acces, k.preuve, "")
-	idb, _ := idBytes(id)
-	c.Add(20 * time.Minute)
-	g, err := s.Regrant(id, o.N, c.Now().Add(6*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := VerifyGrant(s.grantKey, idb, g, c.Now().Add(GrantTTL-time.Second)); !ok {
-		t.Fatal("30 min attendues")
-	}
-	g, err = s.Regrant(id, o.N, c.Now().Add(10*time.Minute))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := VerifyGrant(s.grantKey, idb, g, c.Now().Add(10*time.Minute)); ok {
-		t.Fatal("octroi au-delà du jeton")
-	}
-	if _, err := s.Regrant(id, o.N, c.Now()); !errors.Is(err, ErrGone) {
-		t.Fatal("jeton échu", err)
+func TestMaxReopensIs20(t *testing.T) {
+	if MaxReopens != 20 {
+		t.Fatal(MaxReopens)
 	}
 }
 
-// Octroi expiré sans renouvellement : le balayage termine l'ouverture ; un « draining » est
-// alors effacé. Une ouverture qui lit encore n'est pas terminée.
-func TestGrantExpirySweep(t *testing.T) {
+// D42-22 : un partage dont toutes les ouvertures sont prises (« draining ») reste jusqu'à son
+// échéance ; la personne qui l'a ouvert y revient, personne d'autre n'entre ; à l'échéance,
+// il est effacé et l'octroi ne vaut plus rien.
+func TestDrainingKeptUntilExpiry(t *testing.T) {
 	s, c := newSvc(t)
-	k, k2 := newKeys(), newKeys()
-	drain := ready(t, s, k, 1, 24, 1)
-	live := ready(t, s, k2, gb, 24, 2)
-	o, _ := s.UnlockGrant(drain, k.acces, k.preuve, "")
-	o2, _ := s.UnlockGrant(live, k2.acces, k2.preuve, "")
-	c.Add(GrantTTL - time.Second)
-	mustRead(t, s, live, 0, o2.N)
+	k := newKeys()
+	id := ready(t, s, k, 1, 24, 1)
+	o, err := s.UnlockGrant(id, k.acces, k.preuve, "")
+	if err != nil || o.OpensLeft != 0 {
+		t.Fatal(o, err)
+	}
+	c.Add(7 * time.Hour) // au-delà de l'ancienne purge (6 h) et des 30 min de l'ancien octroi
 	if _, err := s.Sweep(); err != nil {
 		t.Fatal(err)
 	}
-	if rowCount(t, s, drain) != 1 {
-		t.Fatal("effacé avant l'expiration de l'octroi")
+	if rowCount(t, s, id) != 1 {
+		t.Fatal("effacé avant l'échéance")
 	}
-	c.Add(time.Minute)
+	if _, err := s.Meta(k.acces); !errors.Is(err, ErrNotFound) {
+		t.Fatal("quelqu'un d'autre entre", err)
+	}
+	if _, err := s.MetaGrant(k.acces, o.Grant); err != nil {
+		t.Fatal("meta du retour", err)
+	}
+	r, err := s.UnlockGrant(id, k.acces, k.preuve, o.Grant)
+	if err != nil || r.N != o.N {
+		t.Fatal("retour", r, err)
+	}
+	if _, err := readSegment(s, id, 0, r.N); err != nil {
+		t.Fatal(err)
+	}
+	c.Add(17*time.Hour + 15*time.Minute) // échéance (24 h, arrondie au quart d'heure)
 	if _, err := s.Sweep(); err != nil {
 		t.Fatal(err)
 	}
-	gone(t, s, drain)
-	if _, err := s.MetaGrant(k.acces, o.Grant); !errors.Is(err, ErrNotFound) {
+	gone(t, s, id)
+	if _, err := s.MetaGrant(k.acces, r.Grant); !errors.Is(err, ErrNotFound) {
 		t.Fatal(err)
 	}
-	mustRead(t, s, live, 1, o2.N) // active : pas terminée
-	c.Add(3 * time.Minute)
-	if _, err := s.Sweep(); err != nil {
+}
+
+// Le budget de lecture d'une ouverture ne se remet pas à zéro quand la personne revient
+// après plus de 6 h (durée d'un jeton) : il vit jusqu'à l'échéance du partage.
+func TestBudgetSurvivesLongAbsence(t *testing.T) {
+	s, c := newSvc(t)
+	k := newKeys()
+	id := ready(t, s, k, gb, 24, 2)
+	o, _ := s.UnlockGrant(id, k.acces, k.preuve, "")
+	segs := SegmentCount(gb)
+	readAll := func(openN int) error {
+		for n := range segs {
+			if _, err := readSegment(s, id, n, openN); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for range 2 {
+		if err := readAll(o.N); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.Add(7 * time.Hour)
+	r, err := s.UnlockGrant(id, k.acces, k.preuve, o.Grant)
+	if err != nil {
 		t.Fatal(err)
 	}
-	mustGone(t, s, live, 2, o2.N)
-	if s.GrantCount() != 0 {
-		t.Fatal("octrois restants", s.GrantCount())
+	if err := readAll(r.N); err != nil { // un retour : une lecture complète de plus
+		t.Fatal(err)
+	}
+	if err := readAll(r.N); !errors.Is(err, ErrBudget) {
+		t.Fatal("budget remis à zéro après l'absence", err)
 	}
 }
 

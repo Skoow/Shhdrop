@@ -11,7 +11,7 @@ function setup(over: Partial<ReceiverDeps> = {}, link: string | null = LINK) {
   let t = 1_000_000;
   const clock = { advance: (ms: number) => (t += ms) };
   const fetchMeta = vi.fn(async () => ({ expiresInS: 3600, opensLeft: 3 }));
-  const opened = { manifest: { v: 2, rights: "enregistrer", items: [] }, grant: GRANT, regrant: vi.fn(async () => GRANT2) } as unknown as Opened;
+  const opened = { manifest: { v: 2, rights: "enregistrer", items: [] }, grant: GRANT } as unknown as Opened;
   const openShare = vi.fn(async (): Promise<Opened> => opened);
   const scrub = vi.fn();
   const timers: { ms: number; f: () => void; on: boolean }[] = [];
@@ -28,6 +28,7 @@ function setup(over: Partial<ReceiverDeps> = {}, link: string | null = LINK) {
     }
   };
   const store = memStore();
+  const returns = memReturns();
   const deps: Partial<ReceiverDeps> = {
     fetchMeta,
     openShare,
@@ -40,12 +41,12 @@ function setup(over: Partial<ReceiverDeps> = {}, link: string | null = LINK) {
     tag: async () => TAG,
     askTabs: async () => null,
     answerTabs: () => () => undefined,
-    visible: () => true,
     every,
+    returns,
     ...over,
   };
   const r = createReceiver(link === null ? { kind: "incomplete" } : { kind: "s", link }, deps);
-  return { r, fetchMeta: deps.fetchMeta!, openShare: deps.openShare!, scrub: deps.scrub!, clock, opened, store, tick, timers };
+  return { r, fetchMeta: deps.fetchMeta!, openShare: deps.openShare!, scrub: deps.scrub!, clock, opened, store, tick, timers, returns: deps.returns as ReturnType<typeof memReturns> };
 }
 
 const GRANT = "G".repeat(54);
@@ -61,6 +62,17 @@ function memStore(init: OpenGrantEntry | null = null) {
     get value() {
       return v;
     },
+  };
+}
+
+/** Retours gardés (history/returns.ts), en mémoire. */
+function memReturns(init: Record<string, string> = {}) {
+  const m = new Map<string, { grant: string; expiresAt: number }>(Object.entries(init).map(([k, g]) => [k, { grant: g, expiresAt: 9e15 }]));
+  return {
+    m,
+    find: vi.fn(async (tag: string) => m.get(tag)?.grant ?? null),
+    save: vi.fn(async (e: { tag: string; grant: string; expiresAt: number }) => void m.set(e.tag, { grant: e.grant, expiresAt: e.expiresAt })),
+    forget: vi.fn(async (tag: string) => void m.delete(tag)),
   };
 }
 
@@ -276,7 +288,7 @@ describe("rechargement et autres onglets (spec §41.4, UI §9.7.1)", () => {
     let fail = true;
     const { r } = setup({
       grants: store,
-      openShare: vi.fn(async () => (fail ? Promise.reject(new BadPasswordError(4)) : ({ grant: GRANT, regrant: vi.fn() } as unknown as Opened))),
+      openShare: vi.fn(async () => (fail ? Promise.reject(new BadPasswordError(4)) : ({ grant: GRANT } as unknown as Opened))),
     });
     await flush();
     await r.unlock(PW);
@@ -357,7 +369,7 @@ describe("rechargement et autres onglets (spec §41.4, UI §9.7.1)", () => {
           first = false;
           throw err;
         }
-        return { grant: GRANT2, regrant: vi.fn() } as unknown as Opened;
+        return { grant: GRANT2 } as unknown as Opened;
       });
       const { r } = setup({ grants: store, openShare }, null);
       await flush();
@@ -374,7 +386,8 @@ describe("rechargement et autres onglets (spec §41.4, UI §9.7.1)", () => {
     const a = memStore(entry());
     const ra = setup({ grants: a, fetchMeta: vi.fn(async () => Promise.reject(new NotFoundError())) }, null).r;
     await flush();
-    expect([ra.state, a.value]).toEqual(["invalid", null]);
+    // D42-22 : un octroi était gardé, le serveur ne connaît plus le partage → « retour impossible ».
+    expect([ra.state, a.value]).toEqual(["return_lost", null]);
     const b = memStore(entry());
     const rb = setup({ grants: b }, null).r;
     await flush();
@@ -389,25 +402,106 @@ describe("rechargement et autres onglets (spec §41.4, UI §9.7.1)", () => {
     expect(c.value).toBeNull();
   });
 
-  it("30 min sans activité : entrée effacée ; l'activité la garde ; renouvellement toutes les 10 min page visible", async () => {
+  it("30 min sans activité : entrée de l'onglet effacée (pas le retour gardé) ; l'activité la garde ; aucun renouvellement (D42-22)", async () => {
     const store = memStore();
-    let visible = true;
-    const { r, tick, opened } = setup({ grants: store, visible: () => visible });
+    const { r, tick, returns } = setup({ grants: store });
     await flush();
     await r.unlock(PW);
-    tick(10 * 60_000);
+    tick(20 * 60_000);
     await flush();
-    expect(opened.regrant).toHaveBeenCalledTimes(1);
-    expect(store.value?.grant).toBe(GRANT2);
-    visible = false;
-    tick(10 * 60_000);
-    expect(opened.regrant).toHaveBeenCalledTimes(1); // page cachée : rien
-    visible = true;
+    expect(store.value?.grant).toBe(GRANT);
     r.touch();
     tick(29 * 60_000);
     expect(store.value).not.toBeNull();
     tick(60_000);
     expect(store.value).toBeNull();
+    expect(returns.m.get(TAG)?.grant).toBe(GRANT);
+  });
+
+  // ---------- D42-22 : revenir depuis le même navigateur jusqu'à l'échéance ----------
+  it("après un déverrouillage réussi : l'octroi est gardé (étiquette, octroi, échéance), jamais le lien ni le mot de passe", async () => {
+    const { r, returns } = setup();
+    await flush();
+    await r.unlock(PW);
+    expect(returns.save).toHaveBeenCalledTimes(1);
+    const e = returns.save.mock.calls[0]![0];
+    expect(Object.keys(e).sort()).toEqual(["expiresAt", "grant", "tag"]);
+    expect(e).toEqual({ tag: TAG, grant: GRANT, expiresAt: 1_000_000 + 3600_000 });
+    expect(JSON.stringify(e)).not.toContain("A".repeat(43));
+    expect(JSON.stringify(e)).not.toContain(PW);
+  });
+
+  it("lien rouvert depuis le message (onglet neuf) avec un retour gardé : écran « Rouvrir », mot de passe ressaisi, unlock avec l'octroi", async () => {
+    const returns = memReturns({ [TAG]: GRANT });
+    const { r, fetchMeta, openShare } = setup({ returns });
+    await flush();
+    expect([r.state, r.reopening]).toEqual(["reopen", true]);
+    expect(fetchMeta).toHaveBeenCalledWith(LINK, "https://x.test", GRANT);
+    await r.unlock(PW);
+    expect(openShare).toHaveBeenCalledWith(LINK, PW, "https://x.test", GRANT);
+    expect(r.state).toBe("open");
+  });
+
+  it("un autre onglet qui répond passe avant le retour gardé", async () => {
+    const returns = memReturns({ [TAG]: GRANT });
+    const { r, fetchMeta } = setup({ returns, askTabs: async () => GRANT2 });
+    await flush();
+    expect(r.otherTab).toBe(true);
+    expect(fetchMeta).toHaveBeenCalledWith(LINK, "https://x.test", GRANT2);
+    expect(returns.find).not.toHaveBeenCalled();
+  });
+
+  it("retour gardé mais partage introuvable (détruit, expiré, serveur redémarré) : « retour impossible », retour oublié", async () => {
+    const returns = memReturns({ [TAG]: GRANT });
+    const { r } = setup({ returns, fetchMeta: vi.fn(async () => Promise.reject(new NotFoundError())) });
+    await flush();
+    await flush();
+    expect(r.state).toBe("return_lost");
+    expect(returns.m.size).toBe(0);
+  });
+
+  it("sans retour gardé (autre appareil, navigation privée) et introuvable : lien invalide", async () => {
+    const { r } = setup({ fetchMeta: vi.fn(async () => Promise.reject(new NotFoundError())) });
+    await flush();
+    expect(r.state).toBe("invalid");
+  });
+
+  it("grant_invalid ou reopen_limit sur un retour gardé : retour oublié, déverrouillage normal ensuite", async () => {
+    for (const err of [new GrantInvalidError(), new ReopenLimitError()]) {
+      const returns = memReturns({ [TAG]: GRANT });
+      let first = true;
+      const openShare = vi.fn(async () => {
+        if (first) {
+          first = false;
+          throw err;
+        }
+        return { grant: GRANT2 } as unknown as Opened;
+      });
+      const { r } = setup({ returns, openShare });
+      await flush();
+      await r.unlock(PW);
+      await flush();
+      expect(r.state).toBe("locked");
+      expect(returns.m.size).toBe(0);
+      await r.unlock(PW);
+      expect(openShare).toHaveBeenLastCalledWith(LINK, PW, "https://x.test");
+      expect(returns.m.get(TAG)?.grant).toBe(GRANT2);
+    }
+  });
+
+  it("destruction, disparition ou échéance (forget) : retour oublié ; démontage du contenu (dispose) : gardé", async () => {
+    const a = setup();
+    await flush();
+    await a.r.unlock(PW);
+    a.r.forget();
+    await flush();
+    expect(a.returns.m.size).toBe(0);
+    const b = setup();
+    await flush();
+    await b.r.unlock(PW);
+    b.r.dispose();
+    await flush();
+    expect(b.returns.m.get(TAG)?.grant).toBe(GRANT);
   });
 
   it("entrée de plus de 30 min au chargement : effacée, écran normal", async () => {
@@ -450,7 +544,7 @@ describe("audit M2 : écran quitté pendant le déverrouillage ou la lecture", (
   it("forget() pendant unlock : rien n'est gardé (ni octroi, ni contenu, ni minuterie), les clés sont effacées", async () => {
     let release!: (o: Opened) => void;
     const done = vi.fn(async () => undefined);
-    const opened = { manifest: { items: [] }, grant: GRANT, regrant: vi.fn(async () => GRANT2), done } as unknown as Opened;
+    const opened = { manifest: { items: [] }, grant: GRANT, done } as unknown as Opened;
     const answer = vi.fn(() => () => undefined);
     const t = setup({ openShare: () => new Promise<Opened>((res) => (release = res)), answerTabs: answer });
     await flush();

@@ -3,14 +3,15 @@ package share
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/binary"
 	"errors"
 	"time"
 )
 
-// Octroi d'ouverture (spec §41.4, D41-5) : recharger la page ou ouvrir le même partage dans
-// un autre onglet ne compte qu'une ouverture tant que l'octroi est valable.
+// Octroi d'ouverture (spec §41.4, D41-5 ; D42-22) : recharger la page, ouvrir le même partage
+// dans un autre onglet ou y revenir plus tard depuis le même navigateur ne compte qu'une
+// ouverture. L'octroi vaut jusqu'à l'échéance du partage (D42-22, au lieu de 30 min) ; une
+// ouverture ne se termine plus quand il expire : seulement par done, destruction ou échéance.
 //
 // Octroi = b64u(n (4 octets) ‖ exp (4 octets, secondes Unix) ‖ HMAC-SHA-256(clé, étiquette ‖
 // id ‖ n ‖ exp)), 40 octets, 54 caractères. L'id interne n'est pas dans l'octroi : le serveur
@@ -19,8 +20,10 @@ import (
 // vit en mémoire seulement (goneState.grants) ; rien en base, aucune adresse, aucun cookie.
 
 const (
-	GrantTTL   = 30 * time.Minute
-	MaxReopens = 10
+	// MaxReopens : retours (rechargements, autres onglets, retours plus tard) acceptés par
+	// ouverture sur toute la vie du lien (D42-22) ; chacun ajoute une lecture complète au
+	// budget de l'ouverture (§24, §41.4).
+	MaxReopens = 20
 	grantLen   = 40
 )
 
@@ -28,15 +31,15 @@ var (
 	// ErrGrantInvalid : octroi falsifié, d'un autre partage, expiré, ou ouverture terminée
 	// (409 grant_invalid) ; ni ouverture ni essai consommé.
 	ErrGrantInvalid = errors.New("octroi d'ouverture invalide")
-	// ErrReopenLimit : plus de MaxReopens rechargements pour cette ouverture (429 reopen_limit).
+	// ErrReopenLimit : plus de MaxReopens retours pour cette ouverture (429 reopen_limit).
 	ErrReopenLimit = errors.New("trop de rechargements")
 )
 
 var grantLabel = []byte("shhdrop-open-grant-v1")
 
-// grantEntry : échéance en mémoire de l'octroi d'une ouverture et rechargements acceptés.
+// grantEntry : ouverture qui peut revenir (en mémoire jusqu'à sa fin ou celle du partage) et
+// retours acceptés.
 type grantEntry struct {
-	exp     int64
 	reopens int
 }
 
@@ -93,17 +96,15 @@ type Opened struct {
 	OpensLeft int
 }
 
-// grantLocked pose (ou renouvelle) l'échéance en mémoire de l'ouverture k, plafonnée à cap,
-// et signe l'octroi. Sous gone.mu.
-func (s *Service) grantLocked(k openKey, cap, now int64) string {
+// grantLocked inscrit l'ouverture k en mémoire et signe son octroi, valable jusqu'à exp
+// (échéance du partage, D42-22). Le budget de lecture de k vit aussi jusque-là : un retour
+// après plus de 6 h ne le remet pas à zéro. Sous gone.mu.
+func (s *Service) grantLocked(k openKey, exp int64) string {
 	s.gone.init()
-	e := s.gone.grants[k]
-	if e == nil {
-		e = &grantEntry{}
-		s.gone.grants[k] = e
+	if s.gone.grants[k] == nil {
+		s.gone.grants[k] = &grantEntry{}
 	}
-	exp := min(now+int64(GrantTTL/time.Second), cap)
-	e.exp = max(e.exp, exp)
+	s.budget.keep(k, exp)
 	id, _ := idBytes(k.id)
 	return IssueGrant(s.grantKey, id, uint32(k.openN), time.Unix(exp, 0))
 }
@@ -116,7 +117,7 @@ func (s *Service) liveGrantLocked(k openKey) *grantEntry {
 
 // reopen : unlock avec un octroi (UnlockGrant). Octroi invalide ou ouverture terminée :
 // ErrGrantInvalid, sans essai ; mot de passe faux : un essai ; juste : même ouverture, aucune
-// ouverture consommée, au plus MaxReopens fois.
+// ouverture consommée, au plus MaxReopens fois sur la vie du lien.
 func (s *Service) reopen(id string, kAcces, kPreuve []byte, grant string) (Opened, error) {
 	idb, ok := idBytes(id)
 	if !ok {
@@ -128,13 +129,12 @@ func (s *Service) reopen(id string, kAcces, kPreuve []byte, grant string) (Opene
 		return Opened{}, ErrGrantInvalid
 	}
 	var accessV, proofV, envelope []byte
-	var state string
 	var issued, left int
 	var doneMask, exp int64
-	err := s.DB.QueryRow(`SELECT access_v, proof_v, envelope, state, opens_issued, opens_left, done_mask, expires_at FROM shares
+	err := s.DB.QueryRow(`SELECT access_v, proof_v, envelope, opens_issued, opens_left, done_mask, expires_at FROM shares
 		WHERE id=? AND state IN ('ready','draining') AND expires_at>? AND failed_attempts<?
 		AND proof_v IS NOT NULL AND envelope IS NOT NULL`, id, now, maxAttempts).
-		Scan(&accessV, &proofV, &envelope, &state, &issued, &left, &doneMask, &exp)
+		Scan(&accessV, &proofV, &envelope, &issued, &left, &doneMask, &exp)
 	if err != nil {
 		return Opened{}, notFound(err)
 	}
@@ -165,69 +165,7 @@ func (s *Service) reopen(id string, kAcces, kPreuve []byte, grant string) (Opene
 		return Opened{}, ErrReopenLimit
 	}
 	e.reopens++
-	s.cancelLeaveLocked(k) // rechargement ou autre onglet : la personne n'est pas partie
-	if state == "draining" {
-		// Le nouveau jeton vit 6 h : la purge le suit (comme à la dernière ouverture émise).
-		s.mem.mu.Lock()
-		p := s.mem.purge[id]
-		s.mem.mu.Unlock()
-		s.setPurge(id, max(p, min(ceil15(now+purgeWindow), exp)))
-	}
-	s.budget.extend(k, now+purgeWindow)
-	return Opened{N: int(n), Envelope: envelope, Grant: s.grantLocked(k, exp, now), OpensLeft: left}, nil
-}
-
-// Regrant renouvelle l'octroi de l'ouverture openN (jeton de téléchargement valable jusqu'à
-// tokenExp) pour GrantTTL, jamais au-delà du jeton ni de l'échéance du partage. Ouverture
-// terminée, balayée ou partage disparu : ErrGone.
-func (s *Service) Regrant(id string, openN int, tokenExp time.Time) (string, error) {
-	if !validID(id) || openN < 1 || openN > maxOpenN {
-		return "", ErrNotFound
-	}
-	now := s.now()
-	var exp int64
-	err := s.DB.QueryRow(`SELECT expires_at FROM shares WHERE id=? AND state IN ('ready','draining')
-		AND expires_at>? AND failed_attempts<?`, id, now, maxAttempts).Scan(&exp)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrGone
-	}
-	if err != nil {
-		return "", err
-	}
-	s.gone.mu.Lock()
-	defer s.gone.unlock()
-	k := openKey{id, openN}
-	if s.liveGrantLocked(k) == nil || s.gone.dead[id] != nil || s.gone.retiringLocked(id) {
-		return "", ErrGone
-	}
-	cap := min(exp, tokenExp.Unix())
-	if cap <= now {
-		return "", ErrGone
-	}
-	s.cancelLeaveLocked(k) // une page de cette ouverture vit encore
-	return s.grantLocked(k, cap, now), nil
-}
-
-// sweepGrants termine les ouvertures dont l'octroi a expiré sans renouvellement et qui ne
-// lisent plus rien (aucun segment en cours ni dans les 120 s) : spec §41.4, « fin
-// d'ouverture ». Un « draining » dont toutes les ouvertures sont terminées est alors effacé.
-func (s *Service) sweepGrants(now int64) error {
-	s.gone.mu.Lock()
-	s.gone.init()
-	var due []openKey
-	for k, e := range s.gone.grants {
-		if e.exp <= now && !s.gone.active[k].activeAt(now) {
-			due = append(due, k)
-		}
-	}
-	s.gone.unlock()
-	var errs []error
-	for _, k := range due {
-		if err := s.Done(k.id, k.openN); err != nil && !errors.Is(err, ErrGone) && !errors.Is(err, ErrNotFound) {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
+	return Opened{N: int(n), Envelope: envelope, Grant: s.grantLocked(k, exp), OpensLeft: left}, nil
 }
 
 // GrantCount : octrois en mémoire (tests).
@@ -272,9 +210,6 @@ func (s *Service) MetaGrant(kAcces []byte, grant string) (Meta, error) {
 	}
 	s.gone.mu.Lock()
 	live := s.liveGrantLocked(openKey{m.ID, int(n)}) != nil
-	if live {
-		s.cancelLeaveLocked(openKey{m.ID, int(n)}) // rechargement : la page revient (D41-28)
-	}
 	s.gone.unlock()
 	if !live {
 		return Meta{}, ErrNotFound

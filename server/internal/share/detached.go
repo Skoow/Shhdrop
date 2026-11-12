@@ -71,7 +71,6 @@ type goneState struct {
 	dead   map[string]*detached
 	watch  map[string]*watcher
 	grants map[openKey]*grantEntry // octrois d'ouverture (grant.go)
-	leaves map[openKey]int64       // départs de la dernière ouverture (leave.go) : heure du « je pars »
 	// closing : descripteurs détachés retirés de dead, à fermer hors de mu (unlock) ;
 	// closingBytes : leur place, comptée jusqu'à la fermeture faite (detachedBytes).
 	closing      []*detached

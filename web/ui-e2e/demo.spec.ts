@@ -308,6 +308,8 @@ test.describe("fr-FR : envoi (Tasks 17–18)", () => {
     await expect(page.locator('li.row[data-kind="note"]')).toBeVisible();
     await expect(page.getByRole("button", { name: "Télécharger releve.bin" })).toBeVisible();
     await capture(page, "demo-content");
+    // D42-22 : en démo, le retour gardé reste en mémoire de l'onglet (aucune base « shhdrop-returns »).
+    expect(await page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name))).not.toContain("shhdrop-returns");
     // Rechargement : le faux serveur de l'onglet survit (demo/persist.ts, exception démo) :
     // « Rouvrir ce partage », comme en production, au lieu de « Lien invalide ».
     await page.waitForTimeout(300);

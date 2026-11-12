@@ -8,8 +8,6 @@ const serverDir = fileURLToPath(new URL("../../server", import.meta.url));
 
 export default function globalSetup(): void {
   execFileSync("go", ["build", "-o", "shhdrop", "./cmd/shhdrop"], { cwd: serverDir, stdio: "inherit" });
-  // Binaire de test (attente après « je pars » réglable, D41-28) : jamais livré.
-  execFileSync("go", ["build", "-tags", "e2etime", "-o", "shhdrop-e2etime", "./cmd/shhdrop"], { cwd: serverDir, stdio: "inherit" });
   execFileSync("npm", ["run", "build"], { cwd: webDir, stdio: "inherit" });
   execFileSync("npm", ["run", "build:demo"], { cwd: webDir, stdio: "inherit" });
   // Page d'essai du moteur (hygiene.spec.ts), jamais livrée : production puis démo. Celle de

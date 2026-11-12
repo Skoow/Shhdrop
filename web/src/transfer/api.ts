@@ -407,11 +407,6 @@ export async function unlock(
   return { downloadToken: str(o, "download_token"), segments: num(o, "segments"), envelope: envelopeOf(o), grant: grantOf(o), opensLeft: opensLeft(num(o, "opens_left"), true) };
 }
 
-/** Octroi renouvelé pour 30 min (jamais au-delà du jeton) ; rejouable. */
-export async function regrant(c: Ctx, token: string): Promise<string> {
-  return grantOf(await send(c, { method: "POST", path: "/api/shares/regrant", headers: bearer(token), retry: true }, readJSON));
-}
-
 export async function getSegment(c: Ctx, token: string, n: number, size: number): Promise<Uint8Array<ArrayBuffer>> {
   return send(c, { method: "GET", path: `/api/shares/segments/${n}`, headers: bearer(token), retry: true }, async (r) => {
     const b = new Uint8Array(await r.arrayBuffer());
@@ -423,16 +418,6 @@ export async function getSegment(c: Ctx, token: string, n: number, size: number)
 export async function done(c: Ctx, token: string): Promise<void> {
   // Rejouable : done_mask |= bit de l'ouverture. keepalive : envoyé même si la page se ferme.
   await send(c, { method: "POST", path: "/api/shares/done", headers: bearer(token), retry: true, keepalive: true }, none);
-}
-
-/**
- * « Je pars » (D41-28) : la personne qui détient la dernière ouverture permise quitte la page
- * (pagehide). keepalive : la requête survit à la fermeture (même garantie que l'API de balise,
- * dont le nom est interdit par §35.1). Le serveur détruit le partage 3 min plus tard, sauf
- * réouverture par octroi (rechargement) ou lecture en cours. Une seule tentative, sans attente.
- */
-export async function leave(c: Ctx, token: string): Promise<void> {
-  await send(c, { method: "POST", path: "/api/shares/leave", headers: bearer(token), keepalive: true }, none);
 }
 
 /**

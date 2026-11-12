@@ -30,7 +30,7 @@ test("destinataire, dernière ouverture : bulle du cadenas, groupes, « Détruir
   const head = page.locator('[data-group="texte"] .gh');
   expect(await head.evaluate((e) => getComputedStyle(e).borderBottomStyle)).toBe("none");
   // Dernière ouverture : « Détruire ce partage » et sa phrase ; Signaler dans le pied de page seulement (UI7).
-  await expect(page.getByText(/^Vous êtes la dernière personne à pouvoir ouvrir ce partage\./)).toBeVisible();
+  await expect(page.getByText(/^Vous êtes la dernière personne à pouvoir ouvrir ce partage : personne d'autre ne pourra l'ouvrir\./)).toBeVisible();
   await expect(page.getByRole("button", { name: "Détruire ce partage", exact: true })).toBeVisible();
   await expect(page.locator("header.top").getByRole("button", { name: /Signaler/ })).toHaveCount(0);
   await expect(page.locator("footer[data-foot]").getByRole("button", { name: "Signaler ce partage" })).toBeVisible();
@@ -57,7 +57,7 @@ test("destinataire, ouverture non dernière : « Ce lien peut encore être ouver
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(sent.link);
   await unlock(page, sent.password);
-  await expect(page.locator("[data-eol]")).toHaveText("Ce lien peut encore être ouvert 2 fois.");
+  await expect(page.locator("[data-eol]")).toHaveText("Ce lien peut encore être ouvert 2 fois. Vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.");
   await expect(page.getByRole("button", { name: /^Détruire/ })).toHaveCount(0);
   await settle(page);
   await page.screenshot({ path: `${SHOTS}content-not-last-${w(isMobile)}.png`, fullPage: true });

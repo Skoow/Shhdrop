@@ -486,8 +486,9 @@ export type Opened = {
   /** Fin du téléchargement (le jeton ne lit plus rien) ; le lecteur et ses clés sont oubliés. */
   done(): Promise<void>;
   /**
-   * Octroi d'ouverture rendu par unlock (spec §41.4) : à garder (session/open-grant.ts) pour
-   * qu'un rechargement rouvre la même ouverture. Ni clé ni mot de passe.
+   * Octroi d'ouverture rendu par unlock (spec §41.4, D42-22), valable jusqu'à l'échéance du
+   * partage : à garder (session/open-grant.ts, history/returns.ts) pour qu'un rechargement ou
+   * un retour plus tard rouvre la même ouverture. Ni clé ni mot de passe.
    */
   readonly grant: string;
   /**
@@ -495,14 +496,6 @@ export type Opened = {
    * permise ; le lecteur n'offre « Détruire ce partage » qu'alors, retours UI4).
    */
   readonly opensLeft: number;
-  /** Octroi renouvelé pour 30 min (POST /api/shares/regrant) ; erreurs : voir readerError. */
-  regrant(): Promise<string>;
-  /**
-   * Sortie de page (pagehide) : à la dernière ouverture permise seulement (opensLeft = 0),
-   * prévient le serveur (« je pars », D41-28), qui supprime le partage 3 min plus tard sauf
-   * rechargement. Ailleurs : rien. Ne lève jamais, n'attend rien.
-   */
-  leave(): void;
   /**
    * Surveillance de la disparition (spec §41.8) : un appel = une requête tenue au plus 25 s.
    * "alive" (rien), "gone" (partage disparu : fermer l'interface), "stop" (ne plus surveiller).
@@ -689,10 +682,6 @@ async function openWith(
         },
         grant: u.grant,
         opensLeft: u.opensLeft,
-        regrant: () => guarded(() => api.regrant(c, u.downloadToken), readerError),
-        leave: () => {
-          if (u.opensLeft === 0 && !finished && !destroying) api.leave(c, u.downloadToken).catch(() => undefined);
-        },
         // Une destruction ou une fin (done) faite ici prévient aussi la surveillance (410) :
         // ce « gone » est le nôtre, l'écran de fin vient de destroy() ou de done() ; la
         // surveillance s'arrête simplement.

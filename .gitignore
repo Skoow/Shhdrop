@@ -1,7 +1,6 @@
 node_modules/
 dist/
 server/shhdrop
-server/shhdrop-e2etime
 *.db*
 /tmp-data/
 web/dist-demo/

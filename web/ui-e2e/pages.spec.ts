@@ -15,7 +15,7 @@ test("Sécurité : chiffrement, ce que voit le serveur, limites (historique, ong
   for (const h of ["Fermé à clé sur votre appareil", "Le lien et le mot de passe", "Ce que voit notre serveur", "Ce que Shhdrop ne peut pas faire", "QR code et partage en un geste", "Caméra et micro"])
     await expect(page.getByRole("heading", { level: 2, name: h })).toBeVisible();
   const main = page.locator("main");
-  for (const x of ["historique", "stockage de cet onglet", "les archives, partent tels quels", "anciens passages", "adresse IP", "environ 3 minutes", "Les noms de fichiers, leurs types et vos textes sont chiffrés aussi"]) await expect(main).toContainText(x);
+  for (const x of ["historique", "stockage de cet onglet", "les archives, partent tels quels", "anciens passages", "adresse IP", "jusqu'à la fin de sa durée", "Les noms de fichiers, leurs types et vos textes sont chiffrés aussi"]) await expect(main).toContainText(x);
   const text = await main.innerText();
   expect(text).not.toMatch(/100\s?%|sécurisé à|audit|Suisse|Islande/i);
   // Retours UI6 : corps sans jargon ni noms d'algorithmes ; détails repliés en bas, liens publics.

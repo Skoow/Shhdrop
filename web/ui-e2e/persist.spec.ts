@@ -5,7 +5,8 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "./fixtures";
-import { freshPage, sendShare, unlock } from "./open-helpers";
+import { shareStatus } from "../src/index";
+import { freshPage, noteRow, pwField, sendShare, unlock } from "./open-helpers";
 
 const TEXT = "Le code du portail est 2208.";
 // Chromium complet (nouveau mode sans tête) : le « headless shell » par défaut n'écrit pas
@@ -127,3 +128,54 @@ for (const late of [false, true]) {
     }
   });
 }
+
+// D42-22 : le retour survit à la fermeture du navigateur (octroi chiffré en IndexedDB, jamais
+// K_lien ni le mot de passe) : rouvrir le lien du message, navigateur relancé sans restauration,
+// rouvre la même ouverture, mot de passe ressaisi.
+test("profil persistant : navigateur fermé puis relancé, rouvrir le lien revient sans consommer d'ouverture", async ({ shh, browser, browserName }) => {
+  test.skip(browserName !== "chromium" || test.info().project.name !== "chromium-desktop", "contexte persistant Chromium, un seul projet");
+  test.setTimeout(300_000);
+  const s = await freshPage(browser);
+  const sent = await sendShare(s.page, shh.origin + "/", { text: TEXT, opens: 1 });
+  await s.ctx.close();
+  const dir = mkdtempSync(join(tmpdir(), "shh-profile-"));
+  try {
+    let ctx = await step("lancement du profil", () => launch(dir));
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
+    await page.goto(sent.link);
+    await unlock(page, sent.password);
+    // Retour écrit juste après le déverrouillage (chiffrement asynchrone) : attendu avant de fermer.
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          if (!(await indexedDB.databases()).some((d) => d.name === "shhdrop-returns")) return 0;
+          const db = await new Promise<IDBDatabase>((ok, ko) => {
+            const r = indexedDB.open("shhdrop-returns");
+            r.onsuccess = () => ok(r.result);
+            r.onerror = () => ko(r.error);
+          });
+          const n = await new Promise<number>((ok) => {
+            const q = db.transaction("entries").objectStore("entries").count();
+            q.onsuccess = () => ok(q.result);
+          });
+          db.close();
+          return n;
+        }),
+      )
+      .toBe(1);
+    await step("fermeture du profil", () => ctx.close());
+    // Jamais le mot de passe dans le profil (ni dans le stockage, ni ailleurs).
+    expect(filesWith(dir, sent.password)).toEqual([]);
+    ctx = await step("relance sans restauration", () => launch(dir));
+    const back = ctx.pages()[0] ?? (await ctx.newPage());
+    await back.goto(sent.link);
+    await expect(back.getByRole("heading", { name: "Rouvrir ce partage" })).toBeVisible({ timeout: 30_000 });
+    await pwField(back).fill(sent.password);
+    await back.getByRole("button", { name: /^(Rouvrir|Déchiffrement)/ }).click();
+    await expect(noteRow(back)).toBeVisible({ timeout: 30_000 });
+    expect(await shareStatus(sent.manage, shh.origin)).toMatchObject({ opensUsed: 1, state: "draining" });
+    await step("fermeture finale", () => ctx.close());
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -21,8 +21,8 @@ const acceptUnload = (page: Page) => page.on("dialog", (d) => void (d.type() ===
 
 test.use({ locale: "fr-FR" });
 
-test("recharger rouvre sans consommer (1 / 3 avant et après), dix fois ; le onzième demande une nouvelle ouverture ; Terminer efface", async ({ page, shh, browser }) => {
-  test.setTimeout(300_000);
+test("recharger rouvre sans consommer (1 / 3 avant et après), vingt fois (D42-22) ; le vingt et unième demande une nouvelle ouverture", async ({ page, shh, browser }) => {
+  test.setTimeout(600_000);
   const s = await freshPage(browser);
   const sent = await sendShare(s.page, shh.origin + "/", { text: TEXT, opens: 3 });
   await s.ctx.close();
@@ -41,7 +41,7 @@ test("recharger rouvre sans consommer (1 / 3 avant et après), dix fois ; le onz
   // Premier rechargement : écran « Rouvrir », mauvais mot de passe compté, puis le bon.
   await page.reload();
   await expect(reopenTitle(page)).toBeVisible();
-  await expect(page.getByText("Vous avez déjà déverrouillé ce partage.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Vous avez déjà déverrouillé ce partage dans ce navigateur.", { exact: false })).toBeVisible();
   await settle(page);
   expect(await axe(page)).toEqual([]);
   await capture(page, "open-reopen");
@@ -53,19 +53,22 @@ test("recharger rouvre sans consommer (1 / 3 avant et après), dix fois ; le onz
   await expect(noteRow(page)).toBeVisible({ timeout: 30_000 });
   expect((await shareStatus(sent.manage, shh.origin)).opensUsed).toBe(1);
 
-  // Neuf autres rechargements : toujours une seule ouverture.
-  for (let k = 2; k <= 10; k++) {
+  // Dix-neuf autres rechargements : toujours une seule ouverture.
+  for (let k = 2; k <= 20; k++) {
+    // Limite générale du serveur : 60 requêtes par minute et par connexion (fenêtre fixe) ;
+    // vingt rechargements d'affilée la dépasseraient : une pause d'une fenêtre au milieu.
+    if (k === 11) await page.waitForTimeout(61_000);
     await page.reload();
     await reopen(page, sent.password);
   }
   expect((await shareStatus(sent.manage, shh.origin)).opensUsed).toBe(1);
 
-  // Onzième : refusé, dit à l'écran, entrée effacée ; aucune ouverture comptée en silence.
+  // Vingt et unième : refusé, dit à l'écran, entrée effacée ; aucune ouverture comptée en silence.
   await page.reload();
   await expect(reopenTitle(page)).toBeVisible();
   await pwField(page).fill(sent.password);
   await reopenButton(page).click();
-  await expect(page.getByText("Trop de rechargements : une nouvelle ouverture sera comptée.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Trop de retours sur ce partage\u202f: une nouvelle ouverture sera comptée.")).toBeVisible({ timeout: 20_000 });
   expect(await page.evaluate(() => sessionStorage.getItem("shh.og"))).toBeNull();
   expect((await shareStatus(sent.manage, shh.origin)).opensUsed).toBe(1);
   await expect(page.getByText("Ouvrir compte 1\u00a0ouverture sur les 2\u00a0restantes", { exact: false })).toBeVisible();
@@ -75,7 +78,7 @@ test("recharger rouvre sans consommer (1 / 3 avant et après), dix fois ; le onz
   await page.getByRole("button", { name: /^(Déverrouiller|Déchiffrement)/ }).click();
   await expect(noteRow(page)).toBeVisible({ timeout: 30_000 });
   expect((await shareStatus(sent.manage, shh.origin)).opensUsed).toBe(2);
-  await expect(page.locator("[data-eol]")).toHaveText("Ce lien peut encore être ouvert 1\u202ffois.");
+  await expect(page.locator("[data-eol]")).toHaveText("Ce lien peut encore être ouvert 1\u202ffois. Vous pouvez revenir sur ce partage depuis ce navigateur jusqu'à son échéance sans compter d'ouverture.");
 });
 
 test("deuxième onglet : avec le premier ouvert, même ouverture ; sans premier onglet, une de plus, annoncée", async ({ page, shh, browser }) => {

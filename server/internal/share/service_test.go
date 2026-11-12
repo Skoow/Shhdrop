@@ -468,29 +468,23 @@ func TestDoneIdempotent(t *testing.T) {
 	gone(t, s, id)
 }
 
+// D42-22 : un « draining » reste jusqu'à son échéance (purge = expires_at), pour que les
+// personnes qui l'ont ouvert y reviennent ; plus de purge 6 h après la dernière ouverture.
 func TestPurgeAt(t *testing.T) {
 	s, c := newSvc(t)
-	k := newKeys()
+	k, k2 := newKeys(), newKeys()
 	id := ready(t, s, k, 1, 1, 1) // expires_at = 11:15
 	c.Add(50 * time.Minute)       // 10:52
 	s.Unlock(id, k.acces, k.preuve)
 	purge, _ := purgeMem(s, id)
 	if want := time.Date(2026, 11, 4, 11, 15, 0, 0, time.UTC).Unix(); purge != want {
-		t.Fatal("purge_at = min(now+6h, expires_at)", time.Unix(purge, 0).UTC())
+		t.Fatal("purge_at = expires_at", time.Unix(purge, 0).UTC())
 	}
-	k2, k3 := newKeys(), newKeys()
-	id2 := ready(t, s, k2, 1, 24, 1)
-	s.Unlock(id2, k2.acces, k2.preuve) // 10:52 + 6 h = 16:52, arrondi au quart d'heure supérieur
+	id2 := ready(t, s, k2, 1, 24, 1) // expires_at = ceil15(10:52 + 24 h) = 11:00 le lendemain
+	s.Unlock(id2, k2.acces, k2.preuve)
 	purge, _ = purgeMem(s, id2)
-	if want := time.Date(2026, 11, 4, 17, 0, 0, 0, time.UTC).Unix(); purge != want {
-		t.Fatal("purge_at = ceil15(now+6h)", time.Unix(purge, 0).UTC())
-	}
-	id3 := ready(t, s, k3, 1, 6, 1) // expires_at = ceil15(10:52 + 6 h) = 17:00
-	c.Add(5 * time.Hour)            // 15:52 : now + 6 h dépasse expires_at
-	s.Unlock(id3, k3.acces, k3.preuve)
-	purge, _ = purgeMem(s, id3)
-	if want := time.Date(2026, 11, 4, 17, 0, 0, 0, time.UTC).Unix(); purge != want {
-		t.Fatal("purge_at plafonné à expires_at", time.Unix(purge, 0).UTC())
+	if want := time.Date(2026, 11, 5, 11, 0, 0, 0, time.UTC).Unix(); purge != want {
+		t.Fatal("purge_at = expires_at (pas 6 h)", time.Unix(purge, 0).UTC())
 	}
 }
 
@@ -847,7 +841,7 @@ func TestSweep(t *testing.T) {
 	abandoned, _, _ := s.createAny(newKeys().req(1, 1, 1))
 	expired := ready(t, s, newKeys(), 1, 1, 1) // 11:15
 	long := ready(t, s, newKeys(), 1, 24, 2)   // 10:15 le lendemain
-	drained := ready(t, s, k, 1, 24, 1)        // draining, purge à ceil15(10:02 + 6 h) = 16:15
+	drained := ready(t, s, k, 1, 24, 1)        // draining, gardé jusqu'à son échéance (D42-22)
 	s.Unlock(drained, k.acces, k.preuve)
 	if n, err := s.Sweep(); err != nil || n != 0 {
 		t.Fatal(n, err)
@@ -857,9 +851,9 @@ func TestSweep(t *testing.T) {
 		t.Fatal(n, err)
 	}
 	gone(t, s, abandoned)
-	// Octroi de l'unique ouverture expiré sans renouvellement (10:32) : ouverture terminée, le
-	// « draining » part sans attendre sa purge (spec §41.4, fin d'ouverture).
-	gone(t, s, drained)
+	if rowCount(t, s, drained) != 1 { // D42-22 : plus de fin d'ouverture à 30 min
+		t.Fatal("draining effacé avant son échéance")
+	}
 	c.Add(13 * time.Minute) // 11:15
 	if n, err := s.Sweep(); err != nil || n != 1 {
 		t.Fatal(n, err)
@@ -873,9 +867,14 @@ func TestSweep(t *testing.T) {
 	if n, err := s.Sweep(); err != nil || n != 0 {
 		t.Fatal(n, err)
 	}
-	if rowCount(t, s, long) != 1 {
+	if rowCount(t, s, long) != 1 || rowCount(t, s, drained) != 1 {
 		t.Fatal("partage vivant effacé")
 	}
+	c.Add(18 * time.Hour) // 10:15 le lendemain : échéance des deux
+	if n, err := s.Sweep(); err != nil || n != 2 {
+		t.Fatal(n, err)
+	}
+	gone(t, s, drained)
 }
 
 // --- Correctifs, tour 1 ---
