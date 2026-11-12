@@ -137,15 +137,16 @@ func (s *salon) plusAttenduLocked(n uint8) {
 	}
 }
 
-// effacesLusLocked : 0x0E des trames effacées par lecture ou départ (drapeauLu) de rang dans
-// (plancher, point] : celles qu'une connexion qui se reconnecte a pu recevoir avant sa
-// coupure (le rattrapage commence après point). Appelé sous s.mu.
-func (s *salon) effacesLusLocked(plancher, point uint64) [][]byte {
-	var out [][]byte
-	i := sort.Search(len(s.index), func(k int) bool { return s.index[k].seq > plancher })
+// effacesLusLocked : cibles des 0x0E des trames effacées par lecture ou départ (drapeauLu)
+// de rang dans (borne, point] : celles qu'une connexion qui se reconnecte a pu recevoir avant
+// sa coupure (le rattrapage commence après point). borne : siege.borneEffaces (jamais
+// plancher, borne des pièces). Appelé sous s.mu.
+func (s *salon) effacesLusLocked(borne, point uint64) []uint64 {
+	var out []uint64
+	i := sort.Search(len(s.index), func(k int) bool { return s.index[k].seq > borne })
 	for ; i < len(s.index) && s.index[i].seq <= point; i++ {
 		if e := s.index[i]; e.efface() && e.drapeaux&drapeauLu != 0 {
-			out = append(out, EnrEfface(s.seq, e.seq))
+			out = append(out, e.seq)
 		}
 	}
 	return out

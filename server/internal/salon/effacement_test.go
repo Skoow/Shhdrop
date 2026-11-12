@@ -774,3 +774,224 @@ func entreeDeEfface(s *salon, seq uint64) bool {
 	e, _ := entreeDe(s, seq)
 	return e.efface()
 }
+
+// Relecture Task 11, point 1 : les 0x0E en attente partent par lots de lotEffaces au plus,
+// dans l'ordre et sans perte ; le reste demeure dans c.effaces et l'écrivain est réveillé.
+func TestEffacesParLots(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	_, g := b.entrerMembre(t, c, true)
+	s := g.salon
+	cn := &connexion{s: s, reveil: make(chan struct{}, 1)}
+	const n = 2*lotEffaces + 500
+	for i := range n {
+		cn.effaces = append(cn.effaces, uint64(1000+i))
+	}
+	var recus []uint64
+	for tour := 0; ; tour++ {
+		s.mu.Lock()
+		lot := cn.ajouterEffaces(nil)
+		reste := len(cn.effaces)
+		s.mu.Unlock()
+		if len(lot) > lotEffaces {
+			t.Fatal("lot trop grand :", len(lot))
+		}
+		for _, r := range lot {
+			recus = append(recus, binary.BigEndian.Uint64(r[9:17]))
+		}
+		select {
+		case <-cn.reveil:
+			if reste == 0 {
+				t.Fatal("réveil sans reste")
+			}
+		default:
+			if reste != 0 {
+				t.Fatal("reste sans réveil :", reste)
+			}
+		}
+		if reste == 0 {
+			if tour != 2 {
+				t.Fatal("tours :", tour)
+			}
+			break
+		}
+	}
+	if len(recus) != n {
+		t.Fatal("0x0E :", len(recus))
+	}
+	for i, r := range recus {
+		if r != uint64(1000+i) {
+			t.Fatal("ordre :", i, r)
+		}
+	}
+}
+
+// Relecture Task 11, point 1, de bout en bout : 1 500 trames effacées par lecture pendant
+// une coupure ; la reconnexion reçoit les 1 500 0x0E, dans l'ordre, par lots.
+func TestReconnexionBeaucoupDe0x0E(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		_, g := b.entrerMembre(t, c, true)
+		eb, bm := b.entrerMembre(t, c, false)
+		_, cm := b.entrerMembre(t, c, false)
+		const n = 1500
+		var seqs []uint64
+		for i := range n {
+			seq := b.recevoir(t, g, trameD(dInstantane, i))
+			b.lu(t, bm, seq)
+			b.lu(t, cm, seq)
+			seqs = append(seqs, seq)
+		}
+		lb := b.connecter(eb.Jeton, seqs[n-1])
+		synctest.Wait()
+		if got := effaces(lb); !slices.Equal(got, seqs) {
+			t.Fatal("0x0E reçus :", len(got))
+		}
+		finir(t, lb)
+	})
+}
+
+// Relecture Task 11, point 2 : une connexion arrêtée ne garde rien en attente (0x0E, file,
+// réponses), qu'elle soit désinscrite, remplacée ou que l'écrivain voie l'arrêt.
+func TestConnexionArreteeVidee(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		eg, g := b.entrerMembre(t, c, true)
+		eb, bm := b.entrerMembre(t, c, false)
+		s := g.salon
+		vide := func(cn *connexion) bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return cn.effaces == nil && cn.file == nil && cn.prive == nil
+		}
+		remplir := func(cn *connexion, l *fauxLien) {
+			l.set(func(f *fauxLien) { f.bloqueApres = len(f.recus) })
+			b.recevoir(t, bm, trameD(dVolatile, 99))
+			synctest.Wait() // écrivain bloqué dans Ecrire : la suite reste en attente
+			for i := range 5 {
+				seq := b.recevoir(t, g, trameD(dInstantane, i))
+				b.lu(t, bm, seq) // effacée : 0x0E pour G
+				b.recevoir(t, bm, trameD(dVolatile, i))
+			}
+			synctest.Wait()
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if len(cn.effaces) == 0 {
+				t.Fatal("aucun 0x0E en attente : le test ne prouve rien")
+			}
+		}
+		// Remplacée : l'ancienne connexion n'occupe plus le siège quand elle est désinscrite.
+		l1 := b.connecter(eg.Jeton, eg.Seq)
+		lb := b.connecter(eb.Jeton, eb.Seq)
+		synctest.Wait()
+		c1 := connDe(s, 0)
+		remplir(c1, l1)
+		l2 := b.connecter(eg.Jeton, eg.Seq)
+		attendreFin(t, l1)
+		if !vide(c1) {
+			t.Fatal("connexion remplacée : attente non vidée")
+		}
+		// Désinscrite : le client s'en va pendant une écriture bloquée.
+		synctest.Wait()
+		c2 := connDe(s, 0)
+		remplir(c2, l2)
+		finir(t, l2)
+		if !vide(c2) {
+			t.Fatal("connexion désinscrite : attente non vidée")
+		}
+		finir(t, lb)
+		// L'écrivain voit l'arrêt (eArreter) : vidé sous s.mu, avant la désinscription.
+		cn := &connexion{s: s, m: b.m, stop: make(chan struct{}), reveil: make(chan struct{}, 1),
+			effaces: []uint64{1}, file: [][]byte{{1}}, prive: [][]byte{{2}}}
+		cn.arreter(CodeFin, nil)
+		if _, _, e := cn.etapeLocked(); e != eArreter || !vide(cn) {
+			t.Fatal("eArreter : attente non vidée", e)
+		}
+	})
+}
+
+// Relecture Task 11, point 3 : reprise par WebSocket, puis reconnexion ordinaire : aucun 0x0E
+// pour une trame antérieure à la reprise (l'identité d'avant ne compte plus).
+func TestReprisePuisReconnexionSans0x0EAnterieur(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		_, g := b.entrerMembre(t, c, true)
+		eb, _ := b.entrerMembre(t, c, false)
+		_, cm := b.entrerMembre(t, c, false)
+		s := g.salon
+		lb := b.connecter(eb.Jeton, eb.Seq)
+		synctest.Wait()
+		x := b.recevoir(t, g, trameD(dInstantane, 1)) // attend B et C
+		synctest.Wait()
+		finir(t, lb)
+		lr := b.connecter(eb.Jeton, DepuisReprise) // B n'est plus attendu par x
+		synctest.Wait()
+		reprise := dernierSeq(s)
+		finir(t, lr)
+		b.lu(t, cm, x) // dernière lecture : x effacée (drapeauLu)
+		if e, _ := entreeDe(s, x); !e.efface() || e.drapeaux&drapeauLu == 0 {
+			t.Fatalf("x : %+v", e)
+		}
+		l := b.connecter(eb.Jeton, reprise)
+		synctest.Wait()
+		if got := effaces(l); len(got) != 0 {
+			t.Fatal("0x0E d'une trame antérieure à la reprise :", got)
+		}
+		finir(t, l)
+	})
+}
+
+// Accueil d'une trame effacée par un départ : B a reçu x, l'a lue, s'est coupé ; C part
+// (dernier attendu) ; B se reconnecte avec depuis = x → 0x0E de x.
+func TestReconnexion0x0EApresDepart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		_, g := b.entrerMembre(t, c, true)
+		eb, bm := b.entrerMembre(t, c, false)
+		_, cm := b.entrerMembre(t, c, false)
+		s := g.salon
+		lb := b.connecter(eb.Jeton, eb.Seq)
+		synctest.Wait()
+		x := b.recevoir(t, g, trameD(dInstantane, 1))
+		synctest.Wait()
+		b.lu(t, bm, x)
+		finir(t, lb)
+		if err := b.m.Quitter(cm); err != nil {
+			t.Fatal(err)
+		}
+		if e, _ := entreeDe(s, x); !e.efface() {
+			t.Fatal("non effacée par le départ")
+		}
+		l := b.connecter(eb.Jeton, x)
+		synctest.Wait()
+		if got := effaces(l); !slices.Equal(got, []uint64{x}) {
+			t.Fatal("0x0E à l'accueil :", got)
+		}
+		finir(t, l)
+	})
+}
+
+// Accueil d'une trame « instantané » envoyée seul : effacée dès sa diffusion ; l'expéditeur,
+// coupé puis reconnecté avec depuis = x, reçoit de nouveau son 0x0E (il a pu le manquer).
+func TestReconnexion0x0EInstantaneSeul(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		eg, g := b.entrerMembre(t, c, true)
+		lg := b.connecter(eg.Jeton, eg.Seq)
+		synctest.Wait()
+		x := b.recevoir(t, g, trameD(dInstantane, 1))
+		synctest.Wait()
+		finir(t, lg)
+		l := b.connecter(eg.Jeton, x)
+		synctest.Wait()
+		if got := effaces(l); !slices.Equal(got, []uint64{x}) {
+			t.Fatal("0x0E à l'accueil :", got)
+		}
+		finir(t, l)
+	})
+}

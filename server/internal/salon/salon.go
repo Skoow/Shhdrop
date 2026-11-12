@@ -35,13 +35,15 @@ type evenement struct {
 // rang à partir duquel le membre peut lire les pièces (Task 13). horsLigneDepuis : zéro
 // tant qu'un WebSocket du siège est ouvert (Task 9) ; posé à l'entrée et à la déconnexion.
 // arrivee : rang de l'arrivée (0x02) de l'occupant, gardé par une reprise (0x0A) : borne de
-// Retirer. reprises : heures (Config.Now) des reprises par WebSocket de la dernière heure,
-// repriseMax au plus (connexion.go).
+// Retirer. repris : rang du dernier 0x0A d'une reprise par WebSocket du titulaire (0 : aucune),
+// borne des 0x0E renvoyés à l'accueil (borneEffaces). reprises : heures (Config.Now) des
+// reprises par WebSocket de la dernière heure, repriseMax au plus (connexion.go).
 type siege struct {
 	nonce           [16]byte
 	jetonV          [32]byte
 	emis, plancher  uint64
 	arrivee         uint64
+	repris          uint64
 	horsLigneDepuis time.Time
 	reprises        []time.Time
 }
@@ -157,6 +159,16 @@ func (x *siege) attenteReprise(now time.Time) time.Duration {
 		return 0
 	}
 	return x.reprises[0].Add(time.Hour).Sub(now)
+}
+
+// borneEffaces : rang au-delà duquel le titulaire, sous son identité actuelle, a pu recevoir
+// une trame : dernier 0x0A (reprise par WebSocket), sinon rang d'émission du jeton (0x02, ou
+// 0x0A d'une reprise par rejoindre).
+func (x *siege) borneEffaces() uint64 {
+	if x.repris != 0 {
+		return x.repris
+	}
+	return x.emis
 }
 
 // oublierLocked retire le siège n et son jeton (sans annonce) ; rend l'empreinte oubliée.

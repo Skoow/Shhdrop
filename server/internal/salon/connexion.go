@@ -58,6 +58,9 @@ const (
 	attenteFinale = time.Second
 	// periodeVeille : période des contrôles de silence et d'écriture bloquée.
 	periodeVeille = time.Second
+	// lotEffaces : 0x0E construits au plus par passage de l'écrivain sous le verrou du salon
+	// (le reste attend dans c.effaces) : ni longue boucle sous le verrou ni gros lot en mémoire.
+	lotEffaces = 1024
 )
 
 // CodeInterne : erreur du serveur (panique récupérée, erreur d'entrée-sortie de la
@@ -106,7 +109,9 @@ type connexion struct {
 	presenceManquee bool // une présence (0x07) diffusée hors du direct : état renvoyé au retour
 	// effaces : cibles des 0x0E à écrire (sans rang, le rattrapage ne les sert pas), hors de
 	// la file : au plus un par entrée de l'index, jamais une cause de fermeture ni de sortie
-	// du direct. Écrits après la file en direct, après le dernier lot au retour au direct.
+	// du direct ; ceux de l'accueil d'une reconnexion compris. Écrits après la file en direct,
+	// après le dernier lot au retour au direct, lotEffaces au plus à la fois. Vidés, avec file
+	// et prive, dès que la connexion est arrêtée (viderLocked).
 	effaces []uint64
 
 	reveil       chan struct{} // capacité 1
@@ -285,6 +290,7 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 			return nil, CodeInterne // journal des annonces plein (ErrLimit)
 		}
 		x.nonce = nonce
+		x.repris = seq
 		x.reprises = append(x.reprises, now)
 		s.plusAttenduLocked(mb.siege) // nouvelle identité (plan, point 8)
 		point = seq
@@ -297,14 +303,17 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 		crochetAccueil()
 	}
 	accueil := append([][]byte{EnrListe(point, 0, s.etatAuLocked(point))}, s.presencesLocked(mb.siege)...)
+	var effaces []uint64
 	if !a.Reprise {
 		// Trames « instantané » effacées par lecture ou départ pendant la coupure, que ce
-		// client a pu recevoir avant (rang ≤ point, après l'émission de son jeton).
-		accueil = append(accueil, s.effacesLusLocked(x.plancher, point)...)
+		// client a pu recevoir avant (rang ≤ point, après l'émission de son jeton ou sa
+		// dernière reprise) : cibles dans c.effaces, écrites par lots après l'accueil.
+		effaces = s.effacesLusLocked(x.borneEffaces(), point)
 	}
 	c := &connexion{
 		m: m, s: s, mb: mb, l: l, ctx: ctx, t0: time.Now(), curseur: point, direct: point == s.seq,
-		prive: accueil, reveil: make(chan struct{}, 1), stop: make(chan struct{}), ecrivainFini: make(chan struct{}),
+		prive: accueil, effaces: effaces, reveil: make(chan struct{}, 1), stop: make(chan struct{}),
+		ecrivainFini: make(chan struct{}),
 	}
 	if old := s.conns[mb.siege]; old != nil {
 		old.arreter(CodeRemplace, EnrFin(s.seq, RaisonRemplace))
@@ -333,6 +342,7 @@ func (m *Manager) desinscrire(c *connexion) {
 	s := c.s
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	c.viderLocked() // remplacée ou non : plus rien ne sera écrit
 	n := c.mb.siege
 	if s.conns[n] != c {
 		return
@@ -705,6 +715,11 @@ func (c *connexion) etapeLocked() (lot [][]byte, refs []ref, e etape) {
 	s := c.s
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer func() {
+		if e == eArreter {
+			c.viderLocked() // le lot rendu est déjà hors des listes
+		}
+	}()
 	if c.arrete.Load() {
 		return nil, nil, eArreter
 	}
@@ -746,13 +761,26 @@ func (c *connexion) etapeLocked() (lot [][]byte, refs []ref, e etape) {
 	return c.ajouterEffaces(lot), nil, eEcrire
 }
 
-// ajouterEffaces : 0x0E en attente ajoutés à lot (rang courant), liste vidée. Sous s.mu.
+// ajouterEffaces : au plus lotEffaces 0x0E en attente ajoutés à lot (rang courant), dans
+// l'ordre ; le reste demeure dans c.effaces et l'écrivain est réveillé pour le lot suivant.
+// Sous s.mu.
 func (c *connexion) ajouterEffaces(lot [][]byte) [][]byte {
-	for _, cible := range c.effaces {
+	n := min(len(c.effaces), lotEffaces)
+	for _, cible := range c.effaces[:n] {
 		lot = append(lot, EnrEfface(c.s.seq, cible))
 	}
-	c.effaces = nil
+	if c.effaces = c.effaces[n:]; len(c.effaces) == 0 {
+		c.effaces = nil
+	} else {
+		c.signaler()
+	}
 	return lot
+}
+
+// viderLocked : connexion arrêtée, plus rien à écrire : 0x0E, file et réponses en attente
+// oubliés (mémoire rendue sans attendre la fin de Servir). Sous s.mu.
+func (c *connexion) viderLocked() {
+	c.effaces, c.file, c.prive = nil, nil, nil
 }
 
 // avancer : curseur après un lot de rattrapage lu hors du verrou (seul l'écrivain le change

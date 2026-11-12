@@ -241,6 +241,35 @@ func TestEffacerPlusieurs(t *testing.T) {
 		t.Fatal("écriture en échec :", err)
 	}
 	f.ecriturePartielle = false
+	// Relecture Task 11 : une écriture ratée (emplacement 5 seul) n'empêche pas les suivantes,
+	// et les dates sont remises à l'epoch malgré l'échec.
+	for i := range 3 { // emplacements 6 à 8
+		if _, err := c.Ajouter(trameTest(10 + i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chtimes(c.chemin, time.Now(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	f.panneSeule, f.panneDecalage = true, decalage(5)
+	if err := c.EffacerPlusieurs([]uint32{2, 5, 7, 8}); !errors.Is(err, ErrES) || strings.Contains(err.Error(), "/") {
+		t.Fatal("écriture en échec :", err)
+	}
+	f.panneSeule = false
+	for _, e := range []uint32{2, 7, 8} {
+		if _, err := c.Lire(e); !errors.Is(err, ErrEfface) {
+			t.Fatalf("emplacement %d non effacé après l'échec d'un autre : %v", e, err)
+		}
+	}
+	if b, err := c.Lire(5); err != nil || !bytes.Equal(b, trameTest(5)) {
+		t.Fatal("emplacement 5 :", err)
+	}
+	if b, err := c.Lire(6); err != nil || !bytes.Equal(b, trameTest(10)) {
+		t.Fatal("emplacement 6 :", err)
+	}
+	if fi, err := os.Stat(c.chemin); err != nil || !fi.ModTime().Equal(time.Unix(0, 0)) {
+		t.Fatal("dates après un échec :", fi.ModTime(), err)
+	}
 	c.Detruire()
 	if err := c.EffacerPlusieurs([]uint32{0}); !errors.Is(err, ErrDetruite) {
 		t.Fatal("après Detruire :", err)
@@ -302,6 +331,9 @@ type fichierPanne struct {
 	*os.File
 	ecriturePartielle bool // WriteAt écrit la moitié puis échoue
 	truncateEchoue    bool
+	// panneSeule : seule l'écriture au décalage panneDecalage échoue (sans rien écrire).
+	panneSeule    bool
+	panneDecalage int64
 }
 
 var errPanneTest = errors.New("/chemin/secret/panne injectée")
@@ -310,6 +342,9 @@ func (f *fichierPanne) WriteAt(p []byte, off int64) (int, error) {
 	if f.ecriturePartielle {
 		n, _ := f.File.WriteAt(p[:len(p)/2], off)
 		return n, &os.PathError{Op: "write", Path: "/chemin/secret", Err: errPanneTest}
+	}
+	if f.panneSeule && off == f.panneDecalage {
+		return 0, &os.PathError{Op: "write", Path: "/chemin/secret", Err: errPanneTest}
 	}
 	return f.File.WriteAt(p, off)
 }
