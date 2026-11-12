@@ -335,6 +335,8 @@ Autres messages de contrôle (`0x02`–`0x05`) : 600 par minute et par WebSocket
 
 ### Task 11 : effacement par règle et par lectures
 
+> Relecture Task 9 : une connexion sortie du direct (file pleine, retour en rattrapage) perd un `0x0E` qui n'a pas de rang. Prévois le même renvoi que pour les présences : au retour dans le direct, renvoie les `0x0E` survenus depuis la sortie, et ajoute un test « client lent, trame effacée pendant le rattrapage, `0x0E` reçu quand même ».
+
 **Files :**
 - Create : `server/internal/salon/effacement.go`, `server/internal/salon/effacement_test.go`
 - Modify : `server/internal/salon/relais.go`, `server/internal/salon/connexion.go` (`0x05` → `Lu`), `server/internal/salon/manager.go` (`Tick`)
@@ -420,6 +422,8 @@ Autres messages de contrôle (`0x02`–`0x05`) : 600 par minute et par WebSocket
 - [ ] **Step 5 :** commit `feat(salon): exclusion et rotation de l'invitation (partie serveur)`.
 
 ### Task 15 : fin de vie, destruction, purge au démarrage, administration
+
+> Relecture Task 9 : `0x05` (fin) doit atteindre aussi une connexion qui est en rattrapage, pas seulement celles qui sont dans le direct. Ajoute un test.
 
 **Files :**
 - Create : `server/internal/salon/fin.go`, `server/internal/salon/fin_test.go`
