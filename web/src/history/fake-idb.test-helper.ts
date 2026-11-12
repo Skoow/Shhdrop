@@ -20,6 +20,7 @@ function request(): Req {
 export type FakeIdb = IDBFactory & { raw(): Map<string, Map<string, Map<IDBValidKey, unknown>>>; failOpen: boolean; failWrites: boolean };
 
 export function fakeIndexedDB(): FakeIdb {
+  const conns = new Map<string, Set<{ closed: boolean; onversionchange: ((e: Event) => void) | null }>>();
   const dbs = new Map<string, { version: number; stores: Map<string, Map<IDBValidKey, unknown>> }>();
   const f = {
     failOpen: false,
@@ -37,6 +38,7 @@ export function fakeIndexedDB(): FakeIdb {
         const fresh = !d;
         if (!d) dbs.set(name, (d = { version: 0, stores: new Map() }));
         const db = makeDb(d);
+        (conns.get(name) ?? conns.set(name, new Set()).get(name)!).add(db);
         req.result = db;
         if (fresh || d.version < version) {
           d.version = version;
@@ -56,22 +58,32 @@ export function fakeIndexedDB(): FakeIdb {
       return req;
     },
     deleteDatabase(name: string) {
-      dbs.delete(name);
       const req = request();
+      // Comme IndexedDB : chaque connexion ouverte reçoit « versionchange » ; une connexion
+      // qui ne se ferme pas bloque (onblocked), la suppression se fait quand même ici.
+      const open = [...(conns.get(name) ?? [])];
+      for (const c of open) c.onversionchange?.({} as Event);
+      if (open.some((c) => !c.closed)) queueMicrotask(() => (req as Req).onblocked?.({ target: req } as unknown as Event));
+      conns.delete(name);
+      dbs.delete(name);
       queueMicrotask(() => req.onsuccess?.({ target: req } as unknown as Event));
       return req;
     },
   };
 
   function makeDb(d: { stores: Map<string, Map<IDBValidKey, unknown>> }) {
-    return {
+    const db = {
+      closed: false,
+      onversionchange: null as ((e: Event) => void) | null,
       get objectStoreNames() {
         return { contains: (n: string) => d.stores.has(n) };
       },
       createObjectStore(n: string) {
         d.stores.set(n, new Map());
       },
-      close() {},
+      close() {
+        db.closed = true;
+      },
       transaction(names: string | string[], mode: IDBTransactionMode = "readonly") {
         const tx = {
           oncomplete: null as ((e: Event) => void) | null,
@@ -120,6 +132,7 @@ export function fakeIndexedDB(): FakeIdb {
         return tx;
       },
     };
+    return db;
   }
   return f as unknown as FakeIdb;
 }

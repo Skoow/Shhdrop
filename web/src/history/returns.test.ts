@@ -133,4 +133,28 @@ describe("retours chiffrés (IndexedDB simulé)", () => {
     await r2.save({ tag: TAG, grant: GRANT2, expiresAt: now + 60_000 });
     expect(await r2.find(TAG)).toBe(GRANT2);
   });
+
+  it("relecture (A) : base supprimée par un autre onglet, une écriture suivante recrée sa clé (rien de perdu)", async () => {
+    const idb = fakeIndexedDB();
+    const a = openReturns({ backend: idbBackend(idb, RETURNS_DB), now: () => T0 });
+    const b = openReturns({ backend: idbBackend(idb, RETURNS_DB), now: () => T0 });
+    await a.save({ tag: TAG, grant: GRANT, expiresAt: T0 + 60_000 });
+    await b.clear(); // autre onglet : « Effacer l'historique »
+    await a.save({ tag: TAG2, grant: GRANT2, expiresAt: T0 + 60_000 });
+    expect(await b.find(TAG2)).toBe(GRANT2);
+    expect(await a.find(TAG2)).toBe(GRANT2);
+  });
+
+  it("relecture (A) : opérations en file : un oubli qui vide la base ne détruit pas une écriture lancée juste après", async () => {
+    const idb = fakeIndexedDB();
+    const r = openReturns({ backend: idbBackend(idb, RETURNS_DB), now: () => T0 });
+    await r.save({ tag: TAG, grant: GRANT, expiresAt: T0 + 60_000 });
+    const p1 = r.forget(TAG);
+    const p2 = r.save({ tag: TAG2, grant: GRANT2, expiresAt: T0 + 60_000 });
+    const p3 = r.find(TAG2);
+    await Promise.all([p1, p2]);
+    expect(await p3).toBe(GRANT2);
+    expect(await r.find(TAG2)).toBe(GRANT2);
+    expect(await r.find(TAG)).toBeNull();
+  });
 });

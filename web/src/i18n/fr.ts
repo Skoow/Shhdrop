@@ -372,7 +372,7 @@ export const fr = {
   "lost": "Impossible de revenir sur ce partage",
   "lost.hint":
     "Ce navigateur l'avait déjà ouvert, mais le serveur ne le reconnaît plus\u202f: il a été détruit ou a expiré, ou notre serveur a redémarré alors que toutes ses ouvertures étaient prises. Demandez à l'expéditeur de vous l'envoyer à nouveau.",
-  "lost.limit": "Vous êtes revenu 20\u202ffois sur ce partage\u202f; il ne reste aucune ouverture. Demandez à l'expéditeur de vous l'envoyer à nouveau.",
+  "lost.limit": "Ce partage a déjà été rouvert 20\u202ffois depuis cet appareil\u202f; il ne reste aucune ouverture. Demandez à l'expéditeur de vous l'envoyer à nouveau.",
   "incomplete": "Lien incomplet",
   "incomplete.hint":
     "Rouvrez-le depuis le message d'origine. Il manque une partie du lien\u202f: il a peut-être été coupé lors d'un copier-coller, ou sa partie secrète a été retirée de la barre d'adresse après une première visite. Rien n'a été demandé au serveur.",

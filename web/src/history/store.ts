@@ -91,6 +91,18 @@ function done(tx: IDBTransaction): Promise<void> {
 /** Base `name` (l'historique par défaut ; history/returns.ts a la sienne, même mécanisme). */
 export function idbBackend(idb: IDBFactory, name = DB): Backend {
   let opened: Promise<IDBDatabase> | undefined;
+  /**
+   * Un autre onglet supprime ou fait monter la base : on lâche la connexion (sinon sa
+   * suppression resterait bloquée et toutes les ouvertures suivantes attendraient) ; la
+   * prochaine opération rouvre (relecture du 12 novembre, A).
+   */
+  const yieldOn = (d: IDBDatabase) => {
+    d.onversionchange = () => {
+      d.close();
+      opened = undefined;
+    };
+    return d;
+  };
   const db = () =>
     (opened ??= new Promise<IDBDatabase>((ok, ko) => {
       const r = idb.open(name, 1);
@@ -99,7 +111,7 @@ export function idbBackend(idb: IDBFactory, name = DB): Backend {
         if (!d.objectStoreNames.contains(META)) d.createObjectStore(META);
         if (!d.objectStoreNames.contains(ENTRIES)) d.createObjectStore(ENTRIES);
       };
-      r.onsuccess = () => ok(r.result);
+      r.onsuccess = () => ok(yieldOn(r.result));
       r.onerror = () => ko(r.error ?? new Error("idb"));
       r.onblocked = () => ko(new Error("idb_bloquee"));
     }));
@@ -125,7 +137,7 @@ export function idbBackend(idb: IDBFactory, name = DB): Backend {
         r.onblocked = () => ko(new Error("idb_bloquee"));
       });
       if (found === null) return false;
-      opened = Promise.resolve(found);
+      opened = Promise.resolve(yieldOn(found));
       return true;
     },
     async key(fresh) {

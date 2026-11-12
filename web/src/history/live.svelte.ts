@@ -131,13 +131,17 @@ export async function forgetShare(id: string): Promise<void> {
 }
 
 export async function clearHistory(): Promise<void> {
-  // Revue D42-22 : les retours gardés (octrois chiffrés, history/returns.ts) partent aussi.
-  await pageReturns().clear();
+  // Revue D42-22 : les retours gardés (octrois chiffrés, history/returns.ts) partent aussi, en
+  // parallèle et au plus 2 s : une base tenue par un autre onglet ne bloque jamais
+  // l'effacement de l'historique (relecture du 12 novembre, A).
+  const returns = Promise.race([pageReturns().clear(), new Promise<void>((ok) => setTimeout(ok, 2000))]);
   const h = await store();
-  if (!h) return;
-  await h.clear();
-  shares.info = {};
-  await reload(h);
+  if (h) {
+    await h.clear();
+    shares.info = {};
+    await reload(h);
+  }
+  await returns;
 }
 
 export async function setHistoryEnabled(v: boolean): Promise<void> {

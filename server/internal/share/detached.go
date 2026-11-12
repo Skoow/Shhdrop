@@ -55,6 +55,9 @@ type detached struct {
 	graceEnd int64
 	opens    map[int]bool // ouvertures qui gardent le droit de finir
 	refs     int          // segments en cours de lecture sur f
+	// rowGone : la ligne est effacée (retire a réussi). Sans elle (suppression du fichier en
+	// échec), le partage vit encore : ses octrois et budgets restent à la fermeture.
+	rowGone bool
 }
 
 // watcher : surveillances (GET /api/shares/watch) d'un partage ; ch fermé à sa disparition.
@@ -337,7 +340,9 @@ func (s *Service) reapLocked(id string, d *detached, now int64) {
 				delete(s.gone.active, openKey{id, n})
 			}
 		}
-		s.forgetOpensLocked(id, nil) // grâce finie : octrois et budgets oubliés
+		if d.rowGone {
+			s.forgetOpensLocked(id, nil) // grâce finie : octrois et budgets oubliés
+		}
 	}
 }
 
@@ -430,9 +435,10 @@ func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 	}
 	// Plus aucun retour possible : octrois et budgets oubliés, sauf pour les ouvertures qui
 	// finissent sur le descripteur détaché (oubliés à la fin de grâce, reapLocked).
-	keep := allowed
-	if s.gone.dead[id] == nil {
-		keep = nil
+	var keep map[int]bool
+	if d := s.gone.dead[id]; d != nil {
+		d.rowGone = true
+		keep = d.opens // y compris un descripteur gardé d'un retrait précédent en échec
 	}
 	s.forgetOpensLocked(id, keep)
 	s.notifyLocked(id)

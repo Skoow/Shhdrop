@@ -369,7 +369,7 @@ export const en = {
   "lost": "You can no longer come back to this share",
   "lost.hint":
     "This browser had already opened it, but the server no longer recognizes it: it was destroyed or expired, or our server restarted while all its opens were used. Ask the sender to send it again.",
-  "lost.limit": "You have come back 20\u00a0times to this share; no opens are left. Ask the sender to send it again.",
+  "lost.limit": "This share has already been reopened 20\u00a0times from this device; no opens are left. Ask the sender to send it again.",
   "incomplete": "Incomplete link",
   "incomplete.hint":
     "Reopen it from the original message. Part of the link is missing: it may have been cut off when copied, or its secret part was removed from the address bar after a first visit. Nothing was requested from the server.",

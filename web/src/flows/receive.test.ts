@@ -519,6 +519,26 @@ describe("rechargement et autres onglets (spec §41.4, UI §9.7.1)", () => {
     expect(r.state).toBe("open");
   });
 
+  it("relecture (A) : une lecture du retour bloquée ne fige pas l'écran : délai maximal, écran normal", async () => {
+    const returns = memReturns();
+    returns.find.mockImplementation(() => new Promise<string | null>(() => undefined));
+    const { r } = setup({ returns, wait: () => Promise.resolve() });
+    await flush();
+    await flush();
+    expect(r.state).toBe("locked");
+  });
+
+  it("relecture (A) : une écriture du retour bloquée (base tenue par un autre onglet) n'empêche pas l'ouverture : délai maximal", async () => {
+    const returns = memReturns();
+    returns.save.mockImplementation(() => new Promise<undefined>(() => undefined)); // jamais résolue
+    const waits: number[] = [];
+    const { r } = setup({ returns, wait: (ms) => (waits.push(ms), Promise.resolve()) });
+    await flush();
+    await r.unlock(PW);
+    expect(r.state).toBe("open");
+    expect(waits.every((ms) => ms === 2000)).toBe(true);
+  });
+
   it("revue D42-22 : un retour qui n'arrive pas à s'écrire n'empêche pas l'ouverture", async () => {
     const returns = memReturns();
     returns.save.mockImplementation(async () => Promise.reject(new Error("idb")));

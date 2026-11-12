@@ -64,9 +64,17 @@ function clean(x: unknown): ReturnEntry | null {
 export function openReturns(deps: { backend: Backend | null; now?: () => number }): Returns {
   const now = deps.now ?? Date.now;
   const b = deps.backend;
-  let keyP: Promise<CryptoKey> | undefined;
-  const key = () =>
-    (keyP ??= crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]).then((k) => b!.key(k)));
+  // Clé relue (ou créée) à chaque opération, jamais gardée d'une opération à l'autre : la base
+  // a pu être supprimée et recréée entre-temps, par cet onglet ou un autre (relecture A).
+  const key = () => crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]).then((k) => b!.key(k));
+  // Une opération à la fois (une seule chaîne de promesses) : une suppression de la base ne
+  // ferme jamais la connexion sous une lecture ou une écriture en cours de cet onglet.
+  let chain: Promise<unknown> = Promise.resolve();
+  const queued = <T>(f: () => Promise<T>): Promise<T> => {
+    const p = chain.then(f, f);
+    chain = p.catch(() => undefined);
+    return p;
+  };
 
   async function open(id: string, r: Rec, k: CryptoKey): Promise<ReturnEntry | null> {
     try {
@@ -95,16 +103,16 @@ export function openReturns(deps: { backend: Backend | null; now?: () => number 
   }
   /** Base vide : supprimée, clé comprise (la prochaine écriture en crée une neuve). */
   async function drop(): Promise<void> {
-    keyP = undefined;
     await b?.drop();
   }
-  const quiet = async <T>(f: () => Promise<T>, fallback: T): Promise<T> => {
-    try {
-      return await f();
-    } catch {
-      return fallback;
-    }
-  };
+  const quiet = <T>(f: () => Promise<T>, fallback: T): Promise<T> =>
+    queued(async () => {
+      try {
+        return await f();
+      } catch {
+        return fallback;
+      }
+    });
 
   return {
     find: (tag) => quiet(async () => (TAG.test(tag) ? ((await all()).find(([, e]) => e.tag === tag)?.[1].grant ?? null) : null), null),

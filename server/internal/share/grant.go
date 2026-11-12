@@ -200,6 +200,7 @@ func (s *Service) sweepGrantsLocked(now int64) {
 	for k, e := range s.gone.grants {
 		if e.exp+graceWindow <= now && s.gone.dead[k.id] == nil {
 			delete(s.gone.grants, k)
+			s.budget.forget(k)
 		}
 	}
 }

@@ -97,3 +97,23 @@ describe("revue D42-22 : « Effacer l'historique » efface aussi les retours gar
     expect(idb.raw().has(RETURNS_DB)).toBe(false);
   });
 });
+
+describe("relecture (A) : « Effacer l'historique » ne se bloque jamais sur les retours", () => {
+  it("historique effacé d'abord ; retours bloqués (base tenue ailleurs) : fini au plus tard 2 s après", async () => {
+    await seed();
+    const { pageReturns } = await import("./returns");
+    vi.spyOn(pageReturns(), "clear").mockReturnValue(new Promise<void>(() => undefined));
+    vi.useFakeTimers();
+    try {
+      let done = false;
+      const p = live.clearHistory().then(() => (done = true));
+      await vi.advanceTimersByTimeAsync(100);
+      expect(live.shares.entries).toEqual([]); // l'historique n'attend pas les retours
+      await vi.advanceTimersByTimeAsync(2000);
+      await p;
+      expect(done).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

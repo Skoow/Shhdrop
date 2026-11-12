@@ -42,6 +42,9 @@ import {
 } from "../session/open-grant";
 import { answerOtherTabs, askOtherTabs } from "../session/tabs";
 
+/** Délai maximal de l'écriture du retour avant d'afficher le contenu (relecture du 12 novembre). */
+export const SAVE_WAIT_MS = 2000;
+
 export type ReceiveState =
   | "meta" // fetchMeta en cours (squelette)
   | "inapp" // navigateur intégré : bandeau, rien n'est demandé au serveur
@@ -82,6 +85,8 @@ export type ReceiverDeps = {
   answerTabs: (getGrant: (tag: string) => string | null) => () => void;
   /** Octrois gardés pour revenir jusqu'à l'échéance (history/returns.ts, D42-22). */
   returns: Returns;
+  /** Attente (délai maximal de l'écriture du retour). */
+  wait: (ms: number) => Promise<void>;
   /** Minuterie répétée (garde d'inactivité) ; rend l'arrêt. */
   every: (ms: number, f: () => void) => () => void;
   /** Horloge en millisecondes. */
@@ -153,6 +158,7 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
     askTabs: (t) => askOtherTabs(t),
     answerTabs: (g) => answerOtherTabs(g),
     returns: pageReturns(),
+    wait: (ms) => new Promise((ok) => setTimeout(ok, ms)),
     every: (ms, f) => {
       const id = setInterval(f, ms);
       return () => clearInterval(id);
@@ -257,8 +263,10 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
     // D42-22 : gardé jusqu'à l'échéance du partage (celle de l'octroi), pour revenir plus tard.
     stopAnswer = tag === null ? () => undefined : d.answerTabs((t) => (held !== null && t === held.tag ? held.grant : null));
     // Attendu (quelques ms) avant d'afficher le contenu : fermer l'onglet aussitôt après ne
-    // perd pas le retour. Échec : silencieux, revenir comptera une ouverture.
-    if (tag !== null && expiresAt > 0) await d.returns.save({ tag, grant: o.grant, expiresAt }).catch(() => undefined);
+    // perd pas le retour. Échec : silencieux, revenir comptera une ouverture. Au plus
+    // SAVE_WAIT_MS : une base tenue par un autre onglet ne bloque jamais l'affichage.
+    if (tag !== null && expiresAt > 0)
+      await Promise.race([d.returns.save({ tag, grant: o.grant, expiresAt }).catch(() => undefined), d.wait(SAVE_WAIT_MS)]);
   }
 
   async function loadMeta(): Promise<void> {
@@ -284,7 +292,7 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
           s.otherTab = true;
         } else if (tag !== null) {
           // Retour plus tard depuis ce navigateur (D42-22) : même ouverture, mot de passe ressaisi.
-          const kept = await d.returns.find(tag).catch(() => null);
+          const kept = await Promise.race([d.returns.find(tag).catch(() => null), d.wait(SAVE_WAIT_MS).then(() => null)]);
           if (secret === null || disposed) return;
           if (kept !== null) {
             grant = kept;

@@ -423,7 +423,11 @@ func TestGrantsForgottenAfterOutOfProcessDelete(t *testing.T) {
 	s, c := newSvc(t)
 	k := newKeys()
 	id := ready(t, s, k, 1, 1, 2)
-	if _, err := s.UnlockGrant(id, k.acces, k.preuve, ""); err != nil {
+	o, err := s.UnlockGrant(id, k.acces, k.preuve, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readSegment(s, id, 0, o.N); err != nil { // compteur de budget créé
 		t.Fatal(err)
 	}
 	if _, err := s.DB.Exec(`DELETE FROM shares WHERE id=?`, id); err != nil {
@@ -433,8 +437,8 @@ func TestGrantsForgottenAfterOutOfProcessDelete(t *testing.T) {
 	if _, err := s.Sweep(); err != nil {
 		t.Fatal(err)
 	}
-	if s.GrantCount() != 0 {
-		t.Fatal(s.GrantCount())
+	if s.GrantCount() != 0 || s.BudgetCount() != 0 {
+		t.Fatal(s.GrantCount(), s.BudgetCount())
 	}
 }
 
@@ -511,5 +515,58 @@ func TestLastOpen(t *testing.T) {
 	rb, err := s.UnlockGrant(id, k.acces, k.preuve, b.Grant)
 	if err != nil || !rb.LastOpen {
 		t.Fatal("retour de la dernière", rb, err)
+	}
+}
+
+// Relecture du 12 novembre (B) : suppression du fichier en échec pendant qu'une lecture tient
+// le descripteur détaché (refs > 0) : la ligne reste, le partage vit ; ses octrois et budgets
+// ne doivent pas être oubliés quand ce descripteur est refermé, et un retrait suivant garde
+// les ouvertures qui finissent encore.
+func TestFailedDestroyKeepsGrantsOfLiveShare(t *testing.T) {
+	s, c := newSvc(t)
+	k := newKeys()
+	id := ready(t, s, k, gb, 24, 2)
+	o1, _ := s.UnlockGrant(id, k.acces, k.preuve, "")
+	if _, err := s.UnlockGrant(id, k.acces, k.preuve, ""); err != nil {
+		t.Fatal(err)
+	}
+	mustRead(t, s, id, 0, o1.N) // ouverture 1 active : droit de finir
+	orig := deleteBlob
+	t.Cleanup(func() { deleteBlob = orig })
+	boom := errors.New("disque")
+	var held *Segment
+	deleteBlob = func(*blob.Store, string) error {
+		seg, err := s.OpenSegment(id, 1, o1.N) // servi par le descripteur détaché : refs > 0
+		if err != nil {
+			t.Error(err)
+		}
+		held = seg
+		return boom
+	}
+	if err := s.DestroyManaged(k.gestion); !errors.Is(err, boom) {
+		t.Fatal(err)
+	}
+	deleteBlob = orig
+	if rowCount(t, s, id) != 1 {
+		t.Fatal("ligne effacée")
+	}
+	held.Close()
+	c.Add(3 * time.Minute) // plus active : le descripteur détaché est refermé
+	if _, err := s.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	if s.GrantCount() != 2 || s.BudgetCount() == 0 {
+		t.Fatal("octrois ou budgets oubliés d'un partage vivant", s.GrantCount(), s.BudgetCount())
+	}
+	if _, err := s.UnlockGrant(id, k.acces, k.preuve, o1.Grant); err != nil {
+		t.Fatal("retour refusé sur un partage vivant", err)
+	}
+}
+
+// Le chiffre 20 est écrit dans les textes (lost.limit, content.return.limits, fr et en) : le
+// changer demande de changer les textes (relecture du 12 novembre).
+func TestMaxReopensMatchesTexts(t *testing.T) {
+	if MaxReopens != 20 {
+		t.Fatal("MaxReopens a changé : mettre à jour lost.limit et content.return.limits (fr, en)", MaxReopens)
 	}
 }

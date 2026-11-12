@@ -168,5 +168,49 @@ test("revue D42-22 : limite des retours atteinte sur un partage sans ouverture r
   await pwField(other).fill(sent.password);
   await other.getByRole("button", { name: /^(Rouvrir|Déchiffrement)/ }).click();
   await expect(other.getByRole("heading", { name: "Impossible de revenir sur ce partage" })).toBeVisible({ timeout: 30_000 });
-  await expect(other.getByText("Vous êtes revenu 20 fois sur ce partage ; il ne reste aucune ouverture.", { exact: false })).toBeVisible();
+  await expect(other.getByText("Ce partage a déjà été rouvert 20\u202ffois depuis cet appareil\u202f; il ne reste aucune ouverture.", { exact: false })).toBeVisible();
+});
+
+test("relecture (A) : deux onglets ; B tient la base des retours, A efface l'historique : rien ne se bloque, A et B rouvrent", async ({ page, shh, isMobile }) => {
+  test.setTimeout(240_000);
+  const ctx = page.context();
+  // Envoi depuis ce navigateur : une entrée d'historique, donc « Effacer l'historique ».
+  const sender = await ctx.newPage();
+  const sent = await sendShare(sender, shh.origin + "/", { text: TEXT, opens: 2, isMobile });
+  await sender.close();
+  // Onglet B : ouvre le partage (retour écrit, connexion à la base gardée).
+  const b = await ctx.newPage();
+  await b.goto(sent.link);
+  await unlock(b, sent.password);
+  await expect.poll(() => storedReturns(b).then((x) => x.n), { timeout: 10_000 }).toBe(1);
+  // Onglet A : efface l'historique (et les retours) ; ni blocage ni attente sans fin.
+  await page.goto(shh.origin + "/envois");
+  const clearAll = async () => {
+    const foot = page.locator(".hist .foot");
+    await foot.getByRole("button", { name: "Effacer l'historique", exact: true }).first().click();
+    const yes = (root: typeof page | ReturnType<typeof page.locator>) => root.getByRole("group").getByRole("button", { name: "Effacer", exact: true });
+    await yes(page.getByRole("dialog")).or(yes(foot)).filter({ visible: true }).first().click();
+    await expect(page.locator("[data-history-empty]")).toBeVisible({ timeout: 10_000 });
+  };
+  await clearAll();
+  await expect.poll(() => page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name)), { timeout: 10_000 }).not.toContain("shhdrop-returns");
+  // B rouvre (rechargement : l'entrée de l'onglet le permet) et réécrit son retour.
+  await b.reload();
+  await expect(b.getByRole("heading", { name: "Rouvrir ce partage" })).toBeVisible({ timeout: 15_000 });
+  await pwField(b).fill(sent.password);
+  await b.getByRole("button", { name: /^(Rouvrir|Déchiffrement)/ }).click();
+  await expect(noteRow(b)).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => storedReturns(b).then((x) => x.n), { timeout: 10_000 }).toBe(1);
+  // A ouvre le partage à son tour, sans attente sans fin : même ouverture (B la détient,
+  // onglet ou retour gardé), aucune de plus.
+  await page.goto(sent.link);
+  await expect(pwField(page)).toBeVisible({ timeout: 15_000 });
+  await pwField(page).fill(sent.password);
+  await page.getByRole("button", { name: /^(Rouvrir|Déverrouiller|Déchiffrement)/ }).click();
+  await expect(noteRow(page)).toBeVisible({ timeout: 30_000 });
+  expect((await shareStatus(sent.manage, shh.origin)).opensUsed).toBe(1);
+  // Et A peut encore effacer l'historique.
+  await page.goto(shh.origin + "/envois");
+  await expect(page.getByRole("heading", { level: 1, name: "Mes partages" })).toBeVisible({ timeout: 10_000 });
+  await b.close();
 });
