@@ -1,0 +1,77 @@
+name: securite
+# Vérification hebdomadaire des failles connues dans les dépendances (Go, site, moteur Rust).
+# Complète la CI (qui ne tourne qu'à chaque push) : un avis publié entre deux pushs est vu au plus
+# tard le lundi suivant. Un échec = une faille trouvée (ou un avis RustSec « warning ») : GitHub
+# envoie un e-mail au propriétaire. Pas d'issue automatique (elle exigerait un jeton en écriture).
+# Aucun secret, aucun jeton en plus de celui, en lecture seule, de l'exécuteur.
+on:
+  schedule:
+    # Lundi 04:17 UTC (heure creuse, hors :00 et :30).
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: server/go.mod
+          cache: false
+      # govulncheck v1.9.0, publié le 11 octobre 2026 (proxy.golang.org), donc plus de 7 jours
+      # avant son épinglage (règle du propriétaire). Même version que le job go de ci.yml : en
+      # changer ici, c'est le changer là-bas.
+      - name: govulncheck
+        working-directory: server
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.node-version
+      # npm audit lit package-lock.json : ni npm ci ni code de dépendance exécuté dans ce job.
+      # Dépendances d'exécution (celles du site servi) : échec dès « moderate ».
+      - name: npm audit (exécution)
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=moderate
+      # Informatif : avec les outils de build et de test (Vite, Vitest, Playwright, svelte-check).
+      # Ne fait pas échouer le job ; le résultat est dans le journal. La CI, elle, échoue dès
+      # « high » sur ces mêmes dépendances (ci.yml, job web).
+      - name: npm audit (complet, informatif)
+        working-directory: web
+        continue-on-error: true
+        run: |
+          npm audit
+          cd tools/svelte-check && npm audit
+  engine:
+    runs-on: ubuntu-latest
+    # Rust épinglé + compilation de cargo-audit (≈ 2-3 min).
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: toolchain
+        uses: ./.github/actions/engine-toolchain
+        with:
+          wasm-bindgen: "false"
+      # Même commande que le job engine de ci.yml (cargo-audit 0.23.0 compilé ici par le Rust
+      # épinglé, sans cache ni action tierce ; exceptions motivées dans engine/.cargo/audit.toml).
+      # Choisi plutôt que rustsec/audit-check : cette action utilise un jeton en écriture
+      # (checks, issues) ou exige une action tierce de plus à épingler ; ici, rien de tiers.
+      - name: cargo audit
+        env:
+          CHANNEL: ${{ steps.toolchain.outputs.channel }}
+        run: |
+          cargo +"$CHANNEL" install --locked --root "$RUNNER_TEMP/cargo-audit" cargo-audit --version 0.23.0
+          cd engine && "$RUNNER_TEMP/cargo-audit/bin/cargo-audit" audit --deny warnings

@@ -182,6 +182,12 @@ La CI fait les deux à chaque push : `deploy-lint` (ShellCheck 0.11.0 épinglé)
 
 `test-proxy.sh` est à relancer à chaque changement du `Caddyfile` ou de version de Caddy : c'est le seul test de la ligne dont dépendent les quotas et l'anti-robot (audit F3).
 
+### Vérification de sécurité hebdomadaire
+
+`.github/workflows/securite.yml` tourne chaque lundi à 04:17 UTC et à la demande (onglet Actions, « Run workflow »). Trois jobs : `govulncheck ./...` (server/), `npm audit --omit=dev --audit-level=moderate` (web/, plus un audit complet informatif qui ne fait pas échouer) et `cargo audit --deny warnings` (engine/, mêmes exceptions que la CI : `engine/.cargo/audit.toml`). Aucun secret.
+
+Un job rouge = une faille connue : GitHub envoie un e-mail d'échec au propriétaire (vérifier que les notifications Actions sont actives pour le dépôt). Pas d'issue automatique. Marche à suivre : lire le journal du job, mettre la dépendance à jour (tests), ou noter l'exception et sa date de réexamen (jamais d'ignore silencieux). Si GitHub n'a lancé aucune exécution pendant 60 jours sans activité sur le dépôt, il désactive les workflows planifiés : les réactiver dans l'onglet Actions.
+
 ## 9. Ce que ce kit ne fait pas
 
 - **Démarches légales (§17)** : avis d'un juriste sur la conservation des données d'identification (LCEN, décret 2021-1362, en conflit avec « aucune adresse IP enregistrée »), point de contact DSA, déclaration ANSSI, mentions légales, CGU. Rien n'ouvre au public avant.
