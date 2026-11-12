@@ -162,11 +162,11 @@ Navigateur expéditeur ──(chiffré)──► Caddy ──► Serveur Shhdrop
 | Site | **TypeScript + Svelte + Vite**, PWA sans service worker | Léger ; aucune persistance de code piégé |
 | Crypto navigateur (réécrit le 11 novembre, C-1) | **Partages** : moteur Rust (RustCrypto : HKDF, SHA-256, HMAC, Argon2id) en WebAssembly + **WebCrypto** (AES-256-GCM, nombres aléatoires), D42-21. libsodium.js est retiré. **Salon** : second module wasm qui embarque **OpenMLS =0.9.2 sur RustCrypto** (voir la ligne suivante) | Standards reconnus, aucune crypto maison |
 | Crypto du salon (11 novembre, C-1) | **OpenMLS =0.9.2** sur RustCrypto (`openmls_rust_crypto`), dans un second module wasm, avec **son propre AES-GCM RustCrypto** : WebCrypto est asynchrone et les traits d'OpenMLS sont synchrones, un fournisseur WebCrypto est impossible (Ruling 1 : choix pris sur délégation du propriétaire (11 novembre) ; CLAUDE.md à amender par le propriétaire (« sauf le module du salon : OpenMLS sur RustCrypto »)). `chacha20poly1305` pour l'enveloppe des trames ; `postcard` pour le stockage MLS qui efface ses valeurs. Le reste du site garde le moteur des partages (D42-21) | Aucune crypto maison ; voir spec salon v3 §3 |
-
-> Note (11 novembre, C-1) : la ligne « Crypto navigateur » ci-dessus date d'avant D42-21 ; libsodium.js est retiré (D42-21), et la mention « §39.2 : X25519, Ed25519… pour le salon » est remplacée par la ligne du salon.
 | PDF | **pdf.js** dans une zone isolée | Lecture des PDF sur le site sans exécuter leur code |
 | HTTPS / déploiement | **Docker + Caddy** | Certificats automatiques, portable |
 | Hébergement | Hors UE (Suisse ou Islande de préférence), à choisir à la mise en ligne | Voir sections 15 et 17 |
+
+> Note (11 novembre, C-1) : la ligne « Crypto navigateur » ci-dessus date d'avant D42-21 ; libsodium.js est retiré (D42-21), et la mention « §39.2 : X25519, Ed25519… pour le salon » est remplacée par la ligne du salon.
 
 ### Organisation du dépôt
 
