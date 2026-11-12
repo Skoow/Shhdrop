@@ -41,6 +41,14 @@ test("molette au centre de la zone de dépôt, puis sur la liste : la page défi
   await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(0);
 });
 
+test("ordinateur : la carte du composeur a un contour entier (pas d'ouverture en haut)", async ({ page, shh, isMobile }) => {
+  test.skip(isMobile, "téléphone : composeur sans cadre");
+  await openSend(page, shh.origin);
+  const track = page.locator("[data-composer]").locator("xpath=ancestor::div[contains(@class,'vessel')][1]").locator("svg.line .track");
+  await expect(track).toHaveCount(1);
+  expect(await track.evaluate((e) => getComputedStyle(e).strokeDasharray)).toBe("none");
+});
+
 test("premier écran : titre, trois assurances, zone de dépôt compacte, offres et Salon, sans défiler", async ({ page, shh, isMobile }) => {
   await openSend(page, shh.origin);
   const h1 = page.getByRole("heading", { level: 1, name: "Un lien, un mot de passe, puis plus rien." });

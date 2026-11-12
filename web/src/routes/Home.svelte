@@ -790,6 +790,12 @@
       display: none;
     }
   }
+  /* Composeur sur ordinateur (retours du 12 novembre) : la carte a un contour entier ; l'ouverture
+     de la capsule (motif du logo) laissait le haut sans bord, de la gauche jusqu'au milieu. Le
+     dépôt garde son ouverture resserrée. */
+  .home.compact .compose :global(.vessel:not(.drop) .track) {
+    stroke-dasharray: none;
+  }
   .make-t {
     margin: 0;
     padding-inline: 4px;
