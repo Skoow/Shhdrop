@@ -155,6 +155,8 @@ test.describe("fr-FR", () => {
 
   test("faux serveur dans la page : fetch et XHR /api détournés (aucune requête /api sur le réseau)", async ({ page, demo }) => {
     await page.goto(demo.url);
+    // Le faux serveur s'installe par un await de haut niveau, après « load » : attendre l'écran.
+    await expect(page.getByRole("heading", { level: 1, name: TITLE_FR })).toBeVisible();
     const r = await page.evaluate(async () => {
       const cap = await (await fetch("/api/captcha")).json();
       const nope = await fetch("/api/manage/status");
