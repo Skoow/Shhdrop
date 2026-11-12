@@ -386,7 +386,7 @@ describe("le serveur ne voit rien : repères de requête, base minimale (spec §
     return captured(input, { ...init, headers: h });
   };
   type Row = Record<string, unknown>;
-  const snapshots: Record<string, { cols: string[]; rows: Row[]; master: string[] }> = {};
+  const snapshots: Record<string, { cols: string[]; rows: Row[]; master: string[]; salonCols: string[]; pieceCols: string[]; salonRows: number }> = {};
   async function dbSnapshot(label: string) {
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(join(srv.dataDir, "shares.db"), { readOnly: true });
@@ -394,7 +394,16 @@ describe("le serveur ne voit rien : repères de requête, base minimale (spec §
       const cols = (db.prepare("SELECT name FROM pragma_table_info('shares')").all() as { name: string }[]).map((c) => c.name);
       const rows = db.prepare("SELECT * FROM shares").all() as Row[];
       const master = (db.prepare("SELECT type || ':' || name AS n FROM sqlite_master ORDER BY 1").all() as { n: string }[]).map((x) => x.n);
-      snapshots[label] = { cols, rows, master };
+      const colsOf = (t: string) => (db.prepare(`SELECT name FROM pragma_table_info('${t}')`).all() as { name: string }[]).map((c) => c.name);
+      const count = (t: string) => Number((db.prepare(`SELECT count(*) AS n FROM ${t}`).get() as { n: number }).n);
+      snapshots[label] = {
+        cols,
+        rows,
+        master,
+        salonCols: colsOf("salons"),
+        pieceCols: colsOf("salon_pieces"),
+        salonRows: count("salons") + count("salon_pieces"),
+      };
     } finally {
       db.close();
     }
@@ -432,12 +441,30 @@ describe("le serveur ne voit rien : repères de requête, base minimale (spec §
     await srv?.dispose();
   });
 
-  it("base : seule date expires_at (multiple de 900), ni ttl_hours, ni colonnes retirées, rien d'autre que shares", () => {
+  // Schéma 2 (salon C-2, Task 4) : les tables du salon existent même salon désactivé ; elles restent
+  // vides, et leurs colonnes sont fixées ici : aucun pseudonyme, nom, adresse, date autre que
+  // expires_at, ni compteur de messages (§39.3.5).
+  it("base : seule date expires_at (multiple de 900), ni ttl_hours, ni colonnes retirées ; tables du salon vides et sans colonne en trop", () => {
     for (const [label, s] of Object.entries(snapshots)) {
       expect(s.cols, label).not.toContain("progress_at");
       expect(s.cols, label).not.toContain("upload_deadline");
       expect(s.cols, label).not.toContain("purge_at");
-      expect(s.master, label).toEqual(["index:shares_access_v", "index:shares_manage_v", "table:shares"]);
+      expect(s.master, label).toEqual([
+        "index:salon_pieces_salon",
+        "index:salons_access_v",
+        "index:salons_manage_v",
+        "index:shares_access_v",
+        "index:shares_manage_v",
+        "table:salon_pieces",
+        "table:salons",
+        "table:shares",
+      ]);
+      expect(s.salonCols, label).toEqual([
+        "id", "access_v", "manage_v", "proof_v", "salt", "kdf_ops", "kdf_mem", "expires_at",
+        "max_members", "members_can_destroy", "failed_attempts", "pieces_bytes",
+      ]);
+      expect(s.pieceCols, label).toEqual(["id", "salon_id", "bucket", "state", "segments_mask"]);
+      expect(s.salonRows, label).toBe(0);
       for (const row of s.rows) {
         expect(row.ttl_hours, label).toBeNull();
         expect(Number(row.expires_at) % 900, label).toBe(0);
