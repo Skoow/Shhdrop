@@ -4,9 +4,11 @@ import { join } from "node:path";
 
 export type Needle = { label: string; forms: Buffer[] };
 
-// Formes recherchées : octets bruts, et base64url / base64 pour les trois alignements
+// Formes recherchées : octets bruts ; base64url / base64 pour les trois alignements
 // possibles (un secret encodé au milieu d'un texte plus long ne commence pas forcément
-// sur une frontière de 3 octets). Chaque forme couvre au moins 12 octets du secret.
+// sur une frontière de 3 octets ; chaque forme couvre au moins 12 octets du secret) ; hex en
+// minuscules et en majuscules ; pour un repère texte, UTF-16LE et UTF-16BE (relecture C-2
+// Task 17).
 export function needle(label: string, raw: Uint8Array<ArrayBuffer> | string): Needle {
   const b = Buffer.from(typeof raw === "string" ? new TextEncoder().encode(raw) : raw);
   const forms = [b];
@@ -14,6 +16,12 @@ export function needle(label: string, raw: Uint8Array<ArrayBuffer> | string): Ne
     const sub = b.subarray(k, k + Math.floor((b.length - k) / 3) * 3);
     if (sub.length < 12) continue;
     forms.push(Buffer.from(sub.toString("base64url")), Buffer.from(sub.toString("base64")));
+  }
+  const hex = b.toString("hex");
+  forms.push(Buffer.from(hex), Buffer.from(hex.toUpperCase()));
+  if (typeof raw === "string") {
+    const le = Buffer.from(raw, "utf16le");
+    forms.push(le, Buffer.from(le).swap16());
   }
   return { label, forms };
 }

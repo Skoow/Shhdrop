@@ -2,9 +2,46 @@
 // lecture réelle de la mémoire d'un processus.
 import { spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { MEM_WINDOW, needle, scanProcessMemory, scanRegions } from "./scan";
+import { MEM_WINDOW, findIn, needle, scanProcessMemory, scanRegions } from "./scan";
 
 const W = MEM_WINDOW;
+
+// Relecture C-2 Task 17 : chaque forme d'une aiguille est trouvée dans une meule qui ne
+// contient qu'elle (brut, base64url, base64, hex minuscules et majuscules ; texte : UTF-16LE
+// et UTF-16BE).
+describe("needle : formes cherchées", () => {
+  const octets = new Uint8Array(Array.from({ length: 32 }, (_, i) => (i * 37 + 11) & 255));
+  const texte = "RepereFormesZq7";
+  const dans = (hay: Buffer, n: ReturnType<typeof needle>) => findIn(Buffer.concat([Buffer.from("xx"), hay, Buffer.from("yy")]), [n]);
+  const cas: [string, Uint8Array | string, Buffer][] = [
+    ["brut", octets, Buffer.from(octets)],
+    ["base64url", octets, Buffer.from(Buffer.from(octets).toString("base64url"))],
+    ["base64", octets, Buffer.from(Buffer.from(octets).toString("base64"))],
+    ["hex minuscules", octets, Buffer.from(Buffer.from(octets).toString("hex"))],
+    ["hex majuscules", octets, Buffer.from(Buffer.from(octets).toString("hex").toUpperCase())],
+    ["texte brut", texte, Buffer.from(texte)],
+    ["texte hex minuscules", texte, Buffer.from(Buffer.from(texte).toString("hex"))],
+    ["texte hex majuscules", texte, Buffer.from(Buffer.from(texte).toString("hex").toUpperCase())],
+    ["texte UTF-16LE", texte, Buffer.from(texte, "utf16le")],
+    ["texte UTF-16BE", texte, Buffer.from(texte, "utf16le").swap16()],
+  ];
+  for (const [nom, repere, forme] of cas) {
+    it(nom, () => {
+      const n = needle(nom, typeof repere === "string" ? repere : (repere as Uint8Array<ArrayBuffer>));
+      expect(dans(forme, n)).toEqual([nom]);
+      // Contre-épreuve : une forme abîmée (premier octet changé) n'est pas trouvée.
+      const abimee = Buffer.from(forme);
+      abimee[0] = abimee[0]! ^ 0x55;
+      if (nom !== "base64url" && nom !== "base64") expect(dans(abimee, n)).toEqual([]);
+    });
+  }
+  it("UTF-16 seulement pour un repère texte", () => {
+    const n = needle("o", octets as Uint8Array<ArrayBuffer>);
+    const le = Buffer.alloc(64);
+    for (let i = 0; i < 32; i++) le[2 * i] = octets[i]!;
+    expect(n.forms.some((f) => f.equals(le))).toBe(false);
+  });
+});
 
 describe("scanRegions (mémoire simulée)", () => {
   const mark = "REPERE-fenetre-a1b2c3";
