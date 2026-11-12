@@ -5,7 +5,7 @@
 import { fileURLToPath } from "node:url";
 import { axe, expect, test } from "./fixtures";
 import { file, freshPage, sendShare, settle, unlock } from "./open-helpers";
-import { addText, autoClean, openFilePicker } from "./send-helpers";
+import { addText, openFilePicker } from "./send-helpers";
 import type { Page } from "@playwright/test";
 
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-UI6/", import.meta.url));
@@ -17,7 +17,6 @@ test("composeur : icônes en couleur, menu « … », aperçu par l'icône, Nett
   test.setTimeout(120_000);
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(shh.origin + "/");
-  await autoClean(page, false);
   await addText(page, "Code de la porte : 4512B");
   await (await openFilePicker(page)).setFiles(["plage-nuit.jpg", "contrat.pdf", "budget-2026.xlsx", "archive.zip", "anniversaire-lou.webm", "vocal.ogg", "schema.png"].map(file));
   await expect(page.locator("[data-row]")).toHaveCount(8);
@@ -55,11 +54,13 @@ test("composeur : icônes en couleur, menu « … », aperçu par l'icône, Nett
     await expect(menu.locator(".mi")).toHaveText(["Aperçu", "Renommer", "Nettoyer", "Supprimer"]);
     await settle(page);
     await page.screenshot({ path: `${SHOTS}composeur-menu-${w(isMobile)}.png` });
+    // « Nettoyer » du menu : même confirmation que le balai (retours du 12 novembre).
     await menu.getByRole("button", { name: "Nettoyer" }).click();
     await expect(menu).toBeHidden();
   } else {
-    await photo.getByRole("button", { name: "Nettoyer plage-nuit.jpg" }).click();
+    await photo.getByRole("button", { name: "Nettoyer ce fichier" }).click();
   }
+  await page.getByRole("dialog", { name: "Nettoyer ce fichier\u202f?" }).getByRole("button", { name: "Nettoyer", exact: true }).click();
   await expect(photo.locator('[data-clean="nettoye"]')).toBeVisible();
   await expect(photo.locator("[data-fix]")).toHaveCount(0);
   if (isMobile) {

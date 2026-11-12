@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { axe, capture, expect, test } from "./fixtures";
-import { footLink, langGroup, switchLang } from "./foot-helpers";
+import { foot, footLink, pageIn } from "./foot-helpers";
 
 /** Va à la page Sécurité : lien du pied de page (présent partout, ordinateur et téléphone). */
 async function openSecurity(page: Page) {
@@ -12,27 +12,27 @@ async function openSecurity(page: Page) {
 test.describe("français par défaut", () => {
   test.use({ locale: "fr-FR" });
 
-  test("la bascule change <html lang>, les textes et ne stocke rien", async ({ page, shh }) => {
+  // Plus de bascule dans le pied de page (décision du propriétaire du 12 novembre) : la langue du
+  // navigateur décide ; un onglet en anglais montre les textes et titres anglais.
+  test("la langue du navigateur décide <html lang>, les textes et les titres ; rien n'est stocké", async ({ page, shh, browser }) => {
     await page.goto(shh.origin + "/inconnu");
     await expect(page.locator("html")).toHaveAttribute("lang", "fr");
     await expect(page.getByRole("heading", { name: "Cette page n'existe pas." })).toBeVisible();
     await expect(page).toHaveTitle("Page introuvable · Shhdrop");
+    await expect(foot(page).getByRole("group", { name: /^(Langue|Language)$/ })).toHaveCount(0);
 
-    await switchLang(page, "English");
-    await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await expect(page.getByRole("heading", { name: "This page does not exist." })).toBeVisible();
-    await expect(page).toHaveTitle("Page not found · Shhdrop");
-    // Titre par route (scan UX B9) : accueil, puis Sécurité.
-    await openSecurity(page);
-    await expect(page).toHaveTitle("Security · Shhdrop");
+    const en = await pageIn(browser, "en-US", shh.origin + "/inconnu");
+    await expect(en.page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(en.page.getByRole("heading", { name: "This page does not exist." })).toBeVisible();
+    await expect(en.page).toHaveTitle("Page not found · Shhdrop");
+    // Titre par route (scan UX B9) : Sécurité, puis l'accueil.
+    await openSecurity(en.page);
+    await expect(en.page).toHaveTitle("Security · Shhdrop");
+    await en.page.goto(shh.origin + "/");
+    await expect(en.page).toHaveTitle("End-to-end encrypted sharing, no account · Shhdrop");
+    await en.ctx.close();
     // Accueil : titre descriptif (référencement, retours CLEAN2) ; page d'envoi : « Envoyer ».
     await page.goto(shh.origin + "/");
-    await expect(page).toHaveTitle("Partage chiffré de bout en bout, sans compte · Shhdrop");
-
-    await switchLang(page, "English");
-    await expect(page).toHaveTitle("End-to-end encrypted sharing, no account · Shhdrop");
-    await switchLang(page, "Français");
-    await expect(page.locator("html")).toHaveAttribute("lang", "fr");
     await expect(page).toHaveTitle("Partage chiffré de bout en bout, sans compte · Shhdrop");
     await page.goto(shh.origin + "/envoyer");
     await expect(page).toHaveTitle("Envoyer · Shhdrop");
@@ -47,13 +47,6 @@ test.describe("français par défaut", () => {
     expect((await page.context().cookies()).length).toBe(0);
   });
 
-  test("pas de mémorisation : un rechargement revient à la langue du navigateur", async ({ page, shh }) => {
-    await page.goto(shh.origin + "/inconnu");
-    await switchLang(page, "English");
-    await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await page.reload();
-    await expect(page.locator("html")).toHaveAttribute("lang", "fr");
-  });
 
   test("lien d'évitement : focus sur le contenu, aucun # dans l'adresse", async ({ page, shh }) => {
     await page.goto(shh.origin + "/");
@@ -111,16 +104,10 @@ test("le verre de l'en-tête apparaît au défilement et pas avant", async ({ pa
   await expect(header).not.toHaveClass(/scrolled/);
 });
 
-test("pied de page, langue : chaque bouton porte sa langue (lang) et son état (aria-pressed)", async ({ page, shh }) => {
+test("ni en-tête ni pied de page ne proposent de langue : elle suit le navigateur (12 novembre)", async ({ page, shh }) => {
   await page.goto(shh.origin + "/inconnu");
-  await expect(page.getByRole("banner").getByRole("button", { name: /English|Français/ })).toHaveCount(0);
-  const html = await page.locator("html").getAttribute("lang");
-  await switchLang(page, html === "fr" ? "English" : "Français");
-  await expect(page.locator("html")).toHaveAttribute("lang", html === "fr" ? "en" : "fr");
-  const grp = langGroup(page);
-  await expect(grp.getByRole("button", { name: "Français" })).toHaveAttribute("lang", "fr");
-  await expect(grp.getByRole("button", { name: "English" })).toHaveAttribute("lang", "en");
-  await expect(grp.getByRole("button", { name: html === "fr" ? "English" : "Français" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: /^(English|Français)$/ })).toHaveCount(0);
+  await expect(foot(page).getByRole("group", { name: /^(Langue|Language)$/ })).toHaveCount(0);
 });
 
 test("le secret du # ne fuit ni dans le DOM, ni dans le titre, ni dans la console, ni dans une requête", async ({ page, shh }) => {
@@ -131,8 +118,7 @@ test("le secret du # ne fuit ni dans le DOM, ni dans le titre, ni dans la consol
   page.on("request", (r) => urls.push(r.url()));
   await page.goto(`${shh.origin}/s/AbCdEfGhIjKlMnOpQrStUv#${SECRET}`);
   await expect(page.locator("main#contenu")).toBeVisible();
-  // Navigation interne et bascule de langue : le routeur travaille sous l'adresse complète.
-  await switchLang(page, "English");
+  // Navigation interne : le routeur travaille sous l'adresse complète.
   await openSecurity(page);
   await page.goBack();
   await page.evaluate(() => 0);

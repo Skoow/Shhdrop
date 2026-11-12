@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { axe, captureOf, expect, test } from "./fixtures";
 import { file, freshPage, sendShare, settle, unlock } from "./open-helpers";
-import { autoClean, openFilePicker } from "./send-helpers";
+import { cleanAll, openFilePicker } from "./send-helpers";
 import type { Locator, Page } from "@playwright/test";
 
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-UI9/", import.meta.url));
@@ -25,7 +25,6 @@ test("composeur : bouclier juste avant le nom, jamais repoussé par un nom long 
   test.setTimeout(120_000);
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(shh.origin + "/");
-  await autoClean(page, true);
   const jpg = readFileSync(file("plage-nuit.jpg"));
   const long = "vacances-ete-2026-plage-de-nuit-sous-les-etoiles-photo-originale-tres-longue.jpg";
   await (await openFilePicker(page)).setFiles([
@@ -36,6 +35,7 @@ test("composeur : bouclier juste avant le nom, jamais repoussé par un nom long 
   ]);
   const row = (n: string) => page.locator("[data-row]").filter({ has: page.locator(`.nm[title="${n}"]`) });
   await expect(page.locator("[data-row]")).toHaveCount(4);
+  await cleanAll(page);
   await expect(row("plage-nuit.jpg").locator('[data-clean="nettoye"]')).toBeVisible();
   await expect(row(long).locator('[data-clean="nettoye"]')).toBeVisible();
   await expect(row("abime.jpg").locator('[data-clean="echec"]')).toBeVisible();

@@ -1,16 +1,16 @@
-// Nettoyage automatique des métadonnées (spec §35.2, Task 9a ; décision du propriétaire du
-// 8 novembre, D41-23 ; présentation D41-34) : 2ᵉ ligne de la bulle du cadenas (« Nettoyé : … »,
+// Nettoyage des métadonnées (spec §35.2, Task 9a ; décision du propriétaire du 8 novembre,
+// D41-23 ; présentation D41-34 ; depuis le 12 novembre, seulement au balai ou par « Tout
+// nettoyer », plus de réglage automatique) : 2ᵉ ligne de la bulle du cadenas (« Nettoyé : … »,
 // « Fichier tel quel », « Nettoyage impossible : … »), étincelle ou pastille ambre sur la ligne,
-// envoi sans clic, résumé des échecs près d'Envoyer, réglage désactivé, photo reçue sans GPS
-// (octet par octet), images nettoyées toujours décodables (createImageBitmap).
+// envoi sans clic, résumé des échecs près d'Envoyer, rien de nettoyé à l'ajout, photo reçue sans
+// GPS (octet par octet), images nettoyées toujours décodables (createImageBitmap).
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { stripMetadata } from "../src/media/strip";
 import { expect, test } from "./fixtures";
 import { file, freshPage, sendShare, unlock } from "./open-helpers";
-import { autoClean, openFilePicker, sendButton } from "./send-helpers";
-import { cleanSwitch } from "./foot-helpers";
+import { cleanAll, openFilePicker, sendButton } from "./send-helpers";
 
 test.use({ locale: "fr-FR" });
 
@@ -46,13 +46,13 @@ async function fakePicker(page: Page) {
   });
 }
 
-test("photo avec GPS : « Nettoyé » à l'ajout, le destinataire reçoit la photo nettoyée, octet par octet", async ({ page, shh, browser }) => {
+test("photo avec GPS : « Nettoyé » par « Tout nettoyer », le destinataire reçoit la photo nettoyée, octet par octet", async ({ page, shh, browser }) => {
   test.setTimeout(120_000);
   const s = await freshPage(browser);
   const photo = { name: "IMG_GPS.jpg", mimeType: "image/jpeg", buffer: FX("iphone-like.jpg") };
   await s.page.goto(shh.origin + "/");
-  await autoClean(s.page, true); // désactivé par défaut (CLEAN4)
   await (await openFilePicker(s.page)).setFiles(photo);
+  await cleanAll(s.page);
   const r = row(s.page, "IMG_GPS");
   // D41-34 : étincelle à côté du type ; le détail dans la bulle du cadenas (2ᵉ ligne).
   await expect(r.locator('[data-clean="nettoye"]')).toBeVisible();
@@ -73,7 +73,7 @@ test("photo avec GPS : « Nettoyé » à l'ajout, le destinataire reçoit la pho
   expect(got.length).toBeLessThan(photo.buffer.length);
 });
 
-test("états à l'écran (D41-34) : nettoyé (photo, PDF), nettoyage impossible (échec, PDF protégé), tel quel (inconnu, archive) ; tout part sans clic (D41-23) ; résumé des échecs près d'Envoyer", async ({ page, shh, isMobile }) => {
+test("états à l'écran (D41-34) après « Tout nettoyer » : nettoyé (photo, PDF), nettoyage impossible (échec, PDF protégé), tel quel (format non lu, archive) ; tout part sans clic (D41-23) ; résumé des échecs près d'Envoyer", async ({ page, shh, isMobile }) => {
   test.setTimeout(90_000);
   if (isMobile) await page.setViewportSize({ width: 390, height: 844 });
   const puts: string[] = [];
@@ -81,7 +81,6 @@ test("états à l'écran (D41-34) : nettoyé (photo, PDF), nettoyage impossible 
     if (q.method() === "PUT" && q.url().includes("/api/shares/segments/")) puts.push(q.url());
   });
   await page.goto(shh.origin + "/");
-  await autoClean(page, true); // désactivé par défaut (CLEAN4)
   const jpg = FX("iphone-like.jpg");
   await (await openFilePicker(page)).setFiles([
     { name: "IMG_GPS.jpg", mimeType: "image/jpeg", buffer: jpg },
@@ -92,6 +91,7 @@ test("états à l'écran (D41-34) : nettoyé (photo, PDF), nettoyage impossible 
     { name: "dessin.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>") },
   ]);
   await expect(page.locator("[data-row]")).toHaveCount(6);
+  await cleanAll(page);
   await expect(row(page, "IMG_GPS").locator('[data-clean="nettoye"]')).toBeVisible();
   await expect(row(page, "IMG_GPS").locator('[data-clean="echec"]')).toHaveCount(0);
   const fail = (n: string) => row(page, n).locator('[data-clean="echec"]');
@@ -102,11 +102,9 @@ test("états à l'écran (D41-34) : nettoyé (photo, PDF), nettoyage impossible 
   await expect(lock(page, "devis")).toHaveAccessibleName(detail("Nettoyé : propriétés du document retirées (auteur, logiciel, dates)"));
   await expect(fail("signe")).toBeVisible();
   await expect(lock(page, "signe")).toHaveAccessibleName(detail("Nettoyage impossible : fichier signé ou protégé"));
-  // Image d'un format que le nettoyage ne lit pas (décision du 10 novembre) : pastille ambre.
-  await expect(fail("dessin")).toBeVisible();
-  await expect(lock(page, "dessin")).toHaveAccessibleName(detail("Nettoyage impossible : format non pris en charge"));
-  // Archive (jamais ouverte, D41-27) : « Fichier tel quel », rien sur la ligne.
-  for (const n of ["archive"]) {
+  // Archive (jamais ouverte, D41-27) et image d'un format que le nettoyage ne lit pas : jamais
+  // proposées au balai (12 novembre : plus de nettoyage tenté à l'ajout), « Fichier tel quel ».
+  for (const n of ["archive", "dessin"]) {
     await expect(lock(page, n)).toHaveAccessibleName(detail("Fichier tel quel (non modifié)"));
     await expect(row(page, n).locator("[data-clean]")).toHaveCount(0);
   }
@@ -115,22 +113,24 @@ test("états à l'écran (D41-34) : nettoyé (photo, PDF), nettoyage impossible 
   // Aucun choix à faire : plus de bouton, envoi permis, résumé discret près d'Envoyer.
   await expect(page.getByRole("button", { name: /^Envoyer tel quel/ })).toHaveCount(0);
   await expect(page.locator("#send-reason").filter({ visible: true })).toHaveCount(0);
-  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("3\u202ffichiers n'ont pas pu être nettoyés");
+  await expect(page.locator("[data-unclean-sum]").filter({ visible: true })).toHaveText("2\u202ffichiers n'ont pas pu être nettoyés");
   await expect(sendButton(page).filter({ visible: true })).toBeEnabled();
-  // Chacun part dès l'ajout, nettoyé ou non (une requête d'envoi par petit élément).
-  await expect.poll(() => puts.length, { timeout: 30_000 }).toBe(6);
+  // Chacun part dès l'ajout (une requête d'envoi par petit élément), puis la version nettoyée
+  // remplace l'original (au moins une requête de plus par fichier nettoyé).
+  await expect.poll(() => puts.length, { timeout: 30_000 }).toBeGreaterThanOrEqual(6);
   await expect(page.locator('[data-up]:not([data-up="pret"])')).toHaveCount(0, { timeout: 30_000 });
   if (isMobile) await page.screenshot({ path: `${SHOTS}compose-clean-states-390.png` });
 });
 
-test("document Word avec auteur (Task 9b, D41-27) : « Nettoyé » à l'ajout, aucune remarque, reçu sans propriétés ; commentaires intacts", async ({ page, shh, browser }) => {
+test("document Word avec auteur (Task 9b, D41-27) : « Nettoyé » au balai, aucune remarque, reçu sans propriétés ; commentaires intacts", async ({ page, shh, browser }) => {
   test.setTimeout(120_000);
   const doc = { name: "rapport.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: FX("meta.docx") };
   const s = await freshPage(browser);
   await s.page.goto(shh.origin + "/");
-  await autoClean(s.page, true); // désactivé par défaut (CLEAN4)
   await (await openFilePicker(s.page)).setFiles(doc);
   const r = row(s.page, "rapport");
+  await r.getByRole("button", { name: "Nettoyer ce fichier" }).click();
+  await s.page.getByRole("dialog", { name: "Nettoyer ce fichier\u202f?" }).getByRole("button", { name: "Nettoyer", exact: true }).click();
   await expect(r.locator('[data-clean="nettoye"]')).toBeVisible();
   await expect(lock(s.page, "rapport")).toHaveAccessibleName(detail("Nettoyé : propriétés et chemin local du fichier retirés (auteurs des commentaires et liens vers d'autres fichiers gardés)"));
   // Aucune remarque sur la ligne (D41-27) ; la bulle du cadenas et celle du bouclier disent le texte exact.
@@ -152,13 +152,9 @@ test("document Word avec auteur (Task 9b, D41-27) : « Nettoyé » à l'ajout, a
   expect(doc.buffer.toString("latin1")).toMatch(/ReperAuteur/);
 });
 
-test("réglage « Nettoyer automatiquement les fichiers » désactivé par défaut : « Fichier tel quel » dans la bulle, rien sur la ligne, rien de modifié", async ({ page, shh }) => {
+test("rien n'est nettoyé à l'ajout (plus de réglage, décision du propriétaire du 12 novembre) : « Fichier tel quel » dans la bulle, rien sur la ligne, rien de modifié", async ({ page, shh }) => {
   await page.goto(shh.origin + "/");
-  // Le réglage est dans le pied de page (retours du 11 novembre : plus de panneau Réglages).
-  const sw = cleanSwitch(page);
-  // Désactivé par défaut (décision du propriétaire, CLEAN4) ; l'explication est sous le réglage.
-  await expect(sw).toHaveAttribute("aria-checked", "false");
-  await expect(sw).toHaveAccessibleDescription(/informations cachées.*Désactivé par défaut/); // deux phrases (audit M19)
+  await expect(page.locator("footer[data-foot]").getByRole("switch")).toHaveCount(0);
   await (await openFilePicker(page)).setFiles({ name: "IMG_GPS.jpg", mimeType: "image/jpeg", buffer: FX("iphone-like.jpg") });
   await expect(lock(page, "IMG_GPS")).toHaveAccessibleName(detail("Fichier tel quel (non modifié)"));
   await expect(row(page, "IMG_GPS").locator("[data-clean]")).toHaveCount(0);

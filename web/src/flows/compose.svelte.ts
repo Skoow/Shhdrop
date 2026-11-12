@@ -1,15 +1,15 @@
 // Composeur (UI §9.2) : liste des éléments à envoyer, en mémoire seulement (aucun stockage).
 // Toute addition passe par `add` (sélecteur, dépôt, collage, photo, vidéo) ou `addText` /
-// `addVoice` : lecture d'essai → limite de nombre → nettoyage des métadonnées → doublons →
-// insertion à la fin de sa catégorie. L'ordre de `items` est l'ordre du manifeste.
+// `addVoice` : lecture d'essai → limite de nombre → doublons → insertion à la fin de sa
+// catégorie. L'ordre de `items` est l'ordre du manifeste.
 //
-// Nettoyage (spec §35.2 ; D41-23) : automatique, à l'ajout, avant tout chiffrement ; l'élément
-// n'entre dans la liste qu'une fois la décision prise (il n'est donc jamais confié à l'envoi
-// anticipé avant). Échec, format non pris en charge : l'élément part sans clic, marqué « Non
-// nettoyé » avec sa raison. Réglage désactivé : rien n'est modifié (« Original »).
+// Nettoyage (spec §35.2 ; D41-23) : jamais à l'ajout (décision du propriétaire du 12 novembre,
+// plus de réglage automatique) ; un fichier ajouté part tel quel (« Original ») tant que la
+// personne ne le nettoie pas (`clean`, balai ou « Tout nettoyer », après confirmation). Échec,
+// format non pris en charge : l'élément part sans clic, marqué « Non nettoyé » avec sa raison.
 import { CONTENT_MAX, DATA_SEGMENTS, MANIFEST_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, cleanName, isRiskyName, segmentsNeeded, type Item } from "../index";
 import { isCleanFailure, manifestClean, type ItemCleanState } from "../media/clean-label";
-import { DOC_FORMATS, IMAGE_FORMATS, detectFormat, type Format } from "../media/format";
+import { AV_FORMATS, DOC_FORMATS, IMAGE_FORMATS, detectFormat, type Format } from "../media/format";
 import { stripMetadata, type CleanFamily, type StripResult } from "../media/strip";
 import { approve } from "./clean-gate";
 import { CATEGORY_ORDER, categoryOf, extOf, type Category } from "./kinds";
@@ -49,7 +49,7 @@ export type ComposeItem = {
   readonly risky?: boolean;
   /** Vidéo ou vocal pris ici : un nouveau nettoyage passe par strip-capture (`recorded`). */
   readonly recorded?: boolean;
-  /** Format que le nettoyage sait traiter (images, PDF, bureautique, vidéo ou vocal pris ici) :
+  /** Format que le nettoyage sait traiter (images, PDF, bureautique, vidéos et sons) :
    *  « Nettoyer » n'est proposé qu'à ceux-là (un élément « Original » d'un autre format n'y gagnerait rien). */
   readonly cleanable?: boolean;
   /** Le contenu ne correspond pas à l'extension (exécutable déguisé, par exemple). */
@@ -88,8 +88,6 @@ const FR_NAMES: Names = {
 export type ComposeDeps = {
   /** Porte du nettoyage (media/strip.ts) ; par défaut `stripMetadata`. */
   strip?: (file: Blob, mime: string, name: string, opts?: { recorded?: boolean }) => Promise<StripResult>;
-  /** Réglage « Nettoyer automatiquement les fichiers » (vrai par défaut). */
-  autoClean?: () => boolean;
   /** Lecture d'essai (UI §9.2.8) ; par défaut le premier octet. Rejet → « illisible ». */
   probe?: (f: Blob) => Promise<Uint8Array | void>;
   /** La liste passe de 0 à 1 élément (déclencheur du pré-calcul anti-robot, Task 14). */
@@ -198,7 +196,6 @@ export function createComposer(deps: ComposeDeps = {}) {
   const commit = deps.commit ?? ((apply: () => void) => apply());
   const online = deps.online ?? (() => typeof navigator === "undefined" || navigator.onLine !== false);
   const strip = deps.strip ?? stripMetadata;
-  const autoClean = deps.autoClean ?? (() => true);
 
   /**
    * Format que le nettoyage ne sait pas lire. Une photo, une vidéo ou un son (TIFF, RAW, AVI,
@@ -211,20 +208,19 @@ export function createComposer(deps: ComposeDeps = {}) {
     return { clean: "non_pris_en_charge", cleanFormat: format };
   }
 
-  /** Nettoyage d'un fichier à l'ajout : données à envoyer et état. */
-  async function cleanOf(f: File, source: Source, name: string, category: Category, captureStripped: boolean | undefined): Promise<{ data: Blob; c: CleanFields }> {
+  /**
+   * État d'un fichier à l'ajout. Rien n'est nettoyé ni analysé à l'ajout (décision du
+   * propriétaire du 12 novembre : plus de réglage « Nettoyage automatique ») : le balai de la ligne
+   * ou « Tout nettoyer » lance `clean` après confirmation. Seuls les contenus pris dans
+   * l'interface sont déjà sans informations cachées.
+   */
+  function cleanOf(f: File, source: Source, category: Category, captureStripped: boolean | undefined): { data: Blob; c: CleanFields } {
     // Photo prise ici : JPEG tiré d'un <canvas>, sans EXIF ni position par construction.
     if (source === "photo-ici" && category === "photos") return { data: f, c: { clean: "nettoye", cleanFamily: "image" } };
     // Vidéo prise ici : déjà passée par strip-capture.ts (CaptureScreen) ; un échec y a déjà été
     // montré à la personne (« Garder tel quel »).
     if (source === "video-ici" && captureStripped !== undefined) return { data: f, c: captureStripped ? { clean: "nettoye", cleanFamily: "video" } : { clean: "echec" } };
-    if (!autoClean()) return { data: f, c: { clean: "original" } };
-    // Archives : jamais ouvertes ni modifiées (décision du propriétaire, D41-27).
-    if (category === "archives") return { data: f, c: { clean: "intact" } };
-    const r = await strip(f, f.type, name, { recorded: source === "video-ici" });
-    if (r.state === "nettoye") return { data: r.data, c: { clean: "nettoye", cleanFamily: r.family } };
-    if (r.state === "non_pris_en_charge") return { data: f, c: unsupported(category, r.format) };
-    return { data: f, c: { clean: r.state } };
+    return { data: f, c: { clean: "original" } };
   }
 
   let items = $state.raw<ComposeItem[]>([]);
@@ -284,10 +280,12 @@ export function createComposer(deps: ComposeDeps = {}) {
         const exec = isExecutableSniff(sniffed) || sniffed === "iso";
         const risky = exec || isRiskyName(base + ext);
         const mismatch = exec && !isRiskyName(base + ext);
-        const { data, c } = await cleanOf(f, source, base + ext, category, captureStripped);
+        const { data, c } = cleanOf(f, source, category, captureStripped);
         const fmt = formats.get(f) ?? "inconnu";
         const recorded = source === "video-ici";
-        const cleanable = (IMAGE_FORMATS as readonly string[]).includes(fmt) || (DOC_FORMATS as readonly string[]).includes(fmt) || (recorded && (fmt === "mp4" || fmt === "webm"));
+        // Images, documents, vidéos et sons que le nettoyage lit (§35.2). Sans réglage automatique
+        // (12 novembre), le balai est le seul moyen de nettoyer une vidéo ou un son importés.
+        const cleanable = ([...IMAGE_FORMATS, ...DOC_FORMATS, ...AV_FORMATS] as readonly string[]).includes(fmt);
         ready.push(cleared({ id: nextId(), kind: "file", category, base, ext, mime, size: data.size, data, ...c, duplicate: false, sniffed, risky, mismatch, cleanable, ...(recorded ? { recorded } : {}) }));
       }
       if (ready.length > 0) {

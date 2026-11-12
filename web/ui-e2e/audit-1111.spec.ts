@@ -126,14 +126,14 @@ test("M20 : page du mot de passe : coût d'ouverture en une ligne ; dernier essa
   await shot(page, "faible-detruit-5-essais", isMobile);
 });
 
-test("M17, M18, coffre : une ligne Plus et Pro, aucune option verrouillée ni copie chiffrée ; barre d'onglets sur téléphone seulement (deux onglets utiles) ; captures", async ({ page, shh, isMobile }) => {
+test("M17, M18, coffre : bloc des offres (12 novembre, remplace la ligne Plus et Pro), aucune option verrouillée ni copie chiffrée ; barre d'onglets sur téléphone seulement (deux onglets utiles) ; captures", async ({ page, shh, isMobile }) => {
   test.setTimeout(90_000);
   await page.goto(shh.origin + "/");
   // M18 (règle du 11 novembre) : visible dès deux onglets utiles ; Mes partages fonctionne.
   await expect(page.getByRole("navigation", { name: "Navigation principale" })).toHaveCount(isMobile ? 1 : 0);
   await shot(page, "m18-accueil-onglets", isMobile);
   await addText(page, "Le code de la porte est 4471.");
-  await expect(page.locator("[data-paid-line]").filter({ visible: true })).toBeVisible();
+  await expect(page.locator("[data-offer-strip]").filter({ visible: true })).toBeVisible();
   await expect(page.locator("[data-locked], [data-paid-space]")).toHaveCount(0);
   await expect(page.getByText(/copie chiffrée/)).toHaveCount(0);
   await shot(page, "m17-composeur", isMobile);
@@ -142,7 +142,7 @@ test("M17, M18, coffre : une ligne Plus et Pro, aucune option verrouillée ni co
     await shot(page, "m17-options", isMobile);
     await page.keyboard.press("Escape");
   }
-  await page.locator("[data-paid-line]").filter({ visible: true }).click();
+  await page.locator('[data-offer-strip] [data-offer="plus"] button').filter({ visible: true }).click();
   await expect(page.getByRole("dialog", { name: "Shhdrop Plus" })).toBeVisible();
   await shot(page, "m17-feuille-bientot", isMobile);
 });
@@ -169,24 +169,18 @@ test("M16, M22, I2 : « Lien prêt » : heure de fin seule et arrondi dit ; h1 ;
   await shot(page, "m22-pied-lien-pret", isMobile, true);
 });
 
-test("M19 : pied : « Nettoyage automatique », deux phrases, « En savoir plus » qui déplie ; M15 : Signaler indique le vrai bouton ; captures", async ({ page, shh, isMobile }) => {
+// M19 (pied : « Nettoyage automatique » et son « En savoir plus ») : réglage retiré par décision
+// du propriétaire du 12 novembre ; son explication est dans la bulle du balai (envoi.spec.ts).
+test("M15 : Signaler indique le vrai bouton ; plus de « Nettoyage automatique » dans le pied ; captures", async ({ page, shh, isMobile }) => {
   await page.goto(shh.origin + "/signaler");
   await expect(page.getByText(/«\u202fSignaler ce partage\u202f» en bas de la page, dans le pied \(colonne «\u202fConfiance\u202f»\)/)).toBeVisible();
   await shot(page, "m15-signaler", isMobile);
   const foot = page.locator("footer.foot");
-  const sw = foot.getByRole("switch", { name: "Nettoyage automatique" });
-  await sw.scrollIntoViewIfNeeded();
-  const desc = await sw.evaluate((e) => document.getElementById(e.getAttribute("aria-describedby")!.split(" ")[0]!)!.textContent ?? "");
-  expect(desc.split(/(?<=[.:])\s+(?=[A-ZÀ-Ý])/u).length).toBeLessThanOrEqual(2);
-  const more = foot.locator("[data-clean-more]");
-  await expect(more.locator("p")).toBeHidden();
-  await more.locator("summary").click();
-  await expect(more.locator("p")).toBeVisible();
-  expect((await more.locator("summary").boundingBox())!.height).toBeGreaterThanOrEqual(44);
-  await shot(page, "m19-pied-nettoyage", isMobile);
+  await expect(foot.getByRole("switch")).toHaveCount(0);
+  await expect(foot.locator("[data-clean-more]")).toHaveCount(0);
 });
 
-test("M21 : cibles d'appui ≥ 44 px : liens du pied, « Nettoyer », pastille du cadenas", async ({ page, shh }) => {
+test("M21 : cibles d'appui ≥ 44 px : liens du pied, balai « Nettoyer ce fichier », pastille du cadenas", async ({ page, shh }) => {
   await page.goto(shh.origin + "/");
   const hit = (sel: string) =>
     page.locator(sel).filter({ visible: true }).first().evaluate((e) => {
@@ -197,14 +191,16 @@ test("M21 : cibles d'appui ≥ 44 px : liens du pied, « Nettoyer », pastille d
       return a.content === "none" ? b.height : Math.max(b.height, b.height - t - bo);
     });
   expect(await hit("footer.foot a.fl")).toBeGreaterThanOrEqual(44);
-  // Fichier image laissé « Original » : « Nettoyer » proposé sur la ligne.
+  // Fichier image laissé « Original » : le balai est proposé sur la ligne.
   await page.goto(shh.origin + "/envoyer");
   const chooser = openFilePicker(page);
   const { readFileSync } = await import("node:fs");
   await (await chooser).setFiles({ name: "IMG.jpg", mimeType: "image/jpeg", buffer: readFileSync(new URL("../src/media/fixtures/iphone-like.jpg", import.meta.url)) });
   await expect(page.locator("[data-row]")).toHaveCount(1);
-  const clean = page.locator("button.retry[data-fix]").filter({ visible: true });
-  if ((await clean.count()) > 0) expect(await hit("button.retry[data-fix]")).toBeGreaterThanOrEqual(44);
+  await expect(page.getByRole("button", { name: "Nettoyer ce fichier" })).toBeVisible();
+  const bb = (await page.getByRole("button", { name: "Nettoyer ce fichier" }).boundingBox())!;
+  expect(bb.height).toBeGreaterThanOrEqual(44);
+  expect(bb.width).toBeGreaterThanOrEqual(44);
   const pill = page.locator("[data-lock] .pic-tip").filter({ visible: true }).first();
   const ph = await pill.evaluate((e) => {
     const b = e.getBoundingClientRect();

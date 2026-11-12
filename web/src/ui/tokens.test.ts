@@ -434,7 +434,7 @@ describe("Icon.ts (UI §6, jeu maison UI8)", () => {
     "wifi-off", "clipboard-x", "circle-help", "minus", "plus", "info", "link-2", "key-round",
     "server", "user-x", "hard-drive", "code-xml", "chevron-down", "arrow-right", "shield-x",
     "ellipsis", "sliders-horizontal", "file-archive", "upload", "compass", "server-crash",
-    "hourglass", "wrench", "monitor-x", "send",
+    "hourglass", "wrench", "monitor-x", "send", "broom",
   ];
   const pascal = (s: string) =>
     s.split("-").map((p) => p[0]!.toUpperCase() + p.slice(1)).join("");

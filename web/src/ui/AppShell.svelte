@@ -4,22 +4,19 @@
   import { chrome } from "../app/chrome.svelte";
   import { followLink, href, navigate, router } from "../app/router.svelte";
   import { LICENSE_URL, SOURCE_URL } from "../routes/pages/content";
-  import { fileSettings } from "../flows/settings.svelte";
-  import type { Lang } from "../i18n/format";
-  import { getLang, LANGS, setLang, t } from "../i18n/i18n.svelte";
+  import { t } from "../i18n/i18n.svelte";
   import Aurora from "./Aurora.svelte";
-  import { ChevronDown, ChevronLeft } from "./Icon";
+  import { ChevronLeft } from "./Icon";
   import LiveRegion from "./LiveRegion.svelte";
   import Logo from "./Logo.svelte";
-  import Switch from "./Switch.svelte";
   import TabBar from "./TabBar.svelte";
 
   type Props = {
     children: Snippet;
     /** Emplacement du bandeau de démo (vide hors démo). */
     banner?: Snippet;
-    /** Vrai pendant un envoi : le pied reste affiché mais ses liens, la langue (UI §10) et le
-     *  nettoyage automatique sont désactivés, pour qu'aucun clic ne quitte la page et coupe l'envoi. */
+    /** Vrai pendant un envoi : le pied reste affiché mais ses liens sont désactivés, pour
+     *  qu'aucun clic ne quitte la page et coupe l'envoi. */
     busy?: boolean;
     /** Barre d'onglets du téléphone (app/tabbar.ts) ; rendue sous 900 px seulement (CSS). */
     tabs?: boolean;
@@ -63,11 +60,6 @@
     main?.focus();
   }
 
-  // Plus de roue ni de panneau Réglages (retours du propriétaire du 11 novembre) : langue,
-  // nettoyage automatique et « À propos » sont dans le pied de page, sur toutes les pages.
-  function pick(l: Lang) {
-    if (!busy) setLang(l);
-  }
   // Lien désactivé pendant l'envoi : annoncé comme tel, avec sa raison, et GARDÉ dans le parcours
   // clavier comme la langue et le nettoyage (audit M22 : sur « Lien prêt », Tab sautait les liens
   // mais pas les boutons ; un élément désactivé reste trouvable, sa raison se lit).
@@ -217,26 +209,10 @@
         </div>
       {/each}
     </nav>
-    <!-- Ex-panneau Réglages : langue, nettoyage automatique, À propos (le code source est déjà
-         dans « Confiance »). Réglages en mémoire seulement, rien n'est stocké. -->
+    <!-- Ex-panneau Réglages : seul « À propos » reste (retours du propriétaire du 12 novembre) :
+         la langue suit le navigateur (UI §10), plus de choix dans le pied ; plus de réglage
+         « Nettoyage automatique » (le balai de chaque fichier, spec §35.2). -->
     <div class="prefs" data-foot-prefs>
-      <section class="pref" aria-labelledby="foot-lang">
-        <p class="ch" id="foot-lang">{t("settings.lang")}</p>
-        <div class="langs" role="group" aria-labelledby="foot-lang">
-          {#each LANGS as l (l.code)}
-            <button type="button" class="lang" lang={l.code} aria-pressed={getLang() === l.code} aria-disabled={busy} aria-describedby={busy ? "foot-busy" : undefined} onclick={() => pick(l.code)}>{l.name}</button>
-          {/each}
-        </div>
-      </section>
-      <section class="pref" aria-labelledby="foot-files">
-        <p class="ch" id="foot-files">{t("settings.files")}</p>
-        <!-- Nom court, deux phrases en description ; le détail se déplie (audit M19). -->
-        <Switch label={t("settings.clean")} hint={t("settings.clean.hint")} checked={fileSettings.autoClean} disabled={busy} reason="foot-busy" onchange={(v) => (fileSettings.autoClean = v)} />
-        <details class="more" data-clean-more>
-          <summary>{t("settings.clean.more")}<ChevronDown size={16} strokeWidth={2} aria-hidden="true" /></summary>
-          <p>{t("settings.clean.more.body")}</p>
-        </details>
-      </section>
       <section class="pref" aria-labelledby="foot-about">
         <p class="ch" id="foot-about">{t("settings.about")}</p>
         <p class="about">{t("settings.about.body")}</p>
@@ -570,11 +546,11 @@
   .busy .tier {
     color: inherit;
   }
-  /* Ex-panneau Réglages : langue, nettoyage automatique, À propos. */
+  /* Ex-panneau Réglages : « À propos » seulement. */
   .prefs {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: minmax(12rem, 1fr) minmax(0, 2fr) minmax(0, 1.4fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--sp-5) var(--sp-6);
     padding-block-start: var(--sp-5);
     border-block-start: 1px solid var(--hair);
@@ -584,79 +560,6 @@
     align-content: start;
     min-width: 0;
   }
-  .langs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--sp-2);
-  }
-  .lang {
-    min-height: 44px;
-    min-width: 6.5rem;
-    padding: 0 var(--sp-4);
-    border: 0;
-    border-radius: 12px;
-    background: rgb(255 255 255 / 0.05);
-    box-shadow: inset 0 0 0 1px var(--hair-2);
-    color: var(--text);
-    font: inherit;
-    font-size: var(--fs-small);
-    font-weight: 560;
-    cursor: pointer;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .lang[aria-pressed="true"] {
-    background: var(--accent-tint);
-    box-shadow: inset 0 0 0 2px var(--accent);
-  }
-  .lang:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-  .lang[aria-disabled="true"][aria-pressed="false"] {
-    background: transparent;
-  }
-  /* « En savoir plus » du nettoyage : lien discret, cible de 44 px, chevron qui tourne. */
-  .more summary {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    min-height: 44px;
-    color: var(--text-2);
-    font-size: var(--fs-small);
-    text-decoration: underline;
-    text-decoration-color: var(--line-strong);
-    text-underline-offset: 0.2em;
-    cursor: pointer;
-    list-style: none;
-  }
-  .more summary::-webkit-details-marker {
-    display: none;
-  }
-  .more summary :global(svg) {
-    transition: transform var(--dur-fast) var(--ease-out);
-  }
-  .more[open] summary :global(svg) {
-    transform: rotate(180deg);
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .more summary :global(svg) {
-      transition: none;
-    }
-  }
-  .more summary:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-    border-radius: 2px;
-  }
-  .more p {
-    margin: 0;
-    max-width: 60ch;
-    color: var(--text-2);
-    font-size: var(--fs-small);
-    line-height: var(--lh-small);
-    text-wrap: pretty;
-  }
   .about {
     margin: 0;
     max-width: 40ch;
@@ -664,11 +567,6 @@
     font-size: var(--fs-small);
     line-height: var(--lh-small);
     text-wrap: pretty;
-  }
-  @media (max-width: 899px) {
-    .prefs {
-      grid-template-columns: 1fr;
-    }
   }
   .base {
     grid-column: 1 / -1;

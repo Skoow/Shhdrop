@@ -11,11 +11,12 @@
   import { NAME_MAX } from "../index";
   import { getLang, t } from "../i18n/i18n.svelte";
   import { formatClock, mediaDuration } from "../media/duration";
-  import { ArrowDown, ArrowUp, Ellipsis, Pencil, X } from "./Icon";
+  import { ArrowDown, ArrowUp, Broom, Ellipsis, Pencil, X } from "./Icon";
+  import Tip from "./Tip.svelte";
   import type { canClean } from "../flows/compose.svelte";
   import ItemNotes from "./ItemNotes.svelte";
   import CleanMark from "./CleanMark.svelte";
-  import { cleanLineKey, cleanMark } from "../media/clean-label";
+  import { cleanLineKey, cleanMark, cleanWhatKey } from "../media/clean-label";
   import LockMark from "./LockMark.svelte";
   import { sendLock } from "./lock";
   import { formatBytes } from "../i18n/format";
@@ -52,9 +53,10 @@
     onretry?: () => void;
     /** Aperçu permis (itemView.composePreview) : l'icône devient un bouton. */
     onpreview?: () => void;
-    /** « Nettoyer » (Original) ou « Réessayer » (échec du nettoyage), et son action. */
+    /** « Nettoyer » (Original : balai, confirmation chez le parent) ou « Réessayer » (échec du
+     *  nettoyage), et son action ; `anchor` : le bouton, où poser la confirmation. */
     fix?: ReturnType<typeof canClean>;
-    onclean?: () => void;
+    onclean?: (anchor: HTMLElement) => void;
     cleaning?: boolean;
   };
   let { item, movable, helpId, onremove, onrename, onedit, onmove, ondragstart, ondragmove, ondragend, compact = false, onmenu, cannotOpen = false, danger = false, el = $bindable(), upload = null, onretry, onpreview, fix = null, onclean, cleaning = false }: Props = $props();
@@ -236,9 +238,11 @@
             {#if retry}<button type="button" class="retry" onclick={onretry} aria-label={t("compose.up.retry", { name })}>{t("common.retry")}</button>{/if}
           </span>
         {/if}
-        {#if !compact && fix && onclean}
+        {#if fix === "nettoyer" && cleaning}
+          <span class="sep" aria-hidden="true">·</span><span class="cleaning" data-cleaning>{t("compose.cleaning")}</span>
+        {:else if !compact && fix === "reessayer" && onclean}
           <span class="sep" aria-hidden="true">·</span>
-          <button type="button" class="retry" onclick={onclean} disabled={cleaning} aria-label={t(fix === "nettoyer" ? "compose.clean.item" : item.clean === "echec" ? "compose.clean.retry" : "compose.up.retry", { name })} data-fix={fix}>{cleaning ? t("compose.cleaning") : t(fix === "nettoyer" ? "compose.clean.short" : "common.retry")}</button>
+          <button type="button" class="retry" onclick={(e) => onclean(e.currentTarget)} disabled={cleaning} aria-label={t(item.clean === "echec" ? "compose.clean.retry" : "compose.up.retry", { name })} data-fix={fix}>{cleaning ? t("compose.cleaning") : t("common.retry")}</button>
         {/if}
         <ItemNotes {item} {cannotOpen} badgesOnly />
       </span>
@@ -246,14 +250,23 @@
     {/if}
   </div>
 
+  {#snippet broom()}
+    <!-- Balai (retours du 12 novembre) : la bulle dit ce que le nettoyage retire (survol, focus) ;
+         l'appui ouvre la confirmation du parent, rien n'est nettoyé avant « Nettoyer ». -->
+    {#if fix === "nettoyer" && onclean && !cleaning}
+      <Tip label={t("compose.clean.button")} tip={t(cleanWhatKey(item.category))} class="broom" onpress={onclean} data-fix="nettoyer"><Broom size={18} strokeWidth={1.75} /></Tip>
+    {/if}
+  {/snippet}
   <div class="acts">
     {#if compact}
+      {@render broom()}
       <IconButton label={t("compose.more", { name })} onpress={() => onmenu?.()} data-menu><Ellipsis size={20} strokeWidth={1.9} /></IconButton>
     {:else if moving}
       <button bind:this={upBtn} type="button" class="mv" onclick={() => onmove(-1)}><ArrowUp size={18} strokeWidth={1.75} aria-hidden="true" /><span class="sr-only">{t("compose.move.up")}</span></button>
       <button type="button" class="mv" onclick={() => onmove(1)}><ArrowDown size={18} strokeWidth={1.75} aria-hidden="true" /><span class="sr-only">{t("compose.move.down")}</span></button>
       <button type="button" class="done" onclick={closeMove}>{t("compose.move.done")}</button>
     {:else if !editing}
+      {@render broom()}
       {#if item.kind === "text"}
         <IconButton label={t("compose.edit", { name: item.base })} onpress={onedit}><Pencil size={18} strokeWidth={1.75} /></IconButton>
       {:else}
@@ -264,28 +277,22 @@
   </div>
 
   {#if item.voice && item.data instanceof Blob}
-    <!-- Rangée dédiée, centrée dans la ligne entière ; hors du bloc de renommage : la lecture continue. -->
+    <!-- Rangée dédiée, alignée à gauche sous le nom ; hors du bloc de renommage : la lecture continue. -->
     <div class="voice"><VoiceClip blob={item.data} peaks={item.voice.peaks} ms={item.voice.ms} {name} size="mini" /></div>
   {/if}
 </div>
 
 <style>
+  /* Lecteur du mémo vocal aligné à gauche avec le nom, comme le reste de la ligne (retours du
+     12 novembre ; il était centré). */
   .voice {
-    grid-column: 1 / -1;
-    justify-self: center;
+    grid-column: 2 / -1;
+    justify-self: start;
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;
     width: 100%;
     max-width: 16rem;
     margin-block: var(--sp-2) 4px;
-  }
-  /* Centrée sur le rectangle de la ligne, pas sur sa zone de contenu (rembourrages inégaux :
-     4 px à droite sur ordinateur ; aucun sur téléphone). */
-  .voice {
-    translate: 2px 0;
-  }
-  .compact .voice {
-    translate: none;
   }
   .voice :global(.clip) {
     flex: 1;
@@ -482,6 +489,29 @@
     display: flex;
     align-items: center;
     gap: 2px;
+  }
+  /* Balai : bouton d'icône de 44 px comme le crayon (la bulle de Tip garde ses marges ailleurs). */
+  .acts :global(button.broom) {
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    border-radius: 10px;
+    color: var(--text-2);
+    transition:
+      background-color var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out);
+  }
+  @media (hover: hover) {
+    .acts :global(button.broom:hover) {
+      background: rgb(255 255 255 / 0.06);
+      color: var(--accent);
+    }
+  }
+  .acts :global(button.broom:active) {
+    background: rgb(255 255 255 / 0.06);
+  }
+  .cleaning {
+    color: var(--text-2);
   }
   .mv,
   .done {

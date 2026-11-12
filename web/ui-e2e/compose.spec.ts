@@ -130,12 +130,14 @@ test.describe("fr-FR", () => {
     // Archive : catégorie, laissée intacte (D41-27) : rien sur la ligne, « Fichier tel quel » dans la bulle (D41-34).
     await expect(rows(page).filter({ hasText: "archive.zip" }).locator("[data-clean]")).toHaveCount(0);
     await expect(rows(page).filter({ hasText: "archive.zip" }).locator("[data-lock] button")).toHaveAccessibleName(/\. Fichier tel quel \(non modifié\)$/);
-    // Nettoyage automatique désactivé par défaut (CLEAN4) : la photo part telle quelle, sans
-    // marque sur la ligne. Plus aucun bouton « Nettoyer tous les fichiers ».
+    // Rien n'est nettoyé à l'ajout (12 novembre, plus de réglage) : la photo part telle quelle,
+    // sans marque sur la ligne, avec son balai ; « Tout nettoyer » en tête (pas l'ancien bouton).
     await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator("[data-clean]")).toHaveCount(0);
     await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).locator("[data-lock] button")).toHaveAccessibleName(/\. Fichier tel quel \(non modifié\)$/);
     await expect(page.getByRole("button", { name: "Nettoyer tous les fichiers" })).toHaveCount(0);
-    await expect(page.locator("[data-row]").getByText(/^(Original|Nettoyé|Non nettoyé)$/)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Tout nettoyer" })).toBeVisible();
+    await expect(rows(page).filter({ hasText: "plage-nuit.jpg" }).getByRole("button", { name: "Nettoyer ce fichier" })).toBeVisible();
+    await expect(page.locator("[data-row]").getByText(/^(Original|Nettoyé|Non nettoyé|Nettoyer)$/)).toHaveCount(0);
     // Listes compactes (décision du 7 novembre) : aucune vignette, une icône de format par ligne,
     // type, taille, durée ; plus d'estimation par fichier ni par catégorie (décision du 8 novembre).
     await expect(page.locator("[data-row] img")).toHaveCount(0);
@@ -283,16 +285,20 @@ test.describe("fr-FR", () => {
     await expect(send(page)).toBeEnabled();
   });
 
-  // Décision du propriétaire du 11 novembre (audit M17) : une seule ligne discrète remplace les
-  // huit choix verrouillés ; la feuille d'information dit « Bientôt disponible » en tête.
-  test("limites gratuites en clair ; une ligne discrète Plus et Pro → feuille honnête, « Bientôt disponible » en tête (D41-16)", async ({ page, shh, isMobile }) => {
+  // Décision du propriétaire du 11 novembre (audit M17), revue le 12 novembre : un bloc compact
+  // Gratuit, Plus, Pro (limites lues dans les constantes) remplace la ligne discrète ; Plus et Pro
+  // ouvrent la feuille d'information, qui dit « Bientôt disponible » en tête.
+  test("limites gratuites en clair ; bloc Gratuit, Plus, Pro → feuille honnête, « Bientôt disponible » en tête (D41-16)", async ({ page, shh, isMobile }) => {
     await open(page, shh.origin);
     await browse(page, [f("contrat.pdf")]);
-    await expect(page.locator("[data-free]")).toHaveText("Gratuit\u202f: 2\u202fGo · 24\u202fh maximum");
+    const strip = page.locator("[data-offer-strip]").filter({ visible: true });
+    await expect(strip.locator('[data-offer="free"]')).toHaveText(/^Gratuit\s*aujourd'hui\s*2\u202fGo\s*24\u202fh\s*10\u202fouvertures$/);
     await expect(page.locator("[data-locked], [data-paid-space]")).toHaveCount(0);
-    const line = page.locator("[data-paid-line]").filter({ visible: true });
-    await expect(line).toHaveText("Plus de place et de durée avec Plus et Pro, bientôt");
+    const line = strip.locator('[data-offer="plus"] button');
+    await expect(line).toContainText("bientôt");
     expect((await line.boundingBox())!.height).toBeGreaterThanOrEqual(44); // cible d'appui (audit M21)
+    // Liste non vide : /offres s'ouvre dans un nouvel onglet (la liste resterait sinon perdue).
+    await expect(strip.getByRole("link", { name: /^Voir les offres/ })).toHaveAttribute("target", "_blank");
     const opts = await options(page, isMobile);
     await expect(opts.getByRole("radio", { name: "12 h" })).toBeChecked();
     if (isMobile) await page.keyboard.press("Escape");
@@ -429,7 +435,8 @@ test.describe("fr-FR", () => {
     await browse(page, PHOTOS.slice(0, 2));
     await page.getByRole("button", { name: "Actions pour plage-nuit.jpg" }).click();
     const menu = page.getByRole("dialog", { name: "plage-nuit.jpg" });
-    // « Nettoyer » : le fichier part tel quel par défaut (CLEAN4), il peut être nettoyé d'ici.
+    // « Nettoyer » : le fichier part tel quel par défaut, il peut être nettoyé d'ici (même
+    // confirmation que le balai de la ligne, retours du 12 novembre).
     await expect(menu.locator(".mi")).toHaveText(["Aperçu", "Renommer", "Nettoyer", "Supprimer"]);
     await settle(page);
     await capture(page, "compose-item-menu");
@@ -498,12 +505,12 @@ test.describe("fr-FR", () => {
       expect(await page.locator(".top .fill").evaluate((e) => getComputedStyle(e).backgroundColor)).toBe("rgb(255, 138, 128)");
       await expect(send(page)).toBeDisabled();
       await expect(page.locator("#send-reason")).toHaveText("Le total dépasse 2 Go. Supprimez des éléments.");
-      // Plus de ligne « Avec Plus » en doublon : la ligne discrète de l'en-tête suffit (audit M17).
+      // Plus de ligne « Avec Plus » en doublon : le bloc des offres de l'en-tête suffit (audit M17).
       await expect(page.locator(".top [data-upsell]")).toHaveCount(0);
       await expect(page.getByRole("dialog")).toHaveCount(0);
       await page.waitForTimeout(6500);
       await capture(page, "compose-limit-size");
-      await page.locator("[data-paid-line]").filter({ visible: true }).click();
+      await page.locator('[data-offer-strip] [data-offer="plus"] button').filter({ visible: true }).click();
       await expect(page.getByRole("dialog", { name: "Shhdrop Plus" })).toBeVisible();
       await page.keyboard.press("Escape");
     } finally {

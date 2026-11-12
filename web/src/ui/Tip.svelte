@@ -8,8 +8,10 @@
   import type { ClassValue } from "svelte/elements";
 
   /** `detail` : 2ᵉ ligne de la bulle (cadenas : l'état du nettoyage, D41-34). */
-  type Props = { label: string; tip: string; detail?: string; class?: ClassValue; children: Snippet; [data: `data-${string}`]: string | undefined };
-  let { label, tip, detail, class: cls, children, ...rest }: Props = $props();
+  /** `onpress` : bouton d'action (balai du nettoyage) ; la bulle explique au survol et au focus,
+   *  l'appui lance l'action (au doigt, sans survol, l'action dit elle-même ce qu'elle fera). */
+  type Props = { label: string; tip: string; detail?: string; class?: ClassValue; children: Snippet; onpress?: (el: HTMLButtonElement) => void; disabled?: boolean; [data: `data-${string}`]: string | undefined };
+  let { label, tip, detail, class: cls, children, onpress, disabled = false, ...rest }: Props = $props();
 
   const id = $props.id();
   let btn: HTMLButtonElement | undefined = $state();
@@ -68,11 +70,16 @@
 <button
   bind:this={btn}
   type="button"
-  class={["tip", cls]}
+  class={["tip", { act: !!onpress }, cls]}
   aria-label={label}
   aria-describedby={id}
+  {disabled}
   {...rest}
-  onclick={() => (pinned = !pinned)}
+  onclick={() => {
+    if (!onpress) return void (pinned = !pinned);
+    close();
+    if (btn) onpress(btn);
+  }}
   onpointerenter={(e) => {
     if (e.pointerType === "mouse") hover = true;
   }}
@@ -108,6 +115,12 @@
     font: inherit;
     cursor: help;
     -webkit-tap-highlight-color: transparent;
+  }
+  .tip.act {
+    cursor: pointer;
+  }
+  .tip:disabled {
+    cursor: progress;
   }
   .tip:focus-visible {
     outline: 2px solid var(--accent);

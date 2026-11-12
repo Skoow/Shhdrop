@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "./en";
 import { fr } from "./fr";
 import { formatBytes, formatDuration, formatRate, plural } from "./format";
-import { detectLang, getLang, LANGS, setLang, t } from "./i18n.svelte";
+import * as i18n from "./i18n.svelte";
+import { detectLang, getLang, setLang, t } from "./i18n.svelte";
 import { UPLOAD_WINDOW_MS } from "../flows/send.svelte";
 
 const NNBSP = " ";
@@ -137,9 +138,8 @@ describe("t et langue", () => {
     expect(document.cookie).toBe("");
   });
 
-  it("LANGS : une entrée par dictionnaire, nommée dans sa langue, codes uniques", () => {
-    expect(LANGS.map((l) => l.code)).toEqual(["fr", "en"]);
-    expect(LANGS.map((l) => l.name)).toEqual(["Français", "English"]);
+  it("plus de liste de langues à choisir (décision du propriétaire du 12 novembre) : la langue suit le navigateur", () => {
+    expect("LANGS" in i18n).toBe(false);
   });
 
   it("detectLang : la première langue fr ou en décide ; sinon français", () => {

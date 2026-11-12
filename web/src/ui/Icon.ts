@@ -7,6 +7,7 @@ export { default as Square } from "./icons/Square.svelte";
 export { default as Type } from "./icons/Type.svelte";
 export { default as X } from "./icons/X.svelte";
 export { default as Pencil } from "./icons/Pencil.svelte";
+export { default as Broom } from "./icons/Broom.svelte";
 export { default as GripVertical } from "./icons/GripVertical.svelte";
 export { default as ArrowUp } from "./icons/ArrowUp.svelte";
 export { default as ArrowDown } from "./icons/ArrowDown.svelte";

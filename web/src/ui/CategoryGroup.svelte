@@ -37,7 +37,7 @@
     onpreview?: (item: ComposeItem) => (() => void) | undefined;
     /** « Nettoyer » ou « Réessayer » proposés sur la ligne (ordinateur), et leur action. */
     fix?: (item: ComposeItem) => "nettoyer" | "reessayer" | null;
-    onclean?: (id: string) => void;
+    onclean?: (id: string, anchor: HTMLElement) => void;
     cleaning?: (item: ComposeItem) => boolean;
   };
   let { category, items, bytes, helpId, onremove, onrename, onedit, onmove, onmoveto, compact = false, onmenu, cannotOpen, danger, upload, onretry, onpreview, fix, onclean, cleaning }: Props = $props();
@@ -161,7 +161,7 @@
           onretry={() => onretry?.(item.id)}
           onpreview={onpreview?.(item)}
           fix={fix?.(item) ?? null}
-          onclean={() => onclean?.(item.id)}
+          onclean={(anchor) => onclean?.(item.id, anchor)}
           cleaning={cleaning?.(item) ?? false}
         />
       </li>

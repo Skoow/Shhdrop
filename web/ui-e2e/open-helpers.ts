@@ -5,7 +5,7 @@ import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { expect } from "./fixtures";
-import { addText, autoClean, openFilePicker, readyHeading, sendButton } from "./send-helpers";
+import { addText, cleanAll, openFilePicker, readyHeading, sendButton } from "./send-helpers";
 
 const FILES = fileURLToPath(new URL("./files/", import.meta.url));
 export const file = (name: string) => join(FILES, name);
@@ -39,13 +39,13 @@ export async function sendShare(
   o: { text?: string; files?: (string | { name: string; mimeType: string; buffer: Buffer })[]; opens?: number; download?: boolean; isMobile?: boolean; clean?: boolean } = {},
 ): Promise<Sent> {
   await page.goto(url);
-  // Nettoyage automatique : désactivé par défaut (CLEAN4) ; à activer pour l'éprouver.
-  if (o.clean) await autoClean(page, true);
   if (o.text !== undefined) await addText(page, o.text);
   if (o.files?.length) {
     const chooser = openFilePicker(page);
     await (await chooser).setFiles(o.files.map(upload));
     await expect(page.locator("[data-row]")).toHaveCount(o.files.length + (o.text !== undefined ? 1 : 0));
+    // Rien n'est nettoyé sans le balai (12 novembre) : « Tout nettoyer » pour l'éprouver.
+    if (o.clean) await cleanAll(page);
   }
   if (o.opens !== undefined || o.download === false) {
     let opts = page.locator(".side");

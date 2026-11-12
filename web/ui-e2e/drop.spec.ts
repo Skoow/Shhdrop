@@ -110,7 +110,7 @@ test("ordinateur : filigrane de dépôt dans la liste (texte entier, clic → ch
   await ctx.close();
 });
 
-test("page d'envoi vide « /envoyer » : atteinte par « Commencer » ou directement ; grand cadre au centre (ordinateur), « Ajouter » (téléphone) ; captures", async ({ page, shh, isMobile }) => {
+test("page d'envoi vide « /envoyer » : atteinte par « Commencer » ou directement ; cadre compact en tête de liste (ordinateur, retours du 12 novembre), « Ajouter » (téléphone) ; captures", async ({ page, shh, isMobile }) => {
   await page.setViewportSize(isMobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
   await page.goto(shh.origin + "/");
   await page.getByRole("button", { name: /^Commencer/ }).filter({ visible: true }).first().click();
@@ -127,10 +127,12 @@ test("page d'envoi vide « /envoyer » : atteinte par « Commencer » ou directe
     await expect(page.getByRole("dialog", { name: "Ajouter" })).toBeVisible();
     await page.keyboard.press("Escape");
   } else {
-    // Au centre de la liste, texte blanc entier, jamais tronqué.
+    // Toute la largeur de la liste, compact (il prenait tout l'écran, retours du 12 novembre),
+    // texte blanc entier, jamais tronqué.
     const [list, z] = [await page.locator(".lc-scroll").boundingBox(), await zone.boundingBox()];
     expect(Math.abs(z!.x + z!.width / 2 - (list!.x + list!.width / 2))).toBeLessThan(12);
-    expect(z!.height).toBeGreaterThan(280);
+    expect(z!.height).toBeGreaterThanOrEqual(120);
+    expect(z!.height).toBeLessThanOrEqual(220);
     const color = await zone.locator(".dz-t").evaluate((n) => getComputedStyle(n).color);
     expect(color).toBe(await page.locator("#compose-title").evaluate((n) => getComputedStyle(n).color));
     for (const el of await zone.locator(".dz-t, .dz-s").all()) expect(await el.evaluate((n) => n.scrollWidth <= n.clientWidth)).toBe(true);

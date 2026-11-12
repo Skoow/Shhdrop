@@ -9,7 +9,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { freshPage, pwField, sendShare, settle, unlock, unlockButton } from "./open-helpers";
 import { addText, noHScroll, readyHeading, sendButton } from "./send-helpers";
-import { foot, footLink, switchLang } from "./foot-helpers";
+import { foot, footLink } from "./foot-helpers";
 
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-MOB2/", import.meta.url));
 const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, locale: "fr-FR" } as const;
@@ -119,9 +119,7 @@ test.describe("téléphone façon app", () => {
     // Pied de page : langue, Sécurité, Confidentialité.
     await expect(footLink(page, "Sécurité")).toBeAttached();
     await expect(footLink(page, "Confidentialité")).toBeAttached();
-    await switchLang(page, "English");
-    await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await switchLang(page, "Français");
+    await expect(foot(page).getByRole("group", { name: /^(Langue|Language)$/ })).toHaveCount(0); // langue du navigateur, plus de choix (12 novembre)
     await footLink(page, "Sécurité").click();
     await expect(page).toHaveURL(/\/securite$/);
     await expect(tabbar(page)).toBeVisible();
@@ -239,11 +237,9 @@ test.describe("téléphone façon app", () => {
     await page.goto(s.link);
     await expect(pwField(page)).toBeVisible();
     await expect(tabbar(page)).toHaveCount(0);
-    // Sans onglets : la langue reste accessible dans le pied de page.
+    // Sans onglets : le pied de page reste, sans choix de langue (elle suit le navigateur).
     await expect(page.getByRole("banner").getByRole("button", { name: "Réglages" })).toHaveCount(0);
-    await switchLang(page, "English");
-    await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await switchLang(page, "Français");
+    await expect(foot(page).getByRole("group", { name: /^(Langue|Language)$/ })).toHaveCount(0); // langue du navigateur, plus de choix (12 novembre)
     await page.evaluate(() => scrollTo(0, 0));
     expect(await smallFields(page)).toEqual([]);
     expect(await inViewport(page, unlockButton(page))).toBe(true);
@@ -269,12 +265,11 @@ test.describe("ordinateur : rien ne change", () => {
     // En-tête : ni sélecteur de langue ni entrée Réglages (retours du 11 novembre).
     const banner = page.getByRole("banner");
     await expect(banner.getByRole("button")).toHaveCount(0);
-    for (const n of ["Langue", "Fichiers", "À propos"]) await expect(foot(page).getByText(n, { exact: true })).toBeAttached();
+    await expect(foot(page).getByText("À propos", { exact: true })).toBeAttached();
+    for (const n of ["Langue", "Fichiers"]) await expect(foot(page).getByText(n, { exact: true })).toHaveCount(0); // retirés le 12 novembre
     await expect(footLink(page, "Sécurité")).toBeVisible();
     await expect(footLink(page, "Confidentialité")).toBeVisible();
-    await switchLang(page, "English");
-    await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await switchLang(page, "Français");
+    await expect(foot(page).getByRole("group", { name: /^(Langue|Language)$/ })).toHaveCount(0); // langue du navigateur, plus de choix (12 novembre)
     await expect(page.locator("html")).toHaveAttribute("lang", "fr");
   });
 });

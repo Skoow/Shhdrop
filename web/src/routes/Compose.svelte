@@ -6,11 +6,10 @@
   import { flushSync, tick, untrack } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import { chrome } from "../app/chrome.svelte";
-  import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, TTL_MAX_HOURS, generatePassword, type ElementStatus, type Item, type KeepTtl } from "../index";
+  import { CONTENT_MAX, MAX_ITEMS, NAME_MAX, TEXT_MAX, generatePassword, type ElementStatus, type Item, type KeepTtl } from "../index";
   import type { PaidTier } from "../limits";
   import { blockKey, canClean, createComposer, type AddReport, type ComposeItem, type Source } from "../flows/compose.svelte";
   import { rowStatus, toDraftList } from "../flows/preupload";
-  import { fileSettings } from "../flows/settings.svelte";
   import { addActions, desktopActions, type AddId } from "../flows/add-actions";
   import { captureSupport } from "../media/capture";
   import { fromPasteEvent } from "../flows/intake";
@@ -22,7 +21,7 @@
   import CapacityGauge from "../ui/CapacityGauge.svelte";
   import CategoryGroup from "../ui/CategoryGroup.svelte";
   import { navigate } from "../app/router.svelte";
-  import { ChevronDown, Eye, Pencil, Plus, RefreshCw, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from "../ui/Icon";
+  import { Broom, ChevronDown, Eye, Pencil, Plus, RefreshCw, ShieldAlert, SlidersHorizontal, Trash2, Upload, X } from "../ui/Icon";
   import NamesTip from "../ui/NamesTip.svelte";
   import { composePreview } from "../ui/itemView";
   import { safeBlobType } from "../viewers/blobs";
@@ -32,7 +31,10 @@
   import CaptureScreen, { type Captured } from "../ui/CaptureScreen.svelte";
   import VoiceRecorder, { type Voice } from "../ui/VoiceRecorder.svelte";
   import TextField from "../ui/TextField.svelte";
+  import OffersStrip from "../ui/OffersStrip.svelte";
   import PaidSheet from "../ui/PaidSheet.svelte";
+  import CleanConfirm from "../ui/CleanConfirm.svelte";
+  import { cleanWhatKey, isCleanFailure } from "../media/clean-label";
   import Sheet from "../ui/Sheet.svelte";
   import TextArea from "../ui/TextArea.svelte";
   import UndoToast from "../ui/UndoToast.svelte";
@@ -75,8 +77,6 @@
       voice: (n) => t("compose.name.voice", { n }),
     },
     online: () => online,
-    // Nettoyage automatique à l'ajout (spec §35.2), sauf si le réglage est désactivé.
-    autoClean: () => fileSettings.autoClean,
   });
   // Téléphone (< 760 px) : une vraie app (lignes compactes, menu « … », barre collée, options
   // en feuille). Ordinateur : deux colonnes. Coffre chez le destinataire (spec §27) : retiré de
@@ -374,7 +374,6 @@
   // Résumé discret près d'Envoyer (D41-23) : les lignes portent chacune leur marque et leur raison.
   const uncleaned = $derived(composer.uncleanedCount);
   const reasonText = $derived(composerBlock ? t(blockKey(composerBlock), { max: composerBlock === "trop_gros" ? formatBytes(CONTENT_MAX, lang) : num(TEXT_MAX) }) : "");
-  const freeText = $derived(t("compose.free", { size: formatBytes(CONTENT_MAX, lang), ttl: formatDuration(TTL_MAX_HOURS * 3600, lang) }));
   // Chaque fichier part dès son ajout ; un retrait interrompt son envoi et l'efface du serveur.
   // untrack : le brouillon met à jour l'état des lignes pendant l'appel (pas une dépendance).
   $effect(() => {
@@ -442,7 +441,13 @@
   function menuFixRun() {
     const id = menuId;
     menuId = null;
-    if (id) void tick().then(() => fixRun(id));
+    if (!id) return;
+    // « Nettoyer » : la même confirmation que le balai, posée sur le balai de la ligne.
+    void tick().then(() => {
+      const broom = document.querySelector<HTMLElement>(`[data-row="${CSS.escape(id)}"] button.broom`);
+      if (broom) askClean(id, broom);
+      else void fixRun(id);
+    });
   }
   function menuRemove() {
     const id = menuId;
@@ -492,6 +497,38 @@
     } else onretry?.(id);
   }
 
+  // ---------- Balai : confirmation, puis nettoyage (retours du propriétaire du 12 novembre) ----------
+  // Rien n'est nettoyé à l'ajout ni sans validation : le balai d'une ligne ou « Tout nettoyer »
+  // ouvre une petite confirmation qui dit ce qui sera retiré ; « Nettoyer » lance le nettoyage.
+  const cleanable = $derived(composer.items.filter((i) => canClean(i) === "nettoyer" && !composer.isCleaning(i.id)));
+  let cleanAllBtn: HTMLButtonElement | undefined = $state();
+  let cleanAsk = $state<{ ids: string[]; anchor: HTMLElement; title: string; body: string } | null>(null);
+  function askClean(id: string, anchor: HTMLElement) {
+    const it = composer.items.find((i) => i.id === id);
+    if (!it) return;
+    if (canClean(it) !== "nettoyer") return void fixRun(id); // Réessayer : sans confirmation
+    cleanAsk = { ids: [id], anchor, title: t("clean.confirm.title"), body: `${t(cleanWhatKey(it.category))} ${t("clean.confirm.local")}` };
+  }
+  function askCleanAll(anchor: HTMLElement) {
+    const ids = cleanable.map((i) => i.id);
+    if (ids.length === 0) return;
+    cleanAsk = { ids, anchor, title: t("clean.confirm.all", { n: ids.length }), body: `${t("clean.what.all")} ${t("clean.confirm.local")}` };
+  }
+  async function runClean(ids: string[]) {
+    if (ids.length === 1) {
+      await fixRun(ids[0]!);
+      void focusRow(ids[0]);
+      return;
+    }
+    focusTitle();
+    await Promise.all(ids.map((id) => composer.clean(id)));
+    const now = composer.items.filter((i) => ids.includes(i.id));
+    // « sans » : rien à retirer, ce n'est pas un échec.
+    const failed = now.filter((i) => isCleanFailure(i));
+    announce(t("compose.cleaned.all", { n: now.length - failed.length }));
+    for (const i of failed) announce(t("compose.clean.failed", { name: i.base + i.ext }));
+  }
+
   function send() {
     if (reasonText) return;
     const state: SendState = { items: composer.toApiItems(), ids: composer.items.map((i) => i.id), ttlHours: options.ttlHours, maxOpens: options.maxOpens, password: options.password, ...sendRights(options) };
@@ -530,6 +567,8 @@
   </div>
 {/snippet}
 
+{#snippet offers()}<OffersStrip newTab={filled} onpaid={showPaid} />{/snippet}
+
 {#snippet app()}
   <div class={["app", { narrow }]} data-composer {@attach narrow ? null : fitViewport}>
     <div class="list-col">
@@ -540,15 +579,25 @@
         </div>
         {#if filled}
           <div class="clear">
+            {#if cleanable.length > 0}
+              <!-- « Tout nettoyer » (retours du 12 novembre) : seulement s'il reste un fichier à
+                   nettoyer ; même confirmation que le balai d'une ligne. -->
+              <Button variant="secondary" dense bind:el={cleanAllBtn} onpress={() => cleanAllBtn && askCleanAll(cleanAllBtn)} aria-haspopup="dialog" data-clean-all>
+                {#snippet icon()}<Broom size={18} strokeWidth={1.8} />{/snippet}
+                {t("compose.clean.all")}
+              </Button>
+            {/if}
             <Button variant="secondary" dense onpress={clearAll}>
               {#snippet icon()}<Trash2 size={18} strokeWidth={1.8} />{/snippet}
               {t("compose.clear")}
             </Button>
           </div>
         {/if}
-        <!-- Limites du gratuit, puis UNE ligne discrète pour les offres (décision du propriétaire du
-             11 novembre, audit M17) : la feuille d'information s'ouvre sur place (la liste reste). -->
-        <p class="free num"><span data-free>{freeText}</span><span aria-hidden="true">{" · "}</span><button type="button" class="soonlink" data-paid-line aria-haspopup="dialog" onclick={() => showPaid("plus")}>{t("paid.line")}</button></p>
+        <!-- Offres (retours du propriétaire du 12 novembre, remplace la ligne discrète d'audit M17) :
+             Gratuit, Plus, Pro et leurs limites, « bientôt », lien vers /offres (nouvel onglet si la
+             liste n'est pas vide : elle serait perdue en quittant la page). Téléphone : ici ;
+             ordinateur : au-dessus de « Chiffrer et envoyer », la liste garde sa hauteur. -->
+        {#if narrow}<div class="offers">{@render offers()}</div>{/if}
         <div class="cap">
           <div class="capg"><CapacityGauge bytes={composer.totalBytes + removing} count={composer.count} head /></div>
         </div>
@@ -595,7 +644,7 @@
             {onretry}
             onpreview={(i) => (composePreview(i) ? () => preview(i.id) : undefined)}
             fix={fixOf}
-            onclean={(id) => void fixRun(id)}
+            onclean={askClean}
             cleaning={(i) => composer.isCleaning(i.id)}
           />
         {/each}
@@ -652,6 +701,7 @@
         </div>
         <div class="sendbar foot">
           <Options {options} {unviewable} part="summary" />
+          <div class="offers side-offers">{@render offers()}</div>
           <Button variant="primary" lock disabled={reasonText !== ""} aria-describedby={reasonText ? "send-reason" : undefined} onpress={send}>{t("options.submit")}</Button>
           {#if reasonText}<p id="send-reason" class="reason">{reasonText}</p>{:else if uncleaned > 0}<p class="unclean-sum" data-unclean-sum>{t("compose.uncleaned", { n: uncleaned })}</p>{/if}
         </div>
@@ -750,7 +800,7 @@
         <button type="button" class="mi" onclick={menuEdit}><Pencil size={20} strokeWidth={1.8} aria-hidden="true" />{menuItem.kind === "text" ? t("compose.edit.short") : t("compose.rename.short")}</button>
         {#if menuFix}
           <button type="button" class="mi" onclick={menuFixRun} disabled={composer.isCleaning(menuItem.id)} data-fix={menuFix}>
-            {#if menuFix === "nettoyer"}<ShieldCheck size={20} strokeWidth={1.8} aria-hidden="true" />{t("compose.clean.short")}{:else}<RefreshCw size={20} strokeWidth={1.8} aria-hidden="true" />{t("common.retry")}{/if}
+            {#if menuFix === "nettoyer"}<Broom size={20} strokeWidth={1.8} aria-hidden="true" />{t("compose.clean.short")}{:else}<RefreshCw size={20} strokeWidth={1.8} aria-hidden="true" />{t("common.retry")}{/if}
           </button>
         {/if}
         <button type="button" class="mi danger" onclick={menuRemove}><X size={20} strokeWidth={1.8} aria-hidden="true" />{t("compose.remove.short")}</button>
@@ -762,11 +812,14 @@
 <!-- Menu « … » d'un élément : téléphone seulement (lignes compactes). -->
 <Sheet bind:open={() => menuId !== null, (v) => { if (!v) menuId = null; }} title={menuName}>{@render menuBody()}</Sheet>
 
-<PaidSheet bind:open={paidOpen} tier={paidTier} />
 
 <!-- Aperçu d'un élément avant l'envoi (retours UI6) : la visionneuse du destinataire, sans
      téléchargement ; le contenu ne quitte jamais la mémoire de la page. -->
 <ViewerPanel items={viewItems} bind:at={viewAt} viewOnly={false} load={loadLocal} held={false} onclose={() => undefined} />
+
+<PaidSheet bind:open={paidOpen} tier={paidTier} />
+
+<CleanConfirm anchor={cleanAsk?.anchor ?? null} title={cleanAsk?.title ?? ""} body={cleanAsk?.body ?? ""} onconfirm={() => { const ids = cleanAsk?.ids ?? []; void runClean(ids); }} onclose={() => (cleanAsk = null)} />
 
 <AddSheet bind:open={addOpen} actions={sheetActions} onpick={addAct} />
 
@@ -812,6 +865,13 @@
   .app.narrow .top {
     padding-inline: 0;
   }
+  /* Téléphone : « Tout nettoyer » et « Tout supprimer » sur leur propre rangée, sous le titre
+     (le titre ne se coupe plus en deux). */
+  .app.narrow .clear {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: flex-start;
+  }
   .narrow .list-col {
     gap: var(--sp-2);
   }
@@ -849,38 +909,9 @@
     flex: 1 1 220px;
     min-width: 0;
   }
-  /* Limites gratuites, dites en clair sous le titre (D41-16). */
-  .free {
+  .offers {
     grid-column: 1 / -1;
-    margin: -6px 0 0;
-    color: var(--text-3);
-    font-size: var(--fs-small);
-  }
-  /* Lien discret vers la feuille des offres : texte souligné, cible d'appui de 44 px (::after). */
-  /* Cible d'appui de 44 px de haut (audit M21) : marges intérieures compensées par des marges
-     négatives, la ligne ne bouge pas. */
-  .soonlink {
-    display: inline-block;
-    padding: 11.5px 0;
-    margin: -11.5px 0;
-    border: 0;
-    background: none;
-    color: var(--text-2);
-    font: inherit;
-    text-decoration: underline;
-    text-decoration-color: var(--line-strong);
-    text-underline-offset: 0.2em;
-    cursor: pointer;
-  }
-  .soonlink:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-    border-radius: 2px;
-  }
-  @media (hover: hover) {
-    .soonlink:hover {
-      color: var(--text);
-    }
+    min-width: 0;
   }
 
   /* Zone de dépôt : un clic ouvre le sélecteur ; on peut aussi déposer n'importe où sur la page. */
@@ -935,14 +966,16 @@
       color var(--dur-fast) var(--ease-out),
       transform 400ms var(--ease-settle);
   }
-  /* Page d'envoi vide (retours DROP) : grand cadre au centre de la liste, texte blanc entier. */
+  /* Page d'envoi vide (retours DROP) : cadre en tête de la liste, texte blanc entier. Compact
+     depuis les retours du 12 novembre (il prenait tout l'écran) : titre, offres et Salon restent
+     au premier écran ; la cible garde 120 px de haut au doigt, 184 px sur ordinateur. */
   .dropzone.empty {
-    flex: 1 0 auto;
+    flex: none;
     flex-direction: column;
     justify-content: center;
-    gap: var(--sp-3);
-    min-height: max(280px, 46vh);
-    padding: var(--sp-6) var(--sp-5);
+    gap: var(--sp-2);
+    min-height: 120px;
+    padding: var(--sp-4) var(--sp-4);
     /* Retours LIGHT : cadre en pointillés bien visible, arrondi doux, sans fond. */
     border: 1.5px dashed rgb(233 236 242 / 0.34);
     border-radius: var(--r-xl);
@@ -1030,6 +1063,9 @@
   }
   .clear {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--sp-2);
   }
   .notes {
     list-style: none;
@@ -1370,6 +1406,9 @@
       gap: var(--sp-2);
       padding-inline: 4px;
     }
+    .dropzone.empty {
+      min-height: 184px;
+    }
     /* Filigrane : occupe l'espace vide sous la liste, discret (texte plus clair, sans cadre) ;
        le cadre réapparaît au survol et pendant un glisser-déposer. */
     .dropzone.ghost {
@@ -1449,7 +1488,10 @@
       flex-direction: column;
       gap: var(--sp-2);
       overflow-y: auto;
-      overscroll-behavior: contain;
+      /* Pas d'overscroll-behavior: contain (retours du 12 novembre) : dans Chromium, un conteneur
+         défilant qui le porte garde la molette même quand il n'a rien à faire défiler ; la page
+         (pied de page dessous) ne défilait plus, souris sur la zone de dépôt ou la liste. Arrivée
+         au bout de la liste, la molette passe à la page. */
       margin-inline-end: -10px;
       padding-inline-end: 10px;
       scrollbar-width: thin;
@@ -1468,7 +1510,7 @@
       flex: 1 1 auto;
       min-height: 0;
       overflow-y: auto;
-      overscroll-behavior: contain;
+      /* Même raison que .lc-scroll : la molette passe à la page au bout de la colonne. */
       /* 4 px de marge intérieure : le contour de focus (2 + 2 px) n'est pas rogné (scan UX B4). */
       margin-inline: -4px -10px;
       padding: 4px 10px var(--sp-4) 4px;
@@ -1514,7 +1556,8 @@
       border-inline-start: 1px solid var(--hair);
       box-shadow: none;
     }
-    .sendbar.foot :global(.btn) {
+    /* Les offres juste au-dessus du bouton, en bas de la colonne (la place libre est au-dessus). */
+    .side-offers {
       margin-top: auto;
     }
   }

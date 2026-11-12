@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { expect } from "./fixtures";
-import { cleanSwitch } from "./foot-helpers";
 
 /**
  * Téléphone (< 760 px) : une seule action « Ajouter » (accueil : grand bouton ; composeur : « + »
@@ -95,14 +94,16 @@ export const armed = (page: Page) =>
   });
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Réglage « Nettoyer automatiquement les fichiers » (désactivé par défaut, retours CLEAN4). */
-export async function autoClean(page: Page, on: boolean) {
-  // Pied de page (retours du 11 novembre : plus de panneau Réglages), sur toutes les pages.
-  const sw = cleanSwitch(page);
-  await sw.scrollIntoViewIfNeeded();
-  if ((await sw.getAttribute("aria-checked")) !== String(on)) await sw.click();
-  await expect(sw).toHaveAttribute("aria-checked", String(on));
-  await page.evaluate(() => scrollTo(0, 0));
+/**
+ * « Tout nettoyer » puis « Nettoyer » dans la confirmation (remplace l'interrupteur « Nettoyage
+ * automatique », retiré le 12 novembre) : à appeler APRÈS l'ajout des fichiers. Rend quand plus
+ * rien n'est à nettoyer (le nettoyage peut finir après : attendre la marque voulue).
+ */
+export async function cleanAll(page: Page) {
+  const all = page.getByRole("button", { name: "Tout nettoyer" });
+  await all.click();
+  await page.getByRole("dialog", { name: /^Nettoyer \d+\s*fichiers?\s*\?$/ }).getByRole("button", { name: "Nettoyer", exact: true }).click();
+  await expect(all).toHaveCount(0);
 }
 
 /**

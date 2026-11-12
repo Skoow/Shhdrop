@@ -1,11 +1,12 @@
 // Retours du propriétaire du 11 novembre : plus de roue ni de panneau Réglages ; le pied de page
 // est sur toutes les pages (accueil, composeur, pages d'information, partage ouvert), ordinateur
-// et téléphone, et porte la langue, le nettoyage automatique et « À propos ». Pendant un envoi,
-// ses liens et réglages sont désactivés (aucun clic ne quitte la page). Salon « bientôt » sur
+// et téléphone, et porte « À propos » (plus de choix de langue ni de « Nettoyage automatique »
+// depuis le 12 novembre : la langue suit le navigateur, chaque fichier a son balai). Pendant un
+// envoi, ses liens sont désactivés (aucun clic ne quitte la page). Salon « bientôt » sur
 // l'accueil, à part des actions d'envoi (spec §39).
 import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
-import { cleanSwitch, foot, footLink, langGroup, switchLang } from "./foot-helpers";
+import { foot, footLink } from "./foot-helpers";
 import { freshPage, sendShare } from "./open-helpers";
 import { addFile, composerFits, readyHeading, sendButton, sleep } from "./send-helpers";
 
@@ -18,15 +19,15 @@ async function noSettings(page: Page) {
   await expect(page.getByRole("banner").getByRole("button")).toHaveCount(0);
 }
 
-/** Pied présent, avec ses liens, sa langue, son nettoyage automatique et « À propos ». */
+/** Pied présent, avec ses liens et « À propos » ; ni langue ni nettoyage automatique (12 novembre). */
 async function fullFoot(page: Page) {
   const f = foot(page);
   await f.scrollIntoViewIfNeeded();
   await expect(f).toBeVisible();
   await expect(footLink(page, "Sécurité")).toBeVisible();
   await expect(footLink(page, "Conditions d'utilisation")).toBeVisible();
-  await expect(langGroup(page).getByRole("button")).toHaveText(["Français", "English"]);
-  await expect(cleanSwitch(page)).toBeVisible();
+  await expect(f.getByRole("group", { name: /^(Langue|Language)$/ })).toHaveCount(0);
+  await expect(f.getByRole("switch")).toHaveCount(0);
   await expect(f.getByText("À propos", { exact: true })).toBeVisible();
   await page.evaluate(() => scrollTo(0, 0));
 }
@@ -59,30 +60,11 @@ test.describe("fr-FR", () => {
     await fullFoot(page);
   });
 
-  test("langue et nettoyage automatique changés depuis le pied de page", async ({ page, shh }) => {
-    await page.goto(shh.origin + "/envoyer");
-    await switchLang(page, "English");
-    await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await expect(langGroup(page).getByRole("button", { name: "English" })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("heading", { name: "Your share" })).toBeAttached();
-    await switchLang(page, "Français");
-    await expect(page.locator("html")).toHaveAttribute("lang", "fr");
+  // Ancien test « langue et nettoyage automatique changés depuis le pied de page » : les deux
+  // réglages sont retirés (décision du propriétaire du 12 novembre). La langue suit le
+  // navigateur (i18n.spec.ts) ; le nettoyage se fait au balai (envoi.spec.ts).
 
-    const sw = cleanSwitch(page);
-    await sw.scrollIntoViewIfNeeded();
-    await expect(sw).toHaveAttribute("aria-checked", "false"); // désactivé par défaut (CLEAN4)
-    await expect(sw).toHaveAccessibleDescription(/informations cachées/);
-    await sw.click();
-    await expect(sw).toHaveAttribute("aria-checked", "true");
-    // Le même réglage est vu par toute l'app : il survit à une navigation interne.
-    await footLink(page, "Sécurité").click();
-    await expect(page).toHaveURL(/\/securite$/);
-    await expect(cleanSwitch(page)).toHaveAttribute("aria-checked", "true");
-    await cleanSwitch(page).click();
-    await expect(cleanSwitch(page)).toHaveAttribute("aria-checked", "false");
-  });
-
-  test("pendant un envoi : pied affiché, liens, langue et nettoyage désactivés avec leur raison", async ({ page, shh }) => {
+  test("pendant un envoi : pied affiché, liens désactivés avec leur raison", async ({ page, shh }) => {
     test.setTimeout(120_000);
     await page.goto(shh.origin + "/envoyer");
     await addFile(page, "doc.bin", 6 * 1048576);
@@ -106,17 +88,6 @@ test.describe("fr-FR", () => {
     for (const l of await f.getByRole("link").all()) await expect(l).toHaveAttribute("aria-disabled", "true");
     await sec.click({ force: true });
     expect(new URL(page.url()).pathname).toBe("/envoyer");
-    // Langue : boutons désactivés, la langue ne change pas.
-    const en = langGroup(page).getByRole("button", { name: "English" });
-    await expect(en).toHaveAttribute("aria-disabled", "true");
-    await expect(en).toHaveAccessibleDescription(/désactivés pendant l'envoi/);
-    await en.click({ force: true });
-    await expect(page.locator("html")).toHaveAttribute("lang", "fr");
-    // Nettoyage automatique : interrupteur désactivé (aria-disabled), un appui ne change rien.
-    await expect(cleanSwitch(page)).toBeDisabled();
-    await cleanSwitch(page).click({ force: true });
-    await expect(cleanSwitch(page)).toHaveAttribute("aria-checked", "false");
-    await expect(cleanSwitch(page)).toHaveAccessibleDescription(/désactivés pendant l'envoi/);
     // Toujours en cours d'envoi (aucun écran quitté).
     await expect(page.getByRole("heading", { name: "Chiffrement et envoi" })).toBeVisible();
     await expect(readyHeading(page)).toBeVisible({ timeout: 90_000 });

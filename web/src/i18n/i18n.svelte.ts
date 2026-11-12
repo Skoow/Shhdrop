@@ -5,12 +5,6 @@ import { plural, type Lang } from "./format";
 type Dict = Record<keyof typeof fr, string>;
 const dicts: Record<Lang, Dict> = { fr, en };
 
-/** Langues proposées dans le pied de page, chacune nommée dans sa propre langue. Ajouter une
- *  langue : son dictionnaire, son code dans `Lang` (format.ts) et une ligne ici. */
-export const LANGS: readonly { code: Lang; name: string }[] = [
-  { code: "fr", name: "Français" },
-  { code: "en", name: "English" },
-];
 
 // Les clés à pluriel s'écrivent « base.one » / « base.other » ; on appelle t("base", { n }).
 type Strip<K> = K extends `${infer B}.${"one" | "other"}` ? B : K;
@@ -25,7 +19,9 @@ export function detectLang(languages: readonly string[] = typeof navigator === "
   return "fr";
 }
 
-// Sans mémorisation (aucun stockage) : la langue est recalculée à chaque visite.
+// Sans mémorisation (aucun stockage) : la langue est recalculée à chaque visite. Plus de choix
+// dans le pied de page (décision du propriétaire du 12 novembre) : la langue suit le navigateur.
+// `setLang` reste pour les tests (et un futur choix explicite).
 let lang = $state<Lang>(detectLang());
 
 function applyHtmlLang(l: Lang): void {

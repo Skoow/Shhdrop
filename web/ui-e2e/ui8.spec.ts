@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { axe, captureOf, expect, test } from "./fixtures";
 import { file, freshPage, sendShare, settle, unlock } from "./open-helpers";
-import { autoClean, openFilePicker } from "./send-helpers";
+import { cleanAll, openFilePicker } from "./send-helpers";
 import type { Locator, Page } from "@playwright/test";
 
 const SHOTS = fileURLToPath(new URL("../../.superpowers/sdd/2026-11-04-shhdrop-ecrans/shots/task-UI8/", import.meta.url));
@@ -83,7 +83,6 @@ test("composeur : bouclier de nettoyage avant le nom avec sa bulle, pastille cad
   test.setTimeout(120_000);
   await page.setViewportSize({ width: w(isMobile), height: isMobile ? 844 : 1000 });
   await page.goto(shh.origin + "/");
-  await autoClean(page, true);
   const jpg = readFileSync(file("plage-nuit.jpg"));
   await (await openFilePicker(page)).setFiles([
     { name: "plage-nuit.jpg", mimeType: "image/jpeg", buffer: jpg },
@@ -92,6 +91,7 @@ test("composeur : bouclier de nettoyage avant le nom avec sa bulle, pastille cad
   ]);
   const row = (n: string) => page.locator("[data-row]").filter({ hasText: n });
   await expect(page.locator("[data-row]")).toHaveCount(3);
+  await cleanAll(page);
   const done = row("plage-nuit.jpg").locator('[data-clean="nettoye"]');
   const fail = row("abime.jpg").locator('[data-clean="echec"]');
   await expect(done).toBeVisible();

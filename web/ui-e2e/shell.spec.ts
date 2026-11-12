@@ -42,10 +42,10 @@ test("pied de page (UI5) : Produit, Confiance, Légal ; langue, nettoyage, À pr
   await expect(foot.getByText(/publicité/)).toHaveCount(0);
   await expect(foot.locator(".base .sig")).toHaveText(/^Shhdrop\s*©\s2026$/);
   await expect(foot.locator("[data-build]")).toHaveText(/^Version ([0-9a-f]{7}|dev)$/);
-  // Langue : boutons du pied (pas de liste déroulante), nettoyage automatique, À propos.
+  // Ni langue ni nettoyage automatique (décision du propriétaire du 12 novembre) ; « À propos » reste.
   await expect(foot.getByRole("combobox")).toHaveCount(0);
-  await expect(foot.getByRole("group", { name: "Langue" }).getByRole("button")).toHaveText(["Français", "English"]);
-  await expect(foot.getByRole("switch", { name: "Nettoyage automatique" })).toBeVisible();
+  await expect(foot.getByRole("group", { name: "Langue" })).toHaveCount(0);
+  await expect(foot.getByRole("switch")).toHaveCount(0);
   await expect(foot.getByText("Shhdrop chiffre sur votre appareil avant l'envoi.", { exact: false })).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.waitForTimeout(600); // fin des apparitions au défilement

@@ -184,7 +184,7 @@ test("arrêter → « Valider » sans réécouter → ligne ajoutée", async ({ 
   await expect(page.locator("[data-row]").filter({ hasText: "Mémo vocal 1" })).toBeVisible();
 });
 
-test("ligne vocale : nom générique renommable (Entrée, Échap, vide → générique) ; bulle centrée sous le nom ; alignée sur les autres lignes", async ({ page, shh, isMobile }) => {
+test("ligne vocale : nom générique renommable (Entrée, Échap, vide → générique) ; lecteur sous le nom, aligné à gauche ; alignée sur les autres lignes", async ({ page, shh, isMobile }) => {
   test.setTimeout(60_000);
   const SHOTS4 = SHOTS.replace("task-VOICE5", "task-VOICE4");
   mkdirSync(SHOTS4, { recursive: true });
@@ -217,12 +217,13 @@ test("ligne vocale : nom générique renommable (Entrée, Échap, vide → gén�
       const [a, b] = [await box(voice.locator(sel).first()), await box(pdf.locator(sel).first())];
       expect(a.x, `${sel} à ${w}`).toBeCloseTo(b.x, 0);
     }
-    // Icône, nom et « … » sur la même rangée ; la bulle dessous, centrée dans la ligne.
-    const [pic, meta, menu, clip] = [await box(voice.locator(".pic")), await box(voice.locator(".meta")), await box(voice.locator(act)), await box(voice.locator("[data-voice-clip]"))];
+    // Icône, nom et « … » sur la même rangée ; le lecteur dessous, aligné à gauche sur le nom
+    // (retours du propriétaire du 12 novembre : il était centré dans la ligne).
+    const [pic, meta, menu, clip, main] = [await box(voice.locator(".pic")), await box(voice.locator(".meta")), await box(voice.locator(act)), await box(voice.locator("[data-voice-clip]")), await box(voice.locator(".main"))];
     expect(Math.abs(pic.y + pic.height / 2 - (menu.y + menu.height / 2))).toBeLessThan(2);
     expect(clip.y).toBeGreaterThanOrEqual(meta.y + meta.height);
     expect(clip.y).toBeGreaterThanOrEqual(pic.y + pic.height);
-    expect(Math.abs(clip.x + clip.width / 2 - (vr.x + vr.width / 2))).toBeLessThan(0.75);
+    expect(Math.abs(clip.x - main.x)).toBeLessThan(0.75);
   }
   if (isMobile) await captureOf(voice, { path: `${SHOTS4}voice-row-390.png` });
 

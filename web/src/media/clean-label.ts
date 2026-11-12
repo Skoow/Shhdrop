@@ -8,7 +8,7 @@ import type { Key } from "../i18n/i18n.svelte";
 import type { Format } from "./format";
 import type { CleanFamily, CleanState } from "./strip";
 
-/** `original` : nettoyage automatique désactivé dans les Réglages (rien n'est modifié). */
+/** `original` : fichier ajouté tel quel, pas encore nettoyé (rien n'est nettoyé sans le balai). */
 export type ItemCleanState = CleanState | "original";
 /** `cleanFormat` avec `echec` : photo, vidéo ou son d'un format que le nettoyage ne sait pas lire. */
 export type ItemClean = { clean: ItemCleanState; cleanFamily?: CleanFamily; cleanFormat?: Format };
@@ -74,4 +74,12 @@ export function receivedClean(c: ManifestClean | undefined): { key: Key; mark: "
   if (c === "tel_quel") return { key: "clean.recv.asis", mark: null };
   if (c === "echec" || c === "protege") return { key: c === "echec" ? "clean.recv.fail.echec" : "clean.recv.fail.protege", mark: "fail" };
   return { key: RECV_DONE[c], mark: "done" };
+}
+
+/**
+ * Ce que le nettoyage retirerait d'un fichier, selon sa catégorie (bulle du balai et
+ * confirmation, retours du propriétaire du 12 novembre) : dit AVANT de nettoyer.
+ */
+export function cleanWhatKey(category: string): "clean.what.photos" | "clean.what.videos" | "clean.what.audio" | "clean.what.documents" | "clean.what.misc" {
+  return category === "photos" || category === "videos" || category === "audio" || category === "documents" ? `clean.what.${category}` : "clean.what.misc";
 }

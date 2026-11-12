@@ -166,17 +166,26 @@
           {@render cert(Timer, t("home.fact.erase"))}
           {@render cert(UserX, t("home.fact.account"))}
         </ul>
-        <!-- Salon (spec §39 : « le bouton du salon est à part, pour qu'on le voie ») : à part des
-             actions d'envoi, bien visible, pas encore construit (désactivé, « bientôt »). -->
-        <div class="room" data-room>
-          <button type="button" class="room-b" aria-disabled="true" aria-describedby="room-soon" onclick={() => announce(t("tabs.soon.chat"))}>
-            <span class="room-ic" aria-hidden="true"><TabIcon id="chat" size={22} /></span>
-            <span class="room-t">{t("foot.room")}</span>
-            <span class="room-soon">{t("foot.soon")}</span>
-          </button>
-          <p id="room-soon" class="room-s">{t("tabs.soon.chat")}</p>
-        </div>
+      {:else}
+        <!-- Page d'envoi (retours du propriétaire du 12 novembre) : le titre reste visible, avec
+             trois assurances courtes sous lui ; rien de plus haut que la zone de dépôt. -->
+        <ul class="assure" aria-label={t("home.facts.label")} data-assure>
+          <li><Lock size={15} strokeWidth={2} aria-hidden="true" />{t("send.assure.browser")}</li>
+          <li><UserX size={15} strokeWidth={2} aria-hidden="true" />{t("home.fact.account")}</li>
+          <li><Timer size={15} strokeWidth={2} aria-hidden="true" />{t("send.assure.burn")}</li>
+        </ul>
       {/if}
+      <!-- Salon (spec §39 : « le bouton du salon est à part, pour qu'on le voie ») : à part des
+           actions d'envoi, bien visible, pas encore construit (désactivé, « bientôt ») ; aussi sur
+           la page d'envoi (retours du 12 novembre), même icône et même mot que l'onglet du téléphone. -->
+      <div class={["room", { compact }]} data-room>
+        <button type="button" class="room-b" aria-disabled="true" aria-describedby="room-soon" onclick={() => announce(t("tabs.soon.chat"))}>
+          <span class="room-ic" aria-hidden="true"><TabIcon id="chat" size={22} /></span>
+          <span class="room-t">{t("foot.room")}</span>
+          <span class="room-soon">{t("foot.soon")}</span>
+        </button>
+        <p id="room-soon" class={["room-s", { "sr-only": compact }]}>{t("tabs.soon.chat")}</p>
+      </div>
     </div>
 
     <!-- « Vos partages actifs » (spec §33.1, UI §9.6.1) : lecture locale seulement, rien sans
@@ -285,18 +294,63 @@
   h1:focus {
     outline: none;
   }
-  /* Composeur ouvert : l'app prend l'écran ; le titre reste pour les lecteurs d'écran. */
-  @media all {
-    h1.compact {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      clip-path: inset(50%);
-      white-space: nowrap;
-    }
-    .home.compact .hero {
-      padding-top: 0;
+  /* Page d'envoi (retours du 12 novembre) : le titre visible, plus petit, à gauche ; trois
+     assurances dessous ; le Salon à droite (ordinateur) ou dessous (téléphone). */
+  .home.compact .hero {
+    padding-top: 0;
+    padding-bottom: var(--sp-2);
+    gap: var(--sp-3);
+  }
+  /* Une rangée sur ordinateur (titre, assurances, Salon à droite) : la liste garde sa hauteur ;
+     les assurances passent dessous quand la place manque. */
+  .home.compact .pitch {
+    order: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-5);
+  }
+  .home.compact .compose {
+    order: 2;
+  }
+  h1.compact {
+    order: 1;
+    flex: 0 1 auto;
+    font-size: clamp(1.5rem, 1.2rem + 0.8vw, 1.875rem);
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+  .assure {
+    order: 2;
+    flex: 0 1 auto;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px var(--sp-4);
+    color: var(--text-2);
+    font-size: var(--fs-small);
+  }
+  .assure li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .assure :global(svg) {
+    flex: none;
+    color: var(--accent);
+  }
+  .room.compact {
+    order: 3;
+    margin-inline-start: auto;
+  }
+  /* Téléphone : titre, assurances, puis Salon, les uns sous les autres, à gauche. */
+  @media (max-width: 599px) {
+    .assure,
+    .room.compact {
+      flex-basis: 100%;
+      margin-inline-start: 0;
     }
   }
   .w {
