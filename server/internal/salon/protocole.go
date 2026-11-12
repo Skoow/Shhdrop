@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	"time"
 )
 
 // Protocole du WebSocket du salon (plan C-2, « Protocole ») : messages binaires, entiers
@@ -141,10 +142,12 @@ const (
 // SansExclu : siège de l'enregistrement d'exclusion quand personne n'est exclu.
 const SansExclu uint8 = 0xFF
 
-// Annonce : siège occupé et son nonce_arrivée (enregistrement 0x0D).
+// Annonce : siège occupé, son nonce_arrivée et la dernière connexion de son occupant
+// (enregistrement 0x0D ; minutes Unix, 0 = inconnue ou en ligne, Task 9b).
 type Annonce struct {
-	Siege uint8
-	Nonce [16]byte
+	Siege       uint8
+	Nonce       [16]byte
+	DerniereMin uint64
 }
 
 // enr : enregistrement type (1) ‖ seq (8) ‖ n octets de données, alloué une fois à sa taille.
@@ -177,13 +180,15 @@ func EnrDepart(seq uint64, siege uint8) []byte { return append(enr(0x03, seq, 1)
 // EnrFin : 0x05, raison (Raison*).
 func EnrFin(seq uint64, raison uint8) []byte { return append(enr(0x05, seq, 1), raison) }
 
-// EnrPresence : 0x07, siège ‖ 1 en ligne / 0 hors ligne.
-func EnrPresence(seq uint64, siege uint8, enLigne bool) []byte {
+// EnrPresence : 0x07, siège ‖ 1 en ligne / 0 hors ligne ‖ dernière connexion (minutes Unix,
+// 8 octets), 19 octets en tout (Task 9b, spec v3 §14.1). 0 = inconnue ou en ligne : en
+// ligne, derniereMin est ignorée.
+func EnrPresence(seq uint64, siege uint8, enLigne bool, derniereMin uint64) []byte {
 	var v byte
 	if enLigne {
-		v = 1
+		v, derniereMin = 1, 0
 	}
-	return append(enr(0x07, seq, 2), siege, v)
+	return binary.BigEndian.AppendUint64(append(enr(0x07, seq, 2+8), siege, v), derniereMin)
 }
 
 // EnrPong : 0x08, les 8 octets du ping.
@@ -208,17 +213,31 @@ func EnrLimite(seq uint64, secondes uint32) []byte {
 // EnrPlein : 0x0C, trame non rangée (disque plein).
 func EnrPlein(seq uint64) []byte { return enr(0x0C, seq, 0) }
 
-// EnrListe : 0x0D, créateur ‖ n ‖ n × (siège ‖ nonce_arrivée) ; seq = rang où elle
-// s'applique. Plus de 255 annonces : panique (erreur de programmation ; 10 sièges au plus).
+// EnrListe : 0x0D, créateur ‖ n ‖ n × (siège ‖ nonce_arrivée ‖ dernière connexion (8)),
+// 11 + 25n octets ; seq = rang où elle s'applique. Plus de 255 annonces : panique (erreur de
+// programmation ; 10 sièges au plus).
 func EnrListe(seq uint64, createur uint8, liste []Annonce) []byte {
 	if len(liste) > 255 {
 		panic("salon: EnrListe, trop d'annonces")
 	}
-	b := append(enr(0x0D, seq, 2+17*len(liste)), createur, uint8(len(liste)))
+	b := append(enr(0x0D, seq, 2+tailleAnnonce*len(liste)), createur, uint8(len(liste)))
 	for _, a := range liste {
-		b = append(append(b, a.Siege), a.Nonce[:]...)
+		b = binary.BigEndian.AppendUint64(append(append(b, a.Siege), a.Nonce[:]...), a.DerniereMin)
 	}
 	return b
+}
+
+// tailleAnnonce : siège (1) ‖ nonce_arrivée (16) ‖ dernière connexion (8).
+const tailleAnnonce = 1 + 16 + 8
+
+// minuteUnix : minutes Unix de t, arrondies à la minute inférieure (dernière connexion,
+// Task 9b) ; 0 (inconnue) avant 1970.
+func minuteUnix(t time.Time) uint64 {
+	u := t.Unix()
+	if u < 0 {
+		return 0
+	}
+	return uint64(u / 60)
 }
 
 // EnrEfface : 0x0E, seq de la trame effacée.

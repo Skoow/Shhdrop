@@ -182,8 +182,11 @@ func TestEnregistrements(t *testing.T) {
 		{"arrivée", EnrArrivee(seq, 3, n1), 26, cat(tete(0x02), []byte{3}, n1[:])},
 		{"départ", EnrDepart(seq, 9), 10, cat(tete(0x03), []byte{9})},
 		{"fin", EnrFin(seq, RaisonTropLent), 10, cat(tete(0x05), []byte{6})},
-		{"présence en ligne", EnrPresence(seq, 2, true), 11, cat(tete(0x07), []byte{2, 1})},
-		{"présence hors ligne", EnrPresence(seq, 2, false), 11, cat(tete(0x07), []byte{2, 0})},
+		{"présence en ligne", EnrPresence(seq, 2, true, 0), 19, cat(tete(0x07), []byte{2, 1}, u64(0))},
+		// En ligne : la minute donnée est ignorée (0 = inconnue ou en ligne, Task 9b).
+		{"présence en ligne, minute ignorée", EnrPresence(seq, 2, true, 29_381_492), 19, cat(tete(0x07), []byte{2, 1}, u64(0))},
+		{"présence hors ligne", EnrPresence(seq, 2, false, 29_381_492), 19, cat(tete(0x07), []byte{2, 0}, u64(29_381_492))},
+		{"présence hors ligne, inconnue", EnrPresence(seq, 2, false, 0), 19, cat(tete(0x07), []byte{2, 0}, u64(0))},
 		{"pong", EnrPong(seq, [8]byte{9, 8, 7, 6, 5, 4, 3, 2}), 17, cat(tete(0x08), []byte{9, 8, 7, 6, 5, 4, 3, 2})},
 		{"exclusion", EnrExclusion(seq, 4, n1, 0xDEADBEEF), 30, cat(tete(0x09), []byte{4}, n1[:], u32(0xDEADBEEF))},
 		{"exclusion sans exclu", EnrExclusion(seq, SansExclu, n2, 1), 30, cat(tete(0x09), []byte{0xFF}, n2[:], u32(1))},
@@ -191,8 +194,8 @@ func TestEnregistrements(t *testing.T) {
 		{"limite", EnrLimite(seq, 61), 13, cat(tete(0x0B), u32(61))},
 		{"plein", EnrPlein(seq), 9, tete(0x0C)},
 		{"liste vide", EnrListe(seq, 0, nil), 11, cat(tete(0x0D), []byte{0, 0})},
-		{"liste", EnrListe(seq, 0, []Annonce{{0, n1}, {6, n2}}), 45,
-			cat(tete(0x0D), []byte{0, 2, 0}, n1[:], []byte{6}, n2[:])},
+		{"liste", EnrListe(seq, 0, []Annonce{{0, n1, 0}, {6, n2, 0x0102030405060708}}), 61,
+			cat(tete(0x0D), []byte{0, 2, 0}, n1[:], u64(0), []byte{6}, n2[:], u64(0x0102030405060708))},
 		{"effacée", EnrEfface(seq, 0x0102030405060708), 17, cat(tete(0x0E), u64(0x0102030405060708))},
 	}
 	for _, c := range cas {
@@ -209,9 +212,10 @@ func TestEnregistrements(t *testing.T) {
 	// Liste pleine : 10 sièges.
 	dix := make([]Annonce, 10)
 	for i := range dix {
-		dix[i] = Annonce{Siege: uint8(i), Nonce: n1}
+		dix[i] = Annonce{Siege: uint8(i), Nonce: n1, DerniereMin: uint64(i)}
 	}
-	if l := EnrListe(seq, 0, dix); len(l) != 11+10*17 || l[10] != 10 || l[11+9*17] != 9 {
+	if l := EnrListe(seq, 0, dix); len(l) != 11+10*25 || l[10] != 10 || l[11+9*25] != 9 ||
+		binary.BigEndian.Uint64(l[11+9*25+17:]) != 9 {
 		t.Errorf("liste de 10 : %d octets", len(l))
 	}
 	// La trame relayée est une copie : modifier la source ne change pas l'enregistrement.
@@ -251,7 +255,7 @@ func TestAllocations(t *testing.T) {
 	tr := trameValide(0)
 	dem := append(append([]byte{DemTrame}, tr...), make([]byte, 16)...)
 	acc := accueil(strings.Repeat("A", 43), 5)
-	liste := []Annonce{{1, [16]byte{}}, {2, [16]byte{}}}
+	liste := []Annonce{{1, [16]byte{}, 0}, {2, [16]byte{}, 7}}
 	for nom, f := range map[string]func(){
 		"LireEnTete":  func() { LireEnTete(tr) },
 		"LireDemande": func() { LireDemande(dem) },
@@ -262,9 +266,10 @@ func TestAllocations(t *testing.T) {
 		}
 	}
 	for nom, f := range map[string]func(){
-		"EnrTrame": func() { puits = EnrTrame(1, 2, 3, tr) },
-		"EnrListe": func() { puits = EnrListe(1, 0, liste) },
-		"EnrPong":  func() { puits = EnrPong(1, [8]byte{}) },
+		"EnrTrame":    func() { puits = EnrTrame(1, 2, 3, tr) },
+		"EnrListe":    func() { puits = EnrListe(1, 0, liste) },
+		"EnrPong":     func() { puits = EnrPong(1, [8]byte{}) },
+		"EnrPresence": func() { puits = EnrPresence(1, 2, false, 3) },
 	} {
 		if n := testing.AllocsPerRun(100, f); n != 1 {
 			t.Errorf("%s : %v allocations", nom, n)
@@ -375,12 +380,12 @@ func FuzzFlux(f *testing.F) {
 		binary.BigEndian.PutUint64(ping[:], uint64(recu))
 		liste := make([]Annonce, int(siege)%11)
 		for i := range liste {
-			liste[i] = Annonce{Siege: siege + uint8(i), Nonce: nonce}
+			liste[i] = Annonce{Siege: siege + uint8(i), Nonce: nonce, DerniereMin: uint64(recu)}
 		}
 		for _, e := range [][]byte{
 			EnrTrame(seq, siege, recu, trameValide(byte(r)&7)),
 			EnrArrivee(seq, siege, nonce), EnrDepart(seq, siege), EnrFin(seq, siege),
-			EnrPresence(seq, siege, r&1 == 1), EnrPong(seq, ping), EnrExclusion(seq, siege, nonce, r),
+			EnrPresence(seq, siege, r&1 == 1, uint64(recu)), EnrPong(seq, ping), EnrExclusion(seq, siege, nonce, r),
 			EnrReprise(seq, siege, nonce), EnrLimite(seq, r), EnrPlein(seq),
 			EnrListe(seq, siege, liste), EnrEfface(seq, uint64(recu)),
 		} {
@@ -391,6 +396,28 @@ func FuzzFlux(f *testing.F) {
 			}
 			if _, err := LireAccueil(e); err == nil {
 				t.Fatalf("enregistrement %#02x lu comme un accueil", e[0])
+			}
+		}
+		// Dernière connexion (Task 9b) : 0x07 de 19 octets, minute nulle en ligne ; 0x0D de
+		// 11 + 25n octets, chaque annonce relue telle quelle.
+		enLigne := r&1 == 1
+		p := EnrPresence(seq, siege, enLigne, uint64(recu))
+		wantMin := uint64(recu)
+		if enLigne {
+			wantMin = 0
+		}
+		if len(p) != 19 || p[9] != siege || (p[10] == 1) != enLigne || p[10] > 1 ||
+			binary.BigEndian.Uint64(p[11:]) != wantMin {
+			t.Fatalf("0x07 : %x", p)
+		}
+		l := EnrListe(seq, siege, liste)
+		if len(l) != 11+25*len(liste) || l[9] != siege || int(l[10]) != len(liste) {
+			t.Fatalf("0x0D : %d octets pour %d annonces", len(l), len(liste))
+		}
+		for i, a := range liste {
+			o := l[11+25*i:]
+			if o[0] != a.Siege || [16]byte(o[1:17]) != a.Nonce || binary.BigEndian.Uint64(o[17:25]) != a.DerniereMin {
+				t.Fatalf("0x0D, annonce %d : %x", i, o[:25])
 			}
 		}
 	})

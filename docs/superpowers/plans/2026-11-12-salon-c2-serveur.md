@@ -94,16 +94,16 @@ Autres messages de contrôle (`0x02`–`0x05`) : 600 par minute et par WebSocket
 | `0x02` arrivée | siège (1) ‖ `nonce_arrivée` (16) | oui |
 | `0x03` départ | siège (1) | oui |
 | `0x05` fin | raison (1) : 1 expiré, 2 détruit, 4 remplacé, 5 exclu, 6 trop lent | non |
-| `0x07` présence | siège (1) ‖ 1 en ligne / 0 hors ligne | non |
+| `0x07` présence | siège (1) ‖ 1 en ligne / 0 hors ligne ‖ dernière connexion (8, minutes Unix arrondies à la minute inférieure, 0 = inconnue ou en ligne ; Task 9b) — 19 octets en tout | non |
 | `0x08` pong | les 8 octets du ping | non |
 | `0x09` exclusion | siège (1, `0xFF` sans exclu) ‖ `nonce_arrivée` (16) ‖ `r` (4) | oui |
 | `0x0A` reprise | siège (1) ‖ nouveau `nonce_arrivée` (16) | oui |
 | `0x0B` limite | secondes à attendre (4) | non |
 | `0x0C` plein | — (trame non rangée : disque plein) | non |
-| `0x0D` liste | créateur (1, toujours 0) ‖ n (1) ‖ n × (siège (1) ‖ `nonce_arrivée` (16)) ; `seq` = rang où elle s'applique | non |
+| `0x0D` liste | créateur (1, toujours 0) ‖ n (1) ‖ n × (siège (1) ‖ `nonce_arrivée` (16) ‖ dernière connexion (8), comme `0x07`) — 11 + 25n octets ; `seq` = rang où elle s'applique ; dernière connexion non nulle seulement pour un occupant encore là et hors ligne, jamais pour soi | non |
 | `0x0E` effacée | `seq` de la trame effacée (8) | non |
 
-**Séquence d'accueil** : `0x0D` (état au rang `depuis` effectif = max(`depuis`, rang d'émission du jeton), plafonné au dernier rang) → un `0x07` par siège occupé → un `0x0E` par trame « instantané » effacée par lecture ou par départ dont le rang est dans (rang d'émission du jeton, `depuis` effectif] (trames que ce client a pu recevoir avant sa coupure ; jamais pour un retrait, que le client apprend par le message chiffré de l'expéditeur, ni pour 10 min et 1 h, qu'il compte lui-même) → rattrapage (trames non volatiles non effacées et `0x02`/`0x03`/`0x09`/`0x0A` de rang > `depuis`, fusionnés dans l'ordre `seq`) → direct. Reprise : `0x0A` diffusé, puis `0x0D` au rang de ce `0x0A`, `0x07`, direct (aucun rattrapage, aucun `0x0E` : nouvelle identité). Un `0x0E` ne fait jamais fermer une connexion ni sortir du direct : hors du direct, il est renvoyé au retour au direct (Task 11).
+**Séquence d'accueil** : `0x0D` (état au rang `depuis` effectif = max(`depuis`, rang d'émission du jeton), plafonné au dernier rang) → un `0x07` par siège occupé → un `0x0E` par trame « instantané » effacée par lecture ou par départ dont le rang est dans (rang d'émission du jeton, `depuis` effectif] (trames que ce client a pu recevoir avant sa coupure ; jamais pour un retrait, que le client apprend par le message chiffré de l'expéditeur, ni pour 10 min et 1 h, qu'il compte lui-même) → rattrapage (trames non volatiles non effacées et `0x02`/`0x03`/`0x09`/`0x0A` de rang > `depuis`, fusionnés dans l'ordre `seq`) → direct. Dernière connexion (Task 9b, spec v3 §14.1, sans masquage) : minute de la dernière déconnexion d'un WebSocket du siège, en mémoire seulement, posée à la déconnexion (pas à une reprise, qui la garde), oubliée quand le siège est libéré ou le salon fini. Reprise : `0x0A` diffusé, puis `0x0D` au rang de ce `0x0A`, `0x07`, direct (aucun rattrapage, aucun `0x0E` : nouvelle identité). Un `0x0E` ne fait jamais fermer une connexion ni sortir du direct : hors du direct, il est renvoyé au retour au direct (Task 11).
 
 **Fichier de conversation** `salons/{id interne}` : un emplacement de **4 168 octets** par trame non volatile, dans l'ordre d'arrivée : `nonce` (12, aléatoire) ‖ AES-256-GCM(clé du salon, `nonce`, trame, données authentifiées = `"shhdrop/salon/disque/v1"` ‖ numéro d'emplacement (8)). Trame effacée : ses 4 168 octets écrasés de zéros. Aucun `seq`, siège, heure ou drapeau en clair sur le disque.
 

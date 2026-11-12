@@ -304,7 +304,7 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 	if crochetAccueil != nil {
 		crochetAccueil()
 	}
-	accueil := append([][]byte{EnrListe(point, 0, s.etatAuLocked(point))}, s.presencesLocked(mb.siege)...)
+	accueil := append([][]byte{EnrListe(point, 0, s.listeLocked(point, mb.siege))}, s.presencesLocked(mb.siege)...)
 	var effaces []uint64
 	if !a.Reprise {
 		// Trames « instantané » effacées par lecture ou départ pendant la coupure, que ce
@@ -323,24 +323,39 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 	s.conns[mb.siege] = c
 	x.horsLigneDepuis = time.Time{}
 	s.limites[mb.siege].vocal.ouvrir(now) // présence comptée pour la réserve vocale
-	s.diffuserLocked(EnrPresence(s.seq, mb.siege, true), genrePresence, c)
+	s.diffuserLocked(EnrPresence(s.seq, mb.siege, true, 0), genrePresence, c)
 	return c, 0
 }
 
 // presencesLocked : un 0x07 par siège occupé (en ligne s'il a une connexion ; soi, le siège
-// de la connexion servie, toujours en ligne).
+// de la connexion servie, toujours en ligne), hors ligne avec la minute de sa dernière
+// déconnexion (Task 9b).
 func (s *salon) presencesLocked(soi uint8) [][]byte {
 	var out [][]byte
 	for n, x := range s.sieges {
 		if x != nil {
-			out = append(out, EnrPresence(s.seq, uint8(n), s.conns[n] != nil || uint8(n) == soi))
+			out = append(out, EnrPresence(s.seq, uint8(n), s.conns[n] != nil || uint8(n) == soi, x.derniere))
 		}
 	}
 	return out
 }
 
+// listeLocked : annonces du 0x0D au rang point (etatAuLocked), chacune avec la dernière
+// connexion de son occupant (Task 9b) s'il occupe encore le siège (arrivée au plus tard à
+// point) et s'il est hors ligne ; 0 sinon, et pour soi.
+func (s *salon) listeLocked(point uint64, soi uint8) []Annonce {
+	l := s.etatAuLocked(point)
+	for i, a := range l {
+		if x := s.sieges[a.Siege]; x != nil && x.arrivee <= point && s.conns[a.Siege] == nil && a.Siege != soi {
+			l[i].DerniereMin = x.derniere
+		}
+	}
+	return l
+}
+
 // desinscrire retire c de son siège s'il l'occupe encore (pas remplacé) : siège hors ligne
-// depuis maintenant (libéré 10 min plus tard par Tick) et 0x07 hors ligne diffusé.
+// depuis maintenant (libéré 10 min plus tard par Tick), minute de la déconnexion gardée en
+// mémoire (Task 9b) et 0x07 hors ligne diffusé avec elle.
 func (m *Manager) desinscrire(c *connexion) {
 	s := c.s
 	s.mu.Lock()
@@ -356,10 +371,14 @@ func (m *Manager) desinscrire(c *connexion) {
 	if x == nil {
 		return // parti (0x03)
 	}
+	now := m.cfg.Now()
 	if x.emis == c.mb.emis {
-		x.horsLigneDepuis = m.cfg.Now()
+		x.horsLigneDepuis = now
 	}
-	s.diffuserLocked(EnrPresence(s.seq, n, false), genrePresence, nil)
+	// Posée même pour la connexion d'un jeton remplacé par rejoindre du créateur : c'est la
+	// dernière déconnexion d'un WebSocket de ce siège.
+	x.derniere = minuteUnix(now)
+	s.diffuserLocked(EnrPresence(s.seq, n, false, x.derniere), genrePresence, nil)
 }
 
 // relayerLocked diffuse la trame de rang s.seq (rangée ou volatile) aux connexions en direct ;

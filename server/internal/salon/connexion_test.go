@@ -8,9 +8,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"io/fs"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -370,7 +373,7 @@ func TestSequenceAccueil(t *testing.T) {
 		if len(l) != 1+3+4+1 {
 			t.Fatalf("%d enregistrements", len(l))
 		}
-		liste := EnrListe(ea.Seq, 0, []Annonce{{0, e0.Nonce}, {1, ea.Nonce}})
+		liste := EnrListe(ea.Seq, 0, []Annonce{{0, e0.Nonce, 0}, {1, ea.Nonce, 0}})
 		if !bytes.Equal(la.brut(0), liste) {
 			t.Fatalf("0x0D : %x", la.brut(0))
 		}
@@ -378,7 +381,7 @@ func TestSequenceAccueil(t *testing.T) {
 			siege uint8
 			en    bool
 		}{{0, false}, {1, true}, {2, true}} {
-			if !bytes.Equal(la.brut(1+i), EnrPresence(7, p.siege, p.en)) {
+			if !bytes.Equal(la.brut(1+i), EnrPresence(7, p.siege, p.en, 0)) {
 				t.Fatalf("0x07 n°%d : %x", i, la.brut(1+i))
 			}
 		}
@@ -580,7 +583,7 @@ func TestReprise(t *testing.T) {
 			t.Fatal("0x0A non diffusé")
 		}
 		l := la.enrs()
-		if !bytes.Equal(la.brut(0), EnrListe(ev.seq, 0, []Annonce{{0, e0.Nonce}, {1, nonce}, {2, eb.Nonce}})) {
+		if !bytes.Equal(la.brut(0), EnrListe(ev.seq, 0, []Annonce{{0, e0.Nonce, 0}, {1, nonce, 0}, {2, eb.Nonce, 0}})) {
 			t.Fatalf("0x0D : %x", la.brut(0))
 		}
 		if len(l) != 4 {
@@ -613,7 +616,7 @@ func TestReconnexionGardeLeNonce(t *testing.T) {
 		seq := dernierSeq(s)
 		la = b.connecter(ea.Jeton, ea.Seq)
 		synctest.Wait()
-		if !bytes.Equal(la.brut(0), EnrListe(ea.Seq, 0, []Annonce{{0, e0.Nonce}, {1, ea.Nonce}})) {
+		if !bytes.Equal(la.brut(0), EnrListe(ea.Seq, 0, []Annonce{{0, e0.Nonce, 0}, {1, ea.Nonce, 0}})) {
 			t.Fatalf("0x0D : %x", la.brut(0))
 		}
 		if dernierSeq(s) != seq {
@@ -1017,12 +1020,12 @@ func TestPresence(t *testing.T) {
 		n := len(lb.enrs())
 		la := b.connecter(ea.Jeton, ea.Seq)
 		synctest.Wait()
-		if l := lb.enrs(); len(l) != n+1 || !bytes.Equal(lb.brut(n), EnrPresence(dernierSeq(s), ea.Siege, true)) {
+		if l := lb.enrs(); len(l) != n+1 || !bytes.Equal(lb.brut(n), EnrPresence(dernierSeq(s), ea.Siege, true, 0)) {
 			t.Fatalf("présence à l'ouverture : %d", len(l)-n)
 		}
 		finir(t, la)
 		synctest.Wait()
-		if l := lb.enrs(); len(l) != n+2 || !bytes.Equal(lb.brut(n+1), EnrPresence(dernierSeq(s), ea.Siege, false)) {
+		if l := lb.enrs(); len(l) != n+2 || !bytes.Equal(lb.brut(n+1), EnrPresence(dernierSeq(s), ea.Siege, false, uint64(b.h.Now().Unix()/60))) {
 			t.Fatalf("présence à la fermeture : %d", len(l)-n)
 		}
 		finir(t, lb)
@@ -1279,7 +1282,7 @@ func TestRejoindreFermeAncienneConnexion(t *testing.T) {
 		}
 		var hors bool
 		for i, e := range la.enrs() {
-			if e.ty == 0x07 && bytes.Equal(la.brut(i)[9:], []byte{0, 0}) {
+			if e.ty == 0x07 && bytes.Equal(la.brut(i)[9:], EnrPresence(0, 0, false, uint64(b.h.Now().Unix()/60))[9:]) {
 				hors = true
 			}
 		}
@@ -1538,6 +1541,261 @@ func TestFermerTout(t *testing.T) {
 		}
 		if connDe(b.etat(t, c), 0) != nil {
 			t.Fatal("connexion inscrite après l'arrêt")
+		}
+	})
+}
+
+// Dernière connexion (Task 9b, spec v3 §14.1) : heure de la dernière déconnexion de chaque
+// siège, en mémoire seulement, arrondie à la minute inférieure.
+
+// poser : l'horloge du banc à t.
+func (h *horloge) poser(t time.Time) {
+	h.mu.Lock()
+	h.t = t
+	h.mu.Unlock()
+}
+
+// minuteDe : minutes Unix de t (arrondi inférieur), calculées ici sans le code du serveur.
+func minuteDe(t time.Time) uint64 { return uint64(t.Truncate(time.Minute).Unix() / 60) }
+
+// derniere07 : corps (siège ‖ état ‖ minute) du dernier 0x07 reçu pour le siège n.
+func derniere07(t *testing.T, l *fauxLien, n uint8) (enLigne bool, minute uint64) {
+	t.Helper()
+	enrs := l.enrs()
+	for i := len(enrs) - 1; i >= 0; i-- {
+		if e := enrs[i]; e.ty == 0x07 && e.corps[0] == n {
+			if len(e.corps) != 10 {
+				t.Fatalf("0x07 de %d octets", 9+len(e.corps))
+			}
+			return e.corps[1] == 1, binary.BigEndian.Uint64(e.corps[2:])
+		}
+	}
+	t.Fatalf("aucun 0x07 pour le siège %d", n)
+	return false, 0
+}
+
+// annonce0D : minute de l'annonce du siège n dans le premier 0x0D reçu (présent : false si
+// le siège n'y est pas).
+func annonce0D(t *testing.T, l *fauxLien, n uint8) (minute uint64, present bool) {
+	t.Helper()
+	b := l.brut(0)
+	if b[0] != 0x0D || len(b) != 11+25*int(b[10]) {
+		t.Fatalf("premier enregistrement : %x (%d octets)", b[0], len(b))
+	}
+	for i := 0; i < int(b[10]); i++ {
+		if o := b[11+25*i:]; o[0] == n {
+			return binary.BigEndian.Uint64(o[17:25]), true
+		}
+	}
+	return 0, false
+}
+
+var heureB = time.Date(2026, 11, 12, 14, 32, 47, 0, time.UTC)
+
+// B se déconnecte à 14:32:47 : A reçoit 0x07 hors ligne avec la minute de 14:32 ; en ligne,
+// la minute est nulle.
+func TestDerniereConnexionDiffusee(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		ea := b.entrer(t, c, false)
+		eb := b.entrer(t, c, false)
+		la := b.connecter(ea.Jeton, ea.Seq)
+		lb := b.connecter(eb.Jeton, eb.Seq)
+		synctest.Wait()
+		if en, m := derniere07(t, la, eb.Siege); !en || m != 0 {
+			t.Fatalf("B en ligne : %v, minute %d", en, m)
+		}
+		b.h.poser(heureB)
+		finir(t, lb)
+		synctest.Wait()
+		en, m := derniere07(t, la, eb.Siege)
+		want := uint64(time.Date(2026, 11, 12, 14, 32, 0, 0, time.UTC).Unix() / 60)
+		if en || m != want || m != minuteDe(heureB) {
+			t.Fatalf("B hors ligne : %v, minute %d, attendu %d", en, m, want)
+		}
+		// Arrondi inférieur : 14:32:59.999 reste 14:32.
+		lb = b.connecter(eb.Jeton, eb.Seq)
+		synctest.Wait()
+		b.h.poser(time.Date(2026, 11, 12, 14, 32, 59, 999_999_999, time.UTC))
+		finir(t, lb)
+		synctest.Wait()
+		if _, m := derniere07(t, la, eb.Siege); m != want {
+			t.Fatalf("14:32:59.999 : minute %d, attendu %d", m, want)
+		}
+		finir(t, la)
+	})
+}
+
+// A se reconnecte : le 0x0D et le 0x07 portent la minute de B ; le siège 0, jamais
+// connecté, porte 0 (inconnue) ; le siège de A lui-même, en ligne, 0. Une reprise (0x0A,
+// par WebSocket ou par rejoindre du créateur) ne pose ni n'efface la minute.
+func TestDerniereConnexionAccueil(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		e0 := b.entrer(t, c, true)
+		ea := b.entrer(t, c, false)
+		eb := b.entrer(t, c, false)
+		s := b.etat(t, c)
+		la := b.connecter(ea.Jeton, ea.Seq)
+		lb := b.connecter(eb.Jeton, eb.Seq)
+		synctest.Wait()
+		b.h.poser(heureB)
+		finir(t, lb)
+		b.h.poser(heureB.Add(5 * time.Minute))
+		finir(t, la)
+		b.h.poser(heureB.Add(8 * time.Minute))
+		la = b.connecter(ea.Jeton, dernierSeq(s))
+		synctest.Wait()
+		for _, k := range []struct {
+			n    uint8
+			want uint64
+		}{{e0.Siege, 0}, {ea.Siege, 0}, {eb.Siege, minuteDe(heureB)}} {
+			if m, ok := annonce0D(t, la, k.n); !ok || m != k.want {
+				t.Errorf("0x0D, siège %d : minute %d (%v), attendu %d", k.n, m, ok, k.want)
+			}
+			en, m := derniere07(t, la, k.n)
+			if m != k.want || en != (k.n == ea.Siege) {
+				t.Errorf("0x07, siège %d : %v, minute %d, attendu %d", k.n, en, m, k.want)
+			}
+		}
+		// Reprise de B par WebSocket : en ligne (minute nulle), puis la minute de sa nouvelle
+		// déconnexion, pas celle de la reprise.
+		b.h.poser(heureB.Add(20 * time.Minute))
+		lb = b.connecter(eb.Jeton, DepuisReprise)
+		synctest.Wait()
+		if en, m := derniere07(t, la, eb.Siege); !en || m != 0 {
+			t.Fatalf("B repris : %v, minute %d", en, m)
+		}
+		b.h.poser(heureB.Add(21 * time.Minute))
+		finir(t, lb)
+		synctest.Wait()
+		if _, m := derniere07(t, la, eb.Siege); m != minuteDe(heureB.Add(21*time.Minute)) {
+			t.Fatalf("B après reprise : minute %d", m)
+		}
+		// Créateur : connecté puis parti à 14:40, il reprend le siège 0 par rejoindre (0x0A) :
+		// sa dernière connexion reste 14:40 tant qu'il n'a pas rouvert de WebSocket.
+		l0 := b.connecter(e0.Jeton, e0.Seq)
+		synctest.Wait()
+		b.h.poser(time.Date(2026, 11, 12, 14, 40, 10, 0, time.UTC))
+		finir(t, l0)
+		b.h.poser(time.Date(2026, 11, 12, 15, 0, 0, 0, time.UTC))
+		b.entrer(t, c, true)
+		finir(t, la)
+		la = b.connecter(ea.Jeton, dernierSeq(s))
+		synctest.Wait()
+		want := minuteDe(time.Date(2026, 11, 12, 14, 40, 0, 0, time.UTC))
+		if m, _ := annonce0D(t, la, 0); m != want {
+			t.Errorf("0x0D du créateur repris : minute %d, attendu %d", m, want)
+		}
+		if _, m := derniere07(t, la, 0); m != want {
+			t.Errorf("0x07 du créateur repris : minute %d, attendu %d", m, want)
+		}
+		finir(t, la)
+	})
+}
+
+// Siège libéré : la minute est oubliée, le nouvel occupant porte 0 ; fin du salon : plus
+// rien n'est gardé.
+func TestDerniereConnexionOubliee(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		ea := b.entrer(t, c, false)
+		eb := b.entrer(t, c, false)
+		s := b.etat(t, c)
+		lb := b.connecter(eb.Jeton, eb.Seq)
+		synctest.Wait()
+		b.h.poser(heureB)
+		finir(t, lb)
+		sous(s, func() {
+			if x := s.sieges[eb.Siege]; x == nil || x.derniere != minuteDe(heureB) {
+				t.Fatal("minute non gardée en mémoire")
+			}
+		})
+		b.depart(s, eb.Siege)
+		ec := b.entrer(t, c, false)
+		if ec.Siege != eb.Siege {
+			t.Fatal("siège du nouvel occupant", ec.Siege)
+		}
+		la := b.connecter(ea.Jeton, dernierSeq(s))
+		synctest.Wait()
+		if m, ok := annonce0D(t, la, ec.Siege); !ok || m != 0 {
+			t.Fatalf("0x0D du nouvel occupant : minute %d (%v)", m, ok)
+		}
+		if en, m := derniere07(t, la, ec.Siege); en || m != 0 {
+			t.Fatalf("0x07 du nouvel occupant : %v, minute %d", en, m)
+		}
+		finir(t, la)
+		if err := b.m.detruire(b.idDe(t, c)); err != nil {
+			t.Fatal(err)
+		}
+		sous(s, func() {
+			for n, x := range s.sieges {
+				if x != nil {
+					t.Fatalf("siège %d gardé après la fin du salon", n)
+				}
+			}
+		})
+	})
+}
+
+// La minute (et la seconde) de la dernière déconnexion n'est jamais écrite : ni dans le
+// fichier de conversation, ni dans la base, ni dans son WAL, ni ailleurs sous le dossier.
+func TestDerniereConnexionJamaisSurDisque(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		ea := b.entrer(t, c, false)
+		eb, mb := b.entrerMembre(t, c, false)
+		s := b.etat(t, c)
+		lb := b.connecter(eb.Jeton, eb.Seq)
+		synctest.Wait()
+		for i := range 5 {
+			b.recevoir(t, mb, trameD(0, i))
+		}
+		heure := time.Date(2026, 11, 12, 14, 32, 47, 0, time.UTC)
+		b.h.poser(heure)
+		finir(t, lb)
+		b.entrer(t, c, false) // une écriture de plus dans la base après la déconnexion
+		la := b.connecter(ea.Jeton, dernierSeq(s))
+		synctest.Wait()
+		minute := minuteDe(heure)
+		if _, m := derniere07(t, la, eb.Siege); m != minute {
+			t.Fatal("témoin : minute non servie", m)
+		}
+		finir(t, la)
+		var motifs [][]byte
+		for _, v := range []uint64{minute, uint64(heure.Unix()), minute * 60} {
+			motifs = append(motifs, binary.BigEndian.AppendUint64(nil, v), binary.LittleEndian.AppendUint64(nil, v),
+				[]byte(strconv.FormatUint(v, 10)))
+		}
+		lus := 0
+		err := filepath.WalkDir(b.dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			brut, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			lus++
+			for _, m := range motifs {
+				if bytes.Contains(brut, m) {
+					t.Errorf("%s contient %x", filepath.Base(p), m)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(b.dir, "shares.db-wal")); err != nil {
+			t.Fatal("témoin : WAL absent", err)
+		}
+		if _, err := os.Stat(filepath.Join(b.dir, "salons")); err != nil || lus < 3 {
+			t.Fatal("témoin : fichiers lus", lus, err)
 		}
 	})
 }

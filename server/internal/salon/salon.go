@@ -39,7 +39,10 @@ type evenement struct {
 // arrivee : rang de l'arrivée (0x02) de l'occupant, gardé par une reprise (0x0A) : borne de
 // Retirer. repris : rang du dernier 0x0A d'une reprise par WebSocket du titulaire (0 : aucune),
 // borne des 0x0E renvoyés à l'accueil (borneEffaces). reprises : heures (Config.Now) des
-// reprises par WebSocket de la dernière heure, repriseMax au plus (connexion.go).
+// reprises par WebSocket de la dernière heure, repriseMax au plus (connexion.go). derniere :
+// minute Unix (arrondie à la minute inférieure) de la dernière déconnexion d'un WebSocket du
+// siège, 0 si inconnue (Task 9b, spec v3 §14.1) : en mémoire seulement, gardée par une
+// reprise (0x0A), oubliée avec le siège (départ, libération, fin du salon).
 type siege struct {
 	nonce           [16]byte
 	jetonV          [32]byte
@@ -47,6 +50,7 @@ type siege struct {
 	arrivee         uint64
 	repris          uint64
 	horsLigneDepuis time.Time
+	derniere        uint64
 	reprises        []time.Time
 }
 
@@ -138,6 +142,7 @@ func (s *salon) installerLocked(n uint8, reprise bool, now time.Time) (jeton [32
 			return [32]byte{}, nil, &Attente{Retry: d}
 		}
 		x.reprises = append(slices.Clone(ancien.reprises), now)
+		x.derniere = ancien.derniere // une reprise n'est pas une déconnexion
 	}
 	rand.Read(jeton[:]) // ne rend jamais d'erreur (Go ≥ 1.24)
 	rand.Read(x.nonce[:])
