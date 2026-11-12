@@ -272,8 +272,8 @@ Le propriétaire veut une conversation aussi proche que possible d'une messageri
 - **En ligne** : point vert sur l'avatar et « en ligne » sous le pseudonyme, d'après `0x07`.
 - **Hors ligne** : « vu aujourd'hui à 14:32 », « vu hier à 22:05 » ou « vu le 11 nov. à 09:10 », à la minute près, heure de l'appareil qui affiche.
 - **Source de l'heure** : le serveur, qui connaît déjà les connexions (§10). Il garde **en mémoire seulement** l'heure de la dernière déconnexion de chaque siège, arrondie à la minute, et la joint à `0x07` hors ligne et à l'accueil (`0x0D` étendu). Rien sur le disque, rien après la fin du salon. Changement de protocole : tâche serveur C-2 Task 9b (ci-dessous).
-- **Masquer ma dernière connexion** : réglage par personne. Le client l'annonce au serveur par un message de contrôle `0x06` (vide ou 1 octet, en mémoire seulement). Le serveur n'envoie alors plus l'heure de ce siège. Comme sur WhatsApp, l'effet est **réciproque** : qui masque la sienne ne voit plus celle des autres, appliqué par le serveur, pas seulement par l'écran.
-- **Signalement (moyen, confidentialité)** : l'heure de dernière connexion apprend aux autres membres quand chacun utilise le salon. Elle est montrée par défaut, comme le veut le propriétaire. Correction proposée : réglage « Masquer » visible dès la page d'explication.
+- **Pas de masquage** (décision du propriétaire, 12 novembre) : tout le monde voit la dernière connexion de chacun, sans réglage pour la cacher.
+- **Signalement (moyen, confidentialité), accepté par le propriétaire** : l'heure de dernière connexion apprend aux autres membres quand chacun utilise le salon, sans moyen de la cacher ; c'est dit sur la page d'explication avant d'entrer.
 - **Signalement (faible)** : « en ligne » veut dire « WebSocket ouvert ». Un onglet ouvert en arrière-plan compte comme en ligne, comme sur les messageries web.
 
 ### 14.2 Coches des messages et des documents
@@ -283,7 +283,7 @@ Le propriétaire veut une conversation aussi proche que possible d'une messageri
   - **Ouvert** (icône d'œil) : le fichier a été affiché dans la visionneuse de l'application ;
   - **Téléchargé** (flèche vers le bas) : le fichier a été enregistré sur l'appareil.
   Dans la fiche du message (appui long ou survol, « Infos ») : pour chaque participant, envoyé, reçu, vu, ouvert, téléchargé, avec l'heure.
-- Toujours actifs, comme « Vu » (décision du propriétaire pour §6). **Signalement (faible, confidentialité)** : l'expéditeur sait si et quand chacun a ouvert ou enregistré son fichier ; c'est dit sur la page d'explication. Le serveur sait déjà qui télécharge une pièce (requête `GET`), pas qui l'ouvre ni qui l'enregistre.
+- Toujours actifs, comme « Vu » (décision du propriétaire pour §6, confirmée le 12 novembre). **Signalement (faible, confidentialité)** : l'expéditeur sait si et quand chacun a ouvert ou enregistré son fichier ; c'est dit sur la page d'explication. Le serveur sait déjà qui télécharge une pièce (requête `GET`), pas qui l'ouvre ni qui l'enregistre.
 
 ### 14.3 Sélection multiple
 
@@ -293,7 +293,7 @@ Le propriétaire veut une conversation aussi proche que possible d'une messageri
 
 ### 14.4 Son de nouveau message et mode silencieux
 
-- **Son** : court, original, de style « tir laser de vaisseau spatial », **synthétisé dans l'appareil** (Web Audio : oscillateur en balayage descendant et petite enveloppe, environ 150 ms, volume modéré). Aucun fichier son, aucune ressource tierce. **Signalement (moyen, légal)** : ne pas reprendre un son connu d'un film ou d'un jeu (droits d'auteur) ; le son est créé pour Shhdrop.
+- **Son** : court, original, de style « tir laser de vaisseau spatial », **synthétisé dans l'appareil** (Web Audio : oscillateur en balayage descendant et petite enveloppe, environ 150 ms, volume modéré). Aucun fichier son, aucune ressource tierce. Le son est **créé pour Shhdrop** (synthèse originale), sans reprendre aucun son existant de film ou de jeu : aucun droit d'auteur tiers (confirmé par le propriétaire, 12 novembre).
 - **Quand** : à la réception d'un message d'un autre participant (jamais pour ses propres messages, accusés, « écrit » ou présences) ; au plus un son toutes les 2 secondes ; pas de son si la conversation est affichée, au premier plan et déjà en bas (on voit le message).
 - **Silencieux** : bouton cloche barrée dans l'en-tête de la conversation, « Mettre en silencieux » (toujours, 1 h, 8 h). Le titre de l'onglet compte encore les non-lus.
 - **Où le réglage est gardé** : la leçon du nettoyage automatique (un réglage perdu à chaque visite est inutile) s'applique. Le réglage est gardé dans la base locale chiffrée de l'appareil (même principe que `shhdrop-returns` : AES-GCM, clé non extractible), rattachée au salon et **effacée à la fin du salon** ou par « Effacer l'historique ». Aucun réglage n'est envoyé au serveur.
@@ -301,6 +301,6 @@ Le propriétaire veut une conversation aussi proche que possible d'une messageri
 
 ### 14.5 Tâches ajoutées
 
-- **C-2 Task 9b** (serveur) : heure de dernière déconnexion en mémoire, arrondie à la minute ; `0x07` hors ligne et `0x0D` étendus de 8 octets (minutes Unix, 0 = inconnue ou masquée) ; contrôle `0x06` « masquer », réciproque ; tests : heure jamais sur disque, masquage réciproque, fin du salon. Les tailles du protocole (§ « Protocole » du plan C-2) changent : `0x07` passe de 11 à 19 octets, une annonce de `0x0D` de 17 à 25.
+- **C-2 Task 9b** (serveur) : heure de dernière déconnexion en mémoire, arrondie à la minute ; `0x07` hors ligne et `0x0D` étendus de 8 octets (minutes Unix, 0 = inconnue ou masquée) ; tests : heure jamais sur disque, oubliée à la fin du salon, arrondie à la minute. Les tailles du protocole (§ « Protocole » du plan C-2) changent : `0x07` passe de 11 à 19 octets, une annonce de `0x0D` de 17 à 25.
 - **C-3** : présence, dernière connexion, coches des messages, son, silencieux.
 - **C-4** : coches des documents, sélection multiple à l'envoi et à la réception, albums, archive.
