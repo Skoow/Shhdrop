@@ -61,8 +61,10 @@
     removing?: number;
     /** Page d'envoi « /envoyer » (retours DROP) : composeur affiché même vide, grand cadre de dépôt au centre. */
     sendPage?: boolean;
+    /** Mot de passe généré, à chaque changement : K_mdp calculé pendant la composition (spec §29.4.4). */
+    onpassword?: (password: string) => void;
   };
-  let { onsend, active = true, onitems, uploadOf, uploadVersion = 0, onretry, removing = 0, sendPage = false }: Props = $props();
+  let { onsend, active = true, onitems, uploadOf, uploadVersion = 0, onretry, removing = 0, sendPage = false, onpassword }: Props = $props();
 
   let online = $state(typeof navigator === "undefined" || navigator.onLine !== false);
 
@@ -84,6 +86,7 @@
   const narrowMq = new MediaQuery("max-width: 759px");
   const narrow = $derived(narrowMq.current);
   const options = createOptions({ generate: generatePassword });
+  $effect(() => onpassword?.(options.password));
   // Formules payantes (D41-16) : feuille d'information seulement, rien n'est en vente.
   let paidOpen = $state(false);
   let paidTier = $state<PaidTier>("plus");

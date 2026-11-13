@@ -1,8 +1,8 @@
 // Brouillon d'envoi (spec §41.14, D41-19) : le partage est créé au premier fichier, chaque
 // fichier est chiffré sous sa propre clé et envoyé aussitôt, en arrière-plan ; retirer un
 // fichier interrompt son envoi et efface ses segments sur le serveur ; au clic, `finalize`
-// attend la fin des envois, puis tire R, le sel, Argon2id et l'enveloppe, chiffre le manifeste
-// des seuls éléments gardés (dans l'ordre affiché) et finalise. Le lien n'existe qu'après.
+// attend la fin des envois, puis tire R, reprend K_mdp (Argon2id calculé pendant la composition,
+// `password`, spec §29.4.4) et fait l'enveloppe, chiffre le manifeste des seuls éléments gardés (dans l'ordre affiché) et finalise. Le lien n'existe qu'après.
 // Le serveur ne reçoit que K_accès et S_gestion (création), des segments chiffrés, des numéros
 // de segments, et à la fin le sel, Argon2id, V_preuve, E, l'en-tête et le manifeste chiffré.
 import {
@@ -41,6 +41,7 @@ import {
   type Item,
   type KeepTtl,
   type KLien,
+  type KMdp,
   type Rights,
   type SGestion,
 } from "../engine";
@@ -161,6 +162,49 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
   let deferred: { id: string; data: Blob }[] | null = null;
   /** Réveille une finalisation qui attend (abandon : elle échoue sur `closed`, audit I2). */
   let wake: (() => void) | undefined;
+
+  // --- K_mdp pendant la composition (spec §29.1, §29.4.4 ; A5) -------------------------------
+  // Le sel est tiré avec le brouillon ; K_mdp du mot de passe généré se calcule dès que la
+  // composition a un élément, un calcul à la fois (64 Mio chacun), et se recalcule si le mot de
+  // passe change (résultat périmé mis à zéro). Il reste dans la mémoire de la page, comme R et
+  // le mot de passe affiché, jusqu'à l'enveloppe (puis zéro), ou jusqu'à l'abandon (zéro).
+  const salt = randomBytes(16);
+  /** Mot de passe dont K_mdp est voulu (le dernier donné), s'il a la forme générée. */
+  let wantPw: string | undefined;
+  let kMdpReady: { pw: string; k: KMdp } | undefined;
+  let kMdpRun: { pw: string; p: Promise<void> } | undefined;
+  const dropKMdp = () => {
+    kMdpReady?.k.fill(0);
+    kMdpReady = undefined;
+  };
+  function precompute() {
+    const pw = wantPw;
+    if (closed || finalizing || kMdpRun || pw === undefined || els.size === 0 || kMdpReady?.pw === pw) return;
+    const p = passwordKeyForCreate(pw, salt)
+      .then(
+        (k) => {
+          if (closed || wantPw !== pw || kMdpReady) k.fill(0); // périmé (ou abandon) : effacé
+          else kMdpReady = { pw, k };
+        },
+        () => undefined, // échec : recalculé au clic
+      )
+      .finally(() => {
+        kMdpRun = undefined;
+        precompute();
+      });
+    kMdpRun = { pw, p };
+  }
+  /** K_mdp pour `pw` (calcul d'avance attendu ou réutilisé, sinon fait maintenant) ; l'appelant l'efface. */
+  async function kMdpFor(pw: string): Promise<KMdp> {
+    if (kMdpRun?.pw === pw) await kMdpRun.p;
+    if (kMdpReady?.pw === pw) {
+      const k = kMdpReady.k;
+      kMdpReady = undefined;
+      return k;
+    }
+    dropKMdp();
+    return passwordKeyForCreate(pw, salt);
+  }
 
   let report: (() => void) | undefined;
   const changed = () => {
@@ -494,6 +538,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
         els.set(id, fresh(id, data));
     changed();
     background();
+    precompute();
     void pump();
   }
 
@@ -524,6 +569,16 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
     },
     /** Aligne le brouillon sur la liste des fichiers (syncList). */
     sync: syncList,
+    /**
+     * Mot de passe généré affiché (A5) : K_mdp calculé d'avance, recalculé à chaque changement.
+     * Un mot de passe d'une autre forme n'est pas calculé (finalize le refusera).
+     */
+    password(pw: string) {
+      if (closed) return;
+      wantPw = isGeneratedPassword(pw) ? pw : undefined;
+      if (kMdpReady && kMdpReady.pw !== wantPw) dropKMdp();
+      precompute();
+    },
     status(id: string): ElementStatus | undefined {
       const e = els.get(id);
       return e && { phase: e.phase, sent: e.acked + e.inflight, total: totalOf(e), error: e.error };
@@ -548,6 +603,8 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       if (closed) return Promise.resolve();
       closed = true;
       deferred = null;
+      wantPw = undefined;
+      dropKMdp(); // un calcul en cours est effacé à son arrivée (closed)
       clearInterval(keepTimer);
       wake?.();
       for (const e of els.values()) {
@@ -660,6 +717,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       const later = deferred;
       deferred = null;
       if (later && !closed) syncList(later);
+      precompute(); // échec : K_mdp prêt pour le prochain clic (succès : brouillon clos, rien)
     }
   }
 
@@ -694,7 +752,6 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
   async function finish(cr: Created, list: { id: string; item: Item }[], f: CreateOpts) {
     // R neuve à chaque finalisation (une ContentKeys par R, jamais recréée : moteur), opaque.
     const r = await newSeed();
-    const salt = randomBytes(16);
     const wipe: Uint8Array[] = [];
     const engine: ({ free(): void } | undefined)[] = [r];
     try {
@@ -709,7 +766,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       }
       const fin = await sealFinal(entries, keys, { rights: f.rights as Rights | undefined, keepTtlH: f.keepTtlH as KeepTtl | undefined });
       throwIfAborted(f.signal);
-      const kMdp = await passwordKeyForCreate(f.password, salt);
+      const kMdp = await kMdpFor(f.password);
       wipe.push(kMdp);
       const ak = await accessKeys(cr.kLien, kMdp);
       engine.push(ak.kEnv);

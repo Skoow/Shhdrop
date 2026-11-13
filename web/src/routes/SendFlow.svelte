@@ -69,10 +69,18 @@
   }
   let draft: Draft = newDraft();
   let draftUsed = false;
+  // Mot de passe affiché par le composeur : K_mdp calculé pendant la composition (A5). Le
+  // brouillon le reçoit de nouveau quand il est remplacé (liste vidée, envoi fini).
+  let shownPassword: string | undefined;
+  function onpassword(pw: string) {
+    shownPassword = pw;
+    draft.password(pw);
+  }
   function onitems(list: { id: string; data: Blob }[]) {
     if (list.length === 0 && draftUsed) {
       void draft.abandon();
       draft = newDraft();
+      if (shownPassword !== undefined) draft.password(shownPassword);
       draftUsed = false;
       removing = 0;
       uploadVersion++;
@@ -214,9 +222,11 @@
 
   function sealed() {
     unloadArmed = false;
-    // Brouillon finalisé : le prochain envoi aura le sien.
+    // Brouillon finalisé : le prochain envoi aura le sien (le composeur, remonté vide, redonne
+    // son nouveau mot de passe).
     draft = newDraft();
     draftUsed = false;
+    shownPassword = undefined;
     setView("ready");
   }
 
@@ -240,7 +250,12 @@
     sender?.cancel();
     powAbort?.abort();
     // Page gardée en cache (bfcache) : elle peut revenir ; sinon le brouillon est détruit.
+    // K_mdp calculé d'avance : effacé dans les deux cas (recalculé au retour de la page).
     if (!e.persisted) void draft.abandon();
+    else draft.password("");
+  }
+  function onPageShow(e: PageTransitionEvent) {
+    if (e.persisted && shownPassword !== undefined) draft.password(shownPassword);
   }
   function onOffline() {
     sender?.markOffline();
@@ -257,7 +272,7 @@
   const summary = $derived(sent ? t("seal.summary", { n: sent.names.length, size: formatBytes(sent.bytes, lang) }) : "");
 </script>
 
-<svelte:window onpagehide={onPageHide} onoffline={onOffline} />
+<svelte:window onpagehide={onPageHide} onpageshow={onPageShow} onoffline={onOffline} />
 
 <!-- Inerte dès l'appui sur Envoyer (audit I1) : la transition de vue arrive plus tard. -->
 <div class="compose-host" hidden={view !== "compose"} inert={view !== "compose" || sender !== null}>
@@ -272,6 +287,7 @@
       active={view === "compose"}
       onsend={start}
       {onitems}
+      {onpassword}
       uploadOf={(id) => draft.status(id)}
       {uploadVersion}
       onretry={(id) => draft.retry(id)}
