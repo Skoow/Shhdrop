@@ -70,7 +70,10 @@ export async function startServer(opts: StartOpts = {}): Promise<TestServer> {
   }
   const dataDir = mkdtempSync(join(tmpdir(), "shh-e2e-"));
   const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries({ PATH: process.env.PATH ?? "", SHH_DATA_DIR: dataDir, SHH_LISTEN: "127.0.0.1:0", SHH_STORAGE_MAX: "4294967296", ...salons, ...opts.env })) {
+  // SHH_DISABLE_DUMPABLE_HARDENING : le test « le serveur ne voit rien » lit /proc/<pid>/mem du
+  // serveur ; PR_SET_DUMPABLE(0) (audit adverse, Z2) l'en empêcherait. Éteint pour les tests
+  // seulement ; la production garde le durcissement (compose.yaml ne pose pas cette variable).
+  for (const [k, v] of Object.entries({ PATH: process.env.PATH ?? "", SHH_DATA_DIR: dataDir, SHH_LISTEN: "127.0.0.1:0", SHH_STORAGE_MAX: "4294967296", SHH_DISABLE_DUMPABLE_HARDENING: "1", ...salons, ...opts.env })) {
     if (v !== undefined) env[k] = v;
   }
   const proc = spawn(bin, ["serve"], { env, stdio: ["ignore", "pipe", "pipe"] });
