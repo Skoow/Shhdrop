@@ -73,6 +73,18 @@ describe("check-dist.mjs, production", () => {
     expect(checkDist(site({ "index.html": PROD_INDEX, "favicon.ico": "i", "icon-192.png": "p", "logo.svg": "<svg/>" }), false)).toEqual([]);
   });
 
+  it("D4 : fichier de langue cité avec son empreinte, jamais orphelin ; anglais absent du script principal", () => {
+    const lang = '{"hero.title":"One link, one password, then nothing."}';
+    const ok = site({ "index.html": PROD_INDEX, "assets/index-a.js": `const s="/assets/locale-en-AbCdEf12.js",i="${sha384(Buffer.from(lang))}";`, "assets/locale-en-AbCdEf12.js": lang });
+    expect(checkDist(ok, false)).toEqual([]);
+    const orphan = site({ "index.html": PROD_INDEX, "assets/locale-en-AbCdEf12.js": lang });
+    expect(checkDist(orphan, false).join("\n")).toContain("assets/locale-en-AbCdEf12.js : orphelin");
+    const noSri = site({ "index.html": PROD_INDEX, "assets/index-a.js": 'const s="/assets/locale-en-AbCdEf12.js";', "assets/locale-en-AbCdEf12.js": lang });
+    expect(checkDist(noSri, false).join("\n")).toContain("assets/locale-en-AbCdEf12.js : son empreinte SHA-384");
+    const both = site({ "index.html": PROD_INDEX, "assets/index-a.js": `const s="/assets/locale-en-AbCdEf12.js",i="${sha384(Buffer.from(lang))}",t="One link, one password, then nothing.";`, "assets/locale-en-AbCdEf12.js": lang });
+    expect(checkDist(both, false).join("\n")).toContain("dictionnaire anglais dans le script principal");
+  });
+
   it("passe sans marque", () => {
     const d = site({ "index.html": PROD_INDEX, "assets/index-a.js": "console.info(1)" });
     expect(run([d])).toEqual({ code: 0, err: "" });

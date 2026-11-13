@@ -36,6 +36,8 @@ Mesure : le français pèse ~19 Ko brotli (interface + pages), l'anglais ~17 Ko.
 
 Si le fichier d'une langue ne se charge pas (réseau), le site s'affiche en anglais, sans erreur bloquante.
 
+**État au 13 novembre (rapport de performance, D4 ; avant les quatre langues)** : le mécanisme est en place pour les deux langues actuelles, mais **avec le français dans le script** (langue de repli actuelle, UI §10 : `detectLang` rend `fr` par défaut) et l'anglais dans `assets/locale-en-EMPREINTE.js`. Écart avec le choix ci-dessus (anglais dans le script), à trancher avec le passage aux quatre langues. Le fichier est du JSON servi avec l'extension `.js` : le serveur Go ne met en cache immuable ni ne compresse les `.json` (règle `immutableAsset`, testée) ; passer à `.json` demande de changer `static.go` et ses tests. Si le fichier ne se charge pas, le site s'affiche en français.
+
 ## 5. Écriture et polices
 
 Les quatre langues s'écrivent de gauche à droite en alphabet latin. Les polices du site (Mona Sans, JetBrains Mono) couvrent déjà ces caractères (plage U+0000-00FF : ã, õ, ç, ñ, á, ¿, ¡) : aucune police ni écriture à ajouter.

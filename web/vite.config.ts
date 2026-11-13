@@ -4,7 +4,7 @@ import { copyFileSync, readdirSync, readFileSync, statSync, writeFileSync } from
 import { join } from "node:path";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { build, defineConfig, type Plugin } from "vite";
 import { DEMO_BASE, DEMO_META } from "./scripts/demo-meta.mjs";
 import { addSri, sha384 } from "./scripts/sri.mjs";
@@ -177,6 +177,45 @@ export function salonWasm(base: string, demo: boolean): Plugin {
   };
 }
 
+/**
+ * Une seule langue au démarrage (rapport de performance, D4) : ./en-source, importé par
+ * src/i18n/, est remplacé par en-source.verified.ts (production) ou en-source.demo.ts (démo, dont
+ * la CSP interdit fetch : dictionnaire intégré). Production : le dictionnaire anglais est écrit en
+ * JSON sous assets/locale-en-EMPREINTE.js (extension .js : cache immuable et compression du
+ * serveur Go, sans le changer) ; son adresse et son empreinte SHA-384 vont dans le script, jamais
+ * ses textes. Contrôle : scripts/check-dist.mjs.
+ */
+export function langAsset(base: string, demo: boolean): Plugin {
+  const VIRTUAL = "virtual:shh-lang";
+  const here = fileURLToPath(new URL(".", import.meta.url));
+  let code = "";
+  return {
+    name: "shh-lang",
+    apply: "build",
+    enforce: "pre",
+    async buildStart() {
+      if (demo) return;
+      // Type stripping de Node (en.ts n'a que des types effaçables) : mêmes textes que le source.
+      const { en } = (await import(pathToFileURL(join(here, "src/i18n/en.ts")).href)) as { en: Record<string, string> };
+      const data = Buffer.from(JSON.stringify(en));
+      const fileName = `assets/locale-en-${createHash("sha256").update(data).digest("base64url").slice(0, 8)}.js`;
+      this.emitFile({ type: "asset", fileName, source: data });
+      code = `export const src = ${JSON.stringify(base + fileName)}; export const integrity = ${JSON.stringify(sha384(data))};`;
+    },
+    resolveId(source, importer) {
+      if (source === VIRTUAL) return "\0" + VIRTUAL;
+      const from = importer?.replace(/\\/g, "/") ?? "";
+      if (/^\.\/en-source(?:\.ts)?$/.test(source) && from.includes("/src/i18n/")) return join(here, demo ? "src/i18n/en-source.demo.ts" : "src/i18n/en-source.verified.ts");
+      return null;
+    },
+    load(id) {
+      if (id !== "\0" + VIRTUAL) return null;
+      if (demo) this.error("shh-lang : pas de fichier de langue dans la démo");
+      return code;
+    },
+  };
+}
+
 /** Démo : CSP, referrer et robots en tête de <head> ; index.html copié en 404.html (Pages). */
 export function demoMeta(): Plugin {
   let outDir = "";
@@ -256,7 +295,7 @@ export function precompress(): Plugin {
 export default defineConfig(({ mode, command }) => {
   const demo = mode === "demo";
   return {
-    plugins: [svelte(), sri(demo ? DEMO_BASE : "/"), engineWasm(demo ? DEMO_BASE : "/", demo), salonWasm(demo ? DEMO_BASE : "/", demo), ...(demo ? [demoMeta()] : [demoGuard(), precompress()])],
+    plugins: [svelte(), sri(demo ? DEMO_BASE : "/"), engineWasm(demo ? DEMO_BASE : "/", demo), salonWasm(demo ? DEMO_BASE : "/", demo), langAsset(demo ? DEMO_BASE : "/", demo), ...(demo ? [demoMeta()] : [demoGuard(), precompress()])],
     base: demo ? DEMO_BASE : "/",
     define: { __SHH_BUILD__: JSON.stringify(buildId(command)) },
     build: {

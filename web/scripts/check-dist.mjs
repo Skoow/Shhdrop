@@ -13,6 +13,8 @@ import { findAnalytics, findErrorListeners } from "./no-analytics.mjs";
 import { checkSri, sha384 } from "./sri.mjs";
 
 const MARK = "__SHH_DEMO__";
+/** Phrase du dictionnaire anglais (titre de l'accueil) : absente du script principal de production. */
+const EN_PROBE = "One link, one password, then nothing.";
 
 /**
  * Poids maximal du module WebAssembly du salon, en brotli (plan salon C-1, Global Constraints ;
@@ -141,7 +143,7 @@ export function checkDist(dir, demo) {
     for (const m of mains) {
       if (m.text.includes("AGFzbQEAAAA") || /\b0,\s*97,\s*115,\s*109,\s*1,\s*0,\s*0,\s*0\b/.test(m.text))
         problems.push(`${m.rel} : octets WebAssembly en ligne dans le script principal : le moteur doit rester dans assets/engine-*.wasm, lu avec son empreinte`);
-      const cited = new Set([...m.text.matchAll(/\/(assets\/(?:engine-[A-Za-z0-9_-]+\.js|[A-Za-z0-9._-]+\.wasm))/g)].map((x) => x[1]));
+      const cited = new Set([...m.text.matchAll(/\/(assets\/(?:engine-[A-Za-z0-9_-]+\.js|locale-[A-Za-z0-9_-]+\.js|[A-Za-z0-9._-]+\.wasm))/g)].map((x) => x[1]));
       for (const rel of cited) {
         const data = byRel.get(rel);
         if (!data) problems.push(`${rel} : cité par le script principal, absent du site`);
@@ -151,8 +153,12 @@ export function checkDist(dir, demo) {
     // Fichier du moteur (.wasm, script du Worker) qu'aucun script principal ne cite : orphelin
     // (chargé d'ailleurs, sans contrôle d'intégrité, ou inutile). Cité sans empreinte : ci-dessus.
     for (const f of all)
-      if (/^assets\/(?:[^/]+\.wasm|engine-[^/]+\.js)$/i.test(f.rel) && !mains.some((m) => m.text.includes(`/${f.rel}`)))
+      if (/^assets\/(?:[^/]+\.wasm|engine-[^/]+\.js|locale-[^/]+\.js)$/i.test(f.rel) && !mains.some((m) => m.text.includes(`/${f.rel}`)))
         problems.push(`${f.rel} : orphelin, aucun script principal ne le cite avec son empreinte SHA-384`);
+    // Une seule langue au démarrage (D4) : le dictionnaire anglais (assets/locale-en-*.js, cité avec
+    // son empreinte ci-dessus) n'est pas aussi dans le script principal.
+    if (all.some((f) => /^assets\/locale-en-[^/]+\.js$/.test(f.rel)))
+      for (const m of mains) if (m.text.includes(EN_PROBE)) problems.push(`${m.rel} : dictionnaire anglais dans le script principal (il doit rester dans assets/locale-en-*.js)`);
     // Moteur WebAssembly : précompressé comme le texte (vite.config.ts, COMPRESSIBLE ; servi par
     // static.go avec Content-Encoding), sinon 481 Ko seraient lus au lieu de 141 Ko en brotli.
     for (const f of all) {

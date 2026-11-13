@@ -26,6 +26,13 @@ declare module "virtual:shh-engine" {
 
 // Module WebAssembly du salon (greffon shh-salon, vite.config.ts), production seulement : adresse
 // et empreinte SRI de assets/salon-EMPREINTE.wasm.
+// Dictionnaire anglais (greffon shh-lang, vite.config.ts), production seulement : adresse et
+// empreinte SRI de assets/locale-en-EMPREINTE.js.
+declare module "virtual:shh-lang" {
+  export const src: string;
+  export const integrity: string;
+}
+
 declare module "virtual:shh-salon" {
   export const src: string;
   export const integrity: string;
