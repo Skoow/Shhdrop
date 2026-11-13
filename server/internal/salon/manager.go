@@ -513,7 +513,8 @@ func (m *Manager) Membre(jeton []byte) (Membre, error) {
 	return Membre{salon: s, siege: n, emis: x.emis, plancher: x.plancher, jetonV: h}, nil
 }
 
-// departLocked : départ du siège n (Quitter, « Quitter et signaler ») : 0x03 au
+// departLocked : départ du siège n (Quitter, « Quitter et signaler », siège jamais connecté
+// après jamaisConnecteMax) : 0x03 au
 // journal (sortirLocked) ; sans effet s'il est libre. Appelé sous s.mu.
 func (m *Manager) departLocked(s *salon, n uint8) {
 	m.sortirLocked(s, n, func(seq uint64) []byte { return EnrDepart(seq, n) }, false)
@@ -602,9 +603,16 @@ func (m *Manager) entretenir(s *salon, now time.Time) (tombe, echu, aPurger bool
 		return false, true, false
 	}
 	s.effacerEchuesLocked(now.UnixMilli())
-	// Aucun siège n'est libéré ici : un absent reste réservé et attendu par les trames
-	// « instantané » jusqu'à son retour, son départ, son exclusion ou la fin du salon (revue
-	// finale C-2, I3). Le créateur libère un siège fantôme par l'exclusion.
+	// Un siège connecté au moins une fois n'est jamais libéré ici : un absent reste réservé et
+	// attendu par les trames « instantané » jusqu'à son retour, son départ, son exclusion ou la
+	// fin du salon (revue finale C-2, I3). Seul un siège invité qui n'a jamais ouvert de
+	// WebSocket dans les jamaisConnecteMax après son entrée part (0x03 : réponse de rejoindre
+	// perdue, remplissage ; relecture C-2, N1) ; son arrivée reste comptée (s.arrivees).
+	for n, x := range s.sieges {
+		if x != nil && x.jamaisConnecte && now.Sub(x.entre) >= jamaisConnecteMax {
+			m.departLocked(s, uint8(n))
+		}
+	}
 	return s.fini && !now.Before(s.expires.Add(margeTombe)), false, s.echuesPiecesLocked(now)
 }
 

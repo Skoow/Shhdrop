@@ -420,32 +420,42 @@ func TestEtatAu(t *testing.T) {
 }
 
 // Exigence 4 (plan, point 9) : la trame de contrôle d'un arrivant (son KeyPackage, non
-// volatile) reste servie au rattrapage d'un membre qui revient 30 min plus tard.
+// volatile) reste servie au rattrapage d'un membre qui revient 30 min plus tard, que
+// l'arrivant soit encore là (hors ligne, siège réservé : I3) ou parti entre-temps (relecture
+// C-2, N4 : b.depart).
 func TestKeyPackageGardePourLeRattrapage(t *testing.T) {
-	b := nouveauBanc(t, 200)
-	c := b.creer(t, 3)
-	eg, g := b.entrerMembre(t, c, true)
-	s := g.salon
-	vu := dernierSeq(s) // dernier rang reçu par le créateur avant la coupure
-	earr, arrivant := b.entrerMembre(t, c, false)
-	kp := trameD(0, 42) // en-tête de contrôle : non volatile, règle « désactivé »
-	seq := b.recevoir(t, arrivant, kp)
-	b.h.avancer(30 * time.Minute)
-	b.m.Tick() // ne libère personne (revue finale C-2, I3 : siège réservé pour la vie du salon)
-	if _, err := b.m.Membre(eg.Jeton[:]); err != nil {
-		t.Fatal("créateur libéré :", err)
-	}
-	if _, err := b.m.Membre(earr.Jeton[:]); err != nil {
-		t.Fatal("arrivant libéré après 30 min hors ligne :", err)
-	}
-	trouve := false
-	for _, e := range lireSuite(t, s, vu, 1000) {
-		if e.ty == 0x01 && e.seq == seq {
-			trouve = e.siege == arrivant.siege && bytes.Equal(e.trame, kp)
+	for _, parti := range []bool{false, true} {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 3)
+		eg, g := b.entrerMembre(t, c, true)
+		s := g.salon
+		vu := dernierSeq(s) // dernier rang reçu par le créateur avant la coupure
+		earr, arrivant := b.entrerMembre(t, c, false)
+		sous(s, func() {
+			s.sieges[arrivant.siege].jamaisConnecte = false // son KeyPackage est venu par WebSocket
+		})
+		kp := trameD(0, 42) // en-tête de contrôle : non volatile, règle « désactivé »
+		seq := b.recevoir(t, arrivant, kp)
+		if parti {
+			b.depart(s, arrivant.siege)
 		}
-	}
-	if !trouve {
-		t.Fatal("KeyPackage absent du rattrapage")
+		b.h.avancer(30 * time.Minute)
+		b.m.Tick() // ne libère personne (revue finale C-2, I3 : siège réservé pour la vie du salon)
+		if _, err := b.m.Membre(eg.Jeton[:]); err != nil {
+			t.Fatal("créateur libéré :", err)
+		}
+		if _, err := b.m.Membre(earr.Jeton[:]); (err == nil) == parti {
+			t.Fatal("arrivant, parti :", parti, err)
+		}
+		trouve := false
+		for _, e := range lireSuite(t, s, vu, 1000) {
+			if e.ty == 0x01 && e.seq == seq {
+				trouve = e.siege == arrivant.siege && bytes.Equal(e.trame, kp)
+			}
+		}
+		if !trouve {
+			t.Fatal("KeyPackage absent du rattrapage, parti :", parti)
+		}
 	}
 }
 

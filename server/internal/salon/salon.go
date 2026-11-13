@@ -20,6 +20,9 @@ const (
 	nbSieges = 10
 	// journalMax : annonces (0x02, 0x03, 0x09, 0x0A) gardées au plus par salon.
 	journalMax = 4096
+	// jamaisConnecteMax : un siège invité qui n'a jamais ouvert de WebSocket dans ce délai après
+	// son entrée est libéré (relecture C-2, N1 : réponse de rejoindre perdue, remplissage).
+	jamaisConnecteMax = 10 * time.Minute
 	// arriveesParMembre : arrivées totales < arriveesParMembre × max_members (§39.3.3).
 	arriveesParMembre = 5
 )
@@ -50,6 +53,12 @@ type siege struct {
 	repris         uint64
 	derniere       uint64
 	reprises       []time.Time
+	// jamaisConnecte : siège invité entré (0x02) qui n'a encore ouvert aucun WebSocket ; entre :
+	// heure (Config.Now) de cette entrée. Mis à faux à la première connexion (inscrire), gardé
+	// par une reprise. Encore vrai jamaisConnecteMax après l'entrée : départ 0x03 (Tick ;
+	// relecture C-2, N1). Aucun KeyPackage n'a pu être publié sans WebSocket : sans effet MLS.
+	jamaisConnecte bool
+	entre          time.Time
 }
 
 // salon : état d'un salon vivant. Tous les champs sont protégés par mu.
@@ -147,6 +156,11 @@ func (s *salon) installerLocked(n uint8, reprise bool, now time.Time) (jeton [32
 		}
 		x.reprises = append(slices.Clone(ancien.reprises), now)
 		x.derniere = ancien.derniere // une reprise n'est pas une déconnexion
+		x.jamaisConnecte, x.entre = ancien.jamaisConnecte, ancien.entre
+	} else if n != 0 {
+		// Nouvel occupant d'un siège invité. Le siège 0 n'est jamais libéré ainsi : il reste au
+		// créateur et ne compte pas dans le plafond des invités.
+		x.jamaisConnecte, x.entre = true, now
 	}
 	rand.Read(jeton[:]) // ne rend jamais d'erreur (Go ≥ 1.24)
 	rand.Read(x.nonce[:])

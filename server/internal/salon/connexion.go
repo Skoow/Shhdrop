@@ -328,6 +328,7 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 		old.arreter(CodeRemplace, EnrFin(s.seq, RaisonRemplace))
 	}
 	s.conns[mb.siege] = c
+	x.jamaisConnecte = false              // connecté une fois : réservé pour la vie du salon (I3, N1)
 	s.limites[mb.siege].vocal.ouvrir(now) // présence comptée pour la réserve vocale
 	s.diffuserLocked(EnrPresence(s.seq, mb.siege, true, 0), genrePresence, c)
 	return c, 0

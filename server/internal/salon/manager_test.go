@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/blob"
@@ -669,9 +670,16 @@ func TestMembre(t *testing.T) {
 // jamais. Seuls un départ (0x03) ou une exclusion le libèrent : 0x03 au journal, jeton oublié,
 // place rendue.
 func TestSiegeReserveHorsLigne(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) { siegeReserveHorsLigne(t) })
+}
+
+func siegeReserveHorsLigne(t *testing.T) {
 	b := nouveauBanc(t, 200)
 	c := b.creer(t, 2)
-	g := b.entrer(t, c, false) // jamais connecté
+	g := b.entrer(t, c, false)
+	lg := b.connecter(g.Jeton, g.Seq) // connecté une fois (N1), puis hors ligne
+	synctest.Wait()
+	finir(t, lg)
 	s := b.etat(t, c)
 	seq := dernierSeq(s)
 	for range 23 {

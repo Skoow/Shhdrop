@@ -254,7 +254,10 @@ func TestInstantaneAttendLAbsent(t *testing.T) {
 		c := b.creer(t, 4)
 		eg, g := b.entrerMembre(t, c, true)
 		ea, a := b.entrerMembre(t, c, false)
-		_, cm := b.entrerMembre(t, c, false) // jamais connecté : hors ligne depuis son entrée
+		ec, cm := b.entrerMembre(t, c, false)
+		lc := b.connecter(ec.Jeton, ec.Seq) // connecté une fois (N1), puis hors ligne
+		synctest.Wait()
+		finir(t, lc)
 		lg := b.connecter(eg.Jeton, eg.Seq)
 		la := b.connecter(ea.Jeton, ea.Seq)
 		synctest.Wait()
@@ -372,6 +375,9 @@ func TestAbsentRevientTard(t *testing.T) {
 		eg, g := b.entrerMembre(t, c, true)
 		_, a := b.entrerMembre(t, c, false)
 		ec, _ := b.entrerMembre(t, c, false)
+		l0 := b.connecter(ec.Jeton, ec.Seq) // connecté une fois (N1), puis absent
+		synctest.Wait()
+		finir(t, l0)
 		lg := b.connecter(eg.Jeton, eg.Seq)
 		synctest.Wait()
 		s := g.salon
