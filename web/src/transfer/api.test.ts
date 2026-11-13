@@ -272,3 +272,23 @@ describe("watch (spec §41.8) : 204 alive, 410 gone, le reste stop", () => {
       expect(await watch(ctx("http://x", { fetch: at(st, b) as unknown as typeof fetch, retryDelayMs: 1 }), "t"), String(st)).toBe("stop");
   });
 });
+
+describe("audit web D4 : valeurs de meta bornées aux maxima de l'offre", () => {
+  const META = { expires_in_s: 3600, salt: "s", kdf: { ops: 3, mem: 1 }, bucket: 1, segments: 1, opens_left: 2 };
+  const call = (body: unknown, grant?: string) =>
+    meta(ctx("http://x", { fetch: (async () => new Response(JSON.stringify(body))) as unknown as typeof fetch, retryDelayMs: 1 }), new Uint8Array(32) as KAcces, grant);
+  it("dans les bornes : accepté (24 h + 15 min d'arrondi, 10 ouvertures)", async () => {
+    expect((await call({ ...META, expires_in_s: 24 * 3600 + 900, opens_left: 10 })).opensLeft).toBe(10);
+    expect((await call({ ...META, expires_in_s: 0 })).expiresInS).toBe(0);
+  });
+  it.each([
+    ["échéance de 99 999 999 s", { expires_in_s: 99_999_999 }],
+    ["échéance au-delà de 24 h + 15 min", { expires_in_s: 24 * 3600 + 901 }],
+    ["échéance négative", { expires_in_s: -1 }],
+    ["999 999 ouvertures", { opens_left: 999_999 }],
+    ["11 ouvertures", { opens_left: 11 }],
+  ])("%s → BadResponse", async (_, over) => {
+    await expect(call({ ...META, ...over })).rejects.toBeInstanceOf(BadResponse);
+  });
+});
+

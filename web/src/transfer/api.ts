@@ -6,6 +6,7 @@
 // Module interne : l'interface publique est src/index.ts, sans ce module.
 import { b64u, checkOrigin, unb64u, type KAcces, type KPreuve, type SGestion } from "../engine/pure";
 import { fetchUploader, xhrUploader, type Uploader } from "./upload";
+import { MAX_OPENS, TTL_MAX_HOURS } from "../limits";
 
 export type Net = {
   fetch?: typeof fetch;
@@ -351,7 +352,7 @@ export async function meta(c: Ctx, kAcces: KAcces, grant?: string): Promise<Meta
   );
   const k = obj(o.kdf);
   return {
-    expiresInS: num(o, "expires_in_s"),
+    expiresInS: expiresOf(o),
     salt: str(o, "salt"),
     kdf: { ops: num(k, "ops"), mem: num(k, "mem") },
     bucket: num(o, "bucket"),
@@ -360,9 +361,22 @@ export async function meta(c: Ctx, kAcces: KAcces, grant?: string): Promise<Meta
   };
 }
 
-/** Un partage lisible a au moins une ouverture restante (ruling 5), sauf rouvert par octroi. */
+/**
+ * Audit web D4 : bornes des valeurs du serveur, aux maxima de l'offre actuelle (gratuite :
+ * TTL_MAX_HOURS, MAX_OPENS) ; marge de 15 min pour l'arrondi de l'échéance côté serveur.
+ * Au-delà, la réponse est refusée : un serveur ne fait pas afficher « 27 777 h » ni « 999 999
+ * ouvertures ». À relever avec les formules payantes (limits.ts, PAID), le jour où elles existent.
+ */
+export const EXPIRES_MAX_S = TTL_MAX_HOURS * 3600 + 900;
+function expiresOf(o: Record<string, unknown>): number {
+  const v = num(o, "expires_in_s");
+  if (v < 0 || v > EXPIRES_MAX_S) throw new BadResponse();
+  return v;
+}
+
+/** Un partage lisible a au moins une ouverture restante (ruling 5), sauf rouvert par octroi ; jamais plus que MAX_OPENS (D4). */
 function opensLeft(n: number, reopen: boolean): number {
-  if (n < (reopen ? 0 : 1)) throw new BadResponse();
+  if (n < (reopen ? 0 : 1) || n > MAX_OPENS) throw new BadResponse();
   return n;
 }
 
