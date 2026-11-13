@@ -587,13 +587,17 @@ func (s *Service) WatchCount() int {
 func (s *Service) PollRemoved() error {
 	// Toujours lu (un dossier, le plus souvent absent) : la demande « tout couper » de wipe
 	// est confirmée même sans descripteur détaché (revue B5). Lu hors de gone.mu.
+	key, err := s.ensureKillKey()
+	if err != nil {
+		return err
+	}
 	kills, err := s.readKills()
 	if err != nil {
 		return err
 	}
 	s.gone.mu.Lock()
 	s.gone.init()
-	if err := s.pollKillsLocked(kills); err != nil {
+	if err := s.pollKillsLocked(kills, key); err != nil {
 		s.gone.unlock()
 		return err
 	}

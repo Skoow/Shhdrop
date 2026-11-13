@@ -185,6 +185,7 @@ type Service struct {
 	}
 	streams Streams   // flux de segments annulables (spec §41.8)
 	gone    goneState // ouvertures actives, descripteurs détachés, surveillances, octrois (spec §41.4, §41.8)
+	kill    killKey   // clé des noms de demandes de coupure (kill.go)
 	// grantKey : clé HMAC des octrois d'ouverture, tirée au démarrage, jamais écrite.
 	grantKey [32]byte
 	// finalizing : envois dont un Finalize est en cours ; un seul à la fois par id, pour

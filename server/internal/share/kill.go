@@ -2,11 +2,16 @@ package share
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -14,13 +19,78 @@ import (
 // une destruction par l'administrateur coupe tout, tout de suite). « shhdrop admin destroy »
 // tourne dans un autre processus : la ligne du partage n'existe plus en base, seul le serveur
 // en marche connaît le descripteur détaché (en mémoire). La commande dépose une demande,
-// <dossier des données>/kill/<hex V_accès> ; le serveur, qui lit ce dossier chaque seconde
-// (PollRemoved), coupe ses flux, ferme le descripteur et efface
+// <dossier des données>/kill/<hex HMAC-SHA-256(clé du serveur, V_accès)> ; le serveur, qui lit
+// ce dossier chaque seconde (PollRemoved), coupe ses flux, ferme le descripteur et efface
 // la demande ; la commande attend cet effacement (KillWait), sinon retire sa demande et
-// répond « introuvable ». La demande ne contient que V_accès (déjà en base tant que le
-// partage existait) et ne vit que quelques secondes.
+// répond « introuvable ». La demande est vide et ne vit que quelques secondes.
+//
+// Nom à clé (audit du 13 novembre, D8) : un nom peut rester dans les blocs du dossier après
+// sa suppression ; hex(V_accès) y aurait confirmé, à qui détient le lien, qu'un partage a été
+// détruit par l'administrateur. La clé est tirée par le serveur à son premier passage
+// (PollRemoved) et réécrite en place dans <dossier des données>/kill.key à chaque démarrage :
+// un nom resté sur le disque ne se relie plus à un lien dès que la clé a changé. Dates du
+// dossier, des demandes et de la clé remises à l'epoch.
 
 func (s *Service) killDir() string { return filepath.Join(filepath.Dir(s.FrozenFile), "kill") }
+
+func (s *Service) killKeyFile() string { return filepath.Join(filepath.Dir(s.FrozenFile), "kill.key") }
+
+// killKey : clé des noms de demandes, côté serveur (ensureKillKey).
+type killKey struct {
+	mu  sync.Mutex
+	key []byte // nil tant qu'elle n'est pas écrite
+}
+
+// killName : nom de la demande pour V_accès v sous la clé key.
+func killName(key, v []byte) string {
+	h := hmac.New(sha256.New, key)
+	h.Write([]byte("shhdrop kill|"))
+	h.Write(v)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// epoch0 : remet les dates de p à l'epoch (aucune heure de destruction sur le disque).
+func epoch0(p string) error { return os.Chtimes(p, time.Unix(0, 0), time.Unix(0, 0)) }
+
+// ensureKillKey (serveur) : tire la clé et l'écrit, en place, dans kill.key (même fichier,
+// mêmes blocs : l'ancienne clé est écrasée), une fois par processus.
+func (s *Service) ensureKillKey() ([]byte, error) {
+	s.kill.mu.Lock()
+	defer s.kill.mu.Unlock()
+	if s.kill.key != nil {
+		return s.kill.key, nil
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, err
+	}
+	p := s.killKeyFile()
+	f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	_, err = f.WriteAt(key, 0)
+	err = errors.Join(err, f.Truncate(int64(len(key))), f.Sync(), f.Close(), epoch0(p))
+	if err != nil {
+		return nil, err
+	}
+	s.kill.key = key
+	return key, nil
+}
+
+// readKillKey (commande) : clé écrite par le serveur ; absente ou mal formée : nil.
+func (s *Service) readKillKey() []byte {
+	f, err := os.Open(s.killKeyFile())
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	key := make([]byte, 33)
+	if n, err := io.ReadFull(f, key); n != 32 || !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil
+	}
+	return key[:32]
+}
 
 // cutDetached coupe, dans ce processus, le partage détaché dont V_accès vaut v.
 func (s *Service) cutDetached(v []byte) bool {
@@ -68,8 +138,18 @@ func (s *Service) CutAllDetached() (bool, error) {
 	}
 }
 
-// requestKill dépose la demande et attend que le serveur l'efface (coupure faite).
-func (s *Service) requestKill(v []byte) error { return s.awaitKill(hex.EncodeToString(v)) }
+// requestKill dépose la demande et attend que le serveur l'efface (coupure faite). Clé du
+// serveur attendue au plus KillWait (serveur qui vient de démarrer) ; sans elle : ErrNotFound.
+func (s *Service) requestKill(v []byte) error {
+	key := s.readKillKey()
+	for end := time.Now().Add(s.KillWait); key == nil && time.Now().Before(end); key = s.readKillKey() {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if key == nil {
+		return ErrNotFound
+	}
+	return s.awaitKill(killName(key, v))
+}
 
 // awaitKill dépose la demande name et attend que le serveur l'efface ; sinon la retire et
 // rend ErrNotFound.
@@ -88,7 +168,10 @@ func (s *Service) awaitKill(name string) error {
 	}
 	if f != nil {
 		f.Close()
+		epoch0(p)
 	}
+	epoch0(dir)
+	defer epoch0(dir) // la suppression (par le serveur ou ici) change aussi la date du dossier
 	for end := time.Now().Add(s.KillWait); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
 		if _, err := os.Stat(p); errors.Is(err, fs.ErrNotExist) {
 			return nil
@@ -113,24 +196,31 @@ func (s *Service) readKills() ([]os.DirEntry, error) {
 // détaché d'ici est laissée : la commande la retire à la fin de son attente. La demande
 // killAll (wipe) coupe tous les partages détachés et est toujours effacée, même s'il n'y en a
 // aucun : la commande sait ainsi que c'est fait.
-func (s *Service) pollKillsLocked(es []os.DirEntry) error {
+func (s *Service) pollKillsLocked(es []os.DirEntry, key []byte) error {
+	removed := false
+	defer func() {
+		if removed {
+			epoch0(s.killDir())
+		}
+	}()
 	for _, e := range es {
 		if e.Name() == killAll {
 			for id, d := range s.gone.dead {
 				s.killLocked(id, d)
 			}
+			removed = true
 			if err := os.Remove(filepath.Join(s.killDir(), killAll)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return err
 			}
 			continue
 		}
-		v, err := hex.DecodeString(e.Name())
-		if err != nil || len(v) != 32 {
+		if v, err := hex.DecodeString(e.Name()); err != nil || len(v) != 32 {
 			continue
 		}
 		for id, d := range s.gone.dead {
-			if bytes.Equal(d.accessV, v) {
+			if hmac.Equal([]byte(killName(key, d.accessV)), []byte(e.Name())) {
 				s.killLocked(id, d)
+				removed = true
 				if err := os.Remove(filepath.Join(s.killDir(), e.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
 					return err
 				}
