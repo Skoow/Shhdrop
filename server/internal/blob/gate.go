@@ -27,6 +27,10 @@ func NewGate(n int) *Gate {
 	return &Gate{c: make(chan struct{}, n)}
 }
 
+// Do exécute f sous la borne, pour un appelant hors du paquet (écritures de conversation du
+// salon, audit adverse du 13 novembre, S-H1). Un Gate nil ne borne rien.
+func (g *Gate) Do(f func() error) error { return g.do(f) }
+
 // do exécute f sous la borne.
 func (g *Gate) do(f func() error) error {
 	if g == nil {

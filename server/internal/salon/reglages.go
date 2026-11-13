@@ -205,6 +205,7 @@ func (m *Manager) renouvelerLocked(s *salon) error {
 	if err != nil {
 		return errRenouvellement
 	}
+	conv.g = m.cfg.Pieces.Gate // écritures bornées comme à l'ouverture (S-H1)
 	conv.compterDans(&m.octetsConv)
 	s.conv = conv
 	return nil

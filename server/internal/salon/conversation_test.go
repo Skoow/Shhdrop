@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/skoow/shhdrop/server/internal/blob"
 )
 
 // idConv : identifiant interne valide (22 caractères base64url, 16 octets).
@@ -33,6 +35,25 @@ func nouvelleConv(t *testing.T, dossier, id string) *Conversation {
 	}
 	t.Cleanup(func() { c.Detruire() })
 	return c
+}
+
+// Audit adverse du 13 novembre, S-H1 : les appels disque de la conversation (écriture d'une
+// trame, lecture, zéros d'effacement) passent par le sémaphore blob.Gate, pour borner les fils
+// du système comme les partages et les pièces. Sans le câblage, Peak resterait à 0.
+func TestConversationBorneLesAppelsDisque(t *testing.T) {
+	dir := t.TempDir()
+	c := nouvelleConv(t, dir, idConv)
+	c.g = blob.NewGate(4)
+	ajouter(t, c, 3) // 3 écritures
+	if _, err := c.Lire(0); err != nil {
+		t.Fatal("Lire :", err)
+	}
+	if err := c.EffacerPlusieurs([]uint32{1}); err != nil {
+		t.Fatal("EffacerPlusieurs :", err)
+	}
+	if p := c.g.Peak(); p < 1 {
+		t.Fatalf("appels disque de la conversation hors du sémaphore (Peak=%d)", p)
+	}
 }
 
 func ajouter(t *testing.T, c *Conversation, n int) {

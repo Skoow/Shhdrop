@@ -530,6 +530,7 @@ func (m *Manager) etat(id string, exp int64, maxMembers int) (*salon, error) {
 		if err != nil {
 			return nil, err
 		}
+		conv.g = m.cfg.Pieces.Gate // écritures de conversation bornées comme les partages (S-H1)
 		conv.compterDans(&m.octetsConv)
 		neuf := nouveauSalon(id, time.Unix(exp, 0), maxMembers, conv, m.now)
 		neuf.flux = &m.flux

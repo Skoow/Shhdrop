@@ -88,6 +88,12 @@ type Conversation struct {
 	chemin  string
 	f       fichierEcriture // écritures
 	lecteur *os.File        // lectures, ouvert avec O_NOATIME quand le système le permet
+	// g : sémaphore des appels disque (blob.Gate partagé avec les partages et les pièces), posé
+	// par le Manager après ouverture (etat, renouvellement) ; nil pour les tests et sans effet.
+	// Audit adverse du 13 novembre, S-H1 : borne les fils du système bloqués sur le disque, que
+	// les écritures de conversation (une par salon, sous s.mu) auraient pu multiplier jusqu'à
+	// dépasser pids_limit sous un disque lent et un SHH_SALONS_MAX élevé.
+	g *blob.Gate
 	cle     [32]byte
 	aead    cipher.AEAD
 	n       uint32 // emplacements écrits
@@ -153,6 +159,16 @@ func (c *Conversation) etat() error {
 	return nil
 }
 
+// borne exécute f sous le sémaphore des appels disque (g nil : sans borne, tests). Pris en
+// dernier, rien d'autre pris dedans : aucune attente croisée (blob.Gate).
+func (c *Conversation) borne(f func()) {
+	if c.g == nil {
+		f()
+		return
+	}
+	_ = c.g.Do(func() error { f(); return nil })
+}
+
 // ecrire écrit p en off ; les dates sont remises à l'epoch même en cas d'erreur (écriture
 // partielle), comme blob.WriteAt.
 func (c *Conversation) ecrire(p []byte, off int64) (err error) {
@@ -161,7 +177,7 @@ func (c *Conversation) ecrire(p []byte, off int64) (err error) {
 			err = derr
 		}
 	}()
-	_, err = c.f.WriteAt(p, off)
+	c.borne(func() { _, err = c.f.WriteAt(p, off) })
 	return es(err)
 }
 
@@ -259,8 +275,10 @@ func (c *Conversation) Lire(e uint32) ([]byte, error) {
 		return nil, ErrEmplacement
 	}
 	buf := make([]byte, TailleEmplacement)
-	if _, err := c.lecteur.ReadAt(buf, decalage(e)); err != nil {
-		return nil, es(err)
+	var errLec error
+	c.borne(func() { _, errLec = c.lecteur.ReadAt(buf, decalage(e)) })
+	if errLec != nil {
+		return nil, es(errLec)
 	}
 	nul := true
 	for _, b := range buf {
@@ -346,7 +364,9 @@ func (c *Conversation) EffacerPlusieurs(l []uint32) error {
 	zeros := make([]byte, TailleEmplacement)
 	var premiere error
 	for _, e := range l {
-		if _, err := c.f.WriteAt(zeros, decalage(e)); err != nil && premiere == nil {
+		var err error
+		c.borne(func() { _, err = c.f.WriteAt(zeros, decalage(e)) })
+		if err != nil && premiere == nil {
 			premiere = es(err)
 		}
 	}
