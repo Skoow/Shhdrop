@@ -10,12 +10,18 @@ ignore = [
     # authentifié qui met dans son Commit l'ajout d'un KeyPackage ECDSA (OpenMLS en vérifie la
     # signature avant de refuser sa suite). Ce chemin ne vérifie qu'une signature sur des données
     # publiques (aucune clé secrète dans le calcul) : une variabilité de temps n'y révèle rien.
-    # Correctif (>= 0.7.6) hors de portée d'OpenMLS 0.9.2.
+    # Correctif (>= 0.7.6) hors de portée d'OpenMLS 0.9.2. Revérifié le 13 novembre 2026 :
+    # crypto-bigint 0.7.9 à 0.7.11 publiées (0.7.6 à 0.7.8 retirées), mais elliptic-curve 0.13.8
+    # exige ^0.5 (`cargo update -p crypto-bigint@0.5.5 --precise 0.7.11` : refusé).
     # Réexamen : à la prochaine version d'OpenMLS, et au plus tard le 11 décembre 2026.
     "RUSTSEC-2026-0387",
-    # libcrux-kem 0.0.9 (deux avis de panique). Présent dans Cargo.lock seulement comme
-    # dépendance de dev de hpke-rs-libcrux : `cargo tree -e all --all-features --target all`
-    # ne l'atteint pas, il n'est compilé nulle part. Réexamen : même date.
+    # libcrux-kem 0.0.9 (deux avis de panique). Présent dans Cargo.lock seulement par
+    # hpke-rs-libcrux, dépendance facultative de hpke-rs (fonction « libcrux », qu'openmls_rust_crypto
+    # n'active pas) : `cargo tree -i libcrux-kem --target all` n'affiche rien, il n'est compilé
+    # nulle part. Revérifié le 13 novembre 2026 : 0.0.10 (corrigée) publiée le 7 octobre, mais
+    # hpke-rs-libcrux 0.7.0 exige =0.0.9 (`cargo update -p libcrux-kem --precise 0.0.10` :
+    # refusé) ; il faudrait hpke-rs 0.8, qu'aucune version d'openmls_rust_crypto n'accepte encore
+    # (0.6.0, ^0.7). Réexamen : même date.
     "RUSTSEC-2026-0330",
     "RUSTSEC-2026-0331",
     # proc-macro-error2 2.0.1 (non maintenu). Macro procédurale tirée par hax-lib-macros (libcrux) :
