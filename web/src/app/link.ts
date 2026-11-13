@@ -42,6 +42,13 @@ const BARE_PATH = /^\/(?!\/)[^\\#?]*$/;
  * Remplace l'entrée courante par `pathname` seul : ni « # », ni requête (aucune entrée
  * ajoutée, état nul). Rend `false` sans rien écrire si `pathname` n'est pas un chemin nu ;
  * ne lève jamais (appelée dans un effet).
+ *
+ * Résidu assumé (audit adverse du 13 novembre, Si1, même classe que D9) : l'entrée
+ * PerformanceNavigationTiming (`performance.getEntriesByType("navigation")[0].name`) garde
+ * l'URL d'origine, fragment compris, et aucune API ne l'efface (elle est figée au chargement).
+ * `replaceState` ne nettoie que la barre d'adresse et l'historique. Seul un script de MÊME
+ * origine pourrait la relire ; c'est déjà empêché (CSP stricte, Trusted Types, zéro ressource
+ * tierce). Le mot de passe, lui, n'est jamais dans le fragment navigué (séparé avant).
  */
 export function scrubAddressBar(h: History, pathname: string): boolean {
   if (!BARE_PATH.test(pathname)) return false;
