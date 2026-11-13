@@ -28,6 +28,7 @@ import {
   unb64u,
   type GeneratedPassword,
   type Item,
+  type KAcces,
   type KeepTtl,
   type KLien,
   type Manifest,
@@ -406,6 +407,26 @@ export async function createShare(
  * Durée de vie restante et ouvertures restantes (ruling 5 : déjà connues de qui a K_accès,
  * pour annoncer « encore N fois » avant le geste irréversible).
  */
+/**
+ * A10 : meta lu à l'arrivée (fetchMeta), repris par l'ouverture qui suit de peu (au plus
+ * META_REUSE_MS, même partage, même octroi, une seule fois) : un aller-retour de moins à
+ * l'Entrée. Rien de secret ici : le meta vient du serveur (sel, KDF, palier) et le partage est
+ * désigné par SHA-256(K_accès). Un partage échu entre-temps est refusé par unlock.
+ */
+export const META_REUSE_MS = 30_000;
+let recentMeta: { tag: string; grant: string; at: number; m: api.Meta } | undefined;
+const metaTag = async (kAcces: Uint8Array<ArrayBuffer>) => b64u(new Uint8Array(await crypto.subtle.digest("SHA-256", kAcces)));
+/** Oublie le meta gardé (tests ; aucun usage requis ailleurs : il échoit seul). */
+export function forgetMeta(): void {
+  recentMeta = undefined;
+}
+async function metaFor(c: api.Ctx, kAcces: KAcces, grant: string | undefined): Promise<api.Meta> {
+  const r = recentMeta;
+  recentMeta = undefined;
+  if (r && performance.now() - r.at <= META_REUSE_MS && r.grant === (grant ?? "") && r.tag === (await metaTag(kAcces))) return r.m;
+  return api.meta(c, kAcces, grant);
+}
+
 export async function fetchMeta(
   link: string,
   expectedOrigin: string,
@@ -417,6 +438,7 @@ export async function fetchMeta(
     const { kAcces } = await deriveAccess(p.kLien);
     try {
       const m = await api.meta(api.ctx(p.origin, net), kAcces, grant);
+      recentMeta = { tag: await metaTag(kAcces), grant: grant ?? "", at: performance.now(), m };
       return { expiresInS: m.expiresInS, opensLeft: m.opensLeft };
     } finally {
       kAcces.fill(0);
@@ -593,7 +615,7 @@ async function openWith(
       keys?.kPreuve.fill(0);
     };
     try {
-      m = await api.meta(c, kAcces, grant);
+      m = await metaFor(c, kAcces, grant);
       keys = await keysFromMeta(p.kLien, m, password);
       u = await api.unlock(c, kAcces, keys.kPreuve, grant);
     } catch (e) {

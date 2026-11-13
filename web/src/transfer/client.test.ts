@@ -98,6 +98,7 @@ import {
   createShare,
   destroyShare,
   fetchMeta,
+  forgetMeta,
   openShare,
   shareStatus,
   type CaptchaCtx,
@@ -192,6 +193,8 @@ const packRoute = (pk: Pack, bad?: (n: number, seg: Uint8Array<ArrayBuffer>) => 
   }
   return undefined;
 };
+
+beforeEach(() => forgetMeta()); // A10 : chaque test part sans meta gardé
 
 function server(route: Route) {
   const calls: string[] = [];
@@ -311,6 +314,38 @@ describe("openShare : correspondance des erreurs", () => {
     expect(captured.kLien.at(-1)!.every((b) => b === 0)).toBe(true);
     expect(captured.ids.at(-1)!.length).toBe(16);
     expect(captured.ids.at(-1)!.every((b) => b === 0)).toBe(true);
+  });
+});
+
+describe("A10 : meta lu à l'arrivée réutilisé à l'ouverture", () => {
+  it("moins de 30 s : un seul GET meta ; plus de 30 s, ou autre octroi : relu ; une seule réutilisation", async () => {
+    const s = server(() => undefined);
+    await fetchMeta(LINK, ORIGIN, s.net);
+    await reject(openShare(LINK, PW, ORIGIN, undefined, s.net)); // paquet invalide : peu importe ici
+    expect(s.calls.filter((c) => c.endsWith("/meta"))).toHaveLength(1);
+    await reject(openShare(LINK, PW, ORIGIN, undefined, s.net)); // déjà réutilisé : relu
+    expect(s.calls.filter((c) => c.endsWith("/meta"))).toHaveLength(2);
+
+    const now = vi.spyOn(performance, "now");
+    const t = performance.now();
+    now.mockReturnValue(t);
+    await fetchMeta(LINK, ORIGIN, s.net);
+    now.mockReturnValue(t + 31_000);
+    await reject(openShare(LINK, PW, ORIGIN, undefined, s.net));
+    expect(s.calls.filter((c) => c.endsWith("/meta"))).toHaveLength(4);
+    now.mockRestore();
+
+    await fetchMeta(LINK, ORIGIN, s.net); // sans octroi
+    await reject(openShare(LINK, PW, ORIGIN, { grant: GRANT0 }, s.net)); // avec : relu
+    expect(s.calls.filter((c) => c.endsWith("/meta"))).toHaveLength(6);
+  });
+
+  it("autre lien : jamais le meta d'un autre partage", async () => {
+    const s = server(() => undefined);
+    const other = await shareLink(ORIGIN, new Uint8Array(32).fill(9) as KLien);
+    await fetchMeta(other, ORIGIN, s.net);
+    await reject(openShare(LINK, PW, ORIGIN, undefined, s.net));
+    expect(s.calls.filter((c) => c.endsWith("/meta"))).toHaveLength(2);
   });
 });
 
