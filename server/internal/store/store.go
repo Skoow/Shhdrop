@@ -73,8 +73,13 @@ CREATE INDEX IF NOT EXISTS salon_pieces_salon ON salon_pieces(salon_id)`
 // Les PRAGMA passent par le DSN pour s'appliquer à chaque connexion. synchronous(FULL) :
 // valeur par défaut, écrite pour qu'un changement du pilote ne l'abaisse pas en silence
 // (NORMAL perdrait les dernières transactions à une coupure de courant).
+// journal_size_limit(0) : le fichier -wal est ramené à zéro après CHAQUE point de contrôle, y
+// compris les points de contrôle automatiques PASSIVE (tous les 1 000 blocs) ; sinon les blocs
+// déjà repliés (dont les métadonnées d'un partage supprimé) restent écrits dans le fichier
+// entre deux TRUNCATE du janitor (audit adverse du 13 novembre, St1).
 const pragmas = "_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_pragma=secure_delete(ON)" +
-	"&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=temp_store(MEMORY)"
+	"&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=temp_store(MEMORY)" +
+	"&_pragma=journal_size_limit(0)"
 
 // SchemaVersion : version du schéma, écrite dans PRAGMA user_version. Un binaire refuse une
 // base d'une version plus récente (ErrNewerSchema) : un retour arrière ne réécrit jamais une

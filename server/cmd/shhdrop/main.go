@@ -304,6 +304,11 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 		return err
 	}
 	defer db.Close()
+	// Vidage immédiat du WAL au démarrage : un -wal laissé par un arrêt brutal (métadonnées de
+	// partages d'avant le crash) est tronqué tout de suite, sans attendre le premier passage du
+	// janitor (≤ 60 s) (audit adverse du 13 novembre, St1). Base occupée (impossible ici, avant
+	// d'écouter) : ignoré, le janitor repassera.
+	_ = store.Checkpoint(db)
 	if err := tightenPerms(cfg.DataDir); err != nil {
 		return err
 	}

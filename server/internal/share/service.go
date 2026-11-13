@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/blob"
+	"github.com/skoow/shhdrop/server/internal/store"
 )
 
 var (
@@ -1443,12 +1444,26 @@ func (s *Service) destroy(id string) (bool, error) {
 	return true, nil
 }
 
+// retireOrNotFound : destruction EXPLICITE (créateur par S_gestion, destinataire par K_preuve,
+// administrateur). Au succès, le WAL est vidé tout de suite (Checkpoint TRUNCATE) : les
+// métadonnées du partage supprimé (V_accès, V_gestion, sel, palier, échéance) ne traînent pas
+// dans shares.db-wal jusqu'au prochain passage du janitor (≤ 60 s), lisibles à une saisie du
+// serveur en marche (audit adverse du 13 novembre, St1). Les destructions CHAUDES (fin de
+// téléchargement, 5 essais : Done, countFailure) appellent retire() directement, sans ce vidage,
+// pour ne pas vider le WAL à chaque téléchargement. Un vidage incomplet (base occupée) n'est pas
+// une erreur : le janitor repassera (le partage est de toute façon déjà supprimé).
 func (s *Service) retireOrNotFound(id string, grace bool) error {
 	ok, err := s.retire(id, grace, s.now())
-	if err == nil && !ok {
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return ErrNotFound
 	}
-	return err
+	// Au mieux : le partage est déjà supprimé, un échec de vidage (base occupée ou autre) ne
+	// doit pas faire échouer la réponse ; le janitor revidera.
+	_ = store.Checkpoint(s.DB)
+	return nil
 }
 
 func notFound(err error) error {
