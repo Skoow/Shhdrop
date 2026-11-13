@@ -159,3 +159,17 @@ Noms internes, découpage des fichiers (un paquet `internal/adminui` servi par u
 
 - **Phase 1 (maintenant)** : écouteur local, jeton, page unique, état JSON (A à G sauf ce qui est marqué phase 2), actions geler / dégeler / détruire un lien signalé, tests.
 - **Phase 2** : bascule S3 (après sa conception), compteurs nouveaux (refus de débit, envois et lectures en cours, destructions par mots de passe faux), répartition par palier si validée.
+
+## État de réalisation (13 novembre, phase 1 codée)
+
+Codé et testé : paquet `server/internal/adminui` (page, état JSON, actions), câblage dans `server/cmd/shhdrop/admin_serve.go`, variables `SHH_ADMIN_LISTEN` et `SHH_ADMIN_TOKEN` (`server/internal/config`). Désactivé par défaut ; `deploy/compose.yaml` n'est **pas** modifié (activation décrite dans `deploy/README.md` §4, à décider par le propriétaire).
+
+Écarts par rapport au texte ci-dessus, à valider :
+
+1. **Adresse d'écoute (moyenne, exploitation).** « Lié à 127.0.0.1 » ne marche pas en production : le serveur tourne dans un conteneur, dont la boucle locale n'est pas joignable par un tunnel SSH. Retenu : mêmes règles que `SHH_LISTEN` (boucle locale ; ou, derrière le proxy déclaré, l'adresse du réseau interne), et **chaque requête** n'est servie que si son pair est la boucle locale ou `SHH_TRUSTED_PROXY` (la machine). Une requête relayée par Caddy (`X-Shh-Client-IP`) est refusée.
+2. **La page elle-même est servie sans jeton (faible).** Un navigateur ne peut pas envoyer d'en-tête `Authorization` en ouvrant une page. Les trois fichiers de la page (HTML, CSS, JS : aucune donnée, aucun secret) sont donc servis sans jeton, au pair autorisé seulement ; tout `/api/*` exige le jeton et répond de façon uniforme sinon. L'authentification « Basic » du navigateur a été écartée : le navigateur la rejoue tout seul, ce qui permettrait à un autre site de déclencher un gel ou une destruction.
+3. **Adresse du pair lue hors de `clientip.go` (faible, §36 S2).** `adminui.peerOK` lit `RemoteAddr` pour le contrôle du point 1 ; le test `api/minimize_test.go` l'autorise à cet endroit précis. Aucun en-tête nouveau n'est lu (`Authorization` et `X-Shh-Client-IP` étaient déjà dans la liste blanche). §36 S2 de la spécification est à amender d'une ligne.
+4. **HTTP/3 n'est pas affiché** : c'est un réglage de Caddy, le serveur Go ne le connaît pas.
+5. **Le jeton n'est pas gardé en clair par le serveur** : seule son empreinte SHA-256 est en mémoire ; la comparaison se fait sur les empreintes, en temps constant.
+
+Demande du propriétaire du 13 novembre, **non codée, à trancher** : « nombre de comptes ouverts, nombre d'abonnés, nombre total de liens ou de fichiers partagés ». Voir le compte rendu : les comptes (§37) et le paiement (§38) ne sont pas codés ; un total cumulé de partages est interdit en toutes lettres par §9.5 et §35.1 (« compteurs de partages créés, d'ouvertures, d'octets servis ») ; le nombre de fichiers d'un partage est inconnu du serveur (manifeste chiffré).

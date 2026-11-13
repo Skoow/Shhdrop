@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,7 +98,7 @@ func runAdmin(args []string, cfg config.Config, stdin io.Reader, stdout, stderr 
 		}
 		fmt.Fprintf(stdout, "créations suspendues (%s ; %d partages en place)\n", dir, n)
 	case "unfreeze":
-		if err := os.Remove(frozen); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := unfreeze(frozen); err != nil {
 			return fail(err)
 		}
 		fmt.Fprintf(stdout, "créations rétablies (%s)\n", dir)

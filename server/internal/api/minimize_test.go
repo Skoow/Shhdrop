@@ -101,8 +101,12 @@ func TestNoHeaderReadOutsideAllowList(t *testing.T) {
 					t.Errorf("%s : %s() interdit (spec §36 S2)", where(x), x.Sel.Name)
 				case "RemoteAddr":
 					fn := enclosing(sf.f, x.Pos())
-					if filepath.Base(sf.path) != "clientip.go" && fn != "healthz" {
-						t.Errorf("%s : RemoteAddr lu dans %s (seulement clientip.go et /healthz)", where(x), fn)
+					// adminui.peerOK (tableau de bord d'administration, 13 novembre) : la page ne
+					// répond qu'à la boucle locale ou au pair de confiance ; l'adresse n'y est que
+					// comparée, comme dans /healthz.
+					adminPeer := strings.HasSuffix(filepath.ToSlash(sf.path), "internal/adminui/adminui.go") && fn == "peerOK"
+					if filepath.Base(sf.path) != "clientip.go" && fn != "healthz" && !adminPeer {
+						t.Errorf("%s : RemoteAddr lu dans %s (seulement clientip.go, /healthz et adminui.peerOK)", where(x), fn)
 					}
 				case "Cookie", "Cookies", "FormValue", "PostFormValue", "UserAgentData":
 					t.Errorf("%s : %s interdit", where(x), x.Sel.Name)

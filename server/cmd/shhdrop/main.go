@@ -279,11 +279,14 @@ func newHTTPServer(h http.Handler) *http.Server {
 }
 
 // serve démarre le serveur et s'arrête proprement quand ctx est annulé.
-// Seule sortie sur out : « SHH_LISTENING <hôte:port> » une fois l'écoute ouverte.
+// Seule sortie sur out : « SHH_LISTENING <hôte:port> » une fois l'écoute ouverte, puis, si le
+// tableau de bord est demandé (SHH_ADMIN_LISTEN), « SHH_ADMIN_LISTENING <hôte:port> » ou
+// « SHH_ADMIN_INDISPONIBLE ».
 func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	// Interdit core dump et lecture de /proc/<pid>/mem par un autre processus (clés en mémoire,
 	// audit adverse du 13 novembre, Z2) ; sans effet hors Linux.
 	durcirProcessus()
+	start := time.Now()
 	if !filepath.IsAbs(cfg.DataDir) {
 		return shown("SHH_DATA_DIR doit être un chemin absolu")
 	}
@@ -366,8 +369,9 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	srv := newHTTPServer(api.New(svc, token.New(tokKey, cfg.Now), lim,
-		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy, cfg.TrustedProxies, salonsOf(cfg, sm), capacityOf(cfg)))
+	handler, alert := api.NewWithAlert(svc, token.New(tokKey, cfg.Now), lim,
+		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy, cfg.TrustedProxies, salonsOf(cfg, sm), capacityOf(cfg))
+	srv := newHTTPServer(handler)
 	if sm != nil {
 		// net/http ne suit plus une connexion mise à niveau : Shutdown ne l'attend pas.
 		srv.RegisterOnShutdown(sm.FermerTout)
@@ -385,6 +389,9 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 		ln.Close()
 		return err
 	}
+	// Tableau de bord d'administration : écouteur à part, après l'écouteur public ; s'il ne
+	// s'ouvre pas, le serveur public tourne quand même.
+	defer startAdmin(cfg, out, adminDeps{svc: svc, sm: sm, db: db, gate: gate, alert: alert, start: start})()
 	jctx, jcancel := context.WithCancel(ctx)
 	jdone := make(chan struct{})
 	wdone := make(chan struct{})

@@ -2,6 +2,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net"
@@ -36,6 +37,14 @@ type Config struct {
 	Origin string
 	// Capacity : places du serveur (capacity.go), réglables ou calculées d'après la machine.
 	Capacity Capacity
+	// AdminListen (SHH_ADMIN_LISTEN, hôte:port) : écouteur du tableau de bord d'administration,
+	// distinct de SHH_LISTEN. Vide (défaut) : tableau de bord désactivé. Mêmes règles d'adresse
+	// que SHH_LISTEN : boucle locale, sauf derrière un proxy déclaré (le conteneur de
+	// production, où seuls la boucle locale et SHH_TRUSTED_PROXY sont servis, adminui).
+	AdminListen string
+	// AdminTokenHash : SHA-256 de SHH_ADMIN_TOKEN (obligatoire avec SHH_ADMIN_LISTEN). Le jeton
+	// lui-même n'est pas gardé : seule son empreinte sert à la comparaison en temps constant.
+	AdminTokenHash [32]byte
 }
 
 func FromEnv() (Config, error) {
@@ -83,7 +92,11 @@ func FromEnv() (Config, error) {
 	if v := os.Getenv("SHH_LISTEN"); v != "" {
 		c.Listen = v
 	}
-	if err := checkListen(c.Listen, c.BehindProxy && len(c.TrustedProxies) > 0); err != nil {
+	proxied := c.BehindProxy && len(c.TrustedProxies) > 0
+	if err := checkListen("SHH_LISTEN", c.Listen, proxied); err != nil {
+		return Config{}, err
+	}
+	if c.AdminListen, c.AdminTokenHash, err = adminFromEnv(c.Listen, proxied); err != nil {
 		return Config{}, err
 	}
 	if c.StaticDir, err = absDir("SHH_STATIC_DIR", os.Getenv("SHH_STATIC_DIR")); err != nil {
@@ -235,13 +248,13 @@ func digits(s string) bool {
 // checkListen : hôte:port numérique. Sans proxy déclaré, l'hôte doit être la boucle locale
 // (127.0.0.0/8, ::1 ou localhost) : sinon K_accès, K_preuve et S_gestion circuleraient
 // en HTTP clair (audit M3).
-func checkListen(l string, proxied bool) error {
+func checkListen(name, l string, proxied bool) error {
 	host, port, err := net.SplitHostPort(l)
 	if err != nil || !digits(port) || len(port) > 5 {
-		return fmt.Errorf("SHH_LISTEN invalide (hôte:port): %q", l)
+		return fmt.Errorf("%s invalide (hôte:port): %q", name, l)
 	}
 	if n, _ := strconv.Atoi(port); n > 65535 {
-		return fmt.Errorf("SHH_LISTEN invalide (hôte:port): %q", l)
+		return fmt.Errorf("%s invalide (hôte:port): %q", name, l)
 	}
 	if host == "localhost" {
 		return nil
@@ -250,7 +263,55 @@ func checkListen(l string, proxied bool) error {
 		return nil
 	}
 	if !proxied {
-		return fmt.Errorf("SHH_LISTEN %q n'est pas une adresse de boucle locale : exige SHH_BEHIND_PROXY=1 et SHH_TRUSTED_PROXY", l)
+		return fmt.Errorf("%s %q n'est pas une adresse de boucle locale : exige SHH_BEHIND_PROXY=1 et SHH_TRUSTED_PROXY", name, l)
 	}
 	return nil
+}
+
+// Jeton d'administration : au moins adminTokenMin caractères de l'alphabet base64url (43 =
+// 32 octets aléatoires), dont adminTokenDistinct différents au moins (refuse « aaaa… »).
+const adminTokenMin, adminTokenMax, adminTokenDistinct = 43, 512, 16
+
+// adminFromEnv : SHH_ADMIN_LISTEN et SHH_ADMIN_TOKEN (tableau de bord d'administration,
+// conception du 13 novembre). Sans SHH_ADMIN_LISTEN : désactivé, le jeton n'est pas lu.
+// Aucun message d'erreur ne reprend le jeton.
+func adminFromEnv(listen string, proxied bool) (string, [32]byte, error) {
+	var none [32]byte
+	l := os.Getenv("SHH_ADMIN_LISTEN")
+	if l == "" {
+		return "", none, nil
+	}
+	if err := checkListen("SHH_ADMIN_LISTEN", l, proxied); err != nil {
+		return "", none, err
+	}
+	_, port, _ := net.SplitHostPort(l)
+	if _, p, _ := net.SplitHostPort(listen); p == port {
+		return "", none, errors.New("SHH_ADMIN_LISTEN doit avoir un autre port que SHH_LISTEN (écouteur distinct, jamais le port public)")
+	}
+	t := os.Getenv("SHH_ADMIN_TOKEN")
+	if !adminTokenOK(t) {
+		return "", none, fmt.Errorf("SHH_ADMIN_LISTEN exige SHH_ADMIN_TOKEN : %d à %d caractères parmi A-Z a-z 0-9 - _ "+
+			"tirés au hasard (exemple : openssl rand -hex 32) ; valeur absente ou refusée (non affichée)",
+			adminTokenMin, adminTokenMax)
+	}
+	return l, sha256.Sum256([]byte(t)), nil
+}
+
+func adminTokenOK(t string) bool {
+	if len(t) < adminTokenMin || len(t) > adminTokenMax {
+		return false
+	}
+	var seen [256]bool
+	distinct := 0
+	for i := 0; i < len(t); i++ {
+		b := t[i]
+		if (b < 'a' || b > 'z') && (b < 'A' || b > 'Z') && (b < '0' || b > '9') && b != '-' && b != '_' {
+			return false
+		}
+		if !seen[b] {
+			seen[b] = true
+			distinct++
+		}
+	}
+	return distinct >= adminTokenDistinct
 }

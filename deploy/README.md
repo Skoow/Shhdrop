@@ -101,6 +101,29 @@ deploy/deploy.sh admin wipe --yes    # urgence : gèle, puis efface tous les par
 
 Le lien signalé ne se donne **jamais** en argument (il irait dans l'historique du shell) : toujours sur l'entrée standard.
 
+### Tableau de bord d'administration (désactivé par défaut)
+
+Une page qui réunit l'état du serveur (santé, stockage, mémoire, places, partages et salons vivants : des nombres seulement, jamais un identifiant, une adresse ni un contenu) et trois commandes : geler, dégeler, détruire un lien signalé. `wipe` n'y est pas, volontairement : il reste en ligne de commande. Conception : `docs/superpowers/specs/2026-11-13-tableau-de-bord-admin-design.md`.
+
+Elle est servie par un **écouteur à part**, jamais par Caddy, jamais sur le port public. Sans `SHH_ADMIN_LISTEN`, elle n'existe pas.
+
+Pour l'activer (changement de `compose.yaml`, à relire et commiter comme les autres) :
+
+1. Tirer un jeton : `openssl rand -hex 32`. Le mettre dans `deploy/.env` (`SHH_ADMIN_TOKEN=…`), jamais dans le dépôt.
+2. Dans `compose.yaml`, service `shhdrop`, section `environment` :
+
+   ```yaml
+   SHH_ADMIN_LISTEN: 172.30.53.2:9191
+   SHH_ADMIN_TOKEN: ${SHH_ADMIN_TOKEN:?SHH_ADMIN_TOKEN manquant}
+   ```
+
+   `172.30.53.2` est l'adresse du conteneur sur le réseau interne : seule la machine peut la joindre (aucun port publié, aucune route depuis Internet). Le serveur ne répond qu'à la boucle locale et à `SHH_TRUSTED_PROXY` (la machine).
+3. `deploy/deploy.sh` relance le conteneur. Depuis son poste : `ssh -L 9191:172.30.53.2:9191 <machine>`, puis ouvrir `http://localhost:9191` et coller le jeton.
+
+Le jeton reste dans la mémoire de l'onglet (il se redemande après un rechargement). Un jeton de moins de 43 caractères empêche le serveur de démarrer. Si l'écouteur d'administration ne s'ouvre pas, le site public démarre quand même.
+
+À savoir : le jeton est lisible par qui est root sur la machine (`docker inspect`), comme le reste ; tout compte local de la machine peut joindre le port, le jeton est alors la seule barrière. Changer le jeton = changer `deploy/.env` et relancer.
+
 ## 5. Après un redémarrage de la machine
 
 Le site reste hors service tant que le volume n'est pas déverrouillé (les conteneurs ne démarrent pas sans lui) :

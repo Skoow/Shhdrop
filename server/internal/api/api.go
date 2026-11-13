@@ -112,6 +112,10 @@ type Capacity struct {
 	Uploads, Downloads, Watches, WebSockets int
 }
 
+// WithDefaults : places effectives (une valeur nulle prend sa valeur par défaut), pour
+// l'affichage du tableau de bord d'administration.
+func (c Capacity) WithDefaults() Capacity { return c.withDefaults() }
+
 func (c Capacity) withDefaults() Capacity {
 	def := func(v, d int) int {
 		if v > 0 {
@@ -294,7 +298,17 @@ type ctxIP struct{}
 // sal : réglages du salon ; valeur zéro = salon désactivé. capa : places du serveur.
 func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
 	static http.Handler, behindProxy bool, proxies []netip.Prefix, sal Salons, capa Capacity) http.Handler {
-	return newHandler(newServerCap(svc, sig, lim, capt, behindProxy, proxies, capa), static, sal)
+	h, _ := NewWithAlert(svc, sig, lim, capt, static, behindProxy, proxies, sal, capa)
+	return h
+}
+
+// NewWithAlert : New, plus la lecture de l'alerte des signalements (le même booléen que
+// /healthz : au moins 5 signalements dans l'heure en cours, spec §15.2, §36 S21), pour le
+// tableau de bord d'administration. Jamais le nombre.
+func NewWithAlert(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
+	static http.Handler, behindProxy bool, proxies []netip.Prefix, sal Salons, capa Capacity) (http.Handler, func() bool) {
+	s := newServerCap(svc, sig, lim, capt, behindProxy, proxies, capa)
+	return newHandler(s, static, sal), func() bool { return s.reports.alert(s.svc.Now()) }
 }
 
 // Salons : réglages du salon. Valeur zéro : salon désactivé (aucune route, CSP inchangée).

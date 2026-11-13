@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Poste de pilotage</title>
+<link rel="stylesheet" href="/admin.css">
+<script src="/admin.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <h1>Poste de pilotage</h1>
+  <p class="sub" id="fraicheur" aria-live="polite"></p>
+</header>
+
+<main>
+<form id="entree" class="carte etroit" autocomplete="off">
+  <h2>Jeton d'administration</h2>
+  <p class="note">Il reste dans la mémoire de cet onglet : rien n'est enregistré, il se redemande après un rechargement.</p>
+  <label for="jeton">Jeton</label>
+  <input id="jeton" type="password" autocomplete="off" spellcheck="false" required>
+  <button class="agir" type="submit">Ouvrir</button>
+  <p class="erreur" id="entree-erreur" role="alert"></p>
+</form>
+
+<div id="tableau" hidden>
+  <p class="bandeau" id="perdu" role="alert" hidden>Serveur injoignable : les valeurs affichées ne sont plus à jour.</p>
+
+  <section class="carte" aria-labelledby="t-sante">
+    <h2 id="t-sante">Santé</h2>
+    <ul class="pastilles" id="pastilles"></ul>
+    <dl class="faits" id="sante"></dl>
+  </section>
+
+  <section class="carte" aria-labelledby="t-stockage">
+    <h2 id="t-stockage">Stockage</h2>
+    <div id="stockage"></div>
+  </section>
+
+  <section class="carte" aria-labelledby="t-activite">
+    <h2 id="t-activite">Activité en ce moment</h2>
+    <p class="note">Ce qui est vivant à l'instant. Aucun total cumulé : le serveur ne compte pas ce qui a existé.</p>
+    <dl class="chiffres" id="activite"></dl>
+  </section>
+
+  <section class="carte" aria-labelledby="t-charge">
+    <h2 id="t-charge">Charge et places</h2>
+    <div id="charge"></div>
+  </section>
+
+  <section class="carte" aria-labelledby="t-memoire">
+    <h2 id="t-memoire">Mémoire et moteur</h2>
+    <div id="memoire"></div>
+  </section>
+
+  <section class="carte" aria-labelledby="t-actions">
+    <h2 id="t-actions">Actions</h2>
+    <div class="action">
+      <div>
+        <h3>Créations</h3>
+        <p class="note" id="gel-etat"></p>
+      </div>
+      <button class="attention" type="button" id="gel"></button>
+    </div>
+    <form class="action colonne" id="detruire" autocomplete="off">
+      <div>
+        <h3>Détruire un lien signalé</h3>
+        <p class="note">Partage ou salon. Le lien part dans le corps de la demande, jamais dans l'adresse, et le champ est vidé aussitôt. La destruction est immédiate et définitive.</p>
+      </div>
+      <label for="lien">Lien signalé</label>
+      <input id="lien" type="password" autocomplete="off" spellcheck="false" required>
+      <button class="detruire" type="submit" id="detruire-bouton">Détruire ce lien</button>
+    </form>
+    <p class="resultat" id="resultat" role="status"></p>
+    <p class="note">L'effacement d'urgence de tout le serveur n'est pas ici, volontairement : <code>shhdrop admin wipe --yes</code>, par SSH.</p>
+  </section>
+</div>
+</main>
+</body>
+</html>
