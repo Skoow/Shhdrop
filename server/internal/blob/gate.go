@@ -47,6 +47,23 @@ func (g *Gate) do(f func() error) error {
 // Peak : plus grand nombre d'appels simultanés vus (tests).
 func (g *Gate) Peak() int64 { return g.peak.Load() }
 
+// InUse : appels disque en cours sous la borne, à l'instant (tableau de bord d'administration) ;
+// 0 pour un Gate nil. Un agrégat, sans rien d'autre.
+func (g *Gate) InUse() int64 {
+	if g == nil {
+		return 0
+	}
+	return g.used.Load()
+}
+
+// Cap : borne du Gate (appels disque simultanés au plus) ; 0 pour un Gate nil.
+func (g *Gate) Cap() int {
+	if g == nil {
+		return 0
+	}
+	return cap(g.c)
+}
+
 // gatedReaderAt : lectures de r sous la borne.
 type gatedReaderAt struct {
 	r io.ReaderAt
