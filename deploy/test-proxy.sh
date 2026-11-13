@@ -384,6 +384,7 @@ check "sortie standard du serveur Go : la seule ligne SHH_LISTENING" \
 check "sortie d'erreur du serveur Go : vide" test ! -s "$srv/shhdrop.stderr"
 check "sortie standard de Caddy : vide" test ! -s "$srv/caddy-a.stdout"
 check "sortie d'erreur de Caddy : vide" test ! -s "$srv/caddy-a.stderr"
+[ -s "$srv/caddy-a.stderr" ] && { echo "sortie d'erreur de Caddy :"; cat "$srv/caddy-a.stderr"; }
 [ -n "$hits_txt$hits_raw" ] && printf 'fichiers en cause :\n%s\n' "$hits_txt$hits_raw"
 
 echo

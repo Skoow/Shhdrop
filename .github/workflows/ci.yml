@@ -248,6 +248,8 @@ jobs:
           cache-dependency-path: server/go.sum
       - name: Test du proxy avec l'image et le Caddy de compose.yaml
         run: |
+          # Tampons UDP de deploy/README.md (QUIC) : sans eux, Caddy avertit sur sa sortie d'erreur.
+          sudo sysctl -w net.core.rmem_max=7500000 net.core.wmem_max=7500000
           out="$RUNNER_TEMP/proxy"
           mkdir -p "$out"
           id=$(docker create shhdrop:ci)
