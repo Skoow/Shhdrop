@@ -1,7 +1,9 @@
 package config
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 )
@@ -65,5 +67,23 @@ func TestAdminAdresse(t *testing.T) {
 	t.Setenv("SHH_ADMIN_LISTEN", "172.30.53.2:9191")
 	if c, err := FromEnv(); err != nil || c.AdminListen != "172.30.53.2:9191" {
 		t.Fatal(err)
+	}
+}
+
+// Audit adverse 3, F1 : tout jeton tiré par la commande documentée (openssl rand -hex 32)
+// doit être accepté. 2 000 tirages : aucun refus.
+func TestAdminJetonHexAleatoireAccepte(t *testing.T) {
+	b := make([]byte, 32)
+	for i := 0; i < 2000; i++ {
+		if _, err := rand.Read(b); err != nil {
+			t.Fatal(err)
+		}
+		if tok := hex.EncodeToString(b); !adminTokenOK(tok) {
+			t.Fatal("jeton hexadécimal aléatoire refusé")
+		}
+	}
+	// Jeton hexadécimal sans le symbole « f » : accepté (c'était le cas refusé).
+	if !adminTokenOK("0123456789abcde0123456789abcde0123456789abcde0123456789abcde0123") {
+		t.Fatal("jeton à 15 symboles refusé")
 	}
 }

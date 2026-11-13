@@ -278,7 +278,11 @@ func checkListen(name, l string, proxied bool) error {
 
 // Jeton d'administration : au moins adminTokenMin caractères de l'alphabet base64url (43 =
 // 32 octets aléatoires), dont adminTokenDistinct différents au moins (refuse « aaaa… »).
-const adminTokenMin, adminTokenMax, adminTokenDistinct = 43, 512, 16
+// 10 et non 16 (audit adverse 3, F1) : un jeton hexadécimal de 64 caractères tiré au hasard
+// n'a que 16 symboles possibles et en omet un environ une fois sur quatre ; il était alors
+// refusé et le serveur ne démarrait pas. Moins de 10 symboles distincts sur 64 tirages
+// hexadécimaux : probabilité inférieure à 10^-9.
+const adminTokenMin, adminTokenMax, adminTokenDistinct = 43, 512, 10
 
 // adminFromEnv : SHH_ADMIN_LISTEN et SHH_ADMIN_TOKEN (tableau de bord d'administration,
 // conception du 13 novembre). Sans SHH_ADMIN_LISTEN : désactivé, le jeton n'est pas lu.
