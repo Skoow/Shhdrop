@@ -83,7 +83,7 @@ const SchemaVersion = 2
 
 var (
 	// ErrNewerSchema : message fixe, sans chemin.
-	ErrNewerSchema = errors.New("base créée par une version plus récente de Shhdrop : refus d'ouvrir " +
+	ErrNewerSchema = errors.New("base créée par une version plus récente de Shhgone : refus d'ouvrir " +
 		"(retour arrière : réinstaller la version récente, ou effacer la base)")
 	// ErrSalonsPerimes : table salons du schéma 2 d'avant la colonne rotation_r (base de
 	// développement, jamais publiée) ; message fixe, sans chemin.
@@ -91,7 +91,7 @@ var (
 		"l'effacer avant de démarrer (rien n'a été fait)")
 	// ErrOldSchema : base d'une version antérieure (commandes d'administration du salon) ;
 	// message fixe, sans chemin.
-	ErrOldSchema = errors.New("base d'une version antérieure de Shhdrop (sans les tables du salon) : " +
+	ErrOldSchema = errors.New("base d'une version antérieure de Shhgone (sans les tables du salon) : " +
 		"démarrer le serveur une fois pour la mettre à jour (rien n'a été fait)")
 	// ErrCheckpointBusy : le vidage du WAL n'a pas pu finir (lecteur ou écrivain en cours) ;
 	// le WAL garde encore des pages, à revider au prochain passage (spec §9.1).

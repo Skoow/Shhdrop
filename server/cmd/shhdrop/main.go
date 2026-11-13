@@ -125,7 +125,7 @@ func placeholder() http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		io.WriteString(w, "<!doctype html><html lang=\"fr\"><meta charset=\"utf-8\"><title>Shhdrop</title><p>Shhdrop</p></html>\n")
+		io.WriteString(w, "<!doctype html><html lang=\"fr\"><meta charset=\"utf-8\"><title>Shhgone</title><p>Shhgone</p></html>\n")
 	})
 }
 
@@ -151,7 +151,7 @@ func prepareDataDir(dir string) error {
 	blobs, err2 := os.Stat(filepath.Join(dir, "blobs"))
 	if err1 != nil || err2 != nil || !db.Mode().IsRegular() || !blobs.IsDir() {
 		return shownf("SHH_DATA_DIR %s n'est pas vide et ne contient pas shares.db et blobs/ : refus "+
-			"(dossier d'un autre programme ?) ; indiquer un dossier vide ou celui de Shhdrop", dir)
+			"(dossier d'un autre programme ?) ; indiquer un dossier vide ou celui de Shhgone", dir)
 	}
 	return nil
 }

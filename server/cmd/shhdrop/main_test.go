@@ -51,7 +51,7 @@ func TestServe(t *testing.T) {
 		}
 		if staticDir == "" {
 			res, body := get("/")
-			if res.StatusCode != 200 || !strings.Contains(body, "Shhdrop") ||
+			if res.StatusCode != 200 || !strings.Contains(body, "Shhgone") ||
 				!strings.HasPrefix(res.Header.Get("Content-Type"), "text/html") ||
 				res.Header.Get("Content-Security-Policy") == "" || res.Header.Get("Cache-Control") != "no-store" {
 				t.Fatalf("/ : %d %q %v", res.StatusCode, body, res.Header)
