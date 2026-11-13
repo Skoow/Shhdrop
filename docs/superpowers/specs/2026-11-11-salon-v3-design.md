@@ -328,3 +328,11 @@ Le propriétaire veut une conversation aussi proche que possible d'une messageri
 - **C-2 Task 9b** (serveur) : heure de dernière déconnexion en mémoire, arrondie à la minute ; `0x07` hors ligne et `0x0D` étendus de 8 octets (minutes Unix, 0 = inconnue) ; tests : heure jamais sur disque, oubliée à la fin du salon, arrondie à la minute. Les tailles du protocole (§ « Protocole » du plan C-2) changent : `0x07` passe de 11 à 19 octets, une annonce de `0x0D` de 17 à 25.
 - **C-3** : présence, dernière connexion, coches des messages, son, silencieux.
 - **C-4** : coches des documents, sélection multiple à l'envoi et à la réception, albums, archive.
+
+### 14.6 Fichiers du salon (demande du propriétaire, 13 novembre)
+
+- Un écran **« Fichiers »** (icône trombone dans l'en-tête de la conversation) rassemble tous les fichiers, photos, vidéos et documents échangés dans le salon, au même endroit, sans remonter la conversation : grille pour les photos et vidéos, liste pour les documents, tri du plus récent au plus ancien, filtre par type et par membre.
+- Pour chaque fichier, **pour soi** : pastille « Nouveau » tant qu'on ne l'a pas ouvert, puis « Vu » (ouvert dans la visionneuse) et « Téléchargé » (avec l'heure). L'expéditeur voit en plus les coches de chacun (§14.2).
+- Sélection multiple et « Télécharger (N) » (§14.3) depuis cet écran ; toucher un fichier l'ouvre dans la visionneuse ; « Voir dans la conversation » remonte au message.
+- Tout est calculé dans l'appareil à partir des messages déjà reçus : le serveur n'apprend rien de plus. L'écran se vide quand le salon est renouvelé ou se termine.
+- Budget des fichiers d'un salon : **2 Go** (décision du propriétaire, 13 novembre), messages et vocaux hors budget.
