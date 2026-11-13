@@ -37,22 +37,24 @@ func nouvelleConv(t *testing.T, dossier, id string) *Conversation {
 	return c
 }
 
-// Audit adverse du 13 novembre, S-H1 : les appels disque de la conversation (écriture d'une
-// trame, lecture, zéros d'effacement) passent par le sémaphore blob.Gate, pour borner les fils
-// du système comme les partages et les pièces. Sans le câblage, Peak resterait à 0.
-func TestConversationBorneLesAppelsDisque(t *testing.T) {
+// Audit adverse du 13 novembre, S-H1 : les ÉCRITURES disque de la conversation (écriture d'une
+// trame, zéros d'effacement) passent par le sémaphore blob.Gate, pour borner les fils du système
+// comme les partages et les pièces. Les lectures ne sont pas bornées (rattrapage, déjà borné par
+// le nombre de connexions). Sans le câblage, Peak resterait à 0.
+func TestConversationBorneLesEcrituresDisque(t *testing.T) {
 	dir := t.TempDir()
 	c := nouvelleConv(t, dir, idConv)
 	c.g = blob.NewGate(4)
-	ajouter(t, c, 3) // 3 écritures
-	if _, err := c.Lire(0); err != nil {
-		t.Fatal("Lire :", err)
-	}
+	ajouter(t, c, 3) // 3 écritures de trame
 	if err := c.EffacerPlusieurs([]uint32{1}); err != nil {
 		t.Fatal("EffacerPlusieurs :", err)
 	}
 	if p := c.g.Peak(); p < 1 {
-		t.Fatalf("appels disque de la conversation hors du sémaphore (Peak=%d)", p)
+		t.Fatalf("écritures de la conversation hors du sémaphore (Peak=%d)", p)
+	}
+	// Une lecture ne touche pas au sémaphore : le compte en cours reste nul après coup.
+	if _, err := c.Lire(0); err != nil {
+		t.Fatal("Lire :", err)
 	}
 }
 

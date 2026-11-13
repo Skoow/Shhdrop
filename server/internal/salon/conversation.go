@@ -275,10 +275,11 @@ func (c *Conversation) Lire(e uint32) ([]byte, error) {
 		return nil, ErrEmplacement
 	}
 	buf := make([]byte, TailleEmplacement)
-	var errLec error
-	c.borne(func() { _, errLec = c.lecteur.ReadAt(buf, decalage(e)) })
-	if errLec != nil {
-		return nil, es(errLec)
+	// Lecture non bornée par le sémaphore (S-H1 ne vise que les écritures sous s.mu) : le
+	// rattrapage lit par ce chemin et le serrer y ajouterait de la latence ; les lectures en
+	// cours sont déjà bornées par le nombre de connexions.
+	if _, err := c.lecteur.ReadAt(buf, decalage(e)); err != nil {
+		return nil, es(err)
 	}
 	nul := true
 	for _, b := range buf {
