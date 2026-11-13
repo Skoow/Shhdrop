@@ -25,6 +25,11 @@ var securityHeaders = [][2]string{
 		"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types svelte-trusted-html shhdrop"},
 	{"Referrer-Policy", "no-referrer"},
 	{"X-Content-Type-Options", "nosniff"},
+	// X-Frame-Options: DENY double frame-ancestors 'none' (ceinture et bretelles, audit adverse
+	// du 13 novembre, Si2) : un très vieux navigateur sans CSP niveau 2 ne cadre pas non plus les
+	// pages qui détiennent des clés. Le cadre PDF (/pdf-frame.html), volontairement embarqué par
+	// l'application en même origine, repasse à SAMEORIGIN (pathHeaders).
+	{"X-Frame-Options", "DENY"},
 	// camera=(self) : photo et vidéo prises dans l'interface (Q-REC1 acceptée par le propriétaire,
 	// spec §35.3) ; /pdf-frame.html n'a besoin ni du micro ni de la caméra (pathHeaders).
 	// Le reste est refusé explicitement (audit F3) : fonctions puissantes inutilisées, qui

@@ -96,6 +96,11 @@ func TestSecurityHeadersKept(t *testing.T) {
 			case kv[0] == "Content-Security-Policy" && p == "/pdf-frame.html":
 			case kv[0] == "Permissions-Policy" && p == "/pdf-frame.html":
 			case kv[0] == "Cross-Origin-Resource-Policy" && strings.HasPrefix(p, "/pdf-frame."):
+			// Cadre PDF embarqué en même origine : SAMEORIGIN au lieu du DENY commun (Si2).
+			case kv[0] == "X-Frame-Options" && p == "/pdf-frame.html":
+				if got[0] != "SAMEORIGIN" {
+					t.Errorf("%s : X-Frame-Options = %q, attendu SAMEORIGIN", p, got[0])
+				}
 			default:
 				if got[0] != kv[1] {
 					t.Errorf("%s : %s = %q, attendu %q", p, kv[0], got[0], kv[1])

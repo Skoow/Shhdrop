@@ -40,5 +40,8 @@ func pathHeaders(h http.Header, p string) {
 	if p == pdfFramePage {
 		h.Set("Content-Security-Policy", pdfFrameCSP)
 		h.Set("Permissions-Policy", pdfFramePermissions)
+		// Embarqué par l'application en même origine (frame-ancestors 'self') : DENY (en-tête
+		// commun) le casserait sur un vieux navigateur sans CSP niveau 2 ; SAMEORIGIN l'y autorise.
+		h.Set("X-Frame-Options", "SAMEORIGIN")
 	}
 }

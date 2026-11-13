@@ -281,6 +281,9 @@ func newHTTPServer(h http.Handler) *http.Server {
 // serve démarre le serveur et s'arrête proprement quand ctx est annulé.
 // Seule sortie sur out : « SHH_LISTENING <hôte:port> » une fois l'écoute ouverte.
 func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
+	// Interdit core dump et lecture de /proc/<pid>/mem par un autre processus (clés en mémoire,
+	// audit adverse du 13 novembre, Z2) ; sans effet hors Linux.
+	durcirProcessus()
 	if !filepath.IsAbs(cfg.DataDir) {
 		return shown("SHH_DATA_DIR doit être un chemin absolu")
 	}
