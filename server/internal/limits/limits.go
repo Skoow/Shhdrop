@@ -118,6 +118,37 @@ type Limiter struct {
 	prevUntil int64
 	// bloc : clé de processus de CleBloc (crypto/rand à New), jamais tournée ni écrite.
 	bloc []byte
+	// bytes64Max, bytes48Max : octets utiles par jour (BytesPer64, BytesPer48), ramenés à
+	// StorageMax / FairShare par SetStorage (part équitable du stockage, audit D2).
+	bytes64Max, bytes48Max int64
+}
+
+// SetStorage : part équitable du stockage (audit du 13 novembre, D2) : une connexion ou un
+// bloc /48 ne réserve pas plus de storageMax / FairShare octets utiles par jour (les partages
+// vivent 24 h au plus : c'est aussi sa part du disque), en plus de BytesPer64 et BytesPer48.
+// À appeler avant de servir.
+func (l *Limiter) SetStorage(storageMax int64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	share := max(1, storageMax/FairShare)
+	l.bytes64Max, l.bytes48Max = min(BytesPer64, share), min(BytesPer48, share)
+}
+
+// Newcomer : la connexion de ip et son bloc /48 n'ont rien créé aujourd'hui (UTC) et n'ont
+// aucun envoi en cours. Seul un nouveau venu peut prendre la réserve de stockage (share,
+// CreateReq.Newcomer). À lire avant BeginUpload.
+func (l *Limiter) Newcomer(ip netip.Addr) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rotateLocked(l.now())
+	k64, k48 := l.keyLocked(ip)
+	var o64, o48 string
+	if l.prev != nil {
+		o64, o48 = keys(l.prev, ip)
+	}
+	return l.count64[k64]+l.count64[o64]+l.count48[k48]+l.count48[o48] == 0 &&
+		l.pend64[k64]+l.pend64[o64]+l.pend48[k48]+l.pend48[o48] == 0 &&
+		l.bytes64[k64]+l.bytes64[o64]+l.bytes48[k48]+l.bytes48[o48] == 0
 }
 
 type upload struct {
@@ -130,7 +161,8 @@ type upload struct {
 }
 
 func New(now func() time.Time) *Limiter {
-	l := &Limiter{now: now, day: -1, minute: -1, hour: -1, bloc: make([]byte, 32)}
+	l := &Limiter{now: now, day: -1, minute: -1, hour: -1, bloc: make([]byte, 32),
+		bytes64Max: BytesPer64, bytes48Max: BytesPer48}
 	if _, err := rand.Read(l.bloc); err != nil {
 		panic(err) // crypto/rand ne renvoie pas d'erreur sous Linux
 	}
@@ -344,7 +376,7 @@ func (l *Limiter) begin(ip netip.Addr, id string, bytes int64, piece bool) (retr
 	creations := !piece && (l.count64[k64]+l.count64[o64] >= CreatesPer64 || l.count48[k48]+l.count48[o48] >= CreatesPer48)
 	switch {
 	case bytes < 0 || creations ||
-		bytes > BytesPer64-l.bytes64[k64]-l.bytes64[o64] || bytes > BytesPer48-l.bytes48[k48]-l.bytes48[o48] ||
+		bytes > l.bytes64Max-l.bytes64[k64]-l.bytes64[o64] || bytes > l.bytes48Max-l.bytes48[k48]-l.bytes48[o48] ||
 		l.aband64[k64]+l.aband64[o64] >= AbandonedPer64 || l.aband48[k48]+l.aband48[o48] >= AbandonedPer48:
 		return untilMidnight, ErrQuota
 	}
@@ -442,7 +474,7 @@ func (u upload) counted() int64 { return max(u.bytes, u.paid()) }
 // debitLocked ajoute d au compte de u (d ≤ 0 : rend) ; refuse un débit au-delà du jour.
 func (l *Limiter) debitLocked(id string, u upload, next upload, now time.Time) (time.Duration, error) {
 	d := next.counted() - u.counted()
-	if d > 0 && (d > BytesPer64-l.bytes64[u.k64] || d > BytesPer48-l.bytes48[u.k48]) {
+	if d > 0 && (d > l.bytes64Max-l.bytes64[u.k64] || d > l.bytes48Max-l.bytes48[u.k48]) {
 		return time.Unix((l.day+1)*day, 0).Sub(now), ErrQuota
 	}
 	l.bytes64[u.k64] += d

@@ -311,7 +311,8 @@ func (m *Manager) placer(n int64) bool {
 		return false
 	}
 	u, err := m.usedBytes()
-	if err != nil || partages+u+n > m.cfg.StorageMax {
+	// Hors de la réserve des nouveaux venus (share.StorageLimit, audit D2).
+	if err != nil || partages+u+n > share.StorageLimit(m.cfg.StorageMax, false) {
 		return false
 	}
 	m.reserves.Add(n)

@@ -107,3 +107,50 @@ func TestKeyed(t *testing.T) {
 		t.Fatal("clé gardée sans transfert", n)
 	}
 }
+
+// Audit du 13 novembre, D2 : 8 adresses IPv4 prenaient les 64 places d'envoi (8 chacune), 16
+// les 256 places de lecture (16 chacune). Part équitable : une nouvelle adresse a encore une
+// place, et il faut bien plus d'adresses pour tout prendre.
+func TestPartEquitable(t *testing.T) {
+	for _, c := range []struct {
+		nom                 string
+		total, per64, per48 int
+		attaquants          int // adresses qui saturaient avant
+		pourSaturer         int // adresses nécessaires maintenant
+	}{
+		{"envois (64)", 64, 8, 32, 8, 6 + 16},
+		{"envois (67)", 67, 8, 32, 9, 7 + 16},
+		{"lectures (256)", 256, 16, 64, 16, 12 + 64},
+		{"lectures (360)", 360, 16, 64, 23, 17 + 90},
+		{"WebSocket (2000)", 2000, 8, 16, 250, 188 + 500},
+	} {
+		prendre := func(s *Slots, n int) (pris int) {
+			for a := range n {
+				k := string(rune('A' + a))
+				for {
+					if _, err := s.Acquire(k+"64", k+"48"); err != nil {
+						break
+					}
+					pris++
+				}
+			}
+			return pris
+		}
+		// Avant : NewSlots seul, saturé par c.attaquants adresses.
+		if old := NewSlots(c.total, c.per64, c.per48); prendre(old, c.attaquants) != c.total {
+			t.Fatalf("%s : l'attaque d'avant ne sature pas", c.nom)
+		}
+		s := NewFairSlots(c.total, c.per64, c.per48)
+		prendre(s, c.attaquants)
+		if _, err := s.Acquire("victime64", "victime48"); err != nil {
+			t.Fatalf("%s : %d adresses privent encore une nouvelle venue : %v", c.nom, c.attaquants, err)
+		}
+		s = NewFairSlots(c.total, c.per64, c.per48)
+		if prendre(s, c.pourSaturer-1); s.Len() == c.total {
+			t.Fatalf("%s : saturé par %d adresses", c.nom, c.pourSaturer-1)
+		}
+		if prendre(s, c.pourSaturer); s.Len() != c.total { // les mêmes, plus une
+			t.Fatalf("%s : %d places sur %d avec %d adresses", c.nom, s.Len(), c.total, c.pourSaturer)
+		}
+	}
+}

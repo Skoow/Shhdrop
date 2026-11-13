@@ -101,7 +101,7 @@ func defaultTransfers() transfers { return transfersFor(Capacity{}) }
 // transfersFor : places de transfert d'après c (valeur nulle : dlTotal, ulTotal).
 func transfersFor(c Capacity) transfers {
 	c = c.withDefaults()
-	return transfers{dl: limits.NewSlots(c.Downloads, dlPer64, dlPer48), ul: limits.NewSlots(c.Uploads, ulPer64, ulPer48),
+	return transfers{dl: limits.NewFairSlots(c.Downloads, dlPer64, dlPer48), ul: limits.NewFairSlots(c.Uploads, ulPer64, ulPer48),
 		perOpen: limits.NewKeyed(dlPerOpen), perUp: limits.NewKeyed(ulPerUpload),
 		window: xferWindow, minRate: xferMinRate}
 }
@@ -280,8 +280,8 @@ func newServerCap(svc *share.Service, sig *token.Signer, lim *limits.Limiter, ca
 	behindProxy bool, proxies []netip.Prefix, c Capacity) *server {
 	c = c.withDefaults()
 	return &server{svc: svc, sig: sig, lim: lim, cap: capt, behindProxy: behindProxy, proxies: proxies,
-		xfer: transfersFor(c), dlTTL: downloadTTL, watchSlots: limits.NewSlots(c.Watches, watchPer64, c.Watches),
-		wsSlots: limits.NewSlots(c.WebSockets, wsPer64, wsPer48),
+		xfer: transfersFor(c), dlTTL: downloadTTL, watchSlots: limits.NewFairSlots(c.Watches, watchPer64, c.Watches),
+		wsSlots: limits.NewFairSlots(c.WebSockets, wsPer64, wsPer48),
 		wait:    timerWait}
 }
 

@@ -1147,3 +1147,56 @@ func TestBeginPieceSansCreation(t *testing.T) {
 		t.Fatal("pièce de la veille comptée comme création :", n)
 	}
 }
+
+// Audit du 13 novembre, D2 : part équitable du stockage. Avec 20 Gio de stockage, une
+// adresse ne réserve plus 6 Gio par jour, mais 20/8 = 2,5 Gio.
+func TestPartEquitableStockage(t *testing.T) {
+	now := t0
+	l := newLim(&now)
+	const gib = int64(1) << 30
+	l.SetStorage(20 * gib)
+	if _, err := l.BeginUpload(ip("1.2.3.4"), "a", 2*gib); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.BeginUpload(ip("1.2.3.4"), "b", gib); !errors.Is(err, ErrQuota) {
+		t.Fatal("au-delà de 2,5 Gio :", err)
+	}
+	if _, err := l.Receive("a", 3*gib); !errors.Is(err, ErrQuota) {
+		t.Fatal("reçus au-delà de 2,5 Gio :", err)
+	}
+	// 200 Gio (production) : les quotas par personne restent les plus bas.
+	l.SetStorage(200 * gib)
+	if _, err := l.BeginUpload(ip("5.6.7.8"), "c", 6*gib); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNouveauVenu(t *testing.T) {
+	now := t0
+	l := newLim(&now)
+	a := ip("1.2.3.4")
+	if !l.Newcomer(a) {
+		t.Fatal("adresse neuve")
+	}
+	if _, err := l.BeginUpload(a, "a", 1); err != nil {
+		t.Fatal(err)
+	}
+	l.CancelUpload("a") // création rendue : de nouveau rien aujourd'hui
+	if !l.Newcomer(a) {
+		t.Fatal("création annulée")
+	}
+	if _, err := l.BeginUpload(a, "b", 1); err != nil {
+		t.Fatal(err)
+	}
+	if l.Newcomer(a) {
+		t.Fatal("envoi en cours")
+	}
+	l.FinishUpload("b", a)
+	if l.Newcomer(a) || !l.Newcomer(ip("1.2.3.5")) {
+		t.Fatal("après une création")
+	}
+	now = now.Add(24 * time.Hour)
+	if !l.Newcomer(a) {
+		t.Fatal("jour suivant")
+	}
+}

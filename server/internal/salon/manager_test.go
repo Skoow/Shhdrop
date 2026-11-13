@@ -991,6 +991,9 @@ func TestVivantsParBloc(t *testing.T) {
 		r := reqValide(c)
 		r.Bloc, r.TTLHours = bloc, ttl
 		_, err := b.m.Creer(r)
+		if err == nil {
+			b.entrer(t, c, true) // salon vide effacé après videMax (audit D2) : le créateur y entre
+		}
 		return c, err
 	}
 	var salons []cles

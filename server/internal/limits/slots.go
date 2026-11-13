@@ -17,6 +17,9 @@ var (
 // une clé sans transfert en cours est oubliée aussitôt.
 type Slots struct {
 	total, per64, per48 int
+	// reserve : dernières places, ouvertes seulement à un bloc /48 qui n'en tient aucune
+	// (NewFairSlots) ; 0 : aucune réserve.
+	reserve int
 
 	mu  sync.Mutex
 	n   int
@@ -32,7 +35,27 @@ func NewSlots(total, per64, per48 int) *Slots {
 	return &Slots{total: total, per64: per64, per48: per48, c64: map[string]int{}, c48: map[string]int{}}
 }
 
+// Part équitable des plafonds globaux (audit du 13 novembre, D2 : quelques adresses
+// prenaient toutes les places du serveur). FairShare : une connexion ou un bloc /48 prend au
+// plus 1/8 des places, en plus de ses propres plafonds ; FairReserve : le dernier quart des
+// places ne va qu'à un bloc qui n'en tient aucune (nouveau venu). Saturer le serveur exige
+// alors au moins 6 blocs pour les 3/4 partagés, puis un bloc de plus par place réservée.
+const (
+	FairShare   = 8
+	FairReserve = 4
+)
+
+// NewFairSlots : NewSlots avec la part équitable : per64 et per48 ramenés à
+// max(1, total / FairShare), et total / FairReserve places réservées aux nouveaux venus.
+func NewFairSlots(total, per64, per48 int) *Slots {
+	share := max(1, total/FairShare)
+	s := NewSlots(total, min(per64, share), min(per48, share))
+	s.reserve = total / FairReserve
+	return s
+}
+
 // Acquire prend une place pour (k64, k48) ou refuse sans attendre (ErrBusy, ErrTooMany).
+// Places réservées (NewFairSlots) : refusées (ErrBusy) à un bloc qui tient déjà une place.
 // release rend la place ; l'appeler une seule fois.
 func (s *Slots) Acquire(k64, k48 string) (release func(), err error) {
 	s.mu.Lock()
@@ -41,6 +64,8 @@ func (s *Slots) Acquire(k64, k48 string) (release func(), err error) {
 	case s.c64[k64] >= s.per64 || s.c48[k48] >= s.per48:
 		return nil, ErrTooMany
 	case s.n >= s.total:
+		return nil, ErrBusy
+	case s.n >= s.total-s.reserve && s.c48[k48] > 0:
 		return nil, ErrBusy
 	}
 	s.n++

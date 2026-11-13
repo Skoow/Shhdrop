@@ -198,7 +198,9 @@ func (s *Service) GrowCharged(id string, bucket int, charge func(bucket int) err
 	if err != nil {
 		return err
 	}
-	if used+s.detachedBytes()+s.extraUsed()+totalSize(bucket)-totalSize(old) > s.StorageMax {
+	// Hors de la réserve des nouveaux venus (StorageLimit) : un petit brouillon créé dans la
+	// réserve ne la remplit pas en grandissant.
+	if used+s.detachedBytes()+s.extraUsed()+totalSize(bucket)-totalSize(old) > StorageLimit(s.StorageMax, false) {
 		return ErrFull
 	}
 	if err := resizeBlob(s.Blobs, id, totalSize(bucket)); err != nil {

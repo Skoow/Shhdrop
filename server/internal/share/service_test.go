@@ -1251,8 +1251,18 @@ func TestPartagesVoientLeSalon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Sans l'usage du salon, l'agrandissement tiendrait largement.
-	s.StorageMax = 3<<30 + used + totalSize(160) - totalSize(80) - 1
+	// Sans l'usage du salon, l'agrandissement tiendrait largement. Un agrandissement n'entre
+	// pas dans la réserve des nouveaux venus (StorageLimit, audit D2) : plus petit StorageMax
+	// dont la part hors réserve suffit.
+	need := 3<<30 + used + totalSize(160) - totalSize(80)
+	s.StorageMax = need * StorageReserve / (StorageReserve - 1)
+	for StorageLimit(s.StorageMax-1, false) >= need {
+		s.StorageMax--
+	}
+	for StorageLimit(s.StorageMax, false) < need {
+		s.StorageMax++
+	}
+	s.StorageMax--
 	if err := s.Grow(id, 160); !errors.Is(err, ErrFull) {
 		t.Fatal("agrandissement :", err)
 	}
@@ -1289,4 +1299,27 @@ func TestUsedSharesSansSalon(t *testing.T) {
 		t.Fatal("téléchargement pendant que le salon est plein :", err)
 	}
 	seg.Close()
+}
+
+// Audit du 13 novembre, D2 : réserve de stockage des nouveaux venus. Une création d'un auteur
+// qui a déjà créé aujourd'hui (Returning) s'arrête à 7/8 de StorageMax ; un nouveau venu peut
+// encore créer dans le dernier huitième.
+func TestReserveStockageNouveauxVenus(t *testing.T) {
+	s, _ := newSvc(t)
+	s.StorageMax = 8 * totalSize(80)
+	for range 7 {
+		r := newKeys().req(80, 1, 1)
+		r.Returning = true
+		if _, _, err := s.createAny(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := newKeys().req(80, 1, 1)
+	r.Returning = true
+	if _, _, err := s.createAny(r); !errors.Is(err, ErrFull) {
+		t.Fatal("réserve prise par un auteur déjà venu :", err)
+	}
+	if _, _, err := s.createAny(newKeys().req(80, 1, 1)); err != nil {
+		t.Fatal("nouveau venu refusé :", err)
+	}
 }

@@ -119,6 +119,9 @@ func (s *server) create(w http.ResponseWriter, r *http.Request) {
 	// bad_request), création comptée au quota et dans la difficulté anti-robot.
 	// Envoi dès l'ajout (spec §41.14) : la réservation (création, puis chaque grow) est
 	// débitée d'avance ; les octets reçus au-delà (segments effacés et renvoyés) aussi.
+	// Réserve de stockage des nouveaux venus (audit D2) : lu avant que BeginUpload ne compte
+	// cette création.
+	req.Returning = !s.lim.Newcomer(ip)
 	switch retry, err := s.lim.BeginUpload(ip, req.ID, share.ContentBytes(b.Bucket)); {
 	case errors.Is(err, limits.ErrDuplicate): // id interne de 128 bits déjà en cours : impossible
 		fail(w, errors.New("id interne en double"))

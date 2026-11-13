@@ -309,6 +309,7 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	// En production (derrière le proxy), pas de fichier creux : la place doit être allouée.
 	// Limites en mémoire ; un envoi effacé sans finalize compte en octets abandonnés (§29.5).
 	lim := limits.New(cfg.Now)
+	lim.SetStorage(cfg.StorageMaxBytes) // part équitable du stockage (audit D2)
 	svc, err := share.NewService(share.Config{DB: db, OnAbandon: func(id string, _ int) { lim.AbandonUpload(id) },
 		Blobs: &blob.Store{Dir: filepath.Join(cfg.DataDir, "blobs"), NoSparse: cfg.BehindProxy},
 		Now:   cfg.Now, StorageMax: cfg.StorageMaxBytes, FrozenFile: filepath.Join(cfg.DataDir, "frozen")})

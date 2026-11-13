@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/blob"
+	"github.com/skoow/shhdrop/server/internal/limits"
 	"github.com/skoow/shhdrop/server/internal/share"
 )
 
@@ -38,6 +39,11 @@ const (
 	// 14 blocs à 15 créations par jour ne prennent pas les SHH_SALONS_MAX places (spec
 	// §39.3.6, décision de l'équipe du 12 novembre, réglable).
 	VivantsParBloc = 5
+	// videMax : un salon où personne n'est entré est effacé ce délai après sa création (audit
+	// du 13 novembre, D2 : 40 adresses prenaient les SHH_SALONS_MAX places pour 24 h sans
+	// jamais y entrer). « Entré » : un Rejoindre réussi (créateur ou invité) ; le siège 0,
+	// gardé au créateur, ne compte pas tant qu'il n'est pas entré.
+	videMax = 15 * time.Minute
 	// quart : arrondi des échéances (share.Ceil15) ; un salon ne peut pas échoir avant le
 	// prochain multiple.
 	quart = 900
@@ -126,10 +132,63 @@ func NewManager(c Config) (*Manager, error) {
 		vivants: map[string]vivant{}, parBloc: map[[32]byte]int{}, pieceIdx: map[string]*salon{}}, nil
 }
 
-// vivant : bloc et échéance d'un salon compté dans parBloc.
+// vivant : bloc et échéance d'un salon compté dans parBloc ; ne : création (secondes Unix) ;
+// entre : un Rejoindre a réussi (videMax).
 type vivant struct {
-	bloc [32]byte
-	exp  int64
+	bloc  [32]byte
+	exp   int64
+	ne    int64
+	entre bool
+}
+
+// parBlocMax : salons vivants au plus par bloc : VivantsParBloc, et au plus 1/8 de Max (part
+// équitable, audit du 13 novembre, D2 ; limits.FairShare).
+func (m *Manager) parBlocMax() int { return max(1, min(VivantsParBloc, m.cfg.Max/limits.FairShare)) }
+
+// reserveSalons : dernières places de Max, ouvertes seulement à un bloc sans salon vivant
+// (nouveau venu ; limits.FairReserve).
+func (m *Manager) reserveSalons() int { return m.cfg.Max / limits.FairReserve }
+
+// vides : salons où personne n'est entré, créés depuis videMax au moins. Sous m.mu.
+func (m *Manager) videsLocked(now int64) []string {
+	var ids []string
+	for id, v := range m.vivants {
+		if !v.entre && v.ne+int64(videMax/time.Second) <= now {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// effacerVides : chaque salon vide depuis videMax est détruit (comme une destruction : ligne,
+// fichier de conversation et pièces effacés, place du bloc rendue). Sous essaiLock, revérifié :
+// un Rejoindre en cours, qui tient ce verrou jusqu'à marquer l'entrée, n'est jamais pris de
+// vitesse.
+func (m *Manager) effacerVides(now int64) {
+	m.mu.Lock()
+	ids := m.videsLocked(now)
+	m.mu.Unlock()
+	for _, id := range ids {
+		mu := m.essaiLock(id)
+		mu.Lock()
+		m.mu.Lock()
+		v, ok := m.vivants[id]
+		m.mu.Unlock()
+		if ok && !v.entre {
+			_ = m.detruire(id) // partie disque ratée : reprise par Tick (reprendreFin)
+		}
+		mu.Unlock()
+	}
+}
+
+// marquerEntre : un Rejoindre a réussi dans le salon id.
+func (m *Manager) marquerEntre(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if v, ok := m.vivants[id]; ok && !v.entre {
+		v.entre = true
+		m.vivants[id] = v
+	}
 }
 
 // finirLocked retire le salon id du compte de son bloc ; sans effet s'il n'y est pas (déjà
@@ -229,6 +288,15 @@ func (m *Manager) Creer(r CreerReq) (time.Duration, error) {
 	if vivants >= m.cfg.Max {
 		return 0, ErrBusy
 	}
+	m.mu.Lock()
+	m.echusLocked(now)
+	nouveau := m.parBloc[r.Bloc] == 0
+	m.mu.Unlock()
+	// Réserve des nouveaux venus (audit D2) : les dernières places de Max et le dernier
+	// huitième du stockage ne vont qu'à un bloc sans salon vivant.
+	if !nouveau && vivants >= m.cfg.Max-m.reserveSalons() {
+		return 0, ErrBusy
+	}
 	partages, err := m.cfg.UsedPartages()
 	if err != nil {
 		return 0, es(err)
@@ -237,7 +305,7 @@ func (m *Manager) Creer(r CreerReq) (time.Duration, error) {
 	if err != nil {
 		return 0, err
 	}
-	if partages+salons+reserveCreation > m.cfg.StorageMax {
+	if partages+salons+reserveCreation > share.StorageLimit(m.cfg.StorageMax, nouveau) {
 		return 0, ErrBusy
 	}
 	// Place du bloc prise avant l'insertion (une destruction de ce salon, même immédiate,
@@ -245,11 +313,11 @@ func (m *Manager) Creer(r CreerReq) (time.Duration, error) {
 	id := share.NewID()
 	m.mu.Lock()
 	m.echusLocked(now)
-	if m.parBloc[r.Bloc] >= VivantsParBloc {
+	if m.parBloc[r.Bloc] >= m.parBlocMax() {
 		m.mu.Unlock()
 		return 0, &Attente{Retry: secs(quart - (now%quart+quart)%quart)}
 	}
-	m.vivants[id] = vivant{bloc: r.Bloc, exp: exp}
+	m.vivants[id] = vivant{bloc: r.Bloc, exp: exp, ne: now}
 	m.parBloc[r.Bloc]++
 	m.mu.Unlock()
 	mcd := 0
@@ -382,6 +450,7 @@ func (m *Manager) Rejoindre(kAcces, kPreuve, sGestion []byte) (Entree, error) {
 		}
 		index[x.jetonV] = s
 	})
+	m.marquerEntre(id) // sous essaiLock : effacerVides ne peut plus le prendre pour vide
 	return Entree{
 		Jeton: jeton, Siege: n, Seq: x.emis, Nonce: x.nonce, ExpiresIn: secs(exp - now.Unix()),
 		MaxMembers: maxMembers, MembersCanDestroy: mcd == 1, BudgetLeft: Budget - piecesBytes,
@@ -570,6 +639,7 @@ func (m *Manager) Tick() {
 			salons = append(salons, s)
 		}
 	}()
+	m.effacerVides(now.Unix())
 	for _, s := range salons {
 		tombe, echu, aPurger := m.entretenir(s, now)
 		switch {

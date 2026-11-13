@@ -567,6 +567,7 @@ func TestRenouvelerPlaceDuBloc(t *testing.T) {
 	if _, err := b.m.Creer(r); err != nil {
 		t.Fatal(err)
 	}
+	b.entrer(t, c, true) // salon vide effacé après videMax (audit D2) : le créateur y entre
 	b.h.avancer(50 * time.Minute)
 	b.regler(t, c, ReglagesReq{Heures: 6})
 	b.h.avancer(2 * time.Hour) // ancienne échéance passée

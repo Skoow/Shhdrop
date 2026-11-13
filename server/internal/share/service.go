@@ -64,6 +64,24 @@ type CreateReq struct {
 	ID               string
 	Bucket           int
 	AccessV, ManageV []byte
+	// Returning : l'auteur a déjà créé ou envoyé aujourd'hui (limits.Limiter.Newcomer faux) :
+	// la réserve de stockage des nouveaux venus lui est fermée (StorageLimit). Posé par la
+	// couche HTTP, jamais lu du client.
+	Returning bool
+}
+
+// StorageReserve : 1/StorageReserve de StorageMax n'est ouvert qu'aux nouveaux venus (audit
+// du 13 novembre, D2 : environ 34 adresses IPv4 remplissaient les 200 Gio et fermaient le
+// service à tous). Avec 200 Gio : 25 Gio, au moins 12 nouvelles adresses pour les prendre.
+const StorageReserve = 8
+
+// StorageLimit : place utilisable par une création (Returning faux : toute, sinon sans la
+// réserve) ; un agrandissement (Grow) et une pièce du salon n'entrent pas dans la réserve.
+func StorageLimit(storageMax int64, newcomer bool) int64 {
+	if newcomer {
+		return storageMax
+	}
+	return storageMax - storageMax/StorageReserve
 }
 
 // FinalizeReq : tout ce qui dépend du mot de passe, la durée, les ouvertures, et le
@@ -546,7 +564,7 @@ func (s *Service) create(r CreateReq, valid func(CreateReq) error) (string, int,
 		return "", 0, err
 	}
 	// Les descripteurs détachés (§41.8) tiennent encore leur place jusqu'à leur fermeture.
-	if used+s.detachedBytes()+s.extraUsed()+size > s.StorageMax {
+	if used+s.detachedBytes()+s.extraUsed()+size > StorageLimit(s.StorageMax, !r.Returning) {
 		return "", 0, ErrFull
 	}
 	if err := reserveBlob(s.Blobs, id, size); err != nil {
