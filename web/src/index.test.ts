@@ -22,6 +22,7 @@ describe("interface publique", () => {
         "createDraft",
         "failedElement",
         "CONTENT_MAX",
+        "CorruptError",
         "MAX_ITEMS",
         "MANIFEST_MAX",
         "MAX_OPENS",
