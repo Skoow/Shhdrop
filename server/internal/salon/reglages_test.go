@@ -372,13 +372,14 @@ func TestRenouvelerEchec(t *testing.T) {
 
 // Concurrence (-race) : renouvellements pendant des envois, des lectures « instantané », des
 // Tick, des pièces en cours d'envoi et une connexion en rattrapage. Aucune panique ; après le
-// dernier, rien d'ancien ne reste (index, conversation, pièces, budget).
+// dernier, rien d'ancien ne reste (index, conversation, pièces, budget). Puis renouvellements et
+// exclusions concurrents d'une destruction : conversation détruite, aucune ligne restante.
 func TestRenouvelerConcurrent(t *testing.T) {
 	b := nouveauBanc(t, 200)
 	c := b.creer(t, 4)
 	eg, g := b.entrerMembre(t, c, true)
 	ea, a := b.entrerMembre(t, c, false)
-	_, bb := b.entrerMembre(t, c, false)
+	ebb, bb := b.entrerMembre(t, c, false)
 	s := g.salon
 	for i := range 300 {
 		b.recevoir(t, g, trameD(0, i))
@@ -443,7 +444,61 @@ func TestRenouvelerConcurrent(t *testing.T) {
 		t.Fatal("fermeture ou panique", lg.codeFerme(), la.codeFerme())
 	}
 	attendre(t, func() bool { return len(reglagesRecus(t, la)) > 0 })
-	finir(t, lg, la)
+
+	// Puis renouvellements, exclusions (rotation, puis exclusion de bb), envois et pièces en même
+	// temps qu'une destruction : conversation détruite, aucune ligne restante, aucun fichier.
+	stop.Store(false)
+	var r, renouv, exclus atomic.Uint32
+	boucle(func(int) {
+		if _, err := b.m.Regler(c.gestion, ReglagesReq{Heures: 1}, nil); err == nil {
+			renouv.Add(1)
+		}
+	})
+	boucle(func(i int) {
+		var siege *uint8
+		var nonce *[16]byte
+		if i == 3 {
+			siege, nonce = siegeP(ebb.Siege), &ebb.Nonce
+		}
+		if b.m.Exclure(reqExclure(c, invitation(c), siege, nonce, r.Add(1))) == nil {
+			exclus.Add(1)
+		}
+	})
+	for _, mb := range []Membre{g, a, bb} {
+		boucle(func(i int) {
+			if id, err := b.m.CreerPiece(mb, 1, false); err == nil {
+				for n, seg := range segments(1, 1) {
+					_ = b.m.PutSegment(id, n, seg)
+				}
+				if b.m.FinalizePiece(id, 0, 0) == nil {
+					_, _ = b.m.Recevoir(mb, trameD(0, i), idPiece(id))
+				}
+			}
+			_, _ = b.m.Recevoir(mb, trameD(0, i), nil)
+		})
+	}
+	attendre(t, func() bool { return renouv.Load() >= 2 && exclus.Load() >= 2 })
+	if err := b.m.Detruire(c.gestion, nil); err != nil {
+		t.Fatal("Detruire :", err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	stop.Store(true)
+	wg.Wait()
+	b.m.Tick()
+	b.toutEfface(t, s, nil, eg.Jeton, ea.Jeton)
+	finRecue(t, "créateur", lg, RaisonDetruit)
+	finRecue(t, "en rattrapage", la, RaisonDetruit)
+	for _, table := range []string{"salons", "salon_pieces"} {
+		if n := b.lignes(t, table, s.id); n != 0 {
+			t.Fatal("lignes restantes dans", table, n)
+		}
+	}
+	if l, _ := b.cfg.Pieces.List(); len(l) != 0 {
+		t.Fatal("fichiers de pièces gardés", l)
+	}
+	if b.m.PaniquesTick() != 0 {
+		t.Fatal("panique")
+	}
 }
 
 // 0x10 : 22 octets, jamais lu comme une demande ni un accueil.
