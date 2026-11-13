@@ -6,15 +6,16 @@ Date : 13 novembre 2026. Demande du propriétaire.
 
 - **Prolonger = renouveler** : le créateur relance le salon pour une nouvelle durée (1, 6, 12 ou 24 h sans compte ; plus avec une offre payante), **et toute la conversation est effacée** : messages, vocaux, fichiers, tout ce qui a été partagé. Seuls restent le lien, le mot de passe et **les membres présents à leur place** : « pour plus de facilité, que les contacts restent dans la même conversation ».
 - Possible tant que le salon existe (jamais après la fin : tout est alors détruit, promesse « puis plus rien »).
-- **Côté serveur** : en une opération, sous le verrou du salon : fichier de conversation détruit puis recréé vide (clé neuve, zéros), pièces effacées (fichier puis ligne), `pieces_bytes = 0`, index, tas d'échéances, `pieces`, attentes « instantané » et `effaces` vidés ; `seq` continue de croître (aucun rang réutilisé) ; nouvelle échéance = maintenant + durée, arrondie au quart d'heure supérieur ; diffusion à tous d'un enregistrement sans rang `0x10` « renouvelé » (rang de départ, secondes restantes, places) : chaque appareil efface son historique local et repart de ce rang. Le moteur MLS du créateur fait un Commit (nouvelle époque, C-3/C-5) pour que rien d'avant ne soit déchiffrable par un nouvel arrivant.
+- **Côté serveur** : en une opération, sous le verrou du salon : fichier de conversation détruit puis recréé vide (clé neuve, zéros), pièces effacées (fichier puis ligne), `pieces_bytes` revenu à 0 pièce par pièce, index, tas d'échéances (lectures attendues comprises), `pieces` et `effaces` vidés ; `seq` continue de croître (aucun rang réutilisé) ; nouvelle échéance = maintenant + durée, arrondie au quart d'heure supérieur ; diffusion à tous d'un enregistrement sans rang `0x10` « renouvelé » (rang de départ, secondes restantes, places) : chaque appareil efface son historique local et repart de ce rang. **Le groupe MLS est recréé** (décision du contrôleur, 13 novembre ; le texte d'avant, « le créateur fait un Commit », ne suffisait pas : le renouvellement efface aussi les Commits, Welcomes et KeyPackages, qu'un arrivant ne pourrait plus rejouer) : à la réception du `0x10` de renouvellement, chaque membre jette son état MLS et publie un nouveau KeyPackage ; le créateur crée un nouveau groupe et ajoute chacun (Commit puis Welcome), comme à la création ; rien d'avant n'est déchiffrable ensuite. Détail : spec v3 §3.6.1 (exigence C-3 22) et §14.7.
 - **Anti-abus** : un renouvellement compte comme une **création de salon** (quota de 5 par jour et par connexion, 15 par /48, preuve anti-robot). Il n'y a donc plus besoin de plafond « 24 h depuis la création » en mémoire : l'approche 1 ci-dessous est abandonnée.
 - **Rattrapage** : une connexion qui revient avec un `depuis` antérieur au renouvellement reçoit le `0x10` puis seulement ce qui suit ; rien d'avant n'est jamais servi.
-- **Places** : inchangé (ci-dessous).
-- **Messages et vocaux** : jamais dans l'espace des fichiers (1 Go par salon sans compte) ; anti-flood déjà en place côté serveur (60 trames/min par membre avec rafale de 20, 1 200 messages/h par membre, 480 trames/min par adresse, vocaux au rythme d'une voix, 120 fichiers/h par membre, garde-fou du disque) ; l'écran (C-3) dira « Doucement, réessayez dans N s » au lieu d'échouer.
+- **Places** : inchangé (ci-dessous), sauf le besoin minimal : sièges occupés **plus le siège 0 du créateur s'il est vide** (il lui est toujours rendu), correction du 13 novembre.
+- **Écran (C-5)** : un renouvellement compte la nouvelle durée depuis maintenant ; il peut donc **raccourcir** le salon (24 h restantes renouvelées pour 1 h). L'écran le dit avant de confirmer (« Le salon se terminera dans 1 h au lieu de 23 h 40 min ; toute la conversation sera effacée »).
+- **Messages et vocaux** : jamais dans l'espace des fichiers (2 Go par salon sans compte depuis le 13 novembre) ; anti-flood déjà en place côté serveur (60 trames/min par membre avec rafale de 20, 1 200 messages/h par membre, 480 trames/min par adresse, vocaux au rythme d'une voix, 120 fichiers/h par membre, garde-fou du disque) ; l'écran (C-3) dira « Doucement, réessayez dans N s » au lieu d'échouer.
 
 ## État (13 novembre) : fait côté serveur
 
-Route `POST /api/salons/reglages`, enregistrement `0x10` (22 octets) et règles exactes : section « Protocole » du plan C-2 et §39.3.9. Écarts à la révision, signalés : `pieces_bytes` revient à 0 par l'effacement de chaque pièce (fichier, puis ligne et budget), pas par une remise à 0 forcée (qui retirerait le budget d'une pièce créée juste après) ; `max_members` garde la borne basse de la création (2) ; le renouvellement peut raccourcir le salon (nouvelle durée comptée depuis maintenant).
+Route `POST /api/salons/reglages`, enregistrement `0x10` (22 octets) et règles exactes : section « Protocole » du plan C-2 et §39.3.9. Écarts à la révision, signalés : `pieces_bytes` revient à 0 par l'effacement de chaque pièce (fichier, puis ligne et budget), pas par une remise à 0 forcée (qui retirerait le budget d'une pièce créée juste après) ; `max_members` garde la borne basse de la création (2) et ne descend jamais sous le besoin minimal (sièges occupés, plus le siège 0 s'il est vide) ; le renouvellement peut raccourcir le salon (nouvelle durée comptée depuis maintenant, à dire à l'écran avant de confirmer) ; si la conversation ne peut pas être recréée, le salon finit avec la raison 7 « interrompu par le serveur ».
 
 ## Intention
 
@@ -22,7 +23,9 @@ Le créateur d'un salon déjà ouvert doit pouvoir **changer le nombre de places
 
 ## Objectifs
 
-- Places : le créateur choisit une nouvelle valeur entre le nombre de personnes **présentes** (sièges occupés) et la limite de l'offre (10 sans compte, plafond technique actuel : sièges 0 à 9).
+> **Remplacé par la révision** (en tête) pour la durée : on ne prolonge plus, on renouvelle.
+
+- Places : le créateur choisit une nouvelle valeur entre le nombre de personnes **présentes** (sièges occupés, plus le siège du créateur s'il est parti) et la limite de l'offre (10 sans compte, plafond technique actuel : sièges 0 à 9).
 - Durée : le créateur prolonge le salon par paliers (+1 h, +6 h, +12 h), sans dépasser **24 h depuis la création** sans compte (la limite actuelle de la durée choisie).
 - Tous les membres connectés voient la nouvelle échéance et le nouveau nombre de places tout de suite.
 
@@ -35,10 +38,12 @@ Le créateur d'un salon déjà ouvert doit pouvoir **changer le nombre de places
 ## Anti-objectifs
 
 - Aucune nouvelle information durable sur le disque : ni heure de création, ni historique des changements.
-- Aucune prolongation sans fin : le plafond de l'offre doit tenir.
 - Jamais retirer la place de quelqu'un qui est dans le salon.
+- *(Retiré le 13 novembre, décision du contrôleur : « aucune prolongation sans fin ». Chaque renouvellement efface tout et compte dans le quota de création ; rien ne s'accumule.)*
 
 ## Approches
+
+> **Remplacé par la révision** (en tête) : l'approche 1 (plafond en mémoire) est abandonnée, le renouvellement compte comme une création de salon.
 
 1. **Plafond de durée gardé en mémoire (retenu).** À la création, le serveur garde en mémoire seulement l'échéance maximale permise (création + 24 h, au quart d'heure supérieur). Rien sur le disque. Après un redémarrage, ce plafond est inconnu : la prolongation est refusée (`409 stale`), limite acceptée (un redémarrage efface de toute façon les conversations).
 2. Plafond écrit en base : survivrait au redémarrage, mais révèle l'heure de création au quart d'heure à qui lit le disque, ce que la spec exclut (« jamais : durée choisie, l'heure de création s'en déduirait »). Écarté.
@@ -48,8 +53,10 @@ Pour prévenir les membres : un **enregistrement serveur sans rang `0x10` « ré
 
 ## Décisions
 
+> **Remplacé par la révision** (en tête) pour la durée : `prolonger_h` est devenu `renouveler_h` (1, 6, 12 ou 24 h depuis maintenant, conversation effacée), sans `409 limit` ni `max_extra_s`. Places : besoin minimal = sièges occupés plus le siège 0 s'il est vide.
+
 - Route `POST /api/salons/reglages` (`X-Shh-Manage`), corps `{ "max_members"?: N, "prolonger_h"?: 1|6|12 }`, au moins un des deux ; réponse `{ max_members, expires_in_s }`.
-- Places : `N` entier, `sièges occupés ≤ N ≤ 10` (`SalonPlacesMax`, réglable plus tard par offre) ; sinon `409 occupied` (trop bas) ou `400 bad_request` (hors bornes). Le plafond des arrivées suit (5 × `N`) ; les arrivées déjà comptées restent.
+- Places : `N` entier, `besoin minimal ≤ N ≤ 10` (sièges occupés, plus le siège 0 du créateur s'il est vide ; au moins 2) (`SalonPlacesMax`, réglable plus tard par offre) ; sinon `409 occupied` (trop bas) ou `400 bad_request` (hors bornes). Le plafond des arrivées suit (5 × `N`) ; les arrivées déjà comptées restent.
 - Durée : nouvelle échéance = ancienne + palier, arrondie au quart d'heure supérieur, ≤ plafond en mémoire ; sinon `409 limit` avec `max_extra_s` (ce qui reste possible). Jetons d'envoi de pièces : inchangés (déjà bornés à min(6 h, fin du salon) à leur émission).
 - Une seule transaction SQL (`UPDATE … WHERE id=? AND failed_attempts<10 AND expires_at>?`) ; état mémoire mis à jour sous `salon.mu` ; `0x10` diffusé (direct et rattrapage, jamais de fermeture).
 - Mêmes protections que les autres actions du créateur : `S_gestion` en temps constant, mêmes limites que `gestion`, réponses fixes, aucune adresse IP.
