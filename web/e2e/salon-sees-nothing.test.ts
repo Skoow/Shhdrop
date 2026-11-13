@@ -517,6 +517,8 @@ describe("le serveur ne voit rien : renouvellement du salon", () => {
       await x.attendre((q) => q.k === "enr" && q.enr.type === 0x10);
       expect(x.reglages).toEqual({ depart, secondes: expect.any(Number), places: 3 });
       expect(x.erreurs).toEqual([]);
+      // Purge du client : plus rien de rang ≤ départ (trames et ce que le moteur en a tiré).
+      expect(x.recus.filter((q) => (q.k === "enr" ? q.enr.type === 0x01 : true) && (q.k === "enr" ? q.enr.seq : q.seq) <= depart)).toEqual([]);
     }
 
     // Disque : conversation vide (clé neuve), aucune fenêtre de l'ancienne, pièce et ligne parties, budget à 0.

@@ -286,6 +286,11 @@ export class ClientSalon {
     const enr: Enr = { type, seq, octets: b.slice() };
     switch (type) {
       case 0x01: {
+        // Après un renouvellement (0x10), rien de rang ≤ départ ne doit plus être servi.
+        if (seq <= this.depart) {
+          this.erreurs.push(`0x01 ${seq} reçu après le renouvellement au rang ${this.depart}`);
+          break;
+        }
         const siege = b[9]!;
         const recuMs = u64(b, 10);
         const trame = b.slice(18);
@@ -331,7 +336,11 @@ export class ClientSalon {
         this.reglages = r;
         if (depart > this.depart) {
           this.depart = depart;
-          this.effaces.length = 0;
+          // Purge de ce qui est de rang ≤ départ : trames reçues (enregistrement brut et ce que le
+          // moteur en a tiré) et 0x0E. Le reste (annonces, présences, 0x10…) est gardé.
+          const garder = (q: Recu) => (q.k === "enr" ? q.enr.type !== 0x01 || q.enr.seq > depart : q.seq > depart);
+          this.recus.splice(0, this.recus.length, ...this.recus.filter(garder));
+          this.effaces.splice(0, this.effaces.length, ...this.effaces.filter((x) => x > depart));
           this.dernierSeq = Math.max(this.dernierSeq, depart);
         }
         break;
