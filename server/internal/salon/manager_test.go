@@ -352,7 +352,7 @@ func TestRejoindreCreateurSiege0(t *testing.T) {
 	b := nouveauBanc(t, 200)
 	c := b.creer(t, 4)
 	e := b.entrer(t, c, true)
-	if e.Siege != 0 || e.MaxMembers != 4 || e.MembersCanDestroy || e.BudgetLeft != 1073741824 ||
+	if e.Siege != 0 || e.MaxMembers != 4 || e.MembersCanDestroy || e.BudgetLeft != 2147483648 ||
 		e.ExpiresIn != 24*time.Hour+7*time.Minute+30*time.Second {
 		t.Fatalf("créateur : %+v", e)
 	}

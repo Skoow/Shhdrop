@@ -22,7 +22,8 @@ import (
 // SHA-256 du jeton), le rang de création, le lien avec sa trame, la sorte (vocal) et les
 // lectures restent en mémoire, sous le verrou du salon.
 //
-// Règles du propriétaire (v3 §5.1) : les fichiers consomment le budget de 1 Go du salon
+// Règles du propriétaire (v3 §5.1) : les fichiers consomment le budget de 2 Go du salon (13 novembre, décision du propriétaire ;
+// 1 Go avant)
 // (pieces_bytes) ; les vocaux n'y comptent pas et ne sont pas limités en nombre, seulement
 // cadencés au rythme d'une voix (réserve du siège, limites.go). Tous comptent dans
 // SHH_STORAGE_MAX.
@@ -36,8 +37,9 @@ import (
 // fichier, puis ligne et budget rendu.
 
 const (
-	// Budget : octets de pièces d'un salon (hors vocaux), 1 Gio (§39.1, v3 §5.1).
-	Budget int64 = 1073741824
+	// Budget : octets de pièces d'un salon (hors vocaux), 2 Gio comme un partage gratuit (§39.1,
+	// v3 §5.1 ; 13 novembre, décision du propriétaire ; 1 Gio avant).
+	Budget int64 = 2147483648
 	// PalierMax : plus grand palier d'une pièce (8 000 morceaux, 524 416 048 octets).
 	PalierMax = 8000
 	// VocalOctetsParSeconde : réserve vocale gagnée par seconde de WebSocket ouvert (une voix

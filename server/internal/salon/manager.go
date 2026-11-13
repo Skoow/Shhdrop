@@ -28,8 +28,10 @@ import (
 const (
 	// maxEssais : 10 K_preuve_s fausses détruisent le salon (§39.3.6).
 	maxEssais = 10
-	// reserveCreation : place disque libre exigée pour créer un salon (plan, point 10).
-	reserveCreation int64 = 2 << 30
+	// reserveCreation : place disque libre exigée pour créer un salon (plan, point 10) : le budget
+	// de pièces d'un salon (Budget, 2 Gio). Ce n'est pas une réservation : chaque pièce et chaque
+	// trame revérifient SHH_STORAGE_MAX (placer, plein), qui reste le vrai garde-fou du disque.
+	reserveCreation int64 = Budget
 	kdfOps                = 3
 	kdfMem                = 67108864
 	// VivantsParBloc : salons vivants au plus par bloc /48 (par adresse en IPv4), pour que

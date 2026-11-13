@@ -130,45 +130,48 @@ func (b *banc) lire(t *testing.T, mb Membre, id string, n int) ([]byte, error) {
 	return io.ReadAll(l)
 }
 
-func TestBudgetUnGo(t *testing.T) {
+// Budget de 2 Go par salon (13 novembre, décision du propriétaire) : quatre paliers de 8 000
+// (4 × 524 416 048 = 2 097 664 192 o) passent, le cinquième est refusé ; le reste
+// (49 819 456 o) prend encore un palier 400 (26 220 848 o), pas un 800 (52 441 648 o).
+func TestBudgetDeuxGo(t *testing.T) {
 	creux(t)
 	b := nouveauBanc(t, 200)
 	c := b.creer(t, 2)
 	_, mb := b.entrerMembre(t, c, true)
 	s := mb.salon
-	if Budget != 1073741824 || PalierMax != 8000 || share.TotalSize(PalierMax) != 524416048 {
+	if Budget != 2147483648 || PalierMax != 8000 || share.TotalSize(PalierMax) != 524416048 ||
+		share.TotalSize(400) != 26220848 || share.TotalSize(800) != 52441648 {
 		t.Fatal("constantes", Budget, PalierMax, share.TotalSize(PalierMax))
 	}
-	// « 500 Mo » : palier 8 000, 524 416 048 octets, deux fois.
-	for range 2 {
+	for range 4 {
 		b.creerPiece(t, mb, 8000, false)
 	}
-	if got := b.budgetPris(t, s); got != 2*524416048 {
+	if got := b.budgetPris(t, s); got != 4*524416048 {
 		t.Fatal("pieces_bytes", got)
 	}
 	if _, err := b.m.CreerPiece(mb, 8000, false); !errors.Is(err, ErrBudget) {
-		t.Fatal("troisième palier 8 000 :", err)
+		t.Fatal("cinquième palier 8 000 :", err)
 	}
-	// Ce qui reste (24 909 728 o) prend encore un palier 160 (10 488 368 o), pas un 400.
-	if _, err := b.m.CreerPiece(mb, 400, false); !errors.Is(err, ErrBudget) {
-		t.Fatal("palier 400 :", err)
+	if _, err := b.m.CreerPiece(mb, 800, false); !errors.Is(err, ErrBudget) {
+		t.Fatal("palier 800 :", err)
 	}
-	b.creerPiece(t, mb, 160, false)
+	b.creerPiece(t, mb, 400, false)
 	for _, p := range []int{16385, 32769, 0, 2, -1, 8001} {
 		if _, err := b.m.CreerPiece(mb, p, false); !errors.Is(err, ErrBadRequest) {
 			t.Fatal("palier", p, err)
 		}
 	}
-	if got := b.budgetPris(t, s); got != 2*524416048+share.TotalSize(160) {
+	pris := int64(4*524416048) + share.TotalSize(400)
+	if got := b.budgetPris(t, s); got != pris {
 		t.Fatal("refus comptés dans pieces_bytes", got)
 	}
 	e := b.entrer(t, c, false)
-	if e.BudgetLeft != Budget-2*524416048-share.TotalSize(160) {
+	if e.BudgetLeft != Budget-pris || e.BudgetLeft != 23598608 {
 		t.Fatal("budget_left", e.BudgetLeft)
 	}
 }
 
-// Salon plein à 1 Go : les fichiers sont refusés, un vocal passe encore (v3 §5.1, décision 3).
+// Salon plein à 2 Go : les fichiers sont refusés, un vocal passe encore (v3 §5.1, décision 3).
 func TestVocalHorsBudget(t *testing.T) {
 	b := nouveauBanc(t, 200)
 	c := b.creer(t, 2)

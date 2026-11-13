@@ -24,7 +24,7 @@ var (
 	ErrExcluded = errors.New("salon: exclu")
 	// ErrForbidden : action réservée (créateur, auteur d'une trame ou d'une pièce).
 	ErrForbidden = errors.New("salon: action interdite")
-	// ErrBudget : budget de pièces du salon (1 Gio) ou budget de lecture épuisé.
+	// ErrBudget : budget de pièces du salon (2 Gio) ou budget de lecture épuisé.
 	ErrBudget = errors.New("salon: budget épuisé")
 	// ErrStale : exclusion qui ne correspond plus à l'état (siège, nonce_arrivée).
 	ErrStale = errors.New("salon: état dépassé")

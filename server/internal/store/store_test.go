@@ -507,12 +507,12 @@ func TestSalonsContraintes(t *testing.T) {
 			t.Errorf("palier %d refusé : %v", b, err)
 		}
 	}
-	for _, v := range []int64{-1, 1073741825} {
+	for _, v := range []int64{-1, 2147483649} {
 		if _, err := db.Exec(`UPDATE salons SET pieces_bytes=? WHERE id='a'`, v); err == nil {
 			t.Errorf("pieces_bytes %d accepté", v)
 		}
 	}
-	for _, v := range []int64{1073741824, 0} {
+	for _, v := range []int64{2147483648, 0} {
 		if _, err := db.Exec(`UPDATE salons SET pieces_bytes=? WHERE id='a'`, v); err != nil {
 			t.Errorf("pieces_bytes %d refusé : %v", v, err)
 		}

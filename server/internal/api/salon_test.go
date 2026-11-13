@@ -418,7 +418,7 @@ func TestRejoindreHTTP(t *testing.T) {
 		}
 		// Aucune horloge avancée depuis la création : même échéance que sa réponse.
 		if r["seat"] != float64(i) || r["max_members"] != 3.0 || r["members_can_destroy"] != false ||
-			r["budget_left"] != 1073741824.0 || r["expires_in_s"] != 4377.0 {
+			r["budget_left"] != 2147483648.0 || r["expires_in_s"] != 4377.0 {
 			t.Fatalf("réponse : %v", r)
 		}
 		s, ok := r["seq"].(float64)

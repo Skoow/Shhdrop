@@ -167,7 +167,7 @@ Comme §39.5 : 2 000 graphèmes au plus, sinon proposé en fichier `.txt` ; lien
 
 ### 4.4 Vocaux et fichiers dans la conversation
 
-Comme §39.5 : vocal enregistré dans la conversation (10 min au plus), lu sur place ; fichiers de tout type, nombre illimité dans le budget (1 Go au total, 500 Mo par fichier), nettoyés comme les partages ; images et vocaux de 16 Mo au plus affichés d'office, le reste au clic avec « Enregistrer ». Ajouts : lecture des vocaux à 1×, 1,5×, 2× ; galerie des photos et vidéos du salon ; glisser-déposer et coller une image.
+Comme §39.5 : vocal enregistré dans la conversation (10 min au plus), lu sur place ; fichiers de tout type, nombre illimité dans le budget (2 Go au total depuis le 13 novembre, décision du propriétaire ; 1 Go avant ; 500 Mo par fichier), nettoyés comme les partages ; images et vocaux de 16 Mo au plus affichés d'office, le reste au clic avec « Enregistrer ». Ajouts : lecture des vocaux à 1×, 1,5×, 2× ; galerie des photos et vidéos du salon ; glisser-déposer et coller une image.
 
 ## 5. Effacement des messages (décision du propriétaire)
 
@@ -194,7 +194,7 @@ Comme §39.5 : vocal enregistré dans la conversation (10 min au plus), lu sur p
 
 ### 5.1 Conversation sur disque, messages sans limite (décisions du propriétaire, 11 novembre)
 
-**Décisions** : (1) la conversation est **écrite sur le disque du serveur**, chiffrée de bout en bout, pour ne pas remplir la mémoire ; ce n'est pas un fichier temporaire de secours mais le stockage normal du salon jusqu'à sa fin. (2) Les **fichiers** (PDF, photos, vidéos, archives…) consomment la capacité du salon (1 Go, §39.1). (3) Les **messages écrits et vocaux** sont **sans limite** et ne consomment pas cette capacité : un salon plein de fichiers permet toujours d'écrire et d'envoyer des vocaux. (4) **Appels audio et vidéo : fonctions payantes** (§8). Remplace « relais en mémoire seulement » (§39.3.2) et le budget des trames (§39.1).
+**Décisions** : (1) la conversation est **écrite sur le disque du serveur**, chiffrée de bout en bout, pour ne pas remplir la mémoire ; ce n'est pas un fichier temporaire de secours mais le stockage normal du salon jusqu'à sa fin. (2) Les **fichiers** (PDF, photos, vidéos, archives…) consomment la capacité du salon (**2 Go**, §39.1 ; 13 novembre, décision du propriétaire, comme un partage gratuit ; 1 Go avant). (3) Les **messages écrits et vocaux** sont **sans limite** et ne consomment pas cette capacité : un salon plein de fichiers permet toujours d'écrire et d'envoyer des vocaux. (4) **Appels audio et vidéo : fonctions payantes** (§8). Remplace « relais en mémoire seulement » (§39.3.2) et le budget des trames (§39.1).
 
 **Stockage**
 - Un fichier par salon (`salons/{id interne}`), écrit en ajout : chaque trame de 4 140 octets telle qu'elle est arrivée (chiffrée de bout en bout par MLS, puis sous `K_trame`). Le serveur ne peut lire ni le contenu, ni le type, ni l'expéditeur, comme en mémoire.
@@ -204,7 +204,7 @@ Comme §39.5 : vocal enregistré dans la conversation (10 min au plus), lu sur p
 - Jamais : pseudonymes, adresses, heures en clair dans la base ; fichier sans date (dates remises à zéro, `O_NOATIME`, comme les partages).
 
 **Pourquoi des bornes restent nécessaires, sans compter les messages (signalements)**
-- **Élevé, abus du vocal** : le serveur ne peut pas savoir qu'un vocal est un vocal (tout est chiffré). « Vocal illimité » permettrait à un client modifié de déposer n'importe quel fichier en le disant vocal, et de contourner le 1 Go. **Retenu** : les vocaux ne comptent pas dans le 1 Go mais suivent la **vitesse d'une vraie voix** : chaque personne dispose de 4 Ko par seconde de présence dans le salon (une voix Opus en consomme environ 3), cumulés jusqu'à 1 h de réserve. Une personne qui parle sans arrêt n'est jamais bloquée ; un faux vocal d'un gros fichier l'est.
+- **Élevé, abus du vocal** : le serveur ne peut pas savoir qu'un vocal est un vocal (tout est chiffré). « Vocal illimité » permettrait à un client modifié de déposer n'importe quel fichier en le disant vocal, et de contourner le budget de fichiers. **Retenu** : les vocaux ne comptent pas dans les 2 Go (1 Go avant le 13 novembre) mais suivent la **vitesse d'une vraie voix** : chaque personne dispose de 4 Ko par seconde de présence dans le salon (une voix Opus en consomme environ 3), cumulés jusqu'à 1 h de réserve. Une personne qui parle sans arrêt n'est jamais bloquée ; un faux vocal d'un gros fichier l'est.
 - **Moyen, abus du texte** : un robot à 60 trames par minute écrit 350 Mo par jour et par siège. **Retenu** : la cadence actuelle (60 par minute, rafale 20) plus un plafond de **1 200 messages par heure et par personne** (un toutes les 3 s en continu, au-delà de toute conversation humaine). Les « en train d'écrire », accusés et présence (§6, §39.3.7) sont relayés **sans être écrits sur le disque**, signalés par un bit de l'enveloppe extérieure ; **fuite assumée** : le serveur distingue ces trames brèves des messages, ce qu'il pouvait déjà déduire de leur rythme (S34).
 - **Garde-fou global** : l'ensemble compte dans `SHH_STORAGE_MAX` ; disque presque plein → plus de nouveaux salons (503 `busy`), les salons ouverts continuent.
 
