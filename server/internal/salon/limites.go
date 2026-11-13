@@ -8,8 +8,11 @@ import (
 // Limites des trames montantes par siège (plan C-2 Task 12, Global Constraints) : seaux à
 // jetons, en mémoire seulement, sous s.mu. Les limites par connexion et par /48 (480 et 960
 // par minute) sont celles de limits.AllowFrame, consultées par Servir avant Recevoir.
-//   - cadence : toute trame, rafale de 20 puis 1 par seconde (60 par minute) ;
-//   - horaire : trames non volatiles, 1 200 puis 1 200 par heure (1 par 3 s).
+//   - cadence : trames non volatiles, rafale de 20 puis 1 par seconde (60 par minute) ;
+//   - horaire : trames non volatiles, 1 200 puis 1 200 par heure (1 par 3 s) ;
+//   - volatile : trames volatiles (« en train d'écrire », accusés), rafale de 30 puis 2 par
+//     seconde (120 par minute), seau à part (point D9 du rapport de performance, décision du
+//     13 novembre : elles consommaient le seau des messages, retenus 2 s après une rafale).
 //
 // Les seaux d'un siège invité sont remis à neuf à l'arrivée d'un nouvel occupant (0x02,
 // installerLocked) : il n'hérite pas du compte d'un autre (une arrivée coûte déjà une place
@@ -28,6 +31,11 @@ const (
 	// (décision du 12 novembre) : environ +4 % sur le dimensionnement du disque (plan, point 10).
 	horaireMax      = 1200
 	horaireParHeure = 1200.0
+	// rafaleVolatile, volatileSeconde : borne contre le flood des volatiles, qui ne sont ni
+	// écrites ni gardées (relais seulement) : 2,5 fois les quelque 48 trames par minute d'un
+	// membre actif (limits.FramesPer64), et toujours sous le plafond de la connexion (480).
+	rafaleVolatile  = 30
+	volatileSeconde = 2.0
 )
 
 // seau : jetons disponibles (au plus cap), remplis de parSeconde par seconde depuis dernier.
@@ -71,7 +79,7 @@ func (b *seau) rendre() { b.jetons = min(b.cap, b.jetons+1) }
 
 // limiteSiege : seaux (trames, pièces) et réserve vocale d'un numéro de siège.
 type limiteSiege struct {
-	cadence, horaire seau
+	cadence, horaire, volatile seau
 	// pieces : pièces non vocales créées (PiecesParHeure, pieces.go), décision du 12 novembre.
 	pieces seau
 	vocal  reserveVocale
@@ -141,34 +149,37 @@ func (r *reserveVocale) rendre(n int64) { r.octets = min(VocalReserveMax, r.octe
 // nouvelleLimite : seaux pleins.
 func nouvelleLimite() limiteSiege {
 	return limiteSiege{
-		cadence: seau{jetons: rafaleSiege, cap: rafaleSiege, parSeconde: cadenceSeconde},
-		horaire: seau{jetons: horaireMax, cap: horaireMax, parSeconde: horaireParHeure / 3600},
-		pieces:  seau{jetons: PiecesParHeure, cap: PiecesParHeure, parSeconde: PiecesParHeure / 3600.0},
+		cadence:  seau{jetons: rafaleSiege, cap: rafaleSiege, parSeconde: cadenceSeconde},
+		horaire:  seau{jetons: horaireMax, cap: horaireMax, parSeconde: horaireParHeure / 3600},
+		volatile: seau{jetons: rafaleVolatile, cap: rafaleVolatile, parSeconde: volatileSeconde},
+		pieces:   seau{jetons: PiecesParHeure, cap: PiecesParHeure, parSeconde: PiecesParHeure / 3600.0},
 	}
 }
 
 // prendre : une trame (non volatile ou pas) ; 0 si elle passe, sinon le délai avant de
 // réessayer, et aucun jeton n'est pris dans aucun seau.
 func (l *limiteSiege) prendre(now time.Time, nonVolatile bool) time.Duration {
-	if nonVolatile {
-		l.horaire.remplir(now)
-		if d := l.horaire.attente(); d > 0 {
-			return d
-		}
+	if !nonVolatile {
+		_, d := l.volatile.prendre(now)
+		return d
+	}
+	l.horaire.remplir(now)
+	if d := l.horaire.attente(); d > 0 {
+		return d
 	}
 	if ok, d := l.cadence.prendre(now); !ok {
 		return d
 	}
-	if nonVolatile {
-		l.horaire.jetons--
-	}
+	l.horaire.jetons--
 	return 0
 }
 
 // rendre : jetons de prendre(now, nonVolatile) rendus (écriture en échec, relais.go).
 func (l *limiteSiege) rendre(nonVolatile bool) {
-	l.cadence.rendre()
-	if nonVolatile {
-		l.horaire.rendre()
+	if !nonVolatile {
+		l.volatile.rendre()
+		return
 	}
+	l.cadence.rendre()
+	l.horaire.rendre()
 }

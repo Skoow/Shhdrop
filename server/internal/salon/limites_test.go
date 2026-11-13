@@ -42,7 +42,7 @@ func (b *banc) essai(t *testing.T, mb Membre, trame []byte) time.Duration {
 	return 0
 }
 
-// 20 trames d'un coup acceptées ; la 21ᵉ → Attente d'une seconde, aucun rang consommé ; une
+// 20 messages (non volatils) d'un coup acceptés ; le 21ᵉ → Attente d'une seconde, aucun rang consommé ; une
 // seconde plus tard, une de plus passe. Par le WebSocket : 0x0B de 1 s, connexion ouverte.
 func TestRafale20(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -51,12 +51,12 @@ func TestRafale20(t *testing.T) {
 		eg, g := b.entrerMembre(t, c, true)
 		s := g.salon
 		for i := range 20 {
-			if d := b.essai(t, g, trameD(dVolatile, i)); d != 0 {
+			if d := b.essai(t, g, trameD(0, i)); d != 0 {
 				t.Fatal("refusée dans la rafale :", i, d)
 			}
 		}
 		avant := dernierSeq(s)
-		if d := b.essai(t, g, trameD(dVolatile, 20)); d != time.Second {
+		if d := b.essai(t, g, trameD(0, 20)); d != time.Second {
 			t.Fatal("21ᵉ :", d)
 		}
 		if dernierSeq(s) != avant {
@@ -100,11 +100,11 @@ func TestSoixanteParMinute(t *testing.T) {
 	c := b.creer(t, 4)
 	_, g := b.entrerMembre(t, c, true)
 	_, a := b.entrerMembre(t, c, false)
-	if n := b.cadence(t, g, 600, 0, time.Second, dVolatile); n != 600 {
+	if n := b.cadence(t, g, 600, 0, time.Second, 0); n != 600 {
 		t.Fatal("1 par seconde :", n, "acceptées sur 600")
 	}
 	// Rafale de 20 et 0,5 jeton par essai : épuisée avant le 40ᵉ essai.
-	if n := b.cadence(t, a, 1200, 100, 500*time.Millisecond, dVolatile); n != 550 {
+	if n := b.cadence(t, a, 1200, 100, 500*time.Millisecond, 0); n != 550 {
 		t.Fatal("2 par seconde :", n, "acceptées sur 1 100 après la rafale")
 	}
 }
@@ -168,18 +168,18 @@ func TestLimiteParSiege(t *testing.T) {
 	_, g := b.entrerMembre(t, c, true)
 	_, a := b.entrerMembre(t, c, false)
 	for i := range 20 {
-		b.essai(t, g, trameD(dVolatile, i))
+		b.essai(t, g, trameD(0, i))
 	}
-	if b.essai(t, g, trameD(dVolatile, 20)) == 0 {
+	if b.essai(t, g, trameD(0, 20)) == 0 {
 		t.Fatal("G non limité")
 	}
 	for i := range 20 {
-		if d := b.essai(t, a, trameD(dVolatile, i)); d != 0 {
+		if d := b.essai(t, a, trameD(0, i)); d != 0 {
 			t.Fatal("A gêné par G :", i, d)
 		}
 	}
 	_, g2 := b.entrerMembre(t, c, true) // reprise du siège 0 : nouveau jeton, même siège
-	if b.essai(t, g2, trameD(dVolatile, 21)) == 0 {
+	if b.essai(t, g2, trameD(0, 21)) == 0 {
 		t.Fatal("reprise : compte du siège remis à zéro")
 	}
 }
@@ -328,9 +328,9 @@ func TestLimiteNouvelOccupant(t *testing.T) {
 		vider := func(mb Membre) {
 			t.Helper()
 			for i := range 20 {
-				b.essai(t, mb, trameD(dVolatile, i))
+				b.essai(t, mb, trameD(0, i))
 			}
-			if b.essai(t, mb, trameD(dVolatile, 20)) == 0 {
+			if b.essai(t, mb, trameD(0, 20)) == 0 {
 				t.Fatal("seau non vidé")
 			}
 		}
@@ -338,7 +338,7 @@ func TestLimiteNouvelOccupant(t *testing.T) {
 		// Reprise par WebSocket : même siège, compteurs gardés.
 		lr := b.connecter(ea.Jeton, DepuisReprise)
 		synctest.Wait()
-		if b.essai(t, a, trameD(dVolatile, 21)) == 0 {
+		if b.essai(t, a, trameD(0, 21)) == 0 {
 			t.Fatal("reprise par WebSocket : compteurs remis à zéro")
 		}
 		finir(t, lr)
@@ -351,7 +351,7 @@ func TestLimiteNouvelOccupant(t *testing.T) {
 			t.Fatal("siège :", n.siege)
 		}
 		for i := range 20 {
-			if d := b.essai(t, n, trameD(dVolatile, i)); d != 0 {
+			if d := b.essai(t, n, trameD(0, i)); d != 0 {
 				t.Fatal("nouvel occupant : compte hérité", i, d)
 			}
 		}
@@ -389,7 +389,7 @@ func TestRefusCadenceSansJetonHoraire(t *testing.T) {
 	c := b.creer(t, 4)
 	_, g := b.entrerMembre(t, c, true)
 	for i := range 20 {
-		b.essai(t, g, trameD(dVolatile, i))
+		b.essai(t, g, trameD(0, i))
 	}
 	h0 := limiteDe(g).horaire.jetons
 	for i := range 10 {
@@ -545,4 +545,41 @@ func TestLimiteCreateurRevenu(t *testing.T) {
 			t.Fatal("créateur revenu : seau horaire remis à neuf :", h)
 		}
 	})
+}
+
+// Point D9 du rapport de performance (décision du 13 novembre) : les trames volatiles
+// (« en train d'écrire », accusés) ont leur propre seau (rafale de 30, puis 2 par seconde) ;
+// elles ne retiennent plus les messages, et les messages ne les retiennent pas.
+func TestSeauVolatile(t *testing.T) {
+	b := bancLimite(t)
+	c := b.creer(t, 4)
+	_, g := b.entrerMembre(t, c, true)
+	// 30 volatiles d'un coup : passent ; la 31ᵉ attend une demi-seconde.
+	for i := range 30 {
+		if d := b.essai(t, g, trameD(dVolatile, i)); d != 0 {
+			t.Fatal("volatile refusée dans la rafale :", i, d)
+		}
+	}
+	if d := b.essai(t, g, trameD(dVolatile, 30)); d != 500*time.Millisecond {
+		t.Fatal("31ᵉ volatile :", d)
+	}
+	// Les 20 messages de la rafale passent encore.
+	for i := range 20 {
+		if d := b.essai(t, g, trameD(0, i)); d != 0 {
+			t.Fatal("message retenu par les volatiles :", i, d)
+		}
+	}
+	if b.essai(t, g, trameD(0, 21)) == 0 {
+		t.Fatal("21ᵉ message accepté")
+	}
+	// Seau des messages vide : une volatile passe dès qu'elle a son jeton.
+	b.h.avancer(500 * time.Millisecond)
+	if d := b.essai(t, g, trameD(dVolatile, 31)); d != 0 {
+		t.Fatal("volatile retenue par les messages :", d)
+	}
+	// Toujours borné : 10 min à 4 volatiles par seconde, au plus 2 par seconde passent.
+	n := b.cadence(t, g, 2400, 0, 250*time.Millisecond, dVolatile)
+	if n > 30+2*600+1 || n < 2*600-2 {
+		t.Fatal("volatiles à 4 par seconde :", n, "acceptées sur 2 400")
+	}
 }
