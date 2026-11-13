@@ -268,7 +268,8 @@ func TestBytesPer48(t *testing.T) {
 	}
 }
 
-// Requêtes de segments à jeton valide : 600 par minute et par connexion, compteur à part.
+// Requêtes de segments à jeton valide : 1 500 par minute et par connexion (600 avant le
+// 13 novembre), compteur à part.
 func TestSegmentRate(t *testing.T) {
 	now := t0
 	l := newLim(&now)
@@ -277,8 +278,8 @@ func TestSegmentRate(t *testing.T) {
 			t.Fatalf("segment %d refusé", i+1)
 		}
 	}
-	if SegmentsPerMin != 600 || l.AllowSegment(ip("1.2.3.4")) {
-		t.Fatal("601ᵉ segment accepté")
+	if SegmentsPerMin != 1500 || l.AllowSegment(ip("1.2.3.4")) {
+		t.Fatal("1 501ᵉ segment accepté")
 	}
 	if !l.AllowRequest(ip("1.2.3.4")) {
 		t.Fatal("compteur général touché par les segments")
@@ -292,11 +293,11 @@ func TestSegmentRate(t *testing.T) {
 	}
 }
 
-// Audit M1 : les /64 d'un même /48 partagent un compteur de 6 000 segments par minute.
+// Audit M1 : les /64 d'un même /48 partagent un compteur de 15 000 segments par minute.
 func TestSegmentRatePer48(t *testing.T) {
 	now := t0
 	l := newLim(&now)
-	if SegmentsPer48Min != 6000 {
+	if SegmentsPer48Min != 15000 {
 		t.Fatal(SegmentsPer48Min)
 	}
 	for p := 0; p < SegmentsPer48Min/SegmentsPerMin; p++ {
@@ -1198,5 +1199,32 @@ func TestNouveauVenu(t *testing.T) {
 	now = now.Add(24 * time.Hour)
 	if !l.Newcomer(a) {
 		t.Fatal("jour suivant")
+	}
+}
+
+// Point D8 du rapport de performance : SegmentsPerMin réglable (SHH_SEGMENTS_PER_MIN).
+func TestSegmentRateReglable(t *testing.T) {
+	now := t0
+	l := newLim(&now)
+	l.SetSegmentsPerMin(3)
+	for range 3 {
+		if !l.AllowSegment(ip("1.2.3.4")) {
+			t.Fatal("refusé sous 3")
+		}
+	}
+	if l.AllowSegment(ip("1.2.3.4")) {
+		t.Fatal("4ᵉ accepté")
+	}
+	// /48 : 10 × 3.
+	n := 0
+	for p := range 20 {
+		for range 3 {
+			if l.AllowSegment(ip(fmt.Sprintf("2001:db8:9:%x::1", p))) {
+				n++
+			}
+		}
+	}
+	if n != 30 {
+		t.Fatal("/48 :", n)
 	}
 }

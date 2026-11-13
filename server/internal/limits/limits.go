@@ -26,7 +26,11 @@ const (
 	BytesPer64     = 6 << 30  // 6 Gio utiles par jour : trois partages pleins (spec §24, §41.2)
 	BytesPer48     = 12 << 30 // 12 Gio utiles par jour et par /48 (anti-saturation du disque)
 	RequestsPerMin = 60
-	SegmentsPerMin = 600 // requêtes de segments à jeton valide, compteur à part
+	// SegmentsPerMin : requêtes de segments à jeton valide par minute et par connexion,
+	// compteur à part ; valeur par défaut, réglable (SetSegmentsPerMin, SHH_SEGMENTS_PER_MIN).
+	// 1 500 segments de 4 Mio par minute ≈ 840 Mbit/s par expéditeur (décision du propriétaire
+	// du 13 novembre ; 600 plafonnait un envoi sur la fibre à ≈ 335 Mbit/s).
+	SegmentsPerMin = 1500
 	// SegmentsPer48Min : même compteur par bloc /48 (10 × la connexion), pour qu'un /48
 	// découpé en /64 ne multiplie pas le débit par 65 536 (audit M1).
 	SegmentsPer48Min = 10 * SegmentsPerMin
@@ -118,9 +122,23 @@ type Limiter struct {
 	prevUntil int64
 	// bloc : clé de processus de CleBloc (crypto/rand à New), jamais tournée ni écrite.
 	bloc []byte
+	// seg64Max, seg48Max : requêtes de segments par minute (SegmentsPerMin, SegmentsPer48Min,
+	// SetSegmentsPerMin).
+	seg64Max, seg48Max int
 	// bytes64Max, bytes48Max : octets utiles par jour (BytesPer64, BytesPer48), ramenés à
 	// StorageMax / FairShare par SetStorage (part équitable du stockage, audit D2).
 	bytes64Max, bytes48Max int64
+}
+
+// SetSegmentsPerMin : n requêtes de segments par minute et par connexion, 10 × n par bloc
+// /48 ; n ≤ 0 garde SegmentsPerMin. À appeler avant de servir.
+func (l *Limiter) SetSegmentsPerMin(n int) {
+	if n <= 0 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.seg64Max, l.seg48Max = n, 10*n
 }
 
 // SetStorage : part équitable du stockage (audit du 13 novembre, D2) : une connexion ou un
@@ -128,6 +146,9 @@ type Limiter struct {
 // vivent 24 h au plus : c'est aussi sa part du disque), en plus de BytesPer64 et BytesPer48.
 // À appeler avant de servir.
 func (l *Limiter) SetStorage(storageMax int64) {
+	if storageMax <= 0 {
+		return
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	share := max(1, storageMax/FairShare)
@@ -162,7 +183,7 @@ type upload struct {
 
 func New(now func() time.Time) *Limiter {
 	l := &Limiter{now: now, day: -1, minute: -1, hour: -1, bloc: make([]byte, 32),
-		bytes64Max: BytesPer64, bytes48Max: BytesPer48}
+		bytes64Max: BytesPer64, bytes48Max: BytesPer48, seg64Max: SegmentsPerMin, seg48Max: SegmentsPer48Min}
 	if _, err := rand.Read(l.bloc); err != nil {
 		panic(err) // crypto/rand ne renvoie pas d'erreur sous Linux
 	}
@@ -567,15 +588,15 @@ func (l *Limiter) AllowRequest(ip netip.Addr) bool {
 	return true
 }
 
-// AllowSegment : 600 requêtes de segments par minute (fenêtre fixe) et par connexion, et
-// 6 000 par bloc /48, pour les seules requêtes de segments dont le jeton est valide
+// AllowSegment : SegmentsPerMin requêtes de segments par minute (fenêtre fixe, réglable) et
+// par connexion, et 10 fois plus par bloc /48, pour les seules requêtes de segments dont le jeton est valide
 // (vérifié avant l'appel). Une requête refusée n'est comptée nulle part.
 func (l *Limiter) AllowSegment(ip netip.Addr) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.rotateLocked(l.now())
 	k64, k48 := l.keyLocked(ip)
-	if l.seg[k64] >= SegmentsPerMin || l.seg48[k48] >= SegmentsPer48Min {
+	if l.seg[k64] >= l.seg64Max || l.seg48[k48] >= l.seg48Max {
 		return false
 	}
 	l.seg[k64]++

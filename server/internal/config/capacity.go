@@ -27,6 +27,9 @@ type Capacity struct {
 	// DiskOps (SHH_DISK_OPS_MAX) : appels système de fichiers simultanés dans les dossiers des
 	// partages et des pièces (blob.Gate) : chacun tient un fil du système (audit D4).
 	DiskOps int
+	// SegmentsPerMin (SHH_SEGMENTS_PER_MIN) : requêtes de segments par minute et par connexion
+	// (limite anti-abus par personne, réglable : 1 500 par défaut, limits.SegmentsPerMin).
+	SegmentsPerMin int
 }
 
 const (
@@ -41,6 +44,8 @@ const (
 	// defaultDiskOps : 64 fils au plus bloqués dans des appels de fichiers, quel que soit le
 	// disque : bien sous pids_limit (1 024, compose.yaml), qui compte aussi les fils de Go.
 	defaultDiskOps = 64
+	// defaultSegmentsPerMin : limits.SegmentsPerMin (≈ 840 Mbit/s par expéditeur).
+	defaultSegmentsPerMin = 1500
 	// capMax : plafond de toute valeur réglable (borne de bon sens, pas de capacité).
 	capMax = 1 << 20
 )
@@ -60,7 +65,8 @@ func memLimit() int64 { return debug.SetMemoryLimit(-1) }
 //     descripteurs chacun), soit 3/4 de la limite au total, le reste pour la base, les
 //     conversations et la marge.
 func computeCapacity(mem int64, nofile uint64) Capacity {
-	c := Capacity{Uploads: defaultUploads, Downloads: defaultDownloads, WebSockets: defaultWebSockets, DiskOps: defaultDiskOps}
+	c := Capacity{Uploads: defaultUploads, Downloads: defaultDownloads, WebSockets: defaultWebSockets, DiskOps: defaultDiskOps,
+		SegmentsPerMin: defaultSegmentsPerMin}
 	if mem > 0 && mem < math.MaxInt64 {
 		c.Uploads = clamp(mem*3/10/uploadCost, 8, capMax)
 		c.Downloads = clamp(mem/10/downloadCost, 16, capMax)
@@ -101,6 +107,7 @@ func capacityFromEnv(mem int64, nofile uint64) (Capacity, error) {
 		{"SHH_WATCH_MAX", &c.Watches, true},
 		{"SHH_WS_MAX", &c.WebSockets, true},
 		{"SHH_DISK_OPS_MAX", &c.DiskOps, false},
+		{"SHH_SEGMENTS_PER_MIN", &c.SegmentsPerMin, false},
 	} {
 		s := os.Getenv(v.name)
 		if s == "" {

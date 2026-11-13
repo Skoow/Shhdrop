@@ -312,6 +312,7 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	gate := blob.NewGate(max(1, cfg.Capacity.DiskOps))
 	lim := limits.New(cfg.Now)
 	lim.SetStorage(cfg.StorageMaxBytes) // part équitable du stockage (audit D2)
+	lim.SetSegmentsPerMin(cfg.Capacity.SegmentsPerMin)
 	svc, err := share.NewService(share.Config{DB: db, OnAbandon: func(id string, _ int) { lim.AbandonUpload(id) },
 		Blobs: &blob.Store{Dir: filepath.Join(cfg.DataDir, "blobs"), NoSparse: cfg.BehindProxy, Gate: gate},
 		Now:   cfg.Now, StorageMax: cfg.StorageMaxBytes, FrozenFile: filepath.Join(cfg.DataDir, "frozen")})

@@ -244,6 +244,8 @@ Aucune limite de capacité n'est fixée en dur (décision du propriétaire du 13
 | `SHH_WS_MAX` | WebSocket du salon ouverts | 2 000 | 2 000 |
 | `SHH_DISK_OPS_MAX` | appels système de fichiers simultanés (partages et pièces) ; au-delà, ils attendent leur tour | 64 | 64 |
 
+**Débit par expéditeur** : `SHH_SEGMENTS_PER_MIN` (1 500 par défaut, 600 avant le 13 novembre) est la seule limite par personne réglable ici : requêtes de segments de 4 Mio par minute et par connexion (10 fois plus par /48), soit environ 840 Mbit/s par expéditeur. La baisser protège la bande passante de la machine ; la monter ne sert qu'au-delà de 1 Gbit/s.
+
 `SHH_DISK_OPS_MAX` borne les fils du système bloqués sur le disque (audit du 13 novembre, D4) : à garder bien sous `pids_limit` (1 024 dans `compose.yaml`). Chaque autre catégorie a au plus `nofile / 8` places (une lecture ou un envoi tient 2 descripteurs) ; une valeur réglée au-delà empêche le serveur de démarrer (message `… dépasse la limite de descripteurs`), au lieu de le faire tomber sous la charge.
 
 **Règle de sûreté** : ne monter `SHH_UPLOADS_MAX` qu'avec la mémoire. Chaque envoi garde 4 Mio, que le ramasse-miettes peut doubler : au-delà de `mem_limit`, le noyau tue le serveur (envois en cours perdus). Pour une machine plus grosse, monter `mem_limit` et `GOMEMLIMIT` ensemble (`GOMEMLIMIT` ≈ 90 % de `mem_limit`) et laisser les places se recalculer.

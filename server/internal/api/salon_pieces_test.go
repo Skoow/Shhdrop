@@ -317,7 +317,7 @@ func TestQuotasPieces(t *testing.T) {
 	}
 }
 
-// Segments de pièces : compteur des segments (600 par minute), pas celui des requêtes (60) ;
+// Segments de pièces : compteur des segments (SegmentsPerMin par minute), pas celui des requêtes (60) ;
 // un jeton invalide ou un membre inconnu reste sous la limite ordinaire.
 func TestSegmentsPiecesHorsLimite(t *testing.T) {
 	e, _ := salonEnv(t)
