@@ -150,10 +150,12 @@ test("contrôles à trois niveaux : fichier, catégorie, tout ; pause sans relec
   // Segments lents et comptés : une pause ne doit rien relire.
   const reads: number[] = [];
   let delay = 700;
+  let gate: Promise<void> | null = null;
   await page.route("**/api/shares/segments/*", async (r) => {
     reads.push(Number(r.request().url().split("/").pop()));
     await new Promise((res) => setTimeout(res, delay));
-    await r.continue();
+    if (gate) await gate;
+    await r.continue().catch(() => undefined); // lecture arrêtée entre-temps
   });
 
   // Fichier : pause, puis reprise ; aucun segment demandé pendant la pause ; contenu exact.
@@ -192,8 +194,12 @@ test("contrôles à trois niveaux : fichier, catégorie, tout ; pause sans relec
   expect(got["a (2).bin"]!.sha).toBe(sha(A));
   expect(got["c.bin"]!.sha).toBe(sha(C));
 
-  // Tout : progression d'ensemble, Tout mettre en pause, Tout reprendre, Tout arrêter.
+  // Tout : progression d'ensemble, Tout mettre en pause, Tout reprendre, Tout arrêter. Segments
+  // retenus jusqu'à la fin : avec la lecture d'avance (A2), les 3 segments de c.bin seraient sinon
+  // arrivés pendant la pause, et la reprise finirait aussitôt.
   delay = 900;
+  let open!: () => void;
+  gate = new Promise<void>((res) => (open = res));
   await page.getByRole("button", { name: "Télécharger à nouveau c.bin" }).click();
   await expect(page.locator('[data-progress="all"]')).toBeVisible();
   await page.getByRole("button", { name: "Tout mettre en pause" }).click();
@@ -204,6 +210,7 @@ test("contrôles à trois niveaux : fichier, catégorie, tout ; pause sans relec
   await expect(row(page, "c.bin")).toHaveAttribute("data-state", "downloading");
   await page.getByRole("button", { name: "Tout arrêter" }).click();
   await expect(row(page, "c.bin")).toHaveAttribute("data-state", "idle", { timeout: 20_000 });
+  open();
 });
 
 test("visionneuse en panneau : précédent, suivant, Début, Fin, Échap rend le focus, balayage au doigt ; axe ; captures", async ({ page, shh, browser }) => {
