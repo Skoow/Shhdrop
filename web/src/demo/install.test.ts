@@ -73,3 +73,14 @@ describe("installDemo", async () => {
     expect(localStorage.length + sessionStorage.length).toBe(0);
   });
 });
+
+describe("audit web D6 : Trusted Types décrits tels qu'ils sont", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync("src/demo/install.ts", "utf8");
+  const meta = readFileSync("scripts/demo-meta.mjs", "utf8");
+  it("la démo exige Trusted Types (balise meta), comme la production : jamais « absent »", () => {
+    expect(meta).toContain("require-trusted-types-for 'script'");
+    expect(src).not.toMatch(/Trusted Types[\s\u202f]*:[\s\u202f]*absent/i);
+    expect(src).not.toMatch(/Trusted Types:\s*missing/i);
+  });
+});
