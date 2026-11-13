@@ -24,10 +24,10 @@ export type Engine = {
 };
 
 async function load(): Promise<Engine> {
-  // Script du Worker d'Argon2id lu en même temps que le moteur (A9) : au clic ou à l'Entrée, il
-  // est déjà vérifié.
-  preloadWorker();
   const module = await WebAssembly.compile(await wasmBytes());
+  // Script du Worker d'Argon2id lu dès que le moteur est vérifié (A9) : au clic ou à l'Entrée, il
+  // l'est déjà. Jamais pour un moteur refusé (rien d'autre n'est lu ni lancé).
+  preloadWorker();
   await init({ module_or_path: module });
   const { default: _init, initSync: _sync, ...exports } = wasm;
   return { wasm: exports, provider: createProvider(), module, start: startWorker };

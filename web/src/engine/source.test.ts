@@ -175,6 +175,6 @@ describe("loadEngine", () => {
     expect(e.start).toBe(start);
     expect(typeof e.wasm.passwordKey).toBe("function");
     expect(await loadEngine()).toBe(e);
-    expect(preload).toHaveBeenCalledTimes(2); // A9 : script du Worker lu avec chaque chargement du moteur
+    expect(preload).toHaveBeenCalledTimes(1); // A9 : script du Worker lu dès le moteur vérifié, jamais après un échec
   });
 });
