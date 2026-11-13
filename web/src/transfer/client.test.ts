@@ -465,13 +465,16 @@ describe("openShare en flux : segments à la demande, saveItem, collectToBlob", 
       parts.push(new Uint8Array(c));
     });
     expect(same(concat(...parts.map((p) => new Uint8Array(p))), b)).toBe(true);
-    expect(s.calls.at(-1)).toBe("GET /api/shares/segments/1");
+    // A3 : le segment 0, déjà lu à l'ouverture, n'est pas redemandé par le premier enregistrement.
+    expect(s.calls.slice(4)).toEqual(["GET /api/shares/segments/1"]);
     const blob = await collectToBlob(o, 1);
     expect(blob.type).toBe("application/octet-stream");
     expect(same(new Uint8Array(await blob.arrayBuffer()), a)).toBe(true);
+    // Segments gardés lâchés après le premier enregistrement : 0 relu une fois pour a.png.
+    expect(s.calls.slice(5)).toEqual(["GET /api/shares/segments/0"]);
     expect(await o.item(0)).toEqual(utf8("salut"));
     expect(o.manifest.rights).toBe("enregistrer");
-    expect(prog).toEqual([[1, 3], [3, 3], [1, 3], [2, 3], [1, 3]]); // segment n lu → (n + 1, total)
+    expect(prog).toEqual([[1, 3], [3, 3], [2, 3], [1, 3]]); // segment n lu → (n + 1, total)
     o.wipe();
     await o.done();
     expect(s.calls.at(-1)).toBe("POST /api/shares/done");
@@ -518,6 +521,58 @@ describe("openShare en flux : segments à la demande, saveItem, collectToBlob", 
     ).toBe(disk);
     expect(await reject(o.item(9))).toEqual(new Error("element_inexistant"));
   });
+
+  it("A4 : segments 0 et du manifeste demandés ensemble après unlock (aucun n'attend l'autre)", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const asked: string[] = [];
+    const base = route();
+    const f = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input).slice(ORIGIN.length);
+      asked.push(path);
+      // Le segment 0 ne répond qu'une fois le segment du manifeste demandé.
+      if (path.endsWith("/segments/0")) await Promise.race([gate, new Promise((r) => setTimeout(r, 2000))]);
+      if (path.endsWith("/segments/2")) release();
+      return base(init?.method ?? "GET", path) ?? defaults(init?.method ?? "GET", path);
+    };
+    const t0 = performance.now();
+    const o = await openShare(LINK, PW, ORIGIN, undefined, { fetch: f as typeof fetch, retryDelayMs: 1 });
+    expect(performance.now() - t0).toBeLessThan(1500);
+    expect(asked.filter((x) => x.includes("/segments/"))).toEqual(["/api/shares/segments/0", "/api/shares/segments/2"]);
+    o.wipe();
+  });
+
+  it("A2 : lecture d'avance pendant un enregistrement ; chaque segment lu une fois", async () => {
+    const big = pseudo(13 * 1048576 + 3, 5); // segments 0 à 3 ; palier 400, manifeste au segment 6
+    const pk2 = await pack([{ kind: "file", name: "g.bin", mime: "application/octet-stream", data: new Blob([big]) }]);
+    expect(pk2.segments).toBe(7);
+    const s = server(packRoute(pk2));
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const slow = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      try {
+        await new Promise((r) => setTimeout(r, 20));
+        return await s.net.fetch(input, init);
+      } finally {
+        inFlight--;
+      }
+    }) as typeof fetch;
+    const o = await openShare(LINK, PW, ORIGIN, undefined, { fetch: slow, retryDelayMs: 1 });
+    maxInFlight = 0;
+    const parts: Uint8Array[] = [];
+    await o.saveItem(0, (c) => void parts.push(new Uint8Array(c)));
+    // Segments lus pendant le déchiffrement des précédents : 3 en vol au plus (lu + 2 d'avance).
+    expect(maxInFlight).toBeGreaterThanOrEqual(2);
+    expect(maxInFlight).toBeLessThanOrEqual(3);
+    expect(same(concat(...parts.map((p) => new Uint8Array(p))), big)).toBe(true);
+    const segs = s.calls.filter((x) => x.includes("/segments/"));
+    // 0 et le manifeste à l'ouverture, puis 1 et 2 (données), jamais deux fois le même.
+    expect(new Set(segs).size).toBe(segs.length);
+    expect(segs).toEqual(["GET /api/shares/segments/0", "GET /api/shares/segments/6", "GET /api/shares/segments/1", "GET /api/shares/segments/2", "GET /api/shares/segments/3"]);
+    o.wipe();
+  }, 60_000);
 
   it("segment manquant (coupure persistante) pendant item → Error(\"reseau\")", async () => {
     let cut = false;

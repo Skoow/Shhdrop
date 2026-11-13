@@ -20,6 +20,7 @@ import {
   parseLink,
   passwordKey,
   readHeader,
+  SEG_PLAIN,
   segmentCount,
   segmentSize,
   segmentsNeeded,
@@ -40,6 +41,7 @@ import { isRiskyName, previewKindOf, safeName, type PreviewKind } from "./safety
 import { lowMemory } from "../app/env";
 import { abortError } from "./upload";
 import { createDraft } from "./draft";
+import { segmentSource, type SegmentSource } from "./segments";
 
 export type { Net } from "./api";
 export type { PreparedCaptcha } from "./prepare";
@@ -606,6 +608,7 @@ async function openWith(
     let wiped = false;
     let destroying = false; // destroy() en cours ou réussi ici
 
+    let src: SegmentSource | undefined;
     let finished = false;
     const done = async () => {
       if (finished) return;
@@ -625,10 +628,13 @@ async function openWith(
         onProgress?.(n + 1, m.segments);
         return s;
       };
+      // Segments 0 (en-tête) et du manifeste (dernier du palier) lus ensemble, puis gardés
+      // pour le lecteur ; lecture d'avance pendant la lecture d'un élément (transfer/segments.ts).
+      src = segmentSource(get);
+      if ((BUCKETS as readonly number[]).includes(m.bucket)) src.preload([...new Set([0, segmentCount(m.bucket) - 1])]);
       // En-tête en clair du segment 0 → R = open(K_env, E, id, en-tête) → engagement vérifié
       // contre R → K_contenu (spec §29.2). Le segment 0 lu ici sert ensuite au lecteur.
-      let seg0: Uint8Array<ArrayBuffer> | null = await get(0);
-      const { header, engagement } = await readHeader(seg0);
+      const { header, engagement } = await readHeader(await src.get(0));
       let content: Awaited<ReturnType<typeof contentKeysChecked>>;
       try {
         const r = await open(kEnv, u.envelope, idBytes, header);
@@ -640,23 +646,15 @@ async function openWith(
       } finally {
         forget(kEnv);
       }
-      const fetchSegment = async (n: number) => {
-        if (n === 0 && seg0 !== null) {
-          const s = seg0;
-          seg0 = null;
-          return s;
-        }
-        return get(n);
-      };
       let rd: Awaited<ReturnType<typeof openStream>>;
       try {
-        rd = await openStream(fetchSegment, m.bucket, content);
+        rd = await openStream(src.get, m.bucket, content);
       } finally {
         // K_contenu ne sert qu'au manifeste, déjà lu : la poignée est oubliée tout de suite.
         forget(content);
       }
-      seg0?.fill(0);
-      seg0 = null;
+      src.endOpen();
+      const segs = src;
       const wrap = async <T>(f: () => Promise<T>): Promise<T> => {
         try {
           return await f();
@@ -669,19 +667,36 @@ async function openWith(
         if (!Number.isInteger(i) || e === undefined) throw new Error("element_inexistant");
         return e;
       };
+      // Lecture de l'élément i, segments [premier, dernier] lus d'avance (offset, size : octets
+      // du clair, bornés par le moteur). Un élément inexistant : erreur du moteur, sans lecture d'avance.
+      const within = <T>(i: number, f: () => Promise<T>) => {
+        const e = rd.manifest.items[i];
+        if (!Number.isInteger(i) || e === undefined || e.size === 0) return segs.within(0, -1, f);
+        return segs.within(Math.floor(e.offset / SEG_PLAIN), Math.floor((e.offset + e.size - 1) / SEG_PLAIN), f);
+      };
       return {
         manifest: rd.manifest,
         safeName: (i) => safeName(entry(i).name),
         // Petit appareil : aperçu limité (l'aperçu tient le fichier entier en mémoire).
         previewKind: (i) => previewKindOf(entry(i), typeof navigator !== "undefined" && lowMemory(navigator, Number.MAX_SAFE_INTEGER)),
         isRiskyFile: (i) => isRiskyName(safeName(entry(i).name)),
-        item: (i) => wrap(() => rd.item(i)),
-        saveItem: (i, sink) => wrap(() => rd.streamItem(i, sink)),
+        item: (i) => wrap(() => within(i, () => rd.item(i))),
+        saveItem: (i, sink) =>
+          wrap(() =>
+            within(i, async () => {
+              try {
+                return await rd.streamItem(i, sink);
+              } finally {
+                segs.releaseKept(); // segments 0 et du manifeste gardés jusqu'au premier enregistrement (A3)
+              }
+            }),
+          ),
         // Fin du téléchargement : le lecteur et les clés de ses éléments sont oubliés.
         done: async () => {
           try {
             await done();
           } finally {
+            segs.clear();
             rd.free();
           }
         },
@@ -709,6 +724,7 @@ async function openWith(
         wipe: () => {
           wiped = true;
           zero();
+          segs.clear();
           rd.wipe();
           rd.free(); // aucune poignée de clé ne reste jusqu'au ramasse-miettes
         },
@@ -716,6 +732,7 @@ async function openWith(
     } catch (e) {
       zero();
       forget(kEnv);
+      src?.clear();
       await done().catch(() => undefined);
       throw e;
     }
