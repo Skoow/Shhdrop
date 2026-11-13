@@ -100,7 +100,8 @@ export function checkDist(dir, demo) {
 
   // Spec §28.3 : chaque script et feuille de style de index.html porte une empreinte exacte
   // (production et démo). Le cadre PDF (pdf-frame.html) en est exempté pour l'instant : il vit
-  // dans une origine opaque, où une empreinte exigerait des en-têtes CORS sur ses deux fichiers.
+  // dans une origine opaque, où une empreinte exigerait des en-têtes CORS sur ses deux fichiers
+  // (serveur Go, headers.go). Il reçoit pourtant le PDF déchiffré (audit web D7) : à faire.
   problems.push(...checkSri("index.html", index, (rel) => byRel.get(rel) ?? null, demo ? DEMO_BASE : "/"));
 
   // Aucune ressource tierce (CLAUDE.md) : ni dans les pages (index.html, 404.html de la démo,
@@ -127,8 +128,10 @@ export function checkDist(dir, demo) {
       if (!/\.m?js$/.test(f.rel)) continue;
       // Cadre PDF isolé (UI §13) : pdf.js garde trois import() (WebAssembly, worker séparé) sur
       // des chemins que nos options n'empruntent pas (useWasm: false, worker sur le fil
-      // principal). Hors SRI par construction (script classique, origine opaque, aucun secret),
-      // et la CSP du cadre ne laisse charger que des scripts du site : exempté, lui seul.
+      // principal). Hors SRI (script classique, origine opaque : une empreinte exigerait
+      // Access-Control-Allow-Origin sur pdf-frame.js et pdf-frame.css). Attention : le cadre
+      // REÇOIT le PDF déchiffré (audit web D7) ; seuls la CSP du cadre (scripts du site
+      // seulement) et le manifeste de version (§28.2) couvrent ce fichier. Exempté, lui seul.
       if (f.rel === "pdf-frame.js") continue;
       const n = f.data.toString("utf8").match(/(?<![\w$.])import\s*\(/g)?.length ?? 0;
       if (n > 0) problems.push(`${f.rel} : import() dynamique (${n} fois), interdit en production`);
