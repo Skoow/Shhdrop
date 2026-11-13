@@ -37,9 +37,12 @@
 	https_port {$SHH_HTTPS_PORT:443}
 
 	servers {
-		# HTTP/1.1 et HTTP/2 seulement : pas de HTTP/3, donc aucun port UDP à ouvrir
-		# (pare-feu 22, 80, 443 de la spec §15.4).
-		protocols h1 h2
+		# HTTP/1.1, HTTP/2 et HTTP/3 (décision du propriétaire du 13 novembre ; c'est aussi le
+		# réglage par défaut de Caddy, écrit ici pour que test-proxy.sh le vérifie). HTTP/3 passe
+		# par QUIC sur le port UDP 443 : à ouvrir dans le pare-feu (README §1). TLS 1.3 de QUIC
+		# suit le bloc tls du site (courbes comprises). Caddy annonce HTTP/3 par l'en-tête
+		# Alt-Svc (h3=":443") sur les réponses HTTP/1.1 et HTTP/2.
+		protocols h1 h2 h3
 
 		# Jamais de « trusted_proxies » ici : aucun intermédiaire devant Caddy (spec §15.1).
 		# L'adresse du client est celle du pair TCP, rien d'autre.

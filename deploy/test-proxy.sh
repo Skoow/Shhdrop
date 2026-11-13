@@ -9,7 +9,8 @@
 #      contourne pas en changeant l'en-tête ;
 #   4. les en-têtes du serveur Go arrivent une seule fois, les octets ne changent pas ; aucune
 #      réponse, même fabriquée par Caddy (308, 413, 502), ne porte « Server » ni « Via » ;
-#   5. TLS 1.3, échange de clés X25519MLKEM768, redirection HTTP vers HTTPS ;
+#   5. TLS 1.3, échange de clés X25519MLKEM768, redirection HTTP vers HTTPS ; HTTP/3 annoncé
+#      (Alt-Svc) et écouté en UDP (la requête HTTP/3 elle-même n'est pas faite) ;
 #   6. aucune adresse de client dans ce que Caddy et le serveur écrivent (fichiers, sorties) ;
 #   7. salon (SHH_SALONS=1, plan C-2 Task 17) : Caddy garde l'en-tête Origin et laisse passer la
 #      mise à niveau WebSocket ; un WebSocket de /api/salons/ws, ouvert depuis l'adresse repère
@@ -267,7 +268,8 @@ check "limite de débit : 130 requêtes avec 130 X-Shh-Client-IP différents →
 # --- 4. En-têtes de réponse et octets ---------------------------------------------------------
 asset=$(cd "$static" && find assets -name '*.js' | sort | head -n 1)
 [ -n "$asset" ] || die "aucun fichier .js dans $static/assets"
-hdrs() { tr -d '\r' <"$1" | tail -n +2 | grep -v -i '^date:' | grep -v '^$' | tr '[:upper:]' '[:lower:]' | sort; }
+# Alt-Svc (annonce HTTP/3, posée par Caddy seul) : hors comparaison, vérifié à part ci-dessous.
+hdrs() { tr -d '\r' <"$1" | tail -n +2 | grep -v -i -e '^date:' -e '^alt-svc:' | grep -v '^$' | tr '[:upper:]' '[:lower:]' | sort; }
 for path in / "/$asset" /api/captcha /x.js; do
 	n=$(printf '%s' "$path" | tr -c 'a-zA-Z0-9' _)
 	d --http1.1 -H "X-Shh-Client-IP: $client" -H 'Accept-Encoding: br' -D "$cli/h-direct$n" -o /dev/null "$G$path"
@@ -284,7 +286,10 @@ for path in / "/$asset" /api/captcha /x.js; do
 		got=$(hdrs "$cli/h-caddy$n" | grep -c "^$h:" || true)
 		[ "$got" = 1 ] || ko "$path : $h présent $got fois (attendu : 1)"
 	done
-	check "$path : ni Server, ni Via, ni Alt-Svc" bash -c "! grep -qiE '^(server|via|alt-svc):' '$cli/h-caddy$n'"
+	check "$path : ni Server, ni Via" bash -c "! grep -qiE '^(server|via):' '$cli/h-caddy$n'"
+	# HTTP/3 (13 novembre) : un seul Alt-Svc, qui annonce h3 sur le port HTTPS et rien d'autre.
+	check "$path : Alt-Svc annonce h3 sur le port $p_https, une fois" \
+		test "$(tr -d '\r' <"$cli/h-caddy$n" | grep -i '^alt-svc:')" = "Alt-Svc: h3=\":$p_https\"; ma=2592000"
 done
 ok "8 en-têtes de sécurité présents une seule fois sur /, /$asset, /api/captcha, /x.js (sauf ÉCHEC ci-dessus)"
 
@@ -324,6 +329,15 @@ check "HTTP → HTTPS : « $loc »" test "$loc" = "308 https://$name/abc"
 curl -sS --noproxy '*' --max-time 10 --interface "$client" -o /dev/null -D "$cli/h-308" \
 	-H "Host: $name" "http://127.0.0.1:$p_http/abc"
 check "308 de Caddy : ni Server, ni Via" bash -c "! grep -qiE '^(server|via):' '$cli/h-308'"
+# HTTP/3 (décision du 13 novembre) : h1, h2 et h3 dans la configuration, et Caddy écoute en UDP
+# sur le port HTTPS (QUIC). La requête HTTP/3 elle-même n'est pas faite : le curl de la CI n'a
+# pas HTTP/3 ; l'annonce Alt-Svc est vérifiée en section 4.
+protos=$(SHH_DOMAIN=$name "$caddy" adapt --config "$here/Caddyfile" --adapter caddyfile 2>/dev/null |
+	grep -o '"protocols":\["h1","h2","h3"\]' | sort -u)
+check "Caddyfile : protocoles h1, h2 et h3" test "$protos" = '"protocols":["h1","h2","h3"]'
+udp_hex=$(printf '%04X' "$p_https")
+check "Caddy écoute en UDP sur $p_https (QUIC)" \
+	bash -c "cat /proc/net/udp /proc/net/udp6 2>/dev/null | awk '{print \$2}' | grep -q ':$udp_hex\$'"
 
 # --- 7. Salon : WebSocket à travers Caddy (avant l'arrêt du serveur Go, section 6) -----------
 garde=${SALON_GARDE:-75}

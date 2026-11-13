@@ -34,7 +34,7 @@ Sur la machine (Linux récent, Docker Engine 25 ou plus avec Compose 2.24 ou plu
 - **journald en mémoire** : `Storage=volatile` dans `/etc/systemd/journald.conf` (sinon `sshd` et le pare-feu écrivent des adresses sur disque) ; pas de journal des paquets refusés par le pare-feu (`ufw logging off`) ;
 - **heure** synchronisée (NTP : `timedatectl set-ntp true`) ;
 - **mises à jour de sécurité automatiques**, sans redémarrage automatique de la machine (`unattended-upgrades`, `Automatic-Reboot "false"`, §22) ;
-- **SSH par clé seulement** (`PasswordAuthentication no`), **pare-feu** : 22, 80 et 443 en TCP, rien d'autre (pas de HTTP/3, donc pas d'UDP).
+- **SSH par clé seulement** (`PasswordAuthentication no`), **pare-feu** : 22, 80 et 443 en TCP, **443 en UDP** (HTTP/3, QUIC, décision du 13 novembre), rien d'autre. Avec ufw : `ufw allow 22/tcp`, `ufw allow 80/tcp`, `ufw allow 443/tcp`, `ufw allow 443/udp`. Sans l'ouverture UDP, les navigateurs restent en HTTP/2 (rien ne casse). Tampons UDP conseillés par la bibliothèque QUIC de Caddy, dans `/etc/sysctl.d/` : `net.core.rmem_max=7500000` et `net.core.wmem_max=7500000` (sinon HTTP/3 marche, plus lentement).
 
 ## 2. Première installation
 

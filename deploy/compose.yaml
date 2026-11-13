@@ -120,6 +120,10 @@ services:
     # relancer deploy/test-proxy.sh avec ce binaire.
     image: caddy:2.11.9@sha256:0c2243efcf437ab7f7a978f1027fcf0d4f9be8a75df27b1b3fbc5dbe0ffa8cf0
     restart: unless-stopped
+    # Réseau de la machine : Caddy écoute directement sur 80/tcp, 443/tcp et 443/udp (HTTP/3,
+    # QUIC, décision du 13 novembre). Aucune ligne « ports: » : Docker l'ignore avec
+    # network_mode: host (rien n'est publié ni traduit). Le pare-feu de la machine doit laisser
+    # passer 443/udp (README §1).
     network_mode: host
     read_only: true
     # root DANS le conteneur, mais sans aucune capacité sauf celle d'écouter sur 80 et 443.
