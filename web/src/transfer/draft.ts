@@ -270,12 +270,46 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
     void pump();
   }
 
+  // --- défi demandé d'avance (A6) ------------------------------------------------------
+  // À l'arrivée sur la page d'envoi : défi lu et preuve lancée tout de suite ; le minimum de 3 s
+  // du serveur s'écoule pendant la composition. Un défi échu (2 min) n'est pas renouvelé ici :
+  // obtain en demande alors un neuf, comme sans warm.
+  let warmed: { cap: PreparedCaptcha; proof: Promise<CaptchaProof> } | undefined;
+  let warming: Promise<void> | undefined;
+  function warm() {
+    const solve = o.solveCaptcha;
+    if (!solve || closed || created || creating || warming) return;
+    if (warmed && warmed.cap.expiresAt - performance.now() > PREPARED_MIN_LEFT_MS) return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    warming = readCaptcha(c)
+      .then(
+        (cap) => {
+          if (closed || created) return;
+          const proof = solve(cap.challenge, { fallbackOrigin: cap.fallbackOrigin, mode: "pow" });
+          proof.catch(() => undefined);
+          warmed = { cap, proof };
+        },
+        () => undefined, // échec : obtain demandera un défi au premier fichier
+      )
+      .finally(() => {
+        warming = undefined;
+      });
+  }
+  /** Défi d'avance, à usage unique (sinon celui fourni par l'appelant). */
+  function takeWarm(): ReturnType<NonNullable<DraftOpts["prepared"]>> {
+    const w = warmed;
+    warmed = undefined;
+    return w ?? o.prepared?.();
+  }
+
   /** Création en arrière-plan au premier fichier ; un échec attend le clic (finalize). */
   function background() {
     if (!o.auto || created || creating || backgroundFailed || closed || els.size === 0) return;
     if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
     if (typeof navigator !== "undefined" && navigator.onLine === false) return;
-    creating = obtain(o.solveCaptcha, o.prepared?.());
+    // Défi d'avance en cours de lecture : attendu, pour ne pas en demander un second.
+    creating = (warming ?? Promise.resolve()).then(() => obtain(o.solveCaptcha, takeWarm()));
     creating.then(adopt, () => {
       backgroundFailed = true;
     }).finally(() => {
@@ -569,6 +603,8 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
     },
     /** Aligne le brouillon sur la liste des fichiers (syncList). */
     sync: syncList,
+    /** Arrivée sur la page d'envoi : défi anti-robot demandé et preuve lancée d'avance (A6). */
+    warm,
     /**
      * Mot de passe généré affiché (A5) : K_mdp calculé d'avance, recalculé à chaque changement.
      * Un mot de passe d'une autre forme n'est pas calculé (finalize le refusera).
@@ -667,7 +703,7 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
         stopped();
         if (losses !== lossesAtStart) throw new NotFoundError(); // brouillon perdu pendant l'attente
         if (!created) {
-          const p = creating ?? obtain(f.solveCaptcha, f.prepared, f.signal);
+          const p = creating ?? obtain(f.solveCaptcha, f.prepared ?? takeWarm(), f.signal);
           const cr = await waitOrWake(p, f.signal).catch((e: unknown) => {
             throw senderError(e);
           });

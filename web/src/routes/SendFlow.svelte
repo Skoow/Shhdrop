@@ -69,6 +69,11 @@
   }
   let draft: Draft = newDraft();
   let draftUsed = false;
+  // Page d'envoi (« /envoyer ») : défi anti-robot demandé dès l'arrivée (A6) ; le minimum de 3 s
+  // du serveur s'écoule pendant que la personne choisit ses fichiers.
+  $effect(() => {
+    if (sendPage) draft.warm();
+  });
   // Mot de passe affiché par le composeur : K_mdp calculé pendant la composition (A5). Le
   // brouillon le reçoit de nouveau quand il est remplacé (liste vidée, envoi fini).
   let shownPassword: string | undefined;
@@ -81,6 +86,7 @@
       void draft.abandon();
       draft = newDraft();
       if (shownPassword !== undefined) draft.password(shownPassword);
+      if (sendPage) draft.warm();
       draftUsed = false;
       removing = 0;
       uploadVersion++;

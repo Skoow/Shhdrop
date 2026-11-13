@@ -108,6 +108,38 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     expect(findIn(hay, [needle("contenu", MARK), needle("nom", "a-repere"), needle("mdp", PW), needle("lien", kLien)])).toEqual([]);
   });
 
+  it("A6 : warm() demande le défi et lance la preuve dès l'arrivée ; au premier fichier, création sans nouveau défi ni attente", async () => {
+    const { seen, net } = setup();
+    let solved = 0;
+    const solve = async (): Promise<CaptchaProof> => (solved++, { kind: "pow", payload: "demo" });
+    const d = createDraft(ORIGIN, { ...net, solveCaptcha: solve, auto: true });
+    d.warm();
+    d.warm(); // une seule demande
+    await until(() => solved === 1);
+    expect(seen.map((r) => `${r.method} ${r.path}`)).toEqual(["GET /api/captcha"]);
+    await new Promise((r) => setTimeout(r, 3200)); // minimum de 3 s du serveur écoulé pendant la composition
+    const t0 = Date.now();
+    d.sync([{ id: "a", data: file(100, 1) }]);
+    await until(() => d.created);
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(seen.filter((r) => r.path === "/api/captcha")).toHaveLength(1);
+    expect(solved).toBe(1);
+    await d.abandon();
+  });
+
+  it("A6 : warm() puis premier fichier pendant la demande du défi : un seul défi", async () => {
+    const { seen, net } = setup();
+    const d = createDraft(ORIGIN, { ...net, solveCaptcha, auto: true });
+    d.warm();
+    d.sync([{ id: "a", data: file(100, 1) }]);
+    await until(() => d.created);
+    expect(seen.filter((r) => r.path === "/api/captcha")).toHaveLength(1);
+    await d.abandon();
+    d.warm(); // abandonné : plus aucune requête
+    await new Promise((r) => setTimeout(r, 30));
+    expect(seen.filter((r) => r.path === "/api/captcha")).toHaveLength(1);
+  });
+
   it("texte seul : rien n'est créé avant le clic", async () => {
     const { seen, net } = setup();
     const d = createDraft(ORIGIN, { ...net, solveCaptcha, auto: true });
