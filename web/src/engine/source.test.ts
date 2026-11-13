@@ -83,6 +83,44 @@ describe("production (source.verified.ts)", () => {
     expect(await blobs[0]!.text()).toBe("self.onmessage=0");
   });
 
+  it("A9 : preloadWorker lit et vérifie le script d'avance, sans créer de Worker ; startWorker ne le relit pas", async () => {
+    const f = vi.fn(async () => new Response("self.onmessage=0"));
+    vi.stubGlobal("fetch", f);
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:https://shh.test/b1");
+    let made = 0;
+    vi.stubGlobal(
+      "Worker",
+      class {
+        constructor() {
+          made++;
+        }
+      },
+    );
+    const { preloadWorker, startWorker } = await import("./source.verified");
+    preloadWorker();
+    preloadWorker();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(made).toBe(0); // un Worker neuf par calcul : jamais créé d'avance
+    await startWorker();
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(made).toBe(1);
+  });
+
+  it("A9 : préchargement en échec : sans erreur ; startWorker relit le fichier", async () => {
+    let fail = true;
+    const f = vi.fn(async () => (fail ? Promise.reject(new TypeError("integrity")) : new Response("x")));
+    vi.stubGlobal("fetch", f);
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:https://shh.test/b");
+    vi.stubGlobal("Worker", class {});
+    const { preloadWorker, startWorker } = await import("./source.verified");
+    preloadWorker();
+    await new Promise((r) => setTimeout(r, 0));
+    fail = false;
+    await startWorker();
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
   it("script du Worker refusé : Error(\"reseau\"), aucun Worker ; l'essai suivant relit le fichier", async () => {
     let fail = true;
     const f = vi.fn(async () => (fail ? Promise.reject(new TypeError("integrity")) : new Response("x")));
@@ -126,7 +164,8 @@ describe("loadEngine", () => {
       return WASM.buffer.slice(WASM.byteOffset, WASM.byteOffset + WASM.byteLength);
     });
     const start = async () => ({}) as Worker;
-    vi.doMock("./source", () => ({ wasmBytes: read, startWorker: start }));
+    const preload = vi.fn();
+    vi.doMock("./source", () => ({ wasmBytes: read, startWorker: start, preloadWorker: preload }));
     const { loadEngine } = await import("./load");
     expect(await errorOf(loadEngine)).toBe("reseau");
     fail = false;
@@ -136,5 +175,6 @@ describe("loadEngine", () => {
     expect(e.start).toBe(start);
     expect(typeof e.wasm.passwordKey).toBe("function");
     expect(await loadEngine()).toBe(e);
+    expect(preload).toHaveBeenCalledTimes(2); // A9 : script du Worker lu avec chaque chargement du moteur
   });
 });

@@ -29,10 +29,21 @@ export function wasmBytes(): Promise<ArrayBuffer> {
 // Adresse blob: du script vérifié, gardée pour la page (script public, sans secret).
 let script: Promise<string> | undefined;
 
-export const startWorker: StartWorker = async () => {
+function workerScript(): Promise<string> {
   if (!script) {
     script = verified(workerSrc, workerIntegrity).then((b) => URL.createObjectURL(new Blob([b], { type: "text/javascript" })));
     script.catch(() => (script = undefined));
   }
-  return new Worker(scriptUrl(await script));
-};
+  return script;
+}
+
+/**
+ * A9 : script du Worker lu et vérifié d'avance (au chargement du moteur : premier fichier,
+ * arrivée sur la page d'ouverture), sans créer de Worker (toujours un Worker neuf par calcul).
+ * Un échec est silencieux : startWorker relira le fichier.
+ */
+export function preloadWorker(): void {
+  workerScript().catch(() => undefined);
+}
+
+export const startWorker: StartWorker = async () => new Worker(scriptUrl(await workerScript()));

@@ -25,3 +25,6 @@ export async function wasmBytes(): Promise<ArrayBuffer> {
 }
 
 export const startWorker: StartWorker | undefined = undefined;
+
+/** Rien à précharger (Argon2id dans la page). */
+export function preloadWorker(): void {}

@@ -8,7 +8,7 @@
 import init, * as wasm from "./pkg/shhdrop_wasm.js";
 import type { StartWorker } from "./argon2";
 import { createProvider, type WebCryptoProvider } from "./provider";
-import { startWorker, wasmBytes } from "./source";
+import { preloadWorker, startWorker, wasmBytes } from "./source";
 
 /** Fonctions et classes du moteur (engine/wasm/src/lib.rs). */
 export type Wasm = Omit<typeof wasm, "default" | "initSync">;
@@ -24,6 +24,9 @@ export type Engine = {
 };
 
 async function load(): Promise<Engine> {
+  // Script du Worker d'Argon2id lu en même temps que le moteur (A9) : au clic ou à l'Entrée, il
+  // est déjà vérifié.
+  preloadWorker();
   const module = await WebAssembly.compile(await wasmBytes());
   await init({ module_or_path: module });
   const { default: _init, initSync: _sync, ...exports } = wasm;
