@@ -23,6 +23,7 @@ import {
   BadPasswordError,
   GrantInvalidError,
   LimitError,
+  CorruptError,
   NotFoundError,
   ReopenLimitError,
   ServerError,
@@ -55,6 +56,7 @@ export type ReceiveState =
   | "invalid"
   | "destroyed_by_password"
   | "incomplete"
+  | "corrupt" // contenu modifié en route (audit web D3) : refusé, rien n'a été affiché
   | "return_lost" // octroi gardé ici, mais le serveur ne connaît plus le partage (D42-22)
   | "error"; // fetchMeta impossible (réseau, limite, serveur, maintenance) : page d'erreur, Réessayer
 
@@ -246,7 +248,7 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
     return tagP.then((t) => (t === null ? undefined : d.returns.forget(t))).catch(() => undefined);
   };
 
-  const end = (state: "invalid" | "destroyed_by_password" | "incomplete" | "return_lost") => {
+  const end = (state: "invalid" | "destroyed_by_password" | "incomplete" | "return_lost" | "corrupt") => {
     secret = null;
     drop();
     s.state = state;
@@ -491,6 +493,9 @@ export function createReceiver(link: LinkState, deps: Partial<ReceiverDeps> = {}
           grantRefused("grant_invalid");
         } else if (e instanceof ReopenLimitError) {
           grantRefused("reopen_limit");
+        } else if (e instanceof CorruptError) {
+          // Audit web D3 : texte fixe, jamais « ce lien n'existe pas ».
+          end("corrupt");
         } else if (e instanceof NotFoundError) {
           // A23 : le dernier essai a échoué → le partage vient d'être détruit (la personne sait qu'il existait).
           end(s.attemptsLeft === 1 ? "destroyed_by_password" : grant !== null ? "return_lost" : "invalid");

@@ -65,6 +65,18 @@ export class NotFoundError extends Error {
   }
 }
 
+/**
+ * Contenu refusé parce qu'il a été modifié en route (audit web D3) : enveloppe, en-tête, palier,
+ * manifeste ou segment qui ne s'authentifie pas, segment tronqué. Rien n'a été affiché. Texte
+ * fixe, choisi par le client : jamais confondu avec « ce lien n'existe pas ».
+ */
+export class CorruptError extends Error {
+  constructor() {
+    super("contenu_modifie");
+    this.name = "CorruptError";
+  }
+}
+
 export class BadPasswordError extends Error {
   constructor(readonly attemptsLeft: number) {
     super("mauvais_mot_de_passe");
@@ -128,8 +140,9 @@ const isNetwork = (e: unknown) => e instanceof Error && e.message === "reseau";
 // Erreurs côté destinataire et gestion (openShare, destroyShare, shareStatus, fetchMeta) :
 // coupure persistante → Error("reseau") ; 429 « budget » → ReadBudgetError (définitif,
 // sans nouvel essai) ; autre 429 → LimitError ; mauvais mot de passe →
-// BadPasswordError ; 5xx → ServerError (texte fixe) ; tout le reste (404, paquet corrompu,
-// paramètres KDF refusés, réponse invalide, autre code) → NotFoundError : rien d'exploitable
+// BadPasswordError ; 5xx → ServerError (texte fixe) ; contenu modifié (paquet corrompu, segment
+// tronqué) → CorruptError (audit web D3) ; tout le reste (404, paramètres KDF refusés, réponse
+// invalide, autre code) → NotFoundError : rien d'exploitable
 // n'est montré, et un serveur malveillant ne peut pas faire afficher un message choisi par lui.
 function readerError(e: unknown): Error {
   if (
@@ -139,10 +152,12 @@ function readerError(e: unknown): Error {
     e instanceof ReadBudgetError ||
     e instanceof ServerError ||
     e instanceof GrantInvalidError ||
-    e instanceof ReopenLimitError
+    e instanceof ReopenLimitError ||
+    e instanceof CorruptError
   )
     return e;
   if (isNetwork(e)) return e as Error;
+  if (e instanceof Error && e.message === "paquet_corrompu") return new CorruptError();
   if (api.isBudget(e)) return new ReadBudgetError();
   if (e instanceof api.HttpError) {
     if (e.status === 409 && e.code === "grant_invalid") return new GrantInvalidError();
@@ -646,7 +661,10 @@ async function openWith(
     try {
       if (u.segments !== m.segments) throw new api.BadResponse();
       const get = async (n: number) => {
-        const s = await api.getSegment(c, u.downloadToken, n, segmentSize(m.bucket, n));
+        // Segment de mauvaise taille (tronqué ou allongé, après les nouveaux essais) : modifié en route.
+        const s = await api.getSegment(c, u.downloadToken, n, segmentSize(m.bucket, n)).catch((e: unknown) => {
+          throw e instanceof api.BadResponse ? new Error("paquet_corrompu") : e;
+        });
         onProgress?.(n + 1, m.segments);
         return s;
       };

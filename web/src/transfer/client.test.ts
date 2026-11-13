@@ -90,6 +90,7 @@ vi.mock("../engine", async (orig) => {
 import {
   BadPasswordError,
   CAPTCHA_MIN_MS,
+  CorruptError,
   LimitError,
   NotFoundError,
   ReadBudgetError,
@@ -257,13 +258,23 @@ describe("openShare : correspondance des erreurs", () => {
     ["unlock : nombre de segments différent", (_, p) => (p.endsWith("/unlock") ? j(200, { download_token: "t", segments: 2, envelope: ENV0, grant: GRANT0, opens_left: 0, last_open: 1 }) : undefined)],
     ["unlock sans enveloppe", (_, p) => (p.endsWith("/unlock") ? j(200, { download_token: "t", segments: 1 }) : undefined)],
     ["enveloppe de 59 octets", (_, p) => (p.endsWith("/unlock") ? j(200, { download_token: "t", segments: 1, envelope: b64u(new Uint8Array(59)), grant: GRANT0, opens_left: 0, last_open: 1 }) : undefined)],
-    ["palier 1 annoncé, paquet invalide", (_, p) => (p.endsWith("/meta") ? j(200, { ...META, bucket: 1 }) : undefined)],
-    ["segment de mauvaise taille (persistant)", (_, p) => (p.endsWith("/segments/0") ? new Response(new Uint8Array(10)) : undefined)],
-    ["paquet corrompu", () => undefined],
   ];
   it.each(notFound)("%s → NotFoundError", async (_, route) => {
     const s = server(route);
     expect(await reject(openShare(LINK, PW, ORIGIN, undefined, s.net))).toBeInstanceOf(NotFoundError);
+  });
+  // Audit web D3 : contenu refusé parce qu'il a été modifié (enveloppe, en-tête, palier, segment
+  // tronqué) → CorruptError, texte fixe choisi par le client, jamais « n'existe pas ».
+  const corrupt: [string, Route][] = [
+    ["palier 1 annoncé, paquet invalide", (_, p) => (p.endsWith("/meta") ? j(200, { ...META, bucket: 1 }) : undefined)],
+    ["segment de mauvaise taille (persistant)", (_, p) => (p.endsWith("/segments/0") ? new Response(new Uint8Array(10)) : undefined)],
+    ["paquet corrompu (enveloppe forgée)", () => undefined],
+  ];
+  it.each(corrupt)("%s → CorruptError", async (_, route) => {
+    const s = server(route);
+    const e = await reject(openShare(LINK, PW, ORIGIN, undefined, s.net));
+    expect(e).toBeInstanceOf(CorruptError);
+    expect((e as Error).name).toBe("CorruptError");
   });
   it("5xx persistant → ServerError (texte fixe) ; 503 « frozen » → maintenance (tâche UP)", async () => {
     const e500 = await reject(openShare(LINK, PW, ORIGIN, undefined, server((_, p) => (p.endsWith("/unlock") ? j(500, { error: "internal" }) : undefined)).net));
@@ -542,10 +553,10 @@ describe("openShare en flux : segments à la demande, saveItem, collectToBlob", 
     expect(same(new Uint8Array(await blob.arrayBuffer()), a)).toBe(true);
   });
 
-  it("segment corrompu pendant saveItem → NotFoundError ; erreur du sink transmise telle quelle", async () => {
+  it("segment corrompu pendant saveItem → CorruptError (audit web D3) ; erreur du sink transmise telle quelle", async () => {
     const s = server(route((n, seg) => (n === 1 ? (seg[5]! ^= 1, seg) : seg)));
     const o = await openShare(LINK, PW, ORIGIN, undefined, s.net);
-    expect(await reject(o.saveItem(2, () => undefined))).toBeInstanceOf(NotFoundError);
+    expect(await reject(o.saveItem(2, () => undefined))).toBeInstanceOf(CorruptError);
     const disk = new Error("disque_plein");
     expect(
       await reject(
@@ -1500,12 +1511,12 @@ describe("openShare v2 : enveloppe, engagement, rejeu", () => {
 
   const bad = async (route: Route) => {
     const s = server(route);
-    expect(await reject(openShare(LINK, PW, ORIGIN, undefined, s.net))).toBeInstanceOf(NotFoundError);
+    expect(await reject(openShare(LINK, PW, ORIGIN, undefined, s.net))).toBeInstanceOf(CorruptError); // audit web D3
     expect(s.calls.at(-1)).toBe("POST /api/shares/done"); // done() d'office
     return s;
   };
 
-  it("C_engagement faux (enveloppe cohérente avec l'en-tête fabriqué) → paquet_corrompu → NotFoundError", async () => {
+  it("C_engagement faux (enveloppe cohérente avec l'en-tête fabriqué) → paquet_corrompu → CorruptError", async () => {
     const pk = await pack(items);
     const forged = new Uint8Array(pk.header);
     forged[40]! ^= 1;
@@ -1516,7 +1527,7 @@ describe("openShare v2 : enveloppe, engagement, rejeu", () => {
     await bad(packRoute({ ...pk, envelope, segs: [seg0] }));
   });
 
-  it("enveloppe échangée (celle d'un autre partage, autre id) ou modifiée → NotFoundError", async () => {
+  it("enveloppe échangée (celle d'un autre partage, autre id) ou modifiée → CorruptError", async () => {
     const pk = await pack(items);
     const other = await pack(items, undefined, new Uint8Array(16).fill(9));
     await bad(packRoute({ ...pk, envelope: other.envelope }));
@@ -1530,13 +1541,13 @@ describe("openShare v2 : enveloppe, engagement, rejeu", () => {
     await bad(packRoute({ ...pk, segs: third.segs }));
   });
 
-  it("mauvais mot de passe (serveur qui accepterait quand même) : enveloppe illisible → NotFoundError", async () => {
+  it("mauvais mot de passe (serveur qui accepterait quand même) : enveloppe illisible → CorruptError", async () => {
     const pk = await pack(items);
     const s = server(packRoute(pk));
-    expect(await reject(openShare(LINK, "un-autre-mot-de-passe", ORIGIN, undefined, s.net))).toBeInstanceOf(NotFoundError);
+    expect(await reject(openShare(LINK, "un-autre-mot-de-passe", ORIGIN, undefined, s.net))).toBeInstanceOf(CorruptError);
   });
 
-  it("paquet tronqué (dernier segment court) ou modifié → NotFoundError", async () => {
+  it("paquet tronqué (dernier segment court) ou modifié → CorruptError", async () => {
     const pk = await pack([{ kind: "file", name: "f", mime: "x/y", data: new Blob([pseudo(5.5 * 1048576, 4)]) }]);
     await bad(packRoute(pk, (n, seg) => (n === 2 ? seg.slice(0, -1) : seg)));
     // Dernier morceau (manifeste) modifié. Un octet du bourrage, lui, n'est jamais lu ni vérifié.

@@ -198,7 +198,7 @@
   });
 </script>
 
-{#if r.state === "invalid" || r.state === "incomplete" || r.state === "return_lost"}
+{#if r.state === "invalid" || r.state === "incomplete" || r.state === "return_lost" || r.state === "corrupt"}
   <Invalid kind={r.state} limit={r.state === "return_lost" && r.error === "reopen_limit"} />
 {:else if r.state === "error"}
   <!-- fetchMeta impossible : page d'erreur (tâche UP) ; le lien reste en mémoire pour Réessayer. -->

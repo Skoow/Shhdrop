@@ -52,7 +52,7 @@
   // Temps restant : seulement quand le débit de cette session est mesuré (estimate non nul,
   // retours UI4), jamais sur les premiers instants.
   const left = $derived(estimate !== null && row.rate > 0 ? (row.total - row.done) / row.rate : null);
-  const FAIL = { network: "dl.fail.network", budget: "dl.fail.budget", limit: "dl.fail.limit", disk_full: "dl.fail.disk", write: "dl.fail.write", gone: "dl.fail.gone", activation: "dl.fail.activation" } as const;
+  const FAIL = { network: "dl.fail.network", budget: "dl.fail.budget", limit: "dl.fail.limit", disk_full: "dl.fail.disk", write: "dl.fail.write", gone: "dl.fail.gone", activation: "dl.fail.activation", corrupt: "dl.fail.corrupt" } as const;
   let viewBtn: HTMLButtonElement | undefined = $state();
   const lock = $derived(receiveLock(kind, row.state));
   const cl = $derived(kind === "file" ? receivedClean(clean) : null);

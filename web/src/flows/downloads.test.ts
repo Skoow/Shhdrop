@@ -292,6 +292,11 @@ describe("audit M3 : « Enregistrer sous » en file", () => {
       expect(classify(new DOMException("x", n))).toEqual({ reason: "activation", retryable: true, keepPartial: false });
     }
   });
+  it("audit web D3 : CorruptError → raison « corrupt », sans nouvel essai, partiel supprimé", async () => {
+    const { classify } = await import("./downloads.svelte");
+    const { CorruptError } = await import("../index");
+    expect(classify(new CorruptError())).toEqual({ reason: "corrupt", retryable: false, keepPartial: false });
+  });
   it("canStart : vrai seulement si un appui lancerait vraiment l'élément (sélecteur ouvert au clic sinon inutile)", async () => {
     const r = fakeReader([30, 30]);
     const release = r.hold();

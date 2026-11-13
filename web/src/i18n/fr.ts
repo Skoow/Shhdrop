@@ -456,6 +456,8 @@ export const fr = {
   "lost.hint":
     "Ce navigateur l'avait déjà ouvert, mais le serveur ne le reconnaît plus\u202f: il a été détruit ou a expiré, ou notre serveur a redémarré alors que toutes ses ouvertures étaient prises. Demandez à l'expéditeur de vous l'envoyer à nouveau.",
   "lost.limit": "Ce partage a déjà été rouvert 20\u202ffois depuis cet appareil\u202f; il ne reste aucune ouverture. Demandez à l'expéditeur de vous l'envoyer à nouveau.",
+  "corrupt": "Le contenu a été modifié en route\u202f; il n'a pas été ouvert.",
+  "corrupt.hint": "Ce que le serveur a renvoyé ne correspond pas à ce que l'expéditeur a chiffré\u202f: rien n'a été affiché. Demandez à l'expéditeur de vous l'envoyer à nouveau.",
   "incomplete": "Lien incomplet",
   "incomplete.hint":
     "Rouvrez-le depuis le message d'origine. Il manque une partie du lien\u202f: il a peut-être été coupé lors d'un copier-coller, ou sa partie secrète a été retirée de la barre d'adresse après une première visite. Rien n'a été demandé au serveur.",
@@ -525,6 +527,7 @@ export const fr = {
   "content.watch": "Regarder",
   "content.progress": "{done} / {total}",
   "content.interrupted": "Téléchargement interrompu.",
+  "content.corrupt": "Le contenu a été modifié en route\u202f; il n'a pas été ouvert.",
   "content.interrupted.expired": "Téléchargement interrompu\u202f: le partage a expiré.",
   "content.pdf": "L'aperçu des PDF n'est pas encore disponible ici. Enregistrez le fichier pour le lire.",
   "content.notViewable": "Cet élément ne peut pas être affiché ici, et l'expéditeur n'a pas autorisé le téléchargement.",
@@ -666,6 +669,7 @@ export const fr = {
   "dl.fail.disk": "Plus de place sur cet appareil. Le fichier incomplet a été supprimé.",
   "dl.fail.write": "Enregistrement interrompu\u202f: le fichier incomplet a été supprimé.",
   "dl.fail.gone": "Ce partage n'est plus disponible.",
+  "dl.fail.corrupt": "Le contenu a été modifié en route\u202f; il n'a pas été ouvert.",
   "dl.fail.activation": "Le navigateur n'a pas ouvert la fenêtre d'enregistrement. Appuyez à nouveau sur Enregistrer.",
   "dl.all": "Tout télécharger",
   "dl.zip": "Tout télécharger en .zip",

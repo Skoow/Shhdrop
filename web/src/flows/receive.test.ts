@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BadPasswordError, GrantInvalidError, LimitError, NotFoundError, ReopenLimitError, ServerError, type Opened } from "../index";
+import { BadPasswordError, CorruptError, GrantInvalidError, LimitError, NotFoundError, ReopenLimitError, ServerError, type Opened } from "../index";
 import type { OpenGrantEntry } from "../session/open-grant";
 import { createReceiver, type ReceiverDeps } from "./receive.svelte";
 
@@ -176,6 +176,13 @@ describe("createReceiver (UI §9.7)", () => {
     await flush();
     await o.r.unlock(PW);
     expect(o.r.state).toBe("invalid");
+  });
+
+  it("audit web D3 : CorruptError à l'ouverture → « corrupt » (jamais « invalid »), lien oublié", async () => {
+    const { r } = setup({ openShare: vi.fn(async () => Promise.reject(new CorruptError())) });
+    await flush();
+    await r.unlock(PW);
+    expect([r.state, r.error]).toEqual(["corrupt", null]);
   });
 
   it("LimitError(120) à l'ouverture → locked, retryAfterS, aucun appel avant l'échéance", async () => {

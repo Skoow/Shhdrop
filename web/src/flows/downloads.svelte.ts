@@ -25,7 +25,7 @@ import type { Tracker } from "./gone.svelte";
 
 export type RowState = "idle" | "queued" | "downloading" | "paused" | "done" | "failed";
 /** `activation` : le sélecteur d'enregistrement a été refusé faute d'appui récent (il faut appuyer à nouveau). */
-export type FailReason = "network" | "budget" | "limit" | "disk_full" | "write" | "gone" | "activation";
+export type FailReason = "network" | "budget" | "limit" | "disk_full" | "write" | "gone" | "activation" | "corrupt";
 
 export type Row = {
   readonly state: RowState;
@@ -90,6 +90,8 @@ export function classify(e: unknown): { reason: FailReason; retryable: boolean; 
   const n = errName(e);
   if (n === "ReadBudgetError") return { reason: "budget", retryable: false, keepPartial: false };
   if (n === "NotFoundError" || n === "GoneError") return { reason: "gone", retryable: false, keepPartial: false };
+  // Contenu modifié en route (audit web D3) : refusé, le fichier partiel est supprimé ; relire ne changerait rien.
+  if (n === "CorruptError") return { reason: "corrupt", retryable: false, keepPartial: false };
   if (n === "LimitError" || n === "ServerError") return { reason: "limit", retryable: true, keepPartial: true };
   // « Enregistrer sous » ouvert hors d'un appui (élément arrivé à son tour dans la file, audit M3).
   if (n === "SecurityError" || n === "NotAllowedError") return { reason: "activation", retryable: true, keepPartial: false };

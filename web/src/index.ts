@@ -4,6 +4,7 @@
 export {
   BadPasswordError,
   CAPTCHA_MIN_MS,
+  CorruptError,
   GrantInvalidError,
   ReopenLimitError,
   grantTag,

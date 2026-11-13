@@ -332,3 +332,13 @@ describe("heures de l'historique (spec §33, UI §9.6.3)", () => {
     expect(formatAgo(-5, "fr")).toBe("à l'instant");
   });
 });
+
+describe("audit web D3 : contenu modifié en route", () => {
+  it("texte fixe demandé, distinct de « ce lien n'existe pas »", () => {
+    expect(fr["corrupt"]).toBe("Le contenu a été modifié en route ; il n'a pas été ouvert.");
+    expect(fr["dl.fail.corrupt"]).toBe(fr["corrupt"]);
+    expect(fr["content.corrupt"]).toBe(fr["corrupt"]);
+    expect(fr["corrupt"]).not.toBe(fr["invalid"]);
+    expect(en["corrupt"]).toBe("The content was modified on the way; it was not opened.");
+  });
+});

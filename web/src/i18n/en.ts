@@ -453,6 +453,8 @@ export const en = {
   "lost.hint":
     "This browser had already opened it, but the server no longer recognizes it: it was destroyed or expired, or our server restarted while all its opens were used. Ask the sender to send it again.",
   "lost.limit": "This share has already been reopened 20\u00a0times from this device; no opens are left. Ask the sender to send it again.",
+  "corrupt": "The content was modified on the way; it was not opened.",
+  "corrupt.hint": "What the server sent back does not match what the sender encrypted: nothing was shown. Ask the sender to send it again.",
   "incomplete": "Incomplete link",
   "incomplete.hint":
     "Reopen it from the original message. Part of the link is missing: it may have been cut off when copied, or its secret part was removed from the address bar after a first visit. Nothing was requested from the server.",
@@ -521,6 +523,7 @@ export const en = {
   "content.watch": "Watch",
   "content.progress": "{done} / {total}",
   "content.interrupted": "Download interrupted.",
+  "content.corrupt": "The content was modified on the way; it was not opened.",
   "content.interrupted.expired": "Download interrupted: the share has expired.",
   "content.pdf": "PDF preview is not available here yet. Save the file to read it.",
   "content.notViewable": "This item can't be shown here, and the sender did not allow downloads.",
@@ -662,6 +665,7 @@ export const en = {
   "dl.fail.disk": "No space left on this device. The incomplete file was deleted.",
   "dl.fail.write": "Saving interrupted: the incomplete file was deleted.",
   "dl.fail.gone": "This share is no longer available.",
+  "dl.fail.corrupt": "The content was modified on the way; it was not opened.",
   "dl.fail.activation": "The browser did not open the save window. Press Save again.",
   "dl.all": "Download all",
   "dl.zip": "Download all as .zip",
