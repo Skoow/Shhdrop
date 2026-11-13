@@ -56,7 +56,11 @@ export const xhrUploader: Uploader = (url, headers, body, onBytes, signal) =>
       reject(abortError());
     };
     signal?.addEventListener("abort", onAbort, { once: true });
-    x.send(body);
+    // Blob plutôt que Uint8Array : mêmes octets, mais Chromium copie un Uint8Array sur le fil
+    // principal (≈ 200 ms par segment de 4 Mio, mesuré) et un Blob en ≈ 20 ms. Le Blob est
+    // une copie du chiffré (jamais du clair) ; il peut aller dans le stockage temporaire du
+    // navigateur, comme le repli de téléchargement.
+    x.send(new Blob([body]));
   });
 
 /** Node, tests, ou `fetch` fourni par l'appelant : les octets ne sont annoncés qu'à l'acquittement. */

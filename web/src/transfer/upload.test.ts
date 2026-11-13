@@ -55,7 +55,7 @@ describe("xhrUploader", () => {
     const body = new Uint8Array(100);
     const p = xhrUploader(URL_, { Authorization: "Bearer t" }, body, (n) => seen.push(n));
     const x = FakeXHR.last;
-    expect([x.method, x.url, x.headers, x.withCredentials, x.sent]).toEqual(["PUT", URL_, { Authorization: "Bearer t" }, false, body]);
+    expect([x.method, x.url, x.headers, x.withCredentials]).toEqual(["PUT", URL_, { Authorization: "Bearer t" }, false]);
     x.upload.onprogress!({ loaded: 40 });
     x.upload.onprogress!({ loaded: 100 });
     x.finish(204, "");
@@ -65,6 +65,22 @@ describe("xhrUploader", () => {
     const q = xhrUploader(URL_, {}, body, () => undefined);
     FakeXHR.last.finish(429, '{"error":"limit","retry_after_s":7}');
     expect(await q).toEqual({ status: 429, json: { error: "limit", retry_after_s: 7 } });
+  });
+
+  it("corps envoyé en Blob (pas de copie lente de Uint8Array par XHR), octets identiques", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeXHR);
+    const body = new Uint8Array(4096);
+    for (let i = 0; i < body.length; i++) body[i] = (i * 31 + 7) & 0xff;
+    const copy = body.slice();
+    const p = xhrUploader(URL_, {}, body, () => undefined);
+    const sent = FakeXHR.last.sent;
+    expect(sent).toBeInstanceOf(Blob);
+    // Le Blob est une copie : effacer le tampon après send() ne change pas ce qui part.
+    body.fill(0);
+    expect(new Uint8Array(await (sent as Blob).arrayBuffer())).toEqual(copy);
+    expect((sent as Blob).type).toBe("");
+    FakeXHR.last.finish(204, "");
+    await p;
   });
 
   it("erreur réseau → TypeError ; redirection → TypeError (jamais suivie en silence)", async () => {
