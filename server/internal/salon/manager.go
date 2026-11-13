@@ -69,6 +69,9 @@ type Manager struct {
 	// seulement : un redémarrage les oublie (les salons d'avant ne comptent plus).
 	vivants map[string]vivant
 	parBloc map[[32]byte]int
+	// curseurEchues : dernier id du dernier lot plein lu par echuesSansEtat (fin.go), "" pour
+	// repartir du début (relecture C-2, N6).
+	curseurEchues string
 
 	idxMu sync.Mutex
 	// index : SHA-256 d'un jeton (valide ou révoqué) → salon ; la vérité est dans salon.jetons

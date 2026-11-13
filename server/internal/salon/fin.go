@@ -386,9 +386,16 @@ func (m *Manager) disparus() []*salon {
 // état (vivant ou tombe) n'y est pas : Tick le finit (entretenir) et achever efface sa ligne.
 // Lecture d'abord, lotLignes au plus par passe : aucune écriture en base sans ligne échue. Sans
 // état, aucun Rejoindre ne peut en recréer un (la ligne est échue). Erreurs ignorées : la
-// ligne reste, reprise au tick suivant.
+// ligne reste, reprise à un tick suivant.
 func (m *Manager) echuesSansEtat(now int64) {
-	rows, err := m.cfg.DB.Query(`SELECT id FROM salons WHERE expires_at<=? LIMIT ?`, now, lotLignes)
+	// Curseur d'un tick à l'autre (relecture C-2, N6) : lotLignes lignes échues par passe,
+	// après la dernière vue, dans l'ordre des id ; des tombes en mémoire en tête n'affament
+	// jamais les lignes qui suivent. Revenu au début quand un lot n'est pas plein.
+	m.mu.Lock()
+	apres := m.curseurEchues
+	m.mu.Unlock()
+	rows, err := m.cfg.DB.Query(`SELECT id FROM salons WHERE expires_at<=? AND id>? ORDER BY id LIMIT ?`,
+		now, apres, lotLignes)
 	if err != nil {
 		return
 	}
@@ -402,6 +409,13 @@ func (m *Manager) echuesSansEtat(now int64) {
 	if errors.Join(rows.Err(), rows.Close()) != nil {
 		return
 	}
+	suivant := ""
+	if len(ids) == lotLignes {
+		suivant = ids[len(ids)-1]
+	}
+	m.mu.Lock()
+	m.curseurEchues = suivant
+	m.mu.Unlock()
 	for _, id := range ids {
 		m.mu.Lock()
 		_, enMemoire := m.salons[id]

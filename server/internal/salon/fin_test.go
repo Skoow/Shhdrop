@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -673,4 +674,43 @@ func TestPaniqueDansOublierReprise(t *testing.T) {
 		cancel()
 		<-fini
 	})
+}
+
+// Relecture C-2, N6 : plus de lotLignes lignes échues dont les premières ont un état en
+// mémoire (tombes encore gardées) : la ligne échue sans état qui vient après est quand même
+// effacée au tick suivant (curseur id > ? d'un tick à l'autre), jamais affamée.
+func TestEchuesSansEtatAuDelaDuLot(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	now := b.h.Now()
+	exp := now.Add(-30 * time.Second) // échues, tombes encore dans leur marge
+	tx, err := b.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ligne := func(id string) {
+		if _, err := tx.Exec(`INSERT INTO salons(id,access_v,manage_v,proof_v,salt,kdf_ops,kdf_mem,expires_at,
+			max_members,members_can_destroy) VALUES(?,?,?,?,?,3,67108864,?,4,0)`, id, aleatoire(), aleatoire(),
+			aleatoire(), aleatoire()[:16], exp.Unix()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range lotLignes {
+		id := fmt.Sprintf("a%05d", i)
+		ligne(id)
+		tombe := nouveauSalon(id, exp, 0, nil, b.m.now)
+		tombe.fini = true
+		b.m.salons[id] = tombe
+	}
+	ligne("z-sans-etat")
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	b.m.Tick()
+	b.m.Tick()
+	if b.lignes(t, "salons", "z-sans-etat") != 0 {
+		t.Fatal("ligne échue sans état affamée par les tombes")
+	}
+	if b.lignes(t, "salons", "a00000") != 1 {
+		t.Fatal("ligne d'une tombe effacée par echuesSansEtat")
+	}
 }
