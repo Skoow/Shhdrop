@@ -52,8 +52,13 @@ const (
 	JoinsPer64 = 20
 	JoinsPer48 = 60
 	// Trames montantes par minute (fenêtre fixe), toutes connexions WebSocket confondues.
-	FramesPer64 = 120
-	FramesPer48 = 600
+	// 480 par connexion (IPv4 ou /64) et 960 par /48 (revue finale C-2, I4, 12 novembre) : une
+	// famille ou un bureau derrière un même NAT partage une adresse IPv4, et un membre actif
+	// envoie environ 48 trames par minute (accusés, « en train d'écrire », messages ; exigence
+	// C-3 17) ; 120 bloquait dès 3 membres actifs. Le plafond par siège (60 par minute, rafale
+	// 20, salon/limites.go) borne déjà chaque membre.
+	FramesPer64 = 480
+	FramesPer48 = 960
 )
 
 // UploadLife : vie maximale d'un envoi non finalisé, 6 h arrondies au quart d'heure supérieur
@@ -604,8 +609,8 @@ func (l *Limiter) AllowJoin(ip netip.Addr) bool {
 	return l.allowPairLocked(ip, l.join64, l.join48, JoinsPer64, JoinsPer48)
 }
 
-// AllowFrame : trame montante du salon, 120 par minute (fenêtre fixe) par connexion et 600
-// par /48 (spec §39.3.6).
+// AllowFrame : trame montante du salon, FramesPer64 par minute (fenêtre fixe) par connexion
+// et FramesPer48 par /48 (spec §39.3.6).
 func (l *Limiter) AllowFrame(ip netip.Addr) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()

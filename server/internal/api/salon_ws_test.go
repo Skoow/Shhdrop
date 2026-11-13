@@ -442,17 +442,18 @@ func TestWSPlaces(t *testing.T) {
 		t.Fatalf("sans Upgrade : %d places prises", n)
 	}
 	var cs []*websocket.Conn
-	for range 4 {
+	// 8 par adresse (revue finale C-2, I4 : une famille derrière un même NAT).
+	for range 8 {
 		cs = append(cs, b.ouvrir(t)) // sans accueil : tenus jusqu'à 5 s
 	}
-	attendre(t, 5*time.Second, func() bool { return b.e.srv.wsSlots.Len() == 4 })
+	attendre(t, 5*time.Second, func() bool { return b.e.srv.wsSlots.Len() == 8 })
 	_, resp, err := b.dial(t, nil, nil)
 	if err == nil || resp == nil || resp.StatusCode != http.StatusTooManyRequests || resp.Header.Get("Retry-After") == "" {
-		t.Fatalf("5e WebSocket : %v %v", resp, err)
+		t.Fatalf("9e WebSocket : %v %v", resp, err)
 	}
 	// Une place rendue à la fermeture : un nouveau WebSocket passe.
 	cs[0].CloseNow()
-	attendre(t, 5*time.Second, func() bool { return b.e.srv.wsSlots.Len() == 3 })
+	attendre(t, 5*time.Second, func() bool { return b.e.srv.wsSlots.Len() == 7 })
 	b.ouvrir(t)
 }
 

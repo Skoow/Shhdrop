@@ -975,8 +975,8 @@ func TestDemandeInvalide(t *testing.T) {
 	}
 }
 
-// 121ᵉ trame de la minute depuis la même adresse : 0x0B (secondes jusqu'à la minute
-// suivante), trame non rangée.
+// 481ᵉ trame de la minute depuis la même adresse (revue finale C-2, I4) : 0x0B (secondes
+// jusqu'à la minute suivante), trame non rangée.
 func TestTrameFrequenceIP(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		b := nouveauBanc(t, 200)
@@ -987,7 +987,7 @@ func TestTrameFrequenceIP(t *testing.T) {
 		b.servir(la, lim.AllowFrame)
 		la.envoyer(accueilWS(ea.Jeton, ea.Seq))
 		synctest.Wait()
-		for i := 0; i < 121; i++ {
+		for i := 0; i < 481; i++ {
 			la.envoyer(demTrame(trameD(0, i)))
 		}
 		synctest.Wait()
@@ -996,7 +996,7 @@ func TestTrameFrequenceIP(t *testing.T) {
 		sous(s, func() {
 			n = len(s.index)
 		})
-		if n != 120 {
+		if n != 480 {
 			t.Fatal("trames rangées", n)
 		}
 		// Envoi en rafale (le client de C-3 n'a qu'une trame en vol) : le 0x0B peut précéder
@@ -1010,7 +1010,7 @@ func TestTrameFrequenceIP(t *testing.T) {
 		if len(limites) != 1 || !bytes.Equal(limites[0], EnrLimite(dernierSeq(s), 30)) { // horloge à 10:07:30
 			t.Fatalf("0x0B : %x", limites)
 		}
-		if n := len(acceptees(t, la)); n != 120 {
+		if n := len(acceptees(t, la)); n != 480 {
 			t.Fatal("0x0F :", n)
 		}
 		if la.codeFerme() != 0 {

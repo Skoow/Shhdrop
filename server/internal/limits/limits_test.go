@@ -922,26 +922,25 @@ func TestAllowJoinHeure(t *testing.T) {
 	}
 }
 
-// Trames montantes : 120 par minute par connexion, 600 par /48.
+// Trames montantes : 480 par minute par connexion, 960 par /48 (revue finale C-2, I4 : une
+// famille ou un bureau derrière un même NAT, environ 48 trames par minute et par membre actif).
 func TestAllowFrameMinute(t *testing.T) {
-	if FramesPer64 != 120 || FramesPer48 != 600 {
+	if FramesPer64 != 480 || FramesPer48 != 960 {
 		t.Fatal(FramesPer64, FramesPer48)
 	}
 	now := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	l := newLim(&now)
-	for i := 0; i < 120; i++ {
+	for i := 0; i < 480; i++ {
 		if !l.AllowFrame(ip("2001:db8:b:1::1")) {
 			t.Fatalf("trame %d refusée", i+1)
 		}
 	}
 	if l.AllowFrame(ip("2001:db8:b:1::2")) {
-		t.Fatal("121e trame de la minute acceptée")
+		t.Fatal("481e trame de la minute acceptée")
 	}
-	for p := 2; p <= 5; p++ {
-		for i := 0; i < 120; i++ {
-			if !l.AllowFrame(ip(fmt.Sprintf("2001:db8:b:%x::1", p))) {
-				t.Fatalf("/64 n° %d, trame %d refusée", p, i+1)
-			}
+	for i := 0; i < 480; i++ {
+		if !l.AllowFrame(ip("2001:db8:b:2::1")) {
+			t.Fatalf("second /64, trame %d refusée", i+1)
 		}
 	}
 	if l.AllowFrame(ip("2001:db8:b:ff::1")) {
@@ -961,6 +960,21 @@ func TestAllowFrameMinute(t *testing.T) {
 	now = now.Add(time.Second)
 	if !l.AllowFrame(ip("2001:db8:b:1::1")) {
 		t.Fatal("pas de remise à zéro à la minute")
+	}
+}
+
+// IPv4 (revue finale C-2, I4) : l'adresse est à la fois la connexion et le bloc ; 480 trames
+// par minute pour tout un NAT, la 481ᵉ refusée.
+func TestAllowFrameIPv4(t *testing.T) {
+	now := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
+	l := newLim(&now)
+	for i := 0; i < 480; i++ {
+		if !l.AllowFrame(ip("198.51.100.7")) {
+			t.Fatalf("trame %d refusée", i+1)
+		}
+	}
+	if l.AllowFrame(ip("198.51.100.7")) {
+		t.Fatal("481e trame de la minute acceptée")
 	}
 }
 
