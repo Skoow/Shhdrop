@@ -70,6 +70,9 @@ import { SERVER_STALL_MS, abortError } from "./upload";
  */
 export const CREATE_SEGMENTS = 6;
 
+/** Envois de segments en vol au plus par élément (A13 ; le serveur accepte 2 segments d'avance). */
+export const PUT_IN_FLIGHT = 2;
+
 /** Signe de vie du brouillon (le serveur efface un envoi sans nouvelle depuis 15 min). */
 export const KEEP_MS = 240_000;
 
@@ -440,38 +443,70 @@ export function createDraft(origin: string, o: DraftOpts = {}) {
       const sealer = await elementSealer(e.data, e.first);
       e.sealer = sealer;
       e.parts = sealer.pieces.length;
-      for (const [j, p] of sealer.pieces.entries()) {
-        await abortable(Promise.resolve().then(() => hooks.pause?.()), signal);
-        throwIfAborted(signal);
-        // Réservation agrandie au fil de l'envoi (le serveur n'accepte que 2 segments
-        // au-delà du dernier reçu, audit H1).
-        const n = p.seg;
-        if ((n + 1) * SEG_CHUNKS + 1 > cr.bucket) {
-          const need = reservationFor(n + 1);
-          await withBudget(Date.now() + SERVER_STALL_MS, { signal }, (s) => api.grow(c, cr.token, need, s));
-          cr.bucket = need;
+      // A13 : PUT_IN_FLIGHT envois au plus en même temps (le serveur accepte 2 segments au-delà du
+      // dernier reçu, audit H1, et 4 envois par jeton) ; chiffrement toujours dans l'ordre, une
+      // fois par plage. Le premier échec arrête l'élément ; les envois partis sont attendus.
+      const sending = new Map<number, number>(); // plage → octets partis de cet essai
+      const flying = new Set<Promise<void>>();
+      const failure: { hit: boolean; e?: unknown } = { hit: false }; // objet : lu après les envois (fermetures)
+      const show = () => {
+        let n = 0;
+        for (const b of sending.values()) n += b;
+        e.inflight = n;
+        changed();
+      };
+      try {
+        for (const [j, p] of sealer.pieces.entries()) {
+          await abortable(Promise.resolve().then(() => hooks.pause?.()), signal);
+          throwIfAborted(signal);
+          if (failure.hit) throw failure.e;
+          // Réservation agrandie au fil de l'envoi (le serveur n'accepte que 2 segments
+          // au-delà du dernier reçu, audit H1).
+          const n = p.seg;
+          if ((n + 1) * SEG_CHUNKS + 1 > cr.bucket) {
+            const need = reservationFor(n + 1);
+            await withBudget(Date.now() + SERVER_STALL_MS, { signal }, (s) => api.grow(c, cr.token, need, s));
+            cr.bucket = need;
+          }
+          const data = await sealer.piece(j);
+          // Le chiffrement ne s'interrompt pas : brouillon perdu ou élément retiré entre-temps →
+          // on s'arrête ici, sans remettre l'élément en « envoi » (revue du 10 novembre).
+          throwIfAborted(signal);
+          if (failure.hit) throw failure.e;
+          e.phase = "envoi";
+          changed();
+          e.touched = true;
+          e.reach = Math.max(e.reach, n * SEG_CHUNKS + p.from + p.chunks);
+          // Segment entier : envoi simple ; sinon, plage de morceaux (?from).
+          const from = p.from === 0 && p.chunks === SEG_CHUNKS ? undefined : p.from;
+          const put = withBudget(deadline, { signal, onRetry: (r) => hooks.onRetry?.(r) }, (s) =>
+            api.putSegment(c, cr.token, n, data, (b) => {
+              sending.set(j, Math.min(b, data.length));
+              show();
+            }, s, from),
+          ).then(
+            () => {
+              sending.delete(j);
+              e.acked += data.length;
+              e.partsDone++;
+              deadline = Date.now() + SERVER_STALL_MS;
+              show();
+            },
+            (err: unknown) => {
+              sending.delete(j);
+              if (!failure.hit) Object.assign(failure, { hit: true, e: err });
+              show();
+            },
+          );
+          flying.add(put);
+          void put.finally(() => flying.delete(put));
+          if (flying.size >= PUT_IN_FLIGHT) await Promise.race(flying);
+          if (failure.hit) throw failure.e;
         }
-        const data = await sealer.piece(j);
-        // Le chiffrement ne s'interrompt pas : brouillon perdu ou élément retiré entre-temps →
-        // on s'arrête ici, sans remettre l'élément en « envoi » (revue du 10 novembre).
-        throwIfAborted(signal);
-        e.phase = "envoi";
-        changed();
-        e.touched = true;
-        e.reach = n * SEG_CHUNKS + p.from + p.chunks;
-        // Segment entier : envoi simple ; sinon, plage de morceaux (?from).
-        const from = p.from === 0 && p.chunks === SEG_CHUNKS ? undefined : p.from;
-        await withBudget(deadline, { signal, onRetry: (r) => hooks.onRetry?.(r) }, (s) =>
-          api.putSegment(c, cr.token, n, data, (b) => {
-            e.inflight = Math.min(b, data.length);
-            changed();
-          }, s, from),
-        );
-        e.acked += data.length;
-        e.partsDone++;
-        e.inflight = 0;
-        deadline = Date.now() + SERVER_STALL_MS;
-        changed();
+        await Promise.all(flying);
+        if (failure.hit) throw failure.e;
+      } finally {
+        await Promise.all(flying); // jamais rejetées : chaque envoi rend son erreur dans `failure`
       }
       e.phase = "pret";
       changed();

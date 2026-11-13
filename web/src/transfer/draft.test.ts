@@ -140,6 +140,39 @@ describe("brouillon (spec §41.14)", { timeout: 60_000 }, () => {
     expect(seen.filter((r) => r.path === "/api/captcha")).toHaveLength(1);
   });
 
+  it("A13 : 2 envois de segments en vol au plus, dans l'ordre ; le fichier se relit à l'identique", async () => {
+    const fake = createFakeServer({ rateBytesPerS: 40 * 1048576 });
+    let inFlight = 0;
+    let max = 0;
+    const order: number[] = [];
+    const fetch = (async (u: RequestInfo | URL, i?: RequestInit) => {
+      const req = new Request(u, i);
+      const put = req.method === "PUT";
+      if (put) {
+        order.push(Number(new URL(req.url).pathname.split("/").pop()));
+        inFlight++;
+        max = Math.max(max, inFlight);
+      }
+      try {
+        if (put) await new Promise((r) => setTimeout(r, 30));
+        return await fake.handle(req);
+      } finally {
+        if (put) inFlight--;
+      }
+    }) as typeof globalThis.fetch;
+    const net = { fetch, retryDelayMs: 1 };
+    const big = file(5 * SEG_PLAIN + 1000, 7);
+    const d = createDraft(ORIGIN, { ...net, solveCaptcha, auto: true });
+    d.sync([{ id: "a", data: big }]);
+    await until(() => d.status("a")?.phase === "pret");
+    expect(max).toBe(2);
+    expect(order).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(d.status("a")!.sent).toBe(d.status("a")!.total);
+    const r = await d.finalize([{ id: "a", item: fileItem("g.bin", big) }], { ttlHours: 1, maxOpens: 1, password: PW, solveCaptcha });
+    const o = await openShare(r.link, PW, ORIGIN, undefined, net);
+    expect(Buffer.from(await o.item(0)).equals(Buffer.from(await big.arrayBuffer()))).toBe(true);
+  });
+
   it("texte seul : rien n'est créé avant le clic", async () => {
     const { seen, net } = setup();
     const d = createDraft(ORIGIN, { ...net, solveCaptcha, auto: true });
