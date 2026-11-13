@@ -12,7 +12,7 @@ func (s *salon) suite(apres uint64, max int) ([][]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.effacerEchuesLocked(s.now().UnixMilli())
-	return s.lireRefs(s.refsLocked(apres, max), nil)
+	return s.lireRefs(s.conv, s.refsLocked(apres, max), nil)
 }
 
 // etatAu : etatAuLocked sous le verrou du salon.

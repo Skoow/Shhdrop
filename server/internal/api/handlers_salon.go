@@ -28,6 +28,7 @@ func (a salonAPI) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/salons/meta", a.meta)
 	mux.HandleFunc("POST /api/salons/rejoindre", a.rejoindre)
 	mux.HandleFunc("GET /api/salons/gestion", a.gestion)
+	mux.HandleFunc("POST /api/salons/reglages", a.reglages)
 	mux.HandleFunc("POST /api/salons/exclure", a.exclure)
 	mux.HandleFunc("POST /api/salons/detruire", a.detruire)
 	mux.HandleFunc("POST /api/salons/signaler", a.signaler)
@@ -60,6 +61,8 @@ func failSalon(w http.ResponseWriter, err error) {
 		// Pièce trop réécrite (2 × sa taille) : 413, pas 429, car la même requête resterait
 		// refusée ; le client abandonne la pièce.
 		writeErr(w, http.StatusRequestEntityTooLarge, "too_large")
+	case errors.Is(err, salon.ErrOccupied):
+		writeErr(w, http.StatusConflict, "occupied")
 	case errors.Is(err, salon.ErrStale):
 		writeErr(w, http.StatusConflict, "stale")
 	case errors.Is(err, salon.ErrExcluded):
@@ -235,6 +238,96 @@ func (a salonAPI) gestion(w http.ResponseWriter, r *http.Request) {
 		ExpiresIn int64 `json:"expires_in_s"`
 		Present   int   `json:"present"`
 	}{secs(left), present})
+}
+
+// errQuotaSalon : quota de création de salons atteint (reglages, renouvellement : 429 limit).
+var errQuotaSalon = errors.New("quota de création de salons")
+
+// reglages : POST /api/salons/reglages (X-Shh-Manage ; corps {max_members?, renouveler_h?,
+// altcha?, hp?, shown_at?}, au moins un réglage) → {max_members, expires_in_s, depuis} (spec
+// 2026-11-13, révision du 13 novembre). Corps invalide, champs de la preuve sans
+// renouveler_h : 400. X-Shh-Manage : mêmes réponses fixes que gestion (absent ou mal formé
+// 400, inconnu ou salon plus vivant 404). Places sous les sièges occupés : 409 occupied.
+// renouveler_h (renouvellement : conversation effacée, membres gardés) compte comme une
+// création de salon : gel (503 frozen), preuve anti-robot (400) et quota de AllowSalonCreate
+// (429 limit jusqu'à minuit UTC), dans cet ordre, seulement une fois S_gestion et les places
+// vérifiés (salon.Manager.Regler, fonction avant) : une demande refusée avant ne consomme ni
+// le défi ni le quota. Quota rendu si le renouvellement échoue ensuite ; succès : difficulté
+// suivante comptée (RecordCreate), comme creer.
+func (a salonAPI) reglages(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		MaxMembers  *int   `json:"max_members"`
+		RenouvelerH *int   `json:"renouveler_h"`
+		Altcha      string `json:"altcha"`
+		HP          string `json:"hp"`
+		ShownAt     string `json:"shown_at"`
+	}
+	if err := readJSON(w, r, &b); err != nil {
+		failSalon(w, errBadRequest)
+		return
+	}
+	var req salon.ReglagesReq
+	ok := true
+	if b.MaxMembers != nil {
+		req.Places = *b.MaxMembers
+		ok = req.Places > 0 // 0 vaudrait « inchangé »
+	}
+	if b.RenouvelerH != nil {
+		req.Heures = *b.RenouvelerH
+		ok = ok && req.Heures > 0
+	} else if b.Altcha != "" || b.HP != "" || b.ShownAt != "" {
+		ok = false // preuve sans renouvellement : corps strict
+	}
+	if !ok || !req.Valide() {
+		failSalon(w, errBadRequest)
+		return
+	}
+	sg, err := headerSecret(r, "X-Shh-Manage")
+	if err != nil {
+		failSalon(w, err)
+		return
+	}
+	ip := ipOf(r)
+	pris := false
+	var avant func() error
+	if req.Heures != 0 {
+		avant = func() error {
+			if a.svc.Frozen() {
+				return share.ErrFrozen
+			}
+			if err := a.antiRobot(b.Altcha, b.ShownAt, b.HP, ip); err != nil {
+				return err
+			}
+			if !a.lim.AllowSalonCreate(ip) {
+				return errQuotaSalon
+			}
+			pris = true
+			return nil
+		}
+	}
+	res, err := a.m.Regler(sg, req, avant)
+	if err != nil {
+		if pris {
+			a.lim.RefundSalonCreate(ip) // rien de renouvelé
+		}
+		switch {
+		case errors.Is(err, share.ErrFrozen):
+			fail(w, err)
+		case errors.Is(err, errQuotaSalon):
+			writeLimit(w, a.lim.SalonCreateRetry())
+		default:
+			failSalon(w, err)
+		}
+		return
+	}
+	if pris {
+		a.cap.RecordCreate(ip)
+	}
+	writeJSON(w, http.StatusOK, struct {
+		MaxMembers int    `json:"max_members"`
+		ExpiresIn  int64  `json:"expires_in_s"`
+		Depuis     uint64 `json:"depuis"`
+	}{res.MaxMembers, secs(res.ExpiresIn), res.Depuis})
 }
 
 // exclure : POST /api/salons/exclure (X-Shh-Manage, X-Shh-Access-New = K_accès_s' ; corps

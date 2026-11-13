@@ -389,6 +389,7 @@ func FuzzFlux(f *testing.F) {
 			EnrPresence(seq, siege, r&1 == 1, uint64(recu)), EnrPong(seq, ping), EnrExclusion(seq, siege, nonce, r),
 			EnrReprise(seq, siege, nonce), EnrLimite(seq, r), EnrPlein(seq),
 			EnrListe(seq, siege, liste), EnrEfface(seq, uint64(recu)), EnrAcceptee(seq),
+			EnrReglages(seq, uint64(recu), r, siege),
 		} {
 			if d, err := LireDemande(e); err == nil {
 				t.Fatalf("enregistrement %#02x lu comme une demande %#02x", e[0], d.Type)
@@ -402,6 +403,12 @@ func FuzzFlux(f *testing.F) {
 		// Accusé d'acceptation (revue finale C-2, I1) : 0x0F ‖ seq, 9 octets.
 		if a := EnrAcceptee(seq); len(a) != 9 || a[0] != 0x0F || binary.BigEndian.Uint64(a[1:]) != seq {
 			t.Fatalf("0x0F : %x", a)
+		}
+		// Réglages (spec 2026-11-13) : 0x10 ‖ seq ‖ départ (8) ‖ secondes (4) ‖ places (1), 22 octets.
+		if g := EnrReglages(seq, uint64(recu), r, siege); len(g) != 22 || g[0] != 0x10 ||
+			binary.BigEndian.Uint64(g[1:]) != seq || binary.BigEndian.Uint64(g[9:]) != uint64(recu) ||
+			binary.BigEndian.Uint32(g[17:]) != r || g[21] != siege {
+			t.Fatalf("0x10 : %x", g)
 		}
 		// Dernière connexion (Task 9b) : 0x07 de 19 octets, minute nulle en ligne ; 0x0D de
 		// 11 + 25n octets, chaque annonce relue telle quelle.

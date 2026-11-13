@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/share"
@@ -103,6 +104,14 @@ type salon struct {
 	fini bool
 	// etatFin : partie disque de la fin (fin.go : finRien, finAFaire, finEnCours).
 	etatFin uint8
+	// Réglages (reglages.go) : depart, rang de départ du dernier renouvellement (0 : aucun ;
+	// rien de rang ≤ depart n'est plus servi) ; gen, nombre de renouvellements, écrit sous mu et
+	// lu aussi sans verrou par l'écrivain d'une connexion (trame d'un lot préparé avant un
+	// renouvellement jamais écrite après lui) ; regle : places ou durée changées au moins une
+	// fois (l'accueil porte alors un 0x10).
+	depart uint64
+	gen    atomic.Uint64
+	regle  bool
 }
 
 func nouveauSalon(id string, expires time.Time, maxMembers int, conv *Conversation, now func() time.Time) *salon {

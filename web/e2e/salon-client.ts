@@ -46,6 +46,7 @@ const TAILLES: Record<number, number> = {
   0x0c: 9,
   0x0e: 9 + 8,
   0x0f: 9,
+  0x10: 9 + 8 + 4 + 1, // 22 : réglages (départ ‖ secondes restantes ‖ places), spec 2026-11-13
 };
 /** Types qui prennent un nouveau rang. */
 const RANGES = new Set([0x01, 0x02, 0x03, 0x09, 0x0a]);
@@ -107,6 +108,10 @@ export class ClientSalon {
   codeFermeture: number | undefined;
   /** Dernier rang reçu (enregistrement qui prend un rang). */
   dernierSeq = 0;
+  /** Réglages du dernier `0x10` reçu (renouvellement ou places). */
+  reglages: { depart: number; secondes: number; places: number } | undefined;
+  /** Rang de départ du dernier renouvellement vu (0 : aucun) : rien de rang ≤ départ n'est gardé. */
+  depart = 0;
 
   #ws: WebSocket | undefined;
   #salon: Salon | undefined;
@@ -313,6 +318,21 @@ export class ClientSalon {
       case 0x0e:
         this.effaces.push(u64(b, 9));
         break;
+      case 0x10: {
+        // Réglages, sans rang (spec 2026-11-13) : effacer tout ce qui est de rang ≤ départ
+        // (idempotent : un 0x10 de places seules garde le même départ), puis reprendre après.
+        const depart = u64(b, 9);
+        const r = { depart, secondes: new DataView(b.buffer, b.byteOffset + 17, 4).getUint32(0), places: b[21]! };
+        if (depart < this.depart) this.erreurs.push(`0x10 : départ ${depart} après ${this.depart}`);
+        if (r.places < 2 || r.places > 10) this.erreurs.push(`0x10 : ${r.places} places`);
+        this.reglages = r;
+        if (depart > this.depart) {
+          this.depart = depart;
+          this.effaces.length = 0;
+          this.dernierSeq = Math.max(this.dernierSeq, depart);
+        }
+        break;
+      }
       case 0x0f:
         // Accusé d'acceptation, à l'expéditeur seul : seq = rang de la trame en vol. En direct,
         // il suit l'écho ; en rattrapage, il peut le précéder (sans rang : dernierSeq inchangé).
@@ -601,6 +621,25 @@ export class ClientSalon {
     this.#salon = undefined;
     this.cles.free();
   }
+}
+
+/**
+ * `POST /api/salons/reglages` (créateur, `S_gestion`) : places et/ou renouvellement ; un
+ * renouvellement porte une preuve anti-robot (comme une création). Rend `{ max_members, expires_in_s, depuis }`.
+ */
+export async function reglerSalon(srv: Srv, sGestion: Uint8Array, opts: { maxMembers?: number; renouvelerH?: number }): Promise<{ max_members: number; expires_in_s: number; depuis: number }> {
+  const corps: Record<string, unknown> = {};
+  if (opts.maxMembers !== undefined) corps.max_members = opts.maxMembers;
+  if (opts.renouvelerH !== undefined) {
+    const cap = await json(srv, "GET", "/api/captcha", {});
+    const recu = Date.now();
+    const { shown_at, fallback: _f, ...defi } = cap;
+    const preuve = await solveAltcha(defi);
+    await dormir(Math.max(0, recu + 3100 - Date.now()));
+    if (preuve.kind !== "pow") throw new Error("preuve inattendue");
+    Object.assign(corps, { renouveler_h: opts.renouvelerH, altcha: preuve.payload, hp: "", shown_at });
+  }
+  return json(srv, "POST", "/api/salons/reglages", { "X-Shh-Manage": b64u(sGestion) }, corps);
 }
 
 /** Taille du conteneur d'une pièce au palier `bucket` : 48 + B × 65 552 octets. */

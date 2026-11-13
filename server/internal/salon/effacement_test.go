@@ -925,7 +925,7 @@ func TestConnexionArreteeVidee(t *testing.T) {
 		cn := &connexion{s: s, m: b.m, stop: make(chan struct{}), reveil: make(chan struct{}, 1),
 			effaces: []uint64{1}, file: [][]byte{{1}}, prive: [][]byte{{2}}}
 		cn.arreter(CodeFin, nil)
-		if _, _, e := cn.etapeLocked(); e != eArreter || !vide(cn) {
+		if _, _, _, e := cn.etapeLocked(); e != eArreter || !vide(cn) {
 			t.Fatal("eArreter : attente non vidée", e)
 		}
 	})

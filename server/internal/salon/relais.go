@@ -298,14 +298,22 @@ func (s *salon) refsLocked(apres uint64, max int) []ref {
 	return out
 }
 
-// lireRefs : enregistrements de refs, trames lues et déchiffrées dans la conversation. Avec
+// lotRefs : refs et la conversation de leurs emplacements, prise sous le verrou du salon avec
+// elles (un renouvellement remplace salon.conv ; reglages.go).
+type lotRefs struct {
+	conv *Conversation
+	l    []ref
+}
+
+// lireRefs : enregistrements de refs, trames lues et déchiffrées dans conv. Avec
 // efface non nil (lecture hors du verrou du salon), une trame qui ne se lit plus parce
-// qu'elle a été effacée entre-temps (efface(seq)) est sautée. Toute autre trame illisible
+// qu'elle a été effacée entre-temps (efface(seq)), ou parce que sa conversation a été
+// détruite par un renouvellement ou une fin (ErrDetruite), est sautée. Toute autre trame illisible
 // (emplacement qui ne s'authentifie plus, erreur d'entrée-sortie) arrête la lecture : les
 // enregistrements d'avant sont rendus avec l'erreur (relecture Task 8 : une trame, peut-être
 // un Commit MLS, n'est jamais sautée sans rien dire). Les enregistrements rendus ne doivent
 // pas être modifiés.
-func (s *salon) lireRefs(refs []ref, efface func(seq uint64) bool) ([][]byte, error) {
+func (s *salon) lireRefs(conv *Conversation, refs []ref, efface func(seq uint64) bool) ([][]byte, error) {
 	if crochetLireRefs != nil {
 		crochetLireRefs()
 	}
@@ -315,9 +323,9 @@ func (s *salon) lireRefs(refs []ref, efface func(seq uint64) bool) ([][]byte, er
 			out = append(out, r.enr)
 			continue
 		}
-		trame, err := s.conv.Lire(r.emplacement)
+		trame, err := conv.Lire(r.emplacement)
 		if err != nil {
-			if efface != nil && errors.Is(err, ErrEfface) && efface(r.seq) {
+			if efface != nil && (errors.Is(err, ErrEfface) || errors.Is(err, ErrDetruite)) && efface(r.seq) {
 				continue
 			}
 			return out, err

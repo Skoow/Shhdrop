@@ -211,8 +211,10 @@ func (m *Manager) achever(s *salon) (err error) {
 		crochetAchever(s)
 	}
 	var errs []error
-	if s.conv != nil { // jamais réaffecté après nouveauSalon
-		errs = append(errs, s.conv.Detruire())
+	// Lue sous le verrou : un renouvellement (reglages.go) la remplace, jamais après « fini ».
+	conv := func() *Conversation { s.mu.Lock(); defer s.mu.Unlock(); return s.conv }()
+	if conv != nil {
+		errs = append(errs, conv.Detruire())
 	}
 	_, e := m.cfg.DB.Exec(`UPDATE salons SET failed_attempts=? WHERE id=? AND failed_attempts<?`, maxEssais, s.id, maxEssais)
 	errs = append(errs, base(e))

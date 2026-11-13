@@ -563,7 +563,8 @@ func (l *Limiter) allowPairLocked(ip netip.Addr, c64, c48 map[string]int, max64,
 }
 
 // AllowSalonCreate : création de salon, 5 par jour (UTC) par connexion et 15 par /48 (spec
-// §39.3.6), comptée à l'appel (avant la création : un conflit ou un refus du gestionnaire
+// §39.3.6), renouvellements compris (POST /api/salons/reglages avec renouveler_h : compté
+// comme une création, révision du 13 novembre), comptée à l'appel (avant la création : un conflit ou un refus du gestionnaire
 // reste compté).
 func (l *Limiter) AllowSalonCreate(ip netip.Addr) bool {
 	l.mu.Lock()

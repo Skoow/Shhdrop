@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"net/netip"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -107,6 +108,7 @@ type connexion struct {
 	curseur         uint64   // dernier rang remis à l'écrivain (lu ou mis dans la file)
 	retardDepuis    time.Time
 	presenceManquee bool // une présence (0x07) diffusée hors du direct : état renvoyé au retour
+	reglagesManque  bool // un 0x10 diffusé hors du direct : réglages courants renvoyés au retour
 	// effaces : cibles des 0x0E à écrire (sans rang, le rattrapage ne les sert pas), hors de
 	// la file : au plus un par entrée de l'index, jamais une cause de fermeture ni de sortie
 	// du direct ; ceux de l'accueil d'une reconnexion compris. Écrits après la file en direct,
@@ -304,7 +306,9 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 	} else {
 		// Borne dédiée (borneEffaces) : après une reprise par WebSocket, rien d'antérieur au
 		// 0x0A n'est servi, comme pour les 0x0E ci-dessous (décision du 12 novembre).
-		point = min(max(a.Depuis, x.borneEffaces()), s.seq)
+		// Renouvellement (reglages.go) : rien de rang ≤ départ n'est plus servi ; le 0x0D au
+		// rang de départ donne les membres gardés.
+		point = min(max(a.Depuis, x.borneEffaces(), s.depart), s.seq)
 	}
 	// Accueil construit avant toute inscription : une panique ici ne laisse ni connexion
 	// fantôme ni siège « en ligne ».
@@ -312,6 +316,9 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 		crochetAccueil()
 	}
 	accueil := append([][]byte{EnrListe(point, 0, s.listeLocked(point, mb.siege))}, s.presencesLocked(mb.siege)...)
+	if s.regle {
+		accueil = append(accueil, s.enrReglagesLocked(now)) // places ou durée changées : 0x10
+	}
 	var effaces []uint64
 	if !a.Reprise {
 		// Trames « instantané » effacées par lecture ou départ pendant la coupure, que ce
@@ -403,6 +410,7 @@ const (
 	genreRang     genre = iota // 0x01, 0x02, 0x03, 0x09, 0x0A : prend un rang
 	genrePresence              // 0x07
 	genreEfface                // 0x0E (cible en enr[9:17])
+	genreReglages              // 0x10 (reglages.go)
 )
 
 // diffuserLocked remet enr à chaque connexion sauf sauf, sans jamais attendre. Hors du
@@ -430,8 +438,11 @@ func (s *salon) diffuserLocked(enr []byte, g genre, sauf *connexion) {
 			continue
 		}
 		if !c.direct {
-			if g == genrePresence {
+			switch g {
+			case genrePresence:
 				c.presenceManquee = true
+			case genreReglages:
+				c.reglagesManque = true
 			}
 			continue
 		}
@@ -684,8 +695,11 @@ func (c *connexion) ecrivain() {
 	defer close(c.ecrivainFini)
 	defer c.recuperer()
 	for {
-		lot, continuer := c.prochainLot()
+		lot, gen, continuer := c.prochainLot()
 		for _, r := range lot {
+			if (r[0] == 0x01 || r[0] == 0x0E) && c.s.gen.Load() != gen {
+				continue // salon renouvelé depuis la préparation du lot : rien d'avant n'est remis
+			}
 			if !c.ecrire(r) {
 				return
 			}
@@ -720,19 +734,20 @@ const (
 	eArreter               // fermeture décidée ; lot éventuel écrit d'abord
 )
 
-// prochainLot : enregistrements à écrire ensuite, dans l'ordre ; continuer = false quand la
-// fermeture est décidée (le lot rendu avec, s'il y en a un, est écrit d'abord). Chaque
+// prochainLot : enregistrements à écrire ensuite, dans l'ordre, et le nombre de
+// renouvellements (salon.gen) quand ils ont été pris ; continuer = false quand la fermeture
+// est décidée (le lot rendu avec, s'il y en a un, est écrit d'abord). Chaque
 // section sous le verrou du salon est une fonction à defer Unlock : une panique (EnrTrame,
 // EnrPresence) ne garde jamais le verrou.
-func (c *connexion) prochainLot() (lot [][]byte, continuer bool) {
+func (c *connexion) prochainLot() (lot [][]byte, gen uint64, continuer bool) {
 	s := c.s
 	for {
-		lot, refs, e := c.etapeLocked()
+		lot, refs, gen, e := c.etapeLocked()
 		switch e {
 		case eEcrire:
-			return lot, true
+			return lot, gen, true
 		case eArreter:
-			return lot, false
+			return lot, gen, false
 		case eAttendre:
 			select {
 			case <-c.reveil:
@@ -740,17 +755,17 @@ func (c *connexion) prochainLot() (lot [][]byte, continuer bool) {
 			}
 			continue
 		}
-		lot, err := s.lireRefs(refs, s.effaceeDepuis)
+		lot, err := s.lireRefs(refs.conv, refs.l, s.effaceeDepuis)
 		if err != nil {
 			code := CodeInterne
 			if s.estFini() {
 				code = CodeInconnu
 			}
 			c.arreter(code, nil)
-			return lot, false
+			return lot, gen, false
 		}
-		c.avancer(refs[len(refs)-1].seq)
-		return lot, true
+		c.avancer(refs.l[len(refs.l)-1].seq)
+		return lot, gen, true
 	}
 }
 
@@ -758,17 +773,18 @@ func (c *connexion) prochainLot() (lot [][]byte, continuer bool) {
 // rattrapage lira ensuite (rang > curseur) ; sinon attente en direct ; sinon lot de
 // rattrapage complet à lire hors du verrou ; sinon dernier lot, lu sous le verrou, et passage
 // au direct dans la même section.
-func (c *connexion) etapeLocked() (lot [][]byte, refs []ref, e etape) {
+func (c *connexion) etapeLocked() (lot [][]byte, refs lotRefs, gen uint64, e etape) {
 	s := c.s
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	gen = s.gen.Load()
 	defer func() {
 		if e == eArreter {
 			c.viderLocked() // le lot rendu est déjà hors des listes
 		}
 	}()
 	if c.arrete.Load() {
-		return nil, nil, eArreter
+		return nil, refs, gen, eArreter
 	}
 	// Échéances d'abord : une trame échue n'est jamais servie, même entre deux Tick.
 	s.effacerEchuesLocked(c.m.cfg.Now().UnixMilli())
@@ -786,30 +802,36 @@ func (c *connexion) etapeLocked() (lot [][]byte, refs []ref, e etape) {
 		lot = c.ajouterEffaces(lot)
 	}
 	if len(lot) > 0 {
-		return lot, nil, eEcrire
+		return lot, refs, gen, eEcrire
 	}
 	if c.direct {
-		return nil, nil, eAttendre
+		return nil, refs, gen, eAttendre
 	}
 	if s.fini {
 		c.arreter(CodeInconnu, nil)
-		return nil, nil, eArreter
+		return nil, refs, gen, eArreter
 	}
-	refs = s.refsLocked(c.curseur, lotRattrapage)
-	if len(refs) == lotRattrapage {
-		return nil, refs, eLire
+	// Conversation prise avec les refs : un renouvellement la remplace, un lot lu hors du
+	// verrou lit toujours celle de ses emplacements (détruite : trames sautées, lireRefs).
+	refs = lotRefs{conv: s.conv, l: s.refsLocked(c.curseur, lotRattrapage)}
+	if len(refs.l) == lotRattrapage {
+		return nil, refs, gen, eLire
 	}
-	lot, err := s.lireRefs(refs, nil)
+	lot, err := s.lireRefs(s.conv, refs.l, nil)
 	if err != nil {
 		c.arreter(CodeInterne, nil)
-		return lot, nil, eArreter
+		return lot, refs, gen, eArreter
 	}
 	c.direct, c.retardDepuis, c.curseur = true, time.Time{}, s.seq
 	if c.presenceManquee {
 		lot = append(lot, s.presencesLocked(c.mb.siege)...)
 		c.presenceManquee = false
 	}
-	return c.ajouterEffaces(lot), nil, eEcrire
+	if c.reglagesManque {
+		lot = append(lot, s.enrReglagesLocked(c.m.cfg.Now()))
+		c.reglagesManque = false
+	}
+	return c.ajouterEffaces(lot), refs, gen, eEcrire
 }
 
 // ajouterEffaces : au plus lotEffaces 0x0E en attente ajoutés à lot (rang courant), dans
@@ -826,6 +848,14 @@ func (c *connexion) ajouterEffaces(lot [][]byte) [][]byte {
 		c.signaler()
 	}
 	return lot
+}
+
+// oublierAvantLocked : renouvellement (reglages.go) : 0x0E en attente oubliés, trames 0x01 en
+// file retirées (jamais écrites après le renouvellement) ; annonces, réponses et accusés
+// gardés (membres gardés ; une trame en vol attend son 0x0F). Sous s.mu.
+func (c *connexion) oublierAvantLocked() {
+	c.effaces = nil
+	c.file = slices.DeleteFunc(c.file, func(r []byte) bool { return r[0] == 0x01 })
 }
 
 // viderLocked : connexion arrêtée, plus rien à écrire : 0x0E, file et réponses en attente

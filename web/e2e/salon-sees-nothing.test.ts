@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { passwordKey } from "../src/engine";
 import type { EnveloppeEnvoi, Message } from "../src/salon/engine";
-import { ClientSalon, KDF, alea, b64u, egal, tailleConteneur, u64, unb64u, type Recu, type Srv } from "./salon-client";
+import { ClientSalon, KDF, alea, b64u, egal, reglerSalon, tailleConteneur, u64, unb64u, type Recu, type Srv } from "./salon-client";
 import { capturingFetch, findIn, listFiles, needle, scanDir, scanProcessMemory, type Captured, type Needle } from "./scan";
 import { startServer, type TestServer } from "./server";
 
@@ -447,4 +447,104 @@ describe("le serveur ne voit rien : salon (C-2)", () => {
     expect(findIn(srv.stderr(), tous)).toEqual([]);
     expect(srv.stdout().toString("utf8")).toMatch(/^SHH_LISTENING 127\.0\.0\.1:\d+\n$/);
   });
+});
+
+// Renouvellement (spec 2026-11-13, révision du 13 novembre) : « prolonger = renouveler », toute la
+// conversation est effacée, les membres restent. Après lui, aucun repère d'avant ne reste sur le
+// disque : ni fenêtre de 32 octets de l'ancien fichier de conversation (chiffré sous l'ancienne
+// clé), ni contenu chiffré d'une pièce, ni ligne de pièce, ni budget ; témoins : ces mêmes
+// repères sont retrouvés sur le disque avant le renouvellement, et la conversation continue.
+describe("le serveur ne voit rien : renouvellement du salon", () => {
+  let srv: TestServer;
+  const clients: ClientSalon[] = [];
+  afterAll(async () => {
+    for (const x of clients) await x.fermer().catch(() => undefined);
+    await srv?.dispose();
+  });
+
+  async function base() {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(join(srv.dataDir, "shares.db"), { readOnly: true });
+    try {
+      const s = db.prepare("SELECT expires_at AS e, pieces_bytes AS p, max_members AS m FROM salons").all() as { e: number; p: number; m: number }[];
+      const pieces = Number((db.prepare("SELECT count(*) AS n FROM salon_pieces").get() as { n: number }).n);
+      return { salons: s, pieces };
+    } finally {
+      db.close();
+    }
+  }
+  const message = (x: string): EnveloppeEnvoi & { id: Uint8Array } => ({ id: alea(16), heureMs: Date.now(), regle: 0, message: { k: "texte", x } });
+  const lu = (x: ClientSalon, e: { id: Uint8Array }) => x.attendre((r: Recu) => r.k === "evt" && r.evenement.type === "message" && egal(r.evenement.enveloppe.id, e.id));
+  const disque = () => listFiles(srv.dataDir).map((f) => readFileSync(f));
+
+  it("après un renouvellement : rien d'avant sur le disque, membres gardés, 0x10 chez tous", async () => {
+    srv = await startServer({ salons: true });
+    const s: Srv = { origin: srv.origin };
+    const cr = await ClientSalon.creer(s, { maxMembers: 3, mdp: MDP });
+    const a = cr.createur;
+    clients.push(a);
+    const b = await ClientSalon.rejoindre(s, cr.lien, MDP);
+    clients.push(b);
+    await Promise.all([a.attendreMembres([0, 1]), b.attendreMembres([0, 1])]);
+    const avant = message("TexteAvantRenouvQm4z71");
+    await a.envoyer(avant);
+    await lu(b, avant);
+    const r = alea(32);
+    const { conteneur, chiffre } = await conteneurChiffre(1, "ContenuAvantRenouvPk93", r);
+    const id = await b.envoyerPiece(1, conteneur);
+    const fichier = { ...message("x"), message: { k: "piece", r, piece: id, palier: 1, nom: "avant.pdf", mime: "application/pdf", taille: 100, sorte: "fichier", dureeMs: null } } as EnveloppeEnvoi & { id: Uint8Array };
+    await b.envoyer(fichier, id);
+    await lu(a, fichier);
+    for (const x of clients) await x.ping();
+
+    // Témoins avant : conversation non vide, contenu de la pièce retrouvé, ligne et budget.
+    const convAvant = listFiles(join(srv.dataDir, "salons")).map((f) => readFileSync(f));
+    expect(convAvant).toHaveLength(1);
+    expect(convAvant[0]!.length).toBeGreaterThan(0);
+    const reperePiece = { label: "pièce d'avant", forms: [Buffer.from(chiffre)] };
+    expect(scanDir(srv.dataDir, [reperePiece]).length).toBe(1);
+    expect(fenetresCommunes(convAvant, disque())).toBeGreaterThan(0);
+    const b0 = await base();
+    expect(b0.pieces).toBe(1);
+    expect(b0.salons[0]!.p).toBeGreaterThan(0);
+
+    const depart = a.dernierSeq;
+    const rep = await reglerSalon(s, cr.sGestion, { renouvelerH: 6 });
+    expect(rep.depuis).toBe(depart);
+    expect(rep.max_members).toBe(3);
+    expect(rep.expires_in_s).toBeGreaterThan(5 * 3600);
+    for (const x of clients) {
+      await x.attendre((q) => q.k === "enr" && q.enr.type === 0x10);
+      expect(x.reglages).toEqual({ depart, secondes: expect.any(Number), places: 3 });
+      expect(x.erreurs).toEqual([]);
+    }
+
+    // Disque : conversation vide (clé neuve), aucune fenêtre de l'ancienne, pièce et ligne parties, budget à 0.
+    expect(listFiles(join(srv.dataDir, "salons")).map((f) => readFileSync(f).length)).toEqual([0]);
+    expect(fenetresCommunes(convAvant, disque())).toBe(0);
+    expect(scanDir(srv.dataDir, [reperePiece])).toEqual([]);
+    expect(listFiles(join(srv.dataDir, "salon-pieces"))).toEqual([]);
+    const b1 = await base();
+    expect(b1.pieces).toBe(0);
+    expect(b1.salons).toHaveLength(1);
+    expect(b1.salons[0]!.p).toBe(0);
+    expect(b1.salons[0]!.e).toBeGreaterThan(b0.salons[0]!.e);
+
+    // Membres gardés : la conversation continue, au rang suivant.
+    const apres = message("TexteApresRenouvTn28c5");
+    const seq = await a.envoyer(apres);
+    expect(seq).toBe(depart + 1);
+    await lu(b, apres);
+    expect(listFiles(join(srv.dataDir, "salons")).map((f) => readFileSync(f).length)).toEqual([4168]);
+    expect(fenetresCommunes(convAvant, disque())).toBe(0);
+    // Reconnexion depuis un rang d'avant : rien d'avant n'est servi.
+    const n = b.recus.length;
+    await b.couper();
+    (b as unknown as { dernierSeq: number }).dernierSeq = 1;
+    await b.reconnecter();
+    await b.ping();
+    const servis = b.recus.slice(n).filter((q) => q.k === "enr" && q.enr.seq <= depart && [0x01, 0x02, 0x03, 0x09, 0x0a].includes(q.enr.type));
+    expect(servis).toEqual([]);
+    expect(b.erreurs).toEqual([]);
+  }, 120_000);
 });

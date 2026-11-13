@@ -12,6 +12,10 @@ Date : 13 novembre 2026. Demande du propriétaire.
 - **Places** : inchangé (ci-dessous).
 - **Messages et vocaux** : jamais dans l'espace des fichiers (1 Go par salon sans compte) ; anti-flood déjà en place côté serveur (60 trames/min par membre avec rafale de 20, 1 200 messages/h par membre, 480 trames/min par adresse, vocaux au rythme d'une voix, 120 fichiers/h par membre, garde-fou du disque) ; l'écran (C-3) dira « Doucement, réessayez dans N s » au lieu d'échouer.
 
+## État (13 novembre) : fait côté serveur
+
+Route `POST /api/salons/reglages`, enregistrement `0x10` (22 octets) et règles exactes : section « Protocole » du plan C-2 et §39.3.9. Écarts à la révision, signalés : `pieces_bytes` revient à 0 par l'effacement de chaque pièce (fichier, puis ligne et budget), pas par une remise à 0 forcée (qui retirerait le budget d'une pièce créée juste après) ; `max_members` garde la borne basse de la création (2) ; le renouvellement peut raccourcir le salon (nouvelle durée comptée depuis maintenant).
+
 ## Intention
 
 Le créateur d'un salon déjà ouvert doit pouvoir **changer le nombre de places** et **prolonger la durée de vie** du salon sans recréer de lien : les invités gardent le même lien et le même mot de passe, personne ne recommence. Toujours dans la limite de l'offre : sans compte aujourd'hui, avec compte plus tard.

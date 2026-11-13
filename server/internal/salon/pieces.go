@@ -96,13 +96,16 @@ type piece struct {
 	auteur [32]byte // SHA-256 du jeton de l'auteur
 	// rang : dernier rang du salon à la création ; lien : rang de la trame liée (0 : aucune).
 	rang, lien uint64
-	etat       etatPiece
-	ecritures  int       // PutSegment en cours (hors du verrou)
-	recus      []bool    // segments reçus (envoi seulement)
-	ecrit      int64     // octets de segments acceptés, réécritures comprises (EcritureMax)
-	activite   time.Time // création, dernier segment reçu, puis finalisation
-	lus        map[[32]byte]int64
-	efface     bool
+	// gen : renouvellements du salon à la création (salon.gen) ; une pièce commencée avant un
+	// renouvellement n'est jamais inscrite (inscrirePiece).
+	gen       uint64
+	etat      etatPiece
+	ecritures int       // PutSegment en cours (hors du verrou)
+	recus     []bool    // segments reçus (envoi seulement)
+	ecrit     int64     // octets de segments acceptés, réécritures comprises (EcritureMax)
+	activite  time.Time // création, dernier segment reçu, puis finalisation
+	lus       map[[32]byte]int64
+	efface    bool
 }
 
 // purge : pièce à effacer hors du verrou du salon (fichier, puis ligne et budget).
@@ -258,7 +261,7 @@ func (m *Manager) debuterPiece(s *salon, mb Membre, p *piece, taille int64) (arr
 		return 0, err
 	}
 	x := s.sieges[mb.siege]
-	p.auteur, p.rang, p.activite = x.jetonV, s.seq, now
+	p.auteur, p.rang, p.activite, p.gen = x.jetonV, s.seq, now, s.gen.Load()
 	if p.vocal {
 		if d := s.limites[mb.siege].vocal.prendre(now, taille); d > 0 {
 			return 0, &Attente{Retry: d}
@@ -315,13 +318,17 @@ func (m *Manager) placer(n int64) bool {
 	return true
 }
 
-// inscrirePiece range p dans son salon (et l'index des pièces), sauf si le salon est fini ou
-// le membre parti entre-temps (ErrNotFound : l'appelant défait tout).
+// inscrirePiece range p dans son salon (et l'index des pièces), sauf si le salon est fini, le
+// membre parti ou le salon renouvelé entre-temps (ErrNotFound : l'appelant défait tout,
+// fichier, ligne et budget).
 func (m *Manager) inscrirePiece(s *salon, mb Membre, p *piece) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.membrePieceLocked(mb, m.cfg.Now()); err != nil {
 		return err
+	}
+	if p.gen != s.gen.Load() {
+		return ErrNotFound // commencée avant un renouvellement : rien d'avant ne survit
 	}
 	if s.lesPieces == nil {
 		s.lesPieces, s.libres = map[string]*piece{}, map[string]*piece{}

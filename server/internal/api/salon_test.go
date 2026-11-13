@@ -133,6 +133,7 @@ func TestRoutesSalonAbsentes(t *testing.T) {
 			{method: "GET", path: "/api/salons/meta", hdr: acces(k)},
 			{method: "POST", path: "/api/salons/rejoindre", hdr: acces(k), body: []byte(`{"proof":"x"}`)},
 			{method: "GET", path: "/api/salons/gestion", hdr: manage(k)},
+			{method: "POST", path: "/api/salons/reglages", hdr: manage(k), body: []byte(`{"max_members":3}`)},
 			{method: "POST", path: "/api/salons/detruire", hdr: manage(k), body: []byte(`{}`)},
 			{method: "POST", path: "/api/salons/signaler", hdr: map[string]string{"X-Shh-Membre": enc.EncodeToString(rnd(32))},
 				body: []byte(`{}`)},
@@ -341,6 +342,7 @@ func TestEnTetesDoubles(t *testing.T) {
 		{"POST", "/api/salons/rejoindre", "X-Shh-Access", `{"proof":"` + enc.EncodeToString(k.preuve) + `"}`},
 		{"POST", "/api/salons/rejoindre", "X-Shh-Manage", `{"proof":"` + enc.EncodeToString(k.preuve) + `"}`},
 		{"GET", "/api/salons/gestion", "X-Shh-Manage", ""},
+		{"POST", "/api/salons/reglages", "X-Shh-Manage", `{"max_members":3}`},
 	} {
 		hr := httptest.NewRequest(c.method, c.path, strings.NewReader(c.body))
 		hr.RemoteAddr = "203.0.113.7:4444"
@@ -526,6 +528,7 @@ func TestFailSalon(t *testing.T) {
 		{salon.ErrFull, 409, `{"error":"full"}`, ""},
 		{salon.ErrBudget, 409, `{"error":"budget"}`, ""},
 		{salon.ErrStale, 409, `{"error":"stale"}`, ""},
+		{salon.ErrOccupied, 409, `{"error":"occupied"}`, ""},
 		{salon.ErrExcluded, 403, `{"error":"excluded"}`, ""},
 		{salon.ErrForbidden, 403, `{"error":"forbidden"}`, ""},
 		{&salon.Attente{Retry: 1500 * time.Millisecond}, 429, `{"error":"limit","retry_after_s":2}`, "2"},
