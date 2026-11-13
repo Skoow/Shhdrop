@@ -837,3 +837,35 @@ func TestPiecesParHeure(t *testing.T) {
 	}
 	b.creerPiece(t, suivant, 1, false)
 }
+
+// Revue finale C-2, mineur (e) : l'annulation de CreerPieceID efface le fichier avant la ligne
+// (comme effacerPiece) ; un fichier qui ne s'efface pas garde sa ligne (reprise à la fin du
+// salon ou au démarrage), jamais un fichier sans ligne compté dans SHH_STORAGE_MAX.
+func TestCreerPieceAnnulationFichierAvantLigne(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	_, g := b.entrerMembre(t, c, true)
+	id := share.NewID()
+	chemin := filepath.Join(b.cfg.Pieces.Dir, id)
+	now := b.m.cfg.Now
+	b.m.cfg.Now = func() time.Time {
+		// Fichier réservé et ligne insérée : l'inscription voit le salon échu (refus, annulation),
+		// et le fichier devient un dossier non vide que Delete ne peut pas effacer.
+		if fi, err := os.Stat(chemin); err == nil && fi.Mode().IsRegular() {
+			os.Remove(chemin)
+			os.MkdirAll(filepath.Join(chemin, "plein"), 0o700)
+			return now().Add(48 * time.Hour)
+		}
+		return now()
+	}
+	if err := b.m.CreerPieceID(g, id, 1, false); err == nil {
+		t.Fatal("création acceptée")
+	}
+	var n int
+	if err := b.db.QueryRow(`SELECT count(*) FROM salon_pieces WHERE id=?`, id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatal("fichier resté sans sa ligne")
+	}
+}

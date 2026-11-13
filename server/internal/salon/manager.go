@@ -552,13 +552,16 @@ func (m *Manager) sortirLocked(s *salon, n uint8, enr func(seq uint64) []byte, r
 // disparues).
 func (m *Manager) Tick() {
 	now := m.cfg.Now()
-	m.mu.Lock()
-	m.echusLocked(now.Unix())
-	salons := make([]*salon, 0, len(m.salons))
-	for _, s := range m.salons {
-		salons = append(salons, s)
-	}
-	m.mu.Unlock()
+	var salons []*salon
+	func() { // defer : une panique (récupérée par Run) ne garde pas Manager.mu
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.echusLocked(now.Unix())
+		salons = make([]*salon, 0, len(m.salons))
+		for _, s := range m.salons {
+			salons = append(salons, s)
+		}
+	}()
 	for _, s := range salons {
 		tombe, echu, aPurger := m.entretenir(s, now)
 		switch {
@@ -569,14 +572,19 @@ func (m *Manager) Tick() {
 		}
 		m.reprendreFin(s)
 		if tombe && !s.resteAPurger() && !s.finIncomplete() {
-			m.mu.Lock()
-			if m.salons[s.id] == s {
-				delete(m.salons, s.id)
-			}
-			m.mu.Unlock()
+			m.oublierTombe(s)
 		}
 	}
 	m.lignes(now)
+}
+
+// oublierTombe : tombe s retirée de Manager.salons (si c'est toujours elle).
+func (m *Manager) oublierTombe(s *salon) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.salons[s.id] == s {
+		delete(m.salons, s.id)
+	}
 }
 
 // margeTombe : une tombe est gardée jusqu'à l'échéance plus cette marge (plan, Task 15) : un

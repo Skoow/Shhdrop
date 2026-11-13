@@ -127,10 +127,11 @@ const (
 	RaisonTropLent uint8 = 6
 )
 
-// Codes de fermeture du WebSocket (plan, point 19).
+// Codes de fermeture du WebSocket (plan, point 19, et table « Codes de fermeture » du
+// « Protocole ») ; 1011 : CodeInterne (connexion.go) ; 1009 : posé par la bibliothèque.
 const (
 	CodeFin      = 1000 // fin du salon, ou départ demandé (0x03)
-	CodeArret    = 1001 // arrêt du serveur
+	CodeArret    = 1001 // arrêt du serveur, ou silence de 45 s (même conduite du client : reconnexion)
 	CodeAccueil  = 4001 // accueil absent ou invalide
 	CodeRevoque  = 4002 // jeton révoqué (exclusion)
 	CodeInvalide = 4003 // message invalide

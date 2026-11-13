@@ -369,7 +369,7 @@ func TestOnzePieces(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 120 - 11 {
-		if _, err := m.CreerPiece(mb, 1, false); err != nil {
+		if err := m.CreerPieceID(mb, share.NewID(), 1, false); err != nil {
 			t.Fatal(err)
 		}
 	}

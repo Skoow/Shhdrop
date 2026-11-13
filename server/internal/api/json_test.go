@@ -112,3 +112,22 @@ func TestStrictKeysNull(t *testing.T) {
 		t.Fatalf("err = %v, attendu errKeys", err)
 	}
 }
+
+// Revue finale C-2, mineur (h) : v qui n'est pas un pointeur non nul (erreur de programmation)
+// → erreur interne (500), jamais une panique ni un 400.
+func TestReadJSONSansPointeur(t *testing.T) {
+	var nul *voidBody
+	for nom, v := range map[string]any{"valeur": voidBody{}, "nil": nil, "pointeur nul": nul, "entier": 3} {
+		r := httptest.NewRequest("POST", "/", strings.NewReader(`{}`))
+		func() {
+			defer func() {
+				if p := recover(); p != nil {
+					t.Fatalf("%s : panique %v", nom, p)
+				}
+			}()
+			if err := readJSON(httptest.NewRecorder(), r, v); err == nil || err == errBadRequest {
+				t.Fatalf("%s : %v, attendu une erreur interne", nom, err)
+			}
+		}()
+	}
+}

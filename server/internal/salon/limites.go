@@ -6,15 +6,17 @@ import (
 )
 
 // Limites des trames montantes par siège (plan C-2 Task 12, Global Constraints) : seaux à
-// jetons, en mémoire seulement, sous s.mu. Les limites par connexion et par /48 (120 et 600
+// jetons, en mémoire seulement, sous s.mu. Les limites par connexion et par /48 (480 et 960
 // par minute) sont celles de limits.AllowFrame, consultées par Servir avant Recevoir.
 //   - cadence : toute trame, rafale de 20 puis 1 par seconde (60 par minute) ;
 //   - horaire : trames non volatiles, 1 200 puis 1 200 par heure (1 par 3 s).
 //
-// Les seaux d'un siège sont remis à neuf à l'arrivée d'un nouvel occupant (0x02,
+// Les seaux d'un siège invité sont remis à neuf à l'arrivée d'un nouvel occupant (0x02,
 // installerLocked) : il n'hérite pas du compte d'un autre (une arrivée coûte déjà une place
 // sur 5 × max_members et un rejoindre limité). Une reprise (0x0A, par WebSocket ou du
-// créateur par rejoindre) les garde : recharger la page ne remet rien à zéro.
+// créateur par rejoindre) les garde : recharger la page ne remet rien à zéro. Le siège 0 garde
+// toujours les siens : le créateur, hors du plafond des arrivées, ne les recharge pas par
+// « Quitter » puis rejoindre (revue finale C-2, mineur c).
 
 const (
 	rafaleSiege    = 20

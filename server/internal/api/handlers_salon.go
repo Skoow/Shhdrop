@@ -298,7 +298,8 @@ func (a salonAPI) exclure(w http.ResponseWriter, r *http.Request) {
 // §39.3.9, plan C-2 Task 15). Ni l'un ni l'autre, ou membre sans la permission : 403
 // forbidden ; les deux, en-tête mal formé, raison autre que "report" : 400 ; salon inconnu,
 // échu ou détruit, jeton inconnu : 404 ; jeton révoqué : 403 excluded. Un signalement réussi
-// compte dans l'entier horaire des signalements (§9.5, sans identifiant), comme les partages.
+// compte dans l'entier horaire des signalements (§9.5, sans identifiant), comme les partages,
+// une fois par salon avec « Quitter et signaler » (salon.signale ; revue finale C-2, mineur d).
 func (a salonAPI) detruire(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Reason json.RawMessage `json:"reason"` // valeur brute : null, "" ou "REPORT" refusés
@@ -326,14 +327,19 @@ func (a salonAPI) detruire(w http.ResponseWriter, r *http.Request) {
 	default:
 		err = salon.ErrForbidden
 	}
+	premier := false
 	if err == nil {
-		err = a.m.Detruire(sg, jeton)
+		if report {
+			premier, err = a.m.DetruireSignaler(sg, jeton)
+		} else {
+			err = a.m.Detruire(sg, jeton)
+		}
 	}
 	if err != nil {
 		failSalon(w, err)
 		return
 	}
-	if report {
+	if premier {
 		a.reports.add(a.svc.Now())
 	}
 	writeJSON(w, http.StatusOK, struct{}{})

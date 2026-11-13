@@ -109,5 +109,7 @@ describe("scanProcessMemory (processus réel)", () => {
     } finally {
       child.kill("SIGKILL");
     }
-  });
+    // Délai explicite (revue finale C-2, mineur j) : démarrage d'un processus enfant puis
+    // lecture de toute sa mémoire, indépendant du délai global de la suite.
+  }, 30_000);
 });

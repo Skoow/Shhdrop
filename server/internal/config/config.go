@@ -111,7 +111,7 @@ func FromEnv() (Config, error) {
 		c.Origin = v
 	}
 	if c.Salons && c.Origin == "" {
-		return Config{}, errors.New("SHH_SALONS=1 exige SHH_ORIGIN (origine publique du site, ex. https://shhdrop.app)")
+		return Config{}, errors.New("SHH_SALONS=1 exige SHH_ORIGIN (origine publique du site, ex. https://shhgone.com)")
 	}
 	return c, nil
 }

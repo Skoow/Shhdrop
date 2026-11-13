@@ -89,3 +89,18 @@ func TestDetruireSignalement(t *testing.T) {
 		t.Fatal("signalement :", c, n())
 	}
 }
+
+// Revue finale C-2, mineur (d) : un seul signalement par salon, « Quitter et signaler » et
+// « Détruire et signaler » confondus (même booléen signale) : le membre signale (+1), puis le
+// créateur détruit en signalant : 200, toujours 1.
+func TestDetruireSignalementUneFoisParSalon(t *testing.T) {
+	e, _ := salonEnv(t)
+	k := newKeys()
+	ms := salonExclusion(t, e, k, 4, 1)
+	if r := e.signaler(map[string]string{"X-Shh-Membre": ms[1].jeton}, `{}`); r.code != 200 || e.signalements() != 1 {
+		t.Fatal("quitter et signaler :", r.code, e.signalements())
+	}
+	if c := e.detruireSalon(manage(k), `{"reason":"report"}`); c != 200 || e.signalements() != 1 {
+		t.Fatal("second signalement du même salon compté :", c, e.signalements())
+	}
+}

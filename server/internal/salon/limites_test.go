@@ -516,3 +516,33 @@ func TestUsageAtomiqueCoherent(t *testing.T) {
 	}
 	verifier("tout détruit", 0)
 }
+
+// Revue finale C-2, mineur (c) : le siège 0 est toujours le créateur ; « Quitter » puis
+// rejoindre avec S_gestion n'est qu'une reprise (hors du plafond des arrivées) : ses seaux
+// ne sont pas remis à neuf (sinon jusqu'à 3 600 trames non volatiles par heure).
+func TestLimiteCreateurRevenu(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := bancLimite(t)
+		c := b.creer(t, 4)
+		_, g := b.entrerMembre(t, c, true)
+		for i := range 20 {
+			b.essai(t, g, trameD(0, i))
+		}
+		if b.essai(t, g, trameD(0, 20)) == 0 {
+			t.Fatal("seau non vidé")
+		}
+		if err := b.m.Quitter(g); err != nil {
+			t.Fatal(err)
+		}
+		_, g2 := b.entrerMembre(t, c, true)
+		if g2.siege != 0 {
+			t.Fatal("siège du créateur :", g2.siege)
+		}
+		if b.essai(t, g2, trameD(0, 21)) == 0 {
+			t.Fatal("créateur revenu : rafale remise à neuf")
+		}
+		if h := limiteDe(g2).horaire.jetons; h > horaireMax-20 {
+			t.Fatal("créateur revenu : seau horaire remis à neuf :", h)
+		}
+	})
+}

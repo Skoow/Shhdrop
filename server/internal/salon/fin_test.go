@@ -571,3 +571,73 @@ func TestLigneEchueSansEtatEffacee(t *testing.T) {
 		t.Fatal("ligne d'un salon vivant effacée")
 	}
 }
+
+// Revue finale C-2, mineur (d) : DetruireSignaler ne rend premier que pour le premier
+// signalement du salon (salon.signale, partagé avec QuitterSignaler), et jamais pour un appel
+// qui arrive sur un salon déjà détruit (deux « détruire » simultanés : le second, qui a lu la
+// ligne avant qu'elle soit rendue morte, ne compte pas).
+func TestDetruireSignalerUneFois(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	b.entrer(t, c, true)
+	_, a := b.entrerMembre(t, c, false)
+	if premier, err := b.m.QuitterSignaler(a); err != nil || !premier {
+		t.Fatal("quitter et signaler :", premier, err)
+	}
+	if premier, err := b.m.DetruireSignaler(c.gestion, nil); err != nil || premier {
+		t.Fatal("détruire et signaler après un signalement :", premier, err)
+	}
+
+	c2 := b.creer(t, 4)
+	b.entrer(t, c2, true)
+	var second bool
+	var errSecond error
+	crochetAchever = func(*salon) {
+		crochetAchever = nil
+		second, errSecond = b.m.DetruireSignaler(c2.gestion, nil) // ligne encore vivante
+	}
+	defer func() { crochetAchever = nil }()
+	if premier, err := b.m.DetruireSignaler(c2.gestion, nil); err != nil || !premier {
+		t.Fatal("premier signalement :", premier, err)
+	}
+	if errSecond != nil || second {
+		t.Fatal("détruire simultané compté :", second, errSecond)
+	}
+}
+
+// Revue finale C-2, mineur (f) : une panique pendant un Tick (ici au début de la partie
+// disque d'une fin) est récupérée par Run, sans sortie ; le tick suivant repart et reprend
+// la fin restée à faire (ligne effacée), et Run s'arrête toujours à l'annulation.
+func TestRunRecupereUnePanique(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		e0, g := b.entrerMembre(t, c, true)
+		id := g.salon.id
+		l0 := b.connecter(e0.Jeton, e0.Seq)
+		synctest.Wait()
+		paniques := 0
+		crochetAchever = func(*salon) {
+			if paniques == 0 {
+				paniques++
+				panic("salon: panique injectée (achever)")
+			}
+		}
+		defer func() { crochetAchever = nil }()
+		ctx, cancel := context.WithCancel(context.Background())
+		fini := make(chan struct{})
+		go func() { b.m.Run(ctx); close(fini) }()
+		b.h.avancer(25 * time.Hour)
+		time.Sleep(3500 * time.Millisecond)
+		synctest.Wait()
+		if paniques != 1 {
+			t.Fatal("panique non injectée")
+		}
+		finRecue(t, "créateur", l0, RaisonExpire)
+		if b.lignes(t, "salons", id) != 0 {
+			t.Fatal("fin non reprise après la panique")
+		}
+		cancel()
+		<-fini
+	})
+}

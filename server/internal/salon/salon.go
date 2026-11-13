@@ -159,8 +159,11 @@ func (s *salon) installerLocked(n uint8, reprise bool, now time.Time) (jeton [32
 	if err != nil {
 		return [32]byte{}, nil, err
 	}
-	if !reprise {
-		s.limites[n] = nouvelleLimite() // nouvel occupant (0x02) : seaux neufs (limites.go)
+	if !reprise && n != 0 {
+		// Nouvel occupant (0x02) d'un siège invité : seaux neufs (limites.go). Le siège 0 est
+		// toujours le créateur : son retour après « Quitter » n'est qu'une reprise, il garde ses
+		// seaux (revue finale C-2, mineur c).
+		s.limites[n] = nouvelleLimite()
 	}
 	x.emis, x.plancher, x.arrivee = seq, seq, seq
 	if reprise && s.sieges[n] != nil {

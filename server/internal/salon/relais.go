@@ -232,14 +232,9 @@ func (m *Manager) quitter(mb Membre, signaler bool) (premier bool, err error) {
 	return premier, nil
 }
 
-// etatAu : sièges occupés et leurs nonces au rang seq (enregistrement 0x0D), refaits depuis
-// le journal (complet depuis le rang 1), par siège croissant ; nil si aucun.
-func (s *salon) etatAu(seq uint64) []Annonce {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.etatAuLocked(seq)
-}
-
+// etatAuLocked : sièges occupés et leurs nonces au rang seq (enregistrement 0x0D), refaits
+// depuis le journal (complet depuis le rang 1), par siège croissant ; nil si aucun. Appelé
+// sous s.mu.
 func (s *salon) etatAuLocked(seq uint64) []Annonce {
 	var occupe [nbSieges]bool
 	var nonces [nbSieges][16]byte
@@ -342,14 +337,4 @@ func (s *salon) effaceeDepuis(seq uint64) bool {
 	defer s.mu.Unlock()
 	i := sort.Search(len(s.index), func(k int) bool { return s.index[k].seq >= seq })
 	return i == len(s.index) || s.index[i].seq != seq || s.index[i].efface()
-}
-
-// suite : au plus max enregistrements de rang > apres (refsLocked), lus sous le verrou du
-// salon, comme le dernier lot du rattrapage (connexion.prochainLot), trames échues effacées
-// d'abord ; une trame illisible arrête la suite avec une erreur (lireRefs).
-func (s *salon) suite(apres uint64, max int) ([][]byte, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.effacerEchuesLocked(s.now().UnixMilli())
-	return s.lireRefs(s.refsLocked(apres, max), nil)
 }

@@ -540,6 +540,10 @@ func fail(w http.ResponseWriter, err error) {
 
 var errBadRequest = errors.New("format invalide")
 
+// errInterne : erreur de programmation (readJSONMax sans pointeur) ; fail et failSalon la
+// traduisent en 500 internal, sans détail.
+var errInterne = errors.New("erreur interne")
+
 // secret décode strictement une valeur base64url sans bourrage de n octets
 // (longueur exacte en caractères, ni \r ni \n : share.DecodeB64).
 func secret(s string, n int) ([]byte, error) {
@@ -582,12 +586,17 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) error {
 // readJSONMax : readJSON avec un plafond de corps choisi (finalize d'un brouillon porte le
 // morceau chiffré du manifeste, spec §41.14).
 func readJSONMax(w http.ResponseWriter, r *http.Request, v any, max int64) error {
+	// v : pointeur non nul exigé par Decode ; autre chose est une erreur de programmation :
+	// erreur interne (500 sans détail), jamais une panique (revue finale C-2, mineur h).
+	if t := reflect.TypeOf(v); t == nil || t.Kind() != reflect.Pointer || reflect.ValueOf(v).IsNil() {
+		return errInterne
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, max))
 	if err != nil {
 		return errBadRequest
 	}
 	scan := json.NewDecoder(bytes.NewReader(body))
-	if err := strictKeys(scan, reflect.TypeOf(v).Elem()); err != nil { // v : pointeur exigé par Decode
+	if err := strictKeys(scan, reflect.TypeOf(v).Elem()); err != nil {
 		return errBadRequest
 	}
 	if _, err := scan.Token(); err != io.EOF {

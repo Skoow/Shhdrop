@@ -118,7 +118,9 @@ func cleFluxMembre(jetonV [32]byte) string { return "m:" + hex.EncodeToString(je
 func cleFluxPiece(id string) string        { return "p:" + id }
 
 // Flux : lectures de segments en cours, par clé de révocation ("m:" + hex(SHA-256(jeton)),
-// "p:" + id de pièce).
+// "p:" + id de pièce). Ne sert qu'aux tests du paquet api (coupure des lectures en cours à
+// une exclusion, désinscription des flux) : un fichier _test.go de salon ne leur serait pas
+// visible ; gardé, une ligne en lecture seule sans effet (revue finale C-2, mineur g).
 func (m *Manager) Flux() *share.Streams { return &m.flux }
 
 // Echeance : fin du salon de mb (jeton d'envoi d'une pièce valable au plus jusque-là).
@@ -174,12 +176,6 @@ func (s *salon) envoiLocked(id string, now time.Time) (*piece, error) {
 	return p, nil
 }
 
-// CreerPiece : CreerPieceID avec un identifiant tiré ici.
-func (m *Manager) CreerPiece(mb Membre, bucket int, vocal bool) (string, error) {
-	id := share.NewID()
-	return id, m.CreerPieceID(mb, id, bucket, vocal)
-}
-
 // CreerPieceID crée la pièce id (share.NewID, tiré par l'appelant pour ses quotas) : palier
 // invalide → ErrBadRequest ; fichier : PiecesParHeure par siège, sinon *Attente ; pieces_bytes + taille ≤ Budget (SQL conditionnel,
 // atomique), sinon ErrBudget ; vocal : taille débitée de la réserve du siège, sinon *Attente
@@ -232,12 +228,21 @@ func (m *Manager) CreerPieceID(mb Membre, id string, bucket int, vocal bool) (er
 	case err != nil:
 		return es(err)
 	}
-	annuler = append(annuler, func() { m.cfg.Pieces.Delete(id) })
+	// Annulation : fichier d'abord, puis la ligne si elle a été insérée et seulement si le
+	// fichier est parti (même règle qu'effacerPiece) : jamais de fichier sans ligne, compté
+	// dans SHH_STORAGE_MAX jusqu'au redémarrage (revue finale C-2, mineur e). Une ligne
+	// gardée est reprise à la fin du salon (effacerPiecesEnBase) ou au démarrage.
+	ligne := false
+	annuler = append(annuler, func() {
+		if m.cfg.Pieces.Delete(id) == nil && ligne {
+			m.cfg.DB.Exec(`DELETE FROM salon_pieces WHERE id=?`, id)
+		}
+	})
 	if _, err := m.cfg.DB.Exec(`INSERT INTO salon_pieces(id,salon_id,bucket,state,segments_mask) VALUES(?,?,?,'uploading',?)`,
 		id, s.id, bucket, make([]byte, (len(p.recus)+7)/8)); err != nil {
 		return base(err)
 	}
-	annuler = append(annuler, func() { m.cfg.DB.Exec(`DELETE FROM salon_pieces WHERE id=?`, id) })
+	ligne = true
 	return m.inscrirePiece(s, mb, p)
 }
 

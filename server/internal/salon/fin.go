@@ -47,43 +47,63 @@ var crochetAchever func(*salon)
 // jeton : ErrForbidden. Le salon est fini en raison 2 ; une erreur de la partie disque est
 // reprise par Tick (pas rendue : le salon est déjà détruit pour tous).
 func (m *Manager) Detruire(sGestion, jeton []byte) error {
+	_, err := m.detruireDemande(sGestion, jeton, false)
+	return err
+}
+
+// DetruireSignaler : « Détruire et signaler » ({reason: "report"}) : destruction comme
+// Detruire ; premier vaut vrai seulement si cet appel a détruit le salon et que c'est le
+// premier signalement du salon (salon.signale, partagé avec QuitterSignaler, posé sous le
+// verrou du salon) : un salon ne compte qu'un signalement, et un second « détruire »
+// simultané, qui trouve une tombe, ne compte pas (revue finale C-2, mineur d).
+func (m *Manager) DetruireSignaler(sGestion, jeton []byte) (premier bool, err error) {
+	return m.detruireDemande(sGestion, jeton, true)
+}
+
+func (m *Manager) detruireDemande(sGestion, jeton []byte, signaler bool) (bool, error) {
 	now := m.cfg.Now().Unix()
 	switch {
 	case sGestion != nil:
 		v := share.Verifier(sGestion)
 		if v == nil {
-			return ErrNotFound
+			return false, ErrNotFound
 		}
 		var id string
 		if err := m.cfg.DB.QueryRow(`SELECT id FROM salons WHERE manage_v=? AND expires_at>? AND failed_attempts<?`,
 			v, now, maxEssais).Scan(&id); err != nil {
-			return notFound(err)
+			return false, notFound(err)
 		}
-		_ = m.detruire(id) // partie disque ratée : reprise par Tick
-		return nil
+		premier, _ := m.detruireAvec(id, signaler) // partie disque ratée : reprise par Tick
+		return premier, nil
 	case jeton != nil:
 		mb, err := m.Membre(jeton)
 		if err != nil {
-			return err
+			return false, err
 		}
 		var mcd int
 		if err := m.cfg.DB.QueryRow(`SELECT members_can_destroy FROM salons WHERE id=? AND expires_at>? AND failed_attempts<?`,
 			mb.salon.id, now, maxEssais).Scan(&mcd); err != nil {
-			return notFound(err)
+			return false, notFound(err)
 		}
 		if mcd != 1 {
-			return ErrForbidden
+			return false, ErrForbidden
 		}
-		_ = m.finir(mb.salon, RaisonDetruit) // partie disque ratée : reprise par Tick
-		return nil
+		premier, _ := m.finirAvec(mb.salon, RaisonDetruit, signaler) // partie disque ratée : reprise par Tick
+		return premier, nil
 	}
-	return ErrForbidden
+	return false, ErrForbidden
 }
 
 // detruire : fin en raison 2 du salon id, avec ou sans état en mémoire (10ᵉ mot de passe faux,
 // Detruire). Sans état, une tombe est créée d'abord : etat ne recrée ensuite ni état ni
 // fichier. Sûre sans essaiLock. Rend l'erreur de la partie disque (reprise par Tick).
 func (m *Manager) detruire(id string) error {
+	_, err := m.detruireAvec(id, false)
+	return err
+}
+
+// detruireAvec : detruire, avec le signalement de finirAvec.
+func (m *Manager) detruireAvec(id string, signaler bool) (premier bool, err error) {
 	m.mu.Lock()
 	s := m.salons[id]
 	if s == nil {
@@ -92,28 +112,40 @@ func (m *Manager) detruire(id string) error {
 		m.salons[id] = s
 	}
 	m.mu.Unlock()
-	return m.finir(s, RaisonDetruit)
+	return m.finirAvec(s, RaisonDetruit, signaler)
 }
 
 // finir : fin commune (raison 1 expiration, 2 destruction) : place du bloc rendue, état
 // mémoire oublié (oublier), puis partie disque (achever). Sans effet sur une tombe (salon
 // déjà fini) : sa partie disque éventuellement restante est reprise par Tick.
 func (m *Manager) finir(s *salon, raison uint8) error {
+	_, err := m.finirAvec(s, raison, false)
+	return err
+}
+
+// finirAvec : finir ; signaler (« Détruire et signaler ») : premier vaut vrai si cet appel a
+// fini le salon et que personne ne l'avait encore signalé (salon.signale, sous son verrou).
+func (m *Manager) finirAvec(s *salon, raison uint8, signaler bool) (premier bool, err error) {
 	m.mu.Lock()
 	m.finirLocked(s.id)
 	m.mu.Unlock()
-	if !m.oublier(s, raison) {
-		return nil
+	fait, premier := m.oublier(s, raison, signaler)
+	if !fait {
+		return false, nil
 	}
-	return m.achever(s)
+	return premier, m.achever(s)
 }
 
-// oublier : partie mémoire d'une fin, sous le verrou du salon ; faux pour une tombe.
-func (m *Manager) oublier(s *salon, raison uint8) bool {
+// oublier : partie mémoire d'une fin, sous le verrou du salon ; fait faux pour une tombe.
+// premier : signaler et salon pas encore signalé (salon.signale posé).
+func (m *Manager) oublier(s *salon, raison uint8, signaler bool) (fait, premier bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fini {
-		return false
+		return false, false
+	}
+	if signaler && !s.signale {
+		s.signale, premier = true, true
 	}
 	// Connexions d'abord : 0x05 au rang courant, en direct comme en rattrapage (l'écrivain
 	// l'écrit après son lot en cours), puis 1000 ; plus rien d'autre ne leur est remis.
@@ -146,19 +178,20 @@ func (m *Manager) oublier(s *salon, raison uint8) bool {
 	s.index = nil
 	s.pieces = nil
 	s.echeances = nil
-	return true
+	return true, premier
 }
 
 // achever : partie disque d'une fin (voir l'en-tête), hors de tout verrou ; appelée par finir
 // (etatFin = finEnCours) ou par Tick (reprendreFin). Rend la première erreur ; la fin reste
 // alors à faire.
 func (m *Manager) achever(s *salon) (err error) {
+	complete := false // posé à la fin seulement : une panique laisse la fin « à faire »
 	defer func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		s.etatFin = finRien
-		if err != nil {
-			s.etatFin = finAFaire
+		s.etatFin = finAFaire
+		if complete {
+			s.etatFin = finRien
 		}
 	}()
 	if crochetAchever != nil {
@@ -187,7 +220,9 @@ func (m *Manager) achever(s *salon) (err error) {
 	case !errors.Is(e, sql.ErrNoRows):
 		errs = append(errs, base(e))
 	}
-	return errors.Join(errs...)
+	err = errors.Join(errs...)
+	complete = err == nil
+	return err
 }
 
 // effacerPiecesEnBase : pièces du salon id encore en base (inconnues en mémoire : création
@@ -257,24 +292,41 @@ func (m *Manager) lignes(now time.Time) {
 			(SELECT 1 FROM salon_pieces WHERE salon_pieces.salon_id=salons.id)`, maxEssais)
 	}
 	m.echuesSansEtat(now.Unix())
+	partis := m.disparus()
+	for _, s := range partis {
+		_ = m.finir(s, RaisonDetruit)
+	}
+	if len(partis) > 0 {
+		// Fichiers de pièces supprimés par un autre processus : usage relu (blob.Store).
+		_ = m.cfg.Pieces.Resync()
+	}
+}
+
+// disparus : salons vivants de ce processus dont la ligne vivante a disparu (lignes), place
+// du bloc rendue ; rend ceux qui ont un état, à finir hors des verrous. Chaque verrou est
+// rendu par defer : une panique récupérée par Run ne laisse ni createMu ni Manager.mu pris.
+func (m *Manager) disparus() []*salon {
 	m.createMu.Lock()
-	m.mu.Lock()
-	ids := make([]string, 0, len(m.salons)+len(m.vivants))
+	defer m.createMu.Unlock()
+	var ids []string
 	etats := map[string]*salon{}
-	for id, s := range m.salons {
-		if !s.estFini() {
-			ids = append(ids, id)
-			etats[id] = s
+	func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		ids = make([]string, 0, len(m.salons)+len(m.vivants))
+		for id, s := range m.salons {
+			if !s.estFini() {
+				ids = append(ids, id)
+				etats[id] = s
+			}
 		}
-	}
-	for id := range m.vivants {
-		if etats[id] == nil {
-			ids = append(ids, id)
+		for id := range m.vivants {
+			if etats[id] == nil {
+				ids = append(ids, id)
+			}
 		}
-	}
-	m.mu.Unlock()
+	}()
 	presents := map[string]bool{}
-	ok := true
 	for i := 0; i < len(ids); i += lotLignes {
 		lot := ids[i:min(i+lotLignes, len(ids))]
 		args := make([]any, 0, len(lot)+1)
@@ -285,8 +337,7 @@ func (m *Manager) lignes(now time.Time) {
 		rows, err := m.cfg.DB.Query(`SELECT id FROM salons WHERE id IN (?`+strings.Repeat(",?", len(lot)-1)+
 			`) AND failed_attempts<?`, args...)
 		if err != nil {
-			ok = false
-			break
+			return nil
 		}
 		for rows.Next() {
 			var id string
@@ -295,32 +346,22 @@ func (m *Manager) lignes(now time.Time) {
 			}
 		}
 		if errors.Join(rows.Err(), rows.Close()) != nil {
-			ok = false
-			break
+			return nil
 		}
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var partis []*salon
-	if ok {
-		m.mu.Lock()
-		for _, id := range ids {
-			if presents[id] {
-				continue
-			}
-			m.finirLocked(id)
-			if s := etats[id]; s != nil {
-				partis = append(partis, s)
-			}
+	for _, id := range ids {
+		if presents[id] {
+			continue
 		}
-		m.mu.Unlock()
+		m.finirLocked(id)
+		if s := etats[id]; s != nil {
+			partis = append(partis, s)
+		}
 	}
-	m.createMu.Unlock()
-	for _, s := range partis {
-		_ = m.finir(s, RaisonDetruit)
-	}
-	if len(partis) > 0 {
-		// Fichiers de pièces supprimés par un autre processus : usage relu (blob.Store).
-		_ = m.cfg.Pieces.Resync()
-	}
+	return partis
 }
 
 // echuesSansEtat (revue finale C-2, I2) : lignes échues à now (expires_at<=now) d'un salon
@@ -357,7 +398,11 @@ func (m *Manager) echuesSansEtat(now int64) {
 	}
 }
 
-// Run : Tick chaque seconde jusqu'à l'annulation de ctx.
+// Run : Tick chaque seconde jusqu'à l'annulation de ctx. Une panique dans un Tick est
+// récupérée sans aucune sortie (ni journal ni stderr : le message pourrait citer un
+// identifiant) et le tick suivant repart (revue finale C-2, mineur f) : une panique de
+// l'entretien n'arrête pas tout le serveur, partages compris. Tous les verrous pris par Tick
+// sont rendus par defer ; une fin interrompue reste « à faire » (achever) et est reprise.
 func (m *Manager) Run(ctx context.Context) {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
@@ -367,8 +412,14 @@ func (m *Manager) Run(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		m.Tick()
+		m.tickSur()
 	}
+}
+
+// tickSur : Tick, panique récupérée et oubliée.
+func (m *Manager) tickSur() {
+	defer func() { _ = recover() }()
+	m.Tick()
 }
 
 // PurgerAuDemarrage (plan, point 11) : à appeler une fois, avant toute autre méthode et avant

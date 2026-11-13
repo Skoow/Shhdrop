@@ -4,7 +4,7 @@
 # par deploy/test-proxy.sh. Aucun module ajouté : binaire officiel.
 #
 # Variables (lues dans l'environnement de Caddy) :
-#   SHH_DOMAIN    nom du site, obligatoire (exemple : shhdrop.app). Vide : Caddy refuse de démarrer.
+#   SHH_DOMAIN    nom du site, obligatoire (exemple : shhgone.com). Vide : Caddy refuse de démarrer.
 #   SHH_UPSTREAM  adresse du serveur Go, par défaut 127.0.0.1:8080
 #   SHH_HTTP_PORT, SHH_HTTPS_PORT  ports d'écoute (80 et 443 ; changés seulement par les tests)
 #

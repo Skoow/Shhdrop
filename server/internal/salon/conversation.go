@@ -293,10 +293,6 @@ func (c *Conversation) Effacer(e uint32) error {
 	return c.ecrire(make([]byte, TailleEmplacement), decalage(e))
 }
 
-// Taille : octets du fichier (emplacements effacés compris) ; 0 après Detruire. Une
-// conversation inutilisable compte la borne haute de son fichier. Sans verrou (atomique).
-func (c *Conversation) Taille() int64 { return c.taille.Load() }
-
 // Detruire oublie la clé (mise à zéro), ferme le fichier puis le supprime. Idempotent : un
 // nouvel appel ne refait que la suppression si elle avait échoué. La taille ne retombe à 0
 // qu'une fois le fichier supprimé : tant qu'il existe, sa place reste comptée (relecture

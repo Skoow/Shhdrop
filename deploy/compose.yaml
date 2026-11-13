@@ -3,7 +3,7 @@
 #
 # Variables obligatoires :
 #   SHH_IMAGE      image du serveur, épinglée par empreinte : dépôt@sha256:…
-#   SHH_DOMAIN     nom du site (exemple : shhdrop.app)
+#   SHH_DOMAIN     nom du site (exemple : shhgone.com)
 #   SHH_DATA_ROOT  point de montage du volume chiffré (LUKS2, noatime), par exemple /srv/shhdrop.
 #                  Doit contenir « data » (compte 65532, mode 0700) et « caddy » (root, 0700).
 # Variables facultatives :
