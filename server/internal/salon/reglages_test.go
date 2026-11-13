@@ -523,3 +523,29 @@ func TestRenouvelerPlaceDuBloc(t *testing.T) {
 		t.Fatal("place du bloc rendue à l'ancienne échéance", n)
 	}
 }
+
+// Le siège 0 du créateur, même vide, compte dans le besoin minimal : choisirLocked le lui rend
+// toujours. Créateur parti, 3 invités : 3 places refusées (4 personnes possibles), 4 permises.
+func TestReglerPlacesCreateurParti(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 5)
+	e0 := b.entrer(t, c, true)
+	s := b.etat(t, c)
+	for range 3 {
+		b.entrer(t, c, false)
+	}
+	b.depart(s, e0.Siege)
+	if _, err := b.m.Regler(c.gestion, ReglagesReq{Places: 3}, nil); !errors.Is(err, ErrOccupied) {
+		t.Fatal("3 places pour 3 invités et le siège du créateur :", err)
+	}
+	if _, p := b.expiresAt(t, s.id); p != 5 {
+		t.Fatal("max_members changé :", p)
+	}
+	if res := b.regler(t, c, ReglagesReq{Places: 4}); res.MaxMembers != 4 {
+		t.Fatalf("4 places : %+v", res)
+	}
+	b.entrer(t, c, true) // le créateur revient : 4 personnes pour 4 places
+	if n := occupes(s); n != 4 {
+		t.Fatal("occupés", n)
+	}
+}

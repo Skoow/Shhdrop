@@ -13,8 +13,9 @@ import (
 // 13 novembre, qui fait foi) : nombre de places et renouvellement, par le créateur
 // (S_gestion), sans recréer de lien.
 //
-//   - Places : N entre les sièges occupés et SalonPlacesMax (et au moins 2, comme à la
-//     création) ; le plafond des arrivées suit (arriveesParMembre × N), les arrivées déjà
+//   - Places : N entre le besoin minimal (sièges occupés, plus le siège 0 du créateur s'il
+//     est vide, puisqu'il lui est toujours rendu) et SalonPlacesMax (et au moins 2, comme à
+//     la création) ; le plafond des arrivées suit (arriveesParMembre × N), les arrivées déjà
 //     comptées restent.
 //   - Renouvellement (« prolonger = renouveler ») : nouvelle durée de 1, 6, 12 ou 24 h comptée
 //     depuis maintenant (au quart d'heure supérieur), et toute la conversation effacée :
@@ -72,8 +73,8 @@ type Reglages struct {
 }
 
 // Regler applique r au salon de S_gestion. S_gestion absent, faux ou d'un salon qui n'est plus
-// vivant : ErrNotFound (comme Gestion) ; r invalide : ErrBadRequest ; places sous les sièges
-// occupés : ErrOccupied. avant (facultatif) est appelée sous essaiLock une fois S_gestion et
+// vivant : ErrNotFound (comme Gestion) ; r invalide : ErrBadRequest ; places sous le besoin
+// minimal (besoinPlaces) : ErrOccupied. avant (facultatif) est appelée sous essaiLock une fois S_gestion et
 // les places vérifiés, juste avant d'appliquer (couche HTTP : preuve anti-robot et quota d'un
 // renouvellement, qui ne sont donc jamais consommés pour une demande refusée ici) ; son erreur
 // est rendue telle quelle, rien n'est changé.
@@ -115,7 +116,7 @@ func (m *Manager) Regler(sGestion []byte, r ReglagesReq, avant func() error) (Re
 		return Reglages{}, err
 	}
 	if r.Places != 0 {
-		if r.Places < s.occupes() {
+		if r.Places < s.besoinPlaces() {
 			return Reglages{}, ErrOccupied
 		}
 		places = r.Places
@@ -205,6 +206,18 @@ func (m *Manager) renouvelerLocked(s *salon) error {
 	conv.compterDans(&m.octetsConv)
 	s.conv = conv
 	return nil
+}
+
+// besoinPlaces : places au moins nécessaires, sièges occupés plus le siège 0 s'il est libre
+// (choisirLocked le rend toujours au créateur, qui doit pouvoir revenir).
+func (s *salon) besoinPlaces() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := s.occupesLocked()
+	if s.sieges[0] == nil {
+		n++
+	}
+	return n
 }
 
 // enrReglagesLocked : 0x10 des réglages courants, au dernier rang attribué. Appelé sous s.mu.
