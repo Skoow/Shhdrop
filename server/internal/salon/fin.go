@@ -37,6 +37,10 @@ const (
 	finEnCours              // achever en cours (un seul à la fois)
 )
 
+// crochetOublier : tests seulement (appelé dans oublier, sous le verrou du salon, après le
+// passage à « fini ») ; nil en production.
+var crochetOublier func()
+
 // crochetAchever : tests seulement (appelé au début d'achever, hors de tout verrou) ; nil en
 // production.
 var crochetAchever func(*salon)
@@ -133,6 +137,9 @@ func (m *Manager) finirAvec(s *salon, raison uint8, signaler bool) (premier bool
 	if !fait {
 		return false, nil
 	}
+	if !s.prendreFin() {
+		return premier, nil // déjà prise par une reprise de Tick
+	}
 	return premier, m.achever(s)
 }
 
@@ -144,6 +151,14 @@ func (m *Manager) oublier(s *salon, raison uint8, signaler bool) (fait, premier 
 	if s.fini {
 		return false, false
 	}
+	// « fini » et fin « à faire » posés avant toute étape qui pourrait paniquer : une panique
+	// (récupérée par Run) laisse une tombe dont Tick reprend la partie disque (reprendreFin) ;
+	// finirAvec prend la fin (finEnCours) par le même test (relecture C-2, N2).
+	s.fini = true
+	s.etatFin = finAFaire
+	if crochetOublier != nil {
+		crochetOublier()
+	}
 	if signaler && !s.signale {
 		s.signale, premier = true, true
 	}
@@ -154,8 +169,6 @@ func (m *Manager) oublier(s *salon, raison uint8, signaler bool) (fait, premier 
 			c.arreter(CodeFin, EnrFin(s.seq, raison))
 		}
 	}
-	s.fini = true
-	s.etatFin = finEnCours // achever suit, appelé par finir
 	m.indexer(func(index map[[32]byte]*salon) {
 		for h := range s.jetons {
 			delete(index, h)
@@ -182,7 +195,7 @@ func (m *Manager) oublier(s *salon, raison uint8, signaler bool) (fait, premier 
 }
 
 // achever : partie disque d'une fin (voir l'en-tête), hors de tout verrou ; appelée par finir
-// (etatFin = finEnCours) ou par Tick (reprendreFin). Rend la première erreur ; la fin reste
+// (etatFin = finEnCours, prendreFin) ou par Tick (reprendreFin). Rend la première erreur ; la fin reste
 // alors à faire.
 func (m *Manager) achever(s *salon) (err error) {
 	complete := false // posé à la fin seulement : une panique laisse la fin « à faire »
@@ -253,18 +266,21 @@ func (m *Manager) effacerPiecesEnBase(id string) error {
 
 // reprendreFin : Tick reprend une fin restée à faire ; une seule reprise à la fois.
 func (m *Manager) reprendreFin(s *salon) {
-	prise := func() bool {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if s.etatFin != finAFaire {
-			return false
-		}
-		s.etatFin = finEnCours
-		return true
-	}()
-	if prise {
+	if s.prendreFin() {
 		_ = m.achever(s)
 	}
+}
+
+// prendreFin : fin « à faire » prise (finEnCours) ; faux si aucune ou déjà prise. Un seul
+// achever à la fois (finirAvec, reprendreFin).
+func (s *salon) prendreFin() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.etatFin != finAFaire {
+		return false
+	}
+	s.etatFin = finEnCours
+	return true
 }
 
 // finIncomplete : la partie disque de la fin n'est pas complète (à faire ou en cours).

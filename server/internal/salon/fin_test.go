@@ -641,3 +641,36 @@ func TestRunRecupereUnePanique(t *testing.T) {
 		<-fini
 	})
 }
+
+// Relecture C-2, N2 : une panique dans oublier, après le passage à « fini », laisse la fin
+// « à faire » ; Run la récupère et le tick suivant reprend la partie disque (ligne effacée).
+func TestPaniqueDansOublierReprise(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := nouveauBanc(t, 200)
+		c := b.creer(t, 4)
+		_, g := b.entrerMembre(t, c, true)
+		id := g.salon.id
+		paniques := 0
+		crochetOublier = func() {
+			if paniques == 0 {
+				paniques++
+				panic("salon: panique injectée (oublier)")
+			}
+		}
+		defer func() { crochetOublier = nil }()
+		ctx, cancel := context.WithCancel(context.Background())
+		fini := make(chan struct{})
+		go func() { b.m.Run(ctx); close(fini) }()
+		b.h.avancer(25 * time.Hour)
+		time.Sleep(3500 * time.Millisecond)
+		synctest.Wait()
+		if paniques != 1 {
+			t.Fatal("panique non injectée")
+		}
+		if b.lignes(t, "salons", id) != 0 {
+			t.Fatal("fin non reprise après une panique dans oublier")
+		}
+		cancel()
+		<-fini
+	})
+}
