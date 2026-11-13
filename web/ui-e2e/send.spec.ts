@@ -178,10 +178,16 @@ test.describe("fr-FR", () => {
     test.setTimeout(180_000);
     await page.goto(shh.origin + "/");
     await addFile(page, "gros.bin", 20 * MIB);
+    // Coupure APRÈS le clic : l'envoi part dès l'ajout (§41.14) et, depuis les corps en Blob (A1),
+    // 20 Mio partent en quelques centaines de millisecondes ; sans cette barrière, la coupure
+    // tombait avant le clic et le bouton restait désactivé (hors ligne).
+    let clicked!: () => void;
+    const afterClick = new Promise<void>((r) => (clicked = r));
     let cut = false;
     await page.route(SEG, async (route) => {
       if (!cut && /\/segments\/[1-9]\d*$/.test(route.request().url())) {
         cut = true;
+        await afterClick;
         await context.setOffline(true);
         await route.abort("internetdisconnected");
         return;
@@ -189,6 +195,7 @@ test.describe("fr-FR", () => {
       await route.continue().catch(() => route.abort().catch(() => undefined));
     });
     await sendButton(page).click();
+    clicked();
     const banner = page.getByRole("status").filter({ hasText: /Connexion perdue|Hors ligne/ });
     await expect(banner).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/L'envoi est conservé encore \d+\smin sans connexion\./)).toBeVisible();
