@@ -591,6 +591,14 @@ func readJSONMax(w http.ResponseWriter, r *http.Request, v any, max int64) error
 	if t := reflect.TypeOf(v); t == nil || t.Kind() != reflect.Pointer || reflect.ValueOf(v).IsNil() {
 		return errInterne
 	}
+	// Échéance de lecture du corps (audit du 13 novembre, D5) : un corps de quelques Kio
+	// envoyé au goutte-à-goutte tenait sinon sa connexion jusqu'à ReadTimeout (300 s). Sans
+	// connexion réelle (tests en mémoire) : sans effet. net/http repose ses délais à la
+	// requête suivante de la même connexion.
+	rc := http.NewResponseController(w)
+	if err := rc.SetReadDeadline(time.Now().Add(jsonReadTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return errBadRequest
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, max))
 	if err != nil {
 		return errBadRequest
@@ -609,6 +617,10 @@ func readJSONMax(w http.ResponseWriter, r *http.Request, v any, max int64) error
 	}
 	return nil
 }
+
+// jsonReadTimeout : temps laissé pour lire un corps JSON (4 Kio, 96 Kio pour finalize) ;
+// variable pour les tests. 10 s : 96 Kio passent encore à 10 Kio/s (lien très lent).
+var jsonReadTimeout = 10 * time.Second
 
 var errKeys = errors.New("clés JSON invalides")
 
