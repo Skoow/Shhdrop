@@ -8,7 +8,7 @@
 #                  Doit contenir « data » (compte 65532, mode 0700) et « caddy » (root, 0700).
 # Variables facultatives :
 #   SHH_STORAGE_MAX  plafond de stockage en octets (défaut : 200 Gio, spec §24)
-#   SHH_UPLOADS_MAX, SHH_DOWNLOADS_MAX, SHH_WATCH_MAX, SHH_WS_MAX : capacité du serveur
+#   SHH_UPLOADS_MAX, SHH_DOWNLOADS_MAX, SHH_WATCH_MAX, SHH_WS_MAX, SHH_DISK_OPS_MAX : capacité
 #                    (défaut : calculée d'après GOMEMLIMIT et nofile, README §11)
 #   SHH_SALONS_MAX   salons vivants au plus (défaut : 200 ; 50 proposé pour un usage personnel),
 #                    sans effet tant que le salon est désactivé (SHH_SALONS, ci-dessous)
@@ -34,13 +34,17 @@ services:
       # Descripteurs : explicites, pour que les places calculées (au plus nofile / 8 par
       # catégorie, config/capacity.go) ne dépendent pas du réglage de Docker sur la machine.
       nofile: 65536
-    pids_limit: 256
+    # Fils du système (audit du 13 novembre, D4) : Go crée un fil par appel système bloquant
+    # (lecture, écriture, fsync, SQLite). 256 pouvait être atteint sous un disque lent, et le
+    # processus s'arrêtait net (« failed to create new OS thread »). 1 024, et les appels de
+    # fichiers sont bornés à SHH_DISK_OPS_MAX (64) par le serveur.
+    pids_limit: 1024
     # Plafonds (audit du 11 novembre) : un abus ou une fuite de mémoire ne fait pas tomber la
-    # machine (sshd, Caddy, déverrouillage du volume). Pire cas prévu par la spec (§4, §24) :
-    # 64 envois simultanés gardés en mémoire (≤ 4 Mio chacun, 4 195 376 octets) = 256 Mio, plus
-    # 256 téléchargements avec un tampon de 256 Kio chacun = 64 Mio, soit 320 Mio de données
-    # vivantes ; le ramasse-miettes de Go peut doubler le tas (GOGC=100) : ≈ 640 Mio, plus SQLite
-    # et le reste du serveur. 1 Gio laisse de la marge ; GOMEMLIMIT (un peu en dessous) fait
+    # machine (sshd, Caddy, déverrouillage du volume). Pire cas avec les places calculées
+    # d'après GOMEMLIMIT (README §11) : 67 envois simultanés gardés en mémoire (≤ 4 Mio
+    # chacun) = 268 Mio, plus 360 téléchargements avec un tampon de 256 Kio chacun = 90 Mio,
+    # soit 358 Mio de données vivantes ; le ramasse-miettes de Go peut doubler le tas
+    # (GOGC=100) : ≈ 716 Mio, plus SQLite et le reste du serveur. 1 Gio laisse de la marge ; GOMEMLIMIT (un peu en dessous) fait
     # travailler le ramasse-miettes avant que le noyau ne tue le processus. Au-delà de 1 Gio :
     # arrêt brutal, puis redémarrage automatique (envois en cours perdus, comme tout redémarrage).
     # CPU : 1,5 processeur (Go règle GOMAXPROCS d'après cette limite) ; il faut donc au moins
@@ -75,6 +79,7 @@ services:
       SHH_DOWNLOADS_MAX: ${SHH_DOWNLOADS_MAX:-}
       SHH_WATCH_MAX: ${SHH_WATCH_MAX:-}
       SHH_WS_MAX: ${SHH_WS_MAX:-}
+      SHH_DISK_OPS_MAX: ${SHH_DISK_OPS_MAX:-}
     networks:
       interne:
         ipv4_address: 172.30.53.2

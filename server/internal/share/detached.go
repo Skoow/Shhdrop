@@ -279,7 +279,7 @@ func (s *Service) serveDetachedLocked(parent context.Context, id string, d *deta
 		return nil, ErrBudget
 	}
 	d.refs++
-	sec := io.NewSectionReader(d.f, segOffset(d.bucket, n), size)
+	sec := io.NewSectionReader(s.Blobs.ReaderAt(d.f), segOffset(d.bucket, n), size) // sous la borne des appels de fichiers
 	return s.startLocked(parent, k, sec, size, nil, func() { d.refs-- }), nil
 }
 

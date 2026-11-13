@@ -24,6 +24,9 @@ type Capacity struct {
 	Watches int
 	// WebSockets (SHH_WS_MAX) : WebSocket du salon ouverts.
 	WebSockets int
+	// DiskOps (SHH_DISK_OPS_MAX) : appels système de fichiers simultanés dans les dossiers des
+	// partages et des pièces (blob.Gate) : chacun tient un fil du système (audit D4).
+	DiskOps int
 }
 
 const (
@@ -35,6 +38,9 @@ const (
 	// Valeurs sans GOMEMLIMIT (aucune base de calcul : celles d'avant le 13 novembre).
 	defaultUploads, defaultDownloads = 64, 256
 	defaultWebSockets                = 2000
+	// defaultDiskOps : 64 fils au plus bloqués dans des appels de fichiers, quel que soit le
+	// disque : bien sous pids_limit (1 024, compose.yaml), qui compte aussi les fils de Go.
+	defaultDiskOps = 64
 	// capMax : plafond de toute valeur réglable (borne de bon sens, pas de capacité).
 	capMax = 1 << 20
 )
@@ -54,7 +60,7 @@ func memLimit() int64 { return debug.SetMemoryLimit(-1) }
 //     descripteurs chacun), soit 3/4 de la limite au total, le reste pour la base, les
 //     conversations et la marge.
 func computeCapacity(mem int64, nofile uint64) Capacity {
-	c := Capacity{Uploads: defaultUploads, Downloads: defaultDownloads, WebSockets: defaultWebSockets}
+	c := Capacity{Uploads: defaultUploads, Downloads: defaultDownloads, WebSockets: defaultWebSockets, DiskOps: defaultDiskOps}
 	if mem > 0 && mem < math.MaxInt64 {
 		c.Uploads = clamp(mem*3/10/uploadCost, 8, capMax)
 		c.Downloads = clamp(mem/10/downloadCost, 16, capMax)
@@ -94,6 +100,7 @@ func capacityFromEnv(mem int64, nofile uint64) (Capacity, error) {
 		{"SHH_DOWNLOADS_MAX", &c.Downloads, true},
 		{"SHH_WATCH_MAX", &c.Watches, true},
 		{"SHH_WS_MAX", &c.WebSockets, true},
+		{"SHH_DISK_OPS_MAX", &c.DiskOps, false},
 	} {
 		s := os.Getenv(v.name)
 		if s == "" {

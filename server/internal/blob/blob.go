@@ -18,6 +18,9 @@ import (
 type Store struct {
 	Dir      string
 	NoSparse bool
+	// Gate (facultatif) : borne des appels système de fichiers simultanés (gate.go), partagée
+	// par tous les Store du processus.
+	Gate *Gate
 
 	// idMu : Reserve, Resize et Delete d'un même fichier ne se croisent pas (verrous rayés
 	// par identifiant) : chacun connaît la taille avant et après, le compteur reste exact.
@@ -92,7 +95,8 @@ func (s *Store) Resync() error {
 	u.scans++
 	u.grown = u.inflight
 	u.mu.Unlock()
-	total, err := s.scan()
+	var total int64
+	err := s.Gate.do(func() (err error) { total, err = s.scan(); return err })
 	if s.afterScan != nil {
 		s.afterScan()
 	}
@@ -158,13 +162,15 @@ func (s *Store) Reserve(id string, size int64) error {
 	mu.Lock()
 	defer mu.Unlock()
 	scans := s.begin(size)
-	defer s.wipeDirTimes() // fichier créé, ou créé puis retiré
-	if err := s.reserve(p, size); err != nil {
-		s.end(scans, size, 0) // rien de créé, ou fichier retiré
-		return err
-	}
-	s.end(scans, size, size)
-	return wipeTimes(p)
+	return s.Gate.do(func() error {
+		defer s.wipeDirTimes() // fichier créé, ou créé puis retiré
+		if err := s.reserve(p, size); err != nil {
+			s.end(scans, size, 0) // rien de créé, ou fichier retiré
+			return err
+		}
+		s.end(scans, size, size)
+		return wipeTimes(p)
+	})
 }
 
 // reserve crée et alloue le fichier ; en cas d'échec, il ne reste rien.
@@ -232,11 +238,15 @@ func (s *Store) RemoveProbes() error {
 }
 
 // WriteAt écrit dans la zone réservée ; refuse tout dépassement.
-func (s *Store) WriteAt(id string, off int64, p []byte) (err error) {
+func (s *Store) WriteAt(id string, off int64, p []byte) error {
 	path, err := s.path(id)
 	if err != nil {
 		return err
 	}
+	return s.Gate.do(func() error { return writeAt(path, off, p) })
+}
+
+func writeAt(path string, off int64, p []byte) (err error) {
 	f, err := os.OpenFile(path, os.O_WRONLY, 0)
 	if err != nil {
 		return err
@@ -284,20 +294,26 @@ func (s *Store) Open(id string, off int64, n int64) (*Section, error) {
 	if err != nil {
 		return nil, err
 	}
-	f, err := OpenRead(path)
+	var f *os.File
+	var fi os.FileInfo
+	err = s.Gate.do(func() error {
+		if f, err = OpenRead(path); err != nil {
+			return err
+		}
+		if fi, err = f.Stat(); err != nil {
+			f.Close()
+		}
+		return err
+	})
 	if err != nil {
-		return nil, err
-	}
-	fi, err := f.Stat()
-	if err != nil {
-		f.Close()
 		return nil, err
 	}
 	if off < 0 || n < 0 || off > fi.Size() || n > fi.Size()-off {
 		f.Close()
 		return nil, errors.New("blob : lecture hors du fichier")
 	}
-	return &Section{SectionReader: io.NewSectionReader(f, off, n), f: f}, nil
+	// Chaque lecture de la section passe sous la borne (Gate).
+	return &Section{SectionReader: io.NewSectionReader(s.ReaderAt(f), off, n), f: f}, nil
 }
 
 // OpenFile ouvre le fichier entier en lecture (sans mise à jour de la date d'accès), pour
@@ -307,7 +323,9 @@ func (s *Store) OpenFile(id string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return OpenRead(path)
+	var f *os.File
+	err = s.Gate.do(func() (err error) { f, err = OpenRead(path); return err })
+	return f, err
 }
 
 // Delete supprime le fichier ; sans erreur s'il est déjà absent.
@@ -322,16 +340,18 @@ func (s *Store) Delete(id string) error {
 	scans := s.begin(0)
 	var freed int64
 	defer func() { s.end(scans, 0, -freed) }()
-	fi, serr := os.Stat(p)
-	if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	} else if err == nil {
-		s.wipeDirTimes()
-		if serr == nil && !fi.IsDir() {
-			freed = fi.Size()
+	return s.Gate.do(func() error {
+		fi, serr := os.Stat(p)
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		} else if err == nil {
+			s.wipeDirTimes()
+			if serr == nil && !fi.IsDir() {
+				freed = fi.Size()
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // List renvoie les identifiants présents sur disque.
@@ -391,11 +411,15 @@ func (s *Store) scan() (int64, error) {
 }
 
 // withFile ouvre le fichier id en écriture ; les dates sont remises à l'epoch à la fermeture.
-func (s *Store) withFile(id string, f func(*os.File) error) (err error) {
+func (s *Store) withFile(id string, f func(*os.File) error) error {
 	path, err := s.path(id)
 	if err != nil {
 		return err
 	}
+	return s.Gate.do(func() error { return openWith(path, f) })
+}
+
+func openWith(path string, f func(*os.File) error) (err error) {
 	fh, err := os.OpenFile(path, os.O_WRONLY, 0)
 	if err != nil {
 		return err
