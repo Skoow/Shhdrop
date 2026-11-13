@@ -138,7 +138,7 @@ fn croise_natif() {
     let env1 = Enveloppe {
         id: [1; 16],
         heure_ms: 1_700_000_000_001,
-        regle: Regle::DixMinutes,
+        regle: Regle::CinqMinutes,
         message: Message::Texte {
             x: "Bonjour du natif, é 😀\nligne 2".into(),
         },

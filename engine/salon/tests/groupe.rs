@@ -1259,8 +1259,8 @@ fn huit_en_tetes() -> Vec<EnTete> {
     for volatile in [false, true] {
         for regle in [
             Regle::Desactive,
-            Regle::Instantane,
-            Regle::DixMinutes,
+            Regle::UneMinute,
+            Regle::CinqMinutes,
             Regle::UneHeure,
         ] {
             v.push(EnTete { volatile, regle });

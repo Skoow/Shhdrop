@@ -566,8 +566,8 @@ fn liste_ids(o: &mut Map<String, Value>) -> Result<Vec<IdMessage>> {
 fn regle_depuis(n: u64) -> Result<Regle> {
     Ok(match n {
         0 => Regle::Desactive,
-        1 => Regle::Instantane,
-        2 => Regle::DixMinutes,
+        1 => Regle::UneMinute,
+        2 => Regle::CinqMinutes,
         3 => Regle::UneHeure,
         _ => return invalide(),
     })
@@ -752,7 +752,7 @@ mod tests {
                 ids: (0..50u8).map(|i| [i; 16]).collect(),
             },
             Message::Regle {
-                regle: Regle::DixMinutes,
+                regle: Regle::CinqMinutes,
             },
             Message::Profil {
                 pseudo: "Léa".into(),
@@ -781,8 +781,8 @@ mod tests {
         for (i, m) in tous().into_iter().enumerate() {
             for regle in [
                 Regle::Desactive,
-                Regle::Instantane,
-                Regle::DixMinutes,
+                Regle::UneMinute,
+                Regle::CinqMinutes,
                 Regle::UneHeure,
             ] {
                 let e = Enveloppe {
@@ -834,7 +834,7 @@ mod tests {
                 sorte: "appel_invite".into()
             }
         );
-        assert_eq!(e.regle, Regle::Instantane);
+        assert_eq!(e.regle, Regle::UneMinute);
         // l'enveloppe reste vérifiée même pour une sorte inconnue
         for ko in [
             &br#"{"v":3,"id":"BwcHBwcHBwcHBwcHBwcHBw","t":5,"k":"appel_invite"}"#[..],

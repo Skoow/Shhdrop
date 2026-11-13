@@ -1,5 +1,17 @@
-//! Règles d'effacement côté appareil (spec v3 §5) : fonctions pures, sans horloge ni E/S.
-//! Le temps est passé en paramètre (millisecondes) ; l'arithmétique est saturante.
+//! Règles d'effacement côté appareil (spec v3 §5, décision du propriétaire du 13 novembre) :
+//! fonction pure, sans horloge ni E/S. Le temps est passé en paramètre (millisecondes) ;
+//! l'arithmétique est saturante.
+//!
+//! - Règle 0 (`Desactive`) : le message reste jusqu'à la fin du salon ou à son renouvellement
+//!   (`0x10`), que l'appareil applique à tout l'historique, hors de cette fonction.
+//! - Règles 1, 2, 3 (`UneMinute`, `CinqMinutes`, `UneHeure`) : le serveur efface la trame 1 min,
+//!   5 min ou 1 h après la **dernière** lecture par les lecteurs attendus (ou après le départ du
+//!   dernier attendu), et diffuse un `0x0E`. **Le `0x0E` fait foi** : le moteur ne déclare jamais
+//!   un tel message effacé avant lui. Il peut seulement afficher un compte à rebours local, depuis
+//!   l'instant où **cet** appareil l'a vu ; le serveur ne peut effacer qu'après (la dernière
+//!   lecture suit celle de cet appareil, ou l'envoi pour l'expéditeur), si bien que ce compte à
+//!   rebours ne promet jamais un effacement plus tard que le vrai. Une fois écoulé sans `0x0E`
+//!   (un autre lecteur attendu n'a pas encore lu), le message reste visible.
 
 use crate::trame::Regle;
 
@@ -7,52 +19,47 @@ use crate::trame::Regle;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Etat {
     Visible,
-    /// Compte à rebours : le message s'efface à `fin_ms` (inclus).
+    /// Compte à rebours local (au plus tôt) : effacement attendu vers `fin_ms`, jamais avant le
+    /// `0x0E` du serveur. Rendu seulement tant que `maintenant_ms < fin_ms`.
     Rebours {
         fin_ms: u64,
     },
     Efface,
 }
 
+/// Délai d'effacement après la dernière lecture (règles 1 à 3) ; `None` pour la règle 0.
+pub fn delai_ms(regle: Regle) -> Option<u64> {
+    match regle {
+        Regle::Desactive => None,
+        Regle::UneMinute => Some(60_000),
+        Regle::CinqMinutes => Some(300_000),
+        Regle::UneHeure => Some(3_600_000),
+    }
+}
+
 /// Calcule l'état d'un message pour cet appareil.
 ///
-/// `envoye_ms` : **heure de réception de la trame par le serveur**, remise avec elle (spec v3
-/// §3.6.1, exigence C-2 6), jamais `heure_ms` de l'enveloppe, que l'expéditeur choisit (il
-/// pourrait sinon allonger ou raccourcir 10 min et 1 h).
-/// `vu_par_moi_ms` : instant où ce lecteur l'a vu (affiché, page visible, 1 s).
-/// `encore_dans_conversation` : le lecteur n'a pas quitté la conversation depuis.
-/// `lu_par_tous` : tous les participants encore présents l'ont lu.
+/// `vu_par_moi_ms` : instant (horloge de cet appareil, comme `maintenant_ms`) où cet appareil l'a
+/// vu (affiché, page visible, 1 s ; pour l'expéditeur, l'envoi), ou `None`.
+/// `efface_par_serveur` : un `0x0E` a été reçu pour cette trame. Ignoré pour la règle 0 (le
+/// serveur n'en envoie jamais pour elle).
 pub fn etat(
     regle: Regle,
-    envoye_ms: u64,
     maintenant_ms: u64,
-    moi_expediteur: bool,
     vu_par_moi_ms: Option<u64>,
-    encore_dans_conversation: bool,
-    lu_par_tous: bool,
+    efface_par_serveur: bool,
 ) -> Etat {
-    let avec_echeance = |fin_ms: u64| {
-        if maintenant_ms >= fin_ms {
-            Etat::Efface
-        } else {
-            Etat::Rebours { fin_ms }
-        }
+    let Some(d) = delai_ms(regle) else {
+        return Etat::Visible;
     };
-    match regle {
-        Regle::Desactive => Etat::Visible,
-        Regle::DixMinutes => avec_echeance(envoye_ms.saturating_add(600_000)),
-        Regle::UneHeure => avec_echeance(envoye_ms.saturating_add(3_600_000)),
-        Regle::Instantane => {
-            if lu_par_tous {
-                return Etat::Efface;
-            }
-            match vu_par_moi_ms {
-                _ if moi_expediteur => Etat::Visible,
-                None => Etat::Visible,
-                Some(_) if !encore_dans_conversation => Etat::Efface,
-                Some(vu) => avec_echeance(vu.saturating_add(60_000)),
-            }
-        }
+    if efface_par_serveur {
+        return Etat::Efface;
+    }
+    match vu_par_moi_ms {
+        Some(vu) if maintenant_ms < vu.saturating_add(d) => Etat::Rebours {
+            fin_ms: vu.saturating_add(d),
+        },
+        _ => Etat::Visible,
     }
 }
 
@@ -60,143 +67,86 @@ pub fn etat(
 mod tests {
     use super::*;
 
-    const DIX: u64 = 600_000;
-    const HEURE: u64 = 3_600_000;
-
-    #[allow(clippy::too_many_arguments)]
-    fn e(
-        r: Regle,
-        env: u64,
-        now: u64,
-        exp: bool,
-        vu: Option<u64>,
-        reste: bool,
-        tous: bool,
-    ) -> Etat {
-        etat(r, env, now, exp, vu, reste, tous)
-    }
+    const MAX: u64 = u64::MAX;
+    const REGLES: [(Regle, u64); 3] = [
+        (Regle::UneMinute, 60_000),
+        (Regle::CinqMinutes, 300_000),
+        (Regle::UneHeure, 3_600_000),
+    ];
 
     #[test]
     fn desactive_toujours_visible() {
-        for exp in [false, true] {
-            assert_eq!(
-                e(Regle::Desactive, 0, u64::MAX, exp, Some(1), false, true),
-                Etat::Visible
-            );
+        for vu in [None, Some(0), Some(MAX)] {
+            for e in [false, true] {
+                assert_eq!(etat(Regle::Desactive, MAX, vu, e), Etat::Visible);
+            }
+        }
+        assert_eq!(delai_ms(Regle::Desactive), None);
+    }
+
+    #[test]
+    fn delais() {
+        for (r, d) in REGLES {
+            assert_eq!(delai_ms(r), Some(d));
         }
     }
 
     #[test]
-    fn dix_minutes_et_une_heure_rebours_puis_efface_pour_tous() {
-        for (r, d) in [(Regle::DixMinutes, DIX), (Regle::UneHeure, HEURE)] {
-            for exp in [false, true] {
-                for vu in [None, Some(1_500)] {
-                    assert_eq!(
-                        e(r, 1_000, 2_000, exp, vu, true, false),
-                        Etat::Rebours { fin_ms: 1_000 + d }
-                    );
-                    assert_eq!(e(r, 1_000, 1_000 + d, exp, vu, true, false), Etat::Efface);
+    fn jamais_efface_sans_0x0e() {
+        // Ni le temps écoulé ni la lecture locale n'effacent : seul le 0x0E du serveur.
+        for (r, _) in REGLES {
+            for vu in [None, Some(0), Some(1_000)] {
+                for now in [0, 86_400_000, MAX] {
+                    assert_ne!(etat(r, now, vu, false), Etat::Efface, "{r:?} {vu:?} {now}");
                 }
             }
         }
     }
 
     #[test]
-    fn instantane_expediteur_visible_tant_que_pas_lu_par_tous() {
-        let i = Regle::Instantane;
-        assert_eq!(e(i, 0, u64::MAX, true, None, true, false), Etat::Visible);
-        assert_eq!(e(i, 0, 5, true, None, false, false), Etat::Visible);
-        assert_eq!(e(i, 0, 5, true, None, true, true), Etat::Efface);
-    }
-
-    #[test]
-    fn instantane_lecteur_non_vu_visible() {
-        let i = Regle::Instantane;
-        assert_eq!(e(i, 0, 5, false, None, true, false), Etat::Visible);
-        assert_eq!(e(i, 0, 5, false, None, false, false), Etat::Visible);
-    }
-
-    #[test]
-    fn instantane_vu_et_reste_rebours_une_minute() {
-        let i = Regle::Instantane;
-        assert_eq!(
-            e(i, 0, 10_000, false, Some(5_000), true, false),
-            Etat::Rebours { fin_ms: 65_000 }
-        );
-        assert_eq!(
-            e(i, 0, 70_000, false, Some(5_000), true, false),
-            Etat::Efface
-        );
-    }
-
-    #[test]
-    fn instantane_vu_puis_sorti_efface() {
-        assert_eq!(
-            e(
-                Regle::Instantane,
-                0,
-                6_000,
-                false,
-                Some(5_000),
-                false,
-                false
-            ),
-            Etat::Efface
-        );
-    }
-
-    #[test]
-    fn instantane_lu_par_tous_efface_pour_tous() {
-        let i = Regle::Instantane;
-        assert_eq!(e(i, 0, 5, false, None, true, true), Etat::Efface);
-        assert_eq!(e(i, 0, 5, false, Some(1), true, true), Etat::Efface);
-        assert_eq!(e(i, 0, 5, true, None, true, true), Etat::Efface);
-    }
-
-    #[test]
-    fn instantane_absent_puis_revient() {
-        // Non vu : visible quel que soit le temps écoulé (même après des jours).
-        for now in [0, 86_400_000, u64::MAX] {
-            assert_eq!(
-                e(Regle::Instantane, 0, now, false, None, true, false),
-                Etat::Visible
-            );
+    fn efface_au_0x0e() {
+        for (r, _) in REGLES {
+            for vu in [None, Some(5), Some(MAX)] {
+                assert_eq!(etat(r, 0, vu, true), Etat::Efface);
+            }
         }
     }
 
     #[test]
-    fn bornes() {
-        let i = Regle::Instantane;
-        assert_eq!(
-            e(i, 0, 64_999, false, Some(5_000), true, false),
-            Etat::Rebours { fin_ms: 65_000 }
-        );
-        assert_eq!(
-            e(i, 0, 65_000, false, Some(5_000), true, false),
-            Etat::Efface
-        );
-        let r = Regle::DixMinutes;
-        assert_eq!(
-            e(r, 0, DIX - 1, false, None, true, false),
-            Etat::Rebours { fin_ms: DIX }
-        );
-        assert_eq!(e(r, 0, DIX, false, None, true, false), Etat::Efface);
+    fn non_vu_visible() {
+        for (r, _) in REGLES {
+            for now in [0, 86_400_000, MAX] {
+                assert_eq!(etat(r, now, None, false), Etat::Visible);
+            }
+        }
+    }
+
+    #[test]
+    fn rebours_local_depuis_le_vu_de_cet_appareil() {
+        for (r, d) in REGLES {
+            let fin = 5_000 + d;
+            assert_eq!(
+                etat(r, 5_000, Some(5_000), false),
+                Etat::Rebours { fin_ms: fin }
+            );
+            assert_eq!(
+                etat(r, fin - 1, Some(5_000), false),
+                Etat::Rebours { fin_ms: fin }
+            );
+            // Délai local écoulé sans 0x0E : un autre attendu n'a pas lu, le message reste.
+            assert_eq!(etat(r, fin, Some(5_000), false), Etat::Visible);
+            assert_eq!(etat(r, fin + 1, Some(5_000), false), Etat::Visible);
+        }
     }
 
     #[test]
     fn arithmetique_saturante() {
-        let max = u64::MAX;
-        assert_eq!(
-            e(Regle::UneHeure, max, max, false, None, true, false),
-            Etat::Efface
-        );
-        assert_eq!(
-            e(Regle::Instantane, 0, max - 1, false, Some(max), true, false),
-            Etat::Rebours { fin_ms: max }
-        );
-        assert_eq!(
-            e(Regle::Instantane, 0, max, false, Some(max), true, false),
-            Etat::Efface
-        );
+        for (r, _) in REGLES {
+            assert_eq!(
+                etat(r, MAX - 1, Some(MAX - 10), false),
+                Etat::Rebours { fin_ms: MAX }
+            );
+            assert_eq!(etat(r, MAX, Some(MAX - 10), false), Etat::Visible);
+        }
     }
 }

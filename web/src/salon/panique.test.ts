@@ -114,7 +114,7 @@ describe("mauvais usages : codes snake_case, arguments vérifiés avant le modul
       () => S.Salon.creer(1, new Uint8Array(16), cles, 1 as never),
       () => S.Salon.creer(1, new Uint8Array(16), {} as never, false),
       () => S.encoder(null as never),
-      () => S.etatEffacement({ regle: 0, envoyeMs: 1, maintenantMs: 1, moiExpediteur: "non" as never, vuParMoiMs: null, encoreDansConversation: true, luParTous: false }),
+      () => S.etatEffacement({ regle: 0, maintenantMs: 1, vuParMoiMs: null, effaceParServeur: "non" as never }),
     ])
       expect(errorOf(f)).toBe("argument_invalide");
     cles.free();

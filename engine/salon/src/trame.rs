@@ -20,12 +20,14 @@ const DEBUT_CHIFFRE: usize = DEBUT_NONCE + 24;
 const TAILLE_TAG_AEAD: usize = 16;
 const _: () = assert!(DEBUT_CHIFFRE + TAILLE_O + TAILLE_TAG_AEAD == TAILLE_TRAME);
 
-/// Règle d'effacement du message (2 bits des drapeaux).
+/// Règle d'effacement du message (2 bits des drapeaux ; spec v3 §5, 13 novembre) : 0 jusqu'à la
+/// fin du salon ou à son renouvellement ; 1, 2, 3 : effacé par le serveur 1 min, 5 min ou 1 h
+/// après la dernière lecture des lecteurs attendus (`0x0E`, qui fait foi ; `effacement::etat`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Regle {
     Desactive = 0,
-    Instantane = 1,
-    DixMinutes = 2,
+    UneMinute = 1,
+    CinqMinutes = 2,
     UneHeure = 3,
 }
 
@@ -33,8 +35,8 @@ impl Regle {
     pub(crate) fn depuis_bits(b: u8) -> Self {
         match b & 3 {
             0 => Regle::Desactive,
-            1 => Regle::Instantane,
-            2 => Regle::DixMinutes,
+            1 => Regle::UneMinute,
+            2 => Regle::CinqMinutes,
             _ => Regle::UneHeure,
         }
     }
@@ -212,7 +214,7 @@ mod tests {
         }
         let et = EnTete {
             volatile: true,
-            regle: Regle::Instantane,
+            regle: Regle::UneMinute,
         };
         let trame = sceller_avec_nonce(&c, et, b"x", &NONCE).unwrap();
         assert_eq!(ouvrir(&c, &trame).unwrap().0, et);
@@ -345,8 +347,8 @@ mod tests {
         use crate::message::{Enveloppe, Message};
         let regles = [
             Regle::Desactive,
-            Regle::Instantane,
-            Regle::DixMinutes,
+            Regle::UneMinute,
+            Regle::CinqMinutes,
             Regle::UneHeure,
         ];
         let env = |regle, message| Enveloppe {

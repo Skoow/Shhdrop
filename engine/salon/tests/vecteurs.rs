@@ -185,8 +185,8 @@ fn en_tete_json(e: shhdrop_salon::EnTete) -> Value {
 fn regle_de(n: u64) -> Regle {
     match n {
         0 => Regle::Desactive,
-        1 => Regle::Instantane,
-        2 => Regle::DixMinutes,
+        1 => Regle::UneMinute,
+        2 => Regle::CinqMinutes,
         3 => Regle::UneHeure,
         _ => panic!("règle {n}"),
     }
@@ -1239,12 +1239,9 @@ fn pseudo() -> Value {
 fn etat_case(c: &Value) -> Value {
     let e = etat(
         regle_de(c["regle"].as_u64().unwrap()),
-        c["envoye_ms"].as_u64().unwrap(),
         c["maintenant_ms"].as_u64().unwrap(),
-        c["moi_expediteur"].as_bool().unwrap(),
         c["vu_par_moi_ms"].as_u64(),
-        c["encore_dans_conversation"].as_bool().unwrap(),
-        c["lu_par_tous"].as_bool().unwrap(),
+        c["efface_par_serveur"].as_bool().unwrap(),
     );
     match e {
         Etat::Visible => json!({ "etat": "visible" }),
@@ -1253,330 +1250,68 @@ fn etat_case(c: &Value) -> Value {
     }
 }
 
+/// Règle du 13 novembre : règle 0 jusqu'à la fin ou au renouvellement ; règles 1 à 3, effacées
+/// par le seul `0x0E` du serveur (1 min, 5 min, 1 h après la dernière lecture), avec un compte à
+/// rebours local depuis l'instant où cet appareil a vu le message.
 fn effacement() -> Value {
-    const DIX: u64 = 600_000;
-    const HEURE: u64 = 3_600_000;
     const MAX: u64 = u64::MAX;
-    // (étiquette, règle, envoyé, maintenant, expéditeur, vu, reste, lu par tous)
+    // (étiquette, règle, maintenant, vu par moi, 0x0E reçu)
     #[allow(clippy::type_complexity)]
-    let named: Vec<(&str, u8, u64, u64, bool, Option<u64>, bool, bool)> = vec![
-        ("desactive_visible", 0, 0, MAX, false, Some(1), false, true),
-        ("desactive_expediteur", 0, 0, MAX, true, None, true, false),
-        (
-            "dix_minutes_rebours",
-            2,
-            1_000,
-            2_000,
-            false,
-            None,
-            true,
-            false,
-        ),
-        (
-            "dix_minutes_veille_de_l_echeance",
-            2,
-            1_000,
-            1_000 + DIX - 1,
-            false,
-            None,
-            true,
-            false,
-        ),
-        (
-            "dix_minutes_a_l_echeance",
-            2,
-            1_000,
-            1_000 + DIX,
-            false,
-            None,
-            true,
-            false,
-        ),
-        (
-            "dix_minutes_apres_l_echeance",
-            2,
-            1_000,
-            1_000 + DIX + 1,
-            false,
-            None,
-            true,
-            false,
-        ),
-        (
-            "dix_minutes_reste_faux_lu_par_tous_vrai",
-            2,
-            1_000,
-            2_000,
-            false,
-            Some(1_500),
-            false,
-            true,
-        ),
-        (
-            "dix_minutes_expediteur_vu",
-            2,
-            1_000,
-            2_000,
-            true,
-            Some(1_500),
-            true,
-            false,
-        ),
-        (
-            "une_heure_rebours",
-            3,
-            1_000,
-            2_000,
-            false,
-            None,
-            true,
-            false,
-        ),
-        (
-            "une_heure_a_heure_moins_1",
-            3,
-            1_000,
-            1_000 + HEURE - 1,
-            false,
-            None,
-            true,
-            false,
-        ),
-        (
-            "une_heure_a_heure",
-            3,
-            1_000,
-            1_000 + HEURE,
-            false,
-            None,
-            true,
-            false,
-        ),
-        (
-            "une_heure_reste_faux_lu_par_tous_vrai",
-            3,
-            1_000,
-            2_000,
-            false,
-            Some(1_500),
-            false,
-            true,
-        ),
-        (
-            "une_heure_expediteur",
-            3,
-            1_000,
-            2_000,
-            true,
-            None,
-            true,
-            true,
-        ),
-        (
-            "une_heure_envoye_a_zero_a_heure_moins_1",
-            3,
-            0,
-            HEURE - 1,
-            false,
-            None,
-            true,
-            false,
-        ),
-        (
-            "une_heure_envoye_a_zero_a_heure",
-            3,
-            0,
-            HEURE,
-            false,
-            None,
-            true,
-            false,
-        ),
-        (
-            "dix_minutes_saturation_envoye_max",
-            2,
-            MAX,
-            MAX,
-            false,
-            None,
-            true,
-            false,
-        ),
-        (
-            "une_heure_saturation_envoye_max_moins_1",
-            3,
-            MAX - 1,
-            MAX - 1,
-            false,
-            None,
-            true,
-            false,
-        ),
-        (
-            "instantane_pas_vu_visible",
-            1,
-            0,
-            9_999_999,
-            false,
-            None,
-            true,
-            false,
-        ),
-        (
-            "instantane_vu_rebours",
-            1,
-            0,
-            5_000,
-            false,
-            Some(4_000),
-            true,
-            false,
-        ),
-        (
-            "instantane_vu_59999_ms",
-            1,
-            0,
-            4_000 + 59_999,
-            false,
-            Some(4_000),
-            true,
-            false,
-        ),
-        (
-            "instantane_vu_60000_ms",
-            1,
-            0,
-            4_000 + 60_000,
-            false,
-            Some(4_000),
-            true,
-            false,
-        ),
-        (
-            "instantane_vu_puis_parti",
-            1,
-            0,
-            5_000,
-            false,
-            Some(4_000),
-            false,
-            false,
-        ),
-        (
-            "instantane_parti_sans_avoir_vu_reste_visible",
-            1,
-            0,
-            5_000,
-            false,
-            None,
-            false,
-            false,
-        ),
-        (
-            "instantane_lu_par_tous_efface",
-            1,
-            0,
-            5_000,
-            false,
-            None,
-            true,
-            true,
-        ),
-        (
-            "instantane_lu_par_tous_efface_meme_parti",
-            1,
-            0,
-            5_000,
-            false,
-            Some(4_000),
-            false,
-            true,
-        ),
-        (
-            "instantane_expediteur_visible",
-            1,
-            0,
-            MAX,
-            true,
-            None,
-            true,
-            false,
-        ),
-        (
-            "instantane_expediteur_apres_avoir_vu_reste_visible",
-            1,
-            0,
-            9_999_999,
-            true,
-            Some(4_000),
-            true,
-            false,
-        ),
-        (
-            "instantane_expediteur_apres_avoir_vu_parti_reste_visible",
-            1,
-            0,
-            9_999_999,
-            true,
-            Some(4_000),
-            false,
-            false,
-        ),
-        (
-            "instantane_expediteur_lu_par_tous_efface",
-            1,
-            0,
-            5_000,
-            true,
-            None,
-            true,
-            true,
-        ),
-        (
-            "instantane_expediteur_vu_et_lu_par_tous_efface",
-            1,
-            0,
-            5_000,
-            true,
-            Some(4_000),
-            true,
-            true,
-        ),
-        (
-            "instantane_vu_saturation",
-            1,
-            0,
-            MAX,
-            false,
-            Some(MAX - 10),
-            true,
-            false,
-        ),
+    let mut named: Vec<(String, u8, u64, Option<u64>, bool)> = vec![
+        ("desactive_visible".into(), 0, MAX, Some(1), false),
+        ("desactive_0x0e_ignore".into(), 0, MAX, Some(1), true),
+        ("desactive_non_vu".into(), 0, 0, None, false),
     ];
+    for (nom, regle, d) in [
+        ("une_minute", 1u8, 60_000u64),
+        ("cinq_minutes", 2, 300_000),
+        ("une_heure", 3, 3_600_000),
+    ] {
+        let vu = 5_000u64;
+        let fin = vu + d;
+        for (cas, now, v, e) in [
+            ("non_vu_visible", 86_400_000, None, false),
+            ("non_vu_0x0e_efface", 0, None, true),
+            ("vu_rebours", vu, Some(vu), false),
+            ("vu_veille_de_l_echeance_locale", fin - 1, Some(vu), false),
+            ("echeance_locale_sans_0x0e_visible", fin, Some(vu), false),
+            (
+                "apres_echeance_locale_sans_0x0e_visible",
+                fin + 1,
+                Some(vu),
+                false,
+            ),
+            (
+                "un_jour_plus_tard_sans_0x0e_visible",
+                vu + 86_400_000,
+                Some(vu),
+                false,
+            ),
+            ("vu_puis_0x0e_efface", vu + 1, Some(vu), true),
+            ("saturation_rebours", MAX - 1, Some(MAX - 10), false),
+            ("saturation_echeance", MAX, Some(MAX - 10), false),
+        ] {
+            named.push((format!("{nom}_{cas}"), regle, now, v, e));
+        }
+    }
     let mut out: Vec<Value> = named
         .into_iter()
-        .map(|(label, regle, env, now, exp, vu, reste, tous)| {
-            json!({ "label": label, "regle": regle, "envoye_ms": env, "maintenant_ms": now,
-                    "moi_expediteur": exp, "vu_par_moi_ms": vu,
-                    "encore_dans_conversation": reste, "lu_par_tous": tous })
+        .map(|(label, regle, now, vu, e)| {
+            json!({ "label": label, "regle": regle, "maintenant_ms": now,
+                    "vu_par_moi_ms": vu, "efface_par_serveur": e })
         })
         .collect();
-    // Grille complète à instants fixes : envoyé à 1 000, vu à 2 000, maintenant à 3 000 (les
-    // échéances sont loin) puis à 70 000 (1 minute après le vu, avant les 10 minutes).
+    // Grille complète : vu à 2 000 ou non, 0x0E ou non, maintenant à 3 000 puis à 70 000 (après
+    // 1 minute, avant 5 minutes) puis à 3 700 000 (après 1 heure).
     for regle in 0..4u8 {
-        for exp in [false, true] {
-            for vu in [None, Some(2_000u64)] {
-                for reste in [false, true] {
-                    for tous in [false, true] {
-                        for now in [3_000u64, 70_000] {
-                            out.push(json!({
-                                "label": format!("grille_r{regle}_exp{}_vu{}_reste{}_tous{}_t{now}",
-                                    u8::from(exp), u8::from(vu.is_some()), u8::from(reste), u8::from(tous)),
-                                "regle": regle, "envoye_ms": 1_000, "maintenant_ms": now,
-                                "moi_expediteur": exp, "vu_par_moi_ms": vu,
-                                "encore_dans_conversation": reste, "lu_par_tous": tous }));
-                        }
-                    }
+        for vu in [None, Some(2_000u64)] {
+            for e in [false, true] {
+                for now in [3_000u64, 70_000, 3_700_000] {
+                    out.push(json!({
+                        "label": format!("grille_r{regle}_vu{}_0x0e{}_t{now}",
+                            u8::from(vu.is_some()), u8::from(e)),
+                        "regle": regle, "maintenant_ms": now,
+                        "vu_par_moi_ms": vu, "efface_par_serveur": e }));
                 }
             }
         }
@@ -1810,6 +1545,32 @@ fn salon_v3() {
             .unwrap_or_else(|| panic!("cas {label}"))
             .clone()
     };
+    // Effacement (13 novembre) : jamais effacé sans 0x0E pour les règles 1 à 3, même longtemps
+    // après le délai local ; règle 0 jamais effacée par cette fonction.
+    let ef = &file["effacement"];
+    for n in ["une_minute", "cinq_minutes", "une_heure"] {
+        for (cas, attendu) in [
+            ("echeance_locale_sans_0x0e_visible", "visible"),
+            ("un_jour_plus_tard_sans_0x0e_visible", "visible"),
+            ("vu_veille_de_l_echeance_locale", "rebours"),
+            ("vu_puis_0x0e_efface", "efface"),
+        ] {
+            assert_eq!(by(ef, &format!("{n}_{cas}"))["etat"], attendu, "{n}_{cas}");
+        }
+    }
+    assert_eq!(by(ef, "desactive_0x0e_ignore")["etat"], "visible");
+    assert_eq!(
+        by(ef, "une_minute_vu_veille_de_l_echeance_locale")["fin_ms"],
+        65_000
+    );
+    assert_eq!(
+        by(ef, "cinq_minutes_vu_veille_de_l_echeance_locale")["fin_ms"],
+        305_000
+    );
+    assert_eq!(
+        by(ef, "une_heure_vu_veille_de_l_echeance_locale")["fin_ms"],
+        3_605_000
+    );
     let m = &file["messages"];
     assert_eq!(by(&m["encode"], "texte_json_3900_octets")["len"], JSON_MAX);
     assert_eq!(

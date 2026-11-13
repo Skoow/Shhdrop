@@ -203,16 +203,13 @@ describe("vecteurs salon-v3.json rejoués par le module WebAssembly", () => {
       if (c.error) expect(err, c.label).toBe(c.error);
       else expect({ ...texteOut(S.verifierPseudo(s)), key_hex: hex(utf8(S.cleUnicite(S.verifierPseudo(s)))) }, c.label).toEqual({ out_hex: c.out_hex, key_hex: c.key_hex });
     }
-    expect(V.effacement.length).toBeGreaterThan(100);
+    expect(V.effacement.length).toBeGreaterThan(70);
     for (const c of V.effacement as Cas[]) {
       const r = S.etatEffacement({
         regle: c.regle,
-        envoyeMs: c.envoye_ms,
         maintenantMs: c.maintenant_ms,
-        moiExpediteur: c.moi_expediteur,
         vuParMoiMs: c.vu_par_moi_ms,
-        encoreDansConversation: c.encore_dans_conversation,
-        luParTous: c.lu_par_tous,
+        effaceParServeur: c.efface_par_serveur,
       });
       expect(r, c.label).toEqual(c.etat === "rebours" ? { etat: "rebours", finMs: Number(c.fin_ms) } : { etat: c.etat });
     }
@@ -288,9 +285,14 @@ describe("frontières du module", () => {
     expect(errorOf(() => S.codeVerification(new Uint8Array(31)))).toBe("argument_invalide");
     for (const siege of [256, -1, 0.5, NaN]) expect(errorOf(() => S.Salon.creer(siege, new Uint8Array(16), cles, true))).toBe("argument_invalide");
     expect(errorOf(() => S.Salon.creer(0, new Uint8Array(15), cles, true))).toBe("argument_invalide");
-    for (const t of [-1, 1.5, 2 ** 53, Number.POSITIVE_INFINITY]) expect(errorOf(() => S.etatEffacement({ regle: 0, envoyeMs: t, maintenantMs: 0, moiExpediteur: false, vuParMoiMs: null, encoreDansConversation: true, luParTous: false }))).toBe("argument_invalide");
-    expect(errorOf(() => S.etatEffacement({ regle: 0, envoyeMs: -1n, maintenantMs: 0, moiExpediteur: false, vuParMoiMs: null, encoreDansConversation: true, luParTous: false }))).toBe("argument_invalide");
-    expect(errorOf(() => S.etatEffacement({ regle: 0, envoyeMs: 2n ** 64n, maintenantMs: 0, moiExpediteur: false, vuParMoiMs: null, encoreDansConversation: true, luParTous: false }))).toBe("argument_invalide");
+    for (const t of [-1, 1.5, 2 ** 53, Number.POSITIVE_INFINITY]) {
+      expect(errorOf(() => S.etatEffacement({ regle: 1, maintenantMs: t, vuParMoiMs: null, effaceParServeur: false }))).toBe("argument_invalide");
+      expect(errorOf(() => S.etatEffacement({ regle: 1, maintenantMs: 0, vuParMoiMs: t, effaceParServeur: false }))).toBe("argument_invalide");
+    }
+    expect(errorOf(() => S.etatEffacement({ regle: 1, maintenantMs: -1n, vuParMoiMs: null, effaceParServeur: false }))).toBe("argument_invalide");
+    expect(errorOf(() => S.etatEffacement({ regle: 1, maintenantMs: 2n ** 64n, vuParMoiMs: null, effaceParServeur: false }))).toBe("argument_invalide");
+    for (const r of [4, -1, 1.5]) expect(errorOf(() => S.etatEffacement({ regle: r as never, maintenantMs: 0, vuParMoiMs: null, effaceParServeur: false }))).toBe("argument_invalide");
+    expect(errorOf(() => S.etatEffacement({ regle: 1, maintenantMs: 0, vuParMoiMs: null, effaceParServeur: 1 as never }))).toBe("argument_invalide");
     // Enveloppe mal formée côté JavaScript : refus du moteur, comme un JSON invalide.
     const ok: Enveloppe = { id: new Uint8Array(16), heureMs: 1, regle: 0, message: { k: "texte", x: "a" } };
     expect(S.decoder(S.encoder(ok))).toEqual(ok);

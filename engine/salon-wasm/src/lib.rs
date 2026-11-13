@@ -41,7 +41,7 @@ type R<T> = core::result::Result<T, JsValue>;
 
 #[wasm_bindgen(typescript_custom_section)]
 const TS_TYPES: &str = r#"
-/** Règle d'effacement : 0 désactivé, 1 instantané, 2 dix minutes, 3 une heure. */
+/** Règle d'effacement : 0 jusqu'à la fin ou au renouvellement ; 1, 2, 3 : 1 min, 5 min, 1 h après la dernière lecture par les lecteurs attendus (le 0x0E du serveur fait foi). */
 export type Regle = 0 | 1 | 2 | 3;
 /** En-tête d'une trame, lisible sans clé (le serveur le lit), authentifié. */
 export type EnTete = { volatile: boolean; regle: Regle };
@@ -137,8 +137,8 @@ fn siege(x: f64) -> R<u8> {
 fn regle_de(v: &JsValue) -> Option<Regle> {
     Some(match entier(v, 3)? {
         0 => Regle::Desactive,
-        1 => Regle::Instantane,
-        2 => Regle::DixMinutes,
+        1 => Regle::UneMinute,
+        2 => Regle::CinqMinutes,
         _ => Regle::UneHeure,
     })
 }
@@ -604,31 +604,20 @@ pub fn code_verification(cle: &[u8]) -> R<String> {
     Ok(salon::code_verification(c))
 }
 
-/// État d'un message à l'écran (`engine/salon/src/effacement.rs`) ; `envoye_ms` : heure de
-/// réception par le serveur (jamais `heureMs`) ; instants en millisecondes,
-/// en `bigint` (la couche TypeScript les vérifie : web/src/salon/engine.ts).
-#[allow(clippy::too_many_arguments)]
+/// État d'un message à l'écran (`engine/salon/src/effacement.rs`) : `vu_par_moi_ms`, instant
+/// (horloge de cet appareil) où cet appareil l'a vu ; `efface_par_serveur`, `0x0E` reçu (fait
+/// foi pour les règles 1 à 3) ; instants en millisecondes, en `bigint` (la couche TypeScript les
+/// vérifie : web/src/salon/engine.ts).
 #[wasm_bindgen(js_name = etatEffacement, unchecked_return_type = "EtatEffacementBrut")]
 pub fn etat_effacement(
     regle: f64,
-    envoye_ms: u64,
     maintenant_ms: u64,
-    moi_expediteur: bool,
     vu_par_moi_ms: Option<u64>,
-    encore_dans_conversation: bool,
-    lu_par_tous: bool,
+    efface_par_serveur: bool,
 ) -> R<Object> {
     let regle = regle_de(&JsValue::from_f64(regle)).ok_or_else(arg)?;
     let o = Object::new();
-    match salon::etat(
-        regle,
-        envoye_ms,
-        maintenant_ms,
-        moi_expediteur,
-        vu_par_moi_ms,
-        encore_dans_conversation,
-        lu_par_tous,
-    ) {
+    match salon::etat(regle, maintenant_ms, vu_par_moi_ms, efface_par_serveur) {
         Etat::Visible => set(&o, "etat", "visible"),
         Etat::Rebours { fin_ms } => {
             set(&o, "etat", "rebours");

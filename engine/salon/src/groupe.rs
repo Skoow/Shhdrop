@@ -1482,7 +1482,7 @@ mod tests {
     fn donnees_authentifiees_mls_liees_a_l_en_tete() {
         let (mut m, mut seq) = trois();
         let e = Enveloppe {
-            regle: Regle::DixMinutes,
+            regle: Regle::CinqMinutes,
             ..env()
         };
         let et = en_tete_de(&e);

@@ -45,18 +45,19 @@ export type Instant = number | bigint;
 
 export type EtatEffacement = { etat: "visible" } | { etat: "rebours"; finMs: number } | { etat: "efface" };
 
+/**
+ * Règle 0 : jusqu'à la fin du salon ou à son renouvellement (0x10, appliqué à tout l'historique).
+ * Règles 1, 2, 3 : effacé par le serveur 1 min, 5 min ou 1 h après la dernière lecture des
+ * lecteurs attendus ; seul son 0x0E fait foi (jamais `efface` avant lui).
+ */
 export type EntreeEffacement = {
   regle: Regle;
-  /** Heure de réception de la trame par le serveur (remise avec elle), jamais `heureMs` de l'enveloppe. */
-  envoyeMs: Instant;
+  /** Horloge de cet appareil, comme `vuParMoiMs`. */
   maintenantMs: Instant;
-  moiExpediteur: boolean;
-  /** Instant où ce lecteur l'a vu (affiché, page visible, 1 s), ou null. */
+  /** Instant où cet appareil l'a vu (affiché, page visible, 1 s ; l'envoi pour l'expéditeur), ou null : compte à rebours local seulement. */
   vuParMoiMs: Instant | null;
-  /** Le lecteur n'a pas quitté la conversation depuis. */
-  encoreDansConversation: boolean;
-  /** Tous les participants encore présents l'ont lu. */
-  luParTous: boolean;
+  /** 0x0E reçu pour cette trame. */
+  effaceParServeur: boolean;
 };
 
 // --- Erreurs, panique ---------------------------------------------------------------------------
@@ -348,7 +349,7 @@ function moteur(g: number): SalonEngine {
     etatEffacement: (e) => {
       objet(e);
       const regle = nombre(e.regle);
-      const args = [instant(e.envoyeMs), instant(e.maintenantMs), booleen(e.moiExpediteur), e.vuParMoiMs === null ? undefined : instant(e.vuParMoiMs), booleen(e.encoreDansConversation), booleen(e.luParTous)] as const;
+      const args = [instant(e.maintenantMs), e.vuParMoiMs === null ? undefined : instant(e.vuParMoiMs), booleen(e.effaceParServeur)] as const;
       const r = a(() => wasm.etatEffacement(regle, ...args));
       return r.etat === "rebours" ? { etat: "rebours", finMs: Number(r.finMs) } : r;
     },
