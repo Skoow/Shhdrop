@@ -108,9 +108,11 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, lien *[16]byte) (uint64, err
 			return 0, err
 		}
 	}
-	// Plafond de trames rangées par salon (audit D3) : 0x0C, pour ce salon seulement ; les
-	// volatiles passent encore. Seul un renouvellement (index vidé) rouvre l'écriture.
-	if plein || !h.Volatile && len(s.index) >= m.tramesMax() {
+	// Plafond de trames rangées : par salon (audit D3) ET global, tous salons confondus (audit
+	// adverse du 13 novembre, front serveur : sans plafond global, 200 salons pleins feraient
+	// tuer le processus). 0x0C dans les deux cas ; les volatiles passent encore. Seul un
+	// renouvellement (index vidé) rouvre l'écriture.
+	if plein || !h.Volatile && (len(s.index) >= m.tramesMax() || s.globAtteint()) {
 		return 0, ErrPlein
 	}
 	limite := !m.sansLimiteSiege
@@ -144,6 +146,7 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, lien *[16]byte) (uint64, err
 	s.seq++
 	s.index = append(s.index, entree{seq: s.seq, emplacement: e, recuMs: now.UnixMilli(), siege: mb.siege,
 		drapeaux: trame[len(marque)], attendus: attendus})
+	s.globInc()
 	if avecDelai && attendus == 0 {
 		s.echeanceLocked(h.Regle, s.seq, now.UnixMilli())
 	}

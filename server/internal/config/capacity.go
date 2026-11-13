@@ -33,6 +33,12 @@ type Capacity struct {
 	// SalonFrames (SHH_SALON_FRAMES_MAX) : trames non volatiles rangées au plus par salon
 	// (audit D3 ; salon.TramesMaxDefaut).
 	SalonFrames int
+	// SalonFramesTotal (SHH_SALON_FRAMES_TOTAL) : trames non volatiles rangées au plus EN
+	// MÉMOIRE, tous salons confondus (audit adverse du 13 novembre, front serveur). C'est le
+	// vrai garde-fou de la mémoire : le plafond par salon (SalonFrames) × SHH_SALONS_MAX
+	// dépasserait sinon GOMEMLIMIT (200 salons pleins ≈ 840 Mio d'index) et ferait tuer le
+	// processus. Partagé par tous les salons (Manager.tramesGlob) ; au-delà, 0x0C.
+	SalonFramesTotal int
 }
 
 const (
@@ -51,8 +57,17 @@ const (
 	defaultSegmentsPerMin = 1500
 	// defaultSalonFrames : salon.TramesMaxDefaut (≈ 417 Mo de disque par salon au plus).
 	defaultSalonFrames = 100000
+	// salonFrameMem : mémoire budgétée par trame rangée (index de 24 o, avec la marge de
+	// croissance des tranches et le doublement du ramasse-miettes : 48 o).
+	salonFrameMem = 48
+	// defaultSalonFramesTotal : plafond global sans GOMEMLIMIT (aucune base de calcul) ; ≈
+	// 48 Mio d'index au plus, tous salons confondus.
+	defaultSalonFramesTotal = 1000000
 	// capMax : plafond de toute valeur réglable (borne de bon sens, pas de capacité).
 	capMax = 1 << 20
+	// framesTotalMax : borne de bon sens du plafond global (≈ 134 M de trames, 3,2 Gio d'index) ;
+	// le plafond global monte avec GOMEMLIMIT, donc sa borne dépasse capMax.
+	framesTotalMax = 1 << 27
 )
 
 // memLimit : GOMEMLIMIT en octets ; math.MaxInt64 sans limite.
@@ -61,20 +76,29 @@ func memLimit() int64 { return debug.SetMemoryLimit(-1) }
 // computeCapacity : valeurs par défaut pour une limite de mémoire mem (math.MaxInt64 : aucune)
 // et nofile descripteurs (0 : inconnu).
 //
+// Budgets mémoire, tirés d'un seul GOMEMLIMIT et pensés pour ne pas se recouvrir (audit
+// adverse du 13 novembre : avant, l'index des salons n'était soustrait d'aucun budget et 200
+// salons pleins faisaient tuer le processus) :
+//
 //   - Envois : 30 % de GOMEMLIMIT, à 4 Mio par envoi. Le ramasse-miettes peut doubler le tas
-//     vivant (GOGC=100) : 60 % au pire, le reste pour les lectures, SQLite et le salon.
-//     900 Mio → 67 places (64 avant).
+//     vivant (GOGC=100) : 60 % au pire. 900 Mio → 67 places (64 avant).
 //   - Lectures : 10 % de GOMEMLIMIT à 256 Kio par lecture (900 Mio → 360).
+//   - Index des salons (SalonFramesTotal) : 10 % de GOMEMLIMIT à 48 o la trame, tous salons
+//     confondus (900 Mio → ≈ 1,97 M de trames). C'est le plafond GLOBAL : le plafond PAR salon
+//     (SalonFrames) reste un garde-fou secondaire.
+//   - Le reste (≈ 50 %, doublement du ramasse-miettes compris) pour SQLite, les conversations
+//     et la marge.
 //   - Surveillances : autant que de lectures. WebSocket : 2 000.
 //   - Descripteurs : chaque catégorie a au plus nofile / 8 places (lectures et envois : 2
 //     descripteurs chacun), soit 3/4 de la limite au total, le reste pour la base, les
 //     conversations et la marge.
 func computeCapacity(mem int64, nofile uint64) Capacity {
 	c := Capacity{Uploads: defaultUploads, Downloads: defaultDownloads, WebSockets: defaultWebSockets, DiskOps: defaultDiskOps,
-		SegmentsPerMin: defaultSegmentsPerMin, SalonFrames: defaultSalonFrames}
+		SegmentsPerMin: defaultSegmentsPerMin, SalonFrames: defaultSalonFrames, SalonFramesTotal: defaultSalonFramesTotal}
 	if mem > 0 && mem < math.MaxInt64 {
 		c.Uploads = clamp(mem*3/10/uploadCost, 8, capMax)
 		c.Downloads = clamp(mem/10/downloadCost, 16, capMax)
+		c.SalonFramesTotal = clamp(mem/10/salonFrameMem, 1000, framesTotalMax)
 	}
 	c.Watches = c.Downloads
 	if fd := fdShare(nofile); fd > 0 {
@@ -106,22 +130,28 @@ func capacityFromEnv(mem int64, nofile uint64) (Capacity, error) {
 		name  string
 		dst   *int
 		fdCap bool
+		hi    int // plafond propre (0 : capMax)
 	}{
-		{"SHH_UPLOADS_MAX", &c.Uploads, true},
-		{"SHH_DOWNLOADS_MAX", &c.Downloads, true},
-		{"SHH_WATCH_MAX", &c.Watches, true},
-		{"SHH_WS_MAX", &c.WebSockets, true},
-		{"SHH_DISK_OPS_MAX", &c.DiskOps, false},
-		{"SHH_SEGMENTS_PER_MIN", &c.SegmentsPerMin, false},
-		{"SHH_SALON_FRAMES_MAX", &c.SalonFrames, false},
+		{"SHH_UPLOADS_MAX", &c.Uploads, true, 0},
+		{"SHH_DOWNLOADS_MAX", &c.Downloads, true, 0},
+		{"SHH_WATCH_MAX", &c.Watches, true, 0},
+		{"SHH_WS_MAX", &c.WebSockets, true, 0},
+		{"SHH_DISK_OPS_MAX", &c.DiskOps, false, 0},
+		{"SHH_SEGMENTS_PER_MIN", &c.SegmentsPerMin, false, 0},
+		{"SHH_SALON_FRAMES_MAX", &c.SalonFrames, false, 0},
+		{"SHH_SALON_FRAMES_TOTAL", &c.SalonFramesTotal, false, framesTotalMax},
 	} {
+		hi := capMax
+		if v.hi > 0 {
+			hi = v.hi
+		}
 		s := os.Getenv(v.name)
 		if s == "" {
 			continue
 		}
 		n, err := strconv.Atoi(s)
-		if err != nil || !digits(s) || s[0] == '0' || n < 1 || n > capMax {
-			return Capacity{}, fmt.Errorf("%s invalide (entier de 1 à %d): %q", v.name, capMax, s)
+		if err != nil || !digits(s) || s[0] == '0' || n < 1 || n > hi {
+			return Capacity{}, fmt.Errorf("%s invalide (entier de 1 à %d): %q", v.name, hi, s)
 		}
 		if v.fdCap && fd > 0 && n > fd {
 			return Capacity{}, fmt.Errorf("%s=%d dépasse la limite de descripteurs (%d / 8 = %d) : relever ulimits.nofile",

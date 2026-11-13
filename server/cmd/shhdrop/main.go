@@ -237,7 +237,7 @@ func setupSalons(cfg config.Config, db *sql.DB, svc *share.Service, lim *limits.
 		Pieces:               &blob.Store{Dir: filepath.Join(cfg.DataDir, dirSalonPieces), NoSparse: cfg.BehindProxy, Gate: gate},
 		DossierConversations: filepath.Join(cfg.DataDir, dirSalons), Now: cfg.Now, Max: cfg.SalonsMax,
 		StorageMax: cfg.StorageMaxBytes, UsedPartages: svc.UsedShares, OnAbandon: lim.AbandonUpload,
-		TramesMax: cfg.Capacity.SalonFrames})
+		TramesMax: cfg.Capacity.SalonFrames, SalonFramesTotal: cfg.Capacity.SalonFramesTotal})
 	if err != nil {
 		return nil, err
 	}

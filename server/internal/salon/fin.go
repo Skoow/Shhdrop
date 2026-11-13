@@ -188,6 +188,7 @@ func (m *Manager) oublier(s *salon, raison uint8, signaler bool) (fait, premier 
 	clear(s.revoques)
 	s.sieges = [nbSieges]*siege{}
 	s.journal = nil
+	s.globDec(len(s.index)) // trames en mémoire rendues au compte global avant de vider l'index
 	s.index = nil
 	s.pieces = nil
 	s.echeances = nil

@@ -764,3 +764,53 @@ func TestPlafondTramesParSalon(t *testing.T) {
 		t.Fatal(TramesMaxDefaut)
 	}
 }
+
+// Audit adverse du 13 novembre (front serveur) : plafond GLOBAL des trames rangées en
+// mémoire, calé sur GOMEMLIMIT et partagé par tous les salons. Au-delà, 0x0C même si chaque
+// salon reste sous son plafond propre (sinon 200 salons pleins feraient tuer le processus
+// faute de mémoire) ; les volatiles passent ; un renouvellement, qui vide l'index d'un salon,
+// rend ses places au compte global.
+func TestPlafondTramesGlobal(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	b.m.cfg.SalonFramesTotal = 5 // plafond global
+	b.m.cfg.TramesMax = 100      // plafond par salon loin devant
+	c1, c2 := b.creer(t, 4), b.creer(t, 4)
+	_, g1 := b.entrerMembre(t, c1, true)
+	_, g2 := b.entrerMembre(t, c2, true)
+	for i := range 3 {
+		b.recevoir(t, g1, trameD(0, i))
+	}
+	for i := range 2 {
+		b.recevoir(t, g2, trameD(0, 10+i))
+	}
+	if n := b.m.tramesGlob.Load(); n != 5 {
+		t.Fatalf("compte global = %d, attendu 5", n)
+	}
+	// 6ᵉ trame non volatile, dans l'un ou l'autre salon : refusée bien que chaque salon soit
+	// loin sous son plafond propre (100).
+	seq2 := dernierSeq(g2.salon)
+	if _, err := b.m.Recevoir(g2, trameD(0, 20), nil); !errors.Is(err, ErrPlein) {
+		t.Fatal("au plafond global, g2 :", err)
+	}
+	if _, err := b.m.Recevoir(g1, trameD(0, 21), nil); !errors.Is(err, ErrPlein) {
+		t.Fatal("au plafond global, g1 :", err)
+	}
+	if dernierSeq(g2.salon) != seq2 {
+		t.Fatal("rang consommé par le refus")
+	}
+	// Une volatile passe (ne compte ni dans l'index ni dans le global).
+	b.recevoir(t, g2, trameD(dVolatile, 22))
+	if n := b.m.tramesGlob.Load(); n != 5 {
+		t.Fatalf("volatile comptée : %d", n)
+	}
+	// Renouvellement de c1 : son index (3 trames) est vidé → 3 places rendues au global.
+	b.regler(t, c1, ReglagesReq{Heures: 6})
+	if n := b.m.tramesGlob.Load(); n != 2 {
+		t.Fatalf("après renouvellement, compte global = %d, attendu 2", n)
+	}
+	// g2 peut de nouveau ranger (3 places libres sous le plafond de 5).
+	b.recevoir(t, g2, trameD(0, 23))
+	if n := b.m.tramesGlob.Load(); n != 3 {
+		t.Fatalf("compte global = %d, attendu 3", n)
+	}
+}

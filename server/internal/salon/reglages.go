@@ -189,6 +189,7 @@ func (m *Manager) renouvelerLocked(s *salon) error {
 	for _, p := range s.lesPieces {
 		s.supprimerPieceLocked(p)
 	}
+	s.globDec(len(s.index)) // trames en mémoire rendues au compte global avant de vider l'index
 	s.index, s.echeances, s.pieces = nil, nil, nil
 	s.depart = s.seq
 	s.gen.Add(1)

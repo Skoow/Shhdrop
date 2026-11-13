@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"hash/fnv"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -69,6 +70,11 @@ type Config struct {
 	// TramesMax (facultatif, SHH_SALON_FRAMES_MAX) : trames non volatiles rangées au plus par
 	// salon (0 : TramesMaxDefaut). Au-delà : 0x0C pour ce salon seulement.
 	TramesMax int
+	// SalonFramesTotal (facultatif, SHH_SALON_FRAMES_TOTAL) : trames non volatiles rangées au
+	// plus EN MÉMOIRE, tous salons confondus (0 : sans plafond, tests seulement ; en production
+	// toujours posé, calé sur GOMEMLIMIT, config.Capacity). Au-delà : 0x0C, quel que soit le
+	// salon. Vrai garde-fou de la mémoire (audit adverse du 13 novembre, front serveur).
+	SalonFramesTotal int
 	// OnAbandon (facultatif) : pièce effacée sans avoir été finalisée (limits.AbandonUpload :
 	// sa place d'envoi en cours est rendue, ses octets comptent comme abandonnés).
 	OnAbandon func(id string)
@@ -105,6 +111,12 @@ type Manager struct {
 	// octetsConv : somme des tailles des conversations ouvertes (Conversation.compterDans) :
 	// usage lu sans verrou ni parcours des salons (UsedBytes, plein).
 	octetsConv atomic.Int64
+	// tramesGlob : trames non volatiles rangées en mémoire, tous salons confondus (somme des
+	// len(s.index) des salons vivants). Incrémenté à chaque trame rangée (relais.go), diminué
+	// quand un index est vidé (fin, renouvellement). Comparé à tramesTotalMax (plafond global,
+	// audit adverse du 13 novembre) sous le verrou du salon : un léger dépassement (une trame
+	// par Recevoir simultané, comme pour m.plein) est accepté.
+	tramesGlob atomic.Int64
 	// placeMu, reserves : place des pièces en cours de réservation (placer, pieces.go).
 	placeMu  sync.Mutex
 	reserves atomic.Int64
@@ -157,6 +169,15 @@ func (m *Manager) tramesMax() int {
 		return m.cfg.TramesMax
 	}
 	return TramesMaxDefaut
+}
+
+// tramesTotalMax : plafond global des trames en mémoire (Config.SalonFramesTotal) ;
+// math.MaxInt32 si non posé (tests : sans plafond global).
+func (m *Manager) tramesTotalMax() int {
+	if m.cfg.SalonFramesTotal > 0 {
+		return m.cfg.SalonFramesTotal
+	}
+	return math.MaxInt32
 }
 
 // parBlocMax : salons vivants au plus par bloc : VivantsParBloc, et au plus 1/8 de Max (part
@@ -512,6 +533,7 @@ func (m *Manager) etat(id string, exp int64, maxMembers int) (*salon, error) {
 		conv.compterDans(&m.octetsConv)
 		neuf := nouveauSalon(id, time.Unix(exp, 0), maxMembers, conv, m.now)
 		neuf.flux = &m.flux
+		neuf.glob, neuf.globMax = &m.tramesGlob, m.tramesTotalMax()
 		m.mu.Lock()
 		if s = m.salons[id]; s == nil {
 			m.salons[id], s = neuf, neuf

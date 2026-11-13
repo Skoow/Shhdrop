@@ -89,6 +89,10 @@ type salon struct {
 	pieces            map[uint64]*piece
 	aPurger           []purge
 	flux              *share.Streams
+	// glob, globMax : compteur global des trames en mémoire (Manager.tramesGlob) et son plafond
+	// (tramesTotalMax). glob nil : sans plafond global (salon bâti hors de Manager.etat, tests).
+	glob    *atomic.Int64
+	globMax int
 	// echeances : effacements à venir des règles 1 à 3, une fois lues par tous (effacement.go),
 	// une au plus par entrée de l'index ; vidées par Tick, la fin et le renouvellement.
 	echeances echeances
@@ -113,6 +117,26 @@ type salon struct {
 	depart uint64
 	gen    atomic.Uint64
 	regle  bool
+}
+
+// globAtteint : le plafond global des trames en mémoire est atteint (nil : sans plafond).
+// Appelé sous s.mu.
+func (s *salon) globAtteint() bool {
+	return s.glob != nil && s.globMax > 0 && int(s.glob.Load()) >= s.globMax
+}
+
+// globInc : une trame rangée de plus (sous s.mu). globDec : n trames retirées (index vidé par
+// une fin ou un renouvellement, sous s.mu).
+func (s *salon) globInc() {
+	if s.glob != nil {
+		s.glob.Add(1)
+	}
+}
+
+func (s *salon) globDec(n int) {
+	if s.glob != nil && n > 0 {
+		s.glob.Add(-int64(n))
+	}
 }
 
 func nouveauSalon(id string, expires time.Time, maxMembers int, conv *Conversation, now func() time.Time) *salon {
