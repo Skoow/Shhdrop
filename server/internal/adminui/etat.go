@@ -36,6 +36,10 @@ type Sante struct {
 	// AlerteSignalements : au moins 5 signalements dans l'heure (le booléen de /healthz) ;
 	// jamais le nombre (spec §15.2, §36 S21).
 	AlerteSignalements bool `json:"alerte_signalements"`
+	// VidagesRates : vidages du WAL ratés depuis le démarrage (store.Vidage.Rates) : base tenue
+	// par un autre processus (outil de sauvegarde, sqlite3). Tant qu'il monte, le WAL garde les
+	// lignes effacées (audit adverse du 13 novembre, stockage, F3). Un entier, rien d'autre.
+	VidagesRates int64 `json:"vidages_wal_rates"`
 }
 
 // Stockage : disque et plafond (B), en octets.

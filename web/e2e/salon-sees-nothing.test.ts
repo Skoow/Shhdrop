@@ -24,6 +24,11 @@ import { ClientSalon, KDF, alea, b64u, egal, reglerSalon, tailleConteneur, u64, 
 import { capturingFetch, findIn, listFiles, needle, scanDir, scanProcessMemory, type Captured, type Needle } from "./scan";
 import { startServer, type TestServer } from "./server";
 
+// Fichier de conversation côté serveur (server/internal/salon/conversation.go) : emplacements
+// de 4 168 octets (nonce 12 ‖ trame chiffrée 4 140 ‖ étiquette 16), par paliers de 64.
+const EMPLACEMENT = 4168;
+const PALIER = 64 * EMPLACEMENT;
+
 const IP = "203.0.113.78";
 const UA = "ReperUASalon/1.0";
 const REF = "https://repere-referer.example/ReperRefSalon";
@@ -320,13 +325,33 @@ describe("le serveur ne voit rien : salon (C-2)", () => {
     expect(conversations.length).toBe(1);
     const taille = conversations[0]!.length;
     expect(taille).toBeGreaterThan(0);
-    expect(taille % 4168).toBe(0);
+    // Le fichier grandit par paliers de 64 emplacements de 4 168 octets, remplis d'aléa à leur
+    // création (audit adverse du 13 novembre, stockage, F4) : sa taille ne donne plus le nombre
+    // de trames, seulement le nombre de paliers entamés.
+    expect(taille % PALIER).toBe(0);
     expect(fenetresCommunes(trames(), conversations)).toBe(0);
     // Volatiles jamais écrites : une trame « écrit » n'a pas fait grossir le fichier, qui fait
-    // exactement 4 168 octets par trame non volatile relayée.
+    // exactement un palier par tranche de 64 trames non volatiles relayées, entamée ou pleine.
+    expect(tailles.nonVolatiles).toBeGreaterThan(0);
     expect(tailles.nonVolatilesApres).toBe(tailles.nonVolatiles);
     expect(tailles.apres).toBe(tailles.avant);
-    expect(tailles.avant).toBe(4168 * tailles.nonVolatiles);
+    expect(tailles.avant).toBe(PALIER * Math.ceil(tailles.nonVolatiles / 64));
+    expect(taille).toBe(tailles.avant);
+    // Emplacements pris, effacés ou libres : indistinguables à la lecture du disque. Aucun
+    // n'est nul ni régulier : chacun a l'allure d'octets aléatoires (au moins 240 valeurs
+    // d'octet distinctes sur 4 168, aucune valeur plus de 64 fois ; un emplacement de zéros,
+    // de texte ou de structure répétée échouerait), et aucun n'est la copie d'un autre.
+    const vus = new Set<string>();
+    for (let off = 0; off < taille; off += EMPLACEMENT) {
+      const e = conversations[0]!.subarray(off, off + EMPLACEMENT);
+      const compte = new Uint32Array(256);
+      for (const o of e) compte[o]! += 1;
+      expect(compte.filter((n) => n > 0).length, `emplacement ${off / EMPLACEMENT}`).toBeGreaterThanOrEqual(240);
+      expect(Math.max(...compte), `emplacement ${off / EMPLACEMENT}`).toBeLessThanOrEqual(64);
+      const cle = e.subarray(0, 32).toString("hex");
+      expect(vus.has(cle), `emplacement ${off / EMPLACEMENT} répété`).toBe(false);
+      vus.add(cle);
+    }
     // Témoin : la recherche trouve une trame recopiée telle quelle.
     const t = trames()[0]!;
     expect(fenetresCommunes([t], [Buffer.concat([conversations[0]!, Buffer.from(t)])])).toBe(4140 - 31);
@@ -537,7 +562,7 @@ describe("le serveur ne voit rien : renouvellement du salon", () => {
     const seq = await a.envoyer(apres);
     expect(seq).toBe(depart + 1);
     await lu(b, apres);
-    expect(listFiles(join(srv.dataDir, "salons")).map((f) => readFileSync(f).length)).toEqual([4168]);
+    expect(listFiles(join(srv.dataDir, "salons")).map((f) => readFileSync(f).length)).toEqual([PALIER]); // une trame : un palier
     expect(fenetresCommunes(convAvant, disque())).toBe(0);
     // Reconnexion depuis un rang d'avant : rien d'avant n'est servi.
     const n = b.recus.length;

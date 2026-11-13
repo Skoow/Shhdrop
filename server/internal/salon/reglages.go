@@ -138,6 +138,9 @@ func (m *Manager) Regler(sGestion []byte, r ReglagesReq, avant func() error) (Re
 	if k, _ := res.RowsAffected(); k != 1 {
 		return Reglages{}, ErrNotFound
 	}
+	// Ancienne échéance (l'heure de création à 15 min près) et anciennes places récrites :
+	// vidage du WAL demandé (regroupé, hors de cette requête ; stockage, F1).
+	m.vidage.Demander()
 	if r.Heures != 0 {
 		m.mu.Lock()
 		if x, ok := m.vivants[id]; ok {
@@ -191,6 +194,7 @@ func (m *Manager) renouvelerLocked(s *salon) error {
 	}
 	s.globDec(len(s.index)) // trames en mémoire rendues au compte global avant de vider l'index
 	s.index, s.echeances, s.pieces = nil, nil, nil
+	s.aEcraser = nil // emplacements de la conversation détruite ci-dessous
 	s.depart = s.seq
 	s.gen.Add(1)
 	for _, c := range s.conns {
@@ -205,7 +209,7 @@ func (m *Manager) renouvelerLocked(s *salon) error {
 	if err != nil {
 		return errRenouvellement
 	}
-	conv.g = m.cfg.Pieces.Gate // écritures bornées comme à l'ouverture (S-H1)
+	conv.lec = m.lec // lectures bornées comme à l'ouverture
 	conv.compterDans(&m.octetsConv)
 	s.conv = conv
 	return nil

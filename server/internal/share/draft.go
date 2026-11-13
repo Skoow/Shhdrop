@@ -399,6 +399,7 @@ func (s *Service) finalizeDraft(id string, reserved int, r FinalizeReq) (time.Du
 	if err != nil {
 		return 0, notFound(err)
 	}
+	s.Vidage.Demander() // ttl_hours retiré de la ligne : l'ancienne valeur ne reste pas dans le WAL
 	s.forget(id)
 	return secs(got - now), nil
 }

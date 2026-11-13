@@ -131,6 +131,14 @@ func FromEnv() (Config, error) {
 	if c.Capacity, err = capacityFromEnv(memLimit(), nofile()); err != nil {
 		return Config{}, err
 	}
+	if err := checkThreads(c.Capacity, pidsMax(pidsFile)); err != nil {
+		return Config{}, err
+	}
+	if c.Salons {
+		if err := checkSalons(c.SalonsMax, c.Capacity, memLimit()); err != nil {
+			return Config{}, err
+		}
+	}
 	return c, nil
 }
 

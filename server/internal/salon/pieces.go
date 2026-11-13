@@ -782,5 +782,9 @@ func (m *Manager) effacerPiece(salonID string, p purge) error {
 			return base(err)
 		}
 	}
-	return base(tx.Commit())
+	if err := tx.Commit(); err != nil {
+		return base(err)
+	}
+	m.vidage.Demander() // ligne de pièce effacée : vidage du WAL regroupé (stockage, F1)
+	return nil
 }

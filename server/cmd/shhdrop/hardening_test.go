@@ -288,3 +288,40 @@ func TestAppRoutesMatchClientRouter(t *testing.T) {
 		t.Fatalf("routes du client %v, du serveur %v", got, appRoutes)
 	}
 }
+
+// Audit adverse du 13 novembre, 2e passage, stockage, H1 : SHH_DISABLE_DUMPABLE_HARDENING=1
+// (porte de sortie du test « le serveur ne voit rien ») est refusée en production
+// (SHH_BEHIND_PROXY=1), par le serveur comme par les commandes d'administration, avec un
+// message qui dit quoi retirer ; hors production, elle reste permise.
+func TestDurcissementMemoireNonDesactivableEnProduction(t *testing.T) {
+	t.Setenv("SHH_DISABLE_DUMPABLE_HARDENING", "1")
+	cfg := baseCfg(t.TempDir())
+	cfg.BehindProxy = true
+	err := serveErr(t, cfg)
+	if err == nil || !strings.Contains(publicMessage(err), "SHH_DISABLE_DUMPABLE_HARDENING") {
+		t.Fatalf("serve en production avec le durcissement éteint : %v", err)
+	}
+	if es, _ := os.ReadDir(cfg.DataDir); len(es) != 0 {
+		t.Fatal("dossier de données touché avant le refus :", es)
+	}
+	// Commande d'administration : même refus, rien n'est fait.
+	t.Setenv("SHH_DATA_DIR", cfg.DataDir)
+	t.Setenv("SHH_BEHIND_PROXY", "1")
+	t.Setenv("SHH_TRUSTED_PROXY", "172.18.0.0/16")
+	var sortie, erreurs strings.Builder
+	if code := runCmd([]string{"shhdrop", "admin", "freeze"}, &sortie, &erreurs); code != 1 ||
+		!strings.Contains(erreurs.String(), "SHH_DISABLE_DUMPABLE_HARDENING") {
+		t.Fatalf("admin en production avec le durcissement éteint : code %d, %q", code, erreurs.String())
+	}
+	if _, err := os.Stat(filepath.Join(cfg.DataDir, "frozen")); err == nil {
+		t.Fatal("commande exécutée malgré le refus")
+	}
+	// Hors production (essais) : permise.
+	if err := durcir(baseCfg(t.TempDir())); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHH_DISABLE_DUMPABLE_HARDENING", "")
+	if err := durcir(cfg); err != nil {
+		t.Fatal("production sans la variable :", err)
+	}
+}

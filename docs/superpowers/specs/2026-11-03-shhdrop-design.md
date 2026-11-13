@@ -157,7 +157,7 @@ Navigateur expéditeur ──(chiffré)──► Caddy ──► Serveur Shhdrop
 | Partie | Choix | Raison |
 |---|---|---|
 | Serveur | **Go**, un binaire statique, sans CGO | Sûr, rapide, build simple |
-| Base | **SQLite** via `modernc.org/sqlite` (Go pur), `secure_delete=ON`, WAL vidé chaque minute | Un fichier, rien à administrer |
+| Base | **SQLite** via `modernc.org/sqlite` (Go pur), `secure_delete=ON`, WAL ~~vidé chaque minute~~ vidé dans la seconde qui suit tout effacement (regroupé, au plus une fois par seconde), à chaque passage du janitor, et au démarrage après les purges (13 novembre, audit adverse 2, stockage F1 à F3) | Un fichier, rien à administrer |
 | Fichiers | Un fichier par partage, taille réservée, écriture à position fixe ; derrière une interface interchangeable | Bornage strict ; passage possible à un stockage externe |
 | Site | **TypeScript + Svelte + Vite**, PWA sans service worker | Léger ; aucune persistance de code piégé |
 | Crypto navigateur (réécrit le 11 novembre, C-1) | **Partages** : moteur Rust (RustCrypto : HKDF, SHA-256, HMAC, Argon2id) en WebAssembly + **WebCrypto** (AES-256-GCM, nombres aléatoires), D42-21. libsodium.js est retiré. **Salon** : second module wasm qui embarque **OpenMLS =0.9.2 sur RustCrypto** (voir la ligne suivante) | Standards reconnus, aucune crypto maison |
@@ -1989,7 +1989,7 @@ Toutes les étiquettes commencent par `shhdrop/v2/salon/` : séparation de domai
 
 #### 39.3.2 Relais et conversation sur disque (réécrit le 12 novembre selon la spec v3 §5.1 ; avant : « relais en mémoire seulement »)
 
-- **Trames non volatiles** : écrites sur le disque du serveur, dans un fichier par salon (`salons/{id interne}`), un emplacement de 4 168 octets par trame, sous une **seconde couche AES-256-GCM** dont la clé aléatoire du salon ne vit qu'en mémoire (v3 §5.1, plan C-2 « Protocole »). Aucun `seq`, siège, heure ou drapeau en clair sur le disque. Trame retirée ou effacée par la règle : emplacement écrasé de zéros, plus jamais servie. À la fin du salon : clé oubliée, fichier supprimé.
+- **Trames non volatiles** : écrites sur le disque du serveur, dans un fichier par salon (`salons/{id interne}`), un emplacement de 4 168 octets par trame, dans un fichier qui grandit par **paliers de 64 emplacements remplis d'octets aléatoires** (13 novembre, audit adverse 2, stockage F4 : la taille ne donne plus le nombre exact de messages ; une trame retirée ou effacée par la règle a son emplacement écrasé d'octets aléatoires, plus de zéros), sous une **seconde couche AES-256-GCM** dont la clé aléatoire du salon ne vit qu'en mémoire (v3 §5.1, plan C-2 « Protocole »). Aucun `seq`, siège, heure ou drapeau en clair sur le disque. Trame retirée ou effacée par la règle : emplacement écrasé de zéros, plus jamais servie. À la fin du salon : clé oubliée, fichier supprimé.
 - **Effacement des trames rangées** (13 novembre, décision du propriétaire, v3 §5) : règle 0 jusqu'à la fin ou au renouvellement (protocole, fichiers) ; règles 1, 2, 3 effacées 1 min, 5 min ou 1 h **après la lecture par tous** les sièges présents à l'envoi (lectures `0x05`, départs et exclusions comptés, absents attendus), avec un `0x0E` à tous ; « instantané » et « 10 min / 1 h depuis l'envoi » ne sont plus proposés. Le serveur voit quand le dernier lecteur a lu chaque message de ces règles (v3 §10).
 - **Trames volatiles** (« en train d'écrire », accusés, présence ; bit 0 de `drapeaux`) : relayées en direct, **jamais écrites** ni gardées pour le rattrapage (rang consommé, trou normal).
 - **Index en mémoire seulement** : par trame non volatile, rang, heure de réception du serveur (ms), emplacement, siège, drapeaux, lecteurs attendus (24 octets) ; jamais en base ni dans un journal, ni dans un fichier d'échange (swap coupé, §22).
@@ -2053,7 +2053,7 @@ Clés : HMAC du jour comme §9.3, jamais d'adresse. L'état d'un salon vivant (f
 | S41 | Créateur | `manage_v` ; en direct, la connexion qui crée | aucun lien avec un compte (§37.4) | Assumé |
 | S42 | Retrait d'un message | qu'un siège a retiré l'une de ses trames, laquelle (`seq`) et quand (en mémoire seulement) | — | Assumé |
 | S43 | En-têtes, User-Agent | retirés par Caddy (§36 S2) ; `X-Shh-Membre`, `X-Shh-Piece` et `X-Shh-Access-New` ajoutés à la liste blanche (pas d’`X-Shh-Depuis` : `depuis` voyage dans l’accueil du WebSocket) ; `Origin` gardé par Caddy, lu seulement pour le WebSocket | — | Fait C-2 (Tasks 10, 17 : `test-proxy.sh`, `salon-sees-nothing.test.ts`) |
-| S63 | Nombre de messages, heure de la dernière trame, durée choisie (revue finale C-2, mineur a) | fichier de conversation : taille (4 168 o par trame non volatile), `ctime` (dernière écriture), date de naissance (première entrée ; avec `expires_at`, la durée) | fichier préalloué par paliers (plus tard) | Assumé (v3 §10) |
+| S63 | Nombre de messages, heure de la dernière trame, durée choisie (revue finale C-2, mineur a) | fichier de conversation : taille (~~4 168 o par trame non volatile~~ par paliers de 64 trames, 267 Ko, depuis le 13 novembre : plus le nombre exact), `ctime` (~~dernière écriture~~ ramené chaque minute à l'heure du passage de l'entretien : lisible une minute au plus après une écriture), date de naissance (**non corrigeable** : aucun appel système ne la change) (première entrée ; avec `expires_at`, la durée) | fichier préalloué par paliers (plus tard) | Assumé (v3 §10) |
 
 #### 39.3.9 Routes (toutes sous `/api/salons/`, JSON strict de §8 sauf trames et segments)
 
@@ -2685,3 +2685,16 @@ Rapport et décisions du propriétaire : `docs/superpowers/audits/2026-11-11-ver
 - Nettoyage : PDF limité aux propriétés du document, vignette EXIF gardée (§35.2, §18, D42-18).
 - Interface : coffre chez le destinataire retiré (§27, §34.1) ; le reste dans la spécification UI, §23.
 - Encore ouvert : I7 (provenance de l'image, §42.1) et I8 (mentions légales, §17).
+
+## Amendements du 13 novembre 2026 (audit adverse, second passage : serveur et stockage), à valider par le propriétaire
+
+Corrections codées et testées (commit « audit adverse 2, serveur ») ; elles précisent ou remplacent les passages cités.
+
+- **§36, dates des fichiers (limite gardée).** Les dates de création (`btime`) des fichiers de partages, de pièces et de conversations ne peuvent pas être effacées : qui lit le disque déverrouillé connaît l'heure de création de chaque partage vivant et du premier message de chaque salon. Seuls le volume chiffré et l'absence d'instantanés protègent cette métadonnée. Les `ctime` sont ramenés à l'heure du passage de l'entretien (chaque minute).
+- **§39, écriture des trames.** La trame est écrite **hors du verrou du salon** ; le rang est attribué ensuite, sous le verrou ; l'index garde l'emplacement de chaque rang (l'ordre des emplacements du fichier n'est plus celui des rangs). Raison : une borne d'appels disque saturée figeait l'entretien de tous les salons, donc les effacements à échéance.
+- **§39, lectures de conversation** : bornées comme les écritures (bornes propres au salon, distinctes de celle des partages) ; plus aucun appel disque sous un verrou de salon.
+- **§39, plafond global des trames en mémoire** : la moitié de `SHH_SALON_FRAMES_TOTAL` est réservée à parts égales entre les `SHH_SALONS_MAX` salons ; un salon n'est refusé (`0x0C`) qu'au-delà de sa part et pot commun vide.
+- **§8, `SHH_SALONS_MAX`** : refusé au démarrage si `SHH_SALONS_MAX` × 256 Kio dépasse 10 % de `GOMEMLIMIT`, ou si la part de trames par salon est inférieure à 1 000. Le démarrage est aussi refusé si les fils du disque dépassent la moitié de `pids_limit`.
+- **§39, clé de conversation** : oubliée à la fin du salon, pas effacée de la mémoire (limite de la bibliothèque standard de Go ; à reprendre avec `runtime/secret`).
+- **§10, fichiers du site** : un fichier n'est servi qu'à son chemin exact (`/pdf-frame.html/` et variantes : 404), pour que la politique du cadre PDF ne puisse pas être contournée par une variante de chemin.
+- **§22, durcissement mémoire** : `SHH_DISABLE_DUMPABLE_HARDENING=1` est refusée avec `SHH_BEHIND_PROXY=1` ; les commandes `shhdrop admin` sont durcies aussi.

@@ -20,6 +20,10 @@ import (
 //   - os.Root : aucun lien symbolique ne sort du dossier ;
 //   - tout nom qui commence par « . » (.env, .git/…) → 404 ;
 //   - un dossier n'est jamais listé : son index.html, sinon 404 ;
+//   - un fichier n'est servi qu'à son chemin exact (exactPath) : « /x.html/ », « /x.html//… »
+//     → 404. Les en-têtes de sécurité propres à un fichier (CSP sandbox du cadre PDF,
+//     api.pathHeaders) suivent le chemin de la requête : aucun autre chemin ne doit donc
+//     rendre les mêmes octets (audit adverse du 13 novembre, site, N1) ;
 //   - repli de l'application monopage : un chemin inconnu dont le dernier segment n'a pas
 //     d'extension sert index.html ; un fichier absent (x.js) → 404. Les liens sont à la
 //     racine (« /#clé », spec §32) : plus de repli particulier sous /s/ ni /m/ ; un chemin
@@ -52,6 +56,11 @@ func staticHandler(dir string) (http.Handler, error) {
 			return
 		}
 		f, fi, err := openRegular(fsys, name)
+		if err == nil && !exactPath(r.URL.Path, name, isDir(fsys, name)) {
+			f.Close()
+			http.NotFound(w, r)
+			return
+		}
 		status := http.StatusOK
 		if errors.Is(err, fs.ErrNotExist) && !strings.Contains(path.Base(name), ".") && !isDir(fsys, name) {
 			if !appRoutes[r.URL.Path] {
@@ -197,6 +206,14 @@ func staticName(p string) (string, bool) {
 		name = "index.html"
 	}
 	return name, true
+}
+
+// exactPath : le chemin p de la requête est exactement celui du fichier name du dossier (nom
+// nettoyé par staticName) : « /name » ; pour un dossier (son index.html), « /name » ou
+// « /name/ » ; pour la racine, « / ». Tout autre chemin qui se nettoie en name (barre finale
+// après un fichier, barres doublées) n'est pas exact.
+func exactPath(p, name string, dir bool) bool {
+	return p == "/"+name || dir && p == "/"+name+"/" || p == "/" && name == "index.html"
 }
 
 func isDir(fsys fs.FS, name string) bool {

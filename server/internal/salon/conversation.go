@@ -22,11 +22,28 @@ import (
 // nonce (12, aléatoire) ‖ AES-256-GCM(clé, nonce, trame, adConv ‖ numéro d'emplacement (8)).
 // La clé est tirée à l'ouverture et ne vit qu'en mémoire : un disque saisi ou copié, ou un
 // redémarrage, ne donne que des emplacements illisibles. Aucun seq, siège, heure ni drapeau
-// en clair ; trame effacée = emplacement écrasé de zéros. Aucun fsync : le fichier ne sert
-// plus après un redémarrage (clé perdue).
+// en clair. Aucun fsync : le fichier ne sert plus après un redémarrage (clé perdue).
+//
+// Ce que le fichier ne dit pas à qui lit le disque (audit adverse du 13 novembre, stockage F4) :
+//   - trame effacée = emplacement écrasé d'octets ALÉATOIRES (et non de zéros) : il ne
+//     s'authentifie plus (ErrEfface) et ne se distingue pas d'un emplacement vivant ;
+//   - le fichier grandit par PALIERS de emplacementsParPalier emplacements, remplis d'aléa à
+//     leur création : sa taille ne donne que l'ordre de grandeur du nombre de trames.
+//
+// Borne des appels disque (audit adverse du 13 novembre, front serveur, F1 et F2) : aucune
+// méthode n'attend une place sous un verrou. Les ÉCRITURES (Ajouter, Effacer,
+// EffacerPlusieurs) ne prennent aucune borne ici : l'appelant (Manager) tient une place de la
+// borne des écritures, prise hors de tout verrou de salon. Les LECTURES (Lire) prennent une
+// place de la borne des lectures (lec) AVANT le verrou de la conversation.
 
 // TailleEmplacement : nonce (12) ‖ trame chiffrée (4 140) ‖ étiquette GCM (16).
 const TailleEmplacement = tailleNonce + TailleTrame + 16
+
+// emplacementsParPalier : le fichier grandit de ce nombre d'emplacements à la fois (≈ 267 Ko).
+const emplacementsParPalier = 64
+
+// TaillePalier : octets ajoutés au fichier à chaque palier.
+const TaillePalier = emplacementsParPalier * TailleEmplacement
 
 const tailleNonce = 12
 
@@ -35,7 +52,7 @@ const tailleNonce = 12
 const adConv = "shhdrop/salon/disque/v1"
 
 var (
-	// ErrEfface : emplacement écrasé de zéros, ou qui ne s'authentifie pas (autre clé,
+	// ErrEfface : emplacement écrasé (aléa), ou qui ne s'authentifie pas (autre clé,
 	// emplacement déplacé ou modifié).
 	ErrEfface = errors.New("salon: trame effacée")
 	// ErrEmplacement : emplacement jamais écrit.
@@ -88,15 +105,16 @@ type Conversation struct {
 	chemin  string
 	f       fichierEcriture // écritures
 	lecteur *os.File        // lectures, ouvert avec O_NOATIME quand le système le permet
-	// g : sémaphore des appels disque (blob.Gate partagé avec les partages et les pièces), posé
-	// par le Manager après ouverture (etat, renouvellement) ; nil pour les tests et sans effet.
-	// Audit adverse du 13 novembre, S-H1 : borne les fils du système bloqués sur le disque, que
-	// les écritures de conversation (une par salon, sous s.mu) auraient pu multiplier jusqu'à
-	// dépasser pids_limit sous un disque lent et un SHH_SALONS_MAX élevé.
-	g *blob.Gate
-	cle     [32]byte
-	aead    cipher.AEAD
-	n       uint32 // emplacements écrits
+	// lec : borne des lectures de conversation (Manager.lec), posée par le Manager après
+	// l'ouverture (etat, renouvellement) ; nil : sans borne (tests). Prise avant mu, jamais
+	// dessous (F2 : les lectures du rattrapage tenaient un fil du système par connexion).
+	lec *blob.Gate
+	// aead : seule copie de la clé gardée (tirée dans OuvrirConversation, jamais rangée
+	// ailleurs) ; lâchée par Detruire. La bibliothèque standard ne permet pas d'effacer le
+	// calendrier de clés d'un chiffrement AES : la clé est oubliée, pas effacée de la mémoire
+	// (audit adverse du 13 novembre, stockage F5).
+	aead cipher.AEAD
+	n    uint32 // emplacements écrits
 	// inutilisable : Truncate a échoué après une écriture ratée ; tailleMax borne alors le
 	// fichier réel (Taille ne le sous-compte jamais).
 	inutilisable bool
@@ -159,16 +177,6 @@ func (c *Conversation) etat() error {
 	return nil
 }
 
-// borne exécute f sous le sémaphore des appels disque (g nil : sans borne, tests). Pris en
-// dernier, rien d'autre pris dedans : aucune attente croisée (blob.Gate).
-func (c *Conversation) borne(f func()) {
-	if c.g == nil {
-		f()
-		return
-	}
-	_ = c.g.Do(func() error { f(); return nil })
-}
-
 // ecrire écrit p en off ; les dates sont remises à l'epoch même en cas d'erreur (écriture
 // partielle), comme blob.WriteAt.
 func (c *Conversation) ecrire(p []byte, off int64) (err error) {
@@ -177,7 +185,7 @@ func (c *Conversation) ecrire(p []byte, off int64) (err error) {
 			err = derr
 		}
 	}()
-	c.borne(func() { _, err = c.f.WriteAt(p, off) })
+	_, err = c.f.WriteAt(p, off)
 	return es(err)
 }
 
@@ -215,8 +223,10 @@ func OuvrirConversation(dossier, id string) (*Conversation, error) {
 	if c.lecteur, err = blob.OpenRead(c.chemin); err != nil {
 		return nil, es(err)
 	}
-	rand.Read(c.cle[:]) // ne rend jamais d'erreur (Go ≥ 1.24)
-	bloc, err := aes.NewCipher(c.cle[:])
+	var cle [32]byte
+	rand.Read(cle[:]) // ne rend jamais d'erreur (Go ≥ 1.24)
+	bloc, err := aes.NewCipher(cle[:])
+	clear(cle[:]) // la clé ne reste que dans le chiffrement (aead)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +248,10 @@ func ad(e uint32) []byte {
 func decalage(e uint32) int64 { return int64(e) * TailleEmplacement }
 
 // Ajouter écrit la trame (TailleTrame octets) dans un nouvel emplacement et rend son numéro.
-// En cas d'échec, le fichier est ramené à sa taille d'avant (aucun emplacement partiel).
+// Premier emplacement d'un palier : le palier entier est écrit d'un coup (la trame, puis de
+// l'aléa) ; en cas d'échec, le fichier est ramené à sa taille d'avant. Dans un palier déjà
+// écrit, la taille ne change pas : un échec laisse un emplacement jamais compté, récrit par
+// l'ajout suivant. L'appelant tient une place de la borne des écritures (voir l'en-tête).
 func (c *Conversation) Ajouter(trame []byte) (uint32, error) {
 	if len(trame) != TailleTrame {
 		return 0, ErrEnTete
@@ -255,17 +268,34 @@ func (c *Conversation) Ajouter(trame []byte) (uint32, error) {
 	buf := make([]byte, tailleNonce, TailleEmplacement)
 	rand.Read(buf)
 	buf = c.aead.Seal(buf, buf, trame, ad(e))
-	if err := c.ecrire(buf, decalage(e)); err != nil {
-		c.annuler(decalage(e), decalage(e)+TailleEmplacement)
+	if e%emplacementsParPalier != 0 {
+		if err := c.ecrire(buf, decalage(e)); err != nil {
+			return 0, err
+		}
+		c.n++
+		return e, nil
+	}
+	palier := make([]byte, TaillePalier)
+	copy(palier, buf)
+	rand.Read(palier[TailleEmplacement:])
+	if err := c.ecrire(palier, decalage(e)); err != nil {
+		c.annuler(decalage(e), decalage(e)+TaillePalier)
 		return 0, err
 	}
 	c.n++
-	c.poserTaille(decalage(c.n))
+	c.poserTaille(decalage(e) + TaillePalier)
 	return e, nil
 }
 
-// Lire rend la trame de l'emplacement e ; ErrEfface s'il est nul ou ne s'authentifie pas.
-func (c *Conversation) Lire(e uint32) ([]byte, error) {
+// Lire rend la trame de l'emplacement e ; ErrEfface s'il ne s'authentifie pas (effacé). Sous
+// la borne des lectures, prise avant le verrou : une lecture qui attend sa place ne tient
+// rien, et ne retarde donc ni une écriture ni une destruction.
+func (c *Conversation) Lire(e uint32) (trame []byte, err error) {
+	_ = c.lec.Do(func() error { trame, err = c.lire(e); return nil })
+	return trame, err
+}
+
+func (c *Conversation) lire(e uint32) ([]byte, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if err := c.etat(); err != nil {
@@ -275,21 +305,8 @@ func (c *Conversation) Lire(e uint32) ([]byte, error) {
 		return nil, ErrEmplacement
 	}
 	buf := make([]byte, TailleEmplacement)
-	// Lecture non bornée par le sémaphore (S-H1 ne vise que les écritures sous s.mu) : le
-	// rattrapage lit par ce chemin et le serrer y ajouterait de la latence ; les lectures en
-	// cours sont déjà bornées par le nombre de connexions.
 	if _, err := c.lecteur.ReadAt(buf, decalage(e)); err != nil {
 		return nil, es(err)
-	}
-	nul := true
-	for _, b := range buf {
-		if b != 0 {
-			nul = false
-			break
-		}
-	}
-	if nul {
-		return nil, ErrEfface
 	}
 	trame, err := c.aead.Open(nil, buf[:tailleNonce], buf[tailleNonce:], ad(e))
 	if err != nil {
@@ -298,7 +315,15 @@ func (c *Conversation) Lire(e uint32) ([]byte, error) {
 	return trame, nil
 }
 
-// Effacer écrase l'emplacement e de zéros.
+// alea : un emplacement d'octets aléatoires (effacement).
+func alea() []byte {
+	b := make([]byte, TailleEmplacement)
+	rand.Read(b)
+	return b
+}
+
+// Effacer écrase l'emplacement e d'octets aléatoires. L'appelant tient une place de la borne
+// des écritures.
 func (c *Conversation) Effacer(e uint32) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -309,7 +334,7 @@ func (c *Conversation) Effacer(e uint32) error {
 		return ErrEmplacement
 	}
 	// Emplacement déjà écrit : la taille du fichier ne change pas, même en cas d'échec.
-	return c.ecrire(make([]byte, TailleEmplacement), decalage(e))
+	return c.ecrire(alea(), decalage(e))
 }
 
 // Detruire oublie la clé (mise à zéro), ferme le fichier puis le supprime. Idempotent : un
@@ -322,8 +347,7 @@ func (c *Conversation) Detruire() error {
 	var errFermeture error
 	if !c.detruite {
 		c.detruite = true
-		clear(c.cle[:])
-		c.aead = nil
+		c.aead = nil // clé oubliée (voir le champ)
 		if c.lecteur != nil {
 			errFermeture = c.lecteur.Close()
 		}
@@ -344,8 +368,9 @@ func (c *Conversation) Detruire() error {
 	return es(errFermeture)
 }
 
-// EffacerPlusieurs écrase de zéros chaque emplacement de l (effacements en chaîne : départ,
-// libération, échéances), dates remises à l'epoch une seule fois. Un numéro hors du fichier :
+// EffacerPlusieurs écrase d'octets aléatoires chaque emplacement de l (effacements en chaîne :
+// départ, libération, échéances, retrait), dates remises à l'epoch une seule fois. L'appelant
+// tient une place de la borne des écritures. Un numéro hors du fichier :
 // ErrEmplacement, rien n'est écrit. Une écriture en échec n'arrête pas les suivantes ; la
 // première erreur est rendue (ErrES).
 func (c *Conversation) EffacerPlusieurs(l []uint32) error {
@@ -362,11 +387,9 @@ func (c *Conversation) EffacerPlusieurs(l []uint32) error {
 			return ErrEmplacement
 		}
 	}
-	zeros := make([]byte, TailleEmplacement)
 	var premiere error
 	for _, e := range l {
-		var err error
-		c.borne(func() { _, err = c.f.WriteAt(zeros, decalage(e)) })
+		_, err := c.f.WriteAt(alea(), decalage(e))
 		if err != nil && premiere == nil {
 			premiere = es(err)
 		}

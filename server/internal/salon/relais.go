@@ -10,9 +10,10 @@ import (
 
 // Relais et stockage des trames (plan C-2 Task 8, « Protocole ») : chaque trame reçue prend
 // le rang suivant du salon, sous son verrou. Une trame non volatile est écrite dans la
-// conversation (chiffrée, sans rang, siège, heure ni drapeau en clair) et indexée en mémoire ;
-// une volatile n'est ni écrite ni indexée (son rang est consommé : trou normal). La diffusion
-// aux connexions en direct, rangée ou non, se fait sous ce même verrou (connexion.go).
+// conversation (chiffrée, sans rang, siège, heure ni drapeau en clair), hors du verrou du
+// salon, puis indexée en mémoire sous ce verrou (Recevoir) ; une volatile n'est ni écrite ni
+// indexée (son rang est consommé : trou normal). La diffusion aux connexions en direct, rangée
+// ou non, se fait sous le verrou du salon (connexion.go).
 
 // entree : trame non volatile rangée, 24 octets (plan, point 10 ; TestTailleEntree).
 // recuMs : heure de réception du serveur (ms Unix), jamais lue dans la trame ni écrite sur
@@ -68,19 +69,35 @@ func (s *salon) perimeLocked(mb Membre, now time.Time) error {
 // pièce disparue, pas prête ou déjà liée : trame rangée sans lien (audit D6). Membre
 // périmé : ErrNotFound ; exclu : ErrExcluded (perimeLocked, de même pour Retirer, Quitter et
 // Lu). Erreur d'écriture de la conversation (ErrES, fixe) : trame non rangée,
-// aucun rang consommé. L'écriture se fait sous le verrou du salon : l'ordre des emplacements
-// est celui des rangs. Règles 1 à 3 (« vu par tous + délai », effacement.go) : lecteurs
+// aucun rang consommé. Règles 1 à 3 (« vu par tous + délai », effacement.go) : lecteurs
 // attendus rangés ; expéditeur seul : échéance rangée tout de suite (maintenant + délai).
 //
+// Trois temps pour une trame non volatile (audit adverse du 13 novembre, front serveur, F1 :
+// l'écriture se faisait sous le verrou du salon, où elle attendait la borne des appels disque ;
+// une borne saturée figeait l'entretien de tous les salons et le tableau de bord) :
+//  1. admettre, sous le verrou du salon : membre, pièce, plafonds, seaux ;
+//  2. écriture dans la conversation, HORS du verrou du salon, sous la borne des écritures
+//     (Manager.ecr) : seule l'expéditrice attend le disque ;
+//  3. ranger, sous le verrou du salon : rang, index, lecteurs attendus, diffusion.
+//
+// Le rang est donné au temps 3 : l'ordre des rangs est celui des verrous du temps 3, pas
+// celui des emplacements du fichier (l'index garde l'emplacement de chaque rang). Entre les
+// temps 1 et 3 : membre parti, exclu ou remplacé, ou salon fini → la trame n'est pas rangée
+// (son emplacement est écrasé, ecraser), erreur de perimeLocked ; salon renouvelé → la trame
+// est d'après le renouvellement : récrite dans la nouvelle conversation ; plafonds de trames
+// (par salon, global) dépassés d'au plus une trame par siège qui écrit en même temps
+// (accepté, comme pour le disque ci-dessous).
+//
 // Garde-fous (Task 12), sans rang consommé ni jeton pris : trame non volatile alors que
-// l'usage (partages, pièces, conversations) plus une trame dépasse StorageMax, ou usage
-// illisible, ou salon qui a déjà TramesMax trames rangées (index, effacées comprises : leurs
-// emplacements restent sur le disque) → ErrPlein (0x0C), avant les seaux ; seaux du siège vides (limites.go) →
-// *Attente (0x0B). Les jetons sont pris avant l'écriture et rendus si Ajouter échoue :
-// disque réellement plein (ENOSPC, EDQUOT) → ErrPlein ; toute autre erreur → rendue telle
-// quelle (fermeture 1011). Ajouter ramène le fichier à sa taille d'avant ; si ce Truncate
-// échoue, la conversation devient inutilisable (ErrInutilisable aux trames suivantes, 1011) :
-// ErrPlein est rendu quand même pour cette trame, jamais écrite.
+// l'usage (partages, pièces, conversations) plus un palier de conversation dépasse StorageMax,
+// ou usage illisible, ou salon qui a déjà TramesMax trames rangées (index, effacées comprises :
+// leurs emplacements restent sur le disque), ou plafond global atteint (globAtteint) → ErrPlein
+// (0x0C), avant les seaux ; seaux du siège vides (limites.go) → *Attente (0x0B). Les jetons
+// sont pris avant l'écriture et rendus si Ajouter échoue : disque réellement plein (ENOSPC,
+// EDQUOT) → ErrPlein ; toute autre erreur → rendue telle quelle (fermeture 1011). Ajouter
+// ramène le fichier à sa taille d'avant ; si ce Truncate échoue, la conversation devient
+// inutilisable (ErrInutilisable aux trames suivantes, 1011) : ErrPlein est rendu quand même
+// pour cette trame, jamais écrite.
 func (m *Manager) Recevoir(mb Membre, trame []byte, lien *[16]byte) (uint64, error) {
 	s := mb.salon
 	if s == nil {
@@ -92,39 +109,84 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, lien *[16]byte) (uint64, err
 	}
 	// Usage lu avant s.mu (Manager.plein) : des trames rangées en même temps dans d'autres
 	// salons, ou des partages créés en même temps, peuvent dépasser StorageMax d'autant : au
-	// plus une trame (4 168 o) par Recevoir simultané, environ 8 Mo pour 2 000 WebSocket.
-	// Accepté (décision du 12 novembre) : la création d'un salon garde 2 Gio de marge.
-	plein := !h.Volatile && m.plein(TailleEmplacement)
+	// plus un palier (TaillePalier) par Recevoir simultané. Accepté (décision du 12 novembre) :
+	// la création d'un salon garde 2 Gio de marge.
+	plein := !h.Volatile && m.plein(TaillePalier)
+	conv, seq, err := m.admettre(s, mb, h, trame, lien, plein)
+	for conv != nil {
+		var e uint32
+		var errE error
+		_ = m.ecr.Do(func() error { e, errE = conv.Ajouter(trame); return nil })
+		seq, conv, err = m.ranger(s, mb, h, trame, lien, conv, e, errE)
+	}
+	return seq, err
+}
+
+// admettre : premier temps de Recevoir, sous le verrou du salon. Trame volatile : rang
+// consommé, relayée, rien d'autre à faire (conv nil). Trame non volatile admise : la
+// conversation où l'écrire.
+func (m *Manager) admettre(s *salon, mb Membre, h EnTete, trame []byte, lien *[16]byte, plein bool) (*Conversation, uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Heure lue sous le verrou : recuMs ne décroît jamais quand seq croît (TestHeureMonotone).
 	now := m.cfg.Now()
 	if !s.membreLocked(mb, now) {
-		return 0, s.perimeLocked(mb, now)
+		return nil, 0, s.perimeLocked(mb, now)
 	}
-	var p *piece // nil : trame sans lien (aucun, ou pièce disparue, pas prête, déjà liée)
 	if lien != nil {
-		if p, err = s.pieceLiableLocked(mb, *lien); err != nil {
-			return 0, err
+		if _, err := s.pieceLiableLocked(mb, *lien); err != nil {
+			return nil, 0, err
 		}
 	}
-	// Plafond de trames rangées : par salon (audit D3) ET global, tous salons confondus (audit
-	// adverse du 13 novembre, front serveur : sans plafond global, 200 salons pleins feraient
-	// tuer le processus). 0x0C dans les deux cas ; les volatiles passent encore. Seul un
-	// renouvellement (index vidé) rouvre l'écriture.
+	// Plafond de trames rangées : par salon (audit D3) ET global, tous salons confondus, avec
+	// une part réservée à chaque salon (globAtteint). 0x0C dans les deux cas ; les volatiles
+	// passent encore. Seul un renouvellement (index vidé) rouvre l'écriture.
 	if plein || !h.Volatile && (len(s.index) >= m.tramesMax() || s.globAtteint()) {
-		return 0, ErrPlein
+		return nil, 0, ErrPlein
 	}
-	limite := !m.sansLimiteSiege
-	if limite {
+	if !m.sansLimiteSiege {
 		if d := s.limites[mb.siege].prendre(now, !h.Volatile); d > 0 {
-			return 0, &Attente{Retry: d}
+			return nil, 0, &Attente{Retry: d}
 		}
 	}
 	if h.Volatile {
 		s.seq++
 		s.relayerLocked(mb.siege, now.UnixMilli(), trame)
-		return s.seq, nil
+		return nil, s.seq, nil
+	}
+	return s.conv, 0, nil
+}
+
+// ranger : troisième temps de Recevoir, sous le verrou du salon : la trame vient d'être écrite
+// à l'emplacement e de conv (ou errE). Rend le rang, ou la conversation où récrire la trame
+// (salon renouvelé pendant l'écriture), ou l'erreur.
+func (m *Manager) ranger(s *salon, mb Membre, h EnTete, trame []byte, lien *[16]byte, conv *Conversation,
+	e uint32, errE error) (uint64, *Conversation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Heure lue sous le verrou : recuMs ne décroît jamais quand seq croît (TestHeureMonotone).
+	now := m.cfg.Now()
+	if !s.membreLocked(mb, now) {
+		// Parti, exclu, remplacé, ou salon fini pendant l'écriture : jamais rangée ni servie.
+		if errE == nil && s.conv == conv {
+			s.aEcraser = append(s.aEcraser, e)
+		}
+		return 0, nil, s.perimeLocked(mb, now)
+	}
+	if s.conv != conv {
+		return 0, s.conv, nil // renouvelé pendant l'écriture : conv est détruite avec son fichier
+	}
+	if errE != nil {
+		if !m.sansLimiteSiege {
+			s.limites[mb.siege].rendre(true) // trame non rangée : jetons rendus
+		}
+		if errors.Is(errE, syscall.ENOSPC) || errors.Is(errE, syscall.EDQUOT) {
+			return 0, nil, ErrPlein
+		}
+		return 0, nil, errE
+	}
+	var p *piece // nil : trame sans lien (aucun, ou pièce disparue, pas prête, déjà liée)
+	if lien != nil {
+		p, _ = s.pieceLiableLocked(mb, *lien) // auteur déjà vérifié (admettre)
 	}
 	// Règles 1 à 3 : lecteurs attendus (sièges occupés, moins l'expéditeur) ; expéditeur seul :
 	// personne à attendre, l'échéance part tout de suite (effacement.go).
@@ -132,16 +194,6 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, lien *[16]byte) (uint64, err
 	_, avecDelai := delaiApresLecture(h.Regle)
 	if avecDelai {
 		attendus = s.attendusLocked(mb.siege)
-	}
-	e, err := s.conv.Ajouter(trame)
-	if err != nil {
-		if limite {
-			s.limites[mb.siege].rendre(true) // trame non rangée : jetons rendus
-		}
-		if errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT) {
-			return 0, ErrPlein
-		}
-		return 0, err
 	}
 	s.seq++
 	s.index = append(s.index, entree{seq: s.seq, emplacement: e, recuMs: now.UnixMilli(), siege: mb.siege,
@@ -154,7 +206,7 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, lien *[16]byte) (uint64, err
 	if p != nil {
 		s.lierLocked(p, s.seq)
 	}
-	return s.seq, nil
+	return s.seq, nil, nil
 }
 
 // Retirer écrase la trame non volatile de rang seq si mb en est l'auteur (décision du
@@ -162,14 +214,22 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, lien *[16]byte) (uint64, err
 // l'occupant actuel, qu'une reprise (0x0A) ne change pas ; au siège 0, toujours le créateur,
 // tout depuis la création. Une trame d'un ancien titulaire d'un siège invité n'est pas à lui.
 // Toute autre trame (autre auteur, volatile, rang inconnu, déjà effacée) : ignorée sans
-// erreur. Membre périmé : ErrNotFound. Effacement commun (effacerLocked), sans 0x0E : échec
-// d'écriture des zéros → ErrES, la trame n'étant quand même plus servie.
+// erreur. Membre périmé : ErrNotFound. Effacement commun (effacerLocked), sans 0x0E : la
+// trame est marquée effacée sous le verrou du salon, puis son emplacement écrasé hors du
+// verrou (ecraser) ; échec de cette écriture → ErrES, la trame n'étant quand même plus servie.
 func (m *Manager) Retirer(mb Membre, seq uint64) error {
 	s := mb.salon
 	if s == nil {
 		return ErrNotFound
 	}
 	defer m.purger(s) // pièce liée : fichier et ligne effacés hors du verrou
+	if err := m.retirer(s, mb, seq); err != nil {
+		return err
+	}
+	return m.ecraser(s)
+}
+
+func (m *Manager) retirer(s *salon, mb Membre, seq uint64) error {
 	now := m.cfg.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -188,7 +248,36 @@ func (m *Manager) Retirer(mb Membre, seq uint64) error {
 	if e.efface() || e.siege != mb.siege || e.seq <= borne {
 		return nil
 	}
-	return s.effacerLocked(i)
+	s.effacerLocked(i)
+	return nil
+}
+
+// ecraser : emplacements marqués effacés du salon (aEcraser) écrasés d'aléa dans sa
+// conversation, hors de tout verrou de salon, sous la borne des écritures. Appelée après un
+// retrait et par la passe disque de l'entretien (échéances). Conversation détruite entre-temps
+// (renouvellement, fin) : rien à écraser, sans erreur. Toute autre erreur : ErrES ; les trames
+// ne sont de toute façon plus servies (marquerLocked), et leurs emplacements, chiffrés sous la
+// clé du salon (en mémoire seulement), disparaissent avec la conversation.
+func (m *Manager) ecraser(s *salon) error {
+	conv, l := s.prendreAEcraser()
+	if len(l) == 0 {
+		return nil
+	}
+	var err error
+	_ = m.ecr.Do(func() error { err = conv.EffacerPlusieurs(l); return nil })
+	if errors.Is(err, ErrDetruite) {
+		return nil
+	}
+	return err
+}
+
+// prendreAEcraser : emplacements à écraser et leur conversation, pris ensemble sous le verrou.
+func (s *salon) prendreAEcraser() (*Conversation, []uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l := s.aEcraser
+	s.aEcraser = nil
+	return s.conv, l
 }
 
 // Quitter : départ de mb (0x03 au journal, diffusé à la Task 9), jeton oublié, siège libéré,
@@ -331,6 +420,16 @@ func (s *salon) lireRefs(conv *Conversation, refs []ref, efface func(seq uint64)
 		out = append(out, EnrTrame(r.seq, r.siege, r.recuMs, trame))
 	}
 	return out, nil
+}
+
+// aDesTrames : refs contient au moins une trame (à lire dans la conversation).
+func aDesTrames(refs []ref) bool {
+	for _, r := range refs {
+		if r.enr == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // crochetLireRefs : tests seulement (panique injectée sous le verrou du salon) ; nil en

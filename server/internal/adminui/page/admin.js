@@ -83,6 +83,10 @@ function afficher(e) {
     ? el('li', 'Signalements : 5 ou plus dans l’heure', 'attention')
     : el('li', 'Signalements : pas d’alerte', 'ok'));
   p.append(el('li', s.salon_actif ? 'Salon activé' : 'Salon désactivé'));
+  if (s.vidages_wal_rates > 0) {
+    p.append(el('li', 'Vidages de la base ratés : ' + nombre.format(s.vidages_wal_rates) +
+      ' (un autre programme lit-il shares.db ?)', 'attention'));
+  }
 
   const d = $('sante');
   vider(d);

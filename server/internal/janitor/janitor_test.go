@@ -167,7 +167,7 @@ func TestRun(t *testing.T) {
 	c.Add(2 * time.Hour)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { Run(ctx, s, s.DB, 10*time.Millisecond); close(done) }()
+	go func() { Run(ctx, s, 10*time.Millisecond); close(done) }()
 	deadline := time.Now().Add(5 * time.Second)
 	for rows(t, s, id) != 0 {
 		if time.Now().After(deadline) {
@@ -201,7 +201,7 @@ func TestRunResyncsUsedBytes(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { Run(ctx, s, s.DB, 10*time.Millisecond); close(done) }()
+	go func() { Run(ctx, s, 10*time.Millisecond); close(done) }()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if n, _ := s.Blobs.UsedBytes(); n == 0 {
@@ -221,7 +221,7 @@ func TestRunResyncsUsedBytes(t *testing.T) {
 func TestRunWatchRecuperentLesPaniques(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{}, 2)
-	go func() { Run(ctx, nil, nil, time.Millisecond); done <- struct{}{} }()
+	go func() { Run(ctx, nil, time.Millisecond); done <- struct{}{} }()
 	go func() { Watch(ctx, nil, time.Millisecond); done <- struct{}{} }()
 	time.Sleep(50 * time.Millisecond) // des dizaines de tours, chacun en panique
 	cancel()

@@ -23,25 +23,18 @@ type Stats struct {
 	Paniques int64 `json:"paniques_entretien"`
 }
 
-// Stats lit l'état agrégé. Les sièges se comptent sous le verrou de chaque salon, pris un à un
-// après avoir copié la liste sous Manager.mu (ordre des verrous : Manager.mu puis salon.mu,
-// jamais l'inverse).
+// Stats lit l'état agrégé sans prendre le verrou d'aucun salon (audit adverse du 13 novembre,
+// front serveur, F1 : la lecture du tableau de bord restait suspendue derrière un salon
+// occupé) : les sièges occupés sont un compteur atomique par salon (salon.occ, remis à 0 à la
+// fin du salon). Manager.mu n'est tenu que le temps de parcourir la liste, en mémoire.
 func (m *Manager) Stats() Stats {
 	m.mu.Lock()
 	vivants := len(m.vivants)
-	salons := make([]*salon, 0, len(m.salons))
+	sieges := 0
 	for _, s := range m.salons {
-		salons = append(salons, s)
+		sieges += int(s.occ.Load())
 	}
 	m.mu.Unlock()
-	sieges := 0
-	for _, s := range salons {
-		s.mu.Lock()
-		if !s.fini {
-			sieges += s.occupesLocked()
-		}
-		s.mu.Unlock()
-	}
 	return Stats{
 		Vivants: vivants, Max: m.cfg.Max, Sieges: sieges, Connexions: m.servis.Load(),
 		Trames: m.tramesGlob.Load(), TramesMax: m.tramesTotalMax(),

@@ -55,10 +55,14 @@ prev=$(cat .release.prev 2>/dev/null || true)
 valid() { [[ $1 =~ ^sha256:[0-9a-f]{64}$ ]]; }
 
 # dc <empreinte> <arguments de docker compose…>
+# « -f compose.yaml » explicite : sans lui, docker compose fusionne de lui-même un
+# compose.override.yaml posé à côté et suit COMPOSE_FILE (deploy/.env), qui pourraient changer
+# l'environnement du serveur sans rien dire (audit adverse du 13 novembre, stockage, H1). Un
+# seul fichier fait foi : celui de la copie du dépôt.
 dc() {
 	local digest=$1
 	shift
-	SHH_IMAGE="$SHH_IMAGE_REPO@$digest" docker compose "$@"
+	SHH_IMAGE="$SHH_IMAGE_REPO@$digest" docker compose -f compose.yaml "$@"
 }
 need_current() { valid "$cur" || die "aucune version installée (deploy/.release absent)"; }
 

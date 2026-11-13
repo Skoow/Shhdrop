@@ -233,9 +233,12 @@ func TestDisquePlein(t *testing.T) {
 		l1 := b.connecter(e1.Jeton, e1.Seq)
 		l2 := b.connecter(e2.Jeton, e2.Seq)
 		synctest.Wait()
-		// Une seule trame tient encore (usage + une trame = StorageMax).
-		partages.Store(b.m.cfg.StorageMax - b.m.UsedBytes() - TailleEmplacement)
+		// Il reste juste un palier de conversation (usage + un palier = StorageMax) : une trame
+		// tient encore ; un octet de moins, plus aucune (le fichier grandit par paliers : refus
+		// dès qu'un palier ne tiendrait plus, même si la trame va dans un palier déjà écrit).
+		partages.Store(b.m.cfg.StorageMax - b.m.UsedBytes() - TaillePalier)
 		b.recevoir(t, g1, trameD(0, 2))
+		partages.Add(1)
 		taille, sceau, seq := s1.conv.Taille(), empreinte(t, s1), dernierSeq(s1)
 		if _, err := b.m.Recevoir(g1, trameD(0, 3), nil); !errors.Is(err, ErrPlein) {
 			t.Fatal("trame au-delà de StorageMax :", err)
@@ -267,7 +270,7 @@ func TestDisquePlein(t *testing.T) {
 		partages.Store(0)
 		l2.envoyer(demTrame(trameD(0, 7)))
 		synctest.Wait()
-		if dernierSeq(s2) != seq2+1 || s2.conv.Taille() != taille2+TailleEmplacement {
+		if dernierSeq(s2) != seq2+1 || s2.conv.Taille() != taille2+TaillePalier {
 			t.Fatal("place rendue : trame toujours refusée")
 		}
 		finir(t, l1, l2)
@@ -293,7 +296,12 @@ func TestDisquePleinENOSPC(t *testing.T) {
 		c := b.creer(t, 4)
 		eg, g := b.entrerMembre(t, c, true)
 		s := g.salon
-		b.recevoir(t, g, trameD(0, 1))
+		// Un palier plein : la trame suivante agrandit le fichier (dans un palier déjà écrit,
+		// la taille ne change pas et l'emplacement raté est récrit par l'ajout suivant :
+		// TestAjouterRetourArriere).
+		for i := range emplacementsParPalier {
+			b.recevoir(t, g, trameD(0, i))
+		}
 		f := avecPanne(t, s.conv)
 		f.ecriturePartielle, f.errEcriture = true, syscall.ENOSPC
 		taille, sceau, seq := s.conv.Taille(), empreinte(t, s), dernierSeq(s)
@@ -486,31 +494,31 @@ func TestUsageAtomiqueCoherent(t *testing.T) {
 		}
 	}
 	verifier("ouverture", 0)
-	for i := range 3 {
+	for i := range emplacementsParPalier { // un palier plein : l'ajout suivant agrandit le fichier
 		b.recevoir(t, g1, trameD(0, i))
 	}
 	b.recevoir(t, g2, trameD(0, 9))
-	verifier("ajouts", 4*TailleEmplacement)
+	verifier("ajouts", 2*TaillePalier)
 	f := avecPanne(t, g1.salon.conv)
 	f.ecriturePartielle = true
 	if _, err := b.m.Recevoir(g1, trameD(0, 3), nil); err == nil {
 		t.Fatal("écriture partielle acceptée")
 	}
-	verifier("échec annulé", 4*TailleEmplacement)
+	verifier("échec annulé", 2*TaillePalier)
 	f.truncateEchoue = true
 	if _, err := b.m.Recevoir(g1, trameD(0, 4), nil); err == nil {
 		t.Fatal("écriture partielle acceptée")
 	}
-	verifier("Truncate en échec (borne haute)", 5*TailleEmplacement)
+	verifier("Truncate en échec (borne haute)", 3*TaillePalier)
 	id1 := b.idDe(t, c1)
 	if err := b.m.detruire(id1); err != nil {
 		t.Fatal(err)
 	}
-	verifier("destruction", TailleEmplacement)
+	verifier("destruction", TaillePalier)
 	if err := b.m.detruire(id1); err != nil {
 		t.Fatal(err)
 	}
-	verifier("destruction répétée", TailleEmplacement)
+	verifier("destruction répétée", TaillePalier)
 	if err := b.m.detruire(b.idDe(t, c2)); err != nil {
 		t.Fatal(err)
 	}

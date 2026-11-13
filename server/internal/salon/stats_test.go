@@ -9,7 +9,7 @@ func TestStatsAgregees(t *testing.T) {
 	b := nouveauBanc(t, 200)
 	b.m.cfg.SalonFramesTotal = 1000
 	c1 := b.creer(t, 4)
-	b.creer(t, 4) // second salon, personne n'y entre
+	b.creer(t, 4)                       // second salon, personne n'y entre
 	_, g := b.entrerMembre(t, c1, true) // créateur
 	b.entrer(t, c1, false)              // invité
 	b.recevoir(t, g, trameD(0, 1))

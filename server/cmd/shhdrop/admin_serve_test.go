@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/skoow/shhdrop/server/internal/adminui"
 	"github.com/skoow/shhdrop/server/internal/config"
+	"github.com/skoow/shhdrop/server/internal/store"
 )
 
 const jetonAdmin = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -239,5 +241,38 @@ func TestAdminDestroyDepuisLaPage(t *testing.T) {
 	}
 	if count(t, svc) != 1 {
 		t.Fatal("un partage a disparu")
+	}
+}
+
+// Audit adverse du 13 novembre, 2e passage, stockage, F3 : le tableau de bord montre le nombre
+// de vidages du WAL ratés (un entier en mémoire). Un autre processus qui lit la base fait
+// échouer le vidage : le compte monte ; il est nul sinon.
+func TestEtatVidagesRates(t *testing.T) {
+	cfg, svc := adminSetup(t)
+	d := adminDeps{svc: svc, db: svc.DB, start: time.Now(), alert: func() bool { return false }}
+	st, err := adminState(cfg, d)
+	if err != nil || st.Sante.VidagesRates != 0 {
+		t.Fatal("au départ :", st.Sante.VidagesRates, err)
+	}
+	other, err := sql.Open("sqlite", "file:"+filepath.Join(cfg.DataDir, "shares.db")+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	tx, err := other.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var n int
+	if err := tx.QueryRow(`SELECT count(*) FROM shares`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	mk(t, svc) // une écriture : le WAL n'est pas vide
+	if err := svc.Vidage.Maintenant(); !errors.Is(err, store.ErrCheckpointBusy) {
+		t.Fatal("vidage, base occupée :", err)
+	}
+	if st, err = adminState(cfg, d); err != nil || st.Sante.VidagesRates != 1 {
+		t.Fatal("après un vidage raté :", st.Sante.VidagesRates, err)
 	}
 }

@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFromEnvSansDataDir(t *testing.T) {
 	t.Setenv("SHH_DATA_DIR", "")
@@ -93,10 +96,26 @@ func TestSalonsDefautDesactive(t *testing.T) {
 			t.Errorf("SHH_SALONS=%q accepté", v)
 		}
 	}
-	env(t, map[string]string{"SHH_DATA_DIR": "/d", "SHH_SALONS": "1", "SHH_ORIGIN": "https://shhdrop.app", "SHH_SALONS_MAX": "10000"})
+	env(t, map[string]string{"SHH_DATA_DIR": "/d", "SHH_SALONS": "1", "SHH_ORIGIN": "https://shhdrop.app", "SHH_SALONS_MAX": "500"})
 	c, err = FromEnv()
-	if err != nil || !c.Salons || c.Origin != "https://shhdrop.app" || c.SalonsMax != 10000 {
+	if err != nil || !c.Salons || c.Origin != "https://shhdrop.app" || c.SalonsMax != 500 {
 		t.Fatalf("salon activé : %+v %v", c, err)
+	}
+	// Audit adverse du 13 novembre, front serveur : SHH_SALONS_MAX est croisé avec la mémoire
+	// au démarrage (checkSalons). 10 000 salons demandent un plafond global de trames à leur
+	// mesure : refus sans lui, accepté avec ; sans effet si le salon est désactivé.
+	env(t, map[string]string{"SHH_DATA_DIR": "/d", "SHH_SALONS": "1", "SHH_ORIGIN": "https://shhdrop.app", "SHH_SALONS_MAX": "10000"})
+	if _, err := FromEnv(); err == nil || !strings.Contains(err.Error(), "SHH_SALONS_MAX=10000") {
+		t.Fatal("10 000 salons sans la mémoire pour acceptés :", err)
+	}
+	t.Setenv("SHH_SALON_FRAMES_TOTAL", "20000000")
+	if c, err = FromEnv(); err != nil || c.SalonsMax != 10000 {
+		t.Fatalf("10 000 salons avec un plafond global à leur mesure : %+v %v", c, err)
+	}
+	t.Setenv("SHH_SALON_FRAMES_TOTAL", "")
+	env(t, map[string]string{"SHH_DATA_DIR": "/d", "SHH_SALONS_MAX": "10000"})
+	if c, err = FromEnv(); err != nil || c.Salons || c.SalonsMax != 10000 {
+		t.Fatalf("salon désactivé : %+v %v", c, err)
 	}
 }
 

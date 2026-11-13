@@ -100,17 +100,14 @@ func (s *salon) marquerLocked(i int) (emplacement uint32, ok bool) {
 	return emplacement, true
 }
 
-// effacerLocked : effacement d'un retrait de l'entrée i : entrée
-// marquée effacée (sa pièce liée aussi, marquerLocked), emplacement écrasé de zéros. L'entrée est marquée effacée même si l'écriture des zéros échoue (erreur rendue) : la
-// trame n'est plus jamais servie ; son emplacement, chiffré sous la clé du salon (en mémoire
-// seulement), disparaît avec la conversation. Sans effet sur une entrée déjà effacée.
-// Appelé sous s.mu.
-func (s *salon) effacerLocked(i int) error {
-	emplacement, ok := s.marquerLocked(i)
-	if !ok {
-		return nil
+// effacerLocked : effacement d'un retrait de l'entrée i : entrée marquée effacée (sa pièce
+// liée aussi, marquerLocked), emplacement à écraser hors du verrou (aEcraser, Manager.ecraser).
+// La trame n'est plus jamais servie dès maintenant, que l'écrasement réussisse ou non. Sans
+// effet sur une entrée déjà effacée. Appelé sous s.mu.
+func (s *salon) effacerLocked(i int) {
+	if emplacement, ok := s.marquerLocked(i); ok {
+		s.aEcraser = append(s.aEcraser, emplacement)
 	}
-	return s.conv.Effacer(emplacement)
 }
 
 // plusAttenduLocked : le siège n n'est plus attendu par aucune trame (départ, exclusion,
@@ -188,8 +185,9 @@ func (s *salon) echeanceLocked(r Regle, seq uint64, nowMs int64) {
 // effacerEchuesLocked : efface en un lot les trames dont l'échéance est atteinte à nowMs
 // (drapeauLu : 0x0E renvoyé à une reconnexion), puis diffuse un 0x0E par trame. Appelé par
 // Tick, et avant tout rattrapage (etapeLocked, suite) : une trame échue n'est jamais servie,
-// même entre deux Tick. Erreurs d'écriture ignorées (marquerLocked : trames quand même plus
-// servies). Appelé sous s.mu.
+// même entre deux Tick. Les emplacements sont écrasés ensuite, hors du verrou, par la passe
+// disque de l'entretien (aEcraser, Manager.ecraser : erreurs d'écriture ignorées, les trames
+// n'étant de toute façon plus servies). Appelé sous s.mu.
 func (s *salon) effacerEchuesLocked(nowMs int64) {
 	var emplacements []uint32
 	var cibles []uint64
@@ -208,7 +206,7 @@ func (s *salon) effacerEchuesLocked(nowMs int64) {
 	if len(cibles) == 0 {
 		return
 	}
-	_ = s.conv.EffacerPlusieurs(emplacements)
+	s.aEcraser = append(s.aEcraser, emplacements...)
 	slices.Sort(cibles) // même échéance : le tas ne garde pas l'ordre ; 0x0E dans l'ordre des rangs
 	for _, cible := range cibles {
 		s.diffuserLocked(EnrEfface(s.seq, cible), genreEfface, nil)

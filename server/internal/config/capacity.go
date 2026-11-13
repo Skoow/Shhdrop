@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strconv"
+	"strings"
 )
 
 // Capacité du serveur (demande du propriétaire du 13 novembre : aucune limite de capacité
@@ -39,6 +40,12 @@ type Capacity struct {
 	// dépasserait sinon GOMEMLIMIT (200 salons pleins ≈ 840 Mio d'index) et ferait tuer le
 	// processus. Partagé par tous les salons (Manager.tramesGlob) ; au-delà, 0x0C.
 	SalonFramesTotal int
+	// ConvDiskOps : appels système simultanés au plus sur les fichiers de conversation du
+	// salon, pour les écritures d'une part et les lectures de l'autre (deux bornes de cette
+	// taille, séparées de DiskOps : audit adverse du 13 novembre, front serveur, F1 et F2).
+	// Jamais réglé à part : le quart de DiskOps (au moins 1). Fils du système au pire, tous
+	// appels de fichiers confondus : DiskThreads.
+	ConvDiskOps int
 }
 
 const (
@@ -72,6 +79,86 @@ const (
 
 // memLimit : GOMEMLIMIT en octets ; math.MaxInt64 sans limite.
 func memLimit() int64 { return debug.SetMemoryLimit(-1) }
+
+// DiskThreads : fils du système que les appels de fichiers peuvent tenir en même temps, au
+// pire (disque qui ne répond plus) : partages et pièces (DiskOps), écritures et lectures des
+// conversations (2 × ConvDiskOps). Plus aucun appel de fichier ne dépend du nombre de
+// connexions (SHH_WS_MAX) : les lectures du rattrapage passent par leur borne (F2).
+func (c Capacity) DiskThreads() int { return c.DiskOps + 2*c.ConvDiskOps }
+
+// pidsFile : limite de processus et de fils du conteneur (cgroup v2 ; pids_limit de
+// compose.yaml), vue de l'intérieur.
+const pidsFile = "/sys/fs/cgroup/pids.max"
+
+// pidsMax : limite lue dans le fichier f ; 0 si elle est inconnue ou absente (« max », hors
+// conteneur, cgroup v1, autre système) : aucun contrôle alors.
+func pidsMax(f string) int {
+	b, err := os.ReadFile(f)
+	if err != nil {
+		return 0
+	}
+	s := strings.TrimSpace(string(b))
+	n, err := strconv.Atoi(s)
+	if err != nil || !digits(s) || n < 1 {
+		return 0
+	}
+	return n
+}
+
+// checkThreads refuse une configuration où les appels de fichiers pourraient, à eux seuls,
+// tenir plus de la moitié des fils permis au conteneur (pids, 0 : inconnu) : sous un disque
+// lent, le runtime Go s'arrêterait net (« failed to create new OS thread »), partages et
+// salons avec lui (audit du 13 novembre, D4 ; audit adverse, F2). L'autre moitié reste au
+// runtime Go, au réseau et à SQLite.
+func checkThreads(c Capacity, pids int) error {
+	if n := c.DiskThreads(); pids > 0 && n > pids/2 {
+		return fmt.Errorf("SHH_DISK_OPS_MAX=%d : jusqu'à %d fils du système bloqués sur le disque (partages et pièces %d, "+
+			"conversations 2 × %d), plus de la moitié de pids_limit (%d) : baisser SHH_DISK_OPS_MAX ou relever pids_limit "+
+			"(compose.yaml)", c.DiskOps, n, c.DiskOps, c.ConvDiskOps, pids)
+	}
+	return nil
+}
+
+const (
+	// SalonJournalMem : mémoire budgétée pour le journal des annonces d'un salon, hors de
+	// SalonFramesTotal : 4 096 annonces au plus (salon.journalMax) à 64 o (rang, tranche,
+	// enregistrement de 26 o au plus). Un test compare avec salon.MemoireJournalMax.
+	SalonJournalMem = 4096 * 64
+	// salonPartMin : trames en mémoire garanties au moins à chaque salon (SalonFramesShare) ;
+	// en dessous, le plafond global ne protège plus un salon de ses voisins (F3).
+	salonPartMin = 1000
+)
+
+// SalonFramesShare : part de trames en mémoire réservée à chaque salon : la moitié du plafond
+// global, à parts égales entre les max salons possibles, jamais plus que le plafond par salon
+// (même calcul que salon.PartTrames ; un test les compare).
+func SalonFramesShare(total, max, perSalon int) int {
+	if total <= 0 || max <= 0 {
+		return 0
+	}
+	return min(total/2/max, perSalon)
+}
+
+// checkSalons refuse un SHH_SALONS_MAX que la mémoire ne porte pas (audit adverse du
+// 13 novembre, front serveur : aucun garde-fou de démarrage ne croisait SHH_SALONS_MAX et la
+// mémoire) :
+//   - journaux des annonces (hors du plafond global des trames) : SHH_SALONS_MAX ×
+//     SalonJournalMem tient dans 10 % de GOMEMLIMIT (mem ; sans limite connue : pas de
+//     contrôle) ;
+//   - part de trames garantie à chaque salon : au moins salonPartMin.
+func checkSalons(salonsMax int, c Capacity, mem int64) error {
+	if mem > 0 && mem < math.MaxInt64 && int64(salonsMax)*SalonJournalMem > mem/10 {
+		return fmt.Errorf("SHH_SALONS_MAX=%d : les journaux des salons pourraient prendre %d Mio, plus de 10 %% de GOMEMLIMIT "+
+			"(%d Mio) : au plus %d salons avec cette mémoire ; baisser SHH_SALONS_MAX ou relever mem_limit et GOMEMLIMIT",
+			salonsMax, int64(salonsMax)*SalonJournalMem/mib, mem/mib, mem/10/SalonJournalMem)
+	}
+	if part := SalonFramesShare(c.SalonFramesTotal, salonsMax, c.SalonFrames); part < min(salonPartMin, c.SalonFrames) {
+		return fmt.Errorf("SHH_SALONS_MAX=%d : avec SHH_SALON_FRAMES_TOTAL=%d, chaque salon n'aurait que %d trames garanties "+
+			"(au moins %d) : baisser SHH_SALONS_MAX, ou relever GOMEMLIMIT (ou SHH_SALON_FRAMES_TOTAL, au moins %d)",
+			salonsMax, c.SalonFramesTotal, part, salonPartMin, 2*salonPartMin*salonsMax)
+	}
+	return nil
+}
 
 // computeCapacity : valeurs par défaut pour une limite de mémoire mem (math.MaxInt64 : aucune)
 // et nofile descripteurs (0 : inconnu).
@@ -107,6 +194,7 @@ func computeCapacity(mem int64, nofile uint64) Capacity {
 		c.Watches = min(c.Watches, max(fd, 1))
 		c.WebSockets = min(c.WebSockets, max(fd, 1))
 	}
+	c.ConvDiskOps = max(1, c.DiskOps/4)
 	return c
 }
 
@@ -159,5 +247,6 @@ func capacityFromEnv(mem int64, nofile uint64) (Capacity, error) {
 		}
 		*v.dst = n
 	}
+	c.ConvDiskOps = max(1, c.DiskOps/4)
 	return c, nil
 }

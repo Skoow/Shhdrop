@@ -81,3 +81,42 @@ func TestSansDateApresEchec(t *testing.T) {
 		t.Fatalf("après Truncate en échec : mtime %v", m)
 	}
 }
+
+// Audit adverse du 13 novembre, stockage, F4 : le ctime du fichier de conversation donnait
+// l'heure du dernier message. Après BrouillerDates (une fois par minute, passe disque de
+// l'entretien), le ctime des conversations, des pièces et de leurs dossiers est l'heure du
+// passage.
+func TestBrouillerDatesCtime(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	_, g := b.entrerMembre(t, c, true)
+	b.recevoir(t, g, trameD(0, 1))
+	fichier := filepath.Join(b.cfg.DossierConversations, g.salon.id)
+	ctime := func(p string) time.Time {
+		var st unix.Stat_t
+		if err := unix.Stat(p, &st); err != nil {
+			t.Fatal(err)
+		}
+		return time.Unix(st.Ctim.Unix())
+	}
+	dernierMessage := ctime(fichier)
+	time.Sleep(50 * time.Millisecond)
+	passage := time.Now()
+	if err := b.m.BrouillerDates(); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{fichier, b.cfg.DossierConversations, b.cfg.Pieces.Dir} {
+		if got := ctime(p); got.Before(passage.Add(-20 * time.Millisecond)) {
+			t.Errorf("%s : ctime %v d'avant le passage %v (dernier message : %v)", filepath.Base(p), got, passage, dernierMessage)
+		}
+	}
+	// La passe disque de l'entretien le fait une fois sur passesParBrouillage.
+	time.Sleep(50 * time.Millisecond)
+	avant := time.Now()
+	for range passesParBrouillage {
+		b.m.entretienDisque()
+	}
+	if got := ctime(fichier); got.Before(avant.Add(-20 * time.Millisecond)) {
+		t.Error("entretien : dates jamais brouillées")
+	}
+}

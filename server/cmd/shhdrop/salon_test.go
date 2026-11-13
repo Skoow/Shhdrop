@@ -471,7 +471,7 @@ func TestSetupSalons(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		m, err := setupSalons(cfg, svc.DB, svc, limits.New(time.Now), nil)
+		m, err := setupSalons(cfg, svc.DB, svc, limits.New(time.Now), nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -505,7 +505,7 @@ func TestSetupSalons(t *testing.T) {
 // égal à partages + salon + 2 Gio, une création de salon passe ; un octet de moins, non. Le
 // partage voit, lui, exactement partages + salon.
 func TestSalonSansDoubleCompte(t *testing.T) {
-	salonOctets := int64(salon.TailleEmplacement) // une trame non volatile sur disque
+	salonOctets := int64(salon.TaillePalier) // une trame non volatile sur disque : un palier
 	for _, marge := range []int64{0, -1} {
 		cfg, svc := adminSetup(t)
 		cfg.Salons, cfg.SalonsMax, cfg.Origin = true, 200, origineTest
@@ -516,7 +516,7 @@ func TestSalonSansDoubleCompte(t *testing.T) {
 		partage := share.TotalSize(1)
 		cfg.StorageMaxBytes = partage + salonOctets + 2<<30 + marge
 		svc.StorageMax = cfg.StorageMaxBytes
-		m, err := setupSalons(cfg, svc.DB, svc, limits.New(time.Now), nil)
+		m, err := setupSalons(cfg, svc.DB, svc, limits.New(time.Now), nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -561,7 +561,7 @@ func TestSalonSansDoubleCompte(t *testing.T) {
 func TestUsageAuDemarrage(t *testing.T) {
 	cfg, svc := adminSetup(t)
 	cfg.Salons, cfg.SalonsMax, cfg.Origin = true, 200, origineTest
-	m, err := setupSalons(cfg, svc.DB, svc, limits.New(time.Now), nil)
+	m, err := setupSalons(cfg, svc.DB, svc, limits.New(time.Now), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -583,7 +583,23 @@ func TestUsageAuDemarrage(t *testing.T) {
 		t.Fatal(err)
 	}
 	u, err := usedAtStart(svc, m)
-	if err != nil || u != share.TotalSize(1)+salon.TailleEmplacement {
+	if err != nil || u != share.TotalSize(1)+salon.TaillePalier {
 		t.Fatal("usage au démarrage :", u, err)
+	}
+}
+
+// Audit adverse du 13 novembre, front serveur : le contrôle de démarrage (config.checkSalons)
+// et le gestionnaire du salon calculent la même part de trames par salon et le même budget de
+// journal (config ne dépend pas du paquet salon : deux écritures, tenues égales ici).
+func TestPartDesSalonsMemeCalcul(t *testing.T) {
+	for _, c := range [][3]int{{1966080, 200, 100000}, {1000000, 500, 100000}, {1000, 200, 100000}, {5, 2000, 10},
+		{10000000, 10, 100000}, {0, 200, 100000}, {20000000, 10000, 100000}} {
+		part, pot := salon.PartTrames(c[0], c[1], c[2])
+		if got := config.SalonFramesShare(c[0], c[1], c[2]); got != part || (c[0] > 0 && c[1]*part+pot != c[0]) {
+			t.Errorf("%v : config %d, salon %d (pot %d)", c, got, part, pot)
+		}
+	}
+	if config.SalonJournalMem != salon.MemoireJournalMax {
+		t.Fatal("budget du journal :", config.SalonJournalMem, salon.MemoireJournalMax)
 	}
 }

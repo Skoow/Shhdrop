@@ -66,11 +66,31 @@ func runCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "erreur:", err)
 			return 1
 		}
+		// Les commandes d'administration lisent le lien signalé (K_accès en mémoire) : même
+		// durcissement que le serveur (audit adverse du 13 novembre, stockage, H1).
+		if err := durcir(cfg); err != nil {
+			fmt.Fprintln(stderr, "erreur:", publicMessage(err))
+			return 1
+		}
 		return runAdmin(args[2:], cfg, os.Stdin, stdout, stderr)
 	default:
 		fmt.Fprintln(stderr, "commande inconnue ; usage: shhdrop serve|admin")
 		return 2
 	}
+}
+
+// durcir : interdit core dump et lecture de /proc/<pid>/mem par un autre processus (clés en
+// mémoire, audit adverse du 13 novembre, Z2 ; durcirProcessus, sans effet hors Linux).
+// SHH_DISABLE_DUMPABLE_HARDENING=1, qui l'éteint pour le test « le serveur ne voit rien », est
+// refusée en production (SHH_BEHIND_PROXY=1) : un fichier compose ajouté ne peut pas ouvrir
+// cette porte sans que le serveur le dise (2e passage, stockage, H1).
+func durcir(cfg config.Config) error {
+	if cfg.BehindProxy && os.Getenv("SHH_DISABLE_DUMPABLE_HARDENING") == "1" {
+		return shown("SHH_DISABLE_DUMPABLE_HARDENING=1 est réservée aux essais (elle rend la mémoire du serveur " +
+			"lisible par un autre processus) : refusée avec SHH_BEHIND_PROXY=1 ; retirer cette variable")
+	}
+	durcirProcessus()
+	return nil
 }
 
 // shownError : message écrit pour l'exploitant (règle de configuration, consigne), sûr à
@@ -229,7 +249,8 @@ const salonWait = 5 * time.Second
 // faite (plan C-2, point 11 : avant l'écoute), et l'usage du salon ajouté à celui des
 // partages (ExtraUsed). Le gestionnaire voit les partages par UsedShares, qui n'inclut
 // jamais ExtraUsed : aucun double compte.
-func setupSalons(cfg config.Config, db *sql.DB, svc *share.Service, lim *limits.Limiter, gate *blob.Gate) (*salon.Manager, error) {
+func setupSalons(cfg config.Config, db *sql.DB, svc *share.Service, lim *limits.Limiter, gate *blob.Gate,
+	vidage *store.Vidage) (*salon.Manager, error) {
 	if !cfg.Salons {
 		return nil, nil
 	}
@@ -237,7 +258,8 @@ func setupSalons(cfg config.Config, db *sql.DB, svc *share.Service, lim *limits.
 		Pieces:               &blob.Store{Dir: filepath.Join(cfg.DataDir, dirSalonPieces), NoSparse: cfg.BehindProxy, Gate: gate},
 		DossierConversations: filepath.Join(cfg.DataDir, dirSalons), Now: cfg.Now, Max: cfg.SalonsMax,
 		StorageMax: cfg.StorageMaxBytes, UsedPartages: svc.UsedShares, OnAbandon: lim.AbandonUpload,
-		TramesMax: cfg.Capacity.SalonFrames, SalonFramesTotal: cfg.Capacity.SalonFramesTotal})
+		TramesMax: cfg.Capacity.SalonFrames, SalonFramesTotal: cfg.Capacity.SalonFramesTotal,
+		ConvDiskOps: cfg.Capacity.ConvDiskOps, Vidage: vidage})
 	if err != nil {
 		return nil, err
 	}
@@ -283,9 +305,9 @@ func newHTTPServer(h http.Handler) *http.Server {
 // tableau de bord est demandé (SHH_ADMIN_LISTEN), « SHH_ADMIN_LISTENING <hôte:port> » ou
 // « SHH_ADMIN_INDISPONIBLE ».
 func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
-	// Interdit core dump et lecture de /proc/<pid>/mem par un autre processus (clés en mémoire,
-	// audit adverse du 13 novembre, Z2) ; sans effet hors Linux.
-	durcirProcessus()
+	if err := durcir(cfg); err != nil {
+		return err
+	}
 	start := time.Now()
 	if !filepath.IsAbs(cfg.DataDir) {
 		return shown("SHH_DATA_DIR doit être un chemin absolu")
@@ -310,11 +332,6 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 		return err
 	}
 	defer db.Close()
-	// Vidage immédiat du WAL au démarrage : un -wal laissé par un arrêt brutal (métadonnées de
-	// partages d'avant le crash) est tronqué tout de suite, sans attendre le premier passage du
-	// janitor (≤ 60 s) (audit adverse du 13 novembre, St1). Base occupée (impossible ici, avant
-	// d'écouter) : ignoré, le janitor repassera.
-	_ = store.Checkpoint(db)
 	if err := tightenPerms(cfg.DataDir); err != nil {
 		return err
 	}
@@ -322,12 +339,15 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	// Limites en mémoire ; un envoi effacé sans finalize compte en octets abandonnés (§29.5).
 	// Une seule borne des appels de fichiers pour les partages et les pièces (audit D4).
 	gate := blob.NewGate(max(1, cfg.Capacity.DiskOps))
+	// Vidages regroupés du WAL, communs aux partages et aux salons (stockage, F1) ; leur boucle
+	// tourne plus bas, avec le janitor.
+	vidage := store.NewVidage(db)
 	lim := limits.New(cfg.Now)
 	lim.SetStorage(cfg.StorageMaxBytes) // part équitable du stockage (audit D2)
 	lim.SetSegmentsPerMin(cfg.Capacity.SegmentsPerMin)
 	svc, err := share.NewService(share.Config{DB: db, OnAbandon: func(id string, _ int) { lim.AbandonUpload(id) },
 		Blobs: &blob.Store{Dir: filepath.Join(cfg.DataDir, "blobs"), NoSparse: cfg.BehindProxy, Gate: gate},
-		Now:   cfg.Now, StorageMax: cfg.StorageMaxBytes, FrozenFile: filepath.Join(cfg.DataDir, "frozen")})
+		Now:   cfg.Now, StorageMax: cfg.StorageMaxBytes, FrozenFile: filepath.Join(cfg.DataDir, "frozen"), Vidage: vidage})
 	if err != nil {
 		return err
 	}
@@ -339,8 +359,19 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if err := janitor.Reconcile(svc); err != nil {
 		return err
 	}
-	sm, err := setupSalons(cfg, db, svc, lim, gate)
+	sm, err := setupSalons(cfg, db, svc, lim, gate, vidage)
 	if err != nil {
+		return err
+	}
+	// Vidage du WAL au démarrage, APRÈS les purges (partages : PurgeAtStart et Reconcile ;
+	// salons : PurgerAuDemarrage) et avant l'écoute : ni un -wal laissé par un arrêt brutal ni
+	// les lignes que les purges viennent d'effacer ne restent lisibles dans shares.db-wal ou
+	// dans shares.db (audit adverse du 13 novembre, St1 ; 2e passage, stockage, F2 : placé avant
+	// les purges, il laissait les partages purgés dans la base jusqu'au premier passage du
+	// janitor, ≈ 55 s). Base occupée : seul un autre processus peut la tenir ici (outil de
+	// sauvegarde, sqlite3) ; refus de démarrer, message fixe (store.ErrCheckpointBusy), comme
+	// le fait déjà la purge des salons.
+	if err := store.Checkpoint(db); err != nil {
 		return err
 	}
 	used, err := usedAtStart(svc, sm)
@@ -395,19 +426,23 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	jctx, jcancel := context.WithCancel(ctx)
 	jdone := make(chan struct{})
 	wdone := make(chan struct{})
-	go func() { janitor.Run(jctx, svc, db, 60*time.Second); close(jdone) }()
+	go func() { janitor.Run(jctx, svc, 60*time.Second); close(jdone) }()
+	// Vidages du WAL demandés par les effacements : au plus un par seconde, hors des requêtes.
+	vdone := make(chan struct{})
+	go func() { vidage.Run(jctx); close(vdone) }()
 	// Chaque seconde : partages effacés hors du serveur (shhdrop admin destroy) → flux
 	// coupés et surveillances prévenues (spec §41.8).
 	go func() { janitor.Watch(jctx, svc, time.Second); close(wdone) }()
-	// Salon : Tick chaque seconde (échéances, sièges hors ligne, pièces, salons échus, lignes
-	// supprimées par l'administrateur), arrêté avant la fermeture de la base.
+	// Salon : entretien chaque seconde, passe mémoire et passe disque dans deux boucles
+	// (échéances, sièges hors ligne, pièces, salons échus, lignes supprimées par
+	// l'administrateur), arrêté avant la fermeture de la base.
 	rdone := make(chan struct{})
 	if sm != nil {
 		go func() { sm.Run(jctx); close(rdone) }()
 	} else {
 		close(rdone)
 	}
-	defer func() { jcancel(); <-jdone; <-wdone; <-rdone }()
+	defer func() { jcancel(); <-jdone; <-wdone; <-rdone; <-vdone }()
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {

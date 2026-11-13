@@ -147,6 +147,11 @@ type Config struct {
 	// prendre de verrou du Service ; une erreur de lecture doit rendre une valeur haute (échec
 	// fermé).
 	ExtraUsed func() int64
+	// Vidage (facultatif) : vidages regroupés du WAL (store.Vidage), demandés après chaque
+	// effacement ou réécriture sensible ; le serveur en fait tourner la boucle (Run). Absent :
+	// un Vidage propre au service, sans boucle (commandes d'administration, tests : seuls les
+	// vidages faits dans l'appelant, Maintenant, ont lieu).
+	Vidage *store.Vidage
 }
 
 // NewService valide la configuration : une valeur zéro ne doit jamais désactiver le gel
@@ -165,7 +170,10 @@ func NewService(c Config) (*Service, error) {
 		return nil, errors.New("share : FrozenFile doit être un chemin absolu")
 	}
 	s := &Service{DB: c.DB, Blobs: c.Blobs, Now: c.Now, StorageMax: c.StorageMax, FrozenFile: c.FrozenFile,
-		OnAbandon: c.OnAbandon, KillWait: c.KillWait, ExtraUsed: c.ExtraUsed}
+		OnAbandon: c.OnAbandon, KillWait: c.KillWait, ExtraUsed: c.ExtraUsed, Vidage: c.Vidage}
+	if s.Vidage == nil {
+		s.Vidage = store.NewVidage(c.DB)
+	}
 	rand.Read(s.grantKey[:]) // clé des octrois d'ouverture, propre à ce processus (spec §41.4)
 	return s, nil
 }
@@ -180,6 +188,7 @@ type Service struct {
 	OnAbandon  func(id string, bucket int)
 	KillWait   time.Duration
 	ExtraUsed  func() int64
+	Vidage     *store.Vidage // jamais nil après NewService
 
 	createMu sync.Mutex // rend atomiques « place libre ? » et la réservation
 	// attemptMu : rend atomiques, par partage, la lecture du compteur, la vérification de
@@ -772,6 +781,7 @@ func (s *Service) Finalize(id string, r FinalizeReq) (time.Duration, error) {
 	if err != nil {
 		return 0, notFound(err)
 	}
+	s.Vidage.Demander() // ttl_hours retiré de la ligne : l'ancienne valeur ne reste pas dans le WAL
 	s.forget(id)
 	return secs(got - now), nil
 }
@@ -1437,6 +1447,11 @@ func (s *Service) destroy(id string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	// Ligne effacée : vidage du WAL demandé (regroupé, hors de cette requête), pour TOUT
+	// effacement (fin de téléchargement, essais, échéance, destruction : audit adverse du
+	// 13 novembre, stockage, F1). En WAL, la ligne supprimée reste lisible dans shares.db-wal
+	// et dans shares.db tant que le WAL n'est pas replié.
+	s.Vidage.Demander()
 	s.forget(id)
 	if state == "uploading" && s.OnAbandon != nil {
 		s.OnAbandon(id, bucket)
@@ -1445,13 +1460,14 @@ func (s *Service) destroy(id string) (bool, error) {
 }
 
 // retireOrNotFound : destruction EXPLICITE (créateur par S_gestion, destinataire par K_preuve,
-// administrateur). Au succès, le WAL est vidé tout de suite (Checkpoint TRUNCATE) : les
-// métadonnées du partage supprimé (V_accès, V_gestion, sel, palier, échéance) ne traînent pas
-// dans shares.db-wal jusqu'au prochain passage du janitor (≤ 60 s), lisibles à une saisie du
-// serveur en marche (audit adverse du 13 novembre, St1). Les destructions CHAUDES (fin de
-// téléchargement, 5 essais : Done, countFailure) appellent retire() directement, sans ce vidage,
-// pour ne pas vider le WAL à chaque téléchargement. Un vidage incomplet (base occupée) n'est pas
-// une erreur : le janitor repassera (le partage est de toute façon déjà supprimé).
+// administrateur). Au succès, le WAL est vidé tout de suite, dans cette requête (Vidage.
+// Maintenant) : les métadonnées du partage supprimé (V_accès, V_gestion, sel, palier, échéance)
+// ne restent ni dans shares.db-wal ni dans shares.db, lisibles à une saisie du serveur en
+// marche (audit adverse du 13 novembre, St1). Tous les autres effacements (fin de
+// téléchargement, 5 essais, échéance : destroy) demandent un vidage regroupé, fait dans la
+// seconde hors de la requête (2e passage, stockage, F1). Un vidage incomplet (base occupée par
+// un autre processus : attente courte, F3) n'est pas une erreur : il est compté et refait par
+// la boucle des vidages (le partage est de toute façon déjà supprimé).
 func (s *Service) retireOrNotFound(id string, grace bool) error {
 	ok, err := s.retire(id, grace, s.now())
 	if err != nil {
@@ -1460,9 +1476,7 @@ func (s *Service) retireOrNotFound(id string, grace bool) error {
 	if !ok {
 		return ErrNotFound
 	}
-	// Au mieux : le partage est déjà supprimé, un échec de vidage (base occupée ou autre) ne
-	// doit pas faire échouer la réponse ; le janitor revidera.
-	_ = store.Checkpoint(s.DB)
+	_ = s.Vidage.Maintenant()
 	return nil
 }
 

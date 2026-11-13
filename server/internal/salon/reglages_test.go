@@ -120,9 +120,9 @@ func TestRenouvelerEfface(t *testing.T) {
 			}
 		}
 		ancienne.mu.Lock()
-		cle := ancienne.cle
+		aead := ancienne.aead
 		ancienne.mu.Unlock()
-		if cle != [32]byte{} || s.conv == ancienne {
+		if aead != nil || s.conv == ancienne {
 			t.Fatal("ancienne clé gardée")
 		}
 		sous(s, func() {
@@ -194,7 +194,7 @@ func TestRenouvelerEfface(t *testing.T) {
 				t.Fatal("rattrapage depuis 0 : trame d'avant", e.seq)
 			}
 		}
-		if b.tailleConv(t, s.id) != TailleEmplacement {
+		if b.tailleConv(t, s.id) != TaillePalier {
 			t.Fatal("nouvelle conversation", b.tailleConv(t, s.id))
 		}
 		finir(t, lg, la, lb)

@@ -50,7 +50,7 @@ func servie(t *testing.T, s *salon, seq uint64) bool {
 }
 
 // effaceeSurDisque : l'entrée de rang seq est marquée effacée et son emplacement d'origine
-// est nul sur le disque (ErrEfface).
+// ne s'authentifie plus sur le disque (écrasé d'aléa : ErrEfface).
 func effaceeSurDisque(t *testing.T, s *salon, seq uint64, emplacement uint32) bool {
 	t.Helper()
 	e, ok := entreeDe(s, seq)
@@ -183,7 +183,7 @@ func TestUneMinuteSeul(t *testing.T) {
 		seq := b.recevoir(t, g, trameD(dUneMinute, 1))
 		synctest.Wait()
 		e0, _ := entreeDe(s, seq)
-		if n := s.conv.Taille(); n != TailleEmplacement || e0.attendus != 0 {
+		if n := s.conv.Taille(); n != TaillePalier || e0.attendus != 0 {
 			t.Fatal("non rangée :", n, e0.attendus)
 		}
 		b.echoir(time.Minute - time.Millisecond)

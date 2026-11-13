@@ -733,7 +733,7 @@ func TestUsedBytes(t *testing.T) {
 	if _, err := b.etat(t, c).conv.Ajouter(trameTest(0)); err != nil {
 		t.Fatal(err)
 	}
-	if u := b.m.UsedBytes(); u != 1000+TailleEmplacement {
+	if u := b.m.UsedBytes(); u != 1000+TaillePalier {
 		t.Fatal("UsedBytes", u)
 	}
 }

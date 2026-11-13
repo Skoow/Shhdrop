@@ -78,8 +78,12 @@ CREATE INDEX IF NOT EXISTS salon_pieces_salon ON salon_pieces(salon_id)`
 // déjà repliés (dont les métadonnées d'un partage supprimé) restent écrits dans le fichier
 // entre deux TRUNCATE du janitor (audit adverse du 13 novembre, St1).
 const pragmas = "_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_pragma=secure_delete(ON)" +
-	"&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_pragma=temp_store(MEMORY)" +
+	"&_pragma=busy_timeout(" + busyTimeoutMs + ")&_pragma=foreign_keys(ON)&_pragma=temp_store(MEMORY)" +
 	"&_pragma=journal_size_limit(0)"
+
+// busyTimeoutMs : attente d'une base occupée par un autre processus (millisecondes), pour
+// toutes les requêtes sauf les vidages regroupés (vidage.go : attente courte).
+const busyTimeoutMs = "5000"
 
 // SchemaVersion : version du schéma, écrite dans PRAGMA user_version. Un binaire refuse une
 // base d'une version plus récente (ErrNewerSchema) : un retour arrière ne réécrit jamais une

@@ -6,6 +6,7 @@ import (
 	"hash/fnv"
 	"math"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/skoow/shhdrop/server/internal/blob"
 	"github.com/skoow/shhdrop/server/internal/limits"
 	"github.com/skoow/shhdrop/server/internal/share"
+	"github.com/skoow/shhdrop/server/internal/store"
 )
 
 // Gestionnaire des salons (plan C-2 Task 6) : création, meta, entrée, sièges et jetons de
@@ -20,7 +22,10 @@ import (
 // nonces et rangs vivent en mémoire.
 //
 // Ordre des verrous : createMu → Manager.mu → salon.mu (fin.go, lignes) ; essais (rayé par id) → Manager.mu → salon.mu →
-// Manager.idxMu ; Conversation a son propre verrou, pris en dernier ; connexion.cmu
+// Manager.idxMu ; Conversation a son propre verrou, pris en dernier. Bornes des appels disque
+// des conversations (ecr, lec) : une place ne s'attend JAMAIS sous Manager.mu, sous salon.mu
+// ni sous le verrou d'une conversation (audit adverse du 13 novembre, front serveur, F1) ;
+// elle se prend avant, et sous elle seul le verrou de la conversation est pris ; connexion.cmu
 // (connexion.go) est un verrou feuille, pris sous salon.mu (diffusion) ou seul, sous lequel
 // aucun autre verrou n'est pris ; le verrou de Manager.flux (share.Streams) aussi. placeMu
 // (pieces.go) n'est jamais pris sous salon.mu ; sous lui, seuls les verrous internes des
@@ -78,13 +83,34 @@ type Config struct {
 	// OnAbandon (facultatif) : pièce effacée sans avoir été finalisée (limits.AbandonUpload :
 	// sa place d'envoi en cours est rendue, ses octets comptent comme abandonnés).
 	OnAbandon func(id string)
+	// ConvDiskOps (facultatif, config.Capacity.ConvDiskOps) : appels disque simultanés au plus
+	// sur les fichiers de conversation, pour les écritures d'une part et pour les lectures de
+	// l'autre (deux bornes de cette taille ; 0 : ConvDiskOpsDefaut).
+	ConvDiskOps int
+	// Vidage (facultatif) : vidages regroupés du WAL (store.Vidage, partagé avec les partages),
+	// demandés après chaque effacement ou réécriture sensible d'une ligne de salon ou de
+	// pièce ; le serveur en fait tourner la boucle. Absent : un Vidage propre, sans boucle.
+	Vidage *store.Vidage
 }
+
+// ConvDiskOpsDefaut : taille par défaut de chacune des deux bornes des conversations.
+const ConvDiskOpsDefaut = 16
 
 // Manager : salons vivants du processus. Sûr pour un usage concurrent.
 type Manager struct {
 	cfg      Config
 	createMu sync.Mutex // vérification du plafond et insertion d'une création, atomiques
-	essais   [64]sync.Mutex
+	// ecr, lec : bornes des appels disque des fichiers de conversation (chacun tient un fil du
+	// système tant que le disque ne répond pas), écritures et lectures. Séparées de la borne des
+	// partages et des pièces (blob.Store.Gate), et l'une de l'autre (audit adverse du
+	// 13 novembre, F1 et F2) : des transferts de partages sur un disque lent ne retardent ni
+	// les messages ni leurs effacements, et des lecteurs lents (rattrapage) n'affament pas les
+	// écritures. Prises hors de tout verrou (voir l'ordre des verrous).
+	ecr, lec *blob.Gate
+	// vidage : Config.Vidage, jamais nil après NewManager (nil pour un Manager bâti à la main,
+	// commandes hors du serveur : Demander ne fait alors rien).
+	vidage *store.Vidage
+	essais [64]sync.Mutex
 
 	mu     sync.Mutex
 	salons map[string]*salon // id interne → état (créé au premier Rejoindre)
@@ -117,6 +143,11 @@ type Manager struct {
 	// audit adverse du 13 novembre) sous le verrou du salon : un léger dépassement (une trame
 	// par Recevoir simultané, comme pour m.plein) est accepté.
 	tramesGlob atomic.Int64
+	// passesDisque : passes de entretienDisque (BrouillerDates une fois sur passesParBrouillage).
+	passesDisque atomic.Int64
+	// tramesPot : trames rangées au-delà de la part réservée de leur salon, tous salons
+	// confondus (salon.globInc, globDec) : le pot commun, plafonné par potTramesMax (F3).
+	tramesPot atomic.Int64
 	// placeMu, reserves : place des pièces en cours de réservation (placer, pieces.go).
 	placeMu  sync.Mutex
 	reserves atomic.Int64
@@ -150,8 +181,17 @@ func NewManager(c Config) (*Manager, error) {
 	if err := os.Chtimes(c.Pieces.Dir, time.Unix(0, 0), time.Unix(0, 0)); err != nil {
 		return nil, es(err)
 	}
+	ops := c.ConvDiskOps
+	if ops <= 0 {
+		ops = ConvDiskOpsDefaut
+	}
+	v := c.Vidage
+	if v == nil {
+		v = store.NewVidage(c.DB)
+	}
 	return &Manager{cfg: c, salons: map[string]*salon{}, index: map[[32]byte]*salon{},
-		vivants: map[string]vivant{}, parBloc: map[[32]byte]int{}, pieceIdx: map[string]*salon{}}, nil
+		vivants: map[string]vivant{}, parBloc: map[[32]byte]int{}, pieceIdx: map[string]*salon{},
+		ecr: blob.NewGate(ops), lec: blob.NewGate(ops), vidage: v}, nil
 }
 
 // vivant : bloc et échéance d'un salon compté dans parBloc ; ne : création (secondes Unix) ;
@@ -178,6 +218,29 @@ func (m *Manager) tramesTotalMax() int {
 		return m.cfg.SalonFramesTotal
 	}
 	return math.MaxInt32
+}
+
+// PartTrames : part de trames en mémoire réservée à chaque salon, pour un plafond global total
+// et max salons au plus (audit adverse du 13 novembre, front serveur, F3 : le plafond global
+// était un pot commun, qu'un groupe de salons pouvait vider pour tous les autres). La moitié
+// du plafond global est réservée, à parts égales entre les max salons possibles (jamais plus
+// que le plafond par salon) ; le reste (pot) est commun. max × part + pot = total : le
+// garde-fou de la mémoire ne bouge pas. Exportée pour le contrôle de démarrage
+// (config : une part trop petite refuse le démarrage).
+func PartTrames(total, max, parSalon int) (part, pot int) {
+	if total <= 0 || max <= 0 {
+		return 0, total
+	}
+	part = min(total/2/max, parSalon)
+	return part, total - max*part
+}
+
+// partTrames : part réservée et pot commun de ce gestionnaire (0, 0 sans plafond global).
+func (m *Manager) partTrames() (part, pot int) {
+	if m.cfg.SalonFramesTotal <= 0 {
+		return 0, 0
+	}
+	return PartTrames(m.cfg.SalonFramesTotal, m.cfg.Max, m.tramesMax())
 }
 
 // parBlocMax : salons vivants au plus par bloc : VivantsParBloc, et au plus 1/8 de Max (part
@@ -530,11 +593,15 @@ func (m *Manager) etat(id string, exp int64, maxMembers int) (*salon, error) {
 		if err != nil {
 			return nil, err
 		}
-		conv.g = m.cfg.Pieces.Gate // écritures de conversation bornées comme les partages (S-H1)
+		conv.lec = m.lec // lectures bornées, hors de tout verrou (Conversation.Lire)
 		conv.compterDans(&m.octetsConv)
 		neuf := nouveauSalon(id, time.Unix(exp, 0), maxMembers, conv, m.now)
 		neuf.flux = &m.flux
-		neuf.glob, neuf.globMax = &m.tramesGlob, m.tramesTotalMax()
+		neuf.glob = &m.tramesGlob
+		if m.cfg.SalonFramesTotal > 0 {
+			neuf.pot = &m.tramesPot
+			neuf.part, neuf.potMax = m.partTrames()
+		}
 		m.mu.Lock()
 		if s = m.salons[id]; s == nil {
 			m.salons[id], s = neuf, neuf
@@ -660,41 +727,107 @@ func (m *Manager) sortirLocked(s *salon, n uint8, enr func(seq uint64) []byte, r
 	m.flux.Revoke(cleFluxMembre(jv)) // lectures de pièces en cours de ce jeton coupées
 }
 
-// Tick : une passe d'entretien (chaque seconde, Run) : trames des règles 1 à 3 échues (délai après lecture par tous)
-// effacées (Task 11), pièces effacées (celles de ces trames, celles qui ne sont jamais
-// liées ou finalisées : Task 13), salons arrivés à échéance finis en raison 1 (finir : 0x05
-// aux connectés, conversation, pièces fichier puis ligne, ligne du salon), fins restées à
-// faire reprises, tombes échues oubliées une fois leur fin complète et leurs pièces purgées
-// (un effacement raté est retenté au Tick suivant), places de bloc des salons échus rendues,
-// puis passe sur la base (lignes, fin.go : lignes à 10 essais, lignes échues sans état, lignes
-// disparues).
+// Tick : une passe d'entretien complète, mémoire puis disque (tests, et tout appelant qui veut
+// l'entretien fait au retour). En marche (Run), les deux passes tournent chacune dans sa
+// goroutine : la passe mémoire n'attend jamais le disque (audit adverse du 13 novembre, front
+// serveur, F1 : une borne des appels disque saturée, ou un disque lent, figeait l'entretien de
+// tous les salons, donc les effacements à échéance et les fins de vie).
 func (m *Manager) Tick() {
+	m.entretienMemoire()
+	m.entretienDisque()
+}
+
+// copieSalons : salons en mémoire, copiés sous Manager.mu (defer : une panique, récupérée par
+// Run, ne garde pas le verrou).
+func (m *Manager) copieSalons(avant func()) []*salon {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if avant != nil {
+		avant()
+	}
+	salons := make([]*salon, 0, len(m.salons))
+	for _, s := range m.salons {
+		salons = append(salons, s)
+	}
+	return salons
+}
+
+// entretienMemoire : passe d'entretien sans aucun appel disque ni requête SQL, et sans
+// attendre aucune borne (chaque seconde, Run) : trames des règles 1 à 3 échues (délai après
+// lecture par tous) marquées effacées, donc plus jamais servies, et 0x0E diffusé (Task 11) ;
+// pièces échues marquées effacées, flux coupés (Task 13) ; sièges jamais connectés libérés ;
+// salons arrivés à échéance finis en raison 1 pour tout ce qui est en mémoire (oublier : 0x05
+// aux connectés, jetons, journal et index oubliés) ; places de bloc des salons échus rendues.
+// Tout ce qui reste à faire sur le disque est laissé à entretienDisque.
+func (m *Manager) entretienMemoire() {
 	now := m.cfg.Now()
-	var salons []*salon
-	func() { // defer : une panique (récupérée par Run) ne garde pas Manager.mu
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		m.echusLocked(now.Unix())
-		salons = make([]*salon, 0, len(m.salons))
-		for _, s := range m.salons {
-			salons = append(salons, s)
+	for _, s := range m.copieSalons(func() { m.echusLocked(now.Unix()) }) {
+		if m.entretenir(s, now) {
+			m.mu.Lock()
+			m.finirLocked(s.id)
+			m.mu.Unlock()
+			m.oublier(s, RaisonExpire, false) // partie disque : entretienDisque (reprendreFin)
 		}
-	}()
+	}
+}
+
+// entretienDisque : passe d'entretien sur le disque et la base (chaque seconde, Run, dans sa
+// propre goroutine ; elle peut attendre un disque lent sans retarder entretienMemoire) :
+// salons où personne n'est entré effacés ; emplacements des trames effacées écrasés
+// (ecraser) ; pièces effacées (fichier puis ligne) ; fins restées à faire reprises (achever :
+// conversation, pièces, ligne du salon) ; tombes échues oubliées une fois leur fin complète
+// et leurs pièces purgées (un effacement raté est retenté au passage suivant) ; puis passe sur
+// la base (lignes, fin.go : lignes à 10 essais, lignes échues sans état, lignes disparues).
+func (m *Manager) entretienDisque() {
+	now := m.cfg.Now()
 	m.effacerVides(now.Unix())
-	for _, s := range salons {
-		tombe, echu, aPurger := m.entretenir(s, now)
-		switch {
-		case echu:
-			_ = m.finir(s, RaisonExpire) // une partie disque ratée reste à faire (reprendreFin)
-		case aPurger:
-			m.purger(s) // hors du verrou du salon
-		}
+	for _, s := range m.copieSalons(nil) {
+		_ = m.ecraser(s) // erreur : trames déjà plus servies (marquerLocked)
+		m.purger(s)      // hors du verrou du salon
 		m.reprendreFin(s)
-		if tombe && !s.resteAPurger() && !s.finIncomplete() {
+		if s.tombeEchue(now) && !s.resteAPurger() && !s.finIncomplete() {
 			m.oublierTombe(s)
 		}
 	}
 	m.lignes(now)
+	// Une fois par minute : dates d'inode des conversations et des pièces brouillées.
+	if m.passesDisque.Add(1)%passesParBrouillage == 0 {
+		_ = m.BrouillerDates()
+	}
+}
+
+// passesParBrouillage : passes disque de l'entretien (une par seconde) entre deux brouillages
+// des dates d'inode.
+const passesParBrouillage = 60
+
+// BrouillerDates remet à l'epoch les dates de chaque fichier de conversation et de pièce, et
+// de leurs dossiers : leur date de changement d'inode (ctime) devient l'heure de ce passage, la
+// même pour tous, et non plus celle du dernier message, du dernier retrait ou de la dernière
+// suppression (audit adverse du 13 novembre, stockage, F4 ; blob.Store.ScrubTimes). Entre deux
+// passages (une minute), le ctime d'une conversation qui vient de recevoir un message donne
+// encore l'heure de ce message ; la date de création (btime) ne peut pas être changée. Hors
+// de tout verrou ; écritures sous la borne des écritures de conversation.
+func (m *Manager) BrouillerDates() error {
+	es0, err := os.ReadDir(m.cfg.DossierConversations)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return es(err)
+	}
+	var premiere error
+	noter := func(err error) {
+		if err != nil && !errors.Is(err, os.ErrNotExist) && premiere == nil {
+			premiere = err
+		}
+	}
+	for _, e := range es0 {
+		if !e.IsDir() && idValide(e.Name()) {
+			noter(m.ecr.Do(func() error { return sansDate(filepath.Join(m.cfg.DossierConversations, e.Name())) }))
+		}
+	}
+	if err == nil {
+		noter(m.ecr.Do(func() error { return sansDate(m.cfg.DossierConversations) }))
+	}
+	noter(es(m.cfg.Pieces.ScrubTimes()))
+	return premiere
 }
 
 // oublierTombe : tombe s retirée de Manager.salons (si c'est toujours elle).
@@ -710,15 +843,16 @@ func (m *Manager) oublierTombe(s *salon) {
 // Rejoindre qui a lu la ligne juste avant l'échéance ne recrée ni état ni fichier.
 const margeTombe = time.Minute
 
-// entretenir : passe de Tick sur un salon, sous son verrou (defer : une panique ne le garde
-// jamais) ; rend vrai pour une tombe échue (échéance + margeTombe), echu pour un salon vivant
-// arrivé à son échéance (à détruire), et aPurger s'il reste des pièces à effacer (pièces de
-// trames échues, pièces non liées échues : pieces.go).
-func (m *Manager) entretenir(s *salon, now time.Time) (tombe, echu, aPurger bool) {
+// entretenir : passe mémoire de l'entretien sur un salon, sous son verrou (defer : une panique
+// ne le garde jamais) ; rend vrai pour un salon vivant arrivé à son échéance (à finir).
+func (m *Manager) entretenir(s *salon, now time.Time) (echu bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.fini && !now.Before(s.expires) {
-		return false, true, false
+	if s.fini {
+		return false
+	}
+	if !now.Before(s.expires) {
+		return true
 	}
 	s.effacerEchuesLocked(now.UnixMilli())
 	// Un siège connecté au moins une fois n'est jamais libéré ici : un absent reste réservé et
@@ -731,7 +865,15 @@ func (m *Manager) entretenir(s *salon, now time.Time) (tombe, echu, aPurger bool
 			m.departLocked(s, uint8(n))
 		}
 	}
-	return s.fini && !now.Before(s.expires.Add(margeTombe)), false, s.echuesPiecesLocked(now)
+	s.echuesPiecesLocked(now) // pièces échues marquées (aPurger) : effacées par entretienDisque
+	return false
+}
+
+// tombeEchue : tombe (salon fini) dont l'échéance plus margeTombe est passée.
+func (s *salon) tombeEchue(now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.fini && !now.Before(s.expires.Add(margeTombe))
 }
 
 // resteAPurger : des pièces du salon attendent encore leur effacement (purger en échec).

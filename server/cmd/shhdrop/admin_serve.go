@@ -74,7 +74,8 @@ func adminState(cfg config.Config, d adminDeps) (adminui.State, error) {
 	var st adminui.State
 	goVersion, rev := adminui.Build()
 	st.Sante = adminui.Sante{DepuisS: int64(time.Since(d.start) / time.Second), Go: goVersion, Revision: rev,
-		Gele: d.svc.Frozen(), SalonActif: d.sm != nil, Origine: cfg.Origin, AlerteSignalements: d.alert()}
+		Gele: d.svc.Frozen(), SalonActif: d.sm != nil, Origine: cfg.Origin, AlerteSignalements: d.alert(),
+		VidagesRates: d.svc.Vidage.Rates()}
 
 	partages, err := d.svc.UsedShares()
 	if err != nil {

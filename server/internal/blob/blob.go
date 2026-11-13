@@ -372,6 +372,34 @@ func (s *Store) List() ([]string, error) {
 	return ids, nil
 }
 
+// ScrubTimes remet à l'epoch les dates de chaque fichier du dossier, puis du dossier. Les dates
+// de contenu et d'accès y sont déjà (wipeTimes à chaque écriture) ; l'effet voulu est sur la
+// date de changement d'inode (ctime), qu'aucun appel ne permet de choisir mais que tout Chtimes
+// met à l'heure : après un passage, le ctime de tous les fichiers est l'heure de ce passage,
+// et non plus celle de la fin de l'envoi, du dernier message ou de la dernière suppression
+// (audit adverse du 13 novembre, stockage, F4). Appelée à chaque passage du janitor. La date
+// de création (btime) ne peut pas être changée : limite écrite dans deploy/README.md. Un
+// fichier supprimé entre-temps est ignoré ; la première autre erreur est rendue, sans arrêter
+// le passage.
+func (s *Store) ScrubTimes() error {
+	ids, err := s.List()
+	if err != nil {
+		return err
+	}
+	var first error
+	for _, id := range ids {
+		p := filepath.Join(s.Dir, id)
+		err := s.Gate.do(func() error { return wipeTimes(p) })
+		if err != nil && !errors.Is(err, os.ErrNotExist) && first == nil {
+			first = err
+		}
+	}
+	if err := s.Gate.do(func() error { return wipeTimes(s.Dir) }); err != nil && !errors.Is(err, os.ErrNotExist) && first == nil {
+		first = err
+	}
+	return first
+}
+
 // UsedBytes : somme des tailles logiques des fichiers, tenue en mémoire (usage) ; le dossier
 // n'est lu qu'au premier appel (démarrage) et par Resync.
 func (s *Store) UsedBytes() (int64, error) {

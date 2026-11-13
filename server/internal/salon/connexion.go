@@ -814,7 +814,10 @@ func (c *connexion) etapeLocked() (lot [][]byte, refs lotRefs, gen uint64, e eta
 	// Conversation prise avec les refs : un renouvellement la remplace, un lot lu hors du
 	// verrou lit toujours celle de ses emplacements (détruite : trames sautées, lireRefs).
 	refs = lotRefs{conv: s.conv, l: s.refsLocked(c.curseur, lotRattrapage)}
-	if len(refs.l) == lotRattrapage {
+	// Toute trame se lit hors du verrou (audit adverse du 13 novembre, F1 et F2 : aucune
+	// lecture du disque, ni attente de la borne des lectures, sous s.mu). Le passage au direct
+	// se fait donc au premier passage où il ne reste que des annonces (en mémoire) ou rien.
+	if len(refs.l) == lotRattrapage || aDesTrames(refs.l) {
 		return nil, refs, gen, eLire
 	}
 	lot, err := s.lireRefs(s.conv, refs.l, nil)
@@ -872,11 +875,7 @@ func (c *connexion) avancer(seq uint64) {
 	c.curseur = seq
 }
 
-func (s *salon) estFini() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.fini
-}
+func (s *salon) estFini() bool { return s.finiA.Load() }
 
 // FermerTout (arrêt du serveur, srv.RegisterOnShutdown, Task 15) ferme toutes les connexions
 // en 1001 sans attendre leur fin ; une connexion dont l'accueil arrive ensuite est fermée en

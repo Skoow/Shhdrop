@@ -155,6 +155,7 @@ func (m *Manager) oublier(s *salon, raison uint8, signaler bool) (fait, premier 
 	// (récupérée par Run) laisse une tombe dont Tick reprend la partie disque (reprendreFin) ;
 	// finirAvec prend la fin (finEnCours) par le même test (relecture C-2, N2).
 	s.fini = true
+	s.finiA.Store(true)
 	s.etatFin = finAFaire
 	if crochetOublier != nil {
 		crochetOublier()
@@ -187,7 +188,9 @@ func (m *Manager) oublier(s *salon, raison uint8, signaler bool) (fait, premier 
 	clear(s.jetons)
 	clear(s.revoques)
 	s.sieges = [nbSieges]*siege{}
+	s.occ.Store(0)
 	s.journal = nil
+	s.aEcraser = nil        // la conversation entière est détruite par achever
 	s.globDec(len(s.index)) // trames en mémoire rendues au compte global avant de vider l'index
 	s.index = nil
 	s.pieces = nil
@@ -238,6 +241,11 @@ func (m *Manager) achever(s *salon) (err error) {
 	}
 	err = errors.Join(errs...)
 	complete = err == nil
+	// Lignes du salon et de ses pièces effacées (ou rendues mortes) : vidage du WAL demandé,
+	// regroupé et hors de cet appel (audit adverse du 13 novembre, stockage, F1 : aucune fin de
+	// salon ne vidait le WAL ; identifiant, vérificateurs, sel et échéance y restaient jusqu'au
+	// passage du janitor).
+	m.vidage.Demander()
 	return err
 }
 
@@ -309,6 +317,7 @@ func (m *Manager) lignes(now time.Time) {
 	if m.cfg.DB.QueryRow(`SELECT 1 FROM salons WHERE failed_attempts>=? LIMIT 1`, maxEssais).Scan(&un) == nil {
 		_, _ = m.cfg.DB.Exec(`DELETE FROM salons WHERE failed_attempts>=? AND NOT EXISTS
 			(SELECT 1 FROM salon_pieces WHERE salon_pieces.salon_id=salons.id)`, maxEssais)
+		m.vidage.Demander()
 	}
 	m.echuesSansEtat(now.Unix())
 	partis := m.disparus()
@@ -428,15 +437,29 @@ func (m *Manager) echuesSansEtat(now int64) {
 		}
 		_, _ = m.cfg.DB.Exec(`DELETE FROM salons WHERE id=? AND expires_at<=? AND NOT EXISTS
 			(SELECT 1 FROM salon_pieces WHERE salon_id=?)`, id, now, id)
+		m.vidage.Demander()
 	}
 }
 
-// Run : Tick chaque seconde jusqu'à l'annulation de ctx. Une panique dans un Tick est
-// récupérée sans aucune sortie (ni journal ni stderr : le message pourrait citer un
-// identifiant) et le tick suivant repart (revue finale C-2, mineur f) : une panique de
-// l'entretien n'arrête pas tout le serveur, partages compris. Tous les verrous pris par Tick
-// sont rendus par defer ; une fin interrompue reste « à faire » (achever) et est reprise.
+// Run : entretien chaque seconde jusqu'à l'annulation de ctx, en deux boucles indépendantes :
+// la passe mémoire (entretienMemoire) et la passe disque (entretienDisque), pour que la
+// première n'attende jamais la seconde (audit adverse du 13 novembre, front serveur, F1). Rend
+// la main quand les deux sont finies. Une panique dans une passe est récupérée sans aucune
+// sortie (ni journal ni stderr : le message pourrait citer un identifiant) et la passe suivante
+// repart (revue finale C-2, mineur f) : une panique de l'entretien n'arrête pas tout le
+// serveur, partages compris. Tous les verrous pris par l'entretien sont rendus par defer ; une
+// fin interrompue reste « à faire » (achever) et est reprise.
 func (m *Manager) Run(ctx context.Context) {
+	fini := make(chan struct{})
+	go func() {
+		defer close(fini)
+		chaqueSeconde(ctx, func() { m.passeSure(m.entretienDisque) })
+	}()
+	chaqueSeconde(ctx, func() { m.passeSure(m.entretienMemoire) })
+	<-fini
+}
+
+func chaqueSeconde(ctx context.Context, f func()) {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	for {
@@ -445,18 +468,22 @@ func (m *Manager) Run(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		m.tickSur()
+		f()
 	}
 }
 
 // tickSur : Tick, panique récupérée et comptée (paniquesTick), sans rien écrire.
-func (m *Manager) tickSur() {
+func (m *Manager) tickSur() { m.passeSure(m.Tick) }
+
+// passeSure : une passe de l'entretien, panique récupérée et comptée (paniquesTick), sans rien
+// écrire.
+func (m *Manager) passeSure(passe func()) {
 	defer func() {
 		if recover() != nil {
 			m.paniquesTick.Add(1)
 		}
 	}()
-	m.Tick()
+	passe()
 }
 
 // PaniquesTick : paniques récupérées dans Tick depuis le démarrage (relecture C-2, N7) : un

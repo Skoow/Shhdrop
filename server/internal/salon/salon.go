@@ -21,6 +21,10 @@ const (
 	nbSieges = 10
 	// journalMax : annonces (0x02, 0x03, 0x09, 0x0A) gardées au plus par salon.
 	journalMax = 4096
+	// MemoireJournalMax : mémoire budgétée pour le journal plein d'un salon, à 64 o l'annonce
+	// (evenement de 32 o, enregistrement de 26 o au plus). Hors du plafond global des trames :
+	// config.checkSalons en tient compte au démarrage (SHH_SALONS_MAX contre GOMEMLIMIT).
+	MemoireJournalMax = journalMax * 64
 	// jamaisConnecteMax : un siège invité qui n'a jamais ouvert de WebSocket dans ce délai après
 	// son entrée est libéré (relecture C-2, N1 : réponse de rejoindre perdue, remplissage).
 	jamaisConnecteMax = 10 * time.Minute
@@ -89,14 +93,31 @@ type salon struct {
 	pieces            map[uint64]*piece
 	aPurger           []purge
 	flux              *share.Streams
-	// glob, globMax : compteur global des trames en mémoire (Manager.tramesGlob) et son plafond
-	// (tramesTotalMax). glob nil : sans plafond global (salon bâti hors de Manager.etat, tests).
-	glob    *atomic.Int64
-	globMax int
+	// glob : compteur global des trames en mémoire (Manager.tramesGlob, tableau de bord) ; nil
+	// pour un salon bâti hors de Manager.etat (tombe, tests).
+	glob *atomic.Int64
+	// part, pot, potMax : part de trames réservée à ce salon et pot commun de tout ce qui est
+	// rangé au-delà des parts (Manager.partTrames, tramesPot, potTramesMax ; F3). pot nil :
+	// sans plafond global.
+	part   int
+	pot    *atomic.Int64
+	potMax int
 	// echeances : effacements à venir des règles 1 à 3, une fois lues par tous (effacement.go),
 	// une au plus par entrée de l'index ; vidées par Tick, la fin et le renouvellement.
 	echeances echeances
 	conv      *Conversation // nil pour la tombe d'un salon détruit sans état
+	// aEcraser : emplacements de conv marqués effacés (retrait, échéance, trame écrite pour
+	// un membre parti entre-temps), à écraser sur le disque HORS du verrou (Manager.ecraser :
+	// aucun appel disque ni attente de la borne sous s.mu, audit adverse du 13 novembre, F1).
+	// Toujours des emplacements de la conversation courante : vidé quand elle est remplacée
+	// (renouvellement) ou détruite (fin).
+	aEcraser []uint32
+	// occ : sièges occupés, tenu à jour sous mu (installerLocked, oublierLocked, oublier) et lu
+	// sans verrou par Manager.Stats ; finiA : copie de fini lue sans verrou (estFini). Le
+	// tableau de bord et les parcours sous Manager.mu n'attendent ainsi jamais le verrou d'un
+	// salon (F1).
+	occ   atomic.Int32
+	finiA atomic.Bool
 	// conns : connexion WebSocket de chaque siège (une au plus, connexion.go).
 	conns [nbSieges]*connexion
 	// limites : seaux des trames montantes de chaque siège, remis à neuf à chaque nouvel
@@ -119,23 +140,34 @@ type salon struct {
 	regle  bool
 }
 
-// globAtteint : le plafond global des trames en mémoire est atteint (nil : sans plafond).
-// Appelé sous s.mu.
+// globAtteint : ce salon ne peut plus ranger de trame en mémoire (pot nil : sans plafond
+// global). Part équitable (audit adverse du 13 novembre, F3) : tant que le salon a moins de
+// trames rangées que sa part réservée, il n'est jamais refusé, quoi que fassent les autres ;
+// au-delà, il puise dans le pot commun, et n'est refusé que quand ce pot est vide. Les parts
+// de tous les salons plus le pot ne dépassent jamais le plafond global (Manager.partTrames) :
+// le garde-fou de la mémoire reste entier. Appelé sous s.mu.
 func (s *salon) globAtteint() bool {
-	return s.glob != nil && s.globMax > 0 && int(s.glob.Load()) >= s.globMax
+	return s.pot != nil && len(s.index) >= s.part && int(s.pot.Load()) >= s.potMax
 }
 
-// globInc : une trame rangée de plus (sous s.mu). globDec : n trames retirées (index vidé par
-// une fin ou un renouvellement, sous s.mu).
+// globInc : une trame de plus vient d'être rangée dans l'index (sous s.mu) ; comptée dans le
+// pot commun si elle dépasse la part du salon. globDec : les n trames de l'index sont retirées
+// (index vidé par une fin ou un renouvellement, sous s.mu).
 func (s *salon) globInc() {
 	if s.glob != nil {
 		s.glob.Add(1)
+	}
+	if s.pot != nil && len(s.index) > s.part {
+		s.pot.Add(1)
 	}
 }
 
 func (s *salon) globDec(n int) {
 	if s.glob != nil && n > 0 {
 		s.glob.Add(-int64(n))
+	}
+	if s.pot != nil && n > s.part {
+		s.pot.Add(-int64(n - s.part))
 	}
 }
 
@@ -218,6 +250,9 @@ func (s *salon) installerLocked(n uint8, reprise bool, now time.Time) (jeton [32
 		x.arrivee = s.sieges[n].arrivee
 		s.plusAttenduLocked(n) // nouvelle identité : trames d'avant le 0x0A illisibles pour elle
 	}
+	if s.sieges[n] == nil {
+		s.occ.Add(1)
+	}
 	s.sieges[n] = x
 	s.jetons[x.jetonV] = n
 	return jeton, x, nil
@@ -257,6 +292,7 @@ func (s *salon) oublierLocked(n uint8) (jetonV [32]byte, ok bool) {
 		return jetonV, false
 	}
 	s.sieges[n] = nil
+	s.occ.Add(-1)
 	delete(s.jetons, x.jetonV)
 	return x.jetonV, true
 }

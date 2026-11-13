@@ -4,20 +4,21 @@ package janitor
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/share"
-	"github.com/skoow/shhdrop/server/internal/store"
 )
 
 // Run appelle Sweep, recale la place utilisée sur le disque (blob.Store.Resync : la commande
-// d'administration supprime des fichiers depuis un autre processus), puis Checkpoint, à
-// chaque période, jusqu'à l'annulation de ctx.
-func Run(ctx context.Context, svc *share.Service, db *sql.DB, every time.Duration) {
+// d'administration supprime des fichiers depuis un autre processus), brouille les dates
+// d'inode des fichiers (blob.Store.ScrubTimes), puis vide le WAL
+// (svc.Vidage.Maintenant : attente courte d'une base occupée par un autre processus, échec
+// compté pour le tableau de bord ; audit adverse du 13 novembre, stockage, F3), à chaque
+// période, jusqu'à l'annulation de ctx.
+func Run(ctx context.Context, svc *share.Service, every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -31,7 +32,12 @@ func Run(ctx context.Context, svc *share.Service, db *sql.DB, every time.Duratio
 			if rerr := svc.Blobs.Resync(); rerr != nil {
 				err = errors.Join(err, rerr)
 			}
-			if cerr := store.Checkpoint(db); cerr != nil {
+			// Dates d'inode des fichiers de partages ramenées à l'heure de ce passage, la même
+			// pour tous (stockage, F4).
+			if serr := svc.Blobs.ScrubTimes(); serr != nil {
+				err = errors.Join(err, serr)
+			}
+			if cerr := svc.Vidage.Maintenant(); cerr != nil {
 				err = errors.Join(err, cerr)
 			}
 			return err

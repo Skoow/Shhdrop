@@ -37,7 +37,10 @@ services:
     # Fils du système (audit du 13 novembre, D4) : Go crée un fil par appel système bloquant
     # (lecture, écriture, fsync, SQLite). 256 pouvait être atteint sous un disque lent, et le
     # processus s'arrêtait net (« failed to create new OS thread »). 1 024, et les appels de
-    # fichiers sont bornés à SHH_DISK_OPS_MAX (64) par le serveur.
+    # fichiers sont bornés par le serveur : SHH_DISK_OPS_MAX (64) pour les partages et les
+    # pièces, plus deux bornes du quart (16 + 16) pour les conversations du salon, soit 96 fils
+    # au pire. Le serveur lit cette limite et refuse de démarrer si ces fils en dépasseraient
+    # la moitié (README §11).
     pids_limit: 1024
     # Plafonds (audit du 11 novembre) : un abus ou une fuite de mémoire ne fait pas tomber la
     # machine (sshd, Caddy, déverrouillage du volume). Pire cas avec les places calculées

@@ -37,24 +37,101 @@ func nouvelleConv(t *testing.T, dossier, id string) *Conversation {
 	return c
 }
 
-// Audit adverse du 13 novembre, S-H1 : les ÉCRITURES disque de la conversation (écriture d'une
-// trame, zéros d'effacement) passent par le sémaphore blob.Gate, pour borner les fils du système
-// comme les partages et les pièces. Les lectures ne sont pas bornées (rattrapage, déjà borné par
-// le nombre de connexions). Sans le câblage, Peak resterait à 0.
-func TestConversationBorneLesEcrituresDisque(t *testing.T) {
+// Audit adverse du 13 novembre, front serveur, F1 et F2 : une conversation ne prend jamais de
+// borne des appels disque pour ses ÉCRITURES (l'appelant, Manager, en tient une place, prise
+// hors de tout verrou : redteam_dos_test.go) ; ses LECTURES passent par la borne des lectures
+// (lec), sans jamais la dépasser, même lancées par centaines (le rattrapage en lançait une par
+// connexion, jusqu'à SHH_WS_MAX fils du système au-dessus de pids_limit).
+func TestConversationBorneLesLectures(t *testing.T) {
 	dir := t.TempDir()
 	c := nouvelleConv(t, dir, idConv)
-	c.g = blob.NewGate(4)
-	ajouter(t, c, 3) // 3 écritures de trame
+	c.lec = blob.NewGate(3)
+	ajouter(t, c, 50)
 	if err := c.EffacerPlusieurs([]uint32{1}); err != nil {
 		t.Fatal("EffacerPlusieurs :", err)
 	}
-	if p := c.g.Peak(); p < 1 {
-		t.Fatalf("écritures de la conversation hors du sémaphore (Peak=%d)", p)
+	if p := c.lec.Peak(); p != 0 {
+		t.Fatalf("écritures passées par la borne des lectures (Peak=%d)", p)
 	}
-	// Une lecture ne touche pas au sémaphore : le compte en cours reste nul après coup.
-	if _, err := c.Lire(0); err != nil {
-		t.Fatal("Lire :", err)
+	var wg sync.WaitGroup
+	for r := 0; r < 200; r++ {
+		wg.Go(func() {
+			for k := 0; k < 50; k++ {
+				if _, err := c.Lire(uint32(k)); err != nil && !(k == 1 && errors.Is(err, ErrEfface)) {
+					t.Error(k, err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+	if p := c.lec.Peak(); p < 1 || p > 3 {
+		t.Fatalf("lectures simultanées : plus haut %d, attendu de 1 à 3", p)
+	}
+	if u := c.lec.InUse(); u != 0 {
+		t.Fatalf("places de lecture non rendues : %d", u)
+	}
+}
+
+// paliers : taille du fichier d'une conversation de n emplacements écrits (croissance par
+// paliers de emplacementsParPalier, audit adverse du 13 novembre, stockage F4).
+func paliers(n int) int64 {
+	return int64((n+emplacementsParPalier-1)/emplacementsParPalier) * TaillePalier
+}
+
+// Audit adverse du 13 novembre, stockage F4 : la taille du fichier ne donne plus le nombre de
+// trames (paliers remplis d'aléa), et un emplacement effacé ne se reconnaît plus à ses zéros :
+// 7 trames et un retrait donnent un fichier d'un palier, sans aucun emplacement nul, ni dans
+// les emplacements écrits, ni dans le reste du palier.
+func TestFichierSansNombreNiZeros(t *testing.T) {
+	dir := t.TempDir()
+	c := nouvelleConv(t, dir, idConv)
+	ajouter(t, c, 7)
+	if err := c.Effacer(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.EffacerPlusieurs([]uint32{4}); err != nil {
+		t.Fatal(err)
+	}
+	brut, err := os.ReadFile(filepath.Join(dir, idConv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(brut) != TaillePalier || c.Taille() != TaillePalier {
+		t.Fatalf("taille %d (Taille %d), attendu un palier de %d", len(brut), c.Taille(), TaillePalier)
+	}
+	nul := make([]byte, TailleEmplacement)
+	for e := 0; e < emplacementsParPalier; e++ {
+		if bytes.Equal(brut[e*TailleEmplacement:(e+1)*TailleEmplacement], nul) {
+			t.Fatalf("emplacement %d entièrement nul", e)
+		}
+	}
+	for _, e := range []uint32{1, 4} {
+		if _, err := c.Lire(e); !errors.Is(err, ErrEfface) {
+			t.Fatalf("emplacement %d effacé lu : %v", e, err)
+		}
+	}
+	// Le palier suivant ne commence qu'au 65e emplacement.
+	for i := 7; i < emplacementsParPalier; i++ {
+		if _, err := c.Ajouter(trameTest(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c.Taille() != TaillePalier {
+		t.Fatal("palier dépassé trop tôt :", c.Taille())
+	}
+	if _, err := c.Ajouter(trameTest(64)); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(filepath.Join(dir, idConv))
+	if err != nil || fi.Size() != 2*TaillePalier || c.Taille() != 2*TaillePalier {
+		t.Fatal("deuxième palier :", fi, c.Taille(), err)
+	}
+	if b, err := c.Lire(64); err != nil || !bytes.Equal(b, trameTest(64)) {
+		t.Fatal("emplacement 64 :", err)
+	}
+	if _, err := c.Lire(65); !errors.Is(err, ErrEmplacement) {
+		t.Fatal("emplacement jamais écrit lu :", err)
 	}
 }
 
@@ -75,14 +152,14 @@ func TestAllerRetour(t *testing.T) {
 	dir := t.TempDir()
 	c := nouvelleConv(t, dir, idConv)
 	ajouter(t, c, 100)
-	if c.Taille() != 100*TailleEmplacement {
+	if c.Taille() != paliers(100) {
 		t.Fatalf("Taille = %d", c.Taille())
 	}
 	fi, err := os.Stat(filepath.Join(dir, idConv))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Size() != 100*TailleEmplacement || fi.Mode().Perm() != 0o600 {
+	if fi.Size() != paliers(100) || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("fichier : %d octets, mode %v", fi.Size(), fi.Mode().Perm())
 	}
 	for i := range 100 {
@@ -191,7 +268,7 @@ func TestEmplacementsEchanges(t *testing.T) {
 	}
 }
 
-func TestEffacerZeros(t *testing.T) {
+func TestEffacerAlea(t *testing.T) {
 	dir := t.TempDir()
 	c := nouvelleConv(t, dir, idConv)
 	ajouter(t, c, 6)
@@ -202,10 +279,10 @@ func TestEffacerZeros(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(brut[3*TailleEmplacement:4*TailleEmplacement], make([]byte, TailleEmplacement)) {
-		t.Fatal("emplacement 3 non nul")
+	if bytes.Equal(brut[3*TailleEmplacement:4*TailleEmplacement], make([]byte, TailleEmplacement)) {
+		t.Fatal("emplacement 3 nul : un effacement se reconnaîtrait sur le disque")
 	}
-	if len(brut) != 6*TailleEmplacement || c.Taille() != 6*TailleEmplacement {
+	if len(brut) != TaillePalier || c.Taille() != TaillePalier {
 		t.Fatal("taille changée par Effacer", len(brut), c.Taille())
 	}
 	if _, err := c.Lire(3); !errors.Is(err, ErrEfface) {
@@ -227,7 +304,7 @@ func TestEffacerZeros(t *testing.T) {
 	}
 }
 
-// EffacerPlusieurs : tous les emplacements donnés écrasés de zéros, les autres intacts,
+// EffacerPlusieurs : tous les emplacements donnés écrasés (aléa), les autres intacts,
 // taille inchangée ; un numéro hors du fichier refuse tout (rien n'est écrit) ; liste vide :
 // rien ; conversation détruite : ErrDetruite ; écriture en échec : ErrES.
 func TestEffacerPlusieurs(t *testing.T) {
@@ -250,7 +327,7 @@ func TestEffacerPlusieurs(t *testing.T) {
 			t.Fatalf("emplacement %d : %v", i, err)
 		}
 	}
-	if c.Taille() != 6*TailleEmplacement {
+	if c.Taille() != TaillePalier {
 		t.Fatal("taille changée", c.Taille())
 	}
 	if err := c.EffacerPlusieurs([]uint32{2, 6}); !errors.Is(err, ErrEmplacement) {
@@ -319,7 +396,7 @@ func TestDetruire(t *testing.T) {
 	if err := c.Effacer(0); err == nil {
 		t.Fatal("effacement après destruction")
 	}
-	if c.cle != [32]byte{} || c.aead != nil {
+	if c.aead != nil {
 		t.Fatal("clé encore en mémoire")
 	}
 	if c.Taille() != 0 {
@@ -392,39 +469,43 @@ func avecPanne(t *testing.T, c *Conversation) *fichierPanne {
 	return f
 }
 
-// Une écriture partielle est annulée : fichier ramené à sa taille d'avant, numéro rendu à
-// l'ajout suivant, erreur sans chemin.
+// Une écriture partielle est annulée, dans un palier déjà écrit (n = 2 : taille inchangée) comme
+// au premier emplacement d'un palier (n = 64 : fichier ramené à sa taille d'avant) : numéro
+// rendu à l'ajout suivant, erreur sans chemin.
 func TestAjouterRetourArriere(t *testing.T) {
-	dir := t.TempDir()
-	c := nouvelleConv(t, dir, idConv)
-	ajouter(t, c, 2)
-	f := avecPanne(t, c)
-	f.ecriturePartielle = true
-	_, err := c.Ajouter(trameTest(2))
-	if !errors.Is(err, ErrES) || strings.Contains(err.Error(), "/") {
-		t.Fatalf("erreur %v", err)
-	}
-	fi, err := os.Stat(filepath.Join(dir, idConv))
-	if err != nil || fi.Size() != 2*TailleEmplacement || c.Taille() != 2*TailleEmplacement {
-		t.Fatal("taille après échec :", fi.Size(), c.Taille(), err)
-	}
-	f.ecriturePartielle = false
-	if e, err := c.Ajouter(trameTest(2)); err != nil || e != 2 {
-		t.Fatal("ajout après échec :", e, err)
-	}
-	for i := range 3 {
-		if b, err := c.Lire(uint32(i)); err != nil || !bytes.Equal(b, trameTest(i)) {
-			t.Fatalf("emplacement %d : %v", i, err)
+	for _, n := range []int{2, emplacementsParPalier} {
+		dir := t.TempDir()
+		c := nouvelleConv(t, dir, idConv)
+		ajouter(t, c, n)
+		f := avecPanne(t, c)
+		f.ecriturePartielle = true
+		_, err := c.Ajouter(trameTest(n))
+		if !errors.Is(err, ErrES) || strings.Contains(err.Error(), "/") {
+			t.Fatalf("erreur %v", err)
+		}
+		fi, err := os.Stat(filepath.Join(dir, idConv))
+		if err != nil || fi.Size() != paliers(n) || c.Taille() != paliers(n) {
+			t.Fatal("taille après échec :", n, fi.Size(), c.Taille(), err)
+		}
+		f.ecriturePartielle = false
+		if e, err := c.Ajouter(trameTest(n)); err != nil || e != uint32(n) {
+			t.Fatal("ajout après échec :", e, err)
+		}
+		for i := range n + 1 {
+			if b, err := c.Lire(uint32(i)); err != nil || !bytes.Equal(b, trameTest(i)) {
+				t.Fatalf("emplacement %d : %v", i, err)
+			}
 		}
 	}
 }
 
-// Truncate impossible après un échec : conversation inutilisable (erreur fixe), Taille ne
-// sous-compte jamais le fichier réel, Detruire marche encore.
+// Truncate impossible après l'échec de l'écriture d'un nouveau palier : conversation
+// inutilisable (erreur fixe), Taille ne sous-compte jamais le fichier réel, Detruire marche
+// encore.
 func TestTruncateEchoue(t *testing.T) {
 	dir := t.TempDir()
 	c := nouvelleConv(t, dir, idConv)
-	ajouter(t, c, 2)
+	ajouter(t, c, emplacementsParPalier)
 	f := avecPanne(t, c)
 	f.ecriturePartielle, f.truncateEchoue = true, true
 	if _, err := c.Ajouter(trameTest(2)); !errors.Is(err, ErrES) {
@@ -434,7 +515,7 @@ func TestTruncateEchoue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Size() <= 2*TailleEmplacement {
+	if fi.Size() <= TaillePalier {
 		t.Fatal("témoin : écriture partielle absente", fi.Size())
 	}
 	if c.Taille() < fi.Size() {
@@ -562,7 +643,7 @@ func TestDetruireEchecGardeTaille(t *testing.T) {
 	if err := c.Detruire(); !errors.Is(err, ErrES) {
 		t.Fatal("suppression impossible :", err)
 	}
-	if c.Taille() != 2*TailleEmplacement || total.Load() != 2*TailleEmplacement {
+	if c.Taille() != TaillePalier || total.Load() != TaillePalier {
 		t.Fatal("taille remise à zéro avant la suppression :", c.Taille(), total.Load())
 	}
 	if err := os.RemoveAll(p); err != nil {

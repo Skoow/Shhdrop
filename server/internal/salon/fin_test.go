@@ -91,10 +91,10 @@ func (b *banc) toutEfface(t *testing.T, s *salon, pieces []string, jetons ...[32
 	}
 	if s.conv != nil {
 		s.conv.mu.Lock()
-		cle := s.conv.cle
+		aead := s.conv.aead
 		s.conv.mu.Unlock()
-		if cle != [32]byte{} {
-			t.Error("clé de la conversation non mise à zéro")
+		if aead != nil {
+			t.Error("clé de la conversation gardée")
 		}
 	}
 }

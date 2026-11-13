@@ -14,6 +14,12 @@ import (
 // thread »). Au-delà de la borne, les appels attendent leur tour (goroutines, pas de fils).
 // Toujours pris en dernier, après les verrous du Store, et rendu sans rien prendre d'autre :
 // aucune attente croisée possible. Un Gate nil ne borne rien.
+//
+// Règle pour tout appelant hors de ce paquet (audit adverse du 13 novembre, front serveur,
+// F1) : ne jamais attendre une place en tenant un verrou qu'un entretien ou une lecture
+// d'état prend aussi (verrou d'un salon, du gestionnaire) : une borne saturée par un disque
+// lent figerait tout ce qui attend ce verrou. Le salon a ses propres bornes (Manager.ecr,
+// lec), prises avant ses verrous.
 type Gate struct {
 	c          chan struct{}
 	used, peak atomic.Int64 // tests : appels en cours, plus haut atteint
@@ -27,8 +33,8 @@ func NewGate(n int) *Gate {
 	return &Gate{c: make(chan struct{}, n)}
 }
 
-// Do exécute f sous la borne, pour un appelant hors du paquet (écritures de conversation du
-// salon, audit adverse du 13 novembre, S-H1). Un Gate nil ne borne rien.
+// Do exécute f sous la borne, pour un appelant hors du paquet (bornes des conversations du
+// salon). Un Gate nil ne borne rien.
 func (g *Gate) Do(f func() error) error { return g.do(f) }
 
 // do exécute f sous la borne.
