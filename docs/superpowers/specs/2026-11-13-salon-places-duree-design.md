@@ -1,6 +1,16 @@
-# Salon : ajouter des places et prolonger la durée sans recréer de lien
+# Salon : ajouter des places et renouveler le salon sans recréer de lien
 
 Date : 13 novembre 2026. Demande du propriétaire.
+
+## Révision du 13 novembre (décisions du propriétaire), qui remplace la partie « Durée » ci-dessous
+
+- **Prolonger = renouveler** : le créateur relance le salon pour une nouvelle durée (1, 6, 12 ou 24 h sans compte ; plus avec une offre payante), **et toute la conversation est effacée** : messages, vocaux, fichiers, tout ce qui a été partagé. Seuls restent le lien, le mot de passe et **les membres présents à leur place** : « pour plus de facilité, que les contacts restent dans la même conversation ».
+- Possible tant que le salon existe (jamais après la fin : tout est alors détruit, promesse « puis plus rien »).
+- **Côté serveur** : en une opération, sous le verrou du salon : fichier de conversation détruit puis recréé vide (clé neuve, zéros), pièces effacées (fichier puis ligne), `pieces_bytes = 0`, index, tas d'échéances, `pieces`, attentes « instantané » et `effaces` vidés ; `seq` continue de croître (aucun rang réutilisé) ; nouvelle échéance = maintenant + durée, arrondie au quart d'heure supérieur ; diffusion à tous d'un enregistrement sans rang `0x10` « renouvelé » (rang de départ, secondes restantes, places) : chaque appareil efface son historique local et repart de ce rang. Le moteur MLS du créateur fait un Commit (nouvelle époque, C-3/C-5) pour que rien d'avant ne soit déchiffrable par un nouvel arrivant.
+- **Anti-abus** : un renouvellement compte comme une **création de salon** (quota de 5 par jour et par connexion, 15 par /48, preuve anti-robot). Il n'y a donc plus besoin de plafond « 24 h depuis la création » en mémoire : l'approche 1 ci-dessous est abandonnée.
+- **Rattrapage** : une connexion qui revient avec un `depuis` antérieur au renouvellement reçoit le `0x10` puis seulement ce qui suit ; rien d'avant n'est jamais servi.
+- **Places** : inchangé (ci-dessous).
+- **Messages et vocaux** : jamais dans l'espace des fichiers (1 Go par salon sans compte) ; anti-flood déjà en place côté serveur (60 trames/min par membre avec rafale de 20, 1 200 messages/h par membre, 480 trames/min par adresse, vocaux au rythme d'une voix, 120 fichiers/h par membre, garde-fou du disque) ; l'écran (C-3) dira « Doucement, réessayez dans N s » au lieu d'échouer.
 
 ## Intention
 
