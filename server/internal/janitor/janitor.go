@@ -26,13 +26,16 @@ func Run(ctx context.Context, svc *share.Service, db *sql.DB, every time.Duratio
 			return
 		case <-t.C:
 		}
-		_, err := svc.Sweep()
-		if rerr := svc.Blobs.Resync(); rerr != nil {
-			err = errors.Join(err, rerr)
-		}
-		if cerr := store.Checkpoint(db); cerr != nil {
-			err = errors.Join(err, cerr)
-		}
+		err := protect(func() error {
+			_, err := svc.Sweep()
+			if rerr := svc.Blobs.Resync(); rerr != nil {
+				err = errors.Join(err, rerr)
+			}
+			if cerr := store.Checkpoint(db); cerr != nil {
+				err = errors.Join(err, cerr)
+			}
+			return err
+		})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "janitor: erreur de nettoyage")
 		}
@@ -54,7 +57,7 @@ func Watch(ctx context.Context, svc *share.Service, every time.Duration) {
 		case <-t.C:
 		}
 		// Au plus une ligne fixe par série d'erreurs (jamais d'identifiant).
-		err := svc.PollRemoved()
+		err := protect(svc.PollRemoved)
 		if err != nil && !failed {
 			fmt.Fprintln(os.Stderr, "janitor: erreur de surveillance")
 			failed = true
@@ -62,6 +65,22 @@ func Watch(ctx context.Context, svc *share.Service, every time.Duration) {
 			failed = false
 		}
 	}
+}
+
+// errPanic : panique récupérée dans un tour de Run ou de Watch.
+var errPanic = errors.New("janitor : panique récupérée")
+
+// protect exécute un tour de boucle et récupère une panique (audit du 13 novembre, D6 : une
+// donnée inattendue en base arrêtait tout le processus) : elle devient errPanic, donc la
+// ligne fixe habituelle sur stderr, sans la valeur ni la pile (elles pourraient contenir un
+// identifiant). Le tour suivant a lieu normalement.
+func protect(f func() error) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = errPanic
+		}
+	}()
+	return f()
 }
 
 // Reconcile, à appeler avant d'écouter : efface les fichiers sans ligne et les

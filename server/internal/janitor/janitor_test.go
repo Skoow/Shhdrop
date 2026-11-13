@@ -215,3 +215,24 @@ func TestRunResyncsUsedBytes(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// Audit du 13 novembre, D6 : une panique dans un tour (ici, un service nil) ne fait plus
+// tomber le processus ; la boucle continue et s'arrête avec son contexte.
+func TestRunWatchRecuperentLesPaniques(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{}, 2)
+	go func() { Run(ctx, nil, nil, time.Millisecond); done <- struct{}{} }()
+	go func() { Watch(ctx, nil, time.Millisecond); done <- struct{}{} }()
+	time.Sleep(50 * time.Millisecond) // des dizaines de tours, chacun en panique
+	cancel()
+	for range 2 {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("boucle non arrêtée")
+		}
+	}
+	if err := protect(func() error { panic("x") }); err != errPanic {
+		t.Fatal("panique non convertie :", err)
+	}
+}
