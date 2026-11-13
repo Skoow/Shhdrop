@@ -80,10 +80,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## Polices hébergées (SIL Open Font License 1.1)
 
-Fichiers copiés de `web/node_modules/@fontsource-variable/*/files/` vers `web/public/fonts/` par `web/scripts/copy-fonts.mjs` (empreintes SHA-256 vérifiées, voir `web/src/ui/tokens.test.ts`). Servies par le serveur lui-même, jamais depuis un CDN. Polices non modifiées.
+Fichiers copiés de `web/node_modules/@fontsource-variable/*/files/` vers `web/src/assets/fonts/` par `web/scripts/copy-fonts.mjs` (empreintes SHA-256 vérifiées, voir `web/src/ui/tokens.test.ts`). Servies par le serveur lui-même, jamais depuis un CDN. Polices non modifiées.
 
-- **Mona Sans** : `web/public/fonts/mona-sans-latin-standard-normal.woff2`, extrait latin de `@fontsource-variable/mona-sans` 5.3.0. Copyright 2022 The Mona Sans Project Authors (https://github.com/github/mona-sans), with Reserved Font Name "Mona".
-- **JetBrains Mono** : `web/public/fonts/jetbrains-mono-latin-wght-normal.woff2`, extrait latin de `@fontsource-variable/jetbrains-mono` 5.3.0. Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono).
+- **Mona Sans** : `web/src/assets/fonts/mona-sans-latin-standard-normal.woff2`, extrait latin de `@fontsource-variable/mona-sans` 5.3.0. Copyright 2022 The Mona Sans Project Authors (https://github.com/github/mona-sans), with Reserved Font Name "Mona".
+- **JetBrains Mono** : `web/src/assets/fonts/jetbrains-mono-latin-wght-normal.woff2`, extrait latin de `@fontsource-variable/jetbrains-mono` 5.3.0. Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono).
 
 Texte de la licence (identique dans les deux paquets) :
 

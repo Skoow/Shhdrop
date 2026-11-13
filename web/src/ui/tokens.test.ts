@@ -371,22 +371,22 @@ describe("thème unique sombre et contraste forcé", () => {
 
 describe("polices hébergées (UI §4.1)", () => {
   const sha = (p: string) =>
-    createHash("sha256").update(readFileSync(join(webDir, "public", "fonts", p))).digest("hex");
+    createHash("sha256").update(readFileSync(join(webDir, "src", "assets", "fonts", p))).digest("hex");
   it("Mona Sans : empreinte et taille", () => {
     const f = "mona-sans-latin-standard-normal.woff2";
     expect(sha(f)).toBe("5ea3740633e5ac7af56c13d7e8ec32bcae12e7723e53d34284469a8947ccb2f3");
-    expect(readFileSync(join(webDir, "public", "fonts", f)).length).toBe(98124);
+    expect(readFileSync(join(webDir, "src", "assets", "fonts", f)).length).toBe(98124);
   });
   it("JetBrains Mono : empreinte et taille", () => {
     const f = "jetbrains-mono-latin-wght-normal.woff2";
     expect(sha(f)).toBe("18be452724bfdc236c074ca94a249a7f41a86752c7d04ab258ce9ed5651f6a7e");
-    expect(readFileSync(join(webDir, "public", "fonts", f)).length).toBe(40404);
+    expect(readFileSync(join(webDir, "src", "assets", "fonts", f)).length).toBe(40404);
   });
-  it("fonts.css : seulement des url(/fonts/…), font-display swap", () => {
+  it("fonts.css : seulement des url(../assets/fonts/…) (empreinte au build, A7), font-display swap", () => {
     const t = read("fonts.css");
     const urls = [...t.matchAll(/url\(([^)]*)\)/g)].map((m) => m[1]);
     expect(urls.length).toBe(2);
-    for (const u of urls) expect(u).toMatch(/^\/fonts\/[a-z0-9-]+\.woff2$/);
+    for (const u of urls) expect(u).toMatch(/^\.\.\/assets\/fonts\/[a-z0-9-]+\.woff2$/);
     expect(t.match(/font-display:\s*swap/g)?.length).toBe(2);
     expect(t).toMatch(/font-weight:\s*200 900/);
     expect(t).toMatch(/font-stretch:\s*75% 125%/);
@@ -397,13 +397,13 @@ describe("polices hébergées (UI §4.1)", () => {
     const html = readFileSync(join(webDir, "index.html"), "utf8");
     const pre = [...html.matchAll(/<link[^>]*rel="preload"[^>]*>/g)].map((m) => m[0]);
     expect(pre.length).toBe(1);
-    expect(pre[0]).toContain("/fonts/mona-sans-latin-standard-normal.woff2");
+    expect(pre[0]).toContain("/src/assets/fonts/mona-sans-latin-standard-normal.woff2");
     expect(pre[0]).toContain("crossorigin");
   });
 });
 
 describe("grain (UI §7.4)", () => {
-  const png = readFileSync(join(webDir, "public", "assets", "grain.png"));
+  const png = readFileSync(join(webDir, "src", "assets", "grain.png"));
   it("PNG 128 × 128", () => {
     expect(png.subarray(1, 4).toString("latin1")).toBe("PNG");
     expect(png.readUInt32BE(16)).toBe(128);

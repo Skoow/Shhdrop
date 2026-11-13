@@ -50,7 +50,7 @@ export function buildGrain() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const dir = join(dirname(dirname(fileURLToPath(import.meta.url))), "public", "assets");
+  const dir = join(dirname(dirname(fileURLToPath(import.meta.url))), "src", "assets");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "grain.png"), buildGrain());
   console.log("grain.png écrit");

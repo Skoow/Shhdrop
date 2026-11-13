@@ -103,7 +103,7 @@ export function buildAurora(name) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const dir = join(dirname(dirname(fileURLToPath(import.meta.url))), "public", "assets");
+  const dir = join(dirname(dirname(fileURLToPath(import.meta.url))), "src", "assets");
   mkdirSync(dir, { recursive: true });
   for (const name of Object.keys(LAYERS)) {
     const png = buildAurora(name);

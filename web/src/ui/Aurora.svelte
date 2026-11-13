@@ -4,7 +4,10 @@
   // États par body[data-screen] (opacité seulement, 1,2 s) : « seal » (scellement), « destroyed »
   // (aurore × 0,55) ; éclat de fermeture par body[data-burst]. Pause quand l'onglet est caché.
   // Plafond de luminance K5 (0,050 derrière le texte), mesuré par ui-e2e/aurora.spec.ts.
-  const base = import.meta.env.BASE_URL;
+  // Images importées : Vite les écrit sous /assets/ avec une empreinte (cache d'un an, A7).
+  import inkUrl from "../assets/aurora-ink.png";
+  import tideUrl from "../assets/aurora-tide.png";
+  import mintUrl from "../assets/aurora-mint.png";
 
   /** Échelles horizontale et verticale : une nappe couvre 150 × 95 vmax, comme le prototype. */
   function scales(): { x: number; y: number } {
@@ -22,10 +25,10 @@
      croix, signature de Shhgone, comme les points du logo) : CSS pur, ni image ni data:. -->
 <div class="night" aria-hidden="true"></div>
 <div class={["aurora", { paused: hidden }]} aria-hidden="true" data-ambient style:--kx={k.x} style:--ky={k.y}>
-  <img class="aur ink" src="{base}assets/aurora-ink.png" alt="" width="128" height="128" decoding="async" />
-  <img class="aur tide" src="{base}assets/aurora-tide.png" alt="" width="128" height="128" decoding="async" />
-  <img class="aur mint" src="{base}assets/aurora-mint.png" alt="" width="128" height="128" decoding="async" />
-  <img class="aur bloom" src="{base}assets/aurora-mint.png" alt="" width="128" height="128" decoding="async" />
+  <img class="aur ink" src={inkUrl} alt="" width="128" height="128" decoding="async" />
+  <img class="aur tide" src={tideUrl} alt="" width="128" height="128" decoding="async" />
+  <img class="aur mint" src={mintUrl} alt="" width="128" height="128" decoding="async" />
+  <img class="aur bloom" src={mintUrl} alt="" width="128" height="128" decoding="async" />
 </div>
 <div class="grain" aria-hidden="true"></div>
 <div class="sides" aria-hidden="true" data-sides></div>
@@ -211,12 +214,12 @@
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    background-image: url(/assets/grain.png);
+    background-image: url(../assets/grain.png);
     background-size: 128px;
     opacity: 0.035;
   }
 
-  /* Papier peint maison sur les côtés (retours UI9) : les pictos de /assets/motif.svg (fichier
+  /* Papier peint maison sur les côtés (retours UI9) : les pictos de assets/motif.svg (fichier
      statique, CSP sans data:), masqués sur la colonne de contenu (≈ 800 px au centre) ; sur
      téléphone, à peine un voile vers les bords. Très faible contraste : le texte garde son AA. */
   .sides {
@@ -224,7 +227,7 @@
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    background: url(/assets/motif.svg) 0 0 / 180px 180px repeat;
+    background: url(../assets/motif.svg) 0 0 / 180px 180px repeat;
     /* Plafond K5 (luminance ≤ 0,050 des fonds, home.spec) : 0,024 (mesuré : 0,028 dépasse). */
     opacity: 0.024;
     --col: 400px;

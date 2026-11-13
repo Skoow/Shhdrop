@@ -1,4 +1,4 @@
-// Copie les polices depuis les paquets Fontsource (devDependencies) vers public/fonts/,
+// Copie les polices depuis les paquets Fontsource (devDependencies) vers src/assets/fonts/ (Vite les écrit sous /assets/ avec une empreinte),
 // en vérifiant l'empreinte SHA-256 de UI §4.1. Les fichiers copiés sont commités ;
 // aucune police n'est chargée depuis un CDN.
 import { createHash } from "node:crypto";
@@ -21,7 +21,7 @@ const FONTS = [
   },
 ];
 
-const out = join(webDir, "public", "fonts");
+const out = join(webDir, "src", "assets", "fonts");
 mkdirSync(out, { recursive: true });
 for (const f of FONTS) {
   const src = join(webDir, "node_modules", f.pkg, "files", f.file);

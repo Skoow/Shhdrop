@@ -128,10 +128,11 @@ test("pied de page : logo au bord intérieur de l'en-tête, liens sans soulignem
   expect(await link.evaluate((e) => getComputedStyle(e).textDecorationLine)).toBe("none");
   // Papier peint maison : un SVG statique (aucun data:), très discret, retiré en contraste renforcé.
   const bg = await foot.evaluate((e) => { const c = getComputedStyle(e, "::after"); return { img: c.backgroundImage, o: parseFloat(c.opacity) }; });
-  expect(bg.img).toMatch(/assets\/motif\.svg/);
+  expect(bg.img).toMatch(/assets\/motif-[A-Za-z0-9_-]{8,}\.svg/);
   expect(bg.img).not.toContain("data:");
   expect(bg.o).toBeLessThanOrEqual(0.06);
-  const res = await page.request.get(shh.origin + "/assets/motif.svg");
+  // Nom à empreinte (A7, cache d'un an) : adresse lue dans le style.
+  const res = await page.request.get(new URL(/url\("?([^")]+)"?\)/.exec(bg.img)![1]!, shh.origin).href);
   expect(res.ok()).toBe(true);
   expect((await res.body()).length).toBeLessThan(4096);
   await settle(page);

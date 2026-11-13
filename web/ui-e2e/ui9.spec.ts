@@ -92,12 +92,13 @@ test("pied : « Shhgone © 2026 » en bas à gauche, plus de « publicité » ; 
   expect(Math.abs(sb!.x - base!.x)).toBeLessThanOrEqual(1);
   // Côtés : fichier statique (pas de data:), fixe, très discret, colonne centrale masquée.
   const st = await sides(page);
-  expect(st.img).toMatch(/assets\/motif\.svg/);
+  expect(st.img).toMatch(/assets\/motif-[A-Za-z0-9_-]{8,}\.svg/);
   expect(st.img).not.toContain("data:");
   expect(st.pos).toBe("fixed");
   expect(st.o).toBeLessThanOrEqual(isMobile ? 0.015 : 0.025);
   expect(st.mask).toMatch(/transparent|rgba\(0, 0, 0, 0\)/);
-  const res = await page.request.get(shh.origin + "/assets/motif.svg");
+  // Nom à empreinte (A7, cache d'un an) : adresse lue dans le style.
+  const res = await page.request.get(new URL(/url\("?([^")]+)"?\)/.exec(st.img)![1]!, shh.origin).href);
   expect((await res.body()).length).toBeLessThan(4096);
   await settle(page);
   await captureOf(foot, { path: `${SHOTS}pied-${w(isMobile)}.png` });

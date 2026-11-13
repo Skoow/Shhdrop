@@ -167,6 +167,14 @@ export function checkDist(dir, demo) {
       const br = byRel.get(f.rel + ".br");
       if (br && br.length > SALON_BROTLI_MAX) problems.push(`${f.rel} : ${br.length} octets en brotli, plus que ${SALON_BROTLI_MAX.toLocaleString("fr-FR").replace(/\s/g, " ")} (module du salon)`);
     }
+    // A7 : polices et images du site sous assets/, nom à empreinte (Vite) : cache d'un an chez le
+    // serveur Go (static.go, immutableAsset). Seuls les fichiers publics d'adresse fixe (icônes,
+    // logo, manifeste) restent à la racine, en no-store.
+    for (const f of all) {
+      const font = /\.woff2?$/i.test(f.rel);
+      const image = /\.(png|svg|webp|jpe?g|gif|avif)$/i.test(f.rel) && f.rel.includes("/");
+      if ((font || image) && !/^assets\/[^/]+-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/i.test(f.rel)) problems.push(`${f.rel} : police ou image sans empreinte hors de assets/ (A7 : pas de cache long)`);
+    }
     if (existsSync(join(dir, "404.html"))) problems.push("404.html : propre à la démo");
     return problems;
   }

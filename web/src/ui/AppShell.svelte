@@ -397,7 +397,7 @@
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    background: url(/assets/motif.svg) 0 0 / 180px 180px repeat;
+    background: url(../assets/motif.svg) 0 0 / 180px 180px repeat;
     opacity: 0.045;
     -webkit-mask-image: linear-gradient(to bottom, transparent, #000 45%);
     mask-image: linear-gradient(to bottom, transparent, #000 45%);

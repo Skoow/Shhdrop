@@ -62,6 +62,17 @@ function run(args: string[]): { code: number; err: string } {
 }
 
 describe("check-dist.mjs, production", () => {
+  it("A7 : police ou image hors de assets/ ou sans empreinte → refus (pas de cache long)", () => {
+    const ok = site({ "index.html": PROD_INDEX, "assets/mona-sans-AbCdEf12.woff2": "w", "assets/grain-AbCdEf12.png": "p", "assets/motif-AbCdEf12.svg": "<svg/>" });
+    expect(checkDist(ok, false)).toEqual([]);
+    for (const bad of ["fonts/mona-sans.woff2", "assets/grain.png", "assets/motif.svg", "assets/aurora-ink.png"]) {
+      const d = site({ "index.html": PROD_INDEX, [bad]: "x" });
+      expect(checkDist(d, false).join("\n")).toContain(`${bad} : police ou image sans empreinte`);
+    }
+    // Fichiers publics d'adresse fixe (icônes, manifeste) : permis à la racine.
+    expect(checkDist(site({ "index.html": PROD_INDEX, "favicon.ico": "i", "icon-192.png": "p", "logo.svg": "<svg/>" }), false)).toEqual([]);
+  });
+
   it("passe sans marque", () => {
     const d = site({ "index.html": PROD_INDEX, "assets/index-a.js": "console.info(1)" });
     expect(run([d])).toEqual({ code: 0, err: "" });

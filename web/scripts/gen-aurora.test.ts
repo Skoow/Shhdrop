@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error module .mjs sans déclarations
 import { buildAurora } from "./gen-aurora.mjs";
 
-const assets = join(dirname(dirname(fileURLToPath(import.meta.url))), "public", "assets");
+const assets = join(dirname(dirname(fileURLToPath(import.meta.url))), "src", "assets");
 const FILES: Record<string, string> = {
   "aurora-mint.png": "5FE3B5",
   "aurora-tide.png": "28809A",

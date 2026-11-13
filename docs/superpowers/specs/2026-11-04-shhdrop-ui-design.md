@@ -195,12 +195,12 @@ Règle : **sur le verre mobile, seul `--text` (et les boutons opaques) est permi
 
 | Rôle | Police | Licence | Fichier | Poids |
 |---|---|---|---|---|
-| Tout le texte d'interface et l'accueil | **Mona Sans** (GitHub), variable `wght` 200–900 et `wdth` 75–125 | SIL Open Font License 1.1 | `web/public/fonts/mona-sans-latin-standard-normal.woff2`, depuis `@fontsource-variable/mona-sans@5.3.0` | 98 124 octets |
-| Phrase de passe, liens, champ du mot de passe, détails techniques de l'envoi | **JetBrains Mono**, variable `wght` 100–800 | SIL Open Font License 1.1 | `web/public/fonts/jetbrains-mono-latin-wght-normal.woff2`, depuis `@fontsource-variable/jetbrains-mono@5.3.0` | 40 404 octets |
+| Tout le texte d'interface et l'accueil | **Mona Sans** (GitHub), variable `wght` 200–900 et `wdth` 75–125 | SIL Open Font License 1.1 | `web/src/assets/fonts/mona-sans-latin-standard-normal.woff2`, depuis `@fontsource-variable/mona-sans@5.3.0` | 98 124 octets |
+| Phrase de passe, liens, champ du mot de passe, détails techniques de l'envoi | **JetBrains Mono**, variable `wght` 100–800 | SIL Open Font License 1.1 | `web/src/assets/fonts/jetbrains-mono-latin-wght-normal.woff2`, depuis `@fontsource-variable/jetbrains-mono@5.3.0` | 40 404 octets |
 
 - Le sous-ensemble `latin` couvre le français (accents, « œ », guillemets, espaces fines, « … », « − »). Il ne contient pas « ≈ » ni les flèches : les textes n'en utilisent pas (les raccourcis clavier s'écrivent « Alt + flèche haut »). Les noms de fichiers en écritures non latines (arabe, hébreu, chinois…) s'affichent avec la police système de repli : c'est voulu, aucun sous-ensemble supplémentaire n'est chargé.
 - Empreintes SHA-256 attendues : Mona Sans `5ea3740633e5ac7af56c13d7e8ec32bcae12e7723e53d34284469a8947ccb2f3`, JetBrains Mono `18be452724bfdc236c074ca94a249a7f41a86752c7d04ab258ce9ed5651f6a7e`.
-- Fichiers **copiés** dans `web/public/fonts/` par `web/scripts/copy-fonts.mjs`, empreinte vérifiée par un test, puis commités. Licence OFL ajoutée à `THIRD_PARTY_LICENSES.md`.
+- Fichiers **copiés** dans `web/src/assets/fonts/` par `web/scripts/copy-fonts.mjs`, empreinte vérifiée par un test, puis commités ; Vite les écrit sous `/assets/` avec une empreinte dans le nom (cache d'un an, A7 du 13 novembre). Licence OFL ajoutée à `THIRD_PARTY_LICENSES.md`.
 - `@font-face` dans `web/src/ui/fonts.css` : `font-display: swap`, `unicode-range` du sous-ensemble latin, plages de `font-weight` et `font-stretch`. Préchargement de Mona Sans seulement.
 - Pourquoi Mona Sans : une grotesque d'outil, nette en petit, avec un axe de **largeur** qui donne à l'accueil une voix propre sans seconde famille. Pourquoi une chasse fixe : la phrase de passe, les liens et les mesures d'envoi sont des données qu'on recopie, dicte ou compare ; elle ne sert nulle part ailleurs.
 - Repli : `"Mona Sans", system-ui, sans-serif` et `"JetBrains Mono", ui-monospace, monospace`.
