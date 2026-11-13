@@ -158,7 +158,9 @@ test.describe("fr-FR", () => {
     // fichier dès son ajout (spec §41.14) ; posée après, tout pouvait être déjà parti.
     const puts = await slowSegments(page, 900);
     await page.goto(shh.origin + "/");
-    await addFile(page, "video.bin", 14 * MIB);
+    // 30 Mio (8 segments) : avec 2 envois en vol (A13), 14 Mio (4 segments) pouvaient être tous
+    // partis avant l'appui sur Pause ; il ne restait alors rien à mettre en pause.
+    await addFile(page, "video.bin", 30 * MIB);
     await sendButton(page).click();
     // Avant la création : Annuler seulement.
     await expect(page.getByRole("button", { name: "Annuler" })).toBeVisible();

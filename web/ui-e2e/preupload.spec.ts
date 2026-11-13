@@ -69,9 +69,11 @@ test.describe("fr-FR", () => {
     await removeItem(page, "retire.bin");
     await expect(page.locator("[data-row]")).toHaveCount(1);
     await expect.poll(() => erases.length, { timeout: 20_000 }).toBe(1);
-    // 9 Mio (segments 1 à 3), retiré pendant l'envoi de son premier segment : seul ce qui est
-    // parti est effacé (revue du 10 novembre, D42-6) ; les segments 2 et 3 n'ont jamais été envoyés.
-    expect(erases[0]).toEqual({ from: 1, to: 2 });
+    // 9 Mio (segments 1 à 3), retiré pendant l'envoi de ses premiers segments : seul ce qui est
+    // parti est effacé (revue du 10 novembre, D42-6). Deux envois en vol (A13) : les segments 1 et 2
+    // sont partis, le segment 3 jamais.
+    expect(puts.filter((n) => n >= 1)).toEqual([1, 2]);
+    expect(erases[0]).toEqual({ from: 1, to: 3 });
     await expect(page.getByText("Suppression sur le serveur…")).toBeHidden({ timeout: 20_000 });
     // Segments du fichier retiré : absents du disque (relus comme des zéros), le premier intact.
     const raw = readFileSync(join(blobs, file!));
