@@ -118,3 +118,37 @@ export const composerFits = (page: Page) =>
     const foot = document.querySelector("footer[data-foot]")!.getBoundingClientRect();
     return app.top >= 0 && app.bottom <= innerHeight && foot.top >= app.bottom;
   });
+
+/**
+ * Corps des PUT de segments, octet pour octet, tels que la page les remet à XMLHttpRequest.
+ * Depuis A1, ce corps est un Blob : Chromium ne le donne pas à `request.postDataBuffer()` (null),
+ * qui rendrait une fouille « le serveur ne voit rien » vide sans le dire. Le script de page
+ * relit le Blob (mêmes octets, sans rien changer à l'envoi) et le passe au test. À appeler
+ * avant `page.goto`.
+ */
+export async function capturePutBodies(page: Page): Promise<{ url: string; body: Buffer }[]> {
+  const out: { url: string; body: Buffer }[] = [];
+  await page.exposeBinding("__shhPutBody", (_src, url: string, b64: string) => void out.push({ url, body: Buffer.from(b64, "base64") }));
+  await page.addInitScript(() => {
+    const open = XMLHttpRequest.prototype.open;
+    const send = XMLHttpRequest.prototype.send;
+    const urls = new WeakMap<XMLHttpRequest, string>();
+    XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
+      if (method === "PUT") urls.set(this, String(url));
+      return (open as (...a: unknown[]) => void).call(this, method, url, ...rest);
+    } as typeof XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, body?: XMLHttpRequestBodyInit | null) {
+      const url = urls.get(this);
+      if (url !== undefined && body instanceof Blob) {
+        void body.arrayBuffer().then((ab) => {
+          const u = new Uint8Array(ab);
+          let s = "";
+          for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000));
+          (window as unknown as { __shhPutBody(u: string, b: string): void }).__shhPutBody(url, btoa(s));
+        });
+      }
+      return send.call(this, body);
+    };
+  });
+  return out;
+}

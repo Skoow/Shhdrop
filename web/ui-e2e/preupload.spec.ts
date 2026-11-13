@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { openShare } from "../src/index";
 import { expect, test } from "./fixtures";
-import { openFilePicker, readyHeading, sendButton, sleep } from "./send-helpers";
+import { capturePutBodies, openFilePicker, readyHeading, sendButton, sleep } from "./send-helpers";
 
 const MIB = 1048576;
 const SEG = 48 + 64 * 65552; // segment 0 (avec l'en-tête) ; les suivants : 64 × 65 552 octets
@@ -99,12 +99,12 @@ test.describe("fr-FR", () => {
   // sont remplacés à finalize ; le destinataire ne le voit pas.
   test("petits fichiers empaquetés : octets envoyés ≈ somme des tailles ; petit retiré invisible pour le destinataire", async ({ page, shh }) => {
     test.setTimeout(180_000);
-    let putBytes = 0;
+    // Corps des PUT (Blob depuis A1) : relus dans la page (send-helpers.ts).
+    const bodies = await capturePutBodies(page);
     let finalize: Record<string, unknown> | undefined;
     const erases: unknown[] = [];
     page.on("request", (r) => {
       const path = new URL(r.url()).pathname;
-      if (r.method() === "PUT" && path.startsWith("/api/shares/segments/")) putBytes += r.postDataBuffer()?.length ?? 0;
       if (path === "/api/shares/erase") erases.push(r.postDataJSON());
       if (path === "/api/shares/finalize") finalize = r.postDataJSON() as Record<string, unknown>;
     });
@@ -114,7 +114,8 @@ test.describe("fr-FR", () => {
     await expect(page.locator("[data-row]")).toHaveCount(20);
     await expect(page.locator("[data-up]:not([data-up=pret])")).toHaveCount(0, { timeout: 60_000 });
     const sum = 20 * 1_000_000;
-    expect(putBytes).toBeGreaterThanOrEqual(sum);
+    await expect.poll(() => bodies.reduce((n, b) => n + b.body.length, 0)).toBeGreaterThanOrEqual(sum);
+    const putBytes = bodies.reduce((n, b) => n + b.body.length, 0);
     expect(putBytes).toBeLessThan(sum * 1.06); // morceaux de 64 Kio ; avant : 20 × 4 Mio = 80 Mio
     await removeItem(page, "photo-01.bin");
     await expect(page.locator("[data-row]")).toHaveCount(19);

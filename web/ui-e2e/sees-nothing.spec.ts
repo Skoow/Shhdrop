@@ -7,7 +7,7 @@
 import { shareId, type KLien } from "../src/engine";
 import { findIn, needle, scanDir, type Needle } from "../e2e/scan";
 import { expect, gotoRetrying, test } from "./fixtures";
-import { addText, openFilePicker, readyHeading, sendButton } from "./send-helpers";
+import { addText, capturePutBodies, openFilePicker, readyHeading, sendButton } from "./send-helpers";
 
 const TEXT = "MOT-REPERE-NAVIGATEUR-5d1e : le code de la porte est 4471";
 // Aucune fenêtre de 8 caractères du nom ne doit exister dans un en-tête ordinaire : « navigate »
@@ -28,6 +28,8 @@ test.describe("fr-FR", () => {
         .join("\n");
       sent.push({ label: `${r.method()} ${new URL(r.url()).pathname}`, data: Buffer.concat([Buffer.from(r.url() + "\n" + head + "\n"), r.postDataBuffer() ?? Buffer.alloc(0)]) });
     });
+    // Corps des PUT (Blob depuis A1) : relus dans la page, mêmes octets (send-helpers.ts).
+    const putBodies = await capturePutBodies(page);
     const answers: { label: string; data: Buffer }[] = [];
     page.on("response", async (r) => {
       if (!new URL(r.url()).pathname.startsWith("/api/")) return;
@@ -90,7 +92,10 @@ test.describe("fr-FR", () => {
 
     const puts = sent.filter((s) => s.label.startsWith("PUT /api/shares/segments/"));
     expect(puts.length).toBeGreaterThan(0);
-    expect(puts.reduce((n, s) => n + s.data.length, 0)).toBeGreaterThan(CONTENT.length);
+    // Chaque PUT a son corps relu ; il entre dans la fouille avec sa requête.
+    await expect.poll(() => putBodies.length).toBe(puts.length);
+    for (const b of putBodies) sent.push({ label: `PUT (corps) ${new URL(b.url, shh.origin).pathname}`, data: b.body });
+    expect(putBodies.reduce((n, b) => n + b.body.length, 0)).toBeGreaterThan(CONTENT.length);
     const hits: string[] = [];
     for (const s of [...sent, ...answers]) for (const l of findIn(s.data, needles)) hits.push(`${s.label} : ${l}`);
     for (const l of findIn(Buffer.concat([shh.server.stdout(), shh.server.stderr()]), needles)) hits.push(`journal : ${l}`);
