@@ -39,6 +39,13 @@ const (
 	// 14 blocs à 15 créations par jour ne prennent pas les SHH_SALONS_MAX places (spec
 	// §39.3.6, décision de l'équipe du 12 novembre, réglable).
 	VivantsParBloc = 5
+	// TramesMaxDefaut : trames non volatiles rangées au plus par salon (audit du 13 novembre,
+	// D3 : seul le plafond global du disque arrêtait une conversation, qui pouvait remplir le
+	// disque de tous, puis faire tuer le processus faute de mémoire, 24 o d'index par trame).
+	// 100 000 × 4 168 o ≈ 417 Mo sur le disque et 2,4 Mio d'index par salon ; c'est plus que
+	// les 1 200 messages par heure d'un siège actif pendant 24 h (28 800), sans couvrir le pire
+	// cas de 10 sièges au plafond (288 000). Réglable (Config.TramesMax).
+	TramesMaxDefaut = 100000
 	// videMax : un salon où personne n'est entré est effacé ce délai après sa création (audit
 	// du 13 novembre, D2 : 40 adresses prenaient les SHH_SALONS_MAX places pour 24 h sans
 	// jamais y entrer). « Entré » : un Rejoindre réussi (créateur ou invité) ; le siège 0,
@@ -59,6 +66,9 @@ type Config struct {
 	StorageMax           int64 // SHH_STORAGE_MAX
 	// UsedPartages : octets des partages (blob.Store des partages).
 	UsedPartages func() (int64, error)
+	// TramesMax (facultatif, SHH_SALON_FRAMES_MAX) : trames non volatiles rangées au plus par
+	// salon (0 : TramesMaxDefaut). Au-delà : 0x0C pour ce salon seulement.
+	TramesMax int
 	// OnAbandon (facultatif) : pièce effacée sans avoir été finalisée (limits.AbandonUpload :
 	// sa place d'envoi en cours est rendue, ses octets comptent comme abandonnés).
 	OnAbandon func(id string)
@@ -139,6 +149,14 @@ type vivant struct {
 	exp   int64
 	ne    int64
 	entre bool
+}
+
+// tramesMax : Config.TramesMax ou TramesMaxDefaut.
+func (m *Manager) tramesMax() int {
+	if m.cfg.TramesMax > 0 {
+		return m.cfg.TramesMax
+	}
+	return TramesMaxDefaut
 }
 
 // parBlocMax : salons vivants au plus par bloc : VivantsParBloc, et au plus 1/8 de Max (part

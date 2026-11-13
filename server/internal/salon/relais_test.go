@@ -737,3 +737,30 @@ func TestHeureMonotone(t *testing.T) {
 		}
 	}
 }
+
+// Audit du 13 novembre, D3 : plafond de trames rangées par salon. Au-delà, 0x0C pour ce
+// salon seulement, sans rang consommé ; les volatiles passent ; un autre salon range encore.
+func TestPlafondTramesParSalon(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	b.m.cfg.TramesMax = 5
+	c1, c2 := b.creer(t, 4), b.creer(t, 4)
+	_, g1 := b.entrerMembre(t, c1, true)
+	_, g2 := b.entrerMembre(t, c2, true)
+	for i := range 5 {
+		b.recevoir(t, g1, trameD(0, i))
+	}
+	seq, taille := dernierSeq(g1.salon), g1.salon.conv.Taille()
+	if _, err := b.m.Recevoir(g1, trameD(0, 6), nil); !errors.Is(err, ErrPlein) {
+		t.Fatal("6ᵉ trame :", err)
+	}
+	if dernierSeq(g1.salon) != seq || g1.salon.conv.Taille() != taille {
+		t.Fatal("rang consommé ou fichier changé par le refus")
+	}
+	if v := b.recevoir(t, g1, trameD(dVolatile, 7)); v != seq+1 {
+		t.Fatal("volatile :", v)
+	}
+	b.recevoir(t, g2, trameD(0, 8))
+	if TramesMaxDefaut != 100000 {
+		t.Fatal(TramesMaxDefaut)
+	}
+}

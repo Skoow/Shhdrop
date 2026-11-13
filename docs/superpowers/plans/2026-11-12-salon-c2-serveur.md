@@ -99,7 +99,7 @@ Autres messages de contrôle (`0x02`–`0x05`) : 600 par minute et par WebSocket
 | `0x09` exclusion | siège (1, `0xFF` sans exclu) ‖ `nonce_arrivée` (16) ‖ `r` (4) | oui |
 | `0x0A` reprise | siège (1) ‖ nouveau `nonce_arrivée` (16) | oui |
 | `0x0B` limite | secondes à attendre (4) ; **ne désigne pas la trame refusée** (relecture Task 16) : le client (C-3) n'a qu'une trame `0x01` en vol à la fois et, après un `0x0B`, renvoie **exactement les mêmes octets** une fois le délai écoulé | non |
-| `0x0C` plein | — (trame non rangée : disque plein) | non |
+| `0x0C` plein | — (trame non rangée : disque plein, ou plafond de trames rangées du salon atteint : `SHH_SALON_FRAMES_MAX`, 100 000 par défaut, audit du 13 novembre, D3 ; seul un renouvellement rouvre alors l'écriture, les volatiles passent encore) | non |
 | `0x0D` liste | créateur (1, toujours 0) ‖ n (1) ‖ n × (siège (1) ‖ `nonce_arrivée` (16) ‖ dernière connexion (8), comme `0x07`) — 11 + 25n octets ; `seq` = rang où elle s'applique ; dernière connexion non nulle seulement pour un occupant encore là et hors ligne, jamais pour soi | non |
 | `0x0E` effacée | `seq` de la trame effacée (8) | non |
 | `0x0F` acceptée | — (9 octets en tout : `seq` = rang de la trame `0x01` acceptée) ; **à l'expéditeur seul**, pour chaque `0x01` rangé ou relayé, en direct comme en rattrapage (revue finale C-2, I1) | non |

@@ -14,15 +14,15 @@ func TestCapaciteCalculee(t *testing.T) {
 		want   Capacity
 	}{
 		// Sans GOMEMLIMIT ni limite connue : valeurs d'avant le 13 novembre.
-		{"sans limites", math.MaxInt64, 0, Capacity{64, 256, 256, 2000, 64, 1500}},
+		{"sans limites", math.MaxInt64, 0, Capacity{64, 256, 256, 2000, 64, 1500, 100000}},
 		// compose.yaml : GOMEMLIMIT 900 Mio, nofile 65 536.
-		{"production", 900 << 20, 65536, Capacity{67, 360, 360, 2000, 64, 1500}},
+		{"production", 900 << 20, 65536, Capacity{67, 360, 360, 2000, 64, 1500, 100000}},
 		// 4 Gio de mémoire : 307 envois, 1 638 lectures.
-		{"4 Gio", 4 << 30, 1 << 20, Capacity{307, 1638, 1638, 2000, 64, 1500}},
+		{"4 Gio", 4 << 30, 1 << 20, Capacity{307, 1638, 1638, 2000, 64, 1500, 100000}},
 		// Descripteurs rares : nofile / 8 par catégorie.
-		{"1 024 descripteurs", 4 << 30, 1024, Capacity{128, 128, 128, 128, 64, 1500}},
+		{"1 024 descripteurs", 4 << 30, 1024, Capacity{128, 128, 128, 128, 64, 1500, 100000}},
 		// Très peu de mémoire : planchers.
-		{"64 Mio", 64 << 20, 65536, Capacity{8, 25, 25, 2000, 64, 1500}},
+		{"64 Mio", 64 << 20, 65536, Capacity{8, 25, 25, 2000, 64, 1500, 100000}},
 	}
 	for _, c := range cas {
 		if got := computeCapacity(c.mem, c.nofile); got != c.want {
@@ -38,8 +38,9 @@ func TestCapaciteReglee(t *testing.T) {
 	t.Setenv("SHH_WS_MAX", "5000")
 	t.Setenv("SHH_DISK_OPS_MAX", "16")
 	t.Setenv("SHH_SEGMENTS_PER_MIN", "600")
+	t.Setenv("SHH_SALON_FRAMES_MAX", "20000")
 	c, err := capacityFromEnv(900<<20, 65536)
-	if err != nil || c != (Capacity{200, 1000, 50, 5000, 16, 600}) {
+	if err != nil || c != (Capacity{200, 1000, 50, 5000, 16, 600, 20000}) {
 		t.Fatal(c, err)
 	}
 	for _, v := range []string{"0", "-1", "012", "1e3", " 5", "x", "1048577"} {

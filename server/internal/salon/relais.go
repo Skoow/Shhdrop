@@ -74,7 +74,8 @@ func (s *salon) perimeLocked(mb Membre, now time.Time) error {
 //
 // Garde-fous (Task 12), sans rang consommé ni jeton pris : trame non volatile alors que
 // l'usage (partages, pièces, conversations) plus une trame dépasse StorageMax, ou usage
-// illisible → ErrPlein (0x0C), avant les seaux ; seaux du siège vides (limites.go) →
+// illisible, ou salon qui a déjà TramesMax trames rangées (index, effacées comprises : leurs
+// emplacements restent sur le disque) → ErrPlein (0x0C), avant les seaux ; seaux du siège vides (limites.go) →
 // *Attente (0x0B). Les jetons sont pris avant l'écriture et rendus si Ajouter échoue :
 // disque réellement plein (ENOSPC, EDQUOT) → ErrPlein ; toute autre erreur → rendue telle
 // quelle (fermeture 1011). Ajouter ramène le fichier à sa taille d'avant ; si ce Truncate
@@ -107,7 +108,9 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, lien *[16]byte) (uint64, err
 			return 0, err
 		}
 	}
-	if plein {
+	// Plafond de trames rangées par salon (audit D3) : 0x0C, pour ce salon seulement ; les
+	// volatiles passent encore. Seul un renouvellement (index vidé) rouvre l'écriture.
+	if plein || !h.Volatile && len(s.index) >= m.tramesMax() {
 		return 0, ErrPlein
 	}
 	limite := !m.sansLimiteSiege

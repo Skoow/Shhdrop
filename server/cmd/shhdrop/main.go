@@ -236,7 +236,8 @@ func setupSalons(cfg config.Config, db *sql.DB, svc *share.Service, lim *limits.
 	m, err := salon.NewManager(salon.Config{DB: db,
 		Pieces:               &blob.Store{Dir: filepath.Join(cfg.DataDir, dirSalonPieces), NoSparse: cfg.BehindProxy, Gate: gate},
 		DossierConversations: filepath.Join(cfg.DataDir, dirSalons), Now: cfg.Now, Max: cfg.SalonsMax,
-		StorageMax: cfg.StorageMaxBytes, UsedPartages: svc.UsedShares, OnAbandon: lim.AbandonUpload})
+		StorageMax: cfg.StorageMaxBytes, UsedPartages: svc.UsedShares, OnAbandon: lim.AbandonUpload,
+		TramesMax: cfg.Capacity.SalonFrames})
 	if err != nil {
 		return nil, err
 	}

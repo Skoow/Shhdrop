@@ -30,6 +30,9 @@ type Capacity struct {
 	// SegmentsPerMin (SHH_SEGMENTS_PER_MIN) : requêtes de segments par minute et par connexion
 	// (limite anti-abus par personne, réglable : 1 500 par défaut, limits.SegmentsPerMin).
 	SegmentsPerMin int
+	// SalonFrames (SHH_SALON_FRAMES_MAX) : trames non volatiles rangées au plus par salon
+	// (audit D3 ; salon.TramesMaxDefaut).
+	SalonFrames int
 }
 
 const (
@@ -46,6 +49,8 @@ const (
 	defaultDiskOps = 64
 	// defaultSegmentsPerMin : limits.SegmentsPerMin (≈ 840 Mbit/s par expéditeur).
 	defaultSegmentsPerMin = 1500
+	// defaultSalonFrames : salon.TramesMaxDefaut (≈ 417 Mo de disque par salon au plus).
+	defaultSalonFrames = 100000
 	// capMax : plafond de toute valeur réglable (borne de bon sens, pas de capacité).
 	capMax = 1 << 20
 )
@@ -66,7 +71,7 @@ func memLimit() int64 { return debug.SetMemoryLimit(-1) }
 //     conversations et la marge.
 func computeCapacity(mem int64, nofile uint64) Capacity {
 	c := Capacity{Uploads: defaultUploads, Downloads: defaultDownloads, WebSockets: defaultWebSockets, DiskOps: defaultDiskOps,
-		SegmentsPerMin: defaultSegmentsPerMin}
+		SegmentsPerMin: defaultSegmentsPerMin, SalonFrames: defaultSalonFrames}
 	if mem > 0 && mem < math.MaxInt64 {
 		c.Uploads = clamp(mem*3/10/uploadCost, 8, capMax)
 		c.Downloads = clamp(mem/10/downloadCost, 16, capMax)
@@ -108,6 +113,7 @@ func capacityFromEnv(mem int64, nofile uint64) (Capacity, error) {
 		{"SHH_WS_MAX", &c.WebSockets, true},
 		{"SHH_DISK_OPS_MAX", &c.DiskOps, false},
 		{"SHH_SEGMENTS_PER_MIN", &c.SegmentsPerMin, false},
+		{"SHH_SALON_FRAMES_MAX", &c.SalonFrames, false},
 	} {
 		s := os.Getenv(v.name)
 		if s == "" {

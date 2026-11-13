@@ -242,6 +242,7 @@ Aucune limite de capacité n'est fixée en dur (décision du propriétaire du 13
 | `SHH_DOWNLOADS_MAX` | lectures de segments simultanées | 10 % de `GOMEMLIMIT` ÷ 256 Kio (tampon), au moins 16 ; 256 sans `GOMEMLIMIT` | 360 |
 | `SHH_WATCH_MAX` | surveillances tenues (`/api/shares/watch`) | autant que de lectures | 360 |
 | `SHH_WS_MAX` | WebSocket du salon ouverts | 2 000 | 2 000 |
+| `SHH_SALON_FRAMES_MAX` | trames non volatiles rangées au plus par salon ; au-delà, `0x0C` « Le salon est plein » pour ce salon seulement | 100 000 (≈ 417 Mo de disque, 2,4 Mio de mémoire) | 100 000 |
 | `SHH_DISK_OPS_MAX` | appels système de fichiers simultanés (partages et pièces) ; au-delà, ils attendent leur tour | 64 | 64 |
 
 **Débit par expéditeur** : `SHH_SEGMENTS_PER_MIN` (1 500 par défaut, 600 avant le 13 novembre) est la seule limite par personne réglable ici : requêtes de segments de 4 Mio par minute et par connexion (10 fois plus par /48), soit environ 840 Mbit/s par expéditeur. La baisser protège la bande passante de la machine ; la monter ne sert qu'au-delà de 1 Gbit/s.

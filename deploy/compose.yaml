@@ -82,6 +82,8 @@ services:
       SHH_DISK_OPS_MAX: ${SHH_DISK_OPS_MAX:-}
       # Limite anti-abus par personne, réglable : segments par minute et par connexion (1 500).
       SHH_SEGMENTS_PER_MIN: ${SHH_SEGMENTS_PER_MIN:-}
+      # Trames non volatiles rangées au plus par salon (100 000 ≈ 417 Mo de disque).
+      SHH_SALON_FRAMES_MAX: ${SHH_SALON_FRAMES_MAX:-}
     networks:
       interne:
         ipv4_address: 172.30.53.2
