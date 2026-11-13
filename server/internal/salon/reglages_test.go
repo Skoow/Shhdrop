@@ -86,8 +86,8 @@ func TestRenouvelerEfface(t *testing.T) {
 		libre := b.pretePiece(t, a, 1, false)
 		envoi := b.creerPiece(t, bb, 1, false)
 		b.recevoir(t, g, trameD(0, 1))
-		inst := b.recevoir(t, g, trameD(dInstantane, 2))
-		b.recevoir(t, g, trameD(byte(DixMinutes)<<1, 3))
+		inst := b.recevoir(t, g, trameD(dUneMinute, 2))
+		b.recevoir(t, g, trameD(byte(CinqMinutes)<<1, 3))
 		lg := b.connecter(eg.Jeton, dernierSeq(s))
 		synctest.Wait()
 		la := b.enRattrapage(t, g, ea, toujours)
@@ -401,8 +401,8 @@ func TestRenouvelerConcurrent(t *testing.T) {
 	}
 	for _, mb := range []Membre{g, a} {
 		boucle(func(i int) {
-			d := []byte{0, dInstantane, byte(DixMinutes) << 1, dVolatile}[i%4]
-			if seq, err := b.m.Recevoir(mb, trameD(d, i), nil); err == nil && d == dInstantane {
+			d := []byte{0, dUneMinute, byte(CinqMinutes) << 1, dVolatile}[i%4]
+			if seq, err := b.m.Recevoir(mb, trameD(d, i), nil); err == nil && d == dUneMinute {
 				_ = b.m.Lu(bb, seq)
 			}
 		})

@@ -26,8 +26,8 @@ func trameD(d byte, i int) []byte {
 }
 
 const (
-	dVolatile   = 0b001
-	dInstantane = byte(Instantane) << 1
+	dVolatile  = 0b001
+	dUneMinute = byte(UneMinute) << 1
 )
 
 // membreDe : Membre du jeton reçu à l'entrée.
@@ -180,7 +180,7 @@ func TestVolatileNonEcrite(t *testing.T) {
 	s := mb.salon
 	avant := dernierSeq(s)
 	for i := 0; i < 10; i++ {
-		for _, regle := range []byte{0, dInstantane} {
+		for _, regle := range []byte{0, dUneMinute} {
 			if seq := b.recevoir(t, mb, trameD(dVolatile|regle, i)); seq <= avant {
 				t.Fatal("rang", seq)
 			}
@@ -337,9 +337,9 @@ func TestSuiteFusionnee(t *testing.T) {
 	b.recevoir(t, g, trameD(dVolatile, 2))
 	e0b, g := b.entrerMembre(t, c, true) // reprise du créateur
 	attendu = append(attendu, att{0x0A, e0b.Seq})
-	// « Instantané » dont A est le seul lecteur attendu : effacée à son départ (plus bas,
+	// Règle 1 dont A est le seul lecteur attendu : effacée 60 s après son départ (plus bas,
 	// Task 11), donc absente de la suite.
-	b.recevoir(t, g, trameD(dInstantane, 3))
+	b.recevoir(t, g, trameD(dUneMinute, 3))
 	eb, bb := b.entrerMembre(t, c, false)
 	attendu = append(attendu, att{0x02, eb.Seq})
 	attendu = append(attendu, att{0x01, b.recevoir(t, bb, trameD(byte(UneHeure)<<1, 4))})
@@ -349,6 +349,7 @@ func TestSuiteFusionnee(t *testing.T) {
 	}
 	s := g.salon
 	attendu = append(attendu, att{0x03, dernierSeq(s)})
+	b.h.avancer(time.Minute) // échéance de la règle 1 (suite efface les trames échues)
 	attendu = append(attendu, att{0x01, b.recevoir(t, g, trameD(0, 6))})
 
 	var lu []att
@@ -520,15 +521,15 @@ func TestAttendus(t *testing.T) {
 	b.entrerMembre(t, c, false)
 	b.entrerMembre(t, c, false)
 	s := g.salon
-	b.recevoir(t, g, trameD(dInstantane, 1))
-	b.recevoir(t, g, trameD(byte(DixMinutes)<<1, 2))
+	b.recevoir(t, g, trameD(dUneMinute, 1))
+	b.recevoir(t, g, trameD(byte(CinqMinutes)<<1, 2))
 	b.recevoir(t, g, trameD(0, 3))
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.index) != 3 || s.index[0].attendus != 0b110 || s.index[1].attendus != 0 || s.index[2].attendus != 0 {
+	if len(s.index) != 3 || s.index[0].attendus != 0b110 || s.index[1].attendus != 0b110 || s.index[2].attendus != 0 {
 		t.Fatal("attendus", s.index)
 	}
-	if s.index[0].drapeaux != dInstantane || s.index[1].drapeaux != byte(DixMinutes)<<1 || s.index[0].siege != 0 {
+	if s.index[0].drapeaux != dUneMinute || s.index[1].drapeaux != byte(CinqMinutes)<<1 || s.index[0].siege != 0 {
 		t.Fatal("drapeaux ou siège", s.index)
 	}
 }

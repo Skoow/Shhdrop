@@ -82,15 +82,22 @@ describe("salon : trois clients, vrai moteur", () => {
     await lit(c, e1, 0);
   });
 
-  it("« instantané » lu (0x05) par les deux autres → 0x0E chez les trois", async () => {
+  // Règle 1 (« vu par tous + délai », décision du 13 novembre) : effacée 60 s après la dernière
+  // lecture (0x05), pas avant ; 0x0E chez les trois.
+  it("règle 1 lue (0x05) par les deux autres → 0x0E chez les trois 60 s après, pas avant", async () => {
     const inst = texte("Lu une fois", 1);
     seqInst = await a.envoyer(inst);
     for (const x of [b, c]) {
       expect(await lit(x, inst, 0)).toBe(seqInst);
       x.lu(seqInst);
     }
-    await Promise.all(tous.map((x) => x.attendre(efface(seqInst))));
-  });
+    for (const x of [b, c]) await x.ping(); // lectures traitées
+    const lu = Date.now();
+    await new Promise((r) => setTimeout(r, 50_000));
+    for (const x of tous) expect(x.recus.some(efface(seqInst))).toBe(false);
+    await Promise.all(tous.map((x) => x.attendre(efface(seqInst), 30_000)));
+    expect(Date.now() - lu).toBeGreaterThanOrEqual(59_000);
+  }, 120_000);
 
   it("coupure de C pendant 20 messages, un retrait et un « écrit » : rattrapage exact", async () => {
     await c.couper();
@@ -120,7 +127,7 @@ describe("salon : trois clients, vrai moteur", () => {
     expect(c.recus.some(enr(0x01, seqRetire))).toBe(false);
     expect(c.recus.some(enr(0x01, seqEcrit2))).toBe(false);
     expect(c.recus.some(message(e2.id))).toBe(false);
-    // Accueil de la reconnexion : 0x0E renvoyé pour l'instantané (rang dans (émission, depuis]),
+    // Accueil de la reconnexion : 0x0E renvoyé pour la trame de règle 1 (rang dans (émission, depuis]),
     // jamais pour le retrait.
     expect(c.effaces.filter((s) => s === seqInst).length).toBe(2);
     expect(c.effaces).not.toContain(seqRetire);

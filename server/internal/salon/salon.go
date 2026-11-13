@@ -89,7 +89,8 @@ type salon struct {
 	pieces            map[uint64]*piece
 	aPurger           []purge
 	flux              *share.Streams
-	// echeances : effacements « 10 min » et « 1 h » à venir (effacement.go), vidés par Tick.
+	// echeances : effacements à venir des règles 1 à 3, une fois lues par tous (effacement.go),
+	// une au plus par entrée de l'index ; vidées par Tick, la fin et le renouvellement.
 	echeances echeances
 	conv      *Conversation // nil pour la tombe d'un salon détruit sans état
 	// conns : connexion WebSocket de chaque siège (une au plus, connexion.go).

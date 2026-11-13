@@ -321,7 +321,7 @@ func (m *Manager) inscrire(ctx context.Context, mb Membre, a Accueil, l Lien) (*
 	}
 	var effaces []uint64
 	if !a.Reprise {
-		// Trames « instantané » effacées par lecture ou départ pendant la coupure, que ce
+		// Trames des règles 1 à 3 effacées après lecture par tous pendant la coupure, que ce
 		// client a pu recevoir avant (rang ≤ point, après l'émission de son jeton ou sa
 		// dernière reprise) : cibles dans c.effaces, écrites par lots après l'accueil.
 		effaces = s.effacesLusLocked(x.borneEffaces(), point)

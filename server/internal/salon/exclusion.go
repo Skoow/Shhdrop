@@ -57,7 +57,7 @@ var crochetExclure func()
 //     ErrBase, rien changé ;
 //   - puis, sous le verrou du salon : WebSocket de l'exclu fermé (0x05 raison 5, 4002 ; il ne
 //     reçoit pas le 0x09), siège libéré par sortirLocked (0x09 au journal et diffusé, siège
-//     plus attendu par aucune trame « instantané » : effacements et 0x0E, jeton révoqué et
+//     plus attendu par aucune trame des règles 1 à 3 : délais lancés, puis 0x0E, jeton révoqué et
 //     gardé jusqu'à la fin du salon, lectures de pièces de ce jeton coupées). Les jetons émis
 //     ensuite ont un plancher de pièces (rang de leur annonce) postérieur à ce 0x09.
 //

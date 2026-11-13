@@ -17,7 +17,7 @@ import (
 // entree : trame non volatile rangée, 24 octets (plan, point 10 ; TestTailleEntree).
 // recuMs : heure de réception du serveur (ms Unix), jamais lue dans la trame ni écrite sur
 // disque. emplacement : numéro dans la conversation, ou effaceMarque une fois l'emplacement
-// écrasé (retrait, règle). attendus : lecteurs attendus d'une trame « instantané », un bit
+// écrasé (retrait, règle). attendus : lecteurs attendus d'une trame des règles 1 à 3, un bit
 // par siège (bitSiege ; sièges occupés à la réception, moins l'expéditeur ; plan, point 8),
 // retirés à chaque lecture, départ ou reprise (effacement.go) ; 0 pour les autres règles. La
 // pièce liée d'une trame est rangée à part (salon.pieces, Task 13).
@@ -69,9 +69,8 @@ func (s *salon) perimeLocked(mb Membre, now time.Time) error {
 // périmé : ErrNotFound ; exclu : ErrExcluded (perimeLocked, de même pour Retirer, Quitter et
 // Lu). Erreur d'écriture de la conversation (ErrES, fixe) : trame non rangée,
 // aucun rang consommé. L'écriture se fait sous le verrou du salon : l'ordre des emplacements
-// est celui des rangs. Règle « 10 min » ou « 1 h » : échéance rangée (effacement.go).
-// « Instantané » sans aucun autre siège occupé : relayée puis effacée aussitôt (0x0E), sans
-// jamais être écrite sur le disque.
+// est celui des rangs. Règles 1 à 3 (« vu par tous + délai », effacement.go) : lecteurs
+// attendus rangés ; expéditeur seul : échéance rangée tout de suite (maintenant + délai).
 //
 // Garde-fous (Task 12), sans rang consommé ni jeton pris : trame non volatile alors que
 // l'usage (partages, pièces, conversations) plus une trame dépasse StorageMax, ou usage
@@ -122,39 +121,32 @@ func (m *Manager) Recevoir(mb Membre, trame []byte, lien *[16]byte) (uint64, err
 		s.relayerLocked(mb.siege, now.UnixMilli(), trame)
 		return s.seq, nil
 	}
+	// Règles 1 à 3 : lecteurs attendus (sièges occupés, moins l'expéditeur) ; expéditeur seul :
+	// personne à attendre, l'échéance part tout de suite (effacement.go).
 	var attendus uint16
-	if h.Regle == Instantane {
+	_, avecDelai := delaiApresLecture(h.Regle)
+	if avecDelai {
 		attendus = s.attendusLocked(mb.siege)
 	}
-	e := uint32(effaceMarque)
-	if h.Regle != Instantane || attendus != 0 {
-		if e, err = s.conv.Ajouter(trame); err != nil {
-			if limite {
-				s.limites[mb.siege].rendre(true) // trame non rangée : jetons rendus
-			}
-			if errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT) {
-				return 0, ErrPlein
-			}
-			return 0, err
+	e, err := s.conv.Ajouter(trame)
+	if err != nil {
+		if limite {
+			s.limites[mb.siege].rendre(true) // trame non rangée : jetons rendus
 		}
+		if errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT) {
+			return 0, ErrPlein
+		}
+		return 0, err
 	}
 	s.seq++
-	drapeaux := trame[len(marque)]
-	if e == effaceMarque {
-		drapeaux |= drapeauLu // personne à attendre : effacée comme par une dernière lecture
-	}
 	s.index = append(s.index, entree{seq: s.seq, emplacement: e, recuMs: now.UnixMilli(), siege: mb.siege,
-		drapeaux: drapeaux, attendus: attendus})
-	s.echeanceLocked(h.Regle, s.seq, now.UnixMilli())
+		drapeaux: trame[len(marque)], attendus: attendus})
+	if avecDelai && attendus == 0 {
+		s.echeanceLocked(h.Regle, s.seq, now.UnixMilli())
+	}
 	s.relayerLocked(mb.siege, now.UnixMilli(), trame)
 	if p != nil {
 		s.lierLocked(p, s.seq)
-	}
-	if e == effaceMarque {
-		// Personne à attendre : 0x0E juste après le 0x01, sans écriture ; la pièce liée est
-		// effacée avec la trame (fichier et ligne au Tick suivant).
-		s.pieceDeTrameLocked(s.seq)
-		s.diffuserLocked(EnrEfface(s.seq, s.seq), genreEfface, nil)
 	}
 	return s.seq, nil
 }
@@ -194,7 +186,7 @@ func (m *Manager) Retirer(mb Membre, seq uint64) error {
 }
 
 // Quitter : départ de mb (0x03 au journal, diffusé à la Task 9), jeton oublié, siège libéré,
-// plus attendu par aucune trame « instantané » (departLocked), puis son WebSocket, s'il en a
+// plus attendu par aucune trame des règles 1 à 3 (departLocked), puis son WebSocket, s'il en a
 // un, fermé en 1000 (demande 0x03, ou POST /api/salons/signaler hors du WebSocket). Membre
 // périmé : ErrNotFound ; exclu : ErrExcluded.
 func (m *Manager) Quitter(mb Membre) error {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/skoow/shhdrop/server/internal/share"
 )
@@ -461,7 +462,7 @@ func TestInstantaneExclu(t *testing.T) {
 		s := g.salon
 		l0, la := b.connecter(e0.Jeton, e0.Seq), b.connecter(ea.Jeton, ea.Seq)
 		synctest.Wait()
-		seq := b.recevoir(t, g, trameD(dInstantane, 1)) // attendus : A et B
+		seq := b.recevoir(t, g, trameD(dUneMinute, 1)) // attendus : A et B
 		b.lu(t, ma, seq)
 		if !servie(t, s, seq) {
 			t.Fatal("effacée avant le départ de B")
@@ -469,6 +470,11 @@ func TestInstantaneExclu(t *testing.T) {
 		if err := b.m.Exclure(reqExclure(c, invitation(c), siegeP(eb.Siege), &eb.Nonce, 1)); err != nil {
 			t.Fatal(err)
 		}
+		synctest.Wait()
+		if !servie(t, s, seq) {
+			t.Fatal("effacée à l'exclusion, sans délai")
+		}
+		b.echoir(time.Minute)
 		synctest.Wait()
 		if servie(t, s, seq) {
 			t.Fatal("trame encore servie")

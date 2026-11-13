@@ -522,7 +522,7 @@ export class ClientSalon {
     this.#envoyerWS(this.#ws!, b);
   }
 
-  /** 0x05 : lecture « instantané » de la trame `seq`. */
+  /** 0x05 : lecture d'une trame des règles 1 à 3 (effacée après lecture par tous, puis délai). */
   lu(seq: number): void {
     this.#demande(0x05, seq);
   }

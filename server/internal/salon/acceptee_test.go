@@ -104,10 +104,11 @@ func TestAccepteeInstantaneEffaceeAvantRattrapage(t *testing.T) {
 		_, g := b.entrerMembre(t, c, true)
 		ea := b.entrer(t, c, false)
 		la := b.enRattrapage(t, g, ea, toujours)
-		la.envoyer(demTrame(trameD(dInstantane, 1)))
+		la.envoyer(demTrame(trameD(dUneMinute, 1)))
 		synctest.Wait()
 		seq := dernierSeq(g.salon)
-		b.lu(t, g, seq) // dernier lecteur attendu : effacée
+		b.lu(t, g, seq)       // dernier lecteur attendu
+		b.echoir(time.Minute) // effacée à l'échéance, avant que le rattrapage l'atteigne
 		time.Sleep(2 * time.Second)
 		synctest.Wait()
 		if echo(la, seq) {
@@ -135,7 +136,7 @@ func TestAccepteeInstantaneSeulEnRattrapage(t *testing.T) {
 		if err := b.m.Quitter(g); err != nil {
 			t.Fatal(err)
 		}
-		la.envoyer(demTrame(trameD(dInstantane, 1)))
+		la.envoyer(demTrame(trameD(dUneMinute, 1)))
 		synctest.Wait()
 		seq := dernierSeq(g.salon)
 		time.Sleep(2 * time.Second)

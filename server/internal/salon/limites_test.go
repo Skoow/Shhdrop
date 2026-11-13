@@ -240,7 +240,7 @@ func TestDisquePlein(t *testing.T) {
 		if _, err := b.m.Recevoir(g1, trameD(0, 3), nil); !errors.Is(err, ErrPlein) {
 			t.Fatal("trame au-delà de StorageMax :", err)
 		}
-		if _, err := b.m.Recevoir(g1, trameD(dInstantane, 3), nil); !errors.Is(err, ErrPlein) {
+		if _, err := b.m.Recevoir(g1, trameD(dUneMinute, 3), nil); !errors.Is(err, ErrPlein) {
 			t.Fatal("« instantané » au-delà de StorageMax :", err)
 		}
 		if dernierSeq(s1) != seq || s1.conv.Taille() != taille || empreinte(t, s1) != sceau {

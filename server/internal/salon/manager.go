@@ -550,7 +550,7 @@ func (m *Manager) sortirLocked(s *salon, n uint8, enr func(seq uint64) []byte, r
 	m.flux.Revoke(cleFluxMembre(jv)) // lectures de pièces en cours de ce jeton coupées
 }
 
-// Tick : une passe d'entretien (chaque seconde, Run) : trames « 10 min » et « 1 h » échues
+// Tick : une passe d'entretien (chaque seconde, Run) : trames des règles 1 à 3 échues (délai après lecture par tous)
 // effacées (Task 11), pièces effacées (celles de ces trames, celles qui ne sont jamais
 // liées ou finalisées : Task 13), salons arrivés à échéance finis en raison 1 (finir : 0x05
 // aux connectés, conversation, pièces fichier puis ligne, ligne du salon), fins restées à
@@ -611,7 +611,7 @@ func (m *Manager) entretenir(s *salon, now time.Time) (tombe, echu, aPurger bool
 	}
 	s.effacerEchuesLocked(now.UnixMilli())
 	// Un siège connecté au moins une fois n'est jamais libéré ici : un absent reste réservé et
-	// attendu par les trames « instantané » jusqu'à son retour, son départ, son exclusion ou la
+	// attendu par les trames des règles 1 à 3 jusqu'à son retour, son départ, son exclusion ou la
 	// fin du salon (revue finale C-2, I3). Seul un siège invité qui n'a jamais ouvert de
 	// WebSocket dans les jamaisConnecteMax après son entrée part (0x03 : réponse de rejoindre
 	// perdue, remplissage ; relecture C-2, N1) ; son arrivée reste comptée (s.arrivees).

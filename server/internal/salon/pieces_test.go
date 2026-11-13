@@ -330,8 +330,8 @@ func TestPieceLieeSuitSaTrame(t *testing.T) {
 	_, mb := b.entrerMembre(t, c, true)
 	defer b.connecte(t, mb)()
 	id := b.pretePiece(t, mb, 16, false)
-	b.lier(t, mb, byte(DixMinutes)<<1, id)
-	b.h.avancer(599 * time.Second)
+	b.lier(t, mb, byte(CinqMinutes)<<1, id) // seul : 5 min dès la réception
+	b.h.avancer(299 * time.Second)
 	b.m.Tick()
 	if f, l := b.surDisque(t, id); !f || !l {
 		t.Fatal("pièce effacée avant l'échéance", f, l)
@@ -339,7 +339,7 @@ func TestPieceLieeSuitSaTrame(t *testing.T) {
 	b.h.avancer(time.Second)
 	b.m.Tick()
 	if f, l := b.surDisque(t, id); f || l {
-		t.Fatal("pièce encore présente à 600 s", f, l)
+		t.Fatal("pièce encore présente à 300 s", f, l)
 	}
 	if got := b.budgetPris(t, mb.salon); got != 0 {
 		t.Fatal("budget non rendu", got)
@@ -398,19 +398,24 @@ func TestPieceLieeInstantane(t *testing.T) {
 	_, mb := b.entrerMembre(t, c, true)
 	_, mb2 := b.entrerMembre(t, c, false)
 	id := b.pretePiece(t, mb, 1, false)
-	seq := b.lier(t, mb, dInstantane, id)
+	seq := b.lier(t, mb, dUneMinute, id)
 	if got, err := b.lire(t, mb2, id, 0); err != nil || len(got) != share.SegmentSize(1, 0) {
 		t.Fatal("lecture :", len(got), err)
 	}
 	b.lu(t, mb2, seq)
-	if f, l := b.surDisque(t, id); f || l {
-		t.Fatal("pièce encore présente après la dernière lecture", f, l)
+	b.echoir(time.Minute - time.Millisecond)
+	if f, l := b.surDisque(t, id); !f || !l {
+		t.Fatal("pièce effacée avant le délai qui suit la dernière lecture", f, l)
 	}
-	// Seul dans le salon : la trame est effacée tout de suite, et sa pièce aussi (au Tick).
+	b.echoir(time.Millisecond)
+	if f, l := b.surDisque(t, id); f || l {
+		t.Fatal("pièce encore présente 60 s après la dernière lecture", f, l)
+	}
+	// Seul dans le salon : le délai part de la réception, la pièce suit sa trame.
 	id2 := b.pretePiece(t, mb2, 1, false)
 	b.depart(mb.salon, mb.siege)
-	b.lier(t, mb2, dInstantane, id2)
-	b.m.Tick()
+	b.lier(t, mb2, dUneMinute, id2)
+	b.echoir(time.Minute)
 	if f, l := b.surDisque(t, id2); f || l {
 		t.Fatal("pièce d'une trame effacée aussitôt", f, l)
 	}

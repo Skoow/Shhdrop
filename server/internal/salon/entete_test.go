@@ -152,7 +152,7 @@ func TestEnTeteDrapeaux(t *testing.T) {
 			t.Errorf("drapeaux %#02x : %+v, %v", f, e, err)
 		}
 	}
-	if Desactive != 0 || Instantane != 1 || DixMinutes != 2 || UneHeure != 3 {
+	if Desactive != 0 || UneMinute != 1 || CinqMinutes != 2 || UneHeure != 3 {
 		t.Fatal("valeurs de Regle")
 	}
 	for _, m := range []string{"SHC2", "shc3", "SHC\x00", "\x00HC3"} {
