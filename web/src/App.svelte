@@ -11,6 +11,7 @@
   import { setScreenTitle } from "./app/title";
   import { getLang } from "./i18n/i18n.svelte";
   import { watchKeyboard } from "./app/viewport";
+  import { watchOpenGrant } from "./session/open-grant";
   import History from "./routes/History.svelte";
   import Manage from "./routes/Manage.svelte";
   import NotFound from "./routes/NotFound.svelte";
@@ -100,6 +101,8 @@
 
   // UI §9 : clavier virtuel ouvert → classe kbd-open sur <html> (barres collées dans le flux).
   $effect(() => watchKeyboard(window, (open) => document.documentElement.classList.toggle("kbd-open", open)));
+  // Entrée d'onglet (K_lien) effacée après 30 min sans activité, sur tous les écrans (audit web D2).
+  $effect(() => watchOpenGrant(window));
 </script>
 
 <svelte:window onhashchange={onHashChange} />

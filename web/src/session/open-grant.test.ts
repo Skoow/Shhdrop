@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { INACTIVITY_MS, OPEN_GRANT_KEY, clearOpenGrant, loadOpenGrant, saveOpenGrant, startInactivityGuard } from "./open-grant";
+import { INACTIVITY_MS, OPEN_GRANT_KEY, clearOpenGrant, loadOpenGrant, saveOpenGrant, startInactivityGuard, watchOpenGrant } from "./open-grant";
 
 // sessionStorage minimal (environnement node).
 class MemStorage {
@@ -112,5 +112,61 @@ describe("open-grant (spec §41.4)", () => {
     const type = /export type OpenGrantEntry = \{([^}]*)\}/.exec(src)![1]!;
     expect(type.replace(/\/\*.*?\*\//g, "").match(/\b\w+(?=\s*:)/g)).toEqual(["v", "link", "grant", "last"]);
     expect(src).not.toMatch(/password|kContenu|\bR\b\s*:/);
+  });
+});
+
+describe("garde au niveau de l'application (audit web D2 du 13 novembre)", () => {
+  function setup() {
+    let t = 1_000_000;
+    const ticks: (() => void)[] = [];
+    const listeners = new Map<string, () => void>();
+    const target = {
+      addEventListener: (ev: string, f: () => void) => listeners.set(ev, f),
+      removeEventListener: (ev: string) => listeners.delete(ev),
+    };
+    const stop = watchOpenGrant(target, () => t, (_ms, f) => {
+      ticks.push(f);
+      return () => ticks.splice(0);
+    });
+    return { advance: (ms: number) => ((t += ms), ticks.forEach((f) => f())), act: (ev = "pointerdown") => listeners.get(ev)?.(), listeners, stop };
+  }
+
+  it("30 min sans activité, quel que soit l'écran : l'entrée (K_lien) est effacée", () => {
+    const w = setup();
+    saveOpenGrant({ v: 1, link: LINK, grant: GRANT, last: 0 });
+    w.advance(INACTIVITY_MS - 60_000);
+    expect(loadOpenGrant()).not.toBeNull();
+    w.advance(60_000);
+    expect(ss.getItem(OPEN_GRANT_KEY)).toBeNull();
+  });
+
+  it("une activité repousse l'échéance ; la garde continue après un effacement (entrée suivante)", () => {
+    const w = setup();
+    expect([...w.listeners.keys()].sort()).toEqual(["keydown", "pointerdown", "scroll", "visibilitychange"]);
+    saveOpenGrant({ v: 1, link: LINK, grant: GRANT, last: 0 });
+    w.advance(INACTIVITY_MS - 1000);
+    w.act("keydown");
+    w.advance(INACTIVITY_MS - 1000);
+    expect(loadOpenGrant()).not.toBeNull();
+    w.advance(1000);
+    expect(loadOpenGrant()).toBeNull();
+    w.act();
+    saveOpenGrant({ v: 1, link: LINK, grant: GRANT, last: 0 });
+    w.advance(INACTIVITY_MS);
+    expect(loadOpenGrant()).toBeNull();
+  });
+
+  it("activité après 30 min d'absence : l'entrée est effacée quand même (pas de sauvetage)", () => {
+    const w = setup();
+    saveOpenGrant({ v: 1, link: LINK, grant: GRANT, last: 0 });
+    w.advance(INACTIVITY_MS + 5000); // sans tick entre-temps : un onglet en veille
+    w.act();
+    expect(loadOpenGrant()).toBeNull();
+  });
+
+  it("stop : écouteurs retirés", () => {
+    const w = setup();
+    w.stop();
+    expect(w.listeners.size).toBe(0);
   });
 });

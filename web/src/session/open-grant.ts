@@ -118,3 +118,37 @@ export function startInactivityGuard(
     },
   };
 }
+
+type Events = { addEventListener(ev: string, f: () => void, o?: AddEventListenerOptions): void; removeEventListener(ev: string, f: () => void, o?: AddEventListenerOptions): void };
+
+/**
+ * Garde au niveau de l'application (audit web D2 du 13 novembre) : l'entrée de l'onglet, qui
+ * contient K_lien, est effacée après INACTIVITY_MS sans activité, quel que soit l'écran (la garde
+ * de l'écran de contenu s'arrête quand on le quitte). Une activité après l'échéance ne sauve pas
+ * l'entrée. Tourne toute la vie de la page ; rend de quoi l'arrêter.
+ */
+export function watchOpenGrant(
+  target: Events,
+  now: () => number = () => Date.now(),
+  every: (ms: number, f: () => void) => () => void = (ms, f) => {
+    const id = setInterval(f, ms);
+    return () => clearInterval(id);
+  },
+): () => void {
+  let last = now();
+  const check = () => {
+    if (now() - last >= INACTIVITY_MS) clearOpenGrant();
+  };
+  const touch = () => {
+    check();
+    last = now();
+  };
+  const EVENTS = ["pointerdown", "keydown", "scroll", "visibilitychange"] as const;
+  const opts = { capture: true, passive: true };
+  for (const ev of EVENTS) target.addEventListener(ev, touch, opts);
+  const off = every(60_000, check);
+  return () => {
+    off();
+    for (const ev of EVENTS) target.removeEventListener(ev, touch, opts);
+  };
+}
