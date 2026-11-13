@@ -195,7 +195,7 @@ test("contrôles à trois niveaux : fichier, catégorie, tout ; pause sans relec
   expect(got["c.bin"]!.sha).toBe(sha(C));
 
   // Tout : progression d'ensemble, Tout mettre en pause, Tout reprendre, Tout arrêter. Segments
-  // retenus jusqu'à la fin : avec la lecture d'avance (A2), les 3 segments de c.bin seraient sinon
+  // retenus jusqu'à « Tout arrêter » : avec la lecture d'avance (A2), les 3 segments de c.bin seraient sinon
   // arrivés pendant la pause, et la reprise finirait aussitôt.
   delay = 900;
   let open!: () => void;
@@ -209,8 +209,8 @@ test("contrôles à trois niveaux : fichier, catégorie, tout ; pause sans relec
   await page.getByRole("button", { name: "Tout reprendre" }).click();
   await expect(row(page, "c.bin")).toHaveAttribute("data-state", "downloading");
   await page.getByRole("button", { name: "Tout arrêter" }).click();
+  open(); // l'arrêt prend effet à la tranche suivante : les segments retenus arrivent
   await expect(row(page, "c.bin")).toHaveAttribute("data-state", "idle", { timeout: 20_000 });
-  open();
 });
 
 test("visionneuse en panneau : précédent, suivant, Début, Fin, Échap rend le focus, balayage au doigt ; axe ; captures", async ({ page, shh, browser }) => {
