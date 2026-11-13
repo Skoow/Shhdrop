@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
-import { loadSalonEngine, type Enveloppe, type Message, type SalonEngine } from "./engine";
+import { loadSalonEngine, type Enveloppe, type Message, type Salon, type SalonEngine } from "./engine";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** Entiers au-delà de 2^53 − 1 (instants de saturation de `effacement`) lus exactement, en bigint. */
@@ -84,6 +84,7 @@ function envDe(v: Cas): Enveloppe {
     regle: () => ({ k: "regle", regle: m.regle }),
     profil: () => ({ k: "profil", pseudo: m.pseudo, couleur: m.couleur, avatar: m.avatar && { r: unhex(m.avatar.r), piece: unhex(m.avatar.piece), palier: m.avatar.palier } }),
     depart: () => ({ k: "depart" }),
+    rotation: () => ({ k: "rotation", n: m.n, cle: id("cle") }),
     inconnu: () => ({ k: "inconnu", sorte: m.sorte }),
   };
   return { id: unhex(v.id), heureMs: Number(v.t), regle: v.e, message: messages[m.k]!() };
@@ -117,12 +118,20 @@ describe("vecteurs salon-v3.json rejoués par le module WebAssembly", () => {
     expect(c).toEqual({ TAILLE_TRAME: V.constants.TAILLE_TRAME, TAILLE_O: V.constants.TAILLE_O, MAX_CHARGE: V.constants.MAX_CHARGE, JSON_MAX: V.constants.JSON_MAX });
   });
 
-  it("clés : K_accès_s, V_accès_s, K_preuve_s, V_preuve_s, étiquette (K_trame reste dans le module : couverte par les trames)", () => {
+  it("clés : K_accès_s, V_accès_s, K_preuve_s, V_preuve_s, étiquette (K_trame reste dans le module : couverte par les trames) ; K_maître_s seule redonne les mêmes clés (F4)", () => {
     expect(V.cles.length).toBeGreaterThan(0);
     for (const c of V.cles as Cas[]) {
       const a = S.cleAcces(unhex(c.k_lien));
       const s = S.clesSalon(unhex(c.k_lien), unhex(c.k_mdp));
       expect({ k: hex(a.k), v: hex(a.v), p: hex(s.kPreuve()), vp: hex(s.vPreuve()), t: hex(s.tag()) }, c.label).toEqual({ k: c.k_acces, v: c.v_acces, p: c.k_preuve, vp: c.v_preuve, t: c.tag });
+      // Rotation de l'invitation : le créateur ne distribue que K_maître_s ; un membre en tire
+      // les clés du salon, K_trame comprise (une trame scellée sous les unes s'ouvre sous les autres).
+      expect(hex(S.cleMaitre(unhex(c.k_lien), unhex(c.k_mdp))), c.label).toBe(c.k_maitre);
+      const m = S.clesDepuisMaitre(unhex(c.k_maitre));
+      expect({ p: hex(m.kPreuve()), vp: hex(m.vPreuve()), t: hex(m.tag()) }, c.label).toEqual({ p: c.k_preuve, vp: c.v_preuve, t: c.tag });
+      const charge = utf8(c.label);
+      expect(hex(S.ouvrir(m, S.sceller(s, { volatile: false, regle: 0 }, charge)).charge), c.label).toBe(hex(charge));
+      m.free();
       s.free();
     }
   });
@@ -165,7 +174,7 @@ describe("vecteurs salon-v3.json rejoués par le module WebAssembly", () => {
       cles.free();
     }
     // Cohérence en-tête ↔ contenu (ce que recevoirTrame vérifie) : seul l'en-tête du contenu passe.
-    expect(V.trames.coherence.length).toBe(48);
+    expect(V.trames.coherence.length).toBe(56);
     for (const c of V.trames.coherence as Cas[]) {
       const e = c.contenu === "controle" ? null : envDe(c.contenu);
       const err = errorOf(() => S.enTeteCoherent(c.en_tete, e));
@@ -270,6 +279,139 @@ describe("groupe en trames (I1, I2, M4, M5)", () => {
   });
 });
 
+describe("exclusion, rotation de l'invitation, refondation (audit adverse du 13 novembre : F1 à F4)", () => {
+  const n = (s: number) => new Uint8Array(16).fill(s + 1);
+  const texteDe = (x: string) => ({ heureMs: 1, regle: 0 as const, message: { k: "texte" as const, x } });
+
+  /** Créateur (siège 0) et deux membres, sous `cles` ; `tous` joue le serveur (rang, écho à tous). */
+  function trio(cles: ReturnType<SalonEngine["clesSalon"]>) {
+    const m = [S.Salon.creer(0, n(0), cles, true)];
+    const liste = [{ siege: 0, nonce: n(0) }];
+    m[0]!.remplacerAnnonces(0, liste);
+    const r = { m, seq: 0, liste };
+    const tous = (t: Uint8Array, de: number, c = cles) => {
+      r.seq++;
+      return r.m.map((x) => {
+        try {
+          return x.recevoirTrame(c, t, r.seq, de);
+        } catch (e) {
+          return { type: "erreur" as const, erreur: (e as Error).message };
+        }
+      });
+    };
+    const arrivee = (s: number, c = cles) => {
+      liste.push({ siege: s, nonce: n(s) });
+      for (const x of r.m) x.annoncer(s, n(s));
+      const x = S.Salon.creer(s, n(s), c, false);
+      x.remplacerAnnonces(0, liste);
+      r.m.push(x);
+      const kp = tous(x.keyPackage(c), s, c)[0]!;
+      if (kp.type !== "keyPackage") throw new Error(JSON.stringify(kp));
+      const ev = tous(r.m[0]!.ajouter(c, kp.octets), 0, c)[0]!;
+      if (ev.type !== "commitAccepte" || !ev.welcome) throw new Error(JSON.stringify(ev));
+      return tous(ev.welcome, 0, c).at(-1)!;
+    };
+    expect(arrivee(1).type).toBe("entree");
+    expect(arrivee(2).type).toBe("entree");
+    return { r, tous, arrivee };
+  }
+
+  it("envoi refusé tant qu'un Commit attend son écho ou qu'un exclu est dans l'arbre ; l'événement dit l'époque du message", () => {
+    const cles = S.clesSalon(new Uint8Array(32).fill(5), new Uint8Array(32).fill(6));
+    const { r } = trio(cles);
+    const [c, a, x] = r.m as [Salon, Salon, Salon];
+    // F2 : 0x09 pour le siège 2 ; personne n'écrit tant que sa feuille est là.
+    c.marquerParti(2);
+    a.marquerParti(2);
+    expect(a.aRetirer()).toEqual([2]);
+    expect(errorOf(() => a.envoyer(cles, texteDe("après l'exclusion")))).toBe("retrait_en_attente");
+    expect(errorOf(() => c.envoyer(cles, { heureMs: 1, regle: 0, message: { k: "ecrit" } }))).toBe("retrait_en_attente");
+    // Un Commit de l'exclu (serveur complice) est refusé avant fusion.
+    const e0 = c.epoque()!;
+    const deX = x.renouveler(cles);
+    x.abandonnerCommit();
+    r.seq++;
+    for (const y of [c, a]) expect(errorOf(() => y.recevoirTrame(cles, deX, r.seq, 2))).toBe("commit_refuse");
+    expect(c.epoque()).toBe(e0);
+    // F1 : retrait en attente de son écho → aucun envoi ; après l'écho, l'envoi passe.
+    const retrait = c.retirer(cles, 2);
+    expect(errorOf(() => c.envoyer(cles, texteDe("trop tôt")))).toBe("commit_en_cours");
+    r.seq++;
+    expect(c.recevoirTrame(cles, retrait, r.seq, 0).type).toBe("commitAccepte");
+    expect(a.recevoirTrame(cles, retrait, r.seq, 0)).toEqual({ type: "membres", ajoutes: [], retires: [2] });
+    expect(a.aRetirer()).toEqual([]);
+    const { trame } = c.envoyer(cles, texteDe("après le retrait"));
+    r.seq++;
+    const ev = a.recevoirTrame(cles, trame, r.seq, 0);
+    expect(ev.type === "message" && ev.epoque).toBe(e0 + 1);
+    expect(ev.type === "message" && ev.epoque === a.epoque()).toBe(true);
+    // L'exclu (client modifié, resté à l'époque e0) ne le lit pas.
+    expect(errorOf(() => x.recevoirTrame(cles, trame, r.seq, 0))).toBe("epoque_perdue");
+    for (const y of [...r.m, cles]) y.free();
+  });
+
+  it("rotation : K_maître_s' seule, du créateur, à l'époque courante ; refondation ; une arrivante entre avec la nouvelle invitation, l'exclu ne lit plus rien", () => {
+    const lien1 = new Uint8Array(32).fill(7);
+    const lien2 = new Uint8Array(32).fill(8);
+    const mdp = new Uint8Array(32).fill(9);
+    const cles = S.clesSalon(lien1, mdp);
+    const { r, tous, arrivee } = trio(cles);
+    const codes = [r.m[0]!.empreinte(0), r.m[0]!.empreinte(1)];
+    expect(codes[0]).toMatch(/^\d{5}( \d{5}){4}$/);
+    const x = r.m.pop()!;
+    r.liste.pop();
+    for (const y of r.m) y.marquerParti(2);
+    r.seq++;
+    const retrait = r.m[0]!.retirer(cles, 2);
+    expect(r.m[0]!.recevoirTrame(cles, retrait, r.seq, 0).type).toBe("commitAccepte");
+    expect(r.m[1]!.recevoirTrame(cles, retrait, r.seq, 0).type).toBe("membres");
+    // Seul le créateur envoie la rotation.
+    const cle = S.cleMaitre(lien2, mdp);
+    expect(errorOf(() => r.m[1]!.envoyer(cles, { heureMs: 2, regle: 0, message: { k: "rotation", n: 1, cle } }))).toBe("rotation_refusee");
+    const { trame } = r.m[0]!.envoyer(cles, { heureMs: 2, regle: 0, message: { k: "rotation", n: 1, cle } });
+    expect(S.lireEnTete(trame)).toEqual({ volatile: false, regle: 0 });
+    const [, recue] = tous(trame, 0);
+    if (recue!.type !== "message" || recue.enveloppe.message.k !== "rotation") throw new Error(JSON.stringify(recue));
+    expect(recue.epoque).toBe(r.m[1]!.epoque());
+    expect(recue.enveloppe.message.n).toBe(1);
+    expect(hex(recue.enveloppe.message.cle)).toBe(hex(cle));
+    expect(errorOf(() => x.recevoirTrame(cles, trame, r.seq, 0))).toBe("epoque_perdue");
+    // Nouvelles clés depuis K_maître_s' seule : celles de la nouvelle invitation.
+    const cles2 = S.clesDepuisMaitre(recue.enveloppe.message.cle);
+    const invitation2 = S.clesSalon(lien2, mdp);
+    expect(hex(cles2.tag())).toBe(hex(invitation2.tag()));
+    recue.enveloppe.message.cle.fill(0);
+    cle.fill(0);
+    // Refondation : l'ancienne poignée est consommée, l'identité est gardée.
+    const anciens = [...r.m];
+    r.m[0] = anciens[0]!.refonder(cles2);
+    r.m[1] = anciens[1]!.refonder(cles2);
+    expect(errorOf(() => anciens[0]!.membres())).toBe("poignee_liberee");
+    expect(errorOf(() => anciens[1]!.refonder(cles2))).toBe("poignee_liberee");
+    expect(r.m[0]!.membres()).toEqual([0]);
+    expect(r.m[1]!.epoque()).toBeUndefined();
+    const kp = tous(r.m[1]!.keyPackage(cles2), 1, cles2)[0]!;
+    if (kp.type !== "keyPackage") throw new Error(JSON.stringify(kp));
+    const ev = tous(r.m[0]!.ajouter(cles2, kp.octets), 0, cles2)[0]!;
+    if (ev.type !== "commitAccepte" || !ev.welcome) throw new Error(JSON.stringify(ev));
+    expect(tous(ev.welcome, 0, cles2)[1]!.type).toBe("entree");
+    expect([r.m[1]!.empreinte(0), r.m[1]!.empreinte(1)]).toEqual(codes);
+    // Une arrivante munie de la nouvelle invitation entre (siège 3).
+    expect(arrivee(3, invitation2).type).toBe("entree");
+    expect(r.m.map((y) => y.membres())).toEqual([
+      [0, 1, 3],
+      [0, 1, 3],
+      [0, 1, 3],
+    ]);
+    const suite = r.m[2]!.envoyer(invitation2, texteDe("après la rotation")).trame;
+    expect(tous(suite, 3, cles2).map((e) => e.type)).toEqual(["message", "message", "ignore"]);
+    // L'exclu, avec l'ancienne invitation, n'ouvre même plus l'enveloppe.
+    expect(errorOf(() => x.recevoirTrame(cles, suite, r.seq, 3))).toBe("trame_corrompue");
+    expect(errorOf(() => S.ouvrir(cles, suite))).toBe("trame_corrompue");
+    for (const y of [...r.m, x, cles, cles2, invitation2]) y.free();
+  });
+});
+
 describe("frontières du module", () => {
   it("erreurs : message snake_case du moteur ; arguments hors bornes refusés (argument_invalide), jamais tronqués", () => {
     const cles = S.clesSalon(new Uint8Array(32), new Uint8Array(32));
@@ -282,6 +424,9 @@ describe("frontières du module", () => {
     expect(errorOf(() => S.sceller(cles, { volatile: 1, regle: 0 } as never, new Uint8Array(1)))).toBe("argument_invalide");
     expect(errorOf(() => S.clesSalon(new Uint8Array(31), new Uint8Array(32)))).toBe("argument_invalide");
     expect(errorOf(() => S.cleAcces(new Uint8Array(33)))).toBe("argument_invalide");
+    expect(errorOf(() => S.cleMaitre(new Uint8Array(32), new Uint8Array(31)))).toBe("argument_invalide");
+    expect(errorOf(() => S.clesDepuisMaitre(new Uint8Array(33)))).toBe("argument_invalide");
+    expect(errorOf(() => S.clesDepuisMaitre("x" as never))).toBe("argument_invalide");
     expect(errorOf(() => S.codeVerification(new Uint8Array(31)))).toBe("argument_invalide");
     for (const siege of [256, -1, 0.5, NaN]) expect(errorOf(() => S.Salon.creer(siege, new Uint8Array(16), cles, true))).toBe("argument_invalide");
     expect(errorOf(() => S.Salon.creer(0, new Uint8Array(15), cles, true))).toBe("argument_invalide");
@@ -305,6 +450,9 @@ describe("frontières du module", () => {
       { ...ok, message: { k: "texte", x: 3 } },
       { ...ok, message: { k: "inconnu", sorte: "appel" } },
       { ...ok, message: { k: "vu", ids: [] } },
+      { ...ok, message: { k: "rotation", n: 1, cle: new Uint8Array(31) } },
+      { ...ok, message: { k: "rotation", n: 2 ** 32, cle: new Uint8Array(32) } },
+      { ...ok, message: { k: "rotation", n: 1.5, cle: new Uint8Array(32) } },
       { ...ok, message: { k: "profil", pseudo: "Alice", couleur: 1.5, avatar: null } },
       { ...ok, message: { k: "profil", pseudo: "Alice", couleur: 256 + 1, avatar: null } },
     ])

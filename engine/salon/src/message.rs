@@ -1,7 +1,8 @@
 //! Formats des messages du salon (spec salon v3 §4.1) : JSON strict, clés exactes, dans la
 //! charge utile d'une trame (l'encodeur : `JSON_MAX` = 3 900 octets au plus ; le décodeur lit jusqu'à `MAX_CHARGE` = 4 093).
 //!
-//! `{"v":3,"id":<b64u 22>,"t":<ms>,"e":<0..3>,"k":"<sorte>", …champs}`. Pas de champ en trop,
+//! `{"v":3,"id":<b64u 22>,"t":<ms>,"e":<0..3>,"k":"<sorte>", …champs}`. Sorte `rotation`
+//! (13 novembre) : `"n":<u32>,"cle":<b64u 43>` (`K_maître_s'`, secrète comme une graine). Pas de champ en trop,
 //! manquant ni de mauvais type pour une sorte connue (`message_invalide`) ; une sorte inconnue
 //! (appels futurs, autres versions) devient `Message::Inconnu` et ses champs sont ignorés.
 //! Les entiers sont des entiers JSON (`1.0` est refusé) d'au plus 2^53 − 1. Les champs optionnels
@@ -140,6 +141,15 @@ pub enum Message {
         avatar: Option<RefPiece>,
     },
     Depart,
+    /// Rotation de l'invitation (spec §39.13.2, salon v3 §15, amendement du 13 novembre) : le
+    /// créateur donne aux membres restants `K_maître_s'` (`cle`) et le numéro de rotation `n`
+    /// (celui du `0x09` du serveur). Jamais le lien, `K_lien'` ni le mot de passe. Le groupe
+    /// (`groupe.rs`) ne l'envoie et ne l'accepte que du créateur, à l'époque courante, sans
+    /// siège parti ou exclu dans l'arbre (`rotation_refusee` sinon).
+    Rotation {
+        n: u32,
+        cle: Graine,
+    },
     /// Sorte inconnue de ce moteur (appels futurs, autres versions) : ignorée, jamais une erreur.
     Inconnu {
         sorte: String,
@@ -218,9 +228,11 @@ fn verifier(e: &Enveloppe) -> Result<()> {
                 _ => Err(Error::MessageInvalide),
             }
         }
-        Message::Retrait { .. } | Message::Ecrit | Message::Regle { .. } | Message::Depart => {
-            Ok(())
-        }
+        Message::Retrait { .. }
+        | Message::Ecrit
+        | Message::Regle { .. }
+        | Message::Depart
+        | Message::Rotation { .. } => Ok(()),
         // Ses champs sont perdus : impossible à ré-émettre.
         Message::Inconnu { .. } => Err(Error::MessageInvalide),
     }
@@ -386,6 +398,11 @@ fn ecrire(w: &mut Plafond, e: &Enveloppe) -> std::io::Result<()> {
             }
         }
         Message::Depart => k(w, "depart")?,
+        Message::Rotation { n, cle } => {
+            k(w, "rotation")?;
+            write!(w, ",\"n\":{n}")?;
+            cle_graine(w, "cle", cle)?;
+        }
         Message::Inconnu { .. } => return Err(std::io::ErrorKind::InvalidInput.into()),
     }
     w.write_all(b"}")
@@ -620,6 +637,10 @@ fn message(sorte: &str, o: &mut Map<String, Value>) -> Result<Message> {
             avatar: avatar(o)?,
         },
         "depart" => Message::Depart,
+        "rotation" => Message::Rotation {
+            n: u32_de(o, "n")?,
+            cle: graine(o, "cle")?,
+        },
         autre => {
             let ok = (1..=SORTE_MAX).contains(&autre.len())
                 && autre

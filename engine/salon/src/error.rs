@@ -30,8 +30,18 @@ pub enum Error {
     /// Octets MLS illisibles, mal formés, d'un autre groupe ou d'une forme refusée
     /// (GroupInfo, message en clair, external commit ou proposition externe).
     MlsInvalide,
-    /// Un Commit de ce membre attend encore son écho du serveur.
+    /// Un Commit de ce membre attend encore son écho du serveur : ni autre Commit, ni envoi
+    /// (un message chiffré maintenant le serait à l'époque que ce Commit ferme, lisible par un
+    /// membre qu'il retire ; audit du 13 novembre, F1).
     CommitEnCours,
+    /// Envoi refusé : un siège que le serveur a dit parti (0x03) ou exclu (0x09) a encore une
+    /// feuille dans l'arbre et lirait le message. Le retirer d'abord (`a_retirer`, `retirer`),
+    /// puis renvoyer (audit du 13 novembre, F2).
+    RetraitEnAttente,
+    /// Message `rotation` refusé : il ne vient pas du créateur, n'est pas de l'époque courante,
+    /// ou un siège parti ou exclu est encore dans l'arbre (il aurait pu lire la nouvelle clé).
+    /// La clé qu'il porte ne doit pas servir ; le créateur renvoie la rotation.
+    RotationRefusee,
     /// Déjà membre du groupe (rejoindre ou KeyPackage demandés deux fois).
     DejaMembre,
     /// Aucun membre du groupe n'occupe ce siège.
@@ -60,6 +70,8 @@ impl fmt::Display for Error {
             Error::NonMembre => "non_membre",
             Error::MlsInvalide => "mls_invalide",
             Error::CommitEnCours => "commit_en_cours",
+            Error::RetraitEnAttente => "retrait_en_attente",
+            Error::RotationRefusee => "rotation_refusee",
             Error::DejaMembre => "deja_membre",
             Error::SiegeInconnu => "siege_inconnu",
             Error::MlsInterne => "mls_interne",
@@ -88,6 +100,8 @@ mod tests {
         assert_eq!(Error::NonMembre.to_string(), "non_membre");
         assert_eq!(Error::MlsInvalide.to_string(), "mls_invalide");
         assert_eq!(Error::CommitEnCours.to_string(), "commit_en_cours");
+        assert_eq!(Error::RetraitEnAttente.to_string(), "retrait_en_attente");
+        assert_eq!(Error::RotationRefusee.to_string(), "rotation_refusee");
         assert_eq!(Error::DejaMembre.to_string(), "deja_membre");
         assert_eq!(Error::SiegeInconnu.to_string(), "siege_inconnu");
         assert_eq!(Error::MlsInterne.to_string(), "mls_interne");

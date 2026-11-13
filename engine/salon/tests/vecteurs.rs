@@ -15,9 +15,9 @@ use shhdrop_core::kdf::sha256;
 use shhdrop_core::{KLien, KMdp};
 use shhdrop_salon::{
     ClesSalon, EN_TETE_CONTROLE, EnTete, Enveloppe, Error, Etat, Graine, JSON_MAX, MAX_CHARGE,
-    Message, RefPiece, Regle, SortePiece, TAILLE_O, TAILLE_TRAME, cle_acces, cle_unicite,
-    cles_salon, code_verification, decoder, en_tete_coherent, en_tete_de, encoder, etat,
-    lire_en_tete, nettoyer_texte, ouvrir, sceller, verifier_pseudo,
+    Message, RefPiece, Regle, SortePiece, TAILLE_O, TAILLE_TRAME, cle_acces, cle_maitre,
+    cle_unicite, cles_depuis_maitre, cles_salon, code_verification, decoder, en_tete_coherent,
+    en_tete_de, encoder, etat, lire_en_tete, nettoyer_texte, ouvrir, sceller, verifier_pseudo,
 };
 
 const FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../vectors/salon-v3.json");
@@ -141,7 +141,17 @@ fn k_mdp(c: &Value) -> KMdp {
 fn cles_case(c: &Value) -> Value {
     let a = cle_acces(&k_lien(c));
     let s = cles_salon(&k_lien(c), &k_mdp(c));
+    // K_maître_s seule redonne les mêmes clés (membre qui la reçoit à une rotation, F4).
+    let maitre = cle_maitre(&k_lien(c), &k_mdp(c));
+    let m = cles_depuis_maitre(&maitre);
+    assert_eq!(
+        (m.k_preuve(), m.k_trame(), m.tag()),
+        (s.k_preuve(), s.k_trame(), s.tag()),
+        "{} : cles_depuis_maitre",
+        c["label"]
+    );
     json!({
+        "k_maitre": hex(&*maitre),
         "k_acces": hex(&a.k), "v_acces": hex(&a.v),
         "k_preuve": hex(s.k_preuve()), "v_preuve": hex(&s.v_preuve()),
         "k_trame": hex(s.k_trame()), "tag": hex(s.tag()),
@@ -312,6 +322,14 @@ fn coherence() -> Value {
                 "coherence/vu_e2",
                 2,
                 json!({ "k": "vu", "ids": [h("coherence/vu", 16)] }),
+            ),
+        ),
+        (
+            "rotation_e0",
+            enveloppe(
+                "coherence/rotation_e0",
+                0,
+                json!({ "k": "rotation", "n": 1, "cle": h("coherence/rotation", 32) }),
             ),
         ),
         (
@@ -577,6 +595,10 @@ fn env_de(v: &Value) -> Enveloppe {
             }),
         },
         "depart" => Message::Depart,
+        "rotation" => Message::Rotation {
+            n: m["n"].as_u64().unwrap() as u32,
+            cle: graine_de(&m["cle"]),
+        },
         "inconnu" => Message::Inconnu { sorte: s("sorte") },
         k => panic!("sorte {k}"),
     };
@@ -623,6 +645,9 @@ fn env_vers(e: &Enveloppe) -> Value {
             "avatar": avatar.as_ref().map(|a| json!({ "r": hex(a.r.as_bytes()),
                 "piece": hex(&a.piece), "palier": a.palier })) }),
         Message::Depart => json!({ "k": "depart" }),
+        Message::Rotation { n, cle } => {
+            json!({ "k": "rotation", "n": n, "cle": hex(cle.as_bytes()) })
+        }
         Message::Inconnu { sorte } => json!({ "k": "inconnu", "sorte": sorte }),
     };
     json!({ "id": hex(&e.id), "t": e.heure_ms, "e": e.regle as u8, "message": message })
@@ -796,6 +821,17 @@ fn messages() -> Value {
             profil("Alice", 0, avatar(2)),
         ),
         ("depart", 0, json!({ "k": "depart" })),
+        // Rotation de l'invitation (13 novembre) : numéro et K_maître_s' (32 octets).
+        (
+            "rotation",
+            0,
+            json!({ "k": "rotation", "n": 1, "cle": h("messages/rotation", 32) }),
+        ),
+        (
+            "rotation_n_max",
+            0,
+            json!({ "k": "rotation", "n": u32::MAX, "cle": h("messages/rotation", 32) }),
+        ),
     ];
     let mut encode: Vec<Value> = encode_inputs
         .into_iter()
@@ -950,6 +986,26 @@ fn messages() -> Value {
         (
             "reaction_emoji_invalide",
             json!({ "utf8": format!("{},\"cible\":\"{id2}\",\"emoji\":\"ab\"}}", head("reaction")) }),
+        ),
+        (
+            "rotation_valide",
+            json!({ "utf8": format!("{},\"n\":7,\"cle\":\"{seed}\"}}", head("rotation")) }),
+        ),
+        (
+            "rotation_n_2_puissance_32",
+            json!({ "utf8": format!("{},\"n\":4294967296,\"cle\":\"{seed}\"}}", head("rotation")) }),
+        ),
+        (
+            "rotation_cle_courte",
+            json!({ "utf8": format!("{},\"n\":7,\"cle\":\"{id2}\"}}", head("rotation")) }),
+        ),
+        (
+            "rotation_sans_cle",
+            json!({ "utf8": format!("{},\"n\":7}}", head("rotation")) }),
+        ),
+        (
+            "rotation_champ_en_trop",
+            json!({ "utf8": format!("{},\"n\":7,\"cle\":\"{seed}\",\"lien\":\"x\"}}", head("rotation")) }),
         ),
         (
             "charge_4093_espaces",
@@ -1357,7 +1413,7 @@ fn empreinte() -> Value {
             let mut c = json!({ "label": label, "public_key": k });
             let x = empreinte_case(&c);
             merge(&mut c, x);
-            assert_eq!(c["code"].as_str().unwrap().len(), 23);
+            assert_eq!(c["code"].as_str().unwrap().len(), 29);
             c
         })
         .collect()
@@ -1440,7 +1496,7 @@ fn replay_file(v: &Value) {
             outputs(
                 &c,
                 &[
-                    "k_acces", "v_acces", "k_preuve", "v_preuve", "k_trame", "tag"
+                    "k_maitre", "k_acces", "v_acces", "k_preuve", "v_preuve", "k_trame", "tag"
                 ]
             ),
             "{}",
@@ -1619,14 +1675,48 @@ fn salon_v3() {
         }
     }
     let coh = file["trames"]["coherence"].as_array().unwrap();
-    assert_eq!(coh.len(), 48);
+    assert_eq!(coh.len(), 56);
     let ok = |prefixe: &str| {
         coh.iter()
             .filter(|c| c["label"].as_str().unwrap().starts_with(prefixe) && c["ok"] == true)
             .count()
     };
-    for p in ["controle_", "texte_e0_", "texte_e3_", "ecrit_e1_", "vu_e2_"] {
+    for p in [
+        "controle_",
+        "texte_e0_",
+        "texte_e3_",
+        "ecrit_e1_",
+        "vu_e2_",
+        "rotation_e0_",
+    ] {
         assert_eq!(ok(p), 1, "{p}");
+    }
+    // Rotation (13 novembre) : jamais volatile (le serveur la garde pour les membres absents) ;
+    // K_maître_s seule redonne les clés ; forme stricte.
+    assert_eq!(
+        by(
+            &file["trames"]["coherence"],
+            "rotation_e0_volatile_false_regle_0"
+        )["ok"],
+        true
+    );
+    for cas in [
+        "rotation_n_2_puissance_32",
+        "rotation_cle_courte",
+        "rotation_sans_cle",
+        "rotation_champ_en_trop",
+    ] {
+        assert_eq!(by(&m["decode"], cas)["error"], "message_invalide", "{cas}");
+    }
+    assert_eq!(
+        by(&m["decode"], "rotation_valide")["envelope"]["message"]["n"],
+        7
+    );
+    for c in file["cles"].as_array().unwrap() {
+        assert_eq!(c["k_maitre"].as_str().unwrap().len(), 64, "{}", c["label"]);
+    }
+    for c in file["empreinte"].as_array().unwrap() {
+        assert_eq!(c["code"].as_str().unwrap().split(' ').count(), 5);
     }
     assert_eq!(ok("inconnu_e2_"), 2);
     assert!(

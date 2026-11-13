@@ -132,6 +132,7 @@ impl Reseau {
     /// `de` envoie un message et chacun des autres le lit ; l'expéditeur reçoit `Ignore`.
     fn message(&mut self, de: usize, k: u32) {
         let e = env(k);
+        let epoque = self.salon(de).epoque().unwrap();
         let mls = self.salon(de).envoyer(&cles(), &e).unwrap();
         assert_eq!(mls.len(), TAILLE_TRAME);
         assert!(self::mls(&mls).len() <= MAX_CHARGE);
@@ -143,6 +144,7 @@ impl Reseau {
                     r,
                     Ok(Evenement::Message {
                         de_siege: de as u8,
+                        epoque,
                         enveloppe: e.clone()
                     }),
                     "membre {i}, message {k}"
@@ -360,9 +362,12 @@ fn ajout_perdu_puis_rejoue() {
 fn message_epoque_precedente() {
     let mut r = groupe(10);
     let e = env(7);
+    let epoque = r.meme_epoque();
     let vieux = r.salon(4).envoyer(&cles(), &e).unwrap();
     let commit = r.salon(0).renouveler(&cles()).unwrap();
     r.commit_accepte(0, &commit, vec![], vec![]);
+    // L'événement dit l'époque du message (la précédente), pas celle du lecteur (F1).
+    assert_eq!(r.meme_epoque(), epoque + 1);
     for (i, ev) in r.diffuser(4, &vieux) {
         if i == 4 {
             assert_eq!(ev, Ok(Evenement::Ignore));
@@ -371,6 +376,7 @@ fn message_epoque_precedente() {
                 ev,
                 Ok(Evenement::Message {
                     de_siege: 4,
+                    epoque,
                     enveloppe: e.clone()
                 }),
                 "membre {i}"
@@ -707,7 +713,8 @@ fn empreinte_stable() {
     entree.extend_from_slice(id.cle_publique());
     assert_eq!(id.cle_publique().len(), 32);
     let h = shhdrop_core::kdf::sha256(&entree);
-    let attendu = h[..16]
+    // 25 chiffres depuis le 13 novembre (20 avant : audit adverse, défense en profondeur).
+    let attendu = h[..20]
         .chunks(4)
         .map(|c| format!("{:05}", u32::from_be_bytes(c.try_into().unwrap()) % 100_000))
         .collect::<Vec<_>>()
@@ -720,9 +727,9 @@ fn empreinte_stable() {
     let mut codes = Vec::new();
     for siege in 0..10u8 {
         let c = r.salon(0).empreinte(siege).unwrap();
-        assert_eq!(c.len(), 23);
+        assert_eq!(c.len(), 29);
         let groupes: Vec<&str> = c.split(' ').collect();
-        assert_eq!(groupes.len(), 4);
+        assert_eq!(groupes.len(), 5);
         assert!(
             groupes
                 .iter()
@@ -776,6 +783,7 @@ fn chiffrer_borne() {
                     r.salon(1).recevoir_trame(&cles(), &mls, seq, 0),
                     Ok(Evenement::Message {
                         de_siege: 0,
+                        epoque: r.salon(0).epoque().unwrap(),
                         enveloppe: e
                     })
                 );
@@ -1308,6 +1316,7 @@ fn en_tete_lie_au_contenu() {
                     ev,
                     Ok(Evenement::Message {
                         de_siege: 0,
+                        epoque: 2,
                         enveloppe: e.clone()
                     }),
                     "membre {i}, {et:?}"
@@ -1405,6 +1414,7 @@ fn arrivant_suit_le_groupe_avant_son_welcome() {
     let seq_commit = r.seq;
     // Le message du siège 2 et le renouvellement du siège 3, avant le Welcome.
     let e = env(42);
+    let epoque = r.salon(2).epoque().unwrap();
     let t = r.salon(2).envoyer(&cles(), &e).unwrap();
     for (i, ev) in r.diffuser(2, &t) {
         if i == 5 {
@@ -1433,6 +1443,7 @@ fn arrivant_suit_le_groupe_avant_son_welcome() {
                 seq_message,
                 Ok(Evenement::Message {
                     de_siege: 2,
+                    epoque,
                     enveloppe: e
                 })
             ),
@@ -1708,6 +1719,7 @@ fn n2_welcome_hors_arbre_refuse() {
     );
     // Un message après le Commit, gardé dans la file de X.
     let e = env(9);
+    let epoque = r.salon(2).epoque().unwrap();
     let t = r.salon(2).envoyer(&cles(), &e).unwrap();
     r.diffuser(2, &t);
     let seq_t = r.seq;
@@ -1733,6 +1745,7 @@ fn n2_welcome_hors_arbre_refuse() {
             seq_t,
             Ok(Evenement::Message {
                 de_siege: 2,
+                epoque,
                 enveloppe: e
             })
         ))

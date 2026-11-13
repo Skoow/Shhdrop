@@ -14,7 +14,7 @@ mod stockage;
 mod texte;
 mod trame;
 
-pub use cles::{CleAcces, ClesSalon, cle_acces, cles_salon};
+pub use cles::{CleAcces, ClesSalon, cle_acces, cle_maitre, cles_depuis_maitre, cles_salon};
 pub use effacement::{Etat, etat};
 pub use error::{Error, Result};
 pub use groupe::{

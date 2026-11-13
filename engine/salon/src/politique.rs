@@ -6,6 +6,9 @@
 //! porte un `(siège, nonce_arrivee)` annoncé par le serveur (enregistrements 0x02 et 0x0A,
 //! §39.3.1) **et la clé du KeyPackage que ce siège a lui-même publié** (le `nonce_arrivee` est
 //! public : sans ce lien, n'importe quel membre fabriquerait la feuille d'un arrivant).
+//! **Auteur** (audit du 13 novembre, F2) : un Commit dont l'auteur est un siège que le serveur a
+//! dit parti ou exclu est refusé, quel que soit son contenu (un renouvellement lui redonnerait
+//! les secrets de la nouvelle époque et ferait perdre le Commit qui le retire).
 use crate::error::{Error, Result};
 
 /// Une arrivée : siège, `nonce_arrivee` et SHA-256 de la clé de signature Ed25519 de sa
@@ -42,7 +45,7 @@ pub fn verifier(
     key_packages: &[Arrivee],
 ) -> Result<()> {
     let refus = Err(Error::CommitRefuse);
-    if commit.interdit {
+    if commit.interdit || sieges_partis.contains(&auteur_siege) {
         return refus;
     }
     for (i, &(siege, nonce, cle)) in commit.ajouts.iter().enumerate() {

@@ -74,6 +74,7 @@ fn message(ev: Evenement, de: u8, attendu: &Value, k: &str) {
         Evenement::Message {
             de_siege,
             enveloppe,
+            ..
         } => {
             assert_eq!(de_siege, de, "{k}");
             assert_eq!(

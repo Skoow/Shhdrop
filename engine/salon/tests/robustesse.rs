@@ -178,6 +178,10 @@ fn modeles() -> Vec<Vec<u8>> {
         },
         Message::Ecrit,
         Message::Depart,
+        Message::Rotation {
+            n: 3,
+            cle: shhdrop_salon::Graine::new([6; 32]),
+        },
     ];
     let mut v: Vec<Vec<u8>> = r
         .into_iter()

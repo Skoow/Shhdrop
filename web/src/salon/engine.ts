@@ -17,10 +17,22 @@
 //   `renouveler` rendent des trames de 4 140 octets dont l'en-tête est tiré du contenu ;
 //   `recevoirTrame` les ouvre et refuse tout écart (`message_invalide`) ; l'arrivant y passe
 //   toutes les trames dès sa création, son Welcome le fait entrer (`entree`, trames rejouées) ;
+// - exclusion et départ (audit du 13 novembre ; spec salon v3 §15) : le moteur impose l'ordre.
+//   `Salon.envoyer` lève `commit_en_cours` tant qu'un Commit de ce membre attend son écho, et
+//   `retrait_en_attente` tant qu'un siège parti (0x03) ou exclu (0x09) est encore dans l'arbre
+//   (`aRetirer()` les donne ; tout membre les retire par `retirer`, puis renvoie) : l'appelant
+//   garde le message et le renvoie après l'écho, il ne le perd pas et ne contourne pas le refus.
+//   Un événement `message` porte `epoque` (époque à laquelle il a été chiffré). Rotation de
+//   l'invitation : le créateur envoie `{ k: "rotation", n, cle: cleMaitre(…) }` après le retrait
+//   (`rotation_refusee` s'il n'est pas le créateur) ; les membres ne la reçoivent qu'à l'époque
+//   courante (`rotation_refusee` sinon : la clé ne sert pas, le créateur la renvoie), puis
+//   passent à `clesDepuisMaitre(cle)` et refondent le groupe (`Salon.refonder`). Jamais le lien,
+//   `K_lien` ni le mot de passe dans un message ;
 // - poignées `ClesSalon` et `Salon` à libérer par `free()` (efface les clés et l'état MLS) ;
 // - secrets rendus (à mettre à zéro par `fill(0)` après usage) : `cleAcces().k`,
-//   `ClesSalon.kPreuve()` (montrées au serveur), `Salon.exporterSframe()` (clé des appels) et les
-//   graines `r` des pièces dans les enveloppes lues ;
+//   `ClesSalon.kPreuve()` (montrées au serveur), `Salon.exporterSframe()` (clé des appels), les
+//   graines `r` des pièces dans les enveloppes lues, `cleMaitre()` et le champ `cle` d'un message
+//   `rotation` lu (`K_maître_s`) ;
 // - textes : passer par `nettoyerTexte`, `verifierPseudo`, `cleUnicite` et `nettoyerNom` du
 //   moteur (jamais une règle refaite en TypeScript) ; l'encodeur refuse un texte non nettoyé ;
 // - groupe MLS : contrat de l'appelant sur les annonces du serveur et l'ordre `seq`
@@ -169,6 +181,15 @@ class Poignee<H extends { free(): void }> {
       return f(this.#h);
     });
   }
+  /** Appel qui consomme la poignée brute : le module la libère (efface ses secrets), réussite ou non. */
+  protected consommer<T>(f: (h: H, g: number) => T): T {
+    return appel(this.#g, () => {
+      const h = this.#h;
+      if (!h) throw err("poignee_liberee");
+      this.#h = undefined;
+      return f(h, this.#g);
+    });
+  }
   /** Libère la poignée (efface ses secrets) ; sans effet la seconde fois. */
   free(): void {
     const h = this.#h;
@@ -222,7 +243,12 @@ export class Salon extends Poignee<wasm.Salon> {
   renouveler(c: ClesSalon): Uint8Array {
     return cles(c).brut((k) => this.avec((h) => h.renouveler(k)));
   }
-  /** Trame d'une enveloppe (en-tête tiré du contenu) et son identifiant (tiré s'il manque). */
+  /**
+   * Trame d'une enveloppe (en-tête tiré du contenu) et son identifiant (tiré s'il manque).
+   * Refus à traiter, jamais à contourner : `commit_en_cours` (attendre l'écho de notre Commit),
+   * `retrait_en_attente` (retirer d'abord les sièges de `aRetirer()`), `rotation_refusee`
+   * (message `rotation` d'un autre que le créateur).
+   */
   envoyer(c: ClesSalon, e: EnveloppeEnvoi): { trame: Uint8Array; id: Uint8Array } {
     objet(e);
     return cles(c).brut((k) => this.avec((h) => h.envoyer(k, e)));
@@ -263,7 +289,7 @@ export class Salon extends Poignee<wasm.Salon> {
   exporterSframe(): Uint8Array {
     return this.avec((h) => h.exporterSframe());
   }
-  /** Code de vérification du siège (4 groupes de 5 chiffres). */
+  /** Code de vérification du siège (5 groupes de 5 chiffres). */
   empreinte(siege: number): string {
     nombre(siege);
     return this.avec((h) => h.empreinte(siege));
@@ -276,6 +302,20 @@ export class Salon extends Poignee<wasm.Salon> {
   epoque(): number | undefined {
     return this.avec((h) => h.epoque());
   }
+  /** Sièges partis (0x03) ou exclus (0x09) encore dans l'arbre : tant qu'il en reste, `envoyer` lève `retrait_en_attente`. */
+  aRetirer(): number[] {
+    return this.avec((h) => h.aRetirer());
+  }
+  /**
+   * Refonde le salon sous d'autres clés (rotation de l'invitation, après `clesDepuisMaitre`) :
+   * cette poignée est consommée (état MLS effacé, tout appel suivant lève `poignee_liberee`) ; la
+   * nouvelle garde l'identité (même code de vérification), les annonces et le dernier rang vu.
+   * Le créateur recrée le groupe ; les autres publient un nouveau `keyPackage` et attendent
+   * leur Welcome.
+   */
+  refonder(c: ClesSalon): Salon {
+    return cles(c).brut((k) => this.consommer((h, g) => new Salon(h.refonder(k), g)));
+  }
 }
 
 // --- Moteur -------------------------------------------------------------------------------------
@@ -286,6 +326,10 @@ export type SalonEngine = {
   /** `K_accès_s` (montrée au serveur) et `V_accès_s` : copies que l'appelant efface. */
   cleAcces(kLien: Uint8Array): { k: Uint8Array; v: Uint8Array };
   clesSalon(kLien: Uint8Array, kMdp: Uint8Array): ClesSalon;
+  /** `K_maître_s` (32 octets) : chez le créateur, pour le message `rotation`. SECRET, copie à effacer. */
+  cleMaitre(kLien: Uint8Array, kMdp: Uint8Array): Uint8Array;
+  /** Clés du salon tirées de `K_maître_s` seule (message `rotation` reçu, preuve de membre) : celles de `clesSalon`. */
+  clesDepuisMaitre(kMaitre: Uint8Array): ClesSalon;
   /** Trame de 4 140 octets ; nonce tiré dans le module. */
   sceller(cles: ClesSalon, enTete: EnTete, charge: Uint8Array): Uint8Array;
   /** Tout échec : `trame_corrompue`. */
@@ -323,6 +367,14 @@ function moteur(g: number): SalonEngine {
       octets(kMdp);
       return new ClesSalon(
         a(() => wasm.clesSalon(kLien, kMdp)),
+        g,
+      );
+    },
+    cleMaitre: (kLien, kMdp) => (octets(kLien), octets(kMdp), a(() => wasm.cleMaitre(kLien, kMdp))),
+    clesDepuisMaitre: (kMaitre) => {
+      octets(kMaitre);
+      return new ClesSalon(
+        a(() => wasm.clesDepuisMaitre(kMaitre)),
         g,
       );
     },

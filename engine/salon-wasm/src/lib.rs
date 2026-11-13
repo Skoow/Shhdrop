@@ -11,11 +11,13 @@
 //!   `argument_invalide` : il n'est jamais tronqué ni arrondi (`wasm-bindgen` ferait de 300 un
 //!   siège 44). Dans une enveloppe, tout champ invalide donne `message_invalide`, comme un JSON
 //!   invalide.
-//! - Secrets venus de JavaScript (`K_lien`, `K_mdp`) : copiés dans un tampon `Zeroizing`. Aucun
-//!   secret n'est rendu à JavaScript, sauf ce que le serveur doit recevoir (`K_accès_s`,
-//!   `K_preuve_s`, comme pour un partage), la clé SFrame de l'époque (`exporterSframe`, pour les
-//!   appels) et les graines `R` des pièces dans les enveloppes lues : l'appelant met ces tableaux
-//!   à zéro (`fill(0)`) dès qu'il n'en a plus besoin. `K_trame`, `K_salon` et l'état MLS restent
+//! - Secrets venus de JavaScript (`K_lien`, `K_mdp`, `K_maître_s`) : copiés dans un tampon
+//!   `Zeroizing`. Aucun secret n'est rendu à JavaScript, sauf ce que le serveur doit recevoir
+//!   (`K_accès_s`, `K_preuve_s`, comme pour un partage), la clé SFrame de l'époque
+//!   (`exporterSframe`, pour les appels), les graines `R` des pièces dans les enveloppes lues et
+//!   `K_maître_s` (`cleMaitre` chez le créateur, champ `cle` d'un message `rotation` lu : elle va
+//!   dans le message de rotation et dans la preuve de membre chiffrée, D41-26) : l'appelant met
+//!   ces tableaux à zéro (`fill(0)`) dès qu'il n'en a plus besoin. `K_trame`, `K_salon` et l'état MLS restent
 //!   dans le module, derrière des poignées (`ClesSalon`, `Salon`) à libérer par `free()`, qui
 //!   les efface.
 //! - Le nonce d'une trame (24 octets) et l'identifiant d'un message absent (16 octets) sont tirés
@@ -60,12 +62,15 @@ export type Message =
   | { k: "regle"; regle: Regle }
   | { k: "profil"; pseudo: string; couleur: number; avatar: { r: Uint8Array; piece: Uint8Array; palier: number } | null }
   | { k: "depart" }
+  /** Rotation de l'invitation : numéro `n` (celui du 0x09) et `K_maître_s'` (32 octets, SECRET : à mettre à zéro après `clesDepuisMaitre`). Envoyée par le créateur seulement ; lue seulement à l'époque courante. */
+  | { k: "rotation"; n: number; cle: Uint8Array }
   /** Sorte inconnue de ce moteur (lue, ignorée ; jamais encodée). */
   | { k: "inconnu"; sorte: string };
 export type Enveloppe = { id: Uint8Array; heureMs: number; regle: Regle; message: Message };
 /** Résultat de Salon.recevoirTrame (engine/salon/src/groupe.rs, `Evenement`). */
 export type Evenement =
-  | { type: "message"; deSiege: number; enveloppe: Enveloppe }
+  /** `epoque` : époque MLS à laquelle le message a été chiffré (la courante ou la précédente : écrit avant le dernier Commit). */
+  | { type: "message"; deSiege: number; epoque: number; enveloppe: Enveloppe }
   /** Entrée dans le groupe (Welcome reçu) : les trames gardées en attente, rejouées dans l'ordre `seq`. */
   | { type: "entree"; rejoues: Rejoue[] }
   | { type: "membres"; ajoutes: number[]; retires: number[] }
@@ -285,6 +290,10 @@ fn lire_message(m: &JsValue) -> Option<Message> {
             }
         }
         "depart" => Message::Depart,
+        "rotation" => Message::Rotation {
+            n: entier(&get(m, "n"), u32::MAX.into())? as u32,
+            cle: graine(&get(m, "cle"))?,
+        },
         "inconnu" => Message::Inconnu {
             sorte: texte(m, "sorte")?,
         },
@@ -413,6 +422,11 @@ fn message_js(m: &Message) -> Object {
             set(&o, "avatar", a);
         }
         Message::Depart => k(&o, "depart"),
+        Message::Rotation { n, cle } => {
+            k(&o, "rotation");
+            set(&o, "n", *n);
+            set(&o, "cle", octets(cle.as_bytes()));
+        }
         Message::Inconnu { sorte } => {
             k(&o, "inconnu");
             set(&o, "sorte", sorte.as_str());
@@ -499,6 +513,26 @@ pub fn cles_salon(k_lien: &Uint8Array, k_mdp: &Uint8Array) -> R<JsClesSalon> {
     let l = KLien::from_slice(&secret32(k_lien)?).map_err(|_| arg())?;
     let m = KMdp::from_slice(&secret32(k_mdp)?).map_err(|_| arg())?;
     Ok(JsClesSalon(salon::cles_salon(&l, &m)))
+}
+
+/// `K_maître_s` (32 octets) de l'invitation : chez le créateur, pour le message `rotation` ;
+/// SECRET, copie que l'appelant met à zéro. Jamais `K_lien`, `K_mdp` ni le mot de passe dans un
+/// message : ils donnent le droit d'entrer.
+#[wasm_bindgen(js_name = cleMaitre)]
+pub fn cle_maitre(k_lien: &Uint8Array, k_mdp: &Uint8Array) -> R<Uint8Array> {
+    let l = KLien::from_slice(&secret32(k_lien)?).map_err(|_| arg())?;
+    let m = KMdp::from_slice(&secret32(k_mdp)?).map_err(|_| arg())?;
+    Ok(octets(&salon::cle_maitre(&l, &m)[..]))
+}
+
+/// Clés du salon tirées de `K_maître_s` seule (reçue dans un message `rotation`, ou gardée par
+/// la preuve de membre) : les mêmes que `clesSalon` pour la même invitation.
+#[wasm_bindgen(js_name = clesDepuisMaitre)]
+pub fn cles_depuis_maitre(k_maitre: &Uint8Array) -> R<JsClesSalon> {
+    let k = secret32(k_maitre)?;
+    let mut m = Zeroizing::new([0u8; 32]);
+    m.copy_from_slice(&k);
+    Ok(JsClesSalon(salon::cles_depuis_maitre(&m)))
 }
 
 fn lire_en_tete_js(v: &JsValue) -> R<EnTete> {
@@ -641,10 +675,12 @@ fn evenement_js(ev: Evenement) -> Object {
     match ev {
         Evenement::Message {
             de_siege,
+            epoque,
             enveloppe,
         } => {
             set(&o, "type", "message");
             set(&o, "deSiege", de_siege);
+            set(&o, "epoque", epoque as f64);
             set(&o, "enveloppe", enveloppe_js(&enveloppe));
         }
         Evenement::Membres { ajoutes, retires } => {
@@ -750,7 +786,9 @@ impl JsSalon {
     }
 
     /// Trame d'une enveloppe (en-tête tiré du contenu) et son identifiant (tiré par le moteur si
-    /// `id` manque).
+    /// `id` manque). Refus : `commit_en_cours` (un Commit de ce membre attend son écho),
+    /// `retrait_en_attente` (un siège parti ou exclu est encore dans l'arbre : `aRetirer`,
+    /// `retirer`), `rotation_refusee` (message `rotation` d'un autre que le créateur).
     #[wasm_bindgen(unchecked_return_type = "{ trame: Uint8Array; id: Uint8Array }")]
     pub fn envoyer(
         &mut self,
@@ -843,7 +881,7 @@ impl JsSalon {
             .map_err(js_err)
     }
 
-    /// Code de vérification du siège (4 groupes de 5 chiffres).
+    /// Code de vérification du siège (5 groupes de 5 chiffres).
     pub fn empreinte(&self, siege: f64) -> R<String> {
         let s = self::siege(siege)?;
         self.0.empreinte(s).map_err(js_err)
@@ -858,5 +896,20 @@ impl JsSalon {
     /// Époque MLS (`undefined` hors du groupe).
     pub fn epoque(&self) -> Option<f64> {
         self.0.epoque().map(|e| e as f64)
+    }
+
+    /// Sièges partis (0x03) ou exclus (0x09) encore dans l'arbre, en ordre croissant : tant
+    /// qu'il en reste, `envoyer` est refusé (`retrait_en_attente`) ; tout membre les retire.
+    #[wasm_bindgen(js_name = aRetirer, unchecked_return_type = "number[]")]
+    pub fn a_retirer(&self) -> Array {
+        sieges(&self.0.a_retirer())
+    }
+
+    /// Refonde le salon sous d'autres clés (rotation de l'invitation) : cette poignée est
+    /// consommée (son état MLS est effacé), la nouvelle garde l'identité (même code de
+    /// vérification), les annonces et le dernier rang vu. Le créateur recrée le groupe ; les
+    /// autres publient un nouveau `keyPackage` et attendent leur Welcome.
+    pub fn refonder(self, cles: &JsClesSalon) -> R<JsSalon> {
+        self.0.refonder(&cles.0).map(JsSalon).map_err(js_err)
     }
 }

@@ -9,7 +9,11 @@
 // `remplacerAnnonces` avant toute trame ; `0x02`/`0x0A` → `annoncer` ; `0x03`/`0x09` →
 // `marquerParti` ; `0x01` → `recevoirTrame(trame, seq, siège)` ; événement `keyPackage` →
 // `ajouter` par le plus petit siège en ligne du groupe ; `commitAccepte { welcome }` → envoi du
-// Welcome. Les trames montantes partent une à une : chacune attend son accusé `0x0F` (son
+// Welcome. Envoi refusé par le moteur (audit adverse du 13 novembre, spec salon v3 §15) :
+// `commit_en_cours` → le message attend l'écho du Commit ; `retrait_en_attente` → le plus petit
+// siège en ligne retire les sièges partis ou exclus (`aRetirer`), le message part ensuite. Rien
+// n'est contourné : un message ne part jamais tant que le moteur le refuse.
+// Les trames montantes partent une à une : chacune attend son accusé `0x0F` (son
 // rang ; revue finale C-2, I1 : il arrive même en rattrapage, quand l'écho ne viendra jamais)
 // ou un refus (`0x0B` : attente puis nouvel envoi des mêmes octets ; `0x0C` : échec).
 import { webcrypto } from "node:crypto";
@@ -492,9 +496,43 @@ export class ClientSalon {
     return p;
   }
 
-  /** Envoie une enveloppe du moteur ; rend son rang. */
-  envoyer(e: EnveloppeEnvoi, piece?: Uint8Array): Promise<number> {
-    return this.envoyerTrame(this.salon.envoyer(this.cles, e).trame, piece);
+  /**
+   * Envoie une enveloppe du moteur ; rend son rang. Si le moteur refuse d'envoyer pour l'instant
+   * (`commit_en_cours`, `retrait_en_attente`), l'enveloppe attend le prochain reçu (écho du
+   * Commit, retrait du siège parti) et repart ; au-delà de `DELAI_ENVOI`, échec.
+   */
+  async envoyer(e: EnveloppeEnvoi, piece?: Uint8Array): Promise<number> {
+    const fin = Date.now() + DELAI_ENVOI;
+    for (;;) {
+      let trame: Uint8Array;
+      try {
+        trame = this.salon.envoyer(this.cles, e).trame;
+      } catch (x) {
+        const m = (x as Error).message;
+        if ((m !== "commit_en_cours" && m !== "retrait_en_attente") || Date.now() > fin) throw x;
+        if (m === "retrait_en_attente") this.#retirerPartis();
+        const vus = this.recus.length;
+        await this.attendre(() => this.recus.length > vus, Math.max(1, fin - Date.now()));
+        continue;
+      }
+      return this.envoyerTrame(trame, piece);
+    }
+  }
+
+  /** Retire un siège parti ou exclu encore dans l'arbre, si ce client est le plus petit siège en ligne. */
+  #retirerPartis(): void {
+    const partis = this.salon.aRetirer();
+    const enLigne = this.salon.membres().filter((s) => !partis.includes(s) && this.presence.get(s) === true);
+    if (partis.length === 0 || Math.min(...enLigne) !== this.siege) return;
+    let commit: Uint8Array;
+    try {
+      commit = this.salon.retirer(this.cles, partis[0]!);
+    } catch (e) {
+      const m = (e as Error).message;
+      if (m !== "commit_en_cours") this.erreurs.push(`retirer ${partis[0]} : ${m}`);
+      return;
+    }
+    void this.envoyerTrame(commit).catch((e) => this.erreurs.push(`Commit de retrait : ${e.message}`));
   }
 
   /** Premier reçu (déjà là ou à venir) qui satisfait `pred`. */

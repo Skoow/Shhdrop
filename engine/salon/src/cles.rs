@@ -73,16 +73,31 @@ impl core::fmt::Debug for ClesSalon {
     }
 }
 
-/// `K_maître_s` = HKDF(`K_lien` ‖ `K_mdp`, « …/maitre »), puis `preuve` et `cle` (`K_salon`)
-/// depuis `K_maître_s`, `trame` et `id` depuis `K_salon`.
-pub fn cles_salon(k_lien: &KLien, k_mdp: &KMdp) -> ClesSalon {
+/// `K_maître_s` = HKDF(`K_lien` ‖ `K_mdp`, « shhdrop/v2/salon/maitre ») : la seule clé que le
+/// créateur distribue aux membres restants à une rotation de l'invitation (message `rotation`,
+/// §39.13.2), et celle que garde la preuve de membre (D41-26). Jamais `K_lien`, `K_mdp` ni le
+/// mot de passe : ils donnent `K_accès_s`, donc le droit d'entrer. SECRET, effacé à la
+/// destruction.
+pub fn cle_maitre(k_lien: &KLien, k_mdp: &KMdp) -> Zeroizing<[u8; 32]> {
     let mut ikm = Zeroizing::new([0u8; 64]);
     ikm[..32].copy_from_slice(k_lien.as_bytes());
     ikm[32..].copy_from_slice(k_mdp.as_bytes());
     let maitre = hkdf::<32>(&*ikm, MAITRE);
     ikm.zeroize();
-    let k_preuve = hkdf::<32>(&*maitre, PREUVE);
-    let k_salon = hkdf::<32>(&*maitre, CLE);
+    maitre
+}
+
+/// Clés du salon tirées de `K_lien` et `K_mdp` : `cles_depuis_maitre(cle_maitre(…))`.
+pub fn cles_salon(k_lien: &KLien, k_mdp: &KMdp) -> ClesSalon {
+    cles_depuis_maitre(&cle_maitre(k_lien, k_mdp))
+}
+
+/// Clés du salon tirées de `K_maître_s` seule (membre qui reçoit `K_maître_s'` à une rotation,
+/// ou qui revient par sa preuve de membre) : `preuve` et `cle` (`K_salon`) depuis `K_maître_s`,
+/// `trame` et `id` depuis `K_salon`. Mêmes clés que `cles_salon` pour la même invitation.
+pub fn cles_depuis_maitre(maitre: &[u8; 32]) -> ClesSalon {
+    let k_preuve = hkdf::<32>(maitre, PREUVE);
+    let k_salon = hkdf::<32>(maitre, CLE);
     let k_trame = hkdf::<32>(&*k_salon, TRAME);
     let tag = hkdf::<16>(&*k_salon, ID);
     ClesSalon {
@@ -138,6 +153,25 @@ mod tests {
         }
         // K_accès ne dépend que de K_lien.
         assert_ne!(cle_acces(&l).k, cle_acces(&l2).k);
+    }
+
+    /// F4 (audit du 13 novembre) : `K_maître_s` suffit à refaire les clés du salon.
+    #[test]
+    fn depuis_la_cle_maitre() {
+        let (l, m) = entrees(1, 2);
+        let maitre = cle_maitre(&l, &m);
+        let mut ikm = [0u8; 64];
+        ikm[..32].copy_from_slice(l.as_bytes());
+        ikm[32..].copy_from_slice(m.as_bytes());
+        assert_eq!(*maitre, *hkdf::<32>(&ikm, "shhdrop/v2/salon/maitre"));
+        let (a, b) = (cles_salon(&l, &m), cles_depuis_maitre(&maitre));
+        assert_eq!(a.k_preuve(), b.k_preuve());
+        assert_eq!(a.k_trame(), b.k_trame());
+        assert_eq!(a.tag(), b.tag());
+        // La clé maîtresse n'est aucune des clés dérivées, ni K_accès.
+        for k in [a.k_preuve(), a.k_trame(), &cle_acces(&l).k] {
+            assert_ne!(&*maitre, k);
+        }
     }
 
     #[test]
