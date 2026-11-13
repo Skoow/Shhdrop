@@ -173,6 +173,12 @@ func (s *server) putSegment(w http.ResponseWriter, r *http.Request) {
 		fail(w, errBadRequest)
 		return
 	}
+	// Envoi fini, abandonné ou inconnu : refusé avant toute place et toute lecture (audit du
+	// 13 novembre, D1). La connexion est fermée : le corps n'est jamais lu.
+	if !s.svc.UploadOpen(id) {
+		refuseUnread(w)
+		return
+	}
 	release, ok := s.xferSlot(w, r, s.xfer.perUp, id, s.xfer.ul)
 	if !ok {
 		return
@@ -220,6 +226,13 @@ func (s *server) putSegment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// refuseUnread : 404 uniforme sans lire le corps, connexion fermée ensuite (net/http lirait
+// sinon jusqu'à 256 Kio du corps restant pour réutiliser la connexion).
+func refuseUnread(w http.ResponseWriter) {
+	w.Header().Set("Connection", "close")
+	writeErr(w, http.StatusNotFound, "not_found")
 }
 
 // readBody lit le corps d'un segment dans buf (maxSegmentLen octets, repris de segBufs : pas

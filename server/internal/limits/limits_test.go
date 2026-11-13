@@ -690,8 +690,13 @@ func TestReceivedBytesCount(t *testing.T) {
 	if ra, err := l.Receive("b", gib); !errors.Is(err, ErrQuota) || ra <= 0 {
 		t.Fatal("au-delà de 6 Gio reçus", ra, err)
 	}
-	if _, err := l.Receive("inconnu", gib); err != nil {
-		t.Fatal("envoi inconnu (jour changé) : ignoré", err)
+	// Envoi inconnu (fini, abandonné, plus vieux qu'UploadLife) : refusé, jamais gratuit
+	// (audit du 13 novembre, D1 : un jeton d'envoi finalisé lisait des Gio hors quota).
+	if _, err := l.Receive("inconnu", gib); !errors.Is(err, ErrQuota) {
+		t.Fatal("envoi inconnu : ErrQuota attendu", err)
+	}
+	if _, err := l.Receive("a", 1); !errors.Is(err, ErrQuota) {
+		t.Fatal("envoi abandonné : ErrQuota attendu", err)
 	}
 }
 

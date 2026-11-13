@@ -224,6 +224,12 @@ type upload struct {
 	top                int
 }
 
+// UploadOpen : l'envoi id est encore ouvert (connu de ce processus, non finalisé, échéance
+// non passée), en mémoire seulement, sans SQL. Vérifié avant de prendre une place de transfert
+// et de lire le corps d'un segment (audit du 13 novembre, D1 : un jeton d'envoi reste signé
+// 6 h après finalize).
+func (s *Service) UploadOpen(id string) bool { return s.uploadOpen(id, s.now()) }
+
 // uploadOpen : l'envoi id est connu de ce processus et son échéance n'est pas passée.
 func (s *Service) uploadOpen(id string, now int64) bool {
 	s.mem.mu.Lock()

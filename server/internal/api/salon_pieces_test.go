@@ -305,7 +305,10 @@ func TestQuotasPieces(t *testing.T) {
 	lireJusqua(t, c, 0x0D) // accueil fait : siège en ligne
 	e.clk.Add(40 * time.Second)
 	expect(t, e.creerPieceHTTP(j[0], 1, true), 201, "")
-	expect(t, e.creerPieceHTTP(j[0], 1, true), 201, "")
+	_, vtok := e.pieceCreee(t, j[0], 1, true)
+	// Segment d'un vocal : hors des quotas des envois (limits.Receive ne le connaît pas, et
+	// refuse un envoi inconnu depuis l'audit du 13 novembre, D1) : accepté.
+	expect(t, e.putPiece(vtok, 0, rnd(share.SegmentSize(1, 0))), 204, "")
 	w = e.creerPieceHTTP(j[0], 1, true)
 	expect(t, w, 429, "")
 	// Reste 28 800 o : il manque 36 800 o, soit 9,2 s → 10 s.

@@ -159,6 +159,13 @@ func (a salonAPI) envoyerSegmentPiece(w http.ResponseWriter, r *http.Request) {
 		failSalon(w, errBadRequest)
 		return
 	}
+	// Pièce finie, effacée ou inconnue : refusée avant toute place et toute lecture (audit du
+	// 13 novembre, D1).
+	vocal, open := a.m.PieceEnvoi(id)
+	if !open {
+		refuseUnread(w)
+		return
+	}
 	release, ok := a.xferSlot(w, r, a.xfer.perUp, "p:"+id, a.xfer.ul)
 	if !ok {
 		return
@@ -173,7 +180,12 @@ func (a salonAPI) envoyerSegmentPiece(w http.ResponseWriter, r *http.Request) {
 	buf := segBufs.Get().(*[]byte)
 	defer segBufs.Put(buf)
 	k, err := readBody(paceReader{http.MaxBytesReader(w, r.Body, maxSegmentLen), p}, r.ContentLength, *buf)
-	retry, qerr := a.lim.Receive(id, share.PayloadBytes(int64(k)))
+	// Un vocal n'est jamais compté aux quotas des envois (réserve du siège, creerPiece).
+	var retry time.Duration
+	var qerr error
+	if !vocal {
+		retry, qerr = a.lim.Receive(id, share.PayloadBytes(int64(k)))
+	}
 	if err != nil {
 		failSalon(w, errBadRequest)
 		return

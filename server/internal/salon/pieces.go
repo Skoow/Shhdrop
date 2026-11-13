@@ -345,6 +345,23 @@ func (m *Manager) salonDePiece(id string) *salon {
 	return m.pieceIdx[id]
 }
 
+// PieceEnvoi : la pièce id attend encore des segments (connue, ni prête ni effacée, salon
+// vivant), en mémoire seulement ; vocal dit si c'est un vocal (hors quotas des envois). Vérifié
+// avant de prendre une place de transfert et de lire le corps (audit du 13 novembre, D1).
+func (m *Manager) PieceEnvoi(id string) (vocal, ok bool) {
+	s := m.salonDePiece(id)
+	if s == nil {
+		return false, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.lesPieces[id]
+	if p == nil || p.efface || p.etat == prete || s.fini || !m.cfg.Now().Before(s.expires) {
+		return false, false
+	}
+	return p.vocal, true
+}
+
 // PutSegment écrit le segment n de la pièce id (jeton d'envoi) : taille exacte du palier
 // (sinon ErrBadRequest) ; total reçu pour la pièce, réécritures comprises, au plus
 // EcritureMax × sa taille (sinon ErrTropEcrit, rien compté). L'écriture se fait hors du

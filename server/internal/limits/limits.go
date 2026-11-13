@@ -455,7 +455,9 @@ func (l *Limiter) debitLocked(id string, u upload, next upload, now time.Time) (
 // §41.14) ; le morceau du manifeste n'est pas compté (ManifestChunk). Au-delà de sa réservation,
 // débités au quota du jour (refus ErrQuota, délai jusqu'à minuit UTC). Un segment effacé
 // reste compté. Un envoi de la veille reste compté sous sa clé de la veille. Un id inconnu
-// (redémarrage, envoi plus vieux qu'UploadLife) est ignoré.
+// (envoi fini, abandonné, plus vieux qu'UploadLife) est refusé (ErrQuota, délai jusqu'à
+// minuit) : jamais gratuit (audit du 13 novembre, D1 : un jeton finalisé lisait des Gio hors
+// quota). Un redémarrage change la clé des jetons : aucun envoi d'avant n'arrive ici.
 func (l *Limiter) Receive(id string, n int64) (time.Duration, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -463,7 +465,7 @@ func (l *Limiter) Receive(id string, n int64) (time.Duration, error) {
 	l.rotateLocked(now)
 	u, ok := l.uploads[id]
 	if !ok {
-		return 0, nil
+		return time.Unix((l.day+1)*day, 0).Sub(now), ErrQuota
 	}
 	if n < 0 {
 		return 0, ErrQuota
