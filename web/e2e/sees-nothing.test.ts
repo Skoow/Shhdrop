@@ -287,7 +287,7 @@ describe("le serveur ne voit rien", () => {
       "GET /api/shares/segments/0",
       "GET /api/shares/segments/6",
       "GET /api/shares/segments/3", // note lue (déchiffrée, authentifiée) à l'ouverture
-      "GET /api/shares/segments/0",
+      // Segment 0 repris de l'ouverture (A3) : pas relu pour le fichier.
       "GET /api/shares/segments/1",
       "GET /api/shares/segments/2",
       "POST /api/shares/done",
