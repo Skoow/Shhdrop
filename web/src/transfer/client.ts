@@ -716,6 +716,7 @@ async function openWith(
             destroying = true;
             try {
               await api.destroy(c, { kAcces, kPreuve }, reason);
+              segs.clear(); // détruit : plus aucune lecture, même des segments gardés
             } catch (e) {
               destroying = false;
               throw e;
