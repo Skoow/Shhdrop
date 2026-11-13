@@ -446,11 +446,20 @@ func (m *Manager) Run(ctx context.Context) {
 	}
 }
 
-// tickSur : Tick, panique récupérée et oubliée.
+// tickSur : Tick, panique récupérée et comptée (paniquesTick), sans rien écrire.
 func (m *Manager) tickSur() {
-	defer func() { _ = recover() }()
+	defer func() {
+		if recover() != nil {
+			m.paniquesTick.Add(1)
+		}
+	}()
 	m.Tick()
 }
+
+// PaniquesTick : paniques récupérées dans Tick depuis le démarrage (relecture C-2, N7) : un
+// entier, sans identifiant ni message, en mémoire seulement. Lu par les tests ; shhdrop admin
+// tourne hors du serveur et ne le voit pas (deploy/README.md §10).
+func (m *Manager) PaniquesTick() int64 { return m.paniquesTick.Load() }
 
 // PurgerAuDemarrage (plan, point 11) : à appeler une fois, avant toute autre méthode et avant
 // l'écoute. Les clés des conversations, les jetons et les planchers des pièces étaient en

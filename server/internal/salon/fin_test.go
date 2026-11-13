@@ -714,3 +714,23 @@ func TestEchuesSansEtatAuDelaDuLot(t *testing.T) {
 		t.Fatal("ligne d'une tombe effacée par echuesSansEtat")
 	}
 }
+
+// Relecture C-2, N7 : chaque panique récupérée dans un Tick compte dans un simple entier,
+// sans identifiant ni sortie ; un tick sans panique ne compte pas.
+func TestPaniquesTickComptees(t *testing.T) {
+	b := nouveauBanc(t, 200)
+	c := b.creer(t, 4)
+	b.entrer(t, c, true)
+	crochetAchever = func(*salon) { panic("salon: panique injectée (achever)") }
+	defer func() { crochetAchever = nil }()
+	b.h.avancer(25 * time.Hour)
+	if b.m.PaniquesTick() != 0 {
+		t.Fatal("compteur non nul au départ")
+	}
+	b.m.tickSur()
+	crochetAchever = nil
+	b.m.tickSur()
+	if n := b.m.PaniquesTick(); n != 1 {
+		t.Fatal("paniques comptées :", n)
+	}
+}
