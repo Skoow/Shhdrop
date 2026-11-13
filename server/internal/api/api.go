@@ -45,6 +45,9 @@ const (
 // Transferts de segments simultanés (audit E1) : un GET se sert en flux (quelques dizaines
 // de Kio de mémoire), un PUT garde son corps entier (≤ 4 Mio) jusqu'à l'écriture, d'où
 // une borne plus basse. Au-delà : 429 (connexion ou /48) ou 503 (serveur), avec Retry-After.
+// Totaux (dlTotal, ulTotal) : valeurs par défaut des tests et sans configuration ; en
+// production, Capacity (config.Capacity, calculée d'après la machine ou réglée par SHH_*).
+// Places par connexion et par /48 : limites anti-abus, fixes.
 const (
 	dlTotal, dlPer64, dlPer48 = 256, 16, 64
 	ulTotal, ulPer64, ulPer48 = 64, 8, 32
@@ -66,9 +69,10 @@ const (
 	// Le budget ne se recharge pas : seul un nouveau déverrouillage rouvre la lecture.
 	budgetRetry = 60 * time.Second
 	// Surveillances tenues (GET /api/shares/watch, spec §41.8) : 25 s au plus, 2 par
-	// connexion, 256 au total (pas de borne propre au /48 : la spécification n'en fixe pas).
-	watchHold                       = 25 * time.Second
-	watchTotal, watchPer64, watch48 = 256, 2, 256
+	// connexion, 256 au total par défaut (Capacity.Watches ; pas de borne propre au /48 : la
+	// spécification n'en fixe pas).
+	watchHold              = 25 * time.Second
+	watchTotal, watchPer64 = 256, 2
 	// reportsAlert : signalements dans l'heure à partir desquels /healthz lève l'alerte (§15.2).
 	reportsAlert = 5
 )
@@ -92,10 +96,31 @@ func (t transfers) start() time.Time {
 	return time.Now()
 }
 
-func defaultTransfers() transfers {
-	return transfers{dl: limits.NewSlots(dlTotal, dlPer64, dlPer48), ul: limits.NewSlots(ulTotal, ulPer64, ulPer48),
+func defaultTransfers() transfers { return transfersFor(Capacity{}) }
+
+// transfersFor : places de transfert d'après c (valeur nulle : dlTotal, ulTotal).
+func transfersFor(c Capacity) transfers {
+	c = c.withDefaults()
+	return transfers{dl: limits.NewSlots(c.Downloads, dlPer64, dlPer48), ul: limits.NewSlots(c.Uploads, ulPer64, ulPer48),
 		perOpen: limits.NewKeyed(dlPerOpen), perUp: limits.NewKeyed(ulPerUpload),
 		window: xferWindow, minRate: xferMinRate}
+}
+
+// Capacity : places du serveur (config.Capacity). Une valeur nulle prend la valeur par défaut
+// (dlTotal, ulTotal, watchTotal, wsTotal).
+type Capacity struct {
+	Uploads, Downloads, Watches, WebSockets int
+}
+
+func (c Capacity) withDefaults() Capacity {
+	def := func(v, d int) int {
+		if v > 0 {
+			return v
+		}
+		return d
+	}
+	return Capacity{Uploads: def(c.Uploads, ulTotal), Downloads: def(c.Downloads, dlTotal),
+		Watches: def(c.Watches, watchTotal), WebSockets: def(c.WebSockets, wsTotal)}
 }
 
 // perWindow : octets exigés par tranche (au moins 1).
@@ -248,9 +273,15 @@ func timerWait(d time.Duration) (<-chan time.Time, func() bool) {
 
 func newServer(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
 	behindProxy bool, proxies []netip.Prefix) *server {
+	return newServerCap(svc, sig, lim, capt, behindProxy, proxies, Capacity{})
+}
+
+func newServerCap(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
+	behindProxy bool, proxies []netip.Prefix, c Capacity) *server {
+	c = c.withDefaults()
 	return &server{svc: svc, sig: sig, lim: lim, cap: capt, behindProxy: behindProxy, proxies: proxies,
-		xfer: defaultTransfers(), dlTTL: downloadTTL, watchSlots: limits.NewSlots(watchTotal, watchPer64, watch48),
-		wsSlots: limits.NewSlots(wsTotal, wsPer64, wsPer48),
+		xfer: transfersFor(c), dlTTL: downloadTTL, watchSlots: limits.NewSlots(c.Watches, watchPer64, c.Watches),
+		wsSlots: limits.NewSlots(c.WebSockets, wsPer64, wsPer48),
 		wait:    timerWait}
 }
 
@@ -260,10 +291,10 @@ type ctxIP struct{}
 // behindProxy (SHH_BEHIND_PROXY) : une requête d'un pair qui n'est pas un proxy de
 // confiance (boucle locale ou proxies, SHH_TRUSTED_PROXY), ou sans X-Shh-Client-IP
 // valide, reçoit 500 au lieu de partager les limites du proxy (échec fermé).
-// sal : réglages du salon ; valeur zéro = salon désactivé.
+// sal : réglages du salon ; valeur zéro = salon désactivé. capa : places du serveur.
 func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
-	static http.Handler, behindProxy bool, proxies []netip.Prefix, sal Salons) http.Handler {
-	return newHandler(newServer(svc, sig, lim, capt, behindProxy, proxies), static, sal)
+	static http.Handler, behindProxy bool, proxies []netip.Prefix, sal Salons, capa Capacity) http.Handler {
+	return newHandler(newServerCap(svc, sig, lim, capt, behindProxy, proxies, capa), static, sal)
 }
 
 // Salons : réglages du salon. Valeur zéro : salon désactivé (aucune route, CSP inchangée).

@@ -62,6 +62,9 @@ func (s *Slots) release(k64, k48 string) {
 	}
 }
 
+// Total : places du serveur.
+func (s *Slots) Total() int { return s.total }
+
 // Len : transferts en cours au total (tests).
 func (s *Slots) Len() int {
 	s.mu.Lock()

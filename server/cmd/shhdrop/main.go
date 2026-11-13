@@ -209,6 +209,12 @@ func salonsOf(cfg config.Config, m *salon.Manager) api.Salons {
 	return api.Salons{Origin: cfg.Origin, M: m}
 }
 
+// capacityOf : places du serveur (config.Capacity) données à l'API.
+func capacityOf(cfg config.Config) api.Capacity {
+	c := cfg.Capacity
+	return api.Capacity{Uploads: c.Uploads, Downloads: c.Downloads, Watches: c.Watches, WebSockets: c.WebSockets}
+}
+
 // Dossiers du salon sous SHH_DATA_DIR : conversations et pièces (jamais blobs/, que
 // janitor.Reconcile vide de ce qu'il n'y connaît pas).
 const dirSalons, dirSalonPieces = "salons", "salon-pieces"
@@ -348,7 +354,7 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 		return err
 	}
 	srv := newHTTPServer(api.New(svc, token.New(tokKey, cfg.Now), lim,
-		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy, cfg.TrustedProxies, salonsOf(cfg, sm)))
+		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy, cfg.TrustedProxies, salonsOf(cfg, sm), capacityOf(cfg)))
 	if sm != nil {
 		// net/http ne suit plus une connexion mise à niveau : Shutdown ne l'attend pas.
 		srv.RegisterOnShutdown(sm.FermerTout)

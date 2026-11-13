@@ -231,3 +231,18 @@ Variables :
 - **Signalements** : « Quitter et signaler » (`POST /api/salons/signaler`) et « Détruire et signaler » comptent dans le même entier horaire que les partages (`reports_alert` de `shhcheck health`). `admin destroy -` accepte aussi un lien de salon `#c…`.
 - **Paniques de l'entretien** : une panique dans la passe d'entretien du salon (chaque seconde) est récupérée sans aucune sortie (ni journal ni stderr : un message pourrait citer un identifiant), et l'entretien repart à la seconde suivante. Elles ne sont comptées que dans un entier en mémoire (`Manager.PaniquesTick`, sans identifiant), lu par les tests ; `shhdrop admin`, qui tourne hors du serveur, ne le voit pas, et `/api/health` ne l'expose pas (relecture C-2, N7). Symptôme à surveiller à la place : des salons échus qui ne disparaissent pas.
 - **Adresses IP** : le serveur n'en garde aucune pour le salon ; seules les limites en mémoire en tiennent compte (empreintes HMAC à clé du jour ou du processus, jamais l'adresse ; §9.5).
+
+## 11. Capacité du serveur
+
+Aucune limite de capacité n'est fixée en dur (décision du propriétaire du 13 novembre) : chaque valeur se règle dans `deploy/.env` ; laissée vide, elle est **calculée au démarrage** d'après `GOMEMLIMIT` (`compose.yaml`) et la limite de descripteurs (`ulimits.nofile`, 65 536 dans `compose.yaml`). Les limites anti-abus **par personne** (créations, octets par jour, places par connexion et par /48, requêtes par minute) ne changent pas et ne se règlent pas ici.
+
+| Variable | Rôle | Valeur calculée | Avec `compose.yaml` (900 Mio, 65 536) |
+|---|---|---|---|
+| `SHH_UPLOADS_MAX` | envois de segments simultanés (partages et pièces) | 30 % de `GOMEMLIMIT` ÷ 4 Mio (corps gardé en mémoire), au moins 8 ; 64 sans `GOMEMLIMIT` | 67 |
+| `SHH_DOWNLOADS_MAX` | lectures de segments simultanées | 10 % de `GOMEMLIMIT` ÷ 256 Kio (tampon), au moins 16 ; 256 sans `GOMEMLIMIT` | 360 |
+| `SHH_WATCH_MAX` | surveillances tenues (`/api/shares/watch`) | autant que de lectures | 360 |
+| `SHH_WS_MAX` | WebSocket du salon ouverts | 2 000 | 2 000 |
+
+Chaque catégorie a au plus `nofile / 8` places (une lecture ou un envoi tient 2 descripteurs) ; une valeur réglée au-delà empêche le serveur de démarrer (message `… dépasse la limite de descripteurs`), au lieu de le faire tomber sous la charge.
+
+**Règle de sûreté** : ne monter `SHH_UPLOADS_MAX` qu'avec la mémoire. Chaque envoi garde 4 Mio, que le ramasse-miettes peut doubler : au-delà de `mem_limit`, le noyau tue le serveur (envois en cours perdus). Pour une machine plus grosse, monter `mem_limit` et `GOMEMLIMIT` ensemble (`GOMEMLIMIT` ≈ 90 % de `mem_limit`) et laisser les places se recalculer.

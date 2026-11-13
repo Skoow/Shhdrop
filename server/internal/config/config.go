@@ -34,6 +34,8 @@ type Config struct {
 	// Origin (SHH_ORIGIN, obligatoire avec SHH_SALONS=1) : origine publique du site, comparée
 	// à l'en-tête Origin du WebSocket et copiée dans la CSP (connect-src wss://hôte).
 	Origin string
+	// Capacity : places du serveur (capacity.go), réglables ou calculées d'après la machine.
+	Capacity Capacity
 }
 
 func FromEnv() (Config, error) {
@@ -112,6 +114,9 @@ func FromEnv() (Config, error) {
 	}
 	if c.Salons && c.Origin == "" {
 		return Config{}, errors.New("SHH_SALONS=1 exige SHH_ORIGIN (origine publique du site, ex. https://shhgone.com)")
+	}
+	if c.Capacity, err = capacityFromEnv(memLimit(), nofile()); err != nil {
+		return Config{}, err
 	}
 	return c, nil
 }

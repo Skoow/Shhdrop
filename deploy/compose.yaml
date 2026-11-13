@@ -8,6 +8,8 @@
 #                  Doit contenir « data » (compte 65532, mode 0700) et « caddy » (root, 0700).
 # Variables facultatives :
 #   SHH_STORAGE_MAX  plafond de stockage en octets (défaut : 200 Gio, spec §24)
+#   SHH_UPLOADS_MAX, SHH_DOWNLOADS_MAX, SHH_WATCH_MAX, SHH_WS_MAX : capacité du serveur
+#                    (défaut : calculée d'après GOMEMLIMIT et nofile, README §11)
 #   SHH_SALONS_MAX   salons vivants au plus (défaut : 200 ; 50 proposé pour un usage personnel),
 #                    sans effet tant que le salon est désactivé (SHH_SALONS, ci-dessous)
 #
@@ -29,6 +31,9 @@ services:
     # Pas de vidage mémoire (spec §22) : il contiendrait des adresses et des jetons.
     ulimits:
       core: 0
+      # Descripteurs : explicites, pour que les places calculées (au plus nofile / 8 par
+      # catégorie, config/capacity.go) ne dépendent pas du réglage de Docker sur la machine.
+      nofile: 65536
     pids_limit: 256
     # Plafonds (audit du 11 novembre) : un abus ou une fuite de mémoire ne fait pas tomber la
     # machine (sshd, Caddy, déverrouillage du volume). Pire cas prévu par la spec (§4, §24) :
@@ -65,6 +70,11 @@ services:
       # empêche le serveur de démarrer ET « shhdrop admin » de tourner (deploy/README.md §10).
       SHH_ORIGIN: https://${SHH_DOMAIN:?SHH_DOMAIN manquant (nom du site)}
       SHH_SALONS_MAX: ${SHH_SALONS_MAX:-200}
+      # Capacité (README §11) : vide = calculée au démarrage d'après GOMEMLIMIT et nofile.
+      SHH_UPLOADS_MAX: ${SHH_UPLOADS_MAX:-}
+      SHH_DOWNLOADS_MAX: ${SHH_DOWNLOADS_MAX:-}
+      SHH_WATCH_MAX: ${SHH_WATCH_MAX:-}
+      SHH_WS_MAX: ${SHH_WS_MAX:-}
     networks:
       interne:
         ipv4_address: 172.30.53.2
