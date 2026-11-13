@@ -3,6 +3,7 @@ package share
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -215,9 +216,9 @@ func TestFinalizeConcurrentFillsOnce(t *testing.T) {
 	id := upload400(t, s, k, 1, 2, 3, 4, 5)
 	var writes atomic.Int64
 	orig := fillWrite
-	fillWrite = func(s *Service, id string, off int64, b []byte) error {
+	fillWrite = func(w io.WriterAt, off int64, b []byte) error {
 		writes.Add(int64(len(b)))
-		return orig(s, id, off, b)
+		return orig(w, off, b)
 	}
 	defer func() { fillWrite = orig }()
 	const N = 20

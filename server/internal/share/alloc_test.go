@@ -1,6 +1,7 @@
 package share
 
 import (
+	"io"
 	"runtime"
 	"testing"
 )
@@ -15,9 +16,9 @@ func TestFillRangeAllocatesNoMoreThanRange(t *testing.T) {
 	}
 	var sizes []int
 	orig := fillWrite
-	fillWrite = func(s *Service, id string, off int64, b []byte) error {
+	fillWrite = func(w io.WriterAt, off int64, b []byte) error {
 		sizes = append(sizes, len(b))
-		return orig(s, id, off, b)
+		return orig(w, off, b)
 	}
 	defer func() { fillWrite = orig }()
 	var before, after runtime.MemStats

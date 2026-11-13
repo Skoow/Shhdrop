@@ -2,6 +2,7 @@ package share
 
 import (
 	"errors"
+	"io"
 	"testing"
 )
 
@@ -15,9 +16,9 @@ func countFills(t *testing.T) *int64 {
 	t.Helper()
 	var n int64
 	orig := fillWrite
-	fillWrite = func(s *Service, id string, off int64, b []byte) error {
+	fillWrite = func(w io.WriterAt, off int64, b []byte) error {
 		n += int64(len(b))
-		return orig(s, id, off, b)
+		return orig(w, off, b)
 	}
 	t.Cleanup(func() { fillWrite = orig })
 	return &n

@@ -3,6 +3,7 @@ package share
 import (
 	"bytes"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/skoow/shhdrop/server/internal/blob"
@@ -109,5 +110,50 @@ func TestFinalizeAbortsWhenSyncFails(t *testing.T) {
 				t.Fatal("état", st)
 			}
 		})
+	}
+}
+
+// Rapport de performance A12 : le fichier d'un envoi est synchronisé en arrière-plan tous les
+// syncEvery octets reçus, jamais deux fois à la fois pour le même envoi ; Finalize synchronise
+// toujours tout le fichier avant « ready ».
+func TestSynchronisationDeFond(t *testing.T) {
+	s, _ := newSvc(t)
+	var mu sync.Mutex
+	calls, enCours, maxEnCours := 0, 0, 0
+	orig := bgSyncBlob
+	bgSyncBlob = func(b *blob.Store, id string) error {
+		mu.Lock()
+		calls++
+		enCours++
+		maxEnCours = max(maxEnCours, enCours)
+		mu.Unlock()
+		err := orig(b, id)
+		mu.Lock()
+		enCours--
+		mu.Unlock()
+		return err
+	}
+	t.Cleanup(func() { bgSyncBlob = orig })
+	const bucket = 1600 // 25 segments de 4 Mio
+	k := newKeys()
+	id, segs, err := s.createAny(k.req(bucket, 24, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n := range segs {
+		if err := s.PutSegment(id, n, segBody(bucket, n, byte(n+1))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.waitBackgroundSync()
+	mu.Lock()
+	c, m := calls, maxEnCours
+	mu.Unlock()
+	// 25 segments ≈ 100 Mio : au moins une, au plus 3 synchronisations de fond (32 Mio).
+	if c < 1 || c > 3 || m != 1 {
+		t.Fatalf("synchronisations de fond : %d (au plus %d à la fois)", c, m)
+	}
+	if _, err := s.Finalize(id, fin(id)); err != nil {
+		t.Fatal(err)
 	}
 }

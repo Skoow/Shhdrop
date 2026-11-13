@@ -3,6 +3,7 @@ package share
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -468,9 +469,9 @@ func TestPutRefusedDuringFinalize(t *testing.T) {
 			started, release := make(chan struct{}), make(chan struct{})
 			var once sync.Once
 			orig := fillWrite
-			fillWrite = func(s *Service, id string, off int64, b []byte) error {
+			fillWrite = func(w io.WriterAt, off int64, b []byte) error {
 				once.Do(func() { close(started); <-release })
-				return orig(s, id, off, b)
+				return orig(w, off, b)
 			}
 			t.Cleanup(func() { fillWrite = orig })
 			r := fin(id)

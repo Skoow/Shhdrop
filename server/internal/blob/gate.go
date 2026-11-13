@@ -1,7 +1,9 @@
 package blob
 
 import (
+	"errors"
 	"io"
+	"os"
 	"sync/atomic"
 )
 
@@ -58,4 +60,56 @@ func (s *Store) ReaderAt(r io.ReaderAt) io.ReaderAt {
 		return r
 	}
 	return gatedReaderAt{r, s.Gate}
+}
+
+// Writer : fichier ouvert une fois pour une suite d'écritures dans sa réservation (bourrage
+// de Finalize : jusqu'à 2 Gio par tranches de 4 Mio, rapport de performance A12 : ouvrir,
+// fermer et remettre les dates à zéro à chaque tranche coûtait autant d'appels). Chaque
+// écriture passe sous la borne (Gate). À fermer (Close remet les dates à l'epoch).
+type Writer struct {
+	f    *os.File
+	path string
+	size int64
+	g    *Gate
+}
+
+// OpenWriter ouvre le fichier id en écriture.
+func (s *Store) OpenWriter(id string) (*Writer, error) {
+	path, err := s.path(id)
+	if err != nil {
+		return nil, err
+	}
+	w := &Writer{path: path, g: s.Gate}
+	err = s.Gate.do(func() error {
+		f, err := os.OpenFile(path, os.O_WRONLY, 0)
+		if err != nil {
+			return err
+		}
+		fi, err := f.Stat()
+		if err != nil {
+			f.Close()
+			return err
+		}
+		w.f, w.size = f, fi.Size()
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return w, nil
+}
+
+// WriteAt écrit p à off, dans la taille du fichier à l'ouverture ; refuse tout dépassement.
+func (w *Writer) WriteAt(p []byte, off int64) (int, error) {
+	if off < 0 || off > w.size || int64(len(p)) > w.size-off {
+		return 0, errors.New("blob : écriture hors de la réservation")
+	}
+	var n int
+	err := w.g.do(func() (err error) { n, err = w.f.WriteAt(p, off); return err })
+	return n, err
+}
+
+// Close ferme le fichier, puis remet ses dates à l'epoch.
+func (w *Writer) Close() error {
+	return w.g.do(func() error { return errors.Join(w.f.Close(), wipeTimes(w.path)) })
 }

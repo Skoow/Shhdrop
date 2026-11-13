@@ -14,6 +14,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"hash/fnv"
+	"io"
 	"io/fs"
 	"math/bits"
 	"os"
@@ -201,9 +202,10 @@ type Service struct {
 		// part : segments d'un brouillon reçus en partie (audit H-2), un bit par morceau.
 		part map[string]map[int]uint64
 	}
-	streams Streams   // flux de segments annulables (spec §41.8)
-	gone    goneState // ouvertures actives, descripteurs détachés, surveillances, octrois (spec §41.4, §41.8)
-	kill    killKey   // clé des noms de demandes de coupure (kill.go)
+	streams Streams        // flux de segments annulables (spec §41.8)
+	bgSync  sync.WaitGroup // synchronisations de fond en cours (syncInBackground)
+	gone    goneState      // ouvertures actives, descripteurs détachés, surveillances, octrois (spec §41.4, §41.8)
+	kill    killKey        // clé des noms de demandes de coupure (kill.go)
 	// grantKey : clé HMAC des octrois d'ouverture, tirée au démarrage, jamais écrite.
 	grantKey [32]byte
 	// finalizing : envois dont un Finalize est en cours ; un seul à la fois par id, pour
@@ -241,7 +243,21 @@ type upload struct {
 	deadline, progress int64
 	recv               int64
 	top                int
+	// dirty : octets écrits depuis la dernière synchronisation de fond ; syncing : une
+	// synchronisation de fond est en cours (rapport de performance A12).
+	dirty   int64
+	syncing bool
 }
+
+// syncEvery : octets écrits dans un envoi après lesquels son fichier est synchronisé en
+// arrière-plan (fdatasync), pour qu'à Finalize il ne reste que la fin et le bourrage à écrire
+// sur le disque (rapport de performance A12 : 702 ms au clic pour 200 Mo). 32 Mio : 8
+// segments. La durabilité reste celle de Finalize, qui synchronise tout le fichier avant
+// « ready » : ces synchronisations ne font qu'avancer le travail.
+const syncEvery = 32 << 20
+
+// bgSyncBlob : synchronisation de fond (variable pour les tests).
+var bgSyncBlob = func(b *blob.Store, id string) error { return b.Sync(id) }
 
 // UploadOpen : l'envoi id est encore ouvert (connu de ce processus, non finalisé, échéance
 // non passée), en mémoire seulement, sans SQL. Vérifié avant de prendre une place de transfert
@@ -255,6 +271,19 @@ func (s *Service) uploadOpen(id string, now int64) bool {
 	defer s.mem.mu.Unlock()
 	u, ok := s.mem.up[id]
 	return ok && u.deadline > now
+}
+
+// syncInBackground synchronise le fichier de l'envoi id (hors de tout verrou), puis permet la
+// suivante. Une erreur (fichier effacé, disque) est ignorée : Finalize resynchronise tout.
+func (s *Service) syncInBackground(id string) {
+	defer s.bgSync.Done()
+	_ = bgSyncBlob(s.Blobs, id)
+	s.mem.mu.Lock()
+	defer s.mem.mu.Unlock()
+	if u, ok := s.mem.up[id]; ok {
+		u.syncing = false
+		s.mem.up[id] = u
+	}
 }
 
 func (s *Service) setUpload(id string, u upload) {
@@ -282,6 +311,11 @@ func (s *Service) noteReceived(id string, n, k int) {
 	if u, ok := s.mem.up[id]; ok {
 		u.recv += int64(k)
 		u.top = max(u.top, n+1)
+		if u.dirty += int64(k) * ChunkCT; u.dirty >= syncEvery && !u.syncing {
+			u.dirty, u.syncing = 0, true
+			s.bgSync.Add(1)
+			go s.syncInBackground(id)
+		}
 		s.mem.up[id] = u
 	}
 }
@@ -834,8 +868,9 @@ func (s *Service) syncFile(id string) error {
 	return nil
 }
 
-// fillWrite : écriture d'une tranche du bourrage (variable pour compter les écritures en test).
-var fillWrite = func(s *Service, id string, off int64, b []byte) error { return s.Blobs.WriteAt(id, off, b) }
+// fillWrite : écriture d'une tranche du bourrage dans le fichier ouvert une seule fois
+// (rapport de performance A12 ; variable pour compter les écritures en test).
+var fillWrite = func(w io.WriterAt, off int64, b []byte) error { _, err := w.WriteAt(b, off); return err }
 
 // fillChunk : taille maximale des écritures du bourrage (un seul tampon par plage, réutilisé).
 const fillChunk = 4 << 20
@@ -853,19 +888,23 @@ func (s *Service) fillRange(id string, start, end int64) error {
 	if start >= end {
 		return nil
 	}
+	w, err := s.Blobs.OpenWriter(id)
+	if err != nil {
+		return err
+	}
 	buf := make([]byte, min(fillChunk, end-start)) // jamais 4 Mio pour un seul morceau (revue B8)
 	for off := start; off < end; {
 		n := min(int64(len(buf)), end-off)
 		b := buf[:n]
 		if _, err := rand.Read(b); err != nil {
-			return err
+			return errors.Join(err, w.Close())
 		}
-		if err := fillWrite(s, id, off, b); err != nil {
-			return err
+		if err := fillWrite(w, off, b); err != nil {
+			return errors.Join(err, w.Close())
 		}
 		off += n
 	}
-	return nil
+	return w.Close()
 }
 
 // Meta trouve le partage par V_accès = SHA-256(K_accès) (index unique) : sans K_accès,

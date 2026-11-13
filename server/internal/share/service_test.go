@@ -64,7 +64,7 @@ func fin(id string) FinalizeReq {
 	return finOf[id]
 }
 
-func newSvc(t *testing.T) (*Service, *clock) {
+func newSvc(t testing.TB) (*Service, *clock) {
 	t.Helper()
 	dir := t.TempDir()
 	db, err := store.Open(filepath.Join(dir, "shares.db"))
