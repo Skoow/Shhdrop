@@ -937,15 +937,16 @@ func (s *Service) UnlockGrant(id string, kAcces, kPreuve []byte, grant string) (
 // recréés pour un partage effacé. Sous gone.mu : partage mort ou en retrait → ErrNotFound ;
 // sinon la ligne est relue (retire prend gone.mu pour son oubli final : une ligne encore là
 // sera oubliée après nous) ; absente → ErrNotFound.
+// La ligne est relue hors de gone.mu, époque revérifiée sous le verrou (liveRead, audit du
+// 13 novembre, D7).
 func (s *Service) grantIfLive(id string, openN int, exp int64) (string, error) {
-	s.gone.mu.Lock()
+	var one int
+	gone, err := s.liveRead(id, func() error { return s.DB.QueryRow(`SELECT 1 FROM shares WHERE id=?`, id).Scan(&one) })
 	defer s.gone.unlock()
-	s.gone.init()
-	if s.gone.dead[id] != nil || s.gone.retiringLocked(id) {
+	if gone {
 		return "", ErrNotFound
 	}
-	var one int
-	if err := s.DB.QueryRow(`SELECT 1 FROM shares WHERE id=?`, id).Scan(&one); err != nil {
+	if err != nil {
 		return "", notFound(err)
 	}
 	return s.grantLocked(openKey{id, openN}, exp), nil

@@ -81,8 +81,8 @@ type goneState struct {
 	// retiring : partages dont le fichier est en cours de suppression hors de mu (retire) ;
 	// présence seulement, le temps d'une suppression. Ils passent déjà pour disparus.
 	retiring []string
-	// epoch : augmenté à chaque retrait et à chaque coupure de flux ; une ouverture de segment
-	// faite hors de mu (openOnce) se refait sous mu s'il a changé entre-temps.
+	// epoch : augmenté à chaque retrait et à chaque coupure de flux ; une lecture de la base
+	// faite hors de mu (openOnce, liveRead) est refaite s'il a changé entre-temps.
 	epoch uint64
 }
 
@@ -159,17 +159,29 @@ func (s *Service) OpenSegmentCtx(parent context.Context, id string, n, openN int
 	if !validID(id) || openN < 1 || openN > maxOpenN {
 		return nil, ErrNotFound
 	}
-	for range 2 { // au plus un retrait (partage échu non encore balayé), puis le chemin détaché
+	retired := false
+	for range liveReads {
 		seg, retire, event, err := s.openOnce(parent, id, n, openN)
+		if errors.Is(err, errRetry) {
+			continue // époque changée pendant l'ouverture
+		}
 		if !retire {
 			return seg, err
 		}
+		if retired { // au plus un retrait (partage échu non encore balayé), puis le chemin détaché
+			return nil, ErrGone
+		}
+		retired = true
 		if _, err := s.retire(id, true, event); err != nil {
 			return nil, err
 		}
 	}
-	return nil, ErrGone
+	// L'époque a changé à chaque essai (retraits en rafale) : réessayer plus tard.
+	return nil, ErrBusy
 }
+
+// errRetry : openOnce a vu l'époque changer pendant l'ouverture ; à refaire.
+var errRetry = errors.New("share : ouverture à refaire")
 
 // openOnce : une tentative. retire : le partage est échu (échéance, 5 essais, purge) et doit
 // d'abord être retiré, à l'heure event.
@@ -203,18 +215,10 @@ func (s *Service) openOnce(parent context.Context, id string, n, openN int) (seg
 	s.gone.mu.Lock()
 	defer s.gone.unlock()
 	if s.gone.epoch != ep {
-		// Retrait ou coupure pendant l'ouverture : tout est refait sous le verrou.
+		// Retrait ou coupure pendant l'ouverture : on recommence (errRetry, OpenSegmentCtx),
+		// sans relire la base sous le verrou (audit du 13 novembre, D7).
 		sec.Close()
-		if d := s.gone.dead[id]; d != nil {
-			seg, err := s.serveDetachedLocked(parent, id, d, k, n, now)
-			return seg, false, 0, err
-		}
-		if s.gone.retiringLocked(id) {
-			return nil, false, 0, ErrGone
-		}
-		if sec, bucket, size, retire, event, err = s.openRow(id, n, openN, now); sec == nil {
-			return nil, retire, event, err
-		}
+		return nil, false, 0, errRetry
 	}
 	// Compté après l'ouverture réussie : une erreur du serveur ne consomme pas le budget.
 	if !s.budget.charge(k, size, s.budgetLocked(k, bucket), now) {
@@ -370,12 +374,20 @@ func (s *Service) detachedBytes() int64 {
 // fichier ; sous gone.mu de nouveau, la ligne. L'ordre « fichier puis ligne » est gardé : si
 // la suppression échoue, la ligne reste et Sweep réessaie. Un retrait déjà en cours du même
 // partage : (false, nil), comme une ligne déjà effacée.
+//
+// La ligne est lue avant gone.mu (audit du 13 novembre, D7 : aucune requête SQL sous ce
+// verrou). Rien n'exige qu'elle soit encore la même ensuite : bucket et vérificateurs ne
+// changent pas ; une ouverture émise entre-temps n'a pas de grâce (elle courait de toute
+// façon contre la destruction) ; une ouverture terminée entre-temps garde au pire un
+// descripteur détaché jusqu'à son done ou à la fin de grâce. Un retrait concurrent est vu sous
+// le verrou (retiring) ; un retrait déjà fini a supprimé le fichier, et destroy rend false.
 func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 	now := s.now()
 	s.gone.mu.Lock()
 	s.gone.init()
-	if s.gone.retiringLocked(id) {
-		s.gone.unlock()
+	busy := s.gone.retiringLocked(id)
+	s.gone.unlock()
+	if busy {
 		return false, nil
 	}
 	var bucket, issued int
@@ -384,11 +396,16 @@ func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 	err := s.DB.QueryRow(`SELECT bucket, opens_issued, done_mask, access_v, proof_v FROM shares WHERE id=?`, id).
 		Scan(&bucket, &issued, &doneMask, &accessV, &proofV)
 	if err != nil {
-		s.gone.unlock()
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
 		}
 		return false, err
+	}
+	s.gone.mu.Lock()
+	s.gone.init()
+	if s.gone.retiringLocked(id) {
+		s.gone.unlock()
+		return false, nil
 	}
 	allowed := map[int]bool{}
 	if grace && s.gone.dead[id] == nil {
@@ -445,6 +462,39 @@ func (s *Service) retire(id string, grace bool, event int64) (bool, error) {
 	return ok, nil
 }
 
+// liveReads : essais de liveRead avant de garder une lecture dont l'époque a changé.
+const liveReads = 16
+
+// liveRead lit la ligne du partage id (read, une requête SQL) hors de gone.mu, puis rend
+// gone.mu PRIS (l'appelant le rend avec s.gone.unlock), avec gone vrai si le partage est mort
+// ou en retrait. L'époque est relevée avant la lecture et revérifiée après : si un retrait ou
+// une coupure a eu lieu entre-temps (n'importe quel partage), la lecture est refaite, au plus
+// liveReads fois ; au-delà, la dernière est gardée. Ce dernier cas, rarissime, ne peut que
+// laisser une surveillance (prévenue par PollRemoved dans la seconde) ou un octroi (oublié par
+// sweepGrantsLocked) pour un partage effacé : jamais servir un fichier retiré (openOnce, qui
+// garde son propre contrôle). Aucune requête SQL sous gone.mu (audit du 13 novembre, D7).
+func (s *Service) liveRead(id string, read func() error) (gone bool, err error) {
+	for i := 0; ; i++ {
+		s.gone.mu.Lock()
+		s.gone.init()
+		if s.gone.dead[id] != nil || s.gone.retiringLocked(id) {
+			return true, nil
+		}
+		ep := s.gone.epoch
+		s.gone.unlock()
+		err = read()
+		s.gone.mu.Lock()
+		s.gone.init()
+		if s.gone.dead[id] != nil || s.gone.retiringLocked(id) {
+			return true, nil
+		}
+		if s.gone.epoch == ep || i+1 >= liveReads {
+			return false, err
+		}
+		s.gone.unlock()
+	}
+}
+
 // revokeAllLocked coupe tous les flux du partage (aucune grâce).
 func (s *Service) revokeAllLocked(id string) {
 	s.gone.epoch++
@@ -474,18 +524,20 @@ func (s *Service) Watch(id string, openN int) (Watch, error) {
 		return Watch{}, ErrNotFound
 	}
 	now := s.now()
-	s.gone.mu.Lock()
-	defer s.gone.unlock()
-	s.gone.init()
-	if s.gone.dead[id] != nil || s.gone.retiringLocked(id) {
-		return Watch{}, ErrGone
-	}
+	// Ligne lue hors de gone.mu (audit du 13 novembre, D7), puis époque revérifiée sous le
+	// verrou (s.liveRead) : un retrait passé entre-temps fait relire.
 	var state string
 	var issued, failed int
 	var doneMask int64
 	var exp sql.NullInt64
-	err := s.DB.QueryRow(`SELECT state, opens_issued, done_mask, failed_attempts, expires_at FROM shares WHERE id=?`, id).
-		Scan(&state, &issued, &doneMask, &failed, &exp)
+	gone, err := s.liveRead(id, func() error {
+		return s.DB.QueryRow(`SELECT state, opens_issued, done_mask, failed_attempts, expires_at FROM shares WHERE id=?`, id).
+			Scan(&state, &issued, &doneMask, &failed, &exp)
+	})
+	defer s.gone.unlock()
+	if gone {
+		return Watch{}, ErrGone
+	}
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Watch{}, ErrGone
