@@ -75,7 +75,9 @@ describe("historique chiffré (IndexedDB simulé)", () => {
 
   it("nonce aléatoire à chaque écriture (même contenu → deux chiffrés différents)", async () => {
     const b = memoryBackend();
-    const h = (await openHistory({ backend: b }))!;
+    // Horloge fixée (comme les autres tests) : à l'heure réelle, l'entrée de T0 serait terminée
+    // depuis 7 jours depuis le 13 novembre 2026 à 08 h 14 UTC, donc retirée (test daté).
+    const h = (await openHistory({ backend: b, now: () => T0 }))!;
     const e = await h.add(fresh());
     const first = [...b.raw().values()][0]!;
     await h.update(e.id, { opensUsed: 0 });
