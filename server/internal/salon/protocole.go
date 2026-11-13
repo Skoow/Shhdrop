@@ -118,13 +118,16 @@ func LireDemande(b []byte) (Demande, error) {
 }
 
 // Raisons de fin (enregistrement 0x05). 3 (« budget de flux ») est réservé, jamais émis
-// (plan, point 20).
+// (plan, point 20). 7 (« interrompu par le serveur ») : le salon a dû finir faute de pouvoir
+// recréer sa conversation pendant un renouvellement (reglages.go) ; comme 1 et 2, fermeture
+// 1000, le salon n'existe plus.
 const (
-	RaisonExpire   uint8 = 1
-	RaisonDetruit  uint8 = 2
-	RaisonRemplace uint8 = 4
-	RaisonExclu    uint8 = 5
-	RaisonTropLent uint8 = 6
+	RaisonExpire     uint8 = 1
+	RaisonDetruit    uint8 = 2
+	RaisonRemplace   uint8 = 4
+	RaisonExclu      uint8 = 5
+	RaisonTropLent   uint8 = 6
+	RaisonInterrompu uint8 = 7
 )
 
 // Codes de fermeture du WebSocket (plan, point 19, et table « Codes de fermeture » du

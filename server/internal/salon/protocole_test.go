@@ -34,7 +34,7 @@ func TestConstantes(t *testing.T) {
 	if 1+TailleTrame+16 > LimiteLecture {
 		t.Fatal("LimiteLecture trop petite")
 	}
-	if RaisonExpire != 1 || RaisonDetruit != 2 || RaisonRemplace != 4 || RaisonExclu != 5 || RaisonTropLent != 6 {
+	if RaisonExpire != 1 || RaisonDetruit != 2 || RaisonRemplace != 4 || RaisonExclu != 5 || RaisonTropLent != 6 || RaisonInterrompu != 7 {
 		t.Fatal("raisons de fin (plan, Protocole, 0x05)")
 	}
 	if CodeAccueil != 4001 || CodeRevoque != 4002 || CodeInvalide != 4003 || CodeInconnu != 4004 ||
@@ -182,6 +182,7 @@ func TestEnregistrements(t *testing.T) {
 		{"arrivée", EnrArrivee(seq, 3, n1), 26, cat(tete(0x02), []byte{3}, n1[:])},
 		{"départ", EnrDepart(seq, 9), 10, cat(tete(0x03), []byte{9})},
 		{"fin", EnrFin(seq, RaisonTropLent), 10, cat(tete(0x05), []byte{6})},
+		{"fin interrompue", EnrFin(seq, RaisonInterrompu), 10, cat(tete(0x05), []byte{7})},
 		{"présence en ligne", EnrPresence(seq, 2, true, 0), 19, cat(tete(0x07), []byte{2, 1}, u64(0))},
 		// En ligne : la minute donnée est ignorée (0 = inconnue ou en ligne, Task 9b).
 		{"présence en ligne, minute ignorée", EnrPresence(seq, 2, true, 29_381_492), 19, cat(tete(0x07), []byte{2, 1}, u64(0))},

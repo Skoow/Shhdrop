@@ -301,7 +301,10 @@ export class ClientSalon {
         if (b[9] !== 0xff) this.#salon?.marquerParti(b[9]!);
         break;
       case 0x05:
+        // Raisons : 1 expiré, 2 détruit, 4 remplacé, 5 exclu, 6 trop lent, 7 interrompu par le
+        // serveur (renouvellement impossible) ; 3 réservé, jamais émis.
         this.fin = b[9];
+        if (![1, 2, 4, 5, 6, 7].includes(b[9]!)) this.erreurs.push(`0x05 : raison ${b[9]}`);
         break;
       case 0x07:
         this.presence.set(b[9]!, b[10] === 1);

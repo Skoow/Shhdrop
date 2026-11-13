@@ -361,7 +361,7 @@ func TestRenouvelerEchec(t *testing.T) {
 		if _, err := b.m.Regler(c.gestion, ReglagesReq{Heures: 1}, nil); err == nil {
 			t.Fatal("renouvellement raté rendu réussi")
 		}
-		finRecue(t, "renouvellement raté", lg, RaisonDetruit)
+		finRecue(t, "renouvellement raté", lg, RaisonInterrompu)
 		if len(reglagesRecus(t, lg)) != 0 {
 			t.Fatal("0x10 diffusé malgré l'échec")
 		}

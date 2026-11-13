@@ -87,7 +87,8 @@ type Reglages struct {
 // hors du verrou (fichier, puis ligne et budget : pieces_bytes revient à 0 pièce par pièce,
 // jamais par une remise à 0 forcée qui retirerait le budget d'une pièce créée juste après).
 // Si la conversation ne peut pas être recréée, rien d'avant n'est déjà plus servi et le salon
-// est fini (raison 2) : Tick reprend sa partie disque comme pour toute fin de vie.
+// est fini (raison 7, « interrompu par le serveur ») : Tick reprend sa partie disque comme
+// pour toute fin de vie.
 func (m *Manager) Regler(sGestion []byte, r ReglagesReq, avant func() error) (Reglages, error) {
 	v := share.Verifier(sGestion)
 	if v == nil {
@@ -148,7 +149,7 @@ func (m *Manager) Regler(sGestion []byte, r ReglagesReq, avant func() error) (Re
 	defer m.purger(s) // pièces d'avant : fichier, puis ligne et budget, hors du verrou du salon
 	depart, err := m.appliquerReglages(s, places, exp, r.Heures != 0)
 	if errors.Is(err, errRenouvellement) {
-		_ = m.finir(s, RaisonDetruit) // partie disque ratée : reprise par Tick
+		_ = m.finir(s, RaisonInterrompu) // partie disque ratée : reprise par Tick
 		return Reglages{}, ErrES
 	}
 	if err != nil {
