@@ -1741,3 +1741,63 @@ fn n2_welcome_hors_arbre_refuse() {
     r.meme_epoque();
     r.message(3, 1);
 }
+
+/// Renouvellement du salon (0x10, spec v3 §3.6.1, décision du 13 novembre) : le serveur efface
+/// tout, Commits, Welcomes et KeyPackages compris ; le groupe MLS est donc recréé. Chacun jette
+/// son état ; le créateur crée un nouveau groupe et ajoute chacun (KeyPackage publié, Commit,
+/// Welcome) comme à la création. Les membres gardent leur siège et leur `nonce_arrivee`
+/// (annonces inchangées). Rien d'avant n'est lisible par le nouveau groupe ; un message envoyé
+/// après est lu par tous.
+#[test]
+fn renouvellement_du_salon_recree_le_groupe() {
+    let mut r = groupe(3);
+    r.message(1, 1);
+    let ancien = r.salon(2).envoyer(&cles(), &env(2)).unwrap();
+    let ancienne_cle = r.salon(0).exporter_sframe().unwrap();
+    // 0x10 : chacun jette son état MLS ; le créateur repart avec un nouveau groupe.
+    let liste = r.liste.clone();
+    let mut createur =
+        Salon::creer(nouvelle_identite(0, nonce(0, 0)).unwrap(), &cles(), true).unwrap();
+    createur.remplacer_annonces(0, &liste);
+    r.m = vec![Some(createur)];
+    for s in 1..3u8 {
+        let mut x = r.nouveau(s, nonce(s, 0));
+        let kp = x.key_package(&cles()).unwrap();
+        r.publier(s, &kp);
+        r.m.push(Some(x));
+        let commit = r.salon(0).ajouter(&cles(), &mls(&kp)).unwrap();
+        let mut welcome = None;
+        for (i, res) in r.diffuser(0, &commit) {
+            match (i, res) {
+                (0, Ok(Evenement::CommitAccepte { welcome: w })) => welcome = w,
+                (i, Ok(Evenement::Membres { ajoutes, .. })) if i != s as usize => {
+                    assert_eq!(ajoutes, vec![s]);
+                }
+                (i, Ok(Evenement::Ignore)) if i == s as usize => {} // en attente de son Welcome
+                (i, autre) => panic!("membre {i} : {autre:?}"),
+            }
+        }
+        let mut x = r.m[s as usize].take().unwrap();
+        let entree = r.entrer(&mut x, &welcome.unwrap(), 0).unwrap();
+        assert!(matches!(entree, Evenement::Entree { .. }), "{entree:?}");
+        r.m[s as usize] = Some(x);
+    }
+    for s in 0..3 {
+        assert_eq!(r.salon(s).membres(), vec![0, 1, 2]);
+    }
+    r.meme_epoque();
+    assert_ne!(*r.salon(0).exporter_sframe().unwrap(), *ancienne_cle);
+    // Une trame de l'ancien groupe n'est lisible par personne.
+    r.seq += 1;
+    let seq = r.seq;
+    for s in 0..3 {
+        let lu = r.salon(s).recevoir_trame(&cles(), &ancien, seq, 2);
+        assert!(
+            !matches!(lu, Ok(Evenement::Message { .. })),
+            "siège {s} lit l'ancien groupe : {lu:?}"
+        );
+    }
+    r.message(2, 3);
+    r.message(0, 4);
+    r.message(1, 5);
+}
