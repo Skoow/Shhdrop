@@ -65,3 +65,5 @@ button:disabled { opacity: .5; cursor: default; }
 .action { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding-bottom: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--line); }
 .action.colonne { display: block; }
 code { font: .875em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2); padding: .125rem .375rem; border-radius: 4px; }
+.large { grid-column: 1 / -1; }
+.apres { margin-top: .875rem; max-width: 34rem; }

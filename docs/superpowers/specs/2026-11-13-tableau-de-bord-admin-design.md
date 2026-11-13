@@ -173,3 +173,7 @@ Codé et testé : paquet `server/internal/adminui` (page, état JSON, actions), 
 5. **Le jeton n'est pas gardé en clair par le serveur** : seule son empreinte SHA-256 est en mémoire ; la comparaison se fait sur les empreintes, en temps constant.
 
 Demande du propriétaire du 13 novembre, **non codée, à trancher** : « nombre de comptes ouverts, nombre d'abonnés, nombre total de liens ou de fichiers partagés ». Voir le compte rendu : les comptes (§37) et le paiement (§38) ne sont pas codés ; un total cumulé de partages est interdit en toutes lettres par §9.5 et §35.1 (« compteurs de partages créés, d'ouvertures, d'octets servis ») ; le nombre de fichiers d'un partage est inconnu du serveur (manifeste chiffré).
+
+## Statistiques d'usage (13 novembre, codées après confirmation du propriétaire)
+
+Demande confirmée (« un dashboard admin complet avec des stats sur l'utilisation du site »). Codé : compteurs depuis le démarrage, en mémoire, un entier chacun (détail et limites : amendement du 13 novembre à la fin de la spécification principale). Cela remplace, dans ce document, « aucune statistique », « aucun compteur nouveau » et la note « Aucun total cumulé » de la page. Restent hors de la page : tout total gardé sur disque, toute courbe dans le temps, le nombre de fichiers, les comptes et les abonnés (rien à compter tant que §37 et §38 ne sont pas codés).

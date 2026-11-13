@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/adminui"
+	"github.com/skoow/shhdrop/server/internal/api"
 	"github.com/skoow/shhdrop/server/internal/blob"
 	"github.com/skoow/shhdrop/server/internal/config"
+	"github.com/skoow/shhdrop/server/internal/limits"
 	"github.com/skoow/shhdrop/server/internal/salon"
 	"github.com/skoow/shhdrop/server/internal/share"
 	"github.com/skoow/shhdrop/server/internal/store"
@@ -23,12 +25,13 @@ import (
 // adminDeps : ce que le tableau de bord d'administration lit et commande dans le serveur
 // en marche.
 type adminDeps struct {
-	svc   *share.Service
-	sm    *salon.Manager // nil : salon désactivé
-	db    *sql.DB
-	gate  *blob.Gate
-	alert func() bool // alerte des signalements (booléen de /healthz)
-	start time.Time   // démarrage du processus, en mémoire seulement
+	svc    *share.Service
+	sm     *salon.Manager // nil : salon désactivé
+	db     *sql.DB
+	gate   *blob.Gate
+	lim    *limits.Limiter
+	probes api.Probes // alerte des signalements, compteurs d'usage, transferts en cours
+	start  time.Time  // démarrage du processus, en mémoire seulement
 }
 
 // adminListen : ouverture de l'écouteur d'administration (variable pour les tests).
@@ -74,7 +77,7 @@ func adminState(cfg config.Config, d adminDeps) (adminui.State, error) {
 	var st adminui.State
 	goVersion, rev := adminui.Build()
 	st.Sante = adminui.Sante{DepuisS: int64(time.Since(d.start) / time.Second), Go: goVersion, Revision: rev,
-		Gele: d.svc.Frozen(), SalonActif: d.sm != nil, Origine: cfg.Origin, AlerteSignalements: d.alert(),
+		Gele: d.svc.Frozen(), SalonActif: d.sm != nil, Origine: cfg.Origin, AlerteSignalements: d.probes.Alert(),
 		VidagesRates: d.svc.Vidage.Rates()}
 
 	partages, err := d.svc.UsedShares()
@@ -101,6 +104,11 @@ func adminState(cfg config.Config, d adminDeps) (adminui.State, error) {
 	st.Capacite = adminui.Capacite{EnvoisMax: c.Uploads, LecturesMax: c.Downloads, SurveillancesMax: c.Watches,
 		WebSocketMax: c.WebSockets, AppelsDisqueMax: d.gate.Cap(), Surveillances: d.svc.WatchCount(),
 		Octrois: d.svc.GrantCount(), Budgets: d.svc.BudgetCount(), AppelsDisque: d.gate.InUse()}
+
+	ul, ulPic := d.probes.Uploads()
+	dl, dlPic := d.probes.Downloads()
+	st.Usage = adminui.Usage{Snapshot: d.probes.Usage(), EffacesEntretien: d.svc.Effaces.Load(),
+		ExpediteursDuJour: d.lim.DistinctCreators(), EnvoisEnCours: ul, EnvoisPic: ulPic, LecturesEnCours: dl, LecturesPic: dlPic}
 
 	if st.Partages, err = d.svc.CountByState(); err != nil {
 		return adminui.State{}, err

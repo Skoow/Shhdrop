@@ -18,9 +18,19 @@ import (
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/adminui"
+	"github.com/skoow/shhdrop/server/internal/api"
 	"github.com/skoow/shhdrop/server/internal/config"
+	"github.com/skoow/shhdrop/server/internal/limits"
 	"github.com/skoow/shhdrop/server/internal/store"
+	"github.com/skoow/shhdrop/server/internal/usage"
 )
+
+// sondesVides : lectures du tableau de bord pour les tests sans serveur HTTP.
+func sondesVides() api.Probes {
+	zero := func() (int, int) { return 0, 0 }
+	return api.Probes{Alert: func() bool { return false }, Usage: func() usage.Snapshot { return usage.Snapshot{} },
+		Uploads: zero, Downloads: zero}
+}
 
 const jetonAdmin = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
@@ -135,6 +145,12 @@ func TestTableauDeBord(t *testing.T) {
 		t.Fatalf("état incohérent : %+v", st)
 	}
 
+	// Usage : tout à zéro au départ ; une route publique inconnue ne compte rien, et les
+	// compteurs ne sont pas servis par le port public (vérifié plus bas avec les autres routes).
+	if st.Usage != (adminui.Usage{}) {
+		t.Fatalf("usage non nul au démarrage : %+v", st.Usage)
+	}
+
 	// Gel puis dégel, comme « shhdrop admin freeze|unfreeze ».
 	gele := func() bool {
 		_, b := adminReq(t, "GET", "http://"+adm+"/api/etat", jetonAdmin, "")
@@ -214,7 +230,7 @@ func TestTableauDeBordIndisponible(t *testing.T) {
 // lien inconnu ; les autres ne sont pas touchés.
 func TestAdminDestroyDepuisLaPage(t *testing.T) {
 	cfg, svc := adminSetup(t)
-	d := adminDeps{svc: svc, db: svc.DB, start: time.Now(), alert: func() bool { return false }}
+	d := adminDeps{svc: svc, db: svc.DB, start: time.Now(), lim: limits.New(time.Now), probes: sondesVides()}
 	_, lien := mkLink(t, svc)
 	mk(t, svc)
 	if kind, err := adminDestroy(cfg, d, []byte(lien+"\n")); err != nil || kind != "partage" || count(t, svc) != 1 {
@@ -249,7 +265,7 @@ func TestAdminDestroyDepuisLaPage(t *testing.T) {
 // échouer le vidage : le compte monte ; il est nul sinon.
 func TestEtatVidagesRates(t *testing.T) {
 	cfg, svc := adminSetup(t)
-	d := adminDeps{svc: svc, db: svc.DB, start: time.Now(), alert: func() bool { return false }}
+	d := adminDeps{svc: svc, db: svc.DB, start: time.Now(), lim: limits.New(time.Now), probes: sondesVides()}
 	st, err := adminState(cfg, d)
 	if err != nil || st.Sante.VidagesRates != 0 {
 		t.Fatal("au départ :", st.Sante.VidagesRates, err)
@@ -274,5 +290,31 @@ func TestEtatVidagesRates(t *testing.T) {
 	}
 	if st, err = adminState(cfg, d); err != nil || st.Sante.VidagesRates != 1 {
 		t.Fatal("après un vidage raté :", st.Sante.VidagesRates, err)
+	}
+}
+
+// Les compteurs d'usage bougent avec l'activité réelle : 61 requêtes dans la minute depuis une
+// même adresse → au moins un refus de débit compté, sans rien d'autre que des nombres.
+func TestUsageCompteLesRefusDeDebit(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "data")
+	out := serveAdmin(t, cfgAdmin(dir), 2)
+	pub := strings.TrimPrefix(out[0], "SHH_LISTENING ")
+	adm := strings.TrimPrefix(out[1], "SHH_ADMIN_LISTENING ")
+	refus := 0
+	for i := 0; i < 70; i++ {
+		if c, _ := adminReq(t, "GET", "http://"+pub+"/api/shares/meta", "", ""); c == 429 {
+			refus++
+		}
+	}
+	if refus == 0 {
+		t.Skip("limite de débit non atteinte (minute tournée pendant le test)")
+	}
+	_, body := adminReq(t, "GET", "http://"+adm+"/api/etat", jetonAdmin, "")
+	var st adminui.State
+	if json.Unmarshal([]byte(body), &st) != nil || st.Usage.RefusDebit != int64(refus) {
+		t.Fatalf("refus comptés %d, attendus %d : %s", st.Usage.RefusDebit, refus, body)
+	}
+	if st.Usage.PartagesCrees != 0 || st.Usage.ExpediteursDuJour != 0 {
+		t.Fatalf("compteurs étrangers touchés : %+v", st.Usage)
 	}
 }

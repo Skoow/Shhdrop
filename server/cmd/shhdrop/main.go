@@ -400,7 +400,7 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	handler, alert := api.NewWithAlert(svc, token.New(tokKey, cfg.Now), lim,
+	handler, probes := api.NewWithProbes(svc, token.New(tokKey, cfg.Now), lim,
 		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy, cfg.TrustedProxies, salonsOf(cfg, sm), capacityOf(cfg))
 	srv := newHTTPServer(handler)
 	if sm != nil {
@@ -422,7 +422,7 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	}
 	// Tableau de bord d'administration : écouteur à part, après l'écouteur public ; s'il ne
 	// s'ouvre pas, le serveur public tourne quand même.
-	defer startAdmin(cfg, out, adminDeps{svc: svc, sm: sm, db: db, gate: gate, alert: alert, start: start})()
+	defer startAdmin(cfg, out, adminDeps{svc: svc, sm: sm, db: db, gate: gate, lim: lim, probes: probes, start: start})()
 	jctx, jcancel := context.WithCancel(ctx)
 	jdone := make(chan struct{})
 	wdone := make(chan struct{})

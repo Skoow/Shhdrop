@@ -119,8 +119,32 @@ function afficher(e) {
     chiffre(a, 'Sièges occupés', e.salon.sieges_occupes);
   }
 
+  const u = e.usage, us = $('usage');
+  $('usage-note').textContent = 'Compté depuis ' + duree(s.en_marche_depuis_s)
+    + ', en mémoire seulement : rien par personne ni par partage, rien sur disque, et tout repart de zéro au redémarrage.';
+  vider(us);
+  chiffre(us, 'Partages créés', u.partages_crees);
+  chiffre(us, 'Envois terminés', u.envois_termines);
+  chiffre(us, 'Déverrouillages', u.deverrouillages);
+  chiffre(us, 'Destructions demandées', u.destructions_demandees);
+  chiffre(us, 'Effacés par l’entretien', u.effaces_par_entretien);
+  chiffre(us, 'Expéditeurs distincts aujourd’hui', u.expediteurs_du_jour);
+  if (e.salon) {
+    chiffre(us, 'Salons créés', u.salons_crees);
+    chiffre(us, 'Entrées dans un salon', u.entrees_salon);
+  }
+  const ud = $('usage-details');
+  vider(ud);
+  fait(ud, 'Volume chiffré reçu', octets(u.octets_recus));
+  fait(ud, 'Volume chiffré servi', octets(u.octets_servis));
+  fait(ud, 'Requêtes refusées par la limite de débit', nombre.format(u.refus_debit));
+
   const c = e.capacite, ch = $('charge');
   vider(ch);
+  jauge(ch, 'Envois en cours', u.envois_en_cours, c.envois_max,
+    nombre.format(u.envois_en_cours) + ' / ' + nombre.format(c.envois_max) + ' (pic ' + nombre.format(u.envois_pic) + ')');
+  jauge(ch, 'Lectures en cours', u.lectures_en_cours, c.lectures_max,
+    nombre.format(u.lectures_en_cours) + ' / ' + nombre.format(c.lectures_max) + ' (pic ' + nombre.format(u.lectures_pic) + ')');
   compte(ch, 'Surveillances tenues', c.surveillances, c.surveillances_max);
   compte(ch, 'Appels disque en cours', c.appels_disque, c.appels_disque_max);
   if (e.salon) {
@@ -129,8 +153,6 @@ function afficher(e) {
     compte(ch, 'Trames du salon en mémoire', e.salon.trames_en_memoire, e.salon.trames_max);
   }
   const cd = el('dl', undefined, 'faits');
-  fait(cd, 'Envois simultanés au plus', nombre.format(c.envois_max));
-  fait(cd, 'Lectures simultanées au plus', nombre.format(c.lectures_max));
   fait(cd, 'Octrois de lecture actifs', nombre.format(c.octrois_lecture));
   fait(cd, 'Budgets de lecture actifs', nombre.format(c.budgets_lecture));
   ch.append(cd);

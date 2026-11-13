@@ -21,10 +21,13 @@ type Slots struct {
 	// (NewFairSlots) ; 0 : aucune réserve.
 	reserve int
 
-	mu  sync.Mutex
-	n   int
-	c64 map[string]int
-	c48 map[string]int
+	mu sync.Mutex
+	n  int
+	// peak : plus grand nombre de transferts simultanés depuis le démarrage (un entier, pour
+	// le tableau de bord d'administration).
+	peak int
+	c64  map[string]int
+	c48  map[string]int
 }
 
 // NewSlots : limites > 0.
@@ -69,6 +72,7 @@ func (s *Slots) Acquire(k64, k48 string) (release func(), err error) {
 		return nil, ErrBusy
 	}
 	s.n++
+	s.peak = max(s.peak, s.n)
 	s.c64[k64]++
 	s.c48[k48]++
 	var once sync.Once
@@ -95,6 +99,14 @@ func (s *Slots) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.n
+}
+
+// InUse : transferts en cours et plus haut atteint depuis le démarrage (tableau de bord
+// d'administration : deux entiers, sans clé).
+func (s *Slots) InUse() (n, peak int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.n, s.peak
 }
 
 // Keyed borne les transferts simultanés d'une même clé (audit I3, M4) : un envoi (id interne)

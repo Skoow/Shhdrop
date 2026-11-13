@@ -9,6 +9,7 @@ import (
 
 	"github.com/skoow/shhdrop/server/internal/salon"
 	"github.com/skoow/shhdrop/server/internal/share"
+	"github.com/skoow/shhdrop/server/internal/usage"
 )
 
 // State : tout ce que la page affiche (inventaire A à G de la conception, phase 1). Que des
@@ -22,6 +23,25 @@ type State struct {
 	Partages share.ByState `json:"partages"`
 	// Salon : nil si le salon est désactivé (SHH_SALONS).
 	Salon *salon.Stats `json:"salon"`
+	// Usage : compteurs d'usage depuis le démarrage (décision du propriétaire du 13 novembre).
+	Usage Usage `json:"usage"`
+}
+
+// Usage : ce que le service a fait depuis le démarrage du processus, en nombres seulement.
+// En mémoire, jamais sur disque : tout repart de zéro au redémarrage.
+type Usage struct {
+	usage.Snapshot
+	// EffacesEntretien : partages effacés par l'entretien (échéance, envoi abandonné, essais
+	// de mot de passe épuisés), confondus.
+	EffacesEntretien int64 `json:"effaces_par_entretien"`
+	// ExpediteursDuJour : connexions distinctes (/64 ou IPv4) ayant créé un partage depuis
+	// minuit UTC, lu dans les compteurs de quotas (limits.DistinctCreators).
+	ExpediteursDuJour int `json:"expediteurs_du_jour"`
+	// Envois et lectures de segments en cours, et le plus haut atteint depuis le démarrage.
+	EnvoisEnCours   int `json:"envois_en_cours"`
+	EnvoisPic       int `json:"envois_pic"`
+	LecturesEnCours int `json:"lectures_en_cours"`
+	LecturesPic     int `json:"lectures_pic"`
 }
 
 // Sante : état général (A, G).

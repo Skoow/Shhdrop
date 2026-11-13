@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/blob"
@@ -180,6 +181,10 @@ func NewService(c Config) (*Service, error) {
 
 // Service : à construire avec NewService.
 type Service struct {
+	// Effaces : partages effacés par Sweep depuis le démarrage (échéance, envoi abandonné,
+	// essais épuisés), confondus : un entier pour le tableau de bord d'administration.
+	Effaces atomic.Int64
+
 	DB         *sql.DB
 	Blobs      *blob.Store
 	Now        func() time.Time
@@ -1316,6 +1321,7 @@ func (s *Service) Sweep() (int, error) {
 			removed++
 		}
 	}
+	s.Effaces.Add(int64(removed))
 	return removed, errors.Join(errs...)
 }
 

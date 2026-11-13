@@ -127,7 +127,7 @@ const FR: Record<InfoName, (v: V) => InfoPage> = {
         list: [
           "Votre adresse IP n'est pas enregistrée. Le serveur la voit le temps de la connexion, comme tout site web, mais ne l'écrit nulle part.",
           "Aucun cookie. Pas de cookie de mesure, donc pas de bandeau.",
-          "Aucun journal des partages, aucune statistique d'usage.",
+          "Aucun journal des partages, aucune mesure d'audience. Le serveur tient seulement, en mémoire, des compteurs globaux pour son exploitation (par exemple le nombre de partages créés depuis son dernier démarrage) : rien par personne, par adresse ni par partage, rien sur disque.",
         ],
       },
       {
@@ -298,7 +298,7 @@ const EN: Record<InfoName, (v: V) => InfoPage> = {
         list: [
           "Your IP address is not recorded. The server sees it while you are connected, like any website, but never writes it down.",
           "No cookies. No measurement cookies, so no banner.",
-          "No log of shares, no usage statistics.",
+          "No log of shares, no audience measurement. The server only keeps, in memory, global counters for its own operation (for example the number of shares created since it last started): nothing per person, per address or per share, nothing on disk.",
         ],
       },
       {

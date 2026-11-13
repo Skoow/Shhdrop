@@ -147,6 +147,7 @@ func (a salonAPI) creer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.cap.RecordCreate(ip)
+	a.usage.SalonCree()
 	writeJSON(w, http.StatusCreated, struct {
 		ExpiresIn int64 `json:"expires_in_s"`
 	}{secs(left)})
@@ -209,6 +210,7 @@ func (a salonAPI) rejoindre(w http.ResponseWriter, r *http.Request) {
 		failSalon(w, err)
 		return
 	}
+	a.usage.EntreeSalon()
 	writeJSON(w, http.StatusOK, struct {
 		Token             string `json:"member_token"`
 		Seat              int    `json:"seat"`

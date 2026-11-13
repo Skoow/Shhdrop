@@ -50,5 +50,6 @@ func (s *server) manageDestroy(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	s.usage.Destruction()
 	w.WriteHeader(http.StatusNoContent)
 }

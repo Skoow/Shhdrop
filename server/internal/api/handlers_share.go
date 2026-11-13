@@ -143,6 +143,7 @@ func (s *server) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.cap.RecordCreate(ip)
+	s.usage.PartageCree()
 	writeJSON(w, http.StatusCreated, struct {
 		Token    string `json:"upload_token"`
 		Segments int    `json:"segments"`
@@ -221,6 +222,7 @@ func (s *server) putSegment(w http.ResponseWriter, r *http.Request) {
 			fail(w, err)
 			return
 		}
+		s.usage.Recu(int64(len(body)))
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -228,6 +230,7 @@ func (s *server) putSegment(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	s.usage.Recu(int64(len(body)))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -332,6 +335,7 @@ func (s *server) finalize(w http.ResponseWriter, r *http.Request) {
 	}
 	// Un envoi commencé la veille compte dans les quotas du jour où il finit (audit M5).
 	s.lim.FinishUpload(id, ipOf(r))
+	s.usage.EnvoiTermine()
 	writeJSON(w, http.StatusOK, map[string]int64{"expires_in_s": secs(left)})
 }
 
@@ -403,6 +407,7 @@ func (s *server) unlock(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	s.usage.Deverrouillage()
 	openN, envelope := o.N, o.Envelope
 	// Jeton de dlTTL (6 h), non plafonné à expires_at : il borne la grâce d'une ouverture
 	// active après l'échéance ; le partage reste revérifié à chaque requête (spec §41.8).
@@ -487,6 +492,7 @@ func (s *server) getSegment(w http.ResponseWriter, r *http.Request) {
 	if err != nil || k != sec.Size() {
 		panic(http.ErrAbortHandler)
 	}
+	s.usage.Servi(k)
 }
 
 // copyBufs : tampons de copie des segments servis (un par téléchargement en cours).
@@ -542,6 +548,7 @@ func (s *server) destroy(w http.ResponseWriter, r *http.Request) {
 	if report {
 		s.reports.add(s.svc.Now())
 	}
+	s.usage.Destruction() // signalement compris, sans le distinguer (§15.2)
 	w.WriteHeader(http.StatusNoContent)
 }
 

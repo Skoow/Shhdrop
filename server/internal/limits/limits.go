@@ -193,6 +193,17 @@ func New(now func() time.Time) *Limiter {
 	return l
 }
 
+// DistinctCreators : nombre de connexions distinctes (/64 ou IPv4, sous leur clé du jour) qui
+// ont créé au moins un partage depuis minuit UTC. Un seul entier, lu dans les compteurs de
+// quotas déjà tenus (aucune donnée de plus n'est gardée) ; les clés elles-mêmes ne sortent
+// jamais. Tableau de bord d'administration seulement.
+func (l *Limiter) DistinctCreators() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rotateLocked(l.now())
+	return len(l.count64)
+}
+
 func (l *Limiter) rotateLocked(now time.Time) {
 	t := now.Unix()
 	if d := floorDiv(t, day); d != l.day {

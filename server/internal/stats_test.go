@@ -1,4 +1,8 @@
 // Test « aucune statistique » côté serveur (spec §35.1, §9.5 ; Task M2), bloquant.
+// Amendé le 13 novembre (décision du propriétaire) : des compteurs d'usage globaux, un entier
+// chacun, en mémoire, existent pour le tableau de bord d'administration (internal/usage) ;
+// ce test garde le reste : aucune télémétrie, aucune table (map) non justifiée, donc rien
+// par personne, par adresse ni par partage.
 package internal_test
 
 import (

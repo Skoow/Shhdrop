@@ -27,6 +27,7 @@ import (
 	"github.com/skoow/shhdrop/server/internal/salon"
 	"github.com/skoow/shhdrop/server/internal/share"
 	"github.com/skoow/shhdrop/server/internal/token"
+	"github.com/skoow/shhdrop/server/internal/usage"
 )
 
 const (
@@ -245,6 +246,8 @@ type server struct {
 	// wait : attente d'une surveillance (minuterie ; remplacée par les tests) ; stop la libère.
 	wait    func(time.Duration) (c <-chan time.Time, stop func() bool)
 	reports reportCounter
+	// usage : compteurs d'usage (un entier chacun, sans clé), lus par le tableau de bord.
+	usage *usage.Counters
 }
 
 // reportCounter : signalements de l'heure en cours, un seul entier sans identifiant, remis à
@@ -286,7 +289,7 @@ func newServerCap(svc *share.Service, sig *token.Signer, lim *limits.Limiter, ca
 	return &server{svc: svc, sig: sig, lim: lim, cap: capt, behindProxy: behindProxy, proxies: proxies,
 		xfer: transfersFor(c), dlTTL: downloadTTL, watchSlots: limits.NewFairSlots(c.Watches, watchPer64, c.Watches),
 		wsSlots: limits.NewFairSlots(c.WebSockets, wsPer64, wsPer48),
-		wait:    timerWait}
+		wait:    timerWait, usage: &usage.Counters{}}
 }
 
 type ctxIP struct{}
@@ -298,17 +301,32 @@ type ctxIP struct{}
 // sal : réglages du salon ; valeur zéro = salon désactivé. capa : places du serveur.
 func New(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
 	static http.Handler, behindProxy bool, proxies []netip.Prefix, sal Salons, capa Capacity) http.Handler {
-	h, _ := NewWithAlert(svc, sig, lim, capt, static, behindProxy, proxies, sal, capa)
+	h, _ := NewWithProbes(svc, sig, lim, capt, static, behindProxy, proxies, sal, capa)
 	return h
 }
 
-// NewWithAlert : New, plus la lecture de l'alerte des signalements (le même booléen que
-// /healthz : au moins 5 signalements dans l'heure en cours, spec §15.2, §36 S21), pour le
-// tableau de bord d'administration. Jamais le nombre.
-func NewWithAlert(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
-	static http.Handler, behindProxy bool, proxies []netip.Prefix, sal Salons, capa Capacity) (http.Handler, func() bool) {
+// Probes : lectures agrégées pour le tableau de bord d'administration ; jamais servies par
+// une route publique.
+type Probes struct {
+	// Alert : alerte des signalements (le même booléen que /healthz : au moins 5 dans
+	// l'heure en cours, spec §15.2, §36 S21). Jamais le nombre.
+	Alert func() bool
+	// Usage : compteurs d'usage depuis le démarrage.
+	Usage func() usage.Snapshot
+	// Uploads, Downloads : envois et lectures de segments en cours, et le plus haut atteint.
+	Uploads, Downloads func() (enCours, pic int)
+}
+
+// NewWithProbes : New, plus les lectures du tableau de bord d'administration.
+func NewWithProbes(svc *share.Service, sig *token.Signer, lim *limits.Limiter, capt *captcha.Captcha,
+	static http.Handler, behindProxy bool, proxies []netip.Prefix, sal Salons, capa Capacity) (http.Handler, Probes) {
 	s := newServerCap(svc, sig, lim, capt, behindProxy, proxies, capa)
-	return newHandler(s, static, sal), func() bool { return s.reports.alert(s.svc.Now()) }
+	return newHandler(s, static, sal), Probes{
+		Alert:     func() bool { return s.reports.alert(s.svc.Now()) },
+		Usage:     s.usage.Snapshot,
+		Uploads:   s.xfer.ul.InUse,
+		Downloads: s.xfer.dl.InUse,
+	}
 }
 
 // Salons : réglages du salon. Valeur zéro : salon désactivé (aucune route, CSP inchangée).
@@ -397,6 +415,7 @@ func (s *server) guard(next http.Handler) http.Handler {
 			allowed = s.lim.AllowRequest(ip)
 		}
 		if !allowed {
+			s.usage.RefusDebit()
 			// Fenêtre fixe alignée sur la minute (limits.AllowRequest).
 			writeLimit(w, time.Duration(60-s.svc.Now().Unix()%60)*time.Second)
 			return
