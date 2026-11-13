@@ -2,8 +2,8 @@
   // Capsule de scellement (UI §7.3, §20.4) : verre statique, encoche au milieu du bord haut,
   // trait qui part de l'encoche et suit les octets envoyés, volet de texte chiffré DÉCORATIF
   // (graine fixe, benchmark M2), noms brouillés en proportion (couche aria-hidden, vrais noms
-  // en liste masquée, K9), pourcentage. La fermeture du sceau n'est jouée qu'après la
-  // résolution de createShare (close(), appelée par l'écran), jamais avant.
+  // en liste masquée, K9), pourcentage. La fermeture du sceau commence à la finalisation
+  // (begin()) ; « scellé » (mot, cadenas fermé) n'apparaît qu'après la résolution de createShare.
   import { midSplitName } from "./midname";
   import type { Category } from "../flows/kinds";
   import { cipherVeil, scramble } from "./decor";
@@ -56,14 +56,22 @@
     for (const a of running) a.finish();
   }
 
-  /** Fermeture du sceau (900 ms, K3) ; un appui ou une touche la termine. Instantanée en mouvement réduit. */
-  export async function close(): Promise<void> {
+  /**
+   * Fermeture du sceau (900 ms, K3) ; un appui ou une touche la termine. Instantanée en mouvement
+   * réduit. Décision du propriétaire (13 novembre, D2 du rapport de performance) : elle se joue
+   * PENDANT la fin de l'envoi (`begin`, à la finalisation), plus après : « Lien prêt » arrive
+   * environ 1,2 s plus tôt. Rien n'y dit « scellé » avant le succès : le mot et le cadenas fermé
+   * n'existent qu'en mode « sealed ». Un échec l'arrête (`stop`) et la capsule revient telle quelle.
+   */
+  let playing: Promise<void> | undefined;
+  async function play(): Promise<void> {
     if (!root || reducedMotion() || typeof root.animate !== "function") return;
     const q = (s: string) => root!.querySelector<Element>(s);
+    // fill « both » : l'état fermé reste affiché si la finalisation dure plus que l'animation.
     const tracks: [Element | null, Keyframe[], KeyframeAnimationOptions][] = [
-      [q(".flash"), [{ strokeDashoffset: 0, opacity: 1 }, { strokeDashoffset: -100, opacity: 0 }], { duration: 640, easing: "cubic-bezier(0.65, 0, 0.35, 1)" }],
-      [q(".bar"), [{ strokeWidth: 2 }, { strokeWidth: 3 }], { duration: 640, easing: "ease-out" }],
-      [q(".lockic"), [{ transform: "translateY(-3px)", opacity: 0.4 }, { transform: "none", opacity: 1 }], { duration: 220, delay: 180, easing: "ease-out", fill: "backwards" }],
+      [q(".flash"), [{ strokeDashoffset: 0, opacity: 1 }, { strokeDashoffset: -100, opacity: 0 }], { duration: 640, easing: "cubic-bezier(0.65, 0, 0.35, 1)", fill: "both" }],
+      [q(".bar"), [{ strokeWidth: 2 }, { strokeWidth: 3 }], { duration: 640, easing: "ease-out", fill: "both" }],
+      [q(".lockic"), [{ transform: "translateY(-3px)", opacity: 0.4 }, { transform: "none", opacity: 1 }], { duration: 220, delay: 180, easing: "ease-out", fill: "both" }],
       [q(".sealed-word"), [{ opacity: 0, transform: "translateY(8px)" }, { opacity: 1, transform: "none" }], { duration: 340, delay: 560, easing: "cubic-bezier(0.16, 1, 0.3, 1)", fill: "backwards" }],
       [root, [{ transform: "scale(1)" }, { transform: "scale(0.985)" }, { transform: "scale(1)" }], { duration: 300, delay: 600, easing: "ease-in-out" }],
     ];
@@ -76,8 +84,25 @@
     } finally {
       removeEventListener("pointerdown", skip, opts);
       removeEventListener("keydown", skip, opts);
-      running = [];
     }
+  }
+
+  /** Début de la fermeture, pendant la finalisation (une seule fois). */
+  export function begin(): void {
+    playing ??= play();
+  }
+
+  /** Finalisation en échec : fermeture arrêtée, capsule rendue telle qu'avant. */
+  export function stop(): void {
+    for (const a of running) a.cancel();
+    running = [];
+    playing = undefined;
+  }
+
+  /** Fin de la fermeture (commencée à la finalisation, ou maintenant) ; rend la main ensuite. */
+  export async function close(): Promise<void> {
+    begin();
+    await playing;
   }
 </script>
 

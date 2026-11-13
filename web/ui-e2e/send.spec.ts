@@ -128,6 +128,11 @@ test.describe("fr-FR", () => {
     expect(await page.evaluate(() => location.hash)).toBe("");
     expect(await page.evaluate(() => document.body.innerText.includes("/#"))).toBe(false);
     await expect(readyHeading(page)).toHaveCount(0);
+    // Fermeture du sceau jouée PENDANT la finalisation (D2, décision du 13 novembre) : animations
+    // du trait lancées ; ni le mot « Scellé » ni le cadenas fermé avant le lien.
+    await expect.poll(() => capsule.evaluate((e) => e.getAnimations({ subtree: true }).some((a) => ((a.effect as KeyframeEffect).target as Element | null)?.classList.contains("bar") === true))).toBe(true);
+    await expect(capsule.locator(".sealed-word")).toHaveCount(0);
+    expect(await capsule.evaluate((e) => e.classList.contains("sealed"))).toBe(false);
     openFinalize();
 
     await expect(readyHeading(page)).toBeVisible({ timeout: 30_000 });
@@ -392,6 +397,9 @@ test.describe("fr-FR", () => {
     });
     await sendButton(page).click();
     await expect(page.getByRole("heading", { name: "Finalisation" })).toBeVisible({ timeout: 30_000 });
+    // Fermeture jouée pendant la finalisation (D2) : jamais en mouvement réduit.
+    await page.waitForTimeout(200);
+    expect(await page.locator("[data-capsule]").first().evaluate((e) => e.getAnimations({ subtree: true }).length)).toBe(0);
     await expect(readyHeading(page)).toBeVisible({ timeout: 30_000 });
     await capture(page, "seal-sealed");
     // Fondu d'écran bref et transitions finies autorisés en mouvement réduit : on les laisse finir ;

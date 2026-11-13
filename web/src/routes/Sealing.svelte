@@ -242,6 +242,12 @@
   });
   let capsule: SealCapsule | undefined = $state();
   let closing = false;
+  // Fermeture du sceau jouée pendant la finalisation (D2, décision du 13 novembre) ; arrêtée si
+  // l'envoi échoue ou est annulé. « Lien prêt » suit dès la fin de la fermeture.
+  $effect(() => {
+    if (phase === "finalize") void tick().then(() => capsule?.begin());
+    else if (phase === "error" || phase === "cancelled" || phase === "offline") capsule?.stop();
+  });
   $effect(() => {
     if (phase !== "sealed" || closing) return;
     closing = true;
