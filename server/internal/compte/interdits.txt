@@ -1,0 +1,116 @@
+# Pseudos interdits côté serveur (demande du propriétaire, 14 novembre), en plus de reserves.txt
+# (liste commune au moteur, inchangée : vecteurs communs). Formes canoniques produites par
+# pseudo_canon du moteur (cleUnicite du module wasm du salon) : NFKC, minuscules, squelette
+# UTS #39 (« m » → « rn », « 1 » → « l », « 0 » → « o »), sans espaces ni ponctuation ; le mot
+# d'origine en commentaire de fin de ligne n'est pas lu (tout ce qui suit la forme).
+#
+#   exact <forme>     refusé si p_canon est exactement la forme ;
+#   contient <forme>  refusé si p_canon contient la forme (mots longs et sans ambiguïté
+#                     seulement : « nazi » est dans « Nazim », « rapist » dans « therapist »,
+#                     « pute » dans « dispute », « cunt » dans « Scunthorpe » : ceux-là sont
+#                     en « exact »).
+#
+# Le serveur répond « pseudo_pris » (409) ou « libre: false » pour un pseudo interdit, comme
+# pour un pseudo pris : rien ne dit qu'un mot est sur cette liste.
+
+# Rôles et équipe (reserves.txt a déjà admin, administrateur, modérateur, modération, support,
+# aide, équipe, officiel, système, sécurité, contact, shhgone, shhdrop).
+exact staff
+exact tearn  team
+exact root
+exact owner
+exact fondateur
+exact founder
+exact official
+exact help
+exact info
+exact noreply  no-reply, no reply
+exact postrnaster  postmaster
+exact abuse
+exact security
+exact systern  system
+exact adrninistrator  administrator
+exact rnoderator  moderator
+exact webrnaster  webmaster
+exact hostrnaster  hostmaster
+exact sysadrnin  sysadmin
+exact superuser
+
+# Autorités usurpables.
+exact police
+exact gendarrnerie  gendarmerie
+exact justice
+exact pharos
+exact gouvernernent  gouvernement
+exact gouv
+exact gouvfr  gouv.fr
+exact interpol
+exact europol
+exact cnil
+exact arcorn  arcom
+
+# Marques, en sous-chaîne (« shhgone_officiel », « Shh Drop support »).
+contient shhgone
+contient shhdrop
+
+# Insultes et termes haineux courants, français.
+contient connard
+contient connasse
+contient salope
+contient enculé
+contient encule
+contient batard
+contient bâtard
+contient salaud
+contient pédophile
+contient pedophile
+contient niquetarnère  nique ta mère
+contient niquetarnere  nique ta mere
+contient putain
+contient pétasse
+contient petasse
+contient gouine
+contient bougnoule
+contient youpin
+contient salearabe  sale arabe
+contient salenoir  sale noir
+contient salejuif  sale juif
+exact ntrn  ntm
+exact fdp
+exact pute
+exact pédé
+exact pede
+exact tapette
+exact nègre
+exact negre
+exact nazi
+
+# Insultes et termes haineux courants, anglais.
+contient fuck
+contient bitch
+contient asshole
+contient nigger
+contient nigga
+contient faggot
+contient whore
+contient dickhead
+contient tranny
+contient wetback
+contient whitepower  white power
+contient hitler
+contient siegheil  sieg heil
+exact cunt
+exact fag
+exact retard
+exact slut
+exact shit
+exact rape
+exact rapist
+exact pedo
+exact paedo
+exact kike
+exact chink
+exact spic
+exact kys
+exact kkk
+exact l488  1488

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/captcha"
+	"github.com/skoow/shhdrop/server/internal/compte"
 	"github.com/skoow/shhdrop/server/internal/limits"
 	"github.com/skoow/shhdrop/server/internal/salon"
 	"github.com/skoow/shhdrop/server/internal/share"
@@ -333,9 +334,14 @@ func NewWithProbes(svc *share.Service, sig *token.Signer, lim *limits.Limiter, c
 // Origin : origine publique du site (config.Config.Origin), donnée seulement si SHH_SALONS=1.
 // M : gestionnaire des salons ; nil → aucune route /api/salons/* (même 404 qu'une route
 // inconnue). Les quotas du salon restent dans cette couche (limiteur lim passé à New).
+//
+// Comptes : service du compte (SHH_COMPTES=1, qui exige SHH_SALONS=1) ; nil → aucune route
+// /api/compte/* (même 404 qu'une route inconnue). Rangé ici : le compte ne sert qu'à créer des
+// salons (conception du compte §1).
 type Salons struct {
-	Origin string
-	M      *salon.Manager
+	Origin  string
+	M       *salon.Manager
+	Comptes *compte.Service
 }
 
 func newHandler(s *server, static http.Handler, sal Salons) http.Handler {
@@ -362,6 +368,9 @@ func newHandler(s *server, static http.Handler, sal Salons) http.Handler {
 	s.salons = sal.M
 	if sal.M != nil {
 		salonAPI{server: s, m: sal.M, origin: sal.Origin}.routes(api)
+	}
+	if sal.Comptes != nil {
+		compteAPI{server: s, c: sal.Comptes}.routes(api)
 	}
 	api.HandleFunc("/api/", notFoundAPI)
 

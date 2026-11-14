@@ -85,6 +85,9 @@ var allowedMaps = map[string]string{
 	"limits/limits.go:totpCpt":   "conception du compte §8.8 échecs TOTP de l'heure par compte (10), HMAC du jour de h",
 	"limits/limits.go:coffreCpt": "conception du compte §8.8, §21.6.2 écritures des coffres de l'heure par compte (60), HMAC du jour de h",
 	"limits/limits.go:pseudoCpt": "conception du compte §21.5 vérifications de pseudo de l'heure (30), HMAC du jour de h ou de l'étape",
+	// Compte (conception du compte §8.3 ; plan lot 4) : mémoire seulement, perdue au redémarrage.
+	"compte/etapes.go:m":   "conception du compte §8.3 étapes en attente (inscription : e_canon, e_envoi, HMAC du code, essais ; connexion : double authentification), clé SHA-256 du jeton d'étape, 15 min (5 min), 20 000 au plus ; aucune adresse en clair",
+	"compte/sessions.go:m": "conception du compte §8.3 dernier usage et « session récente » d'une session, clé t_v (SHA-256 du jeton), oublié 2 h sans usage",
 }
 
 type goFile struct {

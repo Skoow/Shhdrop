@@ -23,6 +23,7 @@ import (
 	"github.com/skoow/shhdrop/server/internal/captcha"
 	"github.com/skoow/shhdrop/server/internal/compte"
 	"github.com/skoow/shhdrop/server/internal/config"
+	"github.com/skoow/shhdrop/server/internal/courriel"
 	"github.com/skoow/shhdrop/server/internal/janitor"
 	"github.com/skoow/shhdrop/server/internal/limits"
 	"github.com/skoow/shhdrop/server/internal/salon"
@@ -223,11 +224,15 @@ func tightenPerms(dataDir string) error {
 
 // salonsOf : réglages du salon donnés à l'API, valeur zéro (désactivé) sans SHH_SALONS=1,
 // même si SHH_ORIGIN est posée (la CSP reste alors celle d'avant le salon).
-func salonsOf(cfg config.Config, m *salon.Manager) api.Salons {
+func salonsOf(cfg config.Config, m *salon.Manager, cpt *comptes) api.Salons {
 	if !cfg.Salons {
 		return api.Salons{}
 	}
-	return api.Salons{Origin: cfg.Origin, M: m}
+	s := api.Salons{Origin: cfg.Origin, M: m}
+	if cfg.Comptes && cpt != nil {
+		s.Comptes = cpt.svc // SHH_COMPTES=0 : nil, aucune route /api/compte/*
+	}
+	return s
 }
 
 // capacityOf : places du serveur (config.Capacity) données à l'API.
@@ -271,11 +276,13 @@ func setupSalons(cfg config.Config, db *sql.DB, svc *share.Service, lim *limits.
 	return m, nil
 }
 
-// comptes : clés du serveur et base des comptes (conception du compte §8 ; branchés aux
-// routes au lot 4 du plan du compte : rien n'est encore servi).
+// comptes : clés du serveur et base des comptes (conception du compte §8), puis, au
+// branchement (brancherComptes), l'envoyeur d'e-mails et le service servi par l'API.
 type comptes struct {
 	db   *sql.DB
 	cles compte.Cles
+	svc  *compte.Service
+	env  *courriel.Envoyeur
 }
 
 // setupComptes : sans SHH_COMPTES=1, rien (nil : aucun fichier lu ni créé). Sinon K_serveur lu
@@ -297,6 +304,50 @@ func setupComptes(cfg config.Config) (*comptes, error) {
 		return nil, err
 	}
 	return &comptes{db: db, cles: cles}, nil
+}
+
+// brancherComptes : envoyeur d'e-mails (créé seulement avec SHH_COMPTES=1 : sans lui, aucune
+// connexion sortante, TestCourrielSeulementAvecComptes) et service du compte, sur le limiteur
+// de l'API. Le mot de passe SMTP est lu une fois, sans son saut de ligne final.
+func brancherComptes(cfg config.Config, cpt *comptes, lim *limits.Limiter) error {
+	if cfg.Comptes && cpt != nil {
+		mdp, err := lireMdpSMTP(cfg.SMTP.PasswordFile)
+		if err != nil {
+			return err
+		}
+		env, err := courriel.Nouveau(cfg.SMTP, mdp)
+		if err != nil {
+			return shown(err.Error())
+		}
+		svc, err := compte.NewService(compte.Config{DB: cpt.db, Cles: cpt.cles, Courriel: env, Limites: lim,
+			Now: cfg.Now, Max: cfg.ComptesMax})
+		if err != nil {
+			return err
+		}
+		cpt.env, cpt.svc = env, svc
+	}
+	return nil
+}
+
+// lireMdpSMTP : contenu de SHH_SMTP_PASSWORD_FILE, sans un saut de ligne final (« \n » ou
+// « \r\n », laissé par un éditeur ou par echo) ; vide ou plus de 1 Kio : refus. Message : le
+// chemin seulement.
+func lireMdpSMTP(chemin string) ([]byte, error) {
+	b, err := os.ReadFile(chemin)
+	if err != nil {
+		return nil, shownf("SHH_SMTP_PASSWORD_FILE %s illisible", chemin)
+	}
+	if n := len(b); n > 0 && b[n-1] == '\n' {
+		b = b[:n-1]
+		if n := len(b); n > 0 && b[n-1] == '\r' {
+			b = b[:n-1]
+		}
+	}
+	if len(b) == 0 || len(b) > 1024 {
+		clear(b)
+		return nil, shownf("SHH_SMTP_PASSWORD_FILE %s : mot de passe vide ou trop long", chemin)
+	}
+	return b, nil
 }
 
 // usedAtStart : place déjà prise sous SHH_STORAGE_MAX au démarrage (checkStorage) : partages
@@ -399,6 +450,9 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if cpt != nil {
 		defer cpt.db.Close()
 	}
+	if err := brancherComptes(cfg, cpt, lim); err != nil {
+		return err
+	}
 	// Vidage du WAL au démarrage, APRÈS les purges (partages : PurgeAtStart et Reconcile ;
 	// salons : PurgerAuDemarrage) et avant l'écoute : ni un -wal laissé par un arrêt brutal ni
 	// les lignes que les purges viennent d'effacer ne restent lisibles dans shares.db-wal ou
@@ -437,7 +491,7 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 		return err
 	}
 	handler, probes := api.NewWithProbes(svc, token.New(tokKey, cfg.Now), lim,
-		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy, cfg.TrustedProxies, salonsOf(cfg, sm), capacityOf(cfg))
+		captcha.New(capKey, cfg.Now), static, cfg.BehindProxy, cfg.TrustedProxies, salonsOf(cfg, sm, cpt), capacityOf(cfg))
 	srv := newHTTPServer(handler)
 	if sm != nil {
 		// net/http ne suit plus une connexion mise à niveau : Shutdown ne l'attend pas.
@@ -472,13 +526,27 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	// Salon : entretien chaque seconde, passe mémoire et passe disque dans deux boucles
 	// (échéances, sièges hors ligne, pièces, salons échus, lignes supprimées par
 	// l'administrateur), arrêté avant la fermeture de la base.
+	// Compte : envoi des e-mails, un à la fois, arrêté avec le reste (la file est oubliée).
+	cdone := make(chan struct{})
+	if cpt != nil && cpt.env != nil {
+		go func() { cpt.env.Run(jctx); close(cdone) }()
+	} else {
+		close(cdone)
+	}
 	rdone := make(chan struct{})
 	if sm != nil {
 		go func() { sm.Run(jctx); close(rdone) }()
 	} else {
 		close(rdone)
 	}
-	defer func() { jcancel(); <-jdone; <-wdone; <-rdone; <-vdone }()
+	defer func() {
+		jcancel()
+		<-jdone
+		<-wdone
+		<-rdone
+		<-vdone
+		<-cdone
+	}()
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {

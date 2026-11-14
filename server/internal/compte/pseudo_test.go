@@ -100,3 +100,50 @@ func TestEmpreintePseudoRefus(t *testing.T) {
 		t.Fatal("borne", PseudoCanonMax)
 	}
 }
+
+// Demande du propriétaire (14 novembre) : rôles, marques, autorités et insultes refusés, sur la
+// forme canonique du moteur (formes tirées de pseudo_canon : « m » → « rn », « 1 » → « l ») ;
+// rôles et autorités en mot entier, marques et insultes aussi en sous-chaîne. Les mots courts
+// ou ambigus (« nazi » dans « Nazim », « rapist » dans « therapist ») restent en mot entier.
+func TestPseudoInterdits(t *testing.T) {
+	c := clesTest(1)
+	for _, p := range []string{
+		"staff", "tearn", "root", "fondateur", "official", "noreply", "postrnaster", "abuse", "security",
+		"police", "gendarrnerie", "pharos", "gouvfr", "gouv",
+		"shhgone", "leshhgoneofficiel", "shhdropsupport",
+		"connard", "grosconnard", "salope", "enculé", "niquetarnère", "fuck", "motherfucker", "bitchx",
+		"nazi", "rapist", "pute", "kkk", "l488",
+	} {
+		if _, err := c.EmpreintePseudo([]byte(p)); !errors.Is(err, ErrPseudoReserve) {
+			t.Errorf("%q accepté (%v)", p, err)
+		}
+	}
+	for _, p := range []string{
+		"lea", "constance", "dispute", "badrninton", "technique", "nazirn", "scunthorpe", "therapist",
+		"cornputer", "grape", "rooted", "staffan", "polices", "connaitre", "retardataire", "shhg", "drop",
+	} {
+		if _, err := c.EmpreintePseudo([]byte(p)); err != nil {
+			t.Errorf("%q refusé (%v)", p, err)
+		}
+	}
+}
+
+// interdits.txt : chaque ligne est « exact <forme> » ou « contient <forme> », forme canonique
+// (minuscules, sans espace ni ponctuation ASCII) ; aucune forme en double ; aucune forme
+// « exact » n'est déjà dans reserves.txt (liste commune au moteur, à ne pas dédoubler ; une
+// marque de reserves.txt peut être reprise en « contient »).
+func TestListeInterdits(t *testing.T) {
+	if len(interditsExacts) < 25 || len(interditsContient) < 20 {
+		t.Fatal(len(interditsExacts), len(interditsContient))
+	}
+	vu := map[string]bool{}
+	for i, f := range append(slices.Clone(interditsExacts), interditsContient...) {
+		if vu[f] || (i < len(interditsExacts) && slices.Contains(reserves, f)) || f == "" || strings.ToLower(f) != f || strings.ContainsAny(f, " .-_'") {
+			t.Errorf("forme %q", f)
+		}
+		vu[f] = true
+	}
+	if _, err := lireInterdits("exact a\nautre b\n"); err == nil {
+		t.Fatal("ligne invalide acceptée")
+	}
+}

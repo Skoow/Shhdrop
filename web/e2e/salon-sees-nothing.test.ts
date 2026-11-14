@@ -375,6 +375,7 @@ describe("le serveur ne voit rien : salon (C-2)", () => {
     expect(s.master).toEqual([
       "index:salon_pieces_salon",
       "index:salons_access_v",
+      "index:salons_compte",
       "index:salons_manage_v",
       "index:shares_access_v",
       "index:shares_manage_v",
@@ -385,6 +386,8 @@ describe("le serveur ne voit rien : salon (C-2)", () => {
     expect(s.salonCols).toEqual([
       "id", "access_v", "manage_v", "proof_v", "salt", "kdf_ops", "kdf_mem", "expires_at",
       "max_members", "members_can_destroy", "failed_attempts", "pieces_bytes", "rotation_r",
+      // compte (schéma 3, conception du compte §8.2) : seul lien compte ↔ salon, NULL sans compte.
+      "compte",
     ]);
     expect(s.pieceCols).toEqual(["id", "salon_id", "bucket", "state", "segments_mask"]);
     expect(s.salons).toBe(1);

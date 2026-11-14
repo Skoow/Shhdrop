@@ -3,6 +3,7 @@ package compte
 import (
 	_ "embed"
 	"errors"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 )
@@ -40,19 +41,69 @@ func lireReserves(s string) []string {
 	return out
 }
 
+// interdits.txt : pseudos interdits côté serveur seulement (demande du propriétaire du
+// 14 novembre : rôles, autorités, marques, insultes), lus une fois au démarrage.
+//
+//go:embed interdits.txt
+var interditsTxt string
+
+var interditsExacts, interditsContient = doitInterdits(interditsTxt)
+
+func doitInterdits(s string) ([]string, []string) {
+	l, err := lireInterdits(s)
+	if err != nil {
+		panic(err)
+	}
+	return l[0], l[1]
+}
+
+// lireInterdits : lignes « exact <forme> » et « contient <forme> » (la suite de la ligne,
+// après la forme, est un commentaire) ; vides et « # » ignorées ; toute autre ligne refusée.
+func lireInterdits(s string) ([2][]string, error) {
+	var out [2][]string
+	for i, l := range strings.Split(s, "\n") {
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		f := strings.Fields(l)
+		k := map[string]int{"exact": 0, "contient": 1}
+		n, ok := k[f[0]]
+		if !ok || len(f) < 2 {
+			return out, fmt.Errorf("interdits.txt, ligne %d : %q", i+1, l)
+		}
+		out[n] = append(out[n], f[1])
+	}
+	return out, nil
+}
+
+// interdit : p_canon réservé (reserves.txt, commun au moteur) ou interdit (interdits.txt).
+func interdit(p string) bool {
+	for _, l := range [2][]string{reserves, interditsExacts} {
+		for _, r := range l {
+			if p == r {
+				return true
+			}
+		}
+	}
+	for _, r := range interditsContient {
+		if strings.Contains(p, r) {
+			return true
+		}
+	}
+	return false
+}
+
 // EmpreintePseudo : p_empreinte = HMAC-SHA-256(K_pseudo, « pseudo » ‖ 0x00 ‖ p_canon)
 // (conception §21.2.2). Refus : p_canon vide, de plus de PseudoCanonMax octets ou en UTF-8
-// invalide (ErrPseudoCanon) ; pseudo réservé (ErrPseudoReserve). Limite assumée (§21.5) : un
+// invalide (ErrPseudoCanon) ; pseudo réservé ou interdit (ErrPseudoReserve). Limite assumée (§21.5) : un
 // client modifié peut envoyer autre chose que le vrai canon ; l'unicité ne vaut que pour les
 // clients honnêtes.
 func (c Cles) EmpreintePseudo(pCanon []byte) ([32]byte, error) {
 	if len(pCanon) == 0 || len(pCanon) > PseudoCanonMax || !utf8.Valid(pCanon) {
 		return [32]byte{}, ErrPseudoCanon
 	}
-	for _, r := range reserves {
-		if string(pCanon) == r {
-			return [32]byte{}, ErrPseudoReserve
-		}
+	if interdit(string(pCanon)) {
+		return [32]byte{}, ErrPseudoReserve
 	}
 	return empreinte(c.Pseudo[:], "pseudo", pCanon), nil
 }

@@ -187,7 +187,10 @@ describe("le serveur ne voit rien", () => {
       ...windows("mot de passe", PASSWORD),
       needle("mot de passe généré", GENERATED),
       needle("droits (manifeste)", '"rights":"coffre"'),
-      needle("droit coffre", "coffre"),
+      // Le mot seul « coffre » n'est plus cherché (14 novembre) : le binaire du serveur le contient
+      // désormais comme nom de colonne du compte (comptes.db, internal/compte), donc il est en
+      // mémoire même sans aucun partage. Le droit lui-même reste cherché sous sa forme exacte du
+      // manifeste, ci-dessus, et sous ses formes binaires (fenêtres du texte, clés).
       needle("durée de garde (manifeste)", '"keep_ttl_h"'),
       needle("kLien", kLien),
       needle("kLien (signalé)", kLien2),
@@ -452,6 +455,7 @@ describe("le serveur ne voit rien : repères de requête, base minimale (spec §
       expect(s.master, label).toEqual([
         "index:salon_pieces_salon",
         "index:salons_access_v",
+        "index:salons_compte",
         "index:salons_manage_v",
         "index:shares_access_v",
         "index:shares_manage_v",
@@ -462,6 +466,8 @@ describe("le serveur ne voit rien : repères de requête, base minimale (spec §
       expect(s.salonCols, label).toEqual([
         "id", "access_v", "manage_v", "proof_v", "salt", "kdf_ops", "kdf_mem", "expires_at",
         "max_members", "members_can_destroy", "failed_attempts", "pieces_bytes", "rotation_r",
+        // compte (schéma 3, conception du compte §8.2) : seul lien compte ↔ salon, NULL sans compte.
+        "compte",
       ]);
       expect(s.pieceCols, label).toEqual(["id", "salon_id", "bucket", "state", "segments_mask"]);
       expect(s.salonRows, label).toBe(0);

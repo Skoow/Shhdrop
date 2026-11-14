@@ -25,11 +25,19 @@ var readHeaders = []string{"Authorization", "X-Shh-Client-IP", "X-Shh-Access", "
 // partage les lire sans être vu).
 var salonHeaders = []string{"X-Shh-Membre", "X-Shh-Piece", "X-Shh-Access-New"}
 
+// compteHeaders : jeton de session du compte (conception du compte §8.5, §15 ; plan lot 4),
+// lu seulement dans handlers_compte.go : il ne part que vers /api/compte/* (et, au lot 6, vers
+// la création de salon, qui l'ajoutera ici pour handlers_salon.go seulement). Jamais gardé ni
+// recopié : le serveur n'en garde que SHA-256.
+var compteHeaders = []string{"X-Shh-Session"}
+
 // headerAllowed : en-tête name lisible dans le fichier path (readHeaders partout,
-// salonHeaders dans handlers_salon*.go seulement).
+// salonHeaders dans handlers_salon*.go seulement, compteHeaders dans handlers_compte.go
+// seulement).
 func headerAllowed(path, name string) bool {
 	return slices.Contains(readHeaders, name) ||
-		slices.Contains(salonHeaders, name) && strings.HasPrefix(filepath.Base(path), "handlers_salon")
+		slices.Contains(salonHeaders, name) && strings.HasPrefix(filepath.Base(path), "handlers_salon") ||
+		slices.Contains(compteHeaders, name) && filepath.Base(path) == "handlers_compte.go"
 }
 
 // wsHeaders : poignée de main du WebSocket du salon (plan C-2 Task 10, spec §39.3.1
