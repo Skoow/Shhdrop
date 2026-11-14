@@ -273,6 +273,32 @@ describe("check-dist.mjs, production", () => {
     ]);
   });
 
+  it("moteur des partages : assets/engine-*.wasm d'au plus 156 Ko en brotli (chargé par toutes les pages de partage)", () => {
+    const bruit = (n: number) => {
+      const b = Buffer.alloc(n);
+      let x = 7;
+      for (let i = 0; i < n; i++) {
+        x ^= x << 13;
+        x ^= x >>> 17;
+        x ^= x << 5;
+        b[i] = x & 0xff;
+      }
+      return Buffer.concat([Buffer.from([0, 97, 115, 109, 1, 0, 0, 0]), b]);
+    };
+    const prod = (wasm: Buffer) => {
+      const w = "assets/engine-AbCd1234.wasm";
+      const d = site({ "index.html": PROD_INDEX, "assets/index-a.js": `const a="/${w}",i="${sha384(wasm)}";` });
+      writeFileSync(join(d, w), wasm);
+      writeFileSync(join(d, w + ".br"), brotliCompressSync(wasm));
+      writeFileSync(join(d, w + ".gz"), gzipSync(wasm));
+      return checkDist(d, false);
+    };
+    expect(prod(bruit(150_000))).toEqual([]);
+    const gros = prod(bruit(192_000));
+    expect(gros).toHaveLength(1);
+    expect(gros[0]).toMatch(/^assets\/engine-AbCd1234\.wasm : \d+ octets en brotli, plus que 156 000 \(moteur des partages\)$/);
+  });
+
   it("moteur WebAssembly : aucun octet de .wasm en ligne dans le script principal de production (base64 ou tableau)", () => {
     const msg = "assets/index-a.js : octets WebAssembly en ligne dans le script principal : le moteur doit rester dans assets/engine-*.wasm, lu avec son empreinte";
     const b64 = Buffer.from(String.fromCharCode(0, 97, 115, 109, 1, 0, 0, 0, 1, 2, 3), "latin1").toString("base64");

@@ -202,20 +202,9 @@ export function cleAppareil(kCompte: Uint8Array): Promise<Uint8Array<ArrayBuffer
   return run((e) => e.wasm.cleAppareil(kCompte) as Uint8Array<ArrayBuffer>);
 }
 
-/** Pseudo nettoyé (affichage) ; sinon pseudo_longueur, pseudo_caracteres, pseudo_ecritures. */
-export function pseudoValide(pseudo: string): Promise<string> {
-  return run((e) => e.wasm.pseudoValide(pseudo));
-}
-
-/** p_canon (clé d'unicité envoyée au serveur) d'un pseudo rendu par pseudoValide. */
-export function pseudoCanon(pseudo: string): Promise<string> {
-  return run((e) => e.wasm.pseudoCanon(pseudo));
-}
-
-/** Vrai si p_canon est celui d'un pseudo réservé. */
-export function pseudoReserve(pCanon: string): Promise<boolean> {
-  return run((e) => e.wasm.pseudoReserve(pCanon));
-}
+// Pseudo du compte : moteur du salon (src/salon/engine.ts : pseudoValide, cleUnicite = p_canon,
+// pseudoReserve), qui a déjà les tables Unicode de sa règle ; ici, elles pèseraient 50 Ko de plus
+// en brotli sur toutes les pages de partage.
 
 /** Mot de passe d'un nouveau compte ; sinon mdp_court, mdp_long, mdp_adresse. */
 export function motDePasseValide(password: string, adresse: Adresse): Promise<void> {

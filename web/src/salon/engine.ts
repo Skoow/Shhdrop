@@ -382,7 +382,16 @@ export type SalonEngine = {
   nettoyerTexte(s: string): string;
   nettoyerNom(s: string): string;
   verifierPseudo(s: string): string;
+  /** Clé d'unicité d'un pseudonyme vérifié ; c'est aussi le `p_canon` du compte (envoyé au serveur). */
   cleUnicite(s: string): string;
+  /**
+   * Pseudo du compte (même règle que `verifierPseudo`) : nettoyé (affichage), sinon l'erreur
+   * détaillée `pseudo_longueur`, `pseudo_caracteres`, `pseudo_ecritures`. Ici et non dans le
+   * moteur des partages, pour ne pas y mettre les tables Unicode de la règle.
+   */
+  pseudoValide(s: string): string;
+  /** Vrai si `p_canon` (`cleUnicite`) est celui d'un pseudo réservé. */
+  pseudoReserve(pCanon: string): boolean;
   codeVerification(clePublique: Uint8Array): string;
   /**
    * `J_gestion` (32 octets) tiré de `S_gestion` : ce qui va dans `X-Shh-Manage` pour toutes les
@@ -452,6 +461,8 @@ function moteur(g: number): SalonEngine {
     nettoyerNom: (s) => (texte(s), a(() => wasm.nettoyerNom(s))),
     verifierPseudo: (s) => (texte(s), a(() => wasm.verifierPseudo(s))),
     cleUnicite: (s) => (texte(s), a(() => wasm.cleUnicite(s))),
+    pseudoValide: (s) => (texte(s), a(() => wasm.pseudoValide(s))),
+    pseudoReserve: (s) => (texte(s), a(() => wasm.pseudoReserve(s))),
     codeVerification: (c) => (octets(c), a(() => wasm.codeVerification(c))),
     jetonGestion: (s) => (octets(s), a(() => wasm.jetonGestion(s))),
     clePubliqueRole: (s) => (octets(s), a(() => wasm.clePubliqueRole(s))),

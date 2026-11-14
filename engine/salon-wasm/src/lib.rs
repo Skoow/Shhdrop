@@ -656,10 +656,42 @@ pub fn verifier_pseudo(s: &str) -> R<String> {
     salon::verifier_pseudo(s).map_err(js_err)
 }
 
-/// Clé d'unicité d'un pseudonyme déjà vérifié (sosies confondus).
+/// Clé d'unicité d'un pseudonyme déjà vérifié (sosies confondus) : c'est aussi le `p_canon` du
+/// compte (`shhdrop_core::compte::pseudo_canon`, même fonction).
 #[wasm_bindgen(js_name = cleUnicite)]
 pub fn cle_unicite(s: &str) -> String {
     salon::cle_unicite(s)
+}
+
+// Pseudo du compte (conception compte v2 §21.5) : exposé ici et non par le moteur des partages
+// (`shhdrop-wasm`), chargé sur toutes les pages de partage, pour ne pas y mettre les tables
+// Unicode de la règle du pseudo (+50 Ko en brotli, mesuré le 14 novembre) ; ce module les a déjà.
+// Même règle que `verifierPseudo` (`shhdrop_core::texte`), avec l'erreur détaillée.
+
+/// Pseudo nettoyé, ou `pseudo_longueur`, `pseudo_caracteres`, `pseudo_ecritures`.
+#[wasm_bindgen(js_name = pseudoValide)]
+pub fn pseudo_valide(s: &str) -> R<String> {
+    use shhdrop_core::Error as E;
+    // Codes écrits ici plutôt que par `Error::message`, qui lierait au module la table de tous les
+    // messages du moteur des partages (plafond du salon, web/scripts/check-dist.mjs). Les trois
+    // seules erreurs de `pseudo_valide` (engine/core/src/texte.rs) : la troisième est
+    // `PseudoEcritures` (bras générique : un quatrième code de repli faisait passer le module
+    // au-dessus du plafond, mesuré le 14 novembre). Une erreur nouvelle de `pseudo_valide` devra
+    // être ajoutée ici (rappel en tête de `pseudo_valide`).
+    shhdrop_core::compte::pseudo_valide(s).map_err(|e| {
+        let m = match e {
+            E::PseudoLongueur => "pseudo_longueur",
+            E::PseudoCaracteres => "pseudo_caracteres",
+            _ => "pseudo_ecritures",
+        };
+        JsError::new(m).into()
+    })
+}
+
+/// Vrai si la forme canonique (`cleUnicite`) est celle d'un pseudo réservé.
+#[wasm_bindgen(js_name = pseudoReserve)]
+pub fn pseudo_reserve(canon: &str) -> bool {
+    shhdrop_core::compte::pseudo_reserve(canon)
 }
 
 /// Code de vérification d'une clé publique Ed25519 (32 octets).

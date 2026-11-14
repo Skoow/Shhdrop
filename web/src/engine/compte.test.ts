@@ -1,13 +1,15 @@
 // Compte v2 (conception 2026-11-14-compte-email-design.md §5.1, §6, §21.2.2, §21.5) :
-// engine/vectors/compte.json rejoué par le build WebAssembly sous Node, à partir des seules
-// entrées du fichier ; dérivations recalculées à part (Argon2id de node:crypto, HKDF de
-// WebCrypto) ; enveloppes et coffres ouverts et refaits par WebCrypto, comme le site le fera.
+// engine/vectors/compte.json rejoué par le build WebAssembly sous Node (le pseudo par le module
+// du salon), à partir des seules entrées du fichier ; dérivations recalculées à part (Argon2id de
+// node:crypto, HKDF de WebCrypto) ; enveloppes et coffres ouverts et refaits par WebCrypto, comme
+// le site le fera.
 import { argon2Sync, createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import { handle } from "./argon2.worker";
 import * as I from "./index";
 import { loadEngine, type Engine, type Wasm } from "./load";
+import { loadSalonEngine, type SalonEngine } from "../salon/engine";
 
 const V = JSON.parse(readFileSync(new URL("../../../engine/vectors/compte.json", import.meta.url), "utf8"));
 const unhex = (s: string) => new Uint8Array(Buffer.from(s, "hex"));
@@ -18,9 +20,11 @@ const sha = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
 
 let E: Engine;
 let W: Wasm;
+let S: SalonEngine;
 beforeAll(async () => {
   E = await loadEngine();
   W = E.wasm;
+  S = await loadSalonEngine();
 });
 
 /** Résultat ou message d'erreur d'un appel, synchrone ou non. */
@@ -115,16 +119,22 @@ describe("compte.json : rejoué par le moteur WebAssembly", () => {
     expect(V.pseudo.length).toBeGreaterThanOrEqual(30);
     for (const c of V.pseudo) {
       const got = await out(async () => {
-        const a = await I.pseudoValide(text(c.entree_hex));
-        const p = await I.pseudoCanon(a);
-        return { affiche_hex: hex(utf8(a)), p_canon_hex: hex(utf8(p)), reserve: await I.pseudoReserve(p) };
+        const a = S.pseudoValide(text(c.entree_hex));
+        const p = S.cleUnicite(a);
+        return { affiche_hex: hex(utf8(a)), p_canon_hex: hex(utf8(p)), reserve: S.pseudoReserve(p) };
       });
       if ("error" in c) expect(got, c.label).toEqual({ error: c.error });
       else expect(got, c.label).toEqual({ ok: { affiche_hex: c.affiche_hex, p_canon_hex: c.p_canon_hex, reserve: c.reserve } });
     }
     for (const r of V.constants.reserves) {
-      expect(W.pseudoCanon(r.mot)).toBe(text(r.p_canon_hex));
-      expect(W.pseudoReserve(text(r.p_canon_hex)), r.mot).toBe(true);
+      expect(S.cleUnicite(r.mot)).toBe(text(r.p_canon_hex));
+      expect(S.pseudoReserve(text(r.p_canon_hex)), r.mot).toBe(true);
+    }
+    // Absent du moteur des partages (chargé sur toutes les pages de partage) : ses tables Unicode
+    // n'y sont pas (web/scripts/check-dist.mjs, ENGINE_BROTLI_MAX).
+    for (const f of ["pseudoValide", "pseudoCanon", "pseudoReserve"]) {
+      expect(f in W, f).toBe(false);
+      expect(f in I, f).toBe(false);
     }
   });
 

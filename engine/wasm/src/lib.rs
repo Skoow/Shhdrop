@@ -716,6 +716,9 @@ pub fn password_key_for_create(
 // ---------------------------------------------------------------------------------------------
 // Compte v2 (conception compte v2 §5.1, §6, §21.2.2, §21.5)
 // ---------------------------------------------------------------------------------------------
+// Le pseudo (`pseudoValide`, `pseudoReserve` ; `p_canon` = `cleUnicite`) est exposé par le module
+// du salon (`shhdrop-salon-wasm`), qui a déjà les tables Unicode de sa règle : ici, elles pèseraient
+// 50 Ko de plus en brotli sur toutes les pages de partage (mesuré le 14 novembre).
 
 /// Adresse normalisée : `{ canon, exacte }`, ou `adresse_invalide`, `adresse_non_ascii`.
 #[wasm_bindgen(
@@ -775,24 +778,6 @@ pub fn cle_profil(s_profil: &Uint8Array) -> core::result::Result<Uint8Array, JsV
 pub fn cle_appareil(k_compte: &Uint8Array) -> core::result::Result<Uint8Array, JsValue> {
     let k = key32(k_compte).map_err(js_err)?;
     Ok(Uint8Array::from(&compte::cle_appareil(&k)[..]))
-}
-
-/// Pseudo nettoyé, ou `pseudo_longueur`, `pseudo_caracteres`, `pseudo_ecritures`.
-#[wasm_bindgen(js_name = pseudoValide)]
-pub fn pseudo_valide(s: &str) -> core::result::Result<String, JsValue> {
-    compte::pseudo_valide(s).map_err(js_err)
-}
-
-/// Forme canonique (`p_canon`) d'un pseudo rendu par `pseudoValide`.
-#[wasm_bindgen(js_name = pseudoCanon)]
-pub fn pseudo_canon(s: &str) -> String {
-    compte::pseudo_canon(s)
-}
-
-/// Vrai si la forme canonique est celle d'un pseudo réservé.
-#[wasm_bindgen(js_name = pseudoReserve)]
-pub fn pseudo_reserve(canon: &str) -> bool {
-    compte::pseudo_reserve(canon)
 }
 
 /// Règle du mot de passe d'un nouveau compte (`mdp_court`, `mdp_long`, `mdp_adresse`) ; `canon`

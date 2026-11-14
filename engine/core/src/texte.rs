@@ -119,6 +119,7 @@ fn ecriture_unique(s: &str) -> bool {
 /// Pseudo nettoyé (affichage), ou `pseudo_longueur` (hors de 2 à 24 graphèmes),
 /// `pseudo_caracteres` (caractère refusé, émoji, marque mal placée, aucune lettre ni chiffre) ou
 /// `pseudo_ecritures` (plusieurs écritures). Ne dit pas s'il est réservé (`compte::pseudo_reserve`).
+/// Toute erreur nouvelle ici doit aussi être traduite par `pseudoValide` (engine/salon-wasm).
 pub fn pseudo_valide(s: &str) -> Result<String> {
     if s.len() > PSEUDO_BRUT_MAX {
         return Err(Error::PseudoLongueur);

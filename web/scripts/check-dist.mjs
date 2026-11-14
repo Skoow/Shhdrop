@@ -22,8 +22,19 @@ const EN_PROBE = "One link, one password, then nothing.";
  * brotli (profil wasm-salon, opt-level "z"), dont OpenMLS et hpke-rs avec `experimental` toujours
  * actif par openmls_rust_crypto (ML-KEM, X-Wing, P-256/384, k256 compilés), et les tables Unicode
  * du texte (~96 Ko). Un fournisseur crypto limité à la suite 0x0001 pourrait le réduire plus tard.
+ * 14 novembre 2026 : 429 684 o avec le pseudo du compte (pseudoValide, pseudoReserve), 316 o sous
+ * le plafond : la prochaine fonction du salon le dépassera probablement (décision à prendre).
  */
 const SALON_BROTLI_MAX = 430_000;
+
+/**
+ * Poids maximal du moteur des partages (assets/engine-*.wasm), en brotli : il est chargé par
+ * toutes les pages de partage. Mesuré le 14 novembre 2026 : 141 559 o avant le compte, 191 466 o
+ * avec la règle du pseudo (tables Unicode : unicode-segmentation, -script, -security), 148 300 o
+ * une fois le pseudo exposé par le module du salon à la place (dérivations du compte gardées).
+ * Le plafond laisse ~5 % de marge : une table Unicode ou une bibliothèque entrée par erreur se voit.
+ */
+const ENGINE_BROTLI_MAX = 156_000;
 
 /** Traces de démo interdites en production (le texte du bandeau, sans ponctuation typographique). */
 const FORBIDDEN_IN_PROD = [
@@ -163,18 +174,24 @@ export function checkDist(dir, demo) {
     if (all.some((f) => /^assets\/locale-en-[^/]+\.js$/.test(f.rel)))
       for (const m of mains) if (m.text.includes(EN_PROBE)) problems.push(`${m.rel} : dictionnaire anglais dans le script principal (il doit rester dans assets/locale-en-*.js)`);
     // Moteur WebAssembly : précompressé comme le texte (vite.config.ts, COMPRESSIBLE ; servi par
-    // static.go avec Content-Encoding), sinon 481 Ko seraient lus au lieu de 141 Ko en brotli.
+    // static.go avec Content-Encoding), sinon 506 Ko seraient lus au lieu de 148 Ko en brotli.
     for (const f of all) {
       if (!/\.wasm$/i.test(f.rel) || f.data.length < 1024) continue;
       const missing = [".br", ".gz"].filter((e) => !byRel.has(f.rel + e));
       if (missing.length) problems.push(`${f.rel} : sans variante ${missing.join(" ni ")} : le moteur serait téléchargé sans compression`);
     }
     // Module du salon (Task 9) : à part du moteur (assets/salon-*.wasm, cité avec son empreinte
-    // ci-dessus, jamais en ligne), au plus SALON_BROTLI_MAX octets transférés (variante brotli).
+    // ci-dessus, jamais en ligne), au plus SALON_BROTLI_MAX octets transférés (variante brotli) ;
+    // moteur des partages (assets/engine-*.wasm), au plus ENGINE_BROTLI_MAX.
     for (const f of all) {
-      if (!/^assets\/salon-[^/]+\.wasm$/.test(f.rel)) continue;
+      const cap = /^assets\/salon-[^/]+\.wasm$/.test(f.rel)
+        ? { max: SALON_BROTLI_MAX, nom: "module du salon" }
+        : /^assets\/engine-[^/]+\.wasm$/.test(f.rel)
+          ? { max: ENGINE_BROTLI_MAX, nom: "moteur des partages" }
+          : null;
+      if (!cap) continue;
       const br = byRel.get(f.rel + ".br");
-      if (br && br.length > SALON_BROTLI_MAX) problems.push(`${f.rel} : ${br.length} octets en brotli, plus que ${SALON_BROTLI_MAX.toLocaleString("fr-FR").replace(/\s/g, " ")} (module du salon)`);
+      if (br && br.length > cap.max) problems.push(`${f.rel} : ${br.length} octets en brotli, plus que ${cap.max.toLocaleString("fr-FR").replace(/\s/g, " ")} (${cap.nom})`);
     }
     // A7 : polices et images du site sous assets/, nom à empreinte (Vite) : cache d'un an chez le
     // serveur Go (static.go, immutableAsset). Seuls les fichiers publics d'adresse fixe (icônes,
