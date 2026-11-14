@@ -542,9 +542,10 @@ export type Opened = {
   readonly lastOpen: boolean;
   /**
    * Surveillance de la disparition (spec §41.8) : un appel = une requête tenue au plus 25 s.
-   * "alive" (rien), "gone" (partage disparu : fermer l'interface), "stop" (ne plus surveiller).
+   * "alive" (rien), "gone" (partage disparu : fermer l'interface), "stop" (ne plus surveiller),
+   * "retry" (réponse ou erreur passagère : réessayer).
    */
-  watch(signal?: AbortSignal): Promise<"alive" | "gone" | "stop">;
+  watch(signal?: AbortSignal): Promise<api.WatchResult>;
   /**
    * Détruit le partage (« report » : signalement, motif non conservé par le serveur) avec
    * K_accès et K_preuve gardés depuis l'ouverture, sans repasser par meta : marche aussi

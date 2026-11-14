@@ -1,9 +1,13 @@
 // Surveillance de la disparition d'un partage ouvert (spec §41.8, cas 1 et 2) : une requête
 // tenue au plus 25 s par le serveur, relancée en boucle tant que la page est visible et active.
 // S'arrête : page cachée (reprend au retour), 30 min sans activité (reprend à la suivante),
-// partage disparu (onGone, une fois), réponse inattendue ("stop"), ou stop(). Aucun secret
-// ici : `poll` porte lui-même le jeton de téléchargement (Opened.watch).
-export type WatchPoll = (signal: AbortSignal) => Promise<"alive" | "gone" | "stop">;
+// partage disparu (onGone, une fois), "stop" (route absente, ou fin faite ici), ou stop().
+// Une réponse ou une erreur passagère ("retry", exception : réseau coupé, 429, 5xx) ne
+// l'arrête PAS : nouvel essai après une attente croissante (1 s, 2 s, 4 s… 30 s au plus),
+// remise à zéro au premier succès (audit adverse 3, F2 : une seule requête perdue désarmait
+// la révocation jusqu'à la fermeture de la page). Aucun secret ici : `poll` porte lui-même
+// le jeton de téléchargement (Opened.watch).
+export type WatchPoll = (signal: AbortSignal) => Promise<"alive" | "gone" | "stop" | "retry">;
 
 export type WatchDeps = {
   now: () => number;
@@ -19,12 +23,16 @@ export type WatchDeps = {
 export const IDLE_MS = 30 * 60_000;
 /** Écart minimal entre deux requêtes de surveillance. */
 export const MIN_GAP_MS = 1_000;
+/** Attente après un échec passager : doublée à chaque échec de suite, plafonnée. */
+export const RETRY_MIN_MS = 1_000;
+export const RETRY_MAX_MS = 30_000;
 
 export function startWatch(poll: WatchPoll, onGone: () => void, deps: WatchDeps): { stop(): void } {
   let stopped = false;
   let running = false;
   let lastActivity = deps.now();
   let ac: AbortController | null = null;
+  let retryMs = RETRY_MIN_MS;
 
   const active = () => deps.visible() && deps.now() - lastActivity < IDLE_MS;
 
@@ -36,7 +44,7 @@ export function startWatch(poll: WatchPoll, onGone: () => void, deps: WatchDeps)
         const started = deps.now();
         const mine = new AbortController();
         ac = mine;
-        let r: "alive" | "gone" | "stop";
+        let r: "alive" | "gone" | "stop" | "retry";
         try {
           r = await poll(mine.signal);
         } catch {
@@ -44,7 +52,7 @@ export function startWatch(poll: WatchPoll, onGone: () => void, deps: WatchDeps)
           // Requête relâchée (page cachée) : la boucle repart si la page est revenue entre-temps
           // (aller-retour d'onglet rapide), sinon elle s'arrête jusqu'au prochain réveil.
           if (mine.signal.aborted) continue;
-          r = "stop";
+          r = "retry";
         } finally {
           ac = null;
         }
@@ -60,6 +68,12 @@ export function startWatch(poll: WatchPoll, onGone: () => void, deps: WatchDeps)
           off();
           return;
         }
+        if (r === "retry") {
+          await deps.pause(retryMs);
+          retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
+          continue;
+        }
+        retryMs = RETRY_MIN_MS;
         const spent = deps.now() - started;
         if (spent < MIN_GAP_MS) await deps.pause(MIN_GAP_MS - spent);
       }

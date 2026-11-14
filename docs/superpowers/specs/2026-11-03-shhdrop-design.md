@@ -2709,3 +2709,11 @@ Le propriétaire a demandé, pour le tableau de bord d'administration, « des st
 - **Promesse publique reformulée** (page Confidentialité et description de la page) : « aucune statistique d'usage » devient « aucune mesure d'audience », suivi de la mention des compteurs globaux en mémoire. **À relire par le juriste** avec le reste de la page.
 - **Non compté, par construction** : le nombre de fichiers (le manifeste est chiffré), les comptes et les abonnés (§37 et §38 ne sont pas codés ; un abonné se compterait chez le vendeur, le pass étant au porteur).
 - Tests : `usage.TestQueDesEntiers`, `adminui.TestEtatQueDesAgregats`, le test « aucune statistique » de `server/internal/stats_test.go` (aucune table ajoutée, imports de télémétrie toujours interdits).
+
+## Amendement du 14 novembre 2026 : la surveillance de disparition réessaie (§41.8 ; audit adverse 3, site F2), à valider par le propriétaire
+
+Avant : toute réponse inattendue de `GET /api/shares/watch` (429, 5xx, réseau coupé) arrêtait la surveillance jusqu'à la fermeture de la page. Une seule requête perdue (passage du Wi-Fi à la 4G, redéploiement, coupure provoquée sur un Wi-Fi public) suffisait : le contenu restait à l'écran du destinataire après une suppression par l'expéditeur. Prouvé dans Chromium.
+
+Maintenant (`web/src/flows/watch.ts`, `web/src/transfer/api.ts`) : seule une réponse 404 (serveur sans la route) arrête la surveillance. Toute autre réponse ou erreur est passagère : nouvel essai après 1 s, 2 s, 4 s… 30 s au plus, tant que la page est visible et active, attente remise à zéro au premier succès. Tests : `watch.test.ts` (« un échec passager n'arrête rien », « attente croissante »), `api.test.ts`.
+
+**Reste à décider** : un bandeau discret après plusieurs échecs de suite (« La suppression à distance n'est plus garantie tant que la connexion n'est pas revenue »), qui demande un texte dans chaque langue. **Rappel de la limite** : un destinataire malveillant garde ce qu'il a déchiffré ; la surveillance protège de l'écran oublié, pas de lui.

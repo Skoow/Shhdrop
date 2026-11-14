@@ -259,7 +259,7 @@ describe("Retry-After (tâche UP : compte à rebours de la page « trop de deman
   });
 });
 
-describe("watch (spec §41.8) : 204 alive, 410 gone, le reste stop", () => {
+describe("watch (spec §41.8) : 204 alive, 410 gone, 404 stop, le reste retry (audit adverse 3, F2)", () => {
   const at = (status: number, body = "") => vi.fn(async () => new Response(status === 204 ? null : body, { status }));
   it("chaque réponse, jeton en en-tête, jamais dans l'adresse", async () => {
     const f = at(204);
@@ -268,8 +268,11 @@ describe("watch (spec §41.8) : 204 alive, 410 gone, le reste stop", () => {
     expect(url).toBe("http://x/api/shares/watch");
     expect(JSON.stringify(init.headers)).toContain("jeton");
     expect(await watch(ctx("http://x", { fetch: at(410, '{"error":"gone"}') as unknown as typeof fetch }), "t")).toBe("gone");
-    for (const [st, b] of [[404, '{"error":"not_found"}'], [410, '{"error":"autre"}'], [429, "{}"], [500, "{}"]] as const)
-      expect(await watch(ctx("http://x", { fetch: at(st, b) as unknown as typeof fetch, retryDelayMs: 1 }), "t"), String(st)).toBe("stop");
+    expect(await watch(ctx("http://x", { fetch: at(404, '{"error":"not_found"}') as unknown as typeof fetch }), "t")).toBe("stop");
+    for (const [st, b] of [[410, '{"error":"autre"}'], [429, "{}"], [500, "{}"], [502, ""]] as const)
+      expect(await watch(ctx("http://x", { fetch: at(st, b) as unknown as typeof fetch, retryDelayMs: 1 }), "t"), String(st)).toBe("retry");
+    const coupe = vi.fn(async () => Promise.reject(new TypeError("réseau coupé")));
+    expect(await watch(ctx("http://x", { fetch: coupe as unknown as typeof fetch, retryDelayMs: 1 }), "t")).toBe("retry");
   });
 });
 

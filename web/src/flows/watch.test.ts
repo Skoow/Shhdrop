@@ -77,7 +77,38 @@ describe("startWatch", () => {
     expect(poll).toHaveBeenCalledTimes(4); // 30 min de plus depuis l'activité, puis arrêt
   });
 
-  it("route absente (404 d'un serveur sans M2) ou erreur : « stop », aucune boucle serrée", async () => {
+  it("audit adverse 3, F2 : un échec passager n'arrête rien ; la disparition est vue ensuite", async () => {
+    const h = deps();
+    const answers = ["retry", "alive", "gone"] as const;
+    let n = 0;
+    const poll = vi.fn(async () => answers[n++]!);
+    const onGone = vi.fn();
+    startWatch(poll, onGone, h.d);
+    for (let i = 0; i < 8; i++) await tick();
+    expect(poll).toHaveBeenCalledTimes(3);
+    expect(onGone).toHaveBeenCalledTimes(1);
+  });
+
+  it("erreur réseau (exception) : réessai avec attente croissante, plafonnée à 30 s, remise à zéro au succès", async () => {
+    const h = deps();
+    const pauses: number[] = [];
+    const d = { ...h.d, pause: async (ms: number) => void pauses.push(ms) };
+    let n = 0;
+    const poll = vi.fn(async () => {
+      n++;
+      if (n <= 7) throw new Error("réseau coupé");
+      if (n === 8) return "alive" as const;
+      if (n === 9) return "retry" as const;
+      return "stop" as const;
+    });
+    startWatch(poll, vi.fn(), d);
+    for (let i = 0; i < 40; i++) await tick();
+    expect(poll).toHaveBeenCalledTimes(10);
+    expect(pauses.slice(0, 7)).toEqual([1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]);
+    expect(pauses.at(-1)).toBe(1_000); // remis à zéro par le succès
+  });
+
+  it("route absente (404 d'un serveur sans M2) : « stop », aucune boucle serrée", async () => {
     const h = deps();
     const poll = vi.fn(async () => "stop" as const);
     const onGone = vi.fn();

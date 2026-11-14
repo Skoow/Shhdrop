@@ -448,17 +448,22 @@ export async function done(c: Ctx, token: string): Promise<void> {
 
 /**
  * GET /api/shares/watch (spec §41.8, route de la Task M2, étape 7b) : requête tenue 25 s au
- * plus par le serveur. 204 → "alive" ; 410 {"error":"gone"} → "gone" ; toute autre réponse
- * (404 d'un serveur sans la route, 429, 5xx) → "stop" : la surveillance s'arrête, sans
- * nouvel essai ici. Annulable (signal).
+ * plus par le serveur. 204 → "alive" ; 410 {"error":"gone"} → "gone" ; 404 (serveur sans la
+ * route) → "stop" : la surveillance s'arrête pour de bon ; toute autre réponse ou erreur
+ * (429, 5xx, réseau coupé) → "retry" : passagère, la boucle de surveillance réessaie
+ * (audit adverse 3, F2 : une seule requête perdue désarmait la révocation jusqu'à la
+ * fermeture de la page). Annulable (signal).
  */
-export async function watch(c: Ctx, token: string, signal?: AbortSignal): Promise<"alive" | "gone" | "stop"> {
+export type WatchResult = "alive" | "gone" | "stop" | "retry";
+
+export async function watch(c: Ctx, token: string, signal?: AbortSignal): Promise<WatchResult> {
   try {
     await send(c, { method: "GET", path: "/api/shares/watch", headers: bearer(token), signal }, none);
     return "alive";
   } catch (e) {
     if (signal?.aborted) throw e;
-    return e instanceof HttpError && e.status === 410 && e.code === "gone" ? "gone" : "stop";
+    if (e instanceof HttpError && e.status === 410 && e.code === "gone") return "gone";
+    return e instanceof HttpError && e.status === 404 ? "stop" : "retry";
   }
 }
 
