@@ -8,37 +8,23 @@
 //! composition ; sans effet sinon) ; 4. au moins un caractère visible (ni `White_Space`, ni invisible, ni marque, ni U+2800 motif braille vide : une marque seule, ou posée sur une espace, ne compte pas ; « marque » comme pour le pseudonyme ci-dessous) ; 5. comptage : 1 à 2 000 graphèmes (UAX #29, `unicode-segmentation`)
 //! et 3 500 octets UTF-8 au plus.
 //!
-//! **Pseudonyme** (`verifier_pseudo`, spec §39.4 point 4) : 1. NFC ; 2. retrait des contrôles,
-//! des inversions de sens et de tout `Default_Ignorable_Code_Point` ; 3. NFC ; 4. toute espace
-//! Unicode (`White_Space`) devient U+0020, regroupées et rognées ; 5. 2 à 24 graphèmes, 8 points de
-//! code au plus par graphème (contre l'empilement de marques) ; 6. seulement lettres, chiffres,
-//! marques, espace et `- _ . '` (l'apostrophe typographique U+2019 devient `'` à l'étape 2), au moins une lettre ou un chiffre ; 7. une seule écriture
-//! (UAX #24 : intersection des `Script_Extension` de tous les caractères, **plus strict** que le niveau
-//! « Highly Restrictive » d'UTS #39, qui permet d'autres mélanges avec le latin ; seuls Han avec
-//! hiragana et katakana, avec bopomofo ou avec hangul sont permis, comme dans UTS #39) ;
-//! 8. pas d'émoji : les blocs de pictogrammes sont refusés par plages de points de code
-//! (voir `est_pictogramme`), ce qui couvre aussi chiffres entourés, lettres encerclées et drapeaux.
-//! Écarts connus : « lettre » = propriété `Alphabetic` et « chiffre » = propriété `Numeric` de la
-//! bibliothèque standard (inclut quelques nombres non décimaux) ; « marque » = caractère qui se
-//! lie au précédent dans la segmentation en graphèmes (UAX #29 : Extend, SpacingMark, ZWJ ; dont
-//! les modificateurs de teinte de peau, qui ne comptent donc pas seuls comme caractère visible).
+//! **Pseudonyme** (`verifier_pseudo`, spec §39.4 point 4) et sa clé d'unicité (`cle_unicite`) :
+//! règle de `shhdrop_core::texte` (`pseudo_valide`, `pseudo_canon`), commune au salon et au
+//! compte depuis le 14 novembre (une seule copie) ; ses trois erreurs deviennent ici
+//! `pseudo_invalide`. « Marque » = caractère qui se lie au précédent dans la segmentation en
+//! graphèmes (UAX #29 : Extend, SpacingMark, ZWJ ; dont les modificateurs de teinte de peau, qui
+//! ne comptent donc pas seuls comme caractère visible) : `shhdrop_core::texte::se_lie`.
 //!
 //! **Nom** (`nettoyer_nom`) : port de `safeName` (web/src/transfer/safety.ts), même ordre
 //! (retrait, puis NFC, puis espaces) ; seul écart : 255 octets UTF-8 au plus en plus des
 //! 120 points de code.
 use crate::error::{Error, Result};
+use shhdrop_core::texte::{est_ignorable, pseudo_canon, pseudo_valide, se_lie};
 use unicode_normalization::UnicodeNormalization;
-use unicode_script::{Script, ScriptExtension, UnicodeScript};
-use unicode_security::confusable_detection::skeleton;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub(crate) const TEXTE_GRAPHEMES: usize = 2000;
 pub(crate) const TEXTE_OCTETS: usize = 3500;
-const PSEUDO_MIN: usize = 2;
-const PSEUDO_MAX: usize = 24;
-const PSEUDO_POINTS_PAR_GRAPHEME: usize = 8;
-/// Entrée brute au-delà de laquelle un pseudonyme est refusé sans l'examiner (24 graphèmes).
-const PSEUDO_BRUT_MAX: usize = 4096;
 const NOM_POINTS: usize = 120;
 const NOM_OCTETS: usize = 255;
 const NOM_EXT_MAX: usize = 16;
@@ -104,148 +90,16 @@ pub fn nettoyer_texte(s: &str) -> Result<String> {
     Ok(out)
 }
 
-/// `Default_Ignorable_Code_Point` (UCD 15.1/16) : largeur nulle, remplissages, sélecteurs de
-/// variante, étiquettes, contrôles de format.
-fn est_ignorable(c: char) -> bool {
-    matches!(c,
-        '\u{00AD}' | '\u{034F}' | '\u{061C}' | '\u{115F}'..='\u{1160}' | '\u{17B4}'..='\u{17B5}'
-        | '\u{180B}'..='\u{180F}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
-        | '\u{2060}'..='\u{206F}' | '\u{3164}' | '\u{FE00}'..='\u{FE0F}' | '\u{FEFF}' | '\u{FFA0}'
-        | '\u{FFF0}'..='\u{FFF8}' | '\u{1BCA0}'..='\u{1BCA3}' | '\u{1D173}'..='\u{1D17A}'
-        | '\u{E0000}'..='\u{E0FFF}')
-}
-
-/// Blocs de pictogrammes et de caractères entourés, refusés dans un pseudonyme : symboles
-/// divers et dingbats, chiffres et lettres entourés, flèches et symboles ajoutés, CJK entouré,
-/// tout le plan U+1F000–U+1FFFF (émojis, drapeaux, cartes, lettres encadrées), teintes de
-/// peau, marques enveloppantes (keycap U+20E3).
-fn est_pictogramme(c: char) -> bool {
-    matches!(c,
-        '\u{2460}'..='\u{24FF}' | '\u{2600}'..='\u{27BF}' | '\u{2B00}'..='\u{2BFF}'
-        | '\u{20DD}'..='\u{20E4}' | '\u{3200}'..='\u{33FF}' | '\u{1F000}'..='\u{1FFFF}'
-        | '\u{00A9}' | '\u{00AE}' | '\u{203C}' | '\u{2049}' | '\u{2122}' | '\u{2139}'
-        | '\u{2190}'..='\u{21FF}' | '\u{2300}'..='\u{23FF}' | '\u{25A0}'..='\u{25FF}'
-        | '\u{2900}'..='\u{297F}' | '\u{3030}' | '\u{303D}')
-}
-
-/// Normalisation + retrait des invisibles + espaces regroupées et rognées.
-fn pseudo_nettoye(s: &str) -> String {
-    let nfc: String = s.nfc().collect();
-    let sans: String = nfc
-        .chars()
-        .filter(|&c| !c.is_control() && !est_ignorable(c))
-        .map(|c| if c == '\u{2019}' { '\'' } else { c })
-        .collect();
-    let mut out = String::new();
-    let mut espace = false;
-    for c in sans.nfc() {
-        if c.is_whitespace() {
-            espace = true;
-        } else {
-            if espace && !out.is_empty() {
-                out.push(' ');
-            }
-            espace = false;
-            out.push(c);
-        }
-    }
-    out
-}
-
-/// Vrai si `c` se lie au caractère précédent dans un graphème (marque, signe voyelle).
-fn se_lie(c: char) -> bool {
-    let mut t = String::with_capacity(5);
-    t.push('a');
-    t.push(c);
-    t.graphemes(true).count() == 1
-}
-
-fn ecriture_unique(s: &str) -> bool {
-    let mut ext = ScriptExtension::default();
-    for c in s.chars() {
-        if c.script() == Script::Unknown {
-            return false;
-        }
-        ext.intersect_with(c.script_extension());
-    }
-    if !ext.is_empty() {
-        return true;
-    }
-    // Japonais, chinois lettré, coréen : Han mêlé à une écriture propre à la langue.
-    let groupes: [&[Script]; 3] = [
-        &[Script::Han, Script::Hiragana, Script::Katakana],
-        &[Script::Han, Script::Bopomofo],
-        &[Script::Han, Script::Hangul],
-    ];
-    groupes.iter().any(|g| {
-        s.chars().all(|c| {
-            let sc = c.script();
-            matches!(sc, Script::Common | Script::Inherited) || g.contains(&sc)
-        })
-    })
-}
-
-/// Renvoie le pseudonyme nettoyé ou `pseudo_invalide`.
+/// Renvoie le pseudonyme nettoyé ou `pseudo_invalide` (règle de `shhdrop_core::texte`).
 pub fn verifier_pseudo(s: &str) -> Result<String> {
-    if s.len() > PSEUDO_BRUT_MAX {
-        return Err(Error::PseudoInvalide);
-    }
-    let p = pseudo_nettoye(s);
-    let n = p.graphemes(true).count();
-    if !(PSEUDO_MIN..=PSEUDO_MAX).contains(&n) {
-        return Err(Error::PseudoInvalide);
-    }
-    let mut a_un_signe = false;
-    for g in p.graphemes(true) {
-        if g.chars().count() > PSEUDO_POINTS_PAR_GRAPHEME {
-            return Err(Error::PseudoInvalide);
-        }
-        // Une marque doit porter une lettre ou un chiffre (pas une espace, un tiret, un point…).
-        if g.chars().count() > 1
-            && g.chars()
-                .next()
-                .is_some_and(|c| !(c.is_alphabetic() || c.is_numeric()))
-        {
-            return Err(Error::PseudoInvalide);
-        }
-        for (i, c) in g.chars().enumerate() {
-            if est_pictogramme(c) {
-                return Err(Error::PseudoInvalide);
-            }
-            let ok = if i == 0 {
-                match c {
-                    ' ' | '-' | '_' | '.' | '\'' => true,
-                    _ if c.is_ascii() => c.is_ascii_alphanumeric(),
-                    _ => (c.is_alphabetic() || c.is_numeric()) && !se_lie(c),
-                }
-            } else {
-                c.is_alphanumeric() || se_lie(c)
-            };
-            if !ok {
-                return Err(Error::PseudoInvalide);
-            }
-            a_un_signe |= c.is_alphanumeric();
-        }
-    }
-    if !a_un_signe || !ecriture_unique(&p) {
-        return Err(Error::PseudoInvalide);
-    }
-    Ok(p)
+    pseudo_valide(s).map_err(|_| Error::PseudoInvalide)
 }
 
-/// Clé de comparaison de deux pseudonymes : NFKC, minuscules, sans espaces ni ponctuation
-/// (seuls restent lettres, chiffres et marques). À appeler sur un pseudonyme déjà vérifié.
-/// Les sosies sont repliés par le squelette UTS #39 (`confusables.txt`) : « Alice » en latin et
-/// « Аӏісе » entièrement en cyrillique ont la même clé ; « 0 » et « o », « 1 », « l » et « I »
-/// aussi. Les marques restent (« Léa » et « Lea » diffèrent).
+/// Clé de comparaison de deux pseudonymes déjà vérifiés : `shhdrop_core::texte::pseudo_canon`
+/// (NFKC, minuscules, squelette UTS #39, sans espaces ni ponctuation). « Alice » en latin et
+/// « Аӏісе » entièrement en cyrillique ont la même clé ; « Léa » et « Lea » non.
 pub fn cle_unicite(pseudo: &str) -> String {
-    let bas: String = pseudo.nfkc().collect::<String>().to_lowercase();
-    // Squelette UTS #39 (sosies : « А » cyrillique = « A » latin, « 0 » = « O », « 1 » = « l »),
-    // puis minuscules de nouveau (le squelette peut redonner des majuscules).
-    let sq: String = skeleton(&bas).collect::<String>().to_lowercase();
-    sq.nfkc()
-        .filter(|&c| c.is_alphanumeric() || (!c.is_whitespace() && !c.is_ascii() && se_lie(c)))
-        .collect()
+    pseudo_canon(pseudo)
 }
 
 /// `Extended_Pictographic` (emoji-data.txt, Unicode 15.1) : sert seulement à garder U+200D et

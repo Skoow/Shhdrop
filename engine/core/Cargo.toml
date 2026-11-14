@@ -21,6 +21,12 @@ sha2 = { version = "0.11", default-features = false, features = ["zeroize"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 subtle = { version = "2.6", default-features = false }
 unicode-normalization = { version = "0.1", default-features = false }
+# Pseudo (compte v2 et salon, spec §39.4 point 4) : graphèmes (UAX #29), écritures (UAX #24),
+# squelette UTS #39. Aucune crate nouvelle : mêmes versions exactes que shhdrop-salon, qui les
+# utilisait déjà (règle du pseudo déplacée ici le 14 novembre pour n'en avoir qu'une copie).
+unicode-segmentation = "=1.13.3"
+unicode-script = "=0.5.9"
+unicode-security = "=0.1.3"
 zeroize = { version = "1.9", default-features = false, features = ["alloc"] }
 
 # Fournisseur natif (tests aujourd'hui, apps plus tard) : n'entre pas dans le .wasm du site.

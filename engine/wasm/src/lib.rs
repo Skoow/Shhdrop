@@ -27,7 +27,7 @@ use shhdrop_core::link::{self, ParsedLink};
 use shhdrop_core::manifest::{Clean, Kind, Manifest};
 use shhdrop_core::platform::{KeyHandle, NONCE_LEN, Opened, Platform, SecretBuf, TAG_LEN};
 use shhdrop_core::reader::{Part, Reader, Segments};
-use shhdrop_core::{Error, KLien, KMdp, Result, SGestion, Seed, encoding, password};
+use shhdrop_core::{Error, KLien, KMdp, Result, SGestion, Seed, compte, encoding, password};
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, future_to_promise};
@@ -711,6 +711,104 @@ pub fn password_key_for_create(
     let pw = secret_text(pw, Error::MotDePasseNonGenere).map_err(js_err)?;
     let k = kdf::password_key_for_create(&pw, salt).map_err(js_err)?;
     Ok(Uint8Array::from(&k.as_bytes()[..]))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Compte v2 (conception compte v2 §5.1, §6, §21.2.2, §21.5)
+// ---------------------------------------------------------------------------------------------
+
+/// Adresse normalisée : `{ canon, exacte }`, ou `adresse_invalide`, `adresse_non_ascii`.
+#[wasm_bindgen(
+    js_name = normaliserAdresse,
+    unchecked_return_type = "{ canon: string; exacte: string }"
+)]
+pub fn normaliser_adresse(email: &str) -> core::result::Result<Object, JsValue> {
+    let a = compte::normaliser(email).map_err(js_err)?;
+    let o = Object::new();
+    set(&o, "canon", &JsValue::from_str(&a.canon));
+    set(&o, "exacte", &JsValue::from_str(&a.exacte));
+    Ok(o)
+}
+
+/// `{ aAuth, kekMdp }` : Argon2id (64 Mio) puis HKDF ; mot de passe en UTF-8. Calcul de
+/// 64 Mio : la couche TypeScript l'appelle dans un Worker neuf (web/src/engine/argon2.ts).
+#[wasm_bindgen(
+    js_name = deriverCompte,
+    unchecked_return_type = "{ aAuth: Uint8Array; kekMdp: Uint8Array }"
+)]
+pub fn deriver_compte(pw: &Uint8Array, canon: &str) -> core::result::Result<Object, JsValue> {
+    let pw = secret_text(pw, Error::MotDePasseVide).map_err(js_err)?;
+    let (a, k) = compte::deriver(&pw, canon).map_err(js_err)?;
+    let o = Object::new();
+    set(&o, "aAuth", &bytes(&*a));
+    set(&o, "kekMdp", &bytes(&*k));
+    Ok(o)
+}
+
+/// Clé de 32 octets venue de JavaScript (`K_compte`, `s_profil`), recopiée dans un tampon effacé.
+fn key32(a: &Uint8Array) -> Result<Zeroizing<[u8; 32]>> {
+    let v = secret(a);
+    let mut k = Zeroizing::new([0u8; 32]);
+    if v.len() != 32 {
+        return Err(Error::TailleInvalide);
+    }
+    k.copy_from_slice(&v);
+    Ok(k)
+}
+
+/// `K_prive` (coffre privé) tirée de `K_compte`.
+#[wasm_bindgen(js_name = clePrive)]
+pub fn cle_prive(k_compte: &Uint8Array) -> core::result::Result<Uint8Array, JsValue> {
+    let k = key32(k_compte).map_err(js_err)?;
+    Ok(Uint8Array::from(&compte::cle_prive(&k)[..]))
+}
+
+/// `K_profil` (coffre de profil) tirée de `s_profil`.
+#[wasm_bindgen(js_name = cleProfil)]
+pub fn cle_profil(s_profil: &Uint8Array) -> core::result::Result<Uint8Array, JsValue> {
+    let k = key32(s_profil).map_err(js_err)?;
+    Ok(Uint8Array::from(&compte::cle_profil(&k)[..]))
+}
+
+/// `K_etiquette` (nom d'appareil d'une session) tirée de `K_compte`.
+#[wasm_bindgen(js_name = cleAppareil)]
+pub fn cle_appareil(k_compte: &Uint8Array) -> core::result::Result<Uint8Array, JsValue> {
+    let k = key32(k_compte).map_err(js_err)?;
+    Ok(Uint8Array::from(&compte::cle_appareil(&k)[..]))
+}
+
+/// Pseudo nettoyé, ou `pseudo_longueur`, `pseudo_caracteres`, `pseudo_ecritures`.
+#[wasm_bindgen(js_name = pseudoValide)]
+pub fn pseudo_valide(s: &str) -> core::result::Result<String, JsValue> {
+    compte::pseudo_valide(s).map_err(js_err)
+}
+
+/// Forme canonique (`p_canon`) d'un pseudo rendu par `pseudoValide`.
+#[wasm_bindgen(js_name = pseudoCanon)]
+pub fn pseudo_canon(s: &str) -> String {
+    compte::pseudo_canon(s)
+}
+
+/// Vrai si la forme canonique est celle d'un pseudo réservé.
+#[wasm_bindgen(js_name = pseudoReserve)]
+pub fn pseudo_reserve(canon: &str) -> bool {
+    compte::pseudo_reserve(canon)
+}
+
+/// Règle du mot de passe d'un nouveau compte (`mdp_court`, `mdp_long`, `mdp_adresse`) ; `canon`
+/// et `exacte` viennent de `normaliserAdresse`.
+#[wasm_bindgen(js_name = motDePasseValide)]
+pub fn mot_de_passe_valide(
+    pw: &Uint8Array,
+    canon: &str,
+    exacte: &str,
+) -> core::result::Result<(), JsValue> {
+    let pw = secret_text(pw, Error::MdpCourt).map_err(js_err)?;
+    let a = compte::Adresse {
+        canon: canon.to_string(),
+        exacte: exacte.to_string(),
+    };
+    compte::mot_de_passe_valide(&pw, &a).map_err(js_err)
 }
 
 // ---------------------------------------------------------------------------------------------

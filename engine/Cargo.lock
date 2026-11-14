@@ -1854,6 +1854,9 @@ dependencies = [
  "sha2 0.11.1",
  "subtle",
  "unicode-normalization",
+ "unicode-script",
+ "unicode-security",
+ "unicode-segmentation",
  "zeroize",
 ]
 

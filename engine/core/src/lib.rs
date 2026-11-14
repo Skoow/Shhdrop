@@ -3,6 +3,7 @@
 //! l'aléa et l'AES-GCM sont fournis par la plateforme.
 #![forbid(unsafe_code)]
 
+pub mod compte;
 pub mod elements;
 pub mod encoding;
 pub mod envelope;
@@ -17,6 +18,7 @@ pub mod native;
 pub mod password;
 pub mod platform;
 pub mod reader;
+pub mod texte;
 mod whatwg;
 
 pub use error::{Error, Result};

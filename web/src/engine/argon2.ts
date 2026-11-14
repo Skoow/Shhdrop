@@ -40,7 +40,7 @@ async function inWorker(start: StartWorker, job: KdfJob, timeoutMs: number): Pro
     return await new Promise<Uint8Array<ArrayBuffer>>((resolve, reject) => {
       w.onmessage = (e: MessageEvent<KdfReply>) => {
         const r = e.data;
-        if ("k" in r && r.k instanceof Uint8Array && r.k.length === 32) resolve(r.k as Uint8Array<ArrayBuffer>);
+        if ("k" in r && r.k instanceof Uint8Array && r.k.length === (job.compte !== undefined ? 64 : 32)) resolve(r.k as Uint8Array<ArrayBuffer>);
         else reject(new Error("error" in r && typeof r.error === "string" ? r.error : "argon2_echec"));
       };
       w.onerror = (e) => {
@@ -63,10 +63,21 @@ async function inWorker(start: StartWorker, job: KdfJob, timeoutMs: number): Pro
   }
 }
 
-async function run(engine: Engine, password: string, salt: Uint8Array, params: KdfParams, create: boolean, start = engine.start, timeoutMs = WORKER_TIMEOUT_MS): Promise<Uint8Array<ArrayBuffer>> {
+/** A_auth ‖ KEK_mdp calculés dans la page (repli) ; les copies du moteur sont effacées. */
+function compteInPage(w: Engine["wasm"], pw: Uint8Array, canon: string): Uint8Array<ArrayBuffer> {
+  const { aAuth, kekMdp } = w.deriverCompte(pw, canon);
+  const k = new Uint8Array(64);
+  k.set(aAuth);
+  k.set(kekMdp, 32);
+  aAuth.fill(0);
+  kekMdp.fill(0);
+  return k;
+}
+
+async function run(engine: Engine, password: string, salt: Uint8Array, params: KdfParams, create: boolean, start = engine.start, timeoutMs = WORKER_TIMEOUT_MS, compte?: string): Promise<Uint8Array<ArrayBuffer>> {
   const pw = new TextEncoder().encode(password);
   try {
-    const job: KdfJob = { module: engine.module, pw, salt, ops: params.ops, mem: params.mem, create };
+    const job: KdfJob = { module: engine.module, pw, salt, ops: params.ops, mem: params.mem, create, ...(compte !== undefined ? { compte } : {}) };
     if (start) {
       try {
         return await inWorker(start, job, timeoutMs);
@@ -75,6 +86,7 @@ async function run(engine: Engine, password: string, salt: Uint8Array, params: K
       }
     }
     const w = engine.wasm;
+    if (compte !== undefined) return compteInPage(w, pw, compte);
     return (create ? w.passwordKeyForCreate(pw, salt) : w.passwordKey(pw, salt, params.ops, params.mem)) as Uint8Array<ArrayBuffer>;
   } finally {
     pw.fill(0);
@@ -92,4 +104,12 @@ export function passwordKey(engine: Engine, password: string, salt: Uint8Array, 
 /** K_mdp pour CRÉER : mot de passe de la forme de generatePassword, KDF_CREATE (vérifiés par le moteur). */
 export function passwordKeyForCreate(engine: Engine, password: string, salt: Uint8Array, start?: StartWorker, timeoutMs?: number): Promise<Uint8Array<ArrayBuffer>> {
   return run(engine, password, salt, { ops: 0, mem: 0 }, true, start, timeoutMs);
+}
+
+/**
+ * Compte v2 : A_auth ‖ KEK_mdp (64 octets) = HKDF(Argon2id(mot de passe, sel de l'adresse
+ * canonique)), dans un Worker neuf comme K_mdp ; l'appelant efface le résultat après usage.
+ */
+export function compteKeys(engine: Engine, password: string, canon: string, start?: StartWorker, timeoutMs?: number): Promise<Uint8Array<ArrayBuffer>> {
+  return run(engine, password, new Uint8Array(0), { ops: 0, mem: 0 }, false, start, timeoutMs, canon);
 }

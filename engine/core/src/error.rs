@@ -68,6 +68,22 @@ pub enum Error {
     /// Lecteur : aperçu (`item`) d'un fichier de plus de PREVIEW_MAX octets, ou dont la mémoire est
     /// refusée ; `stream_item` le lit.
     TropGrosPourApercu,
+    /// Compte : adresse e-mail refusée (forme, longueur, caractère de contrôle ou spécial).
+    AdresseInvalide,
+    /// Compte : adresse e-mail avec un caractère non ASCII (accent, autre écriture).
+    AdresseNonAscii,
+    /// Compte : mot de passe de moins de 10 points de code (après rognage et NFC).
+    MdpCourt,
+    /// Compte : mot de passe de plus de 256 points de code.
+    MdpLong,
+    /// Compte : mot de passe égal à l'adresse ou à sa partie locale.
+    MdpAdresse,
+    /// Pseudo hors de 2 à 24 graphèmes.
+    PseudoLongueur,
+    /// Pseudo avec un caractère refusé (émoji, ponctuation, marque mal placée…).
+    PseudoCaracteres,
+    /// Pseudo qui mêle plusieurs écritures.
+    PseudoEcritures,
 }
 
 impl Error {
@@ -103,6 +119,14 @@ impl Error {
             Error::CleDejaUtilisee => "cle_deja_utilisee",
             Error::ElementInexistant => "element_inexistant",
             Error::TropGrosPourApercu => "trop_gros_pour_apercu",
+            Error::AdresseInvalide => "adresse_invalide",
+            Error::AdresseNonAscii => "adresse_non_ascii",
+            Error::MdpCourt => "mdp_court",
+            Error::MdpLong => "mdp_long",
+            Error::MdpAdresse => "mdp_adresse",
+            Error::PseudoLongueur => "pseudo_longueur",
+            Error::PseudoCaracteres => "pseudo_caracteres",
+            Error::PseudoEcritures => "pseudo_ecritures",
         }
     }
 }
@@ -170,5 +194,13 @@ mod tests {
             Error::TropGrosPourApercu.to_string(),
             "trop_gros_pour_apercu"
         );
+        assert_eq!(Error::AdresseInvalide.to_string(), "adresse_invalide");
+        assert_eq!(Error::AdresseNonAscii.to_string(), "adresse_non_ascii");
+        assert_eq!(Error::MdpCourt.to_string(), "mdp_court");
+        assert_eq!(Error::MdpLong.to_string(), "mdp_long");
+        assert_eq!(Error::MdpAdresse.to_string(), "mdp_adresse");
+        assert_eq!(Error::PseudoLongueur.to_string(), "pseudo_longueur");
+        assert_eq!(Error::PseudoCaracteres.to_string(), "pseudo_caracteres");
+        assert_eq!(Error::PseudoEcritures.to_string(), "pseudo_ecritures");
     }
 }
