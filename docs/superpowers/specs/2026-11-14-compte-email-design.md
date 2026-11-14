@@ -915,3 +915,9 @@ Textes publics à ajouter à ceux de §16 : page Confidentialité, bloc « Si vo
 5. **R-D5 — Sauvegarde** : chaque jour, `comptes.db` seule, chiffrée par age vers la clé de l'exploitant, stockage UE chez un autre fournisseur en écriture seule, 30 jours, restauration testée chaque mois. **Recommandé : oui.**
 
 Restent ouvertes de §20, inchangées : D1 (fournisseur d'e-mail : Scaleway TEM recommandé), D4 (signalement qui remet l'ancienneté à zéro : oui), D7 (« Rester connecté » décoché : oui), D8 (ouverture au public après le juriste). Tranchées : D3 (3 ans, modifiable, §21.11), D5 (suppression totale, §21.12), D6 (§21.13). Caduque : D2.
+
+## Décisions du propriétaire (14 novembre, après la v2)
+
+Validées telles que recommandées : (1) profil (pseudo, photo, langue, abonnement) lisible par le serveur, exception écrite à CLAUDE.md ; (2) les deux attentes de 7 jours après une récupération ; (3) catégories de signalement, après l'avis du juriste ; (4) pas d'envoi d'un lien « à un pseudo » ; (5) sauvegarde quotidienne chiffrée chez un autre fournisseur, restauration essayée chaque mois.
+
+**Suppression du compte, simplifiée** (décision du propriétaire) : on supprime ce dont la personne est l'auteur ou l'admin : ses salons créés (lien compte ↔ salon déjà connu du serveur) et ses partages créés (liste chiffrée du coffre ou de l'appareil, rejouée à la suppression ; un partage absent de ces listes s'efface de toute façon à son échéance, 24 h ou 7 jours au plus). Rien de plus n'est promis : les messages laissés dans le salon d'autrui suivent la fin de ce salon. Aucun lien compte ↔ partage n'est ajouté côté serveur.
