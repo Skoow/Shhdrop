@@ -79,7 +79,8 @@ type Reglages struct {
 
 // Regler applique r au salon de S_gestion. S_gestion absent, faux ou d'un salon qui n'est plus
 // vivant : ErrNotFound (comme Gestion) ; r invalide : ErrBadRequest ; places sous le besoin
-// minimal (besoinPlaces) : ErrOccupied. avant (facultatif) est appelée sous essaiLock une fois S_gestion et
+// minimal (besoinPlaces) : ErrOccupied ; au-delà du palier du compte créateur :
+// *PalierDepasse (palierReglages). avant (facultatif) est appelée sous essaiLock une fois S_gestion et
 // les places vérifiés, juste avant d'appliquer (couche HTTP : preuve anti-robot et quota d'un
 // renouvellement, qui ne sont donc jamais consommés pour une demande refusée ici) ; son erreur
 // est rendue telle quelle, rien n'est changé.
@@ -115,8 +116,9 @@ func (m *Manager) Regler(sGestion []byte, r ReglagesReq, avant func() error) (Re
 	defer mu.Unlock()
 	var exp int64
 	var places int
-	if err := m.cfg.DB.QueryRow(`SELECT expires_at, max_members FROM salons WHERE id=? AND manage_v=? AND expires_at>?
-		AND failed_attempts<?`, id, v, now.Unix(), maxEssais).Scan(&exp, &places); err != nil {
+	var compte []byte
+	if err := m.cfg.DB.QueryRow(`SELECT expires_at, max_members, compte FROM salons WHERE id=? AND manage_v=? AND expires_at>?
+		AND failed_attempts<?`, id, v, now.Unix(), maxEssais).Scan(&exp, &places, &compte); err != nil {
 		return Reglages{}, notFound(err)
 	}
 	s, err := m.etat(id, exp, places)
@@ -128,6 +130,9 @@ func (m *Manager) Regler(sGestion []byte, r ReglagesReq, avant func() error) (Re
 			return Reglages{}, ErrOccupied
 		}
 		places = r.Places
+	}
+	if err := m.palierReglages(compteDe(compte), places, r.Heures); err != nil {
+		return Reglages{}, err
 	}
 	if avant != nil {
 		if err := avant(); err != nil {
@@ -184,6 +189,25 @@ func (m *Manager) Regler(sGestion []byte, r ReglagesReq, avant func() error) (Re
 		return Reglages{}, ErrES
 	}
 	return Reglages{MaxMembers: places, ExpiresIn: secs(exp - now.Unix()), Depuis: depart}, nil
+}
+
+// palierReglages : un salon créé par un compte garde les limites de son palier (conception du
+// compte §8.6, §11 ; lu par la ligne, sans session) : places après le réglage (demandées, ou
+// celles du salon pour un renouvellement seul : un compte revenu au palier neuf ne renouvelle
+// pas un salon de 10 places) et durée d'un renouvellement. Salon sans compte, ou sans crochet
+// (SHH_COMPTES=0) : rien.
+func (m *Manager) palierReglages(compte *[16]byte, places, heures int) error {
+	if compte == nil || m.cfg.Palier == nil {
+		return nil
+	}
+	p, err := m.cfg.Palier(*compte)
+	if err != nil {
+		return err
+	}
+	if places > p.Places || heures > p.Heures {
+		return &PalierDepasse{p}
+	}
+	return nil
 }
 
 // remplacer : partie disque d'un renouvellement, hors de tout verrou de salon (sous essaiLock) :

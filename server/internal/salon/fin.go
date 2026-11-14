@@ -52,51 +52,91 @@ var crochetAchever func(*salon)
 // jeton : ErrForbidden. Le salon est fini en raison 2 ; une erreur de la partie disque est
 // reprise par Tick (pas rendue : le salon est déjà détruit pour tous).
 func (m *Manager) Detruire(sGestion, jeton []byte) error {
-	_, err := m.detruireDemande(sGestion, jeton, false)
+	_, _, err := m.detruireDemande(sGestion, jeton, false)
 	return err
 }
 
 // DetruireSignaler : « Détruire et signaler » ({reason: "report"}) : destruction comme
-// Detruire ; premier vaut vrai seulement si cet appel a détruit le salon et que c'est le
+// Detruire ; Premier vaut vrai seulement si cet appel a détruit le salon et que c'est le
 // premier signalement du salon (salon.signale, partagé avec QuitterSignaler, posé sous le
 // verrou du salon) : un salon ne compte qu'un signalement, et un second « détruire »
-// simultané, qui trouve une tombe, ne compte pas (revue finale C-2, mineur d).
-func (m *Manager) DetruireSignaler(sGestion, jeton []byte) (premier bool, err error) {
-	return m.detruireDemande(sGestion, jeton, true)
+// simultané, qui trouve une tombe, ne compte pas (revue finale C-2, mineur d). Compte : compte
+// créateur, lu avec la ligne avant la destruction, rendu avec Premier seulement.
+func (m *Manager) DetruireSignaler(sGestion, jeton []byte) (Signalement, error) {
+	premier, compte, err := m.detruireDemande(sGestion, jeton, true)
+	if !premier {
+		compte = nil
+	}
+	return Signalement{Premier: premier, Compte: compte}, err
 }
 
-func (m *Manager) detruireDemande(sGestion, jeton []byte, signaler bool) (bool, error) {
+func (m *Manager) detruireDemande(sGestion, jeton []byte, signaler bool) (bool, *[16]byte, error) {
 	now := m.cfg.Now().Unix()
+	var c []byte
 	switch {
 	case sGestion != nil:
 		v := share.Verifier(sGestion)
 		if v == nil {
-			return false, ErrNotFound
+			return false, nil, ErrNotFound
 		}
 		var id string
-		if err := m.cfg.DB.QueryRow(`SELECT id FROM salons WHERE manage_v=? AND expires_at>? AND failed_attempts<?`,
-			v, now, maxEssais).Scan(&id); err != nil {
-			return false, notFound(err)
+		if err := m.cfg.DB.QueryRow(`SELECT id, compte FROM salons WHERE manage_v=? AND expires_at>? AND failed_attempts<?`,
+			v, now, maxEssais).Scan(&id, &c); err != nil {
+			return false, nil, notFound(err)
 		}
 		premier, _ := m.detruireAvec(id, signaler) // partie disque ratée : reprise par Tick
-		return premier, nil
+		return premier, compteDe(c), nil
 	case jeton != nil:
 		mb, err := m.Membre(jeton)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		var mcd int
-		if err := m.cfg.DB.QueryRow(`SELECT members_can_destroy FROM salons WHERE id=? AND expires_at>? AND failed_attempts<?`,
-			mb.salon.id, now, maxEssais).Scan(&mcd); err != nil {
-			return false, notFound(err)
+		if err := m.cfg.DB.QueryRow(`SELECT members_can_destroy, compte FROM salons WHERE id=? AND expires_at>? AND failed_attempts<?`,
+			mb.salon.id, now, maxEssais).Scan(&mcd, &c); err != nil {
+			return false, nil, notFound(err)
 		}
 		if mcd != 1 {
-			return false, ErrForbidden
+			return false, nil, ErrForbidden
 		}
 		premier, _ := m.finirAvec(mb.salon, RaisonDetruit, signaler) // partie disque ratée : reprise par Tick
-		return premier, nil
+		return premier, compteDe(c), nil
 	}
-	return false, ErrForbidden
+	return false, nil, ErrForbidden
+}
+
+// DetruireDuCompte : POST /api/compte/salons/detruire (par la ref du compte) : le salon id,
+// vivant et créé par le compte h, est fini comme par « Détruire » de son créateur (raison 2) ;
+// sinon ErrNotFound. Partie disque ratée : reprise par Tick.
+func (m *Manager) DetruireDuCompte(h [16]byte, id string) error {
+	var un int
+	if err := m.cfg.DB.QueryRow(`SELECT 1 FROM salons WHERE id=? AND compte=? AND expires_at>? AND failed_attempts<?`,
+		id, h[:], m.cfg.Now().Unix(), maxEssais).Scan(&un); err != nil {
+		return notFound(err)
+	}
+	_ = m.detruire(id)
+	return nil
+}
+
+// FermerDuCompte : suppression (et, au lot 7, bannissement) du compte h : chaque salon vivant
+// qu'il a créé est fini comme par « Détruire » de son créateur (raison 2, WebSocket coupés,
+// conversation, pièces et ligne effacées ; partie disque ratée : reprise par Tick). Rend le
+// nombre de salons fermés. La liste est lue sous createMu (comme le palier et l'insertion
+// d'une création, Creer) : une création du compte en cours est finie avant, ou lit le palier
+// après (compte.Supprimer appelle cette fonction une seconde fois, le compte effacé).
+func (m *Manager) FermerDuCompte(h [16]byte) (int, error) {
+	vs, err := func() ([]SalonVue, error) {
+		m.createMu.Lock()
+		defer m.createMu.Unlock()
+		return m.SalonsVivantsDuCompte(h)
+	}()
+	if err != nil {
+		return 0, err
+	}
+	for _, v := range vs {
+		_ = m.detruire(v.ID)
+	}
+	return len(vs), nil
 }
 
 // detruire : fin en raison 2 du salon id, avec ou sans état en mémoire (10ᵉ mot de passe faux,
@@ -162,6 +202,7 @@ func (m *Manager) oublier(s *salon, raison uint8, signaler bool) (fait, premier 
 	if signaler && !s.signale {
 		s.signale, premier = true, true
 	}
+	s.signalements = [NbCategories]int{} // catégories oubliées avec le salon
 	// Connexions d'abord : 0x05 au rang courant, en direct comme en rattrapage (l'écrivain
 	// l'écrit après son lot en cours), puis 1000 ; plus rien d'autre ne leur est remis.
 	for _, c := range s.conns {
@@ -216,7 +257,9 @@ func (m *Manager) achever(s *salon) (err error) {
 	var errs []error
 	// Lue sous le verrou : un renouvellement (reglages.go) la remplace, jamais après « fini ».
 	errs = append(errs, s.detruireConversations())
-	_, e := m.cfg.DB.Exec(`UPDATE salons SET failed_attempts=? WHERE id=? AND failed_attempts<?`, maxEssais, s.id, maxEssais)
+	// Ligne morte : le lien compte ↔ salon part avec elle, même si la suite échoue.
+	_, e := m.cfg.DB.Exec(`UPDATE salons SET failed_attempts=?, compte=NULL WHERE id=? AND (failed_attempts<? OR compte IS NOT NULL)`,
+		maxEssais, s.id, maxEssais)
 	errs = append(errs, base(e))
 	m.purger(s) // pièces connues en mémoire : fichier, ligne, index, quotas
 	if s.resteAPurger() {
@@ -340,7 +383,8 @@ func (m *Manager) lignes(now time.Time) {
 // sans effet, puis efface les pièces et la ligne. Erreurs ignorées : reprises par achever.
 func (m *Manager) finHorsPieces(s *salon) {
 	_ = s.detruireConversations()
-	res, err := m.cfg.DB.Exec(`UPDATE salons SET failed_attempts=? WHERE id=? AND failed_attempts<?`, maxEssais, s.id, maxEssais)
+	res, err := m.cfg.DB.Exec(`UPDATE salons SET failed_attempts=?, compte=NULL WHERE id=? AND (failed_attempts<? OR compte IS NOT NULL)`,
+		maxEssais, s.id, maxEssais)
 	if err != nil {
 		return
 	}
@@ -605,7 +649,8 @@ func DetruireHorsLigne(db *sql.DB, pieces *blob.Store, dossierConv string, kAcce
 	if !idValide(id) {
 		return false, ErrBase
 	}
-	if _, err := db.Exec(`UPDATE salons SET failed_attempts=? WHERE id=? AND failed_attempts<?`, maxEssais, id, maxEssais); err != nil {
+	if _, err := db.Exec(`UPDATE salons SET failed_attempts=?, compte=NULL WHERE id=? AND (failed_attempts<? OR compte IS NOT NULL)`,
+		maxEssais, id, maxEssais); err != nil {
 		return false, base(err)
 	}
 	m := &Manager{cfg: Config{DB: db, Pieces: pieces}}

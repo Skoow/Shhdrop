@@ -34,6 +34,8 @@ func (p *postier) Mettre(m courriel.Message) error {
 	return nil
 }
 
+func (p *postier) Plein() bool { return false }
+
 func (p *postier) code(t *testing.T) string {
 	t.Helper()
 	p.mu.Lock()
@@ -138,6 +140,8 @@ var routesCompte = [][2]string{
 	{"POST", "/api/compte/email/fin"}, {"POST", "/api/compte/totp/debut"}, {"POST", "/api/compte/totp/fin"},
 	{"POST", "/api/compte/totp/retirer"}, {"POST", "/api/compte/totp/annuler-retrait"}, {"GET", "/api/compte/export"},
 	{"POST", "/api/compte/supprimer"},
+	// Lot 6.
+	{"GET", "/api/compte/salons"}, {"POST", "/api/compte/salons/detruire"},
 }
 
 // Parcours complet par HTTP : inscription, coffres, sessions, connexion, déconnexion ; réponses

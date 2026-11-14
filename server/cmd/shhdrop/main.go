@@ -254,18 +254,23 @@ const salonWait = 5 * time.Second
 // aucun dossier créé). Sinon le gestionnaire du salon, dossiers en 0700, purge au démarrage
 // faite (plan C-2, point 11 : avant l'écoute), et l'usage du salon ajouté à celui des
 // partages (ExtraUsed). Le gestionnaire voit les partages par UsedShares, qui n'inclut
-// jamais ExtraUsed : aucun double compte.
+// jamais ExtraUsed : aucun double compte. cpt (SHH_COMPTES=1, sinon nil) : le gestionnaire lit
+// le palier d'un compte dans cpt.svc, créé ensuite par brancherComptes (avant l'écoute).
 func setupSalons(cfg config.Config, db *sql.DB, svc *share.Service, lim *limits.Limiter, gate *blob.Gate,
-	vidage *store.Vidage) (*salon.Manager, error) {
+	vidage *store.Vidage, cpt *comptes) (*salon.Manager, error) {
 	if !cfg.Salons {
 		return nil, nil
+	}
+	var palier func([16]byte) (salon.Palier, error)
+	if cfg.Comptes && cpt != nil {
+		palier = api.PalierDuCompte(&cpt.svc)
 	}
 	m, err := salon.NewManager(salon.Config{DB: db,
 		Pieces:               &blob.Store{Dir: filepath.Join(cfg.DataDir, dirSalonPieces), NoSparse: cfg.BehindProxy, Gate: gate},
 		DossierConversations: filepath.Join(cfg.DataDir, dirSalons), Now: cfg.Now, Max: cfg.SalonsMax,
 		StorageMax: cfg.StorageMaxBytes, UsedPartages: svc.UsedShares, OnAbandon: lim.AbandonUpload,
 		TramesMax: cfg.Capacity.SalonFrames, SalonFramesTotal: cfg.Capacity.SalonFramesTotal,
-		ConvDiskOps: cfg.Capacity.ConvDiskOps, Vidage: vidage})
+		ConvDiskOps: cfg.Capacity.ConvDiskOps, Vidage: vidage, Palier: palier})
 	if err != nil {
 		return nil, err
 	}
@@ -308,8 +313,9 @@ func setupComptes(cfg config.Config) (*comptes, error) {
 
 // brancherComptes : envoyeur d'e-mails (créé seulement avec SHH_COMPTES=1 : sans lui, aucune
 // connexion sortante, TestCourrielSeulementAvecComptes) et service du compte, sur le limiteur
-// de l'API. Le mot de passe SMTP est lu une fois, sans son saut de ligne final.
-func brancherComptes(cfg config.Config, cpt *comptes, lim *limits.Limiter) error {
+// de l'API. Le mot de passe SMTP est lu une fois, sans son saut de ligne final. sm (SHH_SALONS=1,
+// sinon nil) : crochets des salons du compte (fermeture, nombre, liste, destruction).
+func brancherComptes(cfg config.Config, cpt *comptes, lim *limits.Limiter, sm *salon.Manager) error {
 	if cfg.Comptes && cpt != nil {
 		mdp, err := lireMdpSMTP(cfg.SMTP.PasswordFile)
 		if err != nil {
@@ -319,8 +325,11 @@ func brancherComptes(cfg config.Config, cpt *comptes, lim *limits.Limiter) error
 		if err != nil {
 			return shown(err.Error())
 		}
-		svc, err := compte.NewService(compte.Config{DB: cpt.db, Cles: cpt.cles, Courriel: env, Limites: lim,
-			Now: cfg.Now, Max: cfg.ComptesMax})
+		cc := compte.Config{DB: cpt.db, Cles: cpt.cles, Courriel: env, Limites: lim, Now: cfg.Now, Max: cfg.ComptesMax}
+		if sm != nil {
+			api.BrancherSalonsDuCompte(&cc, sm)
+		}
+		svc, err := compte.NewService(cc)
 		if err != nil {
 			return err
 		}
@@ -439,10 +448,8 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if err := janitor.Reconcile(svc); err != nil {
 		return err
 	}
-	sm, err := setupSalons(cfg, db, svc, lim, gate, vidage)
-	if err != nil {
-		return err
-	}
+	// Comptes avant salons : le gestionnaire lit le palier dans le service du compte, qui reçoit
+	// ensuite les crochets du gestionnaire (brancherComptes).
 	cpt, err := setupComptes(cfg)
 	if err != nil {
 		return err
@@ -450,7 +457,11 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if cpt != nil {
 		defer cpt.db.Close()
 	}
-	if err := brancherComptes(cfg, cpt, lim); err != nil {
+	sm, err := setupSalons(cfg, db, svc, lim, gate, vidage, cpt)
+	if err != nil {
+		return err
+	}
+	if err := brancherComptes(cfg, cpt, lim, sm); err != nil {
 		return err
 	}
 	// Vidage du WAL au démarrage, APRÈS les purges (partages : PurgeAtStart et Reconcile ;

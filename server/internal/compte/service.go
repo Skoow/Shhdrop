@@ -39,14 +39,21 @@ type Service struct {
 	act activites
 	pas map[[16]byte]pasTOTP // dernier pas TOTP accepté par compte (rejeu), sous mu
 
-	// Crochets du salon (lot 6) : fermer les salons créés par un compte, les compter. nil :
-	// aucun salon n'est encore relié à un compte (avant le lot 6, salons.compte reste NULL).
+	// Crochets du salon (lot 6) : fermer les salons créés par un compte, les compter, les
+	// lister, en détruire un. nil (salon désactivé, tests) : aucun salon relié.
 	fermerSalons, salonsActifs func(h [16]byte) (int, error)
+	salonsVivants              func(h [16]byte) ([]SalonVivant, error)
+	detruireSalon              func(h [16]byte, id string) error
+	// refs : salons du compte désignés par une ref éphémère (salons.go), sous refsMu.
+	refsMu sync.Mutex
+	refs   map[[16]byte]refSalon
 }
 
-// Postier : la file d'e-mails (courriel.Envoyeur ; un faux dans les tests).
+// Postier : la file d'e-mails (courriel.Envoyeur ; un faux dans les tests). Plein : la file
+// refuserait un message maintenant (une étape sans e-mail répond alors busy comme les autres).
 type Postier interface {
 	Mettre(courriel.Message) error
+	Plein() bool
 }
 
 // Config : base ouverte par OuvrirBase, sous-clés de K_serveur, file d'e-mails, limites (le
@@ -58,8 +65,13 @@ type Config struct {
 	Limites  *limits.Limiter
 	Now      func() time.Time
 	Max      int
-	// FermerSalons, SalonsActifs : crochets du salon (branchés au lot 6), nil sinon.
+	// Crochets du salon (SHH_SALONS=1 ; api.BrancherSalonsDuCompte), nil sinon : fermer les
+	// salons créés par un compte, les compter, les lister (SalonVivant : l'identifiant interne
+	// ne sort jamais du serveur), en détruire un (salon inconnu, fini ou d'un autre compte :
+	// ErrEtape).
 	FermerSalons, SalonsActifs func(h [16]byte) (int, error)
+	SalonsVivants              func(h [16]byte) ([]SalonVivant, error)
+	DetruireSalon              func(h [16]byte, id string) error
 }
 
 // NewService : rien n'est lu ni écrit ; la clé des codes est tirée ici.
@@ -71,7 +83,8 @@ func NewService(c Config) (*Service, error) {
 		c.Now = time.Now
 	}
 	s := &Service{db: c.DB, cles: c.Cles, post: c.Courriel, lim: c.Limites, now: c.Now, max: c.Max,
-		fermerSalons: c.FermerSalons, salonsActifs: c.SalonsActifs}
+		fermerSalons: c.FermerSalons, salonsActifs: c.SalonsActifs, salonsVivants: c.SalonsVivants,
+		detruireSalon: c.DetruireSalon, refs: map[[16]byte]refSalon{}}
 	rand.Read(s.cleCode[:]) // crypto/rand ne renvoie pas d'erreur sous Linux
 	s.et.m = map[[32]byte]*etape{}
 	s.pas = map[[16]byte]pasTOTP{}

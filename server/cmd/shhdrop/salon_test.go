@@ -471,7 +471,7 @@ func TestSetupSalons(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		m, err := setupSalons(cfg, svc.DB, svc, limits.New(time.Now), nil, nil)
+		m, err := setupSalons(cfg, svc.DB, svc, limits.New(time.Now), nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -516,7 +516,7 @@ func TestSalonSansDoubleCompte(t *testing.T) {
 		partage := share.TotalSize(1)
 		cfg.StorageMaxBytes = partage + salonOctets + 2<<30 + marge
 		svc.StorageMax = cfg.StorageMaxBytes
-		m, err := setupSalons(cfg, svc.DB, svc, limits.New(time.Now), nil, nil)
+		m, err := setupSalons(cfg, svc.DB, svc, limits.New(time.Now), nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -561,7 +561,7 @@ func TestSalonSansDoubleCompte(t *testing.T) {
 func TestUsageAuDemarrage(t *testing.T) {
 	cfg, svc := adminSetup(t)
 	cfg.Salons, cfg.SalonsMax, cfg.Origin = true, 200, origineTest
-	m, err := setupSalons(cfg, svc.DB, svc, limits.New(time.Now), nil, nil)
+	m, err := setupSalons(cfg, svc.DB, svc, limits.New(time.Now), nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

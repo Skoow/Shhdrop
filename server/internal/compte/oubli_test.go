@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"testing"
 	"time"
+
+	"github.com/skoow/shhdrop/server/internal/courriel"
 )
 
 // Lot 5 du plan du compte : mot de passe oublié, par e-mail, sans perte du profil (conception
@@ -140,6 +142,41 @@ func TestOubliReponseIdentique(t *testing.T) {
 	}
 	if len(b.post.msgs) != 4 {
 		t.Fatalf("%d e-mails", len(b.post.msgs))
+	}
+}
+
+// File d'e-mails pleine : busy, que l'adresse ait un compte ou non (une réponse qui ne
+// changerait qu'avec un compte dirait qu'il existe ; signalé au lot 5, corrigé au lot 6).
+func TestOubliFilePleineIdentique(t *testing.T) {
+	b := nouveauBanc(t)
+	b.inscrire(t, ipA, "lea@exemple.fr", "lea")
+	b.post.mu.Lock()
+	b.post.err = courriel.ErrPlein
+	b.post.mu.Unlock()
+	for _, a := range []string{"lea@exemple.fr", "inconnue@exemple.fr"} {
+		if _, err := b.s.OubliDebut(ipN(20), a, "fr"); !errors.Is(err, ErrBusy) {
+			t.Fatalf("%s : %v, attendu busy", a, err)
+		}
+	}
+	b.post.mu.Lock()
+	b.post.err = nil
+	b.post.mu.Unlock()
+	b.clk.Add(24 * time.Hour) // limites d'e-mails du jour remises à zéro
+	for _, a := range []string{"lea@exemple.fr", "inconnue@exemple.fr"} {
+		e, err := b.s.OubliDebut(ipN(21), a, "fr")
+		if err != nil {
+			t.Fatal(a, err)
+		}
+		b.post.mu.Lock()
+		b.post.err = courriel.ErrPlein
+		b.post.mu.Unlock()
+		b.clk.Add(time.Minute)
+		if err := b.s.RenvoyerOubli(ipN(21), e, a); !errors.Is(err, ErrBusy) {
+			t.Fatalf("%s : renvoi : %v, attendu busy", a, err)
+		}
+		b.post.mu.Lock()
+		b.post.err = nil
+		b.post.mu.Unlock()
 	}
 }
 

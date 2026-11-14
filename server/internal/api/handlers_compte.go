@@ -63,6 +63,9 @@ func (a compteAPI) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/compte/totp/annuler-retrait", a.sansCorps(a.c.TOTPAnnulerRetrait))
 	mux.HandleFunc("GET /api/compte/export", a.export)
 	mux.HandleFunc("POST /api/compte/supprimer", a.supprimer)
+	// Lot 6 : salons vivants créés par le compte, désignés par une ref éphémère.
+	mux.HandleFunc("GET /api/compte/salons", a.salons)
+	mux.HandleFunc("POST /api/compte/salons/detruire", a.salonsDetruire)
 }
 
 // failCompte : erreur du service → réponse fixe (§8.6) ; toute autre → 500 sans détail.
@@ -163,6 +166,13 @@ func (a compteAPI) session(r *http.Request) (compte.Courante, error) {
 		return compte.Courante{}, compte.ErrSession
 	}
 	return a.c.Session([32]byte(tok))
+}
+
+// sessionCreation : la session de X-Shh-Session pour POST /api/salons (SHH_COMPTES=1), seule
+// route hors de /api/compte/* où ce jeton part (conception du compte §8.5 ; appelée seulement
+// par salonAPI.creer, TestSessionJamaisLueAilleurs).
+func sessionCreation(c *compte.Service, r *http.Request) (compte.Courante, error) {
+	return compteAPI{c: c}.session(r)
 }
 
 func b32(s string) ([32]byte, error) {
@@ -993,4 +1003,63 @@ func (a compteAPI) supprimer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, struct {
 		Salons int `json:"salons_fermes"`
 	}{n})
+}
+
+// salons : GET /api/compte/salons (session) → { salons: [{ ref, expire_vers, places, sieges }] } :
+// salons vivants créés par ce compte (conception §21.6.2) ; ref : 16 octets aléatoires, valables
+// 10 min, en mémoire ; expire_vers : échéance au quart d'heure (« 2026-11-14T21:45Z », déjà la
+// seule date de la ligne) ; places : max_members ; sieges : sièges occupés. Aucune valeur de la
+// ligne du salon ne sort.
+func (a compteAPI) salons(w http.ResponseWriter, r *http.Request) {
+	c, err := a.session(r)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	ls, err := a.c.SalonsListe(c)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	type ligne struct {
+		Ref        string `json:"ref"`
+		ExpireVers string `json:"expire_vers"`
+		Places     int    `json:"places"`
+		Sieges     int    `json:"sieges"`
+	}
+	out := make([]ligne, 0, len(ls))
+	for _, l := range ls {
+		out = append(out, ligne{b64.EncodeToString(l.Ref[:]), time.Unix(l.ExpireVers, 0).UTC().Format("2006-01-02T15:04Z"),
+			l.Places, l.Sieges})
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Salons []ligne `json:"salons"`
+	}{out})
+}
+
+// salonsDetruire : POST /api/compte/salons/detruire (session) { ref } → {} : même effet que
+// « Détruire » du créateur. Ref inconnue, échue, d'un autre compte, salon fini : 404 not_found.
+func (a compteAPI) salonsDetruire(w http.ResponseWriter, r *http.Request) {
+	c, err := a.session(r)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	var b struct {
+		Ref string `json:"ref"`
+	}
+	if err := lire(w, r, &b, maxJSON); err != nil {
+		failCompte(w, err)
+		return
+	}
+	ref, err := secret(b.Ref, 16)
+	if err != nil {
+		failCompte(w, errBadRequest)
+		return
+	}
+	if err := a.c.DetruireParRef(c, [16]byte(ref)); err != nil {
+		failCompte(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct{}{})
 }

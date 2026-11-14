@@ -18,7 +18,13 @@ import (
 func TestSuppressionEfface(t *testing.T) {
 	b := nouveauBanc(t)
 	var fermes [][16]byte
-	b.s.fermerSalons = func(h [16]byte) (int, error) { fermes = append(fermes, h); return 2, nil }
+	b.s.fermerSalons = func(h [16]byte) (int, error) {
+		fermes = append(fermes, h)
+		if len(fermes) > 1 {
+			return 0, nil // seconde passe (lot 6), après l'effacement : plus rien
+		}
+		return 2, nil
+	}
 	_, jLeo, _ := b.inscrire(t, ipN(1), "leo@exemple.fr", "leo")
 	h, j, d := b.inscrire(t, ipA, "lea@exemple.fr", "lea")
 	b.s.Connexion(ipA, "lea@exemple.fr", d.AAuth, OptionsSession{Persistante: true, Etiquette: bytes.Repeat([]byte{9}, 64)}, false)
@@ -38,7 +44,7 @@ func TestSuppressionEfface(t *testing.T) {
 		t.Fatal(err)
 	}
 	n, err := b.s.Supprimer(b.session(t, j))
-	if err != nil || n != 2 || len(fermes) != 1 || fermes[0] != h {
+	if err != nil || n != 2 || len(fermes) != 2 || fermes[0] != h || fermes[1] != h {
 		t.Fatal(n, err, fermes)
 	}
 	var nc, ns, nb int

@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/skoow/shhdrop/server/internal/captcha"
+	"github.com/skoow/shhdrop/server/internal/compte"
 	"github.com/skoow/shhdrop/server/internal/salon"
 	"github.com/skoow/shhdrop/server/internal/share"
 	"github.com/skoow/shhdrop/server/internal/token"
@@ -21,7 +23,14 @@ type salonAPI struct {
 	*server
 	m      *salon.Manager
 	origin string // SHH_ORIGIN : seule origine admise pour le WebSocket
+	// comptes : service du compte (SHH_COMPTES=1) ; nil : création sans compte, comme avant le
+	// compte (conception du compte §8.1).
+	comptes *compte.Service
 }
+
+// errCompteRequis : création de salon sans session valable avec SHH_COMPTES=1 (401
+// compte_requis).
+var errCompteRequis = errors.New("compte requis")
 
 func (a salonAPI) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/salons", a.creer)
@@ -43,7 +52,24 @@ func (a salonAPI) routes(mux *http.ServeMux) {
 func failSalon(w http.ResponseWriter, err error) {
 	var bp *salon.BadPassword
 	var at *salon.Attente
+	var pd *salon.PalierDepasse
+	var bn compte.ErrBanni
 	switch {
+	case errors.As(err, &pd) && pd != nil:
+		writeJSON(w, http.StatusConflict, struct {
+			Error  string `json:"error"`
+			Salons int    `json:"salons"`
+			Places int    `json:"places"`
+			Heures int    `json:"heures"`
+		}{"palier", pd.Salons, pd.Places, pd.Heures})
+	case errors.As(err, &bn):
+		writeJSON(w, http.StatusForbidden, struct {
+			Error string `json:"error"`
+			Jusqu string `json:"jusqu"`
+		}{"banni", bn.Jusqu})
+	case errors.Is(err, errCompteRequis), errors.Is(err, compte.ErrSession):
+		// Compte supprimé entre la session et la création : même réponse que sans session.
+		writeErr(w, http.StatusUnauthorized, "compte_requis")
 	case errors.As(err, &bp) && bp != nil && bp.AttemptsLeft > 0:
 		writeJSON(w, http.StatusForbidden, struct {
 			Error string `json:"error"`
@@ -97,11 +123,17 @@ type creerBody struct {
 	ShownAt           string `json:"shown_at"`
 }
 
-// creer : patron de create des partages : format → gel → anti-robot → quota → création →
-// difficulté suivante. Une requête invalide ou un serveur gelé ne consomme ni le défi ni le
-// quota. access_v ou manage_v déjà pris : 400 comme une création invalide (§29.8), compté au
-// quota et dans la difficulté. Refus du gestionnaire sans faute du client (503 busy,
-// plafond des salons vivants du bloc : 429 limit) : quota du jour rendu.
+// creer : patron de create des partages : format → gel → (SHH_COMPTES=1 : session) →
+// anti-robot → quota → création → difficulté suivante. Une requête invalide, un serveur gelé
+// ou une session absente ne consomme ni le défi ni le quota. access_v ou manage_v déjà pris :
+// 400 comme une création invalide (§29.8), compté au quota et dans la difficulté. Refus du
+// gestionnaire sans faute du client (503 busy, plafond des salons vivants du bloc : 429
+// limit) et refus du compte (409 palier, 403 banni, 401 compte_requis : compte supprimé
+// entre-temps) : quota du jour rendu.
+//
+// SHH_COMPTES=1 (conception du compte §8.6) : X-Shh-Session exigé (sessionCreation, seule
+// lecture de cet en-tête hors des routes /api/compte/*) ; la ligne du salon garde le compte.
+// SHH_COMPTES=0 : l'en-tête n'est pas lu, création sans compte comme avant.
 func (a salonAPI) creer(w http.ResponseWriter, r *http.Request) {
 	var b creerBody
 	if err := readJSON(w, r, &b); err != nil || b.MembersCanDestroy == nil {
@@ -126,6 +158,14 @@ func (a salonAPI) creer(w http.ResponseWriter, r *http.Request) {
 		fail(w, share.ErrFrozen)
 		return
 	}
+	if a.comptes != nil {
+		c, err := sessionCreation(a.comptes, r)
+		if err != nil {
+			failSalon(w, errCompteRequis)
+			return
+		}
+		req.Compte = &c.H
+	}
 	if err := a.antiRobot(b.Altcha, b.ShownAt, b.HP, ip); err != nil {
 		failSalon(w, err)
 		return
@@ -137,10 +177,13 @@ func (a salonAPI) creer(w http.ResponseWriter, r *http.Request) {
 	left, err := a.m.Creer(req)
 	if err != nil {
 		var at *salon.Attente
+		var pd *salon.PalierDepasse
+		var bn compte.ErrBanni
 		switch {
 		case errors.Is(err, salon.ErrConflict):
 			a.cap.RecordCreate(ip)
-		case errors.Is(err, salon.ErrBusy), errors.As(err, &at):
+		case errors.Is(err, salon.ErrBusy), errors.As(err, &at), errors.As(err, &pd), errors.As(err, &bn),
+			errors.Is(err, compte.ErrSession):
 			a.lim.RefundSalonCreate(ip)
 		}
 		failSalon(w, err)
@@ -422,10 +465,10 @@ func (a salonAPI) detruire(w http.ResponseWriter, r *http.Request) {
 	default:
 		err = salon.ErrForbidden
 	}
-	premier := false
+	var sig salon.Signalement
 	if err == nil {
 		if report {
-			premier, err = a.m.DetruireSignaler(sg, jeton)
+			sig, err = a.m.DetruireSignaler(sg, jeton)
 		} else {
 			err = a.m.Detruire(sg, jeton)
 		}
@@ -434,13 +477,48 @@ func (a salonAPI) detruire(w http.ResponseWriter, r *http.Request) {
 		failSalon(w, err)
 		return
 	}
-	if premier {
-		a.reports.add(a.svc.Now())
+	if report {
+		// Sans catégorie sur cette route : « Autre » (conception du compte §21.10.2 ne prévoit de
+		// catégorie que pour « Quitter et signaler »).
+		a.usage.SignalementSalon(salon.CategorieAutre)
 	}
+	a.signale(sig)
 	writeJSON(w, http.StatusOK, struct{}{})
 }
 
-// signaler : POST /api/salons/signaler (X-Shh-Membre, corps {}) → {} : « Quitter et signaler »
+// signale : premier signalement d'un salon : compté dans l'entier horaire (/healthz) et, salon
+// créé par un compte, ancienneté du créateur remise à zéro (conception du compte §11, D4 ; au
+// mieux : le signalement est déjà fait, une erreur de comptes.db n'y change rien).
+func (a salonAPI) signale(sig salon.Signalement) {
+	if !sig.Premier {
+		return
+	}
+	a.reports.add(a.svc.Now())
+	if sig.Compte != nil && a.comptes != nil {
+		_ = a.comptes.Signale(*sig.Compte)
+	}
+}
+
+// categorieDe : catégorie d'un signalement (conception du compte §21.10.1) : absente → 10
+// « Autre » (clients d'avant) ; sinon exactement un entier de 1 à 10 en JSON (null, texte,
+// décimal, 0, 11 : errBadRequest).
+func categorieDe(raw json.RawMessage) (uint8, error) {
+	if raw == nil {
+		return salon.CategorieAutre, nil
+	}
+	for c := uint8(1); c <= salon.NbCategories; c++ {
+		if string(raw) == strconv.Itoa(int(c)) {
+			return c, nil
+		}
+	}
+	return 0, errBadRequest
+}
+
+// signaler : POST /api/salons/signaler (X-Shh-Membre, corps {} ou {"categorie": 1..10}) → {} :
+// « Quitter et signaler ». Catégorie absente : 10 « Autre » ; comptée en mémoire seulement, sur
+// le salon vivant et dans les compteurs d'usage (conception du compte §21.10 ; jamais sur
+// disque) ; catégorie invalide : 400, aucun départ. Premier signalement d'un salon créé par un
+// compte : ancienneté du créateur remise à zéro. Le reste :
 // (spec §39.5, §39.3.9). Le membre part comme par un 0x03 du WebSocket (Quitter : départ
 // diffusé, jeton oublié, WebSocket fermé en 1000), puis le signalement compte dans l'entier
 // horaire des signalements (§9.5, sans identifiant, le même que pour un partage) : seulement
@@ -449,8 +527,15 @@ func (a salonAPI) detruire(w http.ResponseWriter, r *http.Request) {
 // qu'une fois (oublié aussitôt). En-tête absent ou mal formé, corps autre que {} : 400 ;
 // jeton inconnu, salon échu ou détruit : 404 ; jeton révoqué : 403 excluded.
 func (a salonAPI) signaler(w http.ResponseWriter, r *http.Request) {
-	var b struct{}
+	var b struct {
+		Categorie json.RawMessage `json:"categorie"` // valeur brute : null, "3", 3.0 refusés
+	}
 	if err := readJSON(w, r, &b); err != nil {
+		failSalon(w, err)
+		return
+	}
+	cat, err := categorieDe(b.Categorie)
+	if err != nil {
 		failSalon(w, err)
 		return
 	}
@@ -459,16 +544,50 @@ func (a salonAPI) signaler(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		mb, err = a.m.Membre(jeton)
 	}
-	premier := false
+	var sig salon.Signalement
 	if err == nil {
-		premier, err = a.m.QuitterSignaler(mb)
+		sig, err = a.m.QuitterSignaler(mb, cat)
 	}
 	if err != nil {
 		failSalon(w, err)
 		return
 	}
-	if premier {
-		a.reports.add(a.svc.Now())
-	}
+	a.usage.SignalementSalon(cat)
+	a.signale(sig)
 	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+// PalierDuCompte : crochet salon.Config.Palier (SHH_COMPTES=1) : limites du compte lues dans
+// *svc à chaque appel (le service du compte est créé après le gestionnaire des salons, qui lui
+// donne ses propres crochets : BrancherSalonsDuCompte). *svc encore nil : refus fermé.
+func PalierDuCompte(svc **compte.Service) func(h [16]byte) (salon.Palier, error) {
+	return func(h [16]byte) (salon.Palier, error) {
+		if *svc == nil {
+			return salon.Palier{}, salon.ErrBase
+		}
+		l, err := (*svc).Palier(h)
+		return salon.Palier{Salons: l.Salons, Places: l.Places, Heures: l.Heures}, err
+	}
+}
+
+// BrancherSalonsDuCompte : crochets du salon dans la configuration du compte (SHH_SALONS=1) :
+// fermer, compter, lister et détruire les salons d'un compte. Salon inconnu, fini ou d'un
+// autre compte : compte.ErrEtape (404 not_found).
+func BrancherSalonsDuCompte(c *compte.Config, m *salon.Manager) {
+	c.FermerSalons, c.SalonsActifs = m.FermerDuCompte, m.SalonsDuCompte
+	c.SalonsVivants = func(h [16]byte) ([]compte.SalonVivant, error) {
+		vs, err := m.SalonsVivantsDuCompte(h)
+		out := make([]compte.SalonVivant, 0, len(vs))
+		for _, v := range vs {
+			out = append(out, compte.SalonVivant{ID: v.ID, ExpireVers: v.ExpireVers, Places: v.Places, Sieges: v.Sieges})
+		}
+		return out, err
+	}
+	c.DetruireSalon = func(h [16]byte, id string) error {
+		err := m.DetruireDuCompte(h, id)
+		if errors.Is(err, salon.ErrNotFound) {
+			return compte.ErrEtape
+		}
+		return err
+	}
 }

@@ -293,6 +293,12 @@ func TestEtatQueDesAgregats(t *testing.T) {
 			}
 		case reflect.Pointer:
 			voir(chemin, ty.Elem())
+		case reflect.Array:
+			// Tableau de taille fixe d'entiers seulement (signalements par catégorie, lot 6 du
+			// plan du compte) : jamais une liste qui grandit.
+			if k := ty.Elem().Kind(); k != reflect.Int64 && k != reflect.Int {
+				t.Errorf("tableau non agrégé dans l'état : %s (%s)", chemin, ty.Elem().Kind())
+			}
 		case reflect.Bool, reflect.Int, reflect.Int64, reflect.Uint32, reflect.Uint64:
 		case reflect.String:
 			if !chaines[chemin] {

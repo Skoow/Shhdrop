@@ -505,3 +505,23 @@ func TestDelaiParEnvoi(t *testing.T) {
 		t.Fatal("conception §8.7 : 20 s par envoi")
 	}
 }
+
+// Plein (lot 6 du plan du compte) : vrai quand la file refuserait un message, pour qu'une étape
+// sans e-mail (récupération d'une adresse sans compte) réponde busy comme les autres.
+func TestPleinSuitLaFile(t *testing.T) {
+	e, err := Nouveau(config.SMTP{Host: "127.0.0.1", Port: 2525, User: "u", From: "Shhgone <a@exemple.fr>"}, []byte("m"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range Capacite {
+		if e.Plein() {
+			t.Fatal("pleine à", i)
+		}
+		if err := e.Mettre(Message{A: "lea@exemple.fr", Langue: "fr", Code: "123456"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !e.Plein() || !errors.Is(e.Mettre(Message{A: "lea@exemple.fr", Langue: "fr", Code: "123456"}), ErrPlein) {
+		t.Fatal("file pleine non vue")
+	}
+}

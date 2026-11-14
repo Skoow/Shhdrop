@@ -12,7 +12,7 @@ import (
 
 // Supprimer (session récente ; refus pendant l'attente qui suit une récupération, R4) : ferme
 // d'abord les salons créés par le compte (crochet du salon, lot 6 ; un échec arrête tout, le
-// compte reste et la personne peut réessayer), puis efface dans une transaction la ligne du
+// compte reste et la personne peut réessayer ; une seconde passe suit l'effacement), puis efface dans une transaction la ligne du
 // compte (empreintes, vérificateur, enveloppe, séquestre, empreinte du pseudo, deux coffres,
 // secret TOTP) et ses sessions ; WAL vidé ensuite. La ligne bannis de l'adresse est gardée
 // jusqu'à son échéance (§13). Les partages créés sont détruits par l'appareil avant cet appel
@@ -50,6 +50,15 @@ func (s *Service) Supprimer(c Courante) (int, error) {
 	})
 	if err != nil {
 		return 0, err
+	}
+	// Seconde passe, le compte effacé : une création commencée avant (palier lu, compte encore
+	// là) et finie après la première passe est fermée ici ; une création qui lit le palier
+	// maintenant est refusée (salon.Manager.Creer : palier et insertion sous le même verrou que
+	// cette passe). Un échec ici ne rend pas le compte : ces salons échoient (24 h au plus).
+	if s.fermerSalons != nil {
+		if k, err := s.fermerSalons(c.H); err == nil {
+			n += k
+		}
 	}
 	for _, tv := range fermees {
 		s.act.oublier(tv)

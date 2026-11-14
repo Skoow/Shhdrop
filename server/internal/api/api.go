@@ -367,7 +367,7 @@ func newHandler(s *server, static http.Handler, sal Salons) http.Handler {
 	// Salon (SHH_SALONS=1) : sans gestionnaire, aucune route /api/salons/* (404 uniforme).
 	s.salons = sal.M
 	if sal.M != nil {
-		salonAPI{server: s, m: sal.M, origin: sal.Origin}.routes(api)
+		salonAPI{server: s, m: sal.M, origin: sal.Origin, comptes: sal.Comptes}.routes(api)
 	}
 	if sal.Comptes != nil {
 		compteAPI{server: s, c: sal.Comptes}.routes(api)

@@ -516,19 +516,27 @@ func (s *server) done(w http.ResponseWriter, r *http.Request) {
 // en-tête, K_preuve dans le corps). L'expéditeur passe par /api/manage/destroy.
 // reason : absent (destruction : les ouvertures actives finissent) ou exactement "report"
 // (signalement : flux coupés, compté dans l'heure) ; toute autre valeur → 400, jamais de
-// texte libre (spec §36 S14, §41.8).
+// texte libre (spec §36 S14, §41.8). categorie (conception du compte §21.10.2) : entier 1 à
+// 10, seulement avec "report" (sinon 400) ; absente : 10 « Autre » ; comptée en mémoire
+// (usage), jamais écrite.
 func (s *server) destroy(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		Proof  string          `json:"proof"`
-		Reason json.RawMessage `json:"reason"` // valeur brute : null, "" ou "REPORT" refusés
+		Proof     string          `json:"proof"`
+		Reason    json.RawMessage `json:"reason"`    // valeur brute : null, "" ou "REPORT" refusés
+		Categorie json.RawMessage `json:"categorie"` // seulement avec reason "report"
 	}
 	if err := readJSON(w, r, &b); err != nil {
 		fail(w, err)
 		return
 	}
 	report := b.Reason != nil
-	if report && string(b.Reason) != `"report"` {
+	if report && string(b.Reason) != `"report"` || !report && b.Categorie != nil {
 		fail(w, errBadRequest)
+		return
+	}
+	cat, err := categorieDe(b.Categorie)
+	if err != nil {
+		fail(w, err)
 		return
 	}
 	ka, err := headerSecret(r, "X-Shh-Access")
@@ -547,6 +555,7 @@ func (s *server) destroy(w http.ResponseWriter, r *http.Request) {
 	}
 	if report {
 		s.reports.add(s.svc.Now())
+		s.usage.SignalementPartage(cat) // en mémoire seulement : la base n'apprend aucune catégorie
 	}
 	s.usage.Destruction() // signalement compris, sans le distinguer (§15.2)
 	w.WriteHeader(http.StatusNoContent)

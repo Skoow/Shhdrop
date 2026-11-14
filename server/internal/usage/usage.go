@@ -7,8 +7,10 @@
 //     ni par salon ; aucune table (map), aucune liste, aucune date ;
 //   - en mémoire seulement : rien n'est écrit sur disque, tout repart de zéro au démarrage ;
 //   - lus seulement par l'écouteur d'administration, jamais par une route publique ;
-//   - les signalements ne sont pas comptés à part (spec §15.2, §36 S21 : un booléen
-//     seulement) : ils entrent dans « destructions demandées » avec les autres.
+//   - signalements : un entier par catégorie (codes 1 à 10 de la conception du compte §21.10.1)
+//     et par sorte (partage, salon), depuis le démarrage (R14, décision du propriétaire du
+//     14 novembre, sous réserve de l'avis du juriste). Un signalement de partage compte aussi
+//     dans « destructions demandées ». L'alerte de /healthz reste un booléen (§15.2, §36 S21).
 package usage
 
 import "sync/atomic"
@@ -18,7 +20,12 @@ type Counters struct {
 	partagesCrees, envoisTermines, deverrouillages, destructions atomic.Int64
 	refusDebit, octetsRecus, octetsServis                        atomic.Int64
 	salonsCrees, entreesSalon                                    atomic.Int64
+	// signalementsPartage, signalementsSalon : indice = code de la catégorie − 1.
+	signalementsPartage, signalementsSalon [NbCategories]atomic.Int64
 }
+
+// NbCategories : catégories de signalement (codes 1 à NbCategories, le dernier « Autre »).
+const NbCategories = 10
 
 // Snapshot : lecture des compteurs à un instant (JSON de la page d'administration).
 type Snapshot struct {
@@ -40,6 +47,10 @@ type Snapshot struct {
 	// SalonsCrees, EntreesSalon : salons créés et entrées réussies dans un salon.
 	SalonsCrees  int64 `json:"salons_crees"`
 	EntreesSalon int64 `json:"entrees_salon"`
+	// SignalementsPartage, SignalementsSalon : signalements par catégorie (indice 0 = code 1,
+	// indice 9 = code 10 « Autre »), partages ouverts et salons.
+	SignalementsPartage [NbCategories]int64 `json:"signalements_partage"`
+	SignalementsSalon   [NbCategories]int64 `json:"signalements_salon"`
 }
 
 func (c *Counters) PartageCree()       { c.partagesCrees.Add(1) }
@@ -52,6 +63,24 @@ func (c *Counters) Servi(octets int64) { c.octetsServis.Add(octets) }
 func (c *Counters) SalonCree()         { c.salonsCrees.Add(1) }
 func (c *Counters) EntreeSalon()       { c.entreesSalon.Add(1) }
 
+// SignalementPartage, SignalementSalon : un signalement de la catégorie code (1 à 10) ; un code
+// hors de ces bornes n'est pas compté (l'API le refuse avant).
+func (c *Counters) SignalementPartage(code uint8) { compter(&c.signalementsPartage, code) }
+func (c *Counters) SignalementSalon(code uint8)   { compter(&c.signalementsSalon, code) }
+
+func compter(t *[NbCategories]atomic.Int64, code uint8) {
+	if code >= 1 && int(code) <= NbCategories {
+		t[code-1].Add(1)
+	}
+}
+
+func lire(t *[NbCategories]atomic.Int64) (out [NbCategories]int64) {
+	for i := range t {
+		out[i] = t[i].Load()
+	}
+	return out
+}
+
 // Snapshot lit tous les compteurs.
 func (c *Counters) Snapshot() Snapshot {
 	return Snapshot{
@@ -59,5 +88,6 @@ func (c *Counters) Snapshot() Snapshot {
 		Deverrouillages: c.deverrouillages.Load(), Destructions: c.destructions.Load(),
 		RefusDebit: c.refusDebit.Load(), OctetsRecus: c.octetsRecus.Load(), OctetsServis: c.octetsServis.Load(),
 		SalonsCrees: c.salonsCrees.Load(), EntreesSalon: c.entreesSalon.Load(),
+		SignalementsPartage: lire(&c.signalementsPartage), SignalementsSalon: lire(&c.signalementsSalon),
 	}
 }

@@ -285,18 +285,49 @@ func (s *salon) prendreAEcraser() (*Conversation, []uint32) {
 // un, fermé en 1000 (demande 0x03, ou POST /api/salons/signaler hors du WebSocket). Membre
 // périmé : ErrNotFound ; exclu : ErrExcluded.
 func (m *Manager) Quitter(mb Membre) error {
-	_, err := m.quitter(mb, false)
+	_, err := m.quitter(mb, false, 0)
 	return err
 }
 
-// QuitterSignaler : « Quitter et signaler » (POST /api/salons/signaler, spec §39.5) : départ
-// comme Quitter ; premier vaut vrai pour le premier signalement réussi de ce salon seulement
-// (salon.signale), que l'appelant compte dans l'entier horaire des signalements.
-func (m *Manager) QuitterSignaler(mb Membre) (premier bool, err error) {
-	return m.quitter(mb, true)
+// NbCategories : catégories de signalement (conception du compte §21.10.1 : codes 1 à 10, mêmes
+// dans le site et les apps) ; CategorieAutre : « Autre », la valeur d'un signalement sans
+// catégorie (clients d'avant).
+const (
+	NbCategories   = 10
+	CategorieAutre = 10
+)
+
+// Signalement : résultat d'un signalement réussi. Premier : premier signalement de ce salon
+// (salon.signale : compté une fois dans l'entier horaire de /healthz, et remise à zéro de
+// l'ancienneté du créateur) ; Compte : compte créateur du salon, rendu seulement avec Premier
+// (nil sinon, ou pour un salon sans compte).
+type Signalement struct {
+	Premier bool
+	Compte  *[16]byte
 }
 
-func (m *Manager) quitter(mb Membre, signaler bool) (premier bool, err error) {
+// QuitterSignaler : « Quitter et signaler » (POST /api/salons/signaler, spec §39.5) : départ
+// comme Quitter, puis un signalement de la catégorie (1 à NbCategories, sinon ErrBadRequest
+// sans départ) compté sur le salon vivant (Signalements). Premier : voir Signalement ; le compte
+// est lu dans la ligne après le départ (hors du verrou du salon).
+func (m *Manager) QuitterSignaler(mb Membre, categorie uint8) (Signalement, error) {
+	if categorie < 1 || categorie > NbCategories {
+		return Signalement{}, ErrBadRequest
+	}
+	premier, err := m.quitter(mb, true, categorie)
+	if err != nil || !premier {
+		return Signalement{}, err
+	}
+	// Ligne illisible ou déjà partie : départ fait, l'ancienneté n'est simplement pas remise à
+	// zéro (erreur rare ; le signalement est compté).
+	var c []byte
+	if m.cfg.DB.QueryRow(`SELECT compte FROM salons WHERE id=?`, mb.salon.id).Scan(&c) != nil {
+		c = nil
+	}
+	return Signalement{Premier: true, Compte: compteDe(c)}, nil
+}
+
+func (m *Manager) quitter(mb Membre, signaler bool, categorie uint8) (premier bool, err error) {
 	s := mb.salon
 	if s == nil {
 		return false, ErrNotFound
@@ -313,10 +344,34 @@ func (m *Manager) quitter(mb Membre, signaler bool) (premier bool, err error) {
 	if c != nil {
 		c.arreter(CodeFin, nil)
 	}
-	if signaler && !s.signale {
-		s.signale, premier = true, true
+	if signaler {
+		s.signalements[categorie-1]++
+		if !s.signale {
+			s.signale, premier = true, true
+		}
 	}
 	return premier, nil
+}
+
+// SalonSignale : un salon vivant signalé au moins une fois : identifiant interne (jamais
+// montré : le tableau de bord n'en montrera qu'une ref éphémère, lot 7) et signalements par
+// catégorie (indice = code − 1).
+type SalonSignale struct {
+	ID         string
+	Categories [NbCategories]int
+}
+
+// Signalements : salons vivants de ce processus signalés au moins une fois (mémoire seulement).
+func (m *Manager) Signalements() []SalonSignale {
+	var out []SalonSignale
+	for _, s := range m.copieSalons(nil) {
+		s.mu.Lock()
+		if !s.fini && s.signalements != ([NbCategories]int{}) {
+			out = append(out, SalonSignale{ID: s.id, Categories: s.signalements})
+		}
+		s.mu.Unlock()
+	}
+	return out
 }
 
 // etatAuLocked : sièges occupés et leurs nonces au rang seq (enregistrement 0x0D), refaits

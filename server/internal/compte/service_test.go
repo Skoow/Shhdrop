@@ -38,6 +38,13 @@ func (f *faux) Mettre(m courriel.Message) error {
 	return nil
 }
 
+// Plein : la file refuse (err = courriel.ErrPlein).
+func (f *faux) Plein() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return errors.Is(f.err, courriel.ErrPlein)
+}
+
 func (f *faux) n() int { f.mu.Lock(); defer f.mu.Unlock(); return len(f.msgs) }
 
 func (f *faux) dernier(t *testing.T) courriel.Message {

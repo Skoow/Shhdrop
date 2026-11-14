@@ -126,6 +126,9 @@ func (e *Envoyeur) Mettre(m Message) error {
 	}
 }
 
+// Plein : la file est pleine (Mettre rendrait ErrPlein maintenant).
+func (e *Envoyeur) Plein() bool { return len(e.file) >= cap(e.file) }
+
 // Run envoie les messages de la file, un à la fois, jusqu'à l'annulation de ctx (les messages
 // restants sont alors oubliés). Une seule instance à la fois.
 func (e *Envoyeur) Run(ctx context.Context) {

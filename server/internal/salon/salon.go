@@ -81,7 +81,11 @@ type salon struct {
 	// premier signalement du salon compte. Un booléen, sans identifiant ni adresse ; oublié
 	// avec l'état du salon (fin, redémarrage).
 	signale bool
-	journal []evenement
+	// signalements : « Quitter et signaler » réussis par catégorie (indice = code − 1), en
+	// mémoire seulement (conception du compte §21.10.3, R14 : pour que le fondateur agisse sans
+	// lien d'invitation) ; aucun identifiant de membre ; remis à zéro à la fin du salon.
+	signalements [NbCategories]int
+	journal      []evenement
 	// index : trames non volatiles rangées, triées par seq (relais.go).
 	index []entree
 	// Pièces (pieces.go) : lesPieces, toutes les pièces vivantes par identifiant ; libres,

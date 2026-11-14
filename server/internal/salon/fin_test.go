@@ -582,26 +582,26 @@ func TestDetruireSignalerUneFois(t *testing.T) {
 	c := b.creer(t, 4)
 	b.entrer(t, c, true)
 	_, a := b.entrerMembre(t, c, false)
-	if premier, err := b.m.QuitterSignaler(a); err != nil || !premier {
-		t.Fatal("quitter et signaler :", premier, err)
+	if sig, err := b.m.QuitterSignaler(a, CategorieAutre); err != nil || !sig.Premier {
+		t.Fatal("quitter et signaler :", sig, err)
 	}
-	if premier, err := b.m.DetruireSignaler(c.gestion, nil); err != nil || premier {
-		t.Fatal("détruire et signaler après un signalement :", premier, err)
+	if sig, err := b.m.DetruireSignaler(c.gestion, nil); err != nil || sig.Premier {
+		t.Fatal("détruire et signaler après un signalement :", sig, err)
 	}
 
 	c2 := b.creer(t, 4)
 	b.entrer(t, c2, true)
-	var second bool
+	var second Signalement
 	var errSecond error
 	crochetAchever = func(*salon) {
 		crochetAchever = nil
 		second, errSecond = b.m.DetruireSignaler(c2.gestion, nil) // ligne encore vivante
 	}
 	defer func() { crochetAchever = nil }()
-	if premier, err := b.m.DetruireSignaler(c2.gestion, nil); err != nil || !premier {
-		t.Fatal("premier signalement :", premier, err)
+	if sig, err := b.m.DetruireSignaler(c2.gestion, nil); err != nil || !sig.Premier {
+		t.Fatal("premier signalement :", sig, err)
 	}
-	if errSecond != nil || second {
+	if errSecond != nil || second.Premier {
 		t.Fatal("détruire simultané compté :", second, errSecond)
 	}
 }

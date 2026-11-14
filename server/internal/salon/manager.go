@@ -91,7 +91,24 @@ type Config struct {
 	// demandés après chaque effacement ou réécriture sensible d'une ligne de salon ou de
 	// pièce ; le serveur en fait tourner la boucle. Absent : un Vidage propre, sans boucle.
 	Vidage *store.Vidage
+	// Palier (facultatif, SHH_COMPTES=1 ; plan du compte, lot 6) : limites du compte h, lues à
+	// chaque création qui porte un compte et à chaque réglage d'un salon créé par un compte. Son
+	// erreur (compte banni, supprimé, base illisible) est rendue telle quelle. nil : une création
+	// avec compte est refusée (ErrBase) et les réglages d'un salon de compte ne sont pas bornés
+	// par le palier (salon créé avant que SHH_COMPTES passe à 0 : sa ligne survit au
+	// redémarrage).
+	Palier func(h [16]byte) (Palier, error)
 }
+
+// Palier : ce que le compte créateur permet (conception du compte §11) : salons vivants à la
+// fois, places (max_members, créateur compris), durée en heures au plus.
+type Palier struct{ Salons, Places, Heures int }
+
+// PalierDepasse : création ou réglage au-delà du palier du compte (409 palier, avec les
+// limites).
+type PalierDepasse struct{ Palier }
+
+func (e *PalierDepasse) Error() string { return "salon: palier du compte dépassé" }
 
 // ConvDiskOpsDefaut : taille par défaut de chacune des deux bornes des conversations.
 const ConvDiskOpsDefaut = 16
@@ -369,11 +386,14 @@ func base(err error) error {
 // CreerReq : POST /api/salons. AccessV, ManageV, ProofV : SHA-256 de K_accès_s, S_gestion
 // et K_preuve_s (les deux premiers calculés par le serveur depuis les secrets reçus). Bloc :
 // clé opaque du bloc du client (limits.CleBloc), non nulle, gardée en mémoire seulement.
+// Compte (SHH_COMPTES=1) : h du compte créateur, rangé dans salons.compte (seul lien compte ↔
+// salons, effacé avec la ligne) ; nil : salon sans compte (colonne NULL).
 type CreerReq struct {
 	AccessV, ManageV, ProofV, Salt       []byte
 	TTLHours, MaxMembers, KdfOps, KdfMem int
 	MembersCanDestroy                    bool
 	Bloc                                 [32]byte
+	Compte                               *[16]byte
 }
 
 // Valide : valeurs de la spécification (durée, membres, Argon2id, longueurs, vérificateurs
@@ -391,6 +411,12 @@ func (r CreerReq) Valide() bool {
 // existent déjà ou si l'usage total plus 2 Gio dépasse StorageMax ; *Attente (jusqu'au
 // quart d'heure suivant, où une échéance peut libérer une place) si le bloc a déjà
 // VivantsParBloc salons vivants. Un refus ne prend aucune place du bloc.
+//
+// Avec un compte : palier lu (Config.Palier) puis salons vivants du compte comptés sous
+// createMu, comme l'insertion : deux créations simultanées du même compte ne dépassent pas le
+// palier, et une création qui lit le palier après l'effacement du compte est refusée (la
+// seconde passe de fermeture de compte.Supprimer prend ce verrou après l'effacement).
+// *PalierDepasse au-delà (places, durée, salons vivants).
 func (m *Manager) Creer(r CreerReq) (time.Duration, error) {
 	if !r.Valide() {
 		return 0, ErrBadRequest
@@ -405,6 +431,11 @@ func (m *Manager) Creer(r CreerReq) (time.Duration, error) {
 		return 0, ErrConflict
 	case !errors.Is(err, sql.ErrNoRows):
 		return 0, base(err)
+	}
+	if r.Compte != nil {
+		if err := m.palierCreationLocked(r); err != nil {
+			return 0, err
+		}
 	}
 	var vivants int
 	if err := m.cfg.DB.QueryRow(`SELECT count(*) FROM salons WHERE expires_at>? AND failed_attempts<?`,
@@ -450,13 +481,111 @@ func (m *Manager) Creer(r CreerReq) (time.Duration, error) {
 	if r.MembersCanDestroy {
 		mcd = 1
 	}
+	var compte any // NULL sans compte
+	if r.Compte != nil {
+		compte = r.Compte[:]
+	}
 	if _, err := m.cfg.DB.Exec(`INSERT INTO salons(id,access_v,manage_v,proof_v,salt,kdf_ops,kdf_mem,expires_at,
-		max_members,members_can_destroy) VALUES(?,?,?,?,?,?,?,?,?,?)`, id, r.AccessV, r.ManageV, r.ProofV,
-		r.Salt, r.KdfOps, r.KdfMem, exp, r.MaxMembers, mcd); err != nil {
+		max_members,members_can_destroy,compte) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, r.AccessV, r.ManageV, r.ProofV,
+		r.Salt, r.KdfOps, r.KdfMem, exp, r.MaxMembers, mcd, compte); err != nil {
 		m.avecMu(func() { m.finirLocked(id) })
 		return 0, base(err)
 	}
 	return secs(exp - now), nil
+}
+
+// palierCreationLocked : palier du compte de r (Config.Palier) : places, durée, puis salons
+// vivants du compte. Sous createMu.
+func (m *Manager) palierCreationLocked(r CreerReq) error {
+	if m.cfg.Palier == nil {
+		return ErrBase // compte sans crochet : refus fermé
+	}
+	p, err := m.cfg.Palier(*r.Compte)
+	if err != nil {
+		return err
+	}
+	if r.MaxMembers > p.Places || r.TTLHours > p.Heures {
+		return &PalierDepasse{p}
+	}
+	n, err := m.SalonsDuCompte(*r.Compte)
+	if err != nil {
+		return err
+	}
+	if n >= p.Salons {
+		return &PalierDepasse{p}
+	}
+	return nil
+}
+
+// SalonsDuCompte : salons vivants (ni échus, ni détruits) créés par le compte h.
+func (m *Manager) SalonsDuCompte(h [16]byte) (int, error) {
+	var n int
+	err := m.cfg.DB.QueryRow(`SELECT count(*) FROM salons WHERE compte=? AND expires_at>? AND failed_attempts<?`,
+		h[:], m.cfg.Now().Unix(), maxEssais).Scan(&n)
+	return n, base(err)
+}
+
+// SalonVue : un salon vivant du compte (GET /api/compte/salons). ID : identifiant interne, qui
+// ne sort jamais du serveur (le compte n'en montre qu'une ref éphémère) ; ExpireVers :
+// échéance (secondes Unix, multiple de 15 min, seule date gardée) ; Places : max_members ;
+// Sieges : sièges occupés (0 si personne n'est encore entré).
+type SalonVue struct {
+	ID             string
+	ExpireVers     int64
+	Places, Sieges int
+}
+
+// SalonsVivantsDuCompte : salons vivants créés par le compte h, par échéance croissante.
+func (m *Manager) SalonsVivantsDuCompte(h [16]byte) ([]SalonVue, error) {
+	rows, err := m.cfg.DB.Query(`SELECT id, expires_at, max_members FROM salons WHERE compte=? AND expires_at>?
+		AND failed_attempts<? ORDER BY expires_at, id`, h[:], m.cfg.Now().Unix(), maxEssais)
+	if err != nil {
+		return nil, base(err)
+	}
+	defer rows.Close()
+	var out []SalonVue
+	for rows.Next() {
+		var v SalonVue
+		if err := rows.Scan(&v.ID, &v.ExpireVers, &v.Places); err != nil {
+			return nil, base(err)
+		}
+		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, base(err)
+	}
+	for i := range out {
+		m.mu.Lock()
+		s := m.salons[out[i].ID]
+		m.mu.Unlock()
+		if s != nil {
+			out[i].Sieges = s.occupes()
+		}
+	}
+	return out, nil
+}
+
+// CompteDuSalon : compte créateur du salon de K_accès_s, vivant ou non (bannissement par lien,
+// lot 7) ; nil pour un salon sans compte ; ErrNotFound si aucune ligne.
+func (m *Manager) CompteDuSalon(kAcces []byte) (*[16]byte, error) {
+	v := share.Verifier(kAcces)
+	if v == nil {
+		return nil, ErrNotFound
+	}
+	var c []byte
+	if err := m.cfg.DB.QueryRow(`SELECT compte FROM salons WHERE access_v=?`, v).Scan(&c); err != nil {
+		return nil, notFound(err)
+	}
+	return compteDe(c), nil
+}
+
+// compteDe : colonne salons.compte lue (nil, ou 16 octets par la contrainte du schéma).
+func compteDe(c []byte) *[16]byte {
+	if len(c) != 16 {
+		return nil
+	}
+	h := [16]byte(c)
+	return &h
 }
 
 // Meta : GET /api/salons/meta. Salon inconnu, échu ou détruit : ErrNotFound.

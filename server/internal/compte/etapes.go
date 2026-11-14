@@ -124,6 +124,11 @@ func (s *Service) envoyerCodeLocked(e *etape, adresse string, now time.Time) err
 	code := fmt.Sprintf("%06d", n.Int64())
 	c := s.hmacCode(e, code)
 	if e.fantome {
+		// Même réponse qu'une vraie étape quand la file est pleine (sinon busy dirait que
+		// l'adresse a un compte ; relevé au lot 5).
+		if s.post.Plein() {
+			return ErrBusy
+		}
 		rand.Read(c[:])
 	} else if err := s.post.Mettre(courriel.Message{A: adresse, Langue: e.langue, Code: code}); err != nil {
 		if errors.Is(err, courriel.ErrPlein) {

@@ -26,9 +26,11 @@ var readHeaders = []string{"Authorization", "X-Shh-Client-IP", "X-Shh-Access", "
 var salonHeaders = []string{"X-Shh-Membre", "X-Shh-Piece", "X-Shh-Access-New"}
 
 // compteHeaders : jeton de session du compte (conception du compte §8.5, §15 ; plan lot 4),
-// lu seulement dans handlers_compte.go : il ne part que vers /api/compte/* (et, au lot 6, vers
-// la création de salon, qui l'ajoutera ici pour handlers_salon.go seulement). Jamais gardé ni
-// recopié : le serveur n'en garde que SHA-256.
+// lu seulement dans handlers_compte.go : il ne part que vers /api/compte/* et vers la création
+// de salon (lot 6), qui le lit par sessionCreation (définie dans handlers_compte.go, appelée
+// seulement par salonAPI.creer : TestSessionJamaisLueAilleurs). Écart au plan (lot 6, qui
+// prévoyait d'ajouter handlers_salon.go ici) : la règle de fichier reste plus étroite. Jamais
+// gardé ni recopié : le serveur n'en garde que SHA-256.
 var compteHeaders = []string{"X-Shh-Session"}
 
 // headerAllowed : en-tête name lisible dans le fichier path (readHeaders partout,
