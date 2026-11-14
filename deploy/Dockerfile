@@ -94,10 +94,14 @@ RUN go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /out/shhche
 # Dossier de données vide (0700), pour un point de montage qui appartienne déjà au bon compte.
 RUN mkdir -m 0700 /out/data
 
-# --- Image finale : rien d'autre que deux binaires et le site ---------------------------
-# scratch : ni shell, ni bibliothèque, ni gestionnaire de paquets. Le serveur n'ouvre
-# aucune connexion sortante : pas besoin de certificats racine.
+# --- Image finale : rien d'autre que deux binaires, le site et les certificats racine -----
+# scratch : ni shell, ni bibliothèque, ni gestionnaire de paquets. Seule connexion sortante
+# du serveur : SMTP en TLS vérifié vers SHH_SMTP_HOST, avec SHH_COMPTES=1 seulement
+# (internal/courriel/smtp.go, conception du compte §3.2) ; elle exige les certificats racine,
+# copiés de l'étape server (paquet ca-certificates de l'image golang épinglée ci-dessus), au
+# chemin que lit crypto/x509 sous Linux. Avec SHH_COMPTES=0, ils ne servent à rien.
 FROM scratch
+COPY --from=server /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=server /out/shhdrop /out/shhcheck /
 COPY --from=web /src/web/dist /site
 COPY --from=server --chown=65532:65532 /out/data /data

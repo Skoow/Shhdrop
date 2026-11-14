@@ -72,6 +72,19 @@ var allowedMaps = map[string]string{
 	"salon/manager.go:vivants":          "§9.5 salons vivants par bloc (§39.3.6, 12 novembre) : id interne → clé de bloc, jusqu'à la fin du salon",
 	"salon/manager.go:parBloc":          "§9.5 salons vivants par bloc (§39.3.6, 12 novembre) : clé de bloc → nombre, jusqu'à la fin du salon",
 	"compte/jetables.go:jetables":       "constante (liste de domaines jetables, conception du compte §5.3), lue une fois au démarrage, aucun compteur",
+	// Limites du compte (conception du compte §8.3, §8.8 ; plan lot 3) : clés HMAC du jour, aucune
+	// adresse ni empreinte en clair, vidées à l'heure ou à minuit UTC.
+	"limits/limits.go:insc64":    "conception du compte §8.8 inscriptions du jour par connexion (3), minuit UTC",
+	"limits/limits.go:insc48":    "conception du compte §8.8 inscriptions du jour par /48 (10), minuit UTC",
+	"limits/limits.go:mail64":    "conception du compte §8.8 e-mails du jour par connexion (10), minuit UTC",
+	"limits/limits.go:mail48":    "plan lot 3 e-mails du jour par /48 (30), minuit UTC",
+	"limits/limits.go:mailAdr":   "conception du compte §8.3, §8.8 e-mails du jour par adresse (3), HMAC du jour de e_canon, minuit UTC",
+	"limits/limits.go:echec64":   "conception du compte §8.8 échecs de connexion de l'heure par connexion (20)",
+	"limits/limits.go:echec48":   "conception du compte §8.8 échecs de connexion de l'heure par /48 (60)",
+	"limits/limits.go:echecCpt":  "conception du compte §8.3, §8.8 échecs de connexion de l'heure par compte (preuve après 5), HMAC du jour de e_canon",
+	"limits/limits.go:totpCpt":   "conception du compte §8.8 échecs TOTP de l'heure par compte (10), HMAC du jour de h",
+	"limits/limits.go:coffreCpt": "conception du compte §8.8, §21.6.2 écritures des coffres de l'heure par compte (60), HMAC du jour de h",
+	"limits/limits.go:pseudoCpt": "conception du compte §21.5 vérifications de pseudo de l'heure (30), HMAC du jour de h ou de l'étape",
 }
 
 type goFile struct {
@@ -181,11 +194,45 @@ func TestNoUnlistedCounter(t *testing.T) {
 	}
 }
 
-// Aucun client HTTP sortant hors de captcha/recaptcha.go (repli de §26).
+// sortants : appels qui ouvrent une connexion sortante (spec §35.1) ; interdits partout, sauf
+// captcha/recaptcha.go (repli de §26) et, pour le seul client SMTP, internal/courriel/smtp.go
+// (conception du compte §3.2, §15 ; plan lot 3).
+var sortants = map[string]bool{
+	"http.Client": true, "http.Get": true, "http.Post": true, "http.PostForm": true, "http.Head": true,
+	"http.DefaultClient": true, "http.NewRequest": true, "http.NewRequestWithContext": true,
+	"http.Transport": true, "http.DefaultTransport": true,
+	"net.Dial": true, "net.DialTCP": true, "net.DialUDP": true, "net.DialIP": true, "net.DialUnix": true,
+	"net.DialTimeout": true, "net.Dialer": true,
+	"smtp.Dial": true, "smtp.SendMail": true, "smtp.NewClient": true,
+	"tls.Dial": true, "tls.DialWithDialer": true, "tls.Dialer": true, "tls.Client": true,
+}
+
+// smtpPermis : ce que internal/courriel/smtp.go, et lui seul, peut appeler parmi sortants :
+// la connexion TCP (STARTTLS) ou TLS vers SHH_SMTP_HOST et le client SMTP posé dessus. Rien
+// d'autre : ni client HTTP, ni smtp.SendMail (qui accepterait le texte clair), ni tls.Dial.
+var smtpPermis = map[string]bool{"net.Dialer": true, "tls.Dialer": true, "smtp.NewClient": true}
+
+// paquetsReseau : imports qui ne doivent jamais être renommés (un alias tromperait la recherche
+// par nom de paquet ci-dessous).
+var paquetsReseau = map[string]bool{"net": true, "net/http": true, "net/smtp": true, "crypto/tls": true}
+
+// TestNoOutgoingHTTP : aucun client sortant hors de captcha/recaptcha.go et, pour SMTP
+// seulement, internal/courriel/smtp.go.
 func TestNoOutgoingHTTP(t *testing.T) {
+	smtpVu := false
 	for _, g := range sources(t, "..") {
 		if strings.HasSuffix(g.rel, "internal/captcha/recaptcha.go") {
 			continue
+		}
+		smtpGo := g.rel == "internal/courriel/smtp.go"
+		for _, imp := range g.f.Imports {
+			p, _ := strconv.Unquote(imp.Path.Value)
+			if paquetsReseau[p] && imp.Name != nil {
+				t.Errorf("%s : import renommé de %s (interdit : la recherche des clients sortants se fait par nom)", g.rel, p)
+			}
+			if p == "net/smtp" && !smtpGo {
+				t.Errorf("%s : net/smtp hors de internal/courriel/smtp.go (seul client SMTP)", g.rel)
+			}
 		}
 		ast.Inspect(g.f, func(n ast.Node) bool {
 			sel, ok := n.(*ast.SelectorExpr)
@@ -193,14 +240,62 @@ func TestNoOutgoingHTTP(t *testing.T) {
 				return true
 			}
 			if id, ok := sel.X.(*ast.Ident); ok {
-				switch id.Name + "." + sel.Sel.Name {
-				case "http.Client", "http.Get", "http.Post", "http.PostForm", "http.Head", "http.DefaultClient",
-					"http.NewRequest", "http.NewRequestWithContext", "net.Dial", "net.DialTCP", "net.DialUDP",
-					"net.DialTimeout", "net.Dialer", "http.Transport", "http.DefaultTransport":
-					t.Errorf("%s : %s.%s (client sortant interdit, spec §35.1)", g.rel, id.Name, sel.Sel.Name)
+				k := id.Name + "." + sel.Sel.Name
+				switch {
+				case smtpGo && smtpPermis[k]:
+					smtpVu = smtpVu || k == "smtp.NewClient"
+				case sortants[k]:
+					t.Errorf("%s : %s (client sortant interdit, spec §35.1)", g.rel, k)
 				}
 			}
 			return true
 		})
 	}
+	if !smtpVu {
+		t.Error("internal/courriel/smtp.go n'appelle plus smtp.NewClient : exemption périmée, à retirer")
+	}
+}
+
+// TestCourrielSeulementAvecComptes : avec SHH_COMPTES=0, aucune connexion sortante n'est
+// possible. Le seul envoyeur (courriel.Nouveau) n'est créé qu'à l'intérieur d'un « if » qui
+// lit Comptes (cfg.Comptes), dans son corps « alors », hors du paquet courriel et de ses tests.
+func TestCourrielSeulementAvecComptes(t *testing.T) {
+	for _, g := range sources(t, "..") {
+		if strings.HasPrefix(g.rel, "internal/courriel/") {
+			continue
+		}
+		var pile []ast.Node
+		ast.Inspect(g.f, func(n ast.Node) bool {
+			if n == nil {
+				pile = pile[:len(pile)-1]
+				return true
+			}
+			pile = append(pile, n)
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if id, ok := sel.X.(*ast.Ident); !ok || id.Name != "courriel" || sel.Sel.Name != "Nouveau" {
+				return true
+			}
+			for i := len(pile) - 2; i >= 0; i-- {
+				if st, ok := pile[i].(*ast.IfStmt); ok && litComptes(st.Cond) && pile[i+1] == st.Body {
+					return true
+				}
+			}
+			t.Errorf("%s : courriel.Nouveau hors d'un « if …Comptes » (avec SHH_COMPTES=0, aucune sortie)", g.rel)
+			return true
+		})
+	}
+}
+
+func litComptes(e ast.Expr) bool {
+	vu := false
+	ast.Inspect(e, func(n ast.Node) bool {
+		if s, ok := n.(*ast.SelectorExpr); ok && s.Sel.Name == "Comptes" {
+			vu = true
+		}
+		return !vu
+	})
+	return vu
 }

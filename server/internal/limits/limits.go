@@ -125,6 +125,13 @@ type Limiter struct {
 	// seg64Max, seg48Max : requêtes de segments par minute (SegmentsPerMin, SegmentsPer48Min,
 	// SetSegmentsPerMin).
 	seg64Max, seg48Max int
+	// Compte (conception du compte §8.8, plan lot 3 ; compte.go) : inscriptions et e-mails du
+	// jour, échecs, écritures et vérifications de l'heure. Clés : HMAC du secret du jour sur le
+	// préfixe IP, sur l'empreinte e_canon ou sur h (jamais en clair) ; vidées à l'heure ou à
+	// minuit UTC.
+	insc64, insc48, mail64, mail48, mailAdr                   map[string]int
+	echec64, echec48, echecCpt, totpCpt, coffreCpt, pseudoCpt map[string]int
+	bannirHeure                                               int // global, aucune clé
 	// bytes64Max, bytes48Max : octets utiles par jour (BytesPer64, BytesPer48), ramenés à
 	// StorageMax / FairShare par SetStorage (part équitable du stockage, audit D2).
 	bytes64Max, bytes48Max int64
@@ -244,6 +251,8 @@ func (l *Limiter) rotateLocked(now time.Time) {
 		l.join48 = map[string]int{}
 		l.frame64 = map[string]int{}
 		l.frame48 = map[string]int{}
+		l.insc64, l.insc48 = map[string]int{}, map[string]int{}
+		l.mail64, l.mail48, l.mailAdr = map[string]int{}, map[string]int{}, map[string]int{}
 		// Les envois gardés repartent dans les compteurs du jour sous leurs clés de la veille
 		// (aucune adresse n'est gardée : BeginUpload recalcule ces clés avec l.prev). Les
 		// envois terminés la veille, eux, sont oubliés avec leurs compteurs.
@@ -271,6 +280,9 @@ func (l *Limiter) rotateLocked(now time.Time) {
 		l.hour = h
 		l.join64 = map[string]int{}
 		l.join48 = map[string]int{}
+		l.echec64, l.echec48, l.echecCpt = map[string]int{}, map[string]int{}, map[string]int{}
+		l.totpCpt, l.coffreCpt, l.pseudoCpt = map[string]int{}, map[string]int{}, map[string]int{}
+		l.bannirHeure = 0
 	}
 	if m := floorDiv(t, 60); m != l.minute {
 		l.minute = m

@@ -43,8 +43,11 @@ func (g *Gate) do(f func() error) error {
 		return f()
 	}
 	g.c <- struct{}{}
-	if u := g.used.Add(1); u > g.peak.Load() {
-		g.peak.Store(u)
+	// Plus haut atteint, mis à jour par comparaison-échange : un Load puis un Store séparés
+	// laissaient deux appels simultanés écrire le plus petit des deux après le plus grand
+	// (TestLecturesBorneesSansAffamerLesEcritures échouait de temps en temps : pic 15 pour 16
+	// appels en cours).
+	for u, p := g.used.Add(1), g.peak.Load(); u > p && !g.peak.CompareAndSwap(p, u); p = g.peak.Load() {
 	}
 	defer func() { g.used.Add(-1); <-g.c }()
 	return f()
