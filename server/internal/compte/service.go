@@ -37,6 +37,11 @@ type Service struct {
 	mu  sync.Mutex
 	et  etapes
 	act activites
+	pas map[[16]byte]pasTOTP // dernier pas TOTP accepté par compte (rejeu), sous mu
+
+	// Crochets du salon (lot 6) : fermer les salons créés par un compte, les compter. nil :
+	// aucun salon n'est encore relié à un compte (avant le lot 6, salons.compte reste NULL).
+	fermerSalons, salonsActifs func(h [16]byte) (int, error)
 }
 
 // Postier : la file d'e-mails (courriel.Envoyeur ; un faux dans les tests).
@@ -53,6 +58,8 @@ type Config struct {
 	Limites  *limits.Limiter
 	Now      func() time.Time
 	Max      int
+	// FermerSalons, SalonsActifs : crochets du salon (branchés au lot 6), nil sinon.
+	FermerSalons, SalonsActifs func(h [16]byte) (int, error)
 }
 
 // NewService : rien n'est lu ni écrit ; la clé des codes est tirée ici.
@@ -63,9 +70,11 @@ func NewService(c Config) (*Service, error) {
 	if c.Now == nil {
 		c.Now = time.Now
 	}
-	s := &Service{db: c.DB, cles: c.Cles, post: c.Courriel, lim: c.Limites, now: c.Now, max: c.Max}
+	s := &Service{db: c.DB, cles: c.Cles, post: c.Courriel, lim: c.Limites, now: c.Now, max: c.Max,
+		fermerSalons: c.FermerSalons, salonsActifs: c.SalonsActifs}
 	rand.Read(s.cleCode[:]) // crypto/rand ne renvoie pas d'erreur sous Linux
 	s.et.m = map[[32]byte]*etape{}
+	s.pas = map[[16]byte]pasTOTP{}
 	s.act.m, s.act.debut = map[[32]byte]activite{}, c.Now()
 	return s, nil
 }
@@ -102,6 +111,12 @@ func (e ErrLimit) Error() string { return "limit" }
 type ErrBanni struct{ Jusqu string }
 
 func (e ErrBanni) Error() string { return "banni" }
+
+// ErrAttente : refus pendant les 7 jours qui suivent une récupération par e-mail (R4) ;
+// permis à partir du jour Jusqu (« 2026-11-21 »).
+type ErrAttente struct{ Jusqu string }
+
+func (e ErrAttente) Error() string { return "attente" }
 
 // ErrConflit : if_gen périmé ; Gen est celui du serveur (409 conflict).
 type ErrConflit struct{ Gen uint64 }
@@ -228,12 +243,18 @@ func (s *Service) InscriptionDebut(ip netip.Addr, email, langue string) (h [16]b
 	return h, jeton, nil
 }
 
-// Renvoyer : nouveau code pour une étape d'inscription, 60 s au moins après le précédent, à
+// Renvoyer : nouveau code pour une étape d'inscription (RenvoyerOubli, RenvoyerEmail : pour une
+// récupération ou un changement d'adresse, mêmes règles), 60 s au moins après le précédent, à
 // l'adresse exacte de l'étape, retapée par le client. Écart au plan (§8.6 : `{ etape }`) : le
 // serveur ne garde pas l'adresse en clair le temps de l'étape (15 min), seulement e_envoi ;
 // le client renvoie l'adresse, comparée à e_envoi en temps constant. L'ancien code ne vaut
 // plus ; les essais repartent à 5 (le nombre d'e-mails par adresse est borné à 3 par jour).
 func (s *Service) Renvoyer(ip netip.Addr, jeton [32]byte, email string) error {
+	return s.renvoyer(ip, jeton, email, etapeInscription, nil)
+}
+
+// renvoyer : h non nil : l'étape doit être celle de ce compte (changement d'adresse).
+func (s *Service) renvoyer(ip netip.Addr, jeton [32]byte, email string, sorte sorteEtape, h *[16]byte) error {
 	a, err := adresse(email)
 	if err != nil {
 		return ErrEtape
@@ -242,8 +263,9 @@ func (s *Service) Renvoyer(ip netip.Addr, jeton [32]byte, email string) error {
 	now := s.now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e := s.et.trouver(jeton, etapeInscription, now)
-	if e == nil || subtle.ConstantTimeCompare(envoi[:], e.envoi[:]) != 1 {
+	e := s.et.trouver(jeton, sorte, now)
+	if e == nil || subtle.ConstantTimeCompare(envoi[:], e.envoi[:]) != 1 ||
+		(h != nil && subtle.ConstantTimeCompare(h[:], e.h[:]) != 1) {
 		return ErrEtape
 	}
 	if d := e.envoye.Add(attenteRenvoi).Sub(now); d > 0 {
@@ -346,7 +368,8 @@ type ligneConnexion struct {
 // donnent la même erreur après le même calcul (un HMAC de v_mdp, sur un h nul si l'adresse est
 // inconnue, comparé en temps constant). Au-delà de 5 échecs dans l'heure pour cette adresse
 // (existante ou non), preuve ALTCHA exigée (preuve : vérifiée par l'API) ; jamais de
-// verrouillage. Double authentification active : une étape, aucune session (lot 5). Un compte
+// verrouillage. Double authentification active : une étape, aucune session avant le code de
+// l'application (ConnexionTOTP). Un compte
 // banni se connecte (export et suppression, §13).
 func (s *Service) Connexion(ip netip.Addr, email string, aAuth [32]byte, o OptionsSession, preuve bool) (Ouverture, error) {
 	a, err := adresse(email)
@@ -386,7 +409,7 @@ func (s *Service) Connexion(ip netip.Addr, email string, aAuth [32]byte, o Optio
 		return Ouverture{}, ErrIdentifiants
 	}
 	if l.totp {
-		e := &etape{sorte: etapeConnexionTOTP, h: l.h, options: o}
+		e := &etape{sorte: etapeConnexionTOTP, h: l.h, options: o, essaisTOTP: essaisCode}
 		s.mu.Lock()
 		jeton, err := s.nouvelleEtapeLocked(e, now)
 		s.mu.Unlock()

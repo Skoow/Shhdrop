@@ -88,6 +88,8 @@ var allowedMaps = map[string]string{
 	// Compte (conception du compte §8.3 ; plan lot 4) : mémoire seulement, perdue au redémarrage.
 	"compte/etapes.go:m":   "conception du compte §8.3 étapes en attente (inscription : e_canon, e_envoi, HMAC du code, essais ; connexion : double authentification), clé SHA-256 du jeton d'étape, 15 min (5 min), 20 000 au plus ; aucune adresse en clair",
 	"compte/sessions.go:m": "conception du compte §8.3 dernier usage et « session récente » d'une session, clé t_v (SHA-256 du jeton), oublié 2 h sans usage",
+	// Lot 5 : rejeu de la double authentification.
+	"compte/service.go:pas": "conception du compte §8.3 dernier pas TOTP accepté par compte (rejeu), clé h, oublié dès qu'aucun code de ce pas ne peut plus passer (± 1 pas) ; perdu au redémarrage",
 }
 
 type goFile struct {

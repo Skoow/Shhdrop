@@ -142,3 +142,35 @@ func Reconcile(svc *share.Service) error {
 	}
 	return errors.Join(errs...)
 }
+
+// Effaceur : la passe quotidienne du compte (compte.Service.Effacer : comptes inactifs depuis
+// 13 mois, sessions et bannissements échus ; plan du compte, lot 5).
+type Effaceur interface {
+	Effacer(now time.Time) (int, error)
+}
+
+// Comptes appelle eff.Effacer une fois par jour UTC : au démarrage, puis au premier tour de
+// chaque nouveau jour (vérifié à chaque période), jusqu'à l'annulation de ctx. Une passe en
+// erreur (ou en panique) est réessayée au tour suivant ; au plus une ligne fixe sur stderr par
+// série d'erreurs, jamais d'identifiant ni de nombre.
+func Comptes(ctx context.Context, eff Effaceur, now func() time.Time, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	fait, failed := "", false
+	for {
+		if j := now().UTC().Format("2006-01-02"); j != fait {
+			err := protect(func() error { _, err := eff.Effacer(now()); return err })
+			if err == nil {
+				fait, failed = j, false
+			} else if !failed {
+				fmt.Fprintln(os.Stderr, "janitor: erreur d'effacement des comptes")
+				failed = true
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}

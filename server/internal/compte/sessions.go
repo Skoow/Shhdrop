@@ -216,17 +216,17 @@ func (s *Service) Session(jeton [32]byte) (Courante, error) {
 	return c, nil
 }
 
-// Reauth : mot de passe redemandé (A_auth), pour une session récente pendant 5 min. Échecs
-// comptés comme ceux de la connexion (même limite par connexion, même preuve par compte).
-// Double authentification active : lot 5 (refus totp_requis tant qu'il n'est pas fait).
+// Reauth : mot de passe redemandé (A_auth), et code de l'application si la double
+// authentification est active (totp vide : totp_requis), pour une session récente pendant
+// 5 min. Échecs du mot de passe comptés comme ceux de la connexion (même limite par connexion,
+// même preuve par compte) ; échecs du code comme ceux de la double authentification.
 func (s *Service) Reauth(ip netip.Addr, c Courante, aAuth [32]byte, totp string) error {
 	now := s.now()
 	if !s.lim.AllowEchecConnexion(ip) {
 		return ErrLimit{heureSuivante(now)}
 	}
-	var vm, ec []byte
-	var aTOTP bool
-	if err := s.db.QueryRow(`SELECT v_mdp, e_canon, totp IS NOT NULL FROM comptes WHERE h=?`, c.H[:]).Scan(&vm, &ec, &aTOTP); err != nil {
+	var vm, ec, scelle []byte
+	if err := s.db.QueryRow(`SELECT v_mdp, e_canon, totp FROM comptes WHERE h=?`, c.H[:]).Scan(&vm, &ec, &scelle); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrSession
 		}
@@ -237,8 +237,19 @@ func (s *Service) Reauth(ip netip.Addr, c Courante, aAuth [32]byte, totp string)
 		s.lim.NoterEchecConnexion(ip, [32]byte(ec))
 		return ErrIdentifiants
 	}
-	if aTOTP {
-		return ErrTOTPRequis
+	if scelle != nil {
+		if totp == "" {
+			return ErrTOTPRequis
+		}
+		s.mu.Lock()
+		err := s.verifierTOTPLocked(c.H, scelle, totp, now)
+		s.mu.Unlock()
+		if err != nil {
+			return err
+		}
+		if err := annulerRetrait(s.db, c.H); err != nil {
+			return err
+		}
 	}
 	a := s.act.lire(c.tv, now)
 	a.recente = now.Add(dureeRecente)

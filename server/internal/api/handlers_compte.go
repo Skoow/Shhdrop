@@ -46,6 +46,23 @@ func (a compteAPI) routes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/compte/coffre/prive", a.ecrireCoffre(compte.Prive))
 	mux.HandleFunc("POST /api/compte/pseudo/verifier", a.pseudoVerifier)
 	mux.HandleFunc("POST /api/compte/pseudo", a.pseudo)
+	// Lot 5 : double authentification, récupération, paramètres, suppression.
+	mux.HandleFunc("POST /api/compte/connexion/totp", a.connexionTOTP)
+	mux.HandleFunc("POST /api/compte/oubli/debut", a.oubliDebut)
+	mux.HandleFunc("POST /api/compte/oubli/renvoyer", a.oubliRenvoyer)
+	mux.HandleFunc("POST /api/compte/oubli/verifier", a.oubliVerifier)
+	mux.HandleFunc("POST /api/compte/oubli/fin", a.oubliFin)
+	mux.HandleFunc("GET /api/compte", a.etat)
+	mux.HandleFunc("POST /api/compte/mdp", a.mdp)
+	mux.HandleFunc("POST /api/compte/email/debut", a.emailDebut)
+	mux.HandleFunc("POST /api/compte/email/renvoyer", a.emailRenvoyer)
+	mux.HandleFunc("POST /api/compte/email/fin", a.emailFin)
+	mux.HandleFunc("POST /api/compte/totp/debut", a.totpDebut)
+	mux.HandleFunc("POST /api/compte/totp/fin", a.totpFin)
+	mux.HandleFunc("POST /api/compte/totp/retirer", a.sansCorps(a.c.TOTPRetirer))
+	mux.HandleFunc("POST /api/compte/totp/annuler-retrait", a.sansCorps(a.c.TOTPAnnulerRetrait))
+	mux.HandleFunc("GET /api/compte/export", a.export)
+	mux.HandleFunc("POST /api/compte/supprimer", a.supprimer)
 }
 
 // failCompte : erreur du service → réponse fixe (§8.6) ; toute autre → 500 sans détail.
@@ -54,6 +71,7 @@ func failCompte(w http.ResponseWriter, err error) {
 	var lim compte.ErrLimit
 	var bn compte.ErrBanni
 	var cl compte.ErrConflit
+	var at compte.ErrAttente
 	switch {
 	case errors.As(err, &cf):
 		writeJSON(w, http.StatusForbidden, struct {
@@ -67,6 +85,11 @@ func failCompte(w http.ResponseWriter, err error) {
 			Error string `json:"error"`
 			Jusqu string `json:"jusqu"`
 		}{"banni", bn.Jusqu})
+	case errors.As(err, &at):
+		writeJSON(w, http.StatusForbidden, struct {
+			Error string `json:"error"`
+			Jusqu string `json:"jusqu"`
+		}{"attente", at.Jusqu})
 	case errors.As(err, &cl):
 		writeJSON(w, http.StatusConflict, struct {
 			Error string `json:"error"`
@@ -86,6 +109,10 @@ func failCompte(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusForbidden, "preuve_requise")
 	case errors.Is(err, compte.ErrTOTPRequis):
 		writeErr(w, http.StatusForbidden, "totp_requis")
+	case errors.Is(err, compte.ErrTOTPFaux):
+		writeErr(w, http.StatusForbidden, "totp_faux")
+	case errors.Is(err, compte.ErrTOTPRejoue):
+		writeErr(w, http.StatusForbidden, "totp_rejoue")
 	case errors.Is(err, compte.ErrRecent):
 		writeErr(w, http.StatusForbidden, "recent")
 	case errors.Is(err, compte.ErrEtape):
@@ -301,6 +328,12 @@ func (a compteAPI) connexion(w http.ResponseWriter, r *http.Request) {
 		}{true, b64.EncodeToString(ov.Etape[:])})
 		return
 	}
+	ecrireOuverture(w, ov)
+}
+
+// ecrireOuverture : réponse d'une connexion (§21.6.2) ; s_profil effacé au mieux (la réponse
+// encodée, elle, ne s'efface pas).
+func ecrireOuverture(w http.ResponseWriter, ov compte.Ouverture) {
 	writeJSON(w, http.StatusOK, struct {
 		Session    string `json:"session"`
 		H          string `json:"h"`
@@ -313,7 +346,7 @@ func (a compteAPI) connexion(w http.ResponseWriter, r *http.Request) {
 	}{b64.EncodeToString(ov.Jeton[:]), b64.EncodeToString(ov.H[:]), b64.EncodeToString(ov.EnvMdp[:]),
 		b64.EncodeToString(ov.SProfil[:]), b64.EncodeToString(ov.BlobProfil), ov.GenProfil,
 		b64.EncodeToString(ov.BlobPrive), ov.GenPrive})
-	clear(ov.SProfil[:]) // au mieux : la réponse encodée, elle, ne s'efface pas
+	clear(ov.SProfil[:])
 }
 
 func (a compteAPI) reauth(w http.ResponseWriter, r *http.Request) {
@@ -525,4 +558,439 @@ func (a compteAPI) pseudo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+// --- Lot 5 : double authentification, récupération, paramètres, suppression (§21.6.2). ---
+
+// etapeCode : corps { etape, code } (connexion/totp, totp/fin).
+func etapeCode(w http.ResponseWriter, r *http.Request) ([32]byte, string, error) {
+	var b struct {
+		Etape string `json:"etape"`
+		Code  string `json:"code"`
+	}
+	if err := lire(w, r, &b, maxJSON); err != nil {
+		return [32]byte{}, "", err
+	}
+	e, err := b32(b.Etape)
+	return e, b.Code, err
+}
+
+func (a compteAPI) connexionTOTP(w http.ResponseWriter, r *http.Request) {
+	e, code, err := etapeCode(w, r)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	ov, err := a.c.ConnexionTOTP(e, code)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	ecrireOuverture(w, ov)
+}
+
+// oubliDebut : { email, langue, altcha, hp, shown_at } → { etape }, toujours la même forme
+// (§21.3).
+func (a compteAPI) oubliDebut(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Email   string `json:"email"`
+		Langue  string `json:"langue"`
+		Altcha  string `json:"altcha"`
+		HP      string `json:"hp"`
+		ShownAt string `json:"shown_at"`
+	}
+	if err := lire(w, r, &b, maxJSON); err != nil {
+		failCompte(w, err)
+		return
+	}
+	ip := ipOf(r)
+	if err := a.antiRobot(b.Altcha, b.ShownAt, b.HP, ip); err != nil {
+		failCompte(w, err)
+		return
+	}
+	a.cap.RecordCreate(ip)
+	e, err := a.c.OubliDebut(ip, b.Email, b.Langue)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Etape string `json:"etape"`
+	}{b64.EncodeToString(e[:])})
+}
+
+// etapeEmail : corps { etape, email } (renvois).
+func etapeEmail(w http.ResponseWriter, r *http.Request) ([32]byte, string, error) {
+	var b struct {
+		Etape string `json:"etape"`
+		Email string `json:"email"`
+	}
+	if err := lire(w, r, &b, maxJSON); err != nil {
+		return [32]byte{}, "", err
+	}
+	e, err := b32(b.Etape)
+	return e, b.Email, err
+}
+
+func (a compteAPI) oubliRenvoyer(w http.ResponseWriter, r *http.Request) {
+	e, email, err := etapeEmail(w, r)
+	if err == nil {
+		err = a.c.RenvoyerOubli(ipOf(r), e, email)
+	}
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+// oubliVerifier : { etape, code, totp, totp_perdu } → { h } ou { attente_jusqu }.
+func (a compteAPI) oubliVerifier(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Etape     string  `json:"etape"`
+		Code      string  `json:"code"`
+		TOTP      *string `json:"totp"`
+		TOTPPerdu *bool   `json:"totp_perdu"`
+	}
+	if err := lire(w, r, &b, maxJSON); err != nil || b.TOTP == nil || b.TOTPPerdu == nil {
+		failCompte(w, errBadRequest)
+		return
+	}
+	e, err := b32(b.Etape)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	h, att, err := a.c.OubliVerifier(e, b.Code, *b.TOTP, *b.TOTPPerdu)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	if att != "" {
+		writeJSON(w, http.StatusOK, struct {
+			Attente string `json:"attente_jusqu"`
+		}{att})
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		H string `json:"h"`
+	}{b64.EncodeToString(h[:])})
+}
+
+// oubliFin : { etape, a_auth, env_mdp, blob_prive, persistante, etiquette } →
+// { session, h, s_profil, blob_profil, gen_profil, gen_prive }.
+func (a compteAPI) oubliFin(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Etape       string  `json:"etape"`
+		AAuth       string  `json:"a_auth"`
+		EnvMdp      string  `json:"env_mdp"`
+		BlobPrive   string  `json:"blob_prive"`
+		Persistante *bool   `json:"persistante"`
+		Etiquette   *string `json:"etiquette"`
+	}
+	if err := lire(w, r, &b, maxCoffreJSON); err != nil {
+		failCompte(w, err)
+		return
+	}
+	var errs [5]error
+	var e [32]byte
+	var d compte.DonneesOubli
+	var env []byte
+	e, errs[0] = b32(b.Etape)
+	d.AAuth, errs[1] = b32(b.AAuth)
+	env, errs[2] = secret(b.EnvMdp, 60)
+	d.BlobPrive, errs[3] = b64.DecodeString(b.BlobPrive)
+	o, err := options(b.Persistante, b.Etiquette)
+	errs[4] = err
+	if errs != [5]error{} {
+		failCompte(w, errBadRequest)
+		return
+	}
+	d.EnvMdp = [60]byte(env)
+	ov, err := a.c.OubliFin(e, d, o)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Session    string `json:"session"`
+		H          string `json:"h"`
+		SProfil    string `json:"s_profil"`
+		BlobProfil string `json:"blob_profil"`
+		GenProfil  uint64 `json:"gen_profil"`
+		GenPrive   uint64 `json:"gen_prive"`
+	}{b64.EncodeToString(ov.Jeton[:]), b64.EncodeToString(ov.H[:]), b64.EncodeToString(ov.SProfil[:]),
+		b64.EncodeToString(ov.BlobProfil), ov.GenProfil, ov.GenPrive})
+	clear(ov.SProfil[:])
+}
+
+// ouNull : chaîne vide → null (absent ≠ null : ces champs sont toujours présents).
+func ouNull(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func motifOuNull(m uint8) *uint8 {
+	if m == 0 {
+		return nil
+	}
+	return &m
+}
+
+// etat : GET /api/compte (§8.6, §21.6.2).
+func (a compteAPI) etat(w http.ResponseWriter, r *http.Request) {
+	c, err := a.session(r)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	et, err := a.c.Etat(c)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	type limites struct {
+		Salons int `json:"salons"`
+		Places int `json:"places"`
+		Heures int `json:"heures"`
+	}
+	writeJSON(w, http.StatusOK, struct {
+		H             string  `json:"h"`
+		CreeLe        string  `json:"cree_le"`
+		Palier        string  `json:"palier"`
+		ConfirmeLe    *string `json:"confirme_le"`
+		Limites       limites `json:"limites"`
+		SalonsActifs  int     `json:"salons_actifs"`
+		TOTP          bool    `json:"totp"`
+		Banni         bool    `json:"banni"`
+		RecupJusqu    *string `json:"recup_jusqu"`
+		RetraitTOTPLe *string `json:"retrait_totp_le"`
+		BanniJusqu    *string `json:"banni_jusqu"`
+		BanniMotif    *uint8  `json:"banni_motif"`
+	}{b64.EncodeToString(et.H[:]), et.CreeLe, et.Palier, ouNull(et.ConfirmeLe),
+		limites{et.Limites.Salons, et.Limites.Places, et.Limites.Heures}, et.SalonsActifs, et.TOTP, et.Banni,
+		ouNull(et.RecupJusqu), ouNull(et.RetraitTOTPLe), ouNull(et.BanniJusqu), motifOuNull(et.BanniMotif)})
+}
+
+// mdp : { a_auth, env_mdp } (session récente ; autres sessions fermées).
+func (a compteAPI) mdp(w http.ResponseWriter, r *http.Request) {
+	c, err := a.session(r)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	var b struct {
+		AAuth  string `json:"a_auth"`
+		EnvMdp string `json:"env_mdp"`
+	}
+	if err := lire(w, r, &b, maxJSON); err != nil {
+		failCompte(w, err)
+		return
+	}
+	aAuth, err := b32(b.AAuth)
+	env, err2 := secret(b.EnvMdp, 60)
+	if err != nil || err2 != nil {
+		failCompte(w, errBadRequest)
+		return
+	}
+	if err := a.c.ChangerMdp(c, aAuth, [60]byte(env)); err != nil {
+		failCompte(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+// emailDebut : { email_actuel, email_nouveau, langue } → { etape } (session récente).
+func (a compteAPI) emailDebut(w http.ResponseWriter, r *http.Request) {
+	c, err := a.session(r)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	var b struct {
+		Actuel  string `json:"email_actuel"`
+		Nouveau string `json:"email_nouveau"`
+		Langue  string `json:"langue"`
+	}
+	if err := lire(w, r, &b, maxJSON); err != nil {
+		failCompte(w, err)
+		return
+	}
+	e, err := a.c.EmailDebut(c, ipOf(r), b.Actuel, b.Nouveau, b.Langue)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Etape string `json:"etape"`
+	}{b64.EncodeToString(e[:])})
+}
+
+func (a compteAPI) emailRenvoyer(w http.ResponseWriter, r *http.Request) {
+	c, err := a.session(r)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	e, email, err := etapeEmail(w, r)
+	if err == nil {
+		err = a.c.RenvoyerEmail(c, ipOf(r), e, email)
+	}
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+// emailFin : { etape, code, a_auth, env_mdp, totp } (session récente).
+func (a compteAPI) emailFin(w http.ResponseWriter, r *http.Request) {
+	c, err := a.session(r)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	var b struct {
+		Etape  string  `json:"etape"`
+		Code   string  `json:"code"`
+		AAuth  string  `json:"a_auth"`
+		EnvMdp string  `json:"env_mdp"`
+		TOTP   *string `json:"totp"`
+	}
+	if err := lire(w, r, &b, maxJSON); err != nil || b.TOTP == nil {
+		failCompte(w, errBadRequest)
+		return
+	}
+	e, err := b32(b.Etape)
+	aAuth, err2 := b32(b.AAuth)
+	env, err3 := secret(b.EnvMdp, 60)
+	if err != nil || err2 != nil || err3 != nil {
+		failCompte(w, errBadRequest)
+		return
+	}
+	if err := a.c.EmailFin(c, e, b.Code, aAuth, [60]byte(env), *b.TOTP); err != nil {
+		failCompte(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+// totpDebut : {} → { etape, secret } (session récente). Seule réponse qui contient le secret.
+func (a compteAPI) totpDebut(w http.ResponseWriter, r *http.Request) {
+	c, err := a.session(r)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	var b struct{}
+	if err := lire(w, r, &b, maxJSON); err != nil {
+		failCompte(w, err)
+		return
+	}
+	e, sec, err := a.c.TOTPDebut(c)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Etape  string `json:"etape"`
+		Secret string `json:"secret"`
+	}{b64.EncodeToString(e[:]), sec})
+}
+
+func (a compteAPI) totpFin(w http.ResponseWriter, r *http.Request) {
+	c, err := a.session(r)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	e, code, err := etapeCode(w, r)
+	if err == nil {
+		err = a.c.TOTPFin(c, e, code)
+	}
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct{}{})
+}
+
+// sansCorps : route de session au corps {} qui rend {} (totp/retirer, totp/annuler-retrait).
+func (a compteAPI) sansCorps(f func(compte.Courante) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		c, err := a.session(r)
+		if err != nil {
+			failCompte(w, err)
+			return
+		}
+		var b struct{}
+		if err := lire(w, r, &b, maxJSON); err != nil {
+			failCompte(w, err)
+			return
+		}
+		if err := f(c); err != nil {
+			failCompte(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, struct{}{})
+	}
+}
+
+// export : GET export (§12.4) : données du serveur, sans adresse.
+func (a compteAPI) export(w http.ResponseWriter, r *http.Request) {
+	c, err := a.session(r)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	x, err := a.c.Export(c)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	type appareil struct {
+		Ajoutee     string `json:"ajoutee"`
+		Persistante bool   `json:"persistante"`
+	}
+	ss := make([]appareil, 0, len(x.Sessions))
+	for _, v := range x.Sessions {
+		ss = append(ss, appareil{v.Ajoutee, v.Persistante})
+	}
+	writeJSON(w, http.StatusOK, struct {
+		CreeLe           string     `json:"cree_le"`
+		AncienneteDepuis string     `json:"anciennete_depuis"`
+		VuMois           string     `json:"vu_mois"`
+		TOTP             bool       `json:"totp"`
+		RetraitTOTPLe    *string    `json:"retrait_totp_le"`
+		RecupJusqu       *string    `json:"recup_jusqu"`
+		BanniJusqu       *string    `json:"banni_jusqu"`
+		BanniMotif       *uint8     `json:"banni_motif"`
+		SalonsActifs     int        `json:"salons_actifs"`
+		Sessions         []appareil `json:"sessions"`
+	}{x.CreeLe, x.AncienneteDepuis, x.VuMois, x.TOTP, ouNull(x.RetraitTOTPLe), ouNull(x.RecupJusqu),
+		ouNull(x.BanniJusqu), motifOuNull(x.BanniMotif), x.SalonsActifs, ss})
+}
+
+// supprimer : {} → { salons_fermes } (session récente ; attente après une récupération).
+func (a compteAPI) supprimer(w http.ResponseWriter, r *http.Request) {
+	c, err := a.session(r)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	var b struct{}
+	if err := lire(w, r, &b, maxJSON); err != nil {
+		failCompte(w, err)
+		return
+	}
+	n, err := a.c.Supprimer(c)
+	if err != nil {
+		failCompte(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Salons int `json:"salons_fermes"`
+	}{n})
 }

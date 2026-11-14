@@ -2,10 +2,15 @@ package api
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha1"
+	"encoding/base32"
 	"encoding/binary"
+	"fmt"
 	"go/ast"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -56,6 +61,7 @@ func newEnvCompte(t *testing.T) envCompte {
 	rand.Read(c.Email[:])
 	rand.Read(c.Poivre[:])
 	rand.Read(c.Sequestre[:])
+	rand.Read(c.TOTP[:])
 	rand.Read(c.Pseudo[:])
 	p := &postier{}
 	s, err := compte.NewService(compte.Config{DB: db, Cles: c, Courriel: p, Limites: e.srv.lim, Now: e.clk.Now, Max: 100})
@@ -125,6 +131,13 @@ var routesCompte = [][2]string{
 	{"GET", "/api/compte/sessions"}, {"POST", "/api/compte/sessions/fermer"}, {"POST", "/api/compte/deconnexion"},
 	{"GET", "/api/compte/coffre/profil"}, {"PUT", "/api/compte/coffre/profil"}, {"GET", "/api/compte/coffre/prive"},
 	{"PUT", "/api/compte/coffre/prive"}, {"POST", "/api/compte/pseudo/verifier"}, {"POST", "/api/compte/pseudo"},
+	// Lot 5.
+	{"POST", "/api/compte/connexion/totp"}, {"POST", "/api/compte/oubli/debut"}, {"POST", "/api/compte/oubli/renvoyer"},
+	{"POST", "/api/compte/oubli/verifier"}, {"POST", "/api/compte/oubli/fin"}, {"GET", "/api/compte"},
+	{"POST", "/api/compte/mdp"}, {"POST", "/api/compte/email/debut"}, {"POST", "/api/compte/email/renvoyer"},
+	{"POST", "/api/compte/email/fin"}, {"POST", "/api/compte/totp/debut"}, {"POST", "/api/compte/totp/fin"},
+	{"POST", "/api/compte/totp/retirer"}, {"POST", "/api/compte/totp/annuler-retrait"}, {"GET", "/api/compte/export"},
+	{"POST", "/api/compte/supprimer"},
 }
 
 // Parcours complet par HTTP : inscription, coffres, sessions, connexion, déconnexion ; réponses
@@ -267,4 +280,176 @@ func asExpr(n ast.Node) ast.Expr {
 		return e
 	}
 	return nil
+}
+
+// Lot 5 : récupération, double authentification, paramètres, suppression, par HTTP.
+
+// totpCode : RFC 6238 (SHA-1, 6 chiffres, 30 s), pour les tests de l'API (le paquet compte a
+// ses propres vecteurs de la RFC).
+func totpCode(secret []byte, t time.Time) string {
+	var c [8]byte
+	binary.BigEndian.PutUint64(c[:], uint64(t.Unix()/30))
+	m := hmac.New(sha1.New, secret)
+	m.Write(c[:])
+	s := m.Sum(nil)
+	o := s[19] & 15
+	return fmt.Sprintf("%06d", (binary.BigEndian.Uint32(s[o:o+4])&0x7fffffff)%1000000)
+}
+
+func cles(m map[string]any) string {
+	var k []string
+	for x := range m {
+		k = append(k, x)
+	}
+	sort.Strings(k)
+	return strings.Join(k, ",")
+}
+
+// oubli/debut : même réponse (forme, statut) pour une adresse inconnue, une variante et
+// l'adresse exacte ; oubli/verifier d'un code faux : même corps.
+func TestOubliHTTPIdentique(t *testing.T) {
+	e := newEnvCompte(t)
+	e.inscrire(t, "203.0.113.40:1", "lea.dupont@gmail.com", "lea")
+	n := len(e.post.msgs)
+	var corps []string
+	for i, a := range []string{"inconnue@exemple.fr", "leadupont@gmail.com", "lea.dupont@gmail.com"} {
+		remote := fmt.Sprintf("203.0.113.%d:1", 41+i)
+		alt, shown := e.captchaFor(t, remote)
+		w := e.do(req{method: "POST", path: "/api/compte/oubli/debut", remote: remote,
+			body: mustJSON(map[string]any{"email": a, "langue": "fr", "altcha": alt, "hp": "", "shown_at": shown})})
+		d := jsonOf(t, w)
+		if w.Code != 200 || cles(d) != "etape" || len(d["etape"].(string)) != 43 {
+			t.Fatalf("%s : %d %q", a, w.Code, w.Body.String())
+		}
+		w = e.do(req{method: "POST", path: "/api/compte/oubli/verifier", remote: remote,
+			body: mustJSON(map[string]any{"etape": d["etape"], "code": "000000", "totp": "", "totp_perdu": false})})
+		corps = append(corps, fmt.Sprint(w.Code, w.Body.String()))
+	}
+	if corps[0] != corps[1] || corps[1] != corps[2] || corps[0] != `403{"error":"code_faux","attempts_left":4}` {
+		// (le code juste de l'adresse exacte est tiré au hasard : 000000 n'a qu'une chance sur un million)
+		t.Fatal(corps)
+	}
+	if len(e.post.msgs) != n+1 || e.post.msgs[n].A != "lea.dupont@gmail.com" {
+		t.Fatal("e-mails :", len(e.post.msgs)-n)
+	}
+	// Sans preuve anti-robot : refus.
+	w := e.do(req{method: "POST", path: "/api/compte/oubli/debut", remote: "203.0.113.49:1",
+		body: mustJSON(map[string]any{"email": "lea.dupont@gmail.com", "langue": "fr", "altcha": "x", "hp": "", "shown_at": "x"})})
+	expect(t, w, 400, badRequest)
+}
+
+func TestParcoursLot5HTTP(t *testing.T) {
+	e := newEnvCompte(t)
+	const ip = "203.0.113.50:1"
+	a := e.inscrire(t, ip, "lea@exemple.fr", "lea")
+	S := sess(a.session)
+	// État.
+	w := e.do(req{method: "GET", path: "/api/compte", hdr: S})
+	expect(t, w, 200, "")
+	et := jsonOf(t, w)
+	if cles(et) != "banni,banni_jusqu,banni_motif,confirme_le,cree_le,h,limites,palier,recup_jusqu,retrait_totp_le,salons_actifs,totp" ||
+		et["h"] != a.h || et["palier"] != "neuf" || et["totp"] != false || et["recup_jusqu"] != nil || et["banni_motif"] != nil ||
+		fmt.Sprint(et["limites"]) != "map[heures:24 places:4 salons:1]" {
+		t.Fatal(w.Body.String())
+	}
+	// Double authentification.
+	w = e.do(req{method: "POST", path: "/api/compte/totp/debut", hdr: S, body: []byte(`{}`)})
+	expect(t, w, 200, "")
+	td := jsonOf(t, w)
+	sec, err := base32.StdEncoding.DecodeString(td["secret"].(string))
+	if err != nil || len(sec) != 20 || cles(td) != "etape,secret" {
+		t.Fatal(w.Body.String())
+	}
+	expect(t, e.do(req{method: "POST", path: "/api/compte/totp/fin", hdr: S,
+		body: mustJSON(map[string]any{"etape": td["etape"], "code": totpCode(sec, e.clk.Now())})}), 200, `{}`)
+	e.clk.Add(30 * time.Second)
+	w = e.do(req{method: "POST", path: "/api/compte/connexion", remote: ip,
+		body: mustJSON(map[string]any{"email": "lea@exemple.fr", "a_auth": a.aAuth, "persistante": false, "etiquette": ""})})
+	expect(t, w, 200, "")
+	c := jsonOf(t, w)
+	if cles(c) != "etape,totp_requis" || c["totp_requis"] != true {
+		t.Fatal(w.Body.String())
+	}
+	expect(t, e.do(req{method: "POST", path: "/api/compte/connexion/totp", remote: ip,
+		body: mustJSON(map[string]any{"etape": c["etape"], "code": "000000"})}), 403, `{"error":"totp_faux"}`)
+	w = e.do(req{method: "POST", path: "/api/compte/connexion/totp", remote: ip,
+		body: mustJSON(map[string]any{"etape": c["etape"], "code": totpCode(sec, e.clk.Now())})})
+	expect(t, w, 200, "")
+	if cles(jsonOf(t, w)) != "blob_prive,blob_profil,env_mdp,gen_prive,gen_profil,h,s_profil,session" {
+		t.Fatal(w.Body.String())
+	}
+	// Rejeu du même code : refusé.
+	w = e.do(req{method: "POST", path: "/api/compte/connexion", remote: ip,
+		body: mustJSON(map[string]any{"email": "lea@exemple.fr", "a_auth": a.aAuth, "persistante": false, "etiquette": ""})})
+	c = jsonOf(t, w)
+	expect(t, e.do(req{method: "POST", path: "/api/compte/connexion/totp", remote: ip,
+		body: mustJSON(map[string]any{"etape": c["etape"], "code": totpCode(sec, e.clk.Now())})}), 403, `{"error":"totp_rejoue"}`)
+	// Récupération : le code de l'application est exigé ; « Je n'ai plus mon application » : attente.
+	alt, shown := e.captchaFor(t, ip)
+	w = e.do(req{method: "POST", path: "/api/compte/oubli/debut", remote: ip,
+		body: mustJSON(map[string]any{"email": "lea@exemple.fr", "langue": "fr", "altcha": alt, "hp": "", "shown_at": shown})})
+	expect(t, w, 200, "")
+	et2 := jsonOf(t, w)["etape"]
+	code := e.post.code(t)
+	expect(t, e.do(req{method: "POST", path: "/api/compte/oubli/renvoyer", remote: ip,
+		body: mustJSON(map[string]any{"etape": et2, "email": "lea@exemple.fr"})}), 429, "")
+	expect(t, e.do(req{method: "POST", path: "/api/compte/oubli/verifier", remote: ip,
+		body: mustJSON(map[string]any{"etape": et2, "code": code, "totp": "", "totp_perdu": false})}), 403, `{"error":"totp_requis"}`)
+	e.clk.Add(30 * time.Second)
+	w = e.do(req{method: "POST", path: "/api/compte/oubli/verifier", remote: ip,
+		body: mustJSON(map[string]any{"etape": et2, "code": code, "totp": totpCode(sec, e.clk.Now()), "totp_perdu": false})})
+	expect(t, w, 200, `{"h":"`+a.h+`"}`)
+	nouveau := enc.EncodeToString(rnd(32))
+	w = e.do(req{method: "POST", path: "/api/compte/oubli/fin", remote: ip, body: mustJSON(map[string]any{
+		"etape": et2, "a_auth": nouveau, "env_mdp": enc.EncodeToString(rnd(60)), "blob_prive": coffreB64("SHH-ACCT1", 2),
+		"persistante": false, "etiquette": ""})})
+	expect(t, w, 200, "")
+	f := jsonOf(t, w)
+	if cles(f) != "blob_profil,gen_prive,gen_profil,h,s_profil,session" || f["gen_prive"] != float64(2) || f["h"] != a.h {
+		t.Fatal(w.Body.String())
+	}
+	expect(t, e.do(req{method: "GET", path: "/api/compte", hdr: S}), 401, `{"error":"session"}`)
+	S = sess(f["session"].(string))
+	jusqu := e.clk.Now().UTC().AddDate(0, 0, 7).Format("2006-01-02")
+	w = e.do(req{method: "GET", path: "/api/compte", hdr: S})
+	if et = jsonOf(t, w); et["recup_jusqu"] != jusqu || et["totp"] != true {
+		t.Fatal(w.Body.String())
+	}
+	// Attente de 7 jours : adresse et suppression refusées.
+	expect(t, e.do(req{method: "POST", path: "/api/compte/email/debut", hdr: S, remote: ip, body: mustJSON(map[string]any{
+		"email_actuel": "lea@exemple.fr", "email_nouveau": "lea@ailleurs.fr", "langue": "fr"})}), 403,
+		`{"error":"attente","jusqu":"`+jusqu+`"}`)
+	expect(t, e.do(req{method: "POST", path: "/api/compte/supprimer", hdr: S, body: []byte(`{}`)}), 403,
+		`{"error":"attente","jusqu":"`+jusqu+`"}`)
+	// Mot de passe ; export ; annulation d'une demande de retrait ; retrait.
+	expect(t, e.do(req{method: "POST", path: "/api/compte/mdp", hdr: S, body: mustJSON(map[string]any{
+		"a_auth": nouveau, "env_mdp": enc.EncodeToString(rnd(60))})}), 200, `{}`)
+	w = e.do(req{method: "GET", path: "/api/compte/export", hdr: S})
+	expect(t, w, 200, "")
+	if x := jsonOf(t, w); cles(x) != "anciennete_depuis,banni_jusqu,banni_motif,cree_le,recup_jusqu,retrait_totp_le,salons_actifs,sessions,totp,vu_mois" ||
+		strings.Contains(w.Body.String(), "lea") {
+		t.Fatal(w.Body.String())
+	}
+	expect(t, e.do(req{method: "POST", path: "/api/compte/totp/annuler-retrait", hdr: S, body: []byte(`{}`)}), 200, `{}`)
+	expect(t, e.do(req{method: "POST", path: "/api/compte/totp/retirer", hdr: S, body: []byte(`{}`)}), 200, `{}`)
+	// Après 7 jours : changement d'adresse puis suppression.
+	e.clk.Add(7 * 24 * time.Hour)
+	w = e.do(req{method: "POST", path: "/api/compte/connexion", remote: ip,
+		body: mustJSON(map[string]any{"email": "lea@exemple.fr", "a_auth": nouveau, "persistante": false, "etiquette": ""})})
+	expect(t, w, 200, "")
+	S = sess(jsonOf(t, w)["session"].(string))
+	expect(t, e.do(req{method: "POST", path: "/api/compte/email/debut", hdr: S, remote: ip, body: mustJSON(map[string]any{
+		"email_actuel": "lea@exemple.fr", "email_nouveau": "x@mailinator.com", "langue": "fr"})}), 400, `{"error":"jetable"}`)
+	w = e.do(req{method: "POST", path: "/api/compte/email/debut", hdr: S, remote: ip, body: mustJSON(map[string]any{
+		"email_actuel": "lea@exemple.fr", "email_nouveau": "lea@ailleurs.fr", "langue": "fr"})})
+	expect(t, w, 200, "")
+	ee := jsonOf(t, w)
+	if cles(ee) != "etape" || e.post.msgs[len(e.post.msgs)-1].A != "lea@ailleurs.fr" {
+		t.Fatal(w.Body.String())
+	}
+	expect(t, e.do(req{method: "POST", path: "/api/compte/email/fin", hdr: S, body: mustJSON(map[string]any{
+		"etape": ee["etape"], "code": e.post.code(t), "a_auth": enc.EncodeToString(rnd(32)), "env_mdp": enc.EncodeToString(rnd(60)),
+		"totp": ""})}), 200, `{}`)
+	expect(t, e.do(req{method: "POST", path: "/api/compte/supprimer", hdr: S, body: []byte(`{}`)}), 200, `{"salons_fermes":0}`)
+	expect(t, e.do(req{method: "GET", path: "/api/compte", hdr: S}), 401, `{"error":"session"}`)
 }

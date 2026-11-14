@@ -533,6 +533,14 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	} else {
 		close(cdone)
 	}
+	// Compte : passe quotidienne (inactifs depuis 13 mois, sessions et bannissements échus),
+	// au démarrage puis au premier tour de chaque jour UTC.
+	edone := make(chan struct{})
+	if cpt != nil && cpt.svc != nil {
+		go func() { janitor.Comptes(jctx, cpt.svc, cfg.Now, time.Hour); close(edone) }()
+	} else {
+		close(edone)
+	}
 	rdone := make(chan struct{})
 	if sm != nil {
 		go func() { sm.Run(jctx); close(rdone) }()
@@ -546,6 +554,7 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 		<-rdone
 		<-vdone
 		<-cdone
+		<-edone
 	}()
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()

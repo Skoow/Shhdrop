@@ -236,3 +236,54 @@ func TestRunWatchRecuperentLesPaniques(t *testing.T) {
 		t.Fatal("panique non convertie :", err)
 	}
 }
+
+// Passe quotidienne du compte (plan du compte, lot 5) : au démarrage, puis une fois par jour
+// UTC (vérifié à chaque période) ; une erreur ou une panique n'arrête pas la boucle.
+type effaceur struct {
+	mu    sync.Mutex
+	jours []time.Time
+	err   error
+}
+
+func (f *effaceur) Effacer(now time.Time) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.jours = append(f.jours, now)
+	if f.err != nil {
+		e := f.err
+		f.err = nil
+		panic(e)
+	}
+	return 0, nil
+}
+
+func (f *effaceur) n() int { f.mu.Lock(); defer f.mu.Unlock(); return len(f.jours) }
+
+func TestComptesQuotidien(t *testing.T) {
+	c := &clock{t: time.Date(2026, 11, 14, 23, 59, 0, 0, time.UTC)}
+	f := &effaceur{err: errors.New("x")}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { Comptes(ctx, f, c.Now, time.Millisecond); close(done) }()
+	attendre := func(n int) {
+		t.Helper()
+		for i := 0; i < 2000 && f.n() < n; i++ {
+			time.Sleep(time.Millisecond)
+		}
+		if f.n() != n {
+			t.Fatalf("%d passes, attendu %d", f.n(), n)
+		}
+	}
+	// Au démarrage : la passe paniquée est réessayée au tour suivant, le même jour.
+	attendre(2)
+	time.Sleep(20 * time.Millisecond)
+	attendre(2) // une seule passe réussie par jour
+	c.Add(2 * time.Minute)
+	attendre(3)
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	<-done
+	if f.n() != 3 {
+		t.Fatal(f.n())
+	}
+}

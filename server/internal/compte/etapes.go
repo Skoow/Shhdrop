@@ -12,8 +12,9 @@ import (
 	"github.com/skoow/shhdrop/server/internal/courriel"
 )
 
-// Étapes en mémoire (conception §8.3) : une inscription en attente de son code, une connexion
-// en attente du code de l'application (lot 5). Désignées par un jeton de 32 octets rendu au
+// Étapes en mémoire (conception §8.3) : une inscription, une récupération ou un changement
+// d'adresse en attente du code reçu par e-mail ; une connexion en attente du code de
+// l'application ; une activation de la double authentification en attente du premier code. Désignées par un jeton de 32 octets rendu au
 // client ; la table ne garde que SHA-256 du jeton. Rien sur disque : un redémarrage les perd.
 // Aucune adresse en clair : e_canon, e_envoi seulement (le renvoi demande l'adresse au client).
 const (
@@ -31,6 +32,9 @@ type sorteEtape uint8
 const (
 	etapeInscription sorteEtape = iota + 1
 	etapeConnexionTOTP
+	etapeOubli          // récupération (lot 5)
+	etapeEmail          // changement d'adresse : canon, envoi de la nouvelle adresse (lot 5)
+	etapeTOTPActivation // secret scellé en attente du premier code (lot 5)
 )
 
 type etape struct {
@@ -43,6 +47,14 @@ type etape struct {
 	expire       time.Time
 	envoye       time.Time      // dernier envoi d'un code
 	options      OptionsSession // connexion en attente de la double authentification
+	essaisTOTP   int            // essais restants pour le code de l'application
+	secret       [48]byte       // activation : secret TOTP scellé (jamais en clair)
+	// fantome : récupération demandée pour une adresse sans compte (ou une variante de
+	// l'adresse exacte) : même étape, mêmes limites, aucun e-mail, aucun code juste.
+	fantome bool
+	// verifie : récupération dont le code (et le code de l'application, ou l'attente de son
+	// retrait, parRetrait) est juste.
+	verifie, parRetrait bool
 }
 
 // etapes : SHA-256 du jeton → étape (allowedMaps de stats_test.go).
@@ -102,19 +114,24 @@ func (s *Service) nouvelleEtapeLocked(e *etape, now time.Time) ([32]byte, error)
 
 // envoyerCodeLocked : nouveau code de 6 chiffres, 15 min, 5 essais, mis en file pour adresse
 // (l'adresse exacte de la requête, jamais gardée). File pleine : busy, le code précédent reste.
+// Étape fantôme : le même calcul, rien en file, et une empreinte aléatoire qu'aucun code ne
+// reproduit.
 func (s *Service) envoyerCodeLocked(e *etape, adresse string, now time.Time) error {
 	n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
 	if err != nil {
 		return err
 	}
 	code := fmt.Sprintf("%06d", n.Int64())
-	if err := s.post.Mettre(courriel.Message{A: adresse, Langue: e.langue, Code: code}); err != nil {
+	c := s.hmacCode(e, code)
+	if e.fantome {
+		rand.Read(c[:])
+	} else if err := s.post.Mettre(courriel.Message{A: adresse, Langue: e.langue, Code: code}); err != nil {
 		if errors.Is(err, courriel.ErrPlein) {
 			return ErrBusy
 		}
 		return err
 	}
-	e.code = s.hmacCode(e, code)
+	e.code = c
 	e.essais = essaisCode
 	e.envoye = now
 	e.expire = now.Add(dureeCode)
