@@ -71,6 +71,7 @@ var allowedMaps = map[string]string{
 	"salon/pieces.go:lus":               "§9.5 budget de lecture par (jeton de membre, pièce) (§24, M1), effacé avec la pièce",
 	"salon/manager.go:vivants":          "§9.5 salons vivants par bloc (§39.3.6, 12 novembre) : id interne → clé de bloc, jusqu'à la fin du salon",
 	"salon/manager.go:parBloc":          "§9.5 salons vivants par bloc (§39.3.6, 12 novembre) : clé de bloc → nombre, jusqu'à la fin du salon",
+	"compte/jetables.go:jetables":       "constante (liste de domaines jetables, conception du compte §5.3), lue une fois au démarrage, aucun compteur",
 }
 
 type goFile struct {

@@ -61,6 +61,7 @@ const salonsSchema = `CREATE TABLE IF NOT EXISTS salons(
   failed_attempts INTEGER NOT NULL DEFAULT 0,
   pieces_bytes INTEGER NOT NULL DEFAULT 0 CHECK(pieces_bytes BETWEEN 0 AND 2147483648),
   rotation_r INTEGER NOT NULL DEFAULT 0 CHECK(rotation_r BETWEEN 0 AND 4294967295),
+  compte BLOB ` + compteCheck + `,
   CHECK(length(access_v)=32 AND length(manage_v)=32 AND length(proof_v)=32 AND length(salt)=16)) WITHOUT ROWID;
 CREATE UNIQUE INDEX IF NOT EXISTS salons_access_v ON salons(access_v);
 CREATE UNIQUE INDEX IF NOT EXISTS salons_manage_v ON salons(manage_v);
@@ -69,6 +70,14 @@ CREATE TABLE IF NOT EXISTS salon_pieces(
   bucket INTEGER NOT NULL CHECK(bucket BETWEEN 1 AND 8000), state TEXT NOT NULL CHECK(state IN ('uploading','ready')),
   segments_mask BLOB NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS salon_pieces_salon ON salon_pieces(salon_id)`
+
+// compteCheck : salons.compte (schéma 3, conception du compte §8.2) : NULL (salon créé sans
+// compte) ou h du compte créateur, 16 octets. C'est le seul lien compte ↔ salons ; il
+// disparaît avec la ligne du salon. Aucun lien avec les partages.
+const compteCheck = `CHECK(compte IS NULL OR (typeof(compte)='blob' AND length(compte)=16))`
+
+// salonsIndexes : après la migration 2 → 3 (la colonne compte doit exister).
+const salonsIndexes = `CREATE INDEX IF NOT EXISTS salons_compte ON salons(compte)`
 
 // Les PRAGMA passent par le DSN pour s'appliquer à chaque connexion. synchronous(FULL) :
 // valeur par défaut, écrite pour qu'un changement du pilote ne l'abaisse pas en silence
@@ -81,6 +90,10 @@ const pragmas = "_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_pragma=sec
 	"&_pragma=busy_timeout(" + busyTimeoutMs + ")&_pragma=foreign_keys(ON)&_pragma=temp_store(MEMORY)" +
 	"&_pragma=journal_size_limit(0)"
 
+// Pragmas : les mêmes réglages pour comptes.db (internal/compte), qui suit les règles de
+// shares.db (conception du compte §8.2).
+const Pragmas = pragmas
+
 // busyTimeoutMs : attente d'une base occupée par un autre processus (millisecondes), pour
 // toutes les requêtes sauf les vidages regroupés (vidage.go : attente courte).
 const busyTimeoutMs = "5000"
@@ -88,8 +101,9 @@ const busyTimeoutMs = "5000"
 // SchemaVersion : version du schéma, écrite dans PRAGMA user_version. Un binaire refuse une
 // base d'une version plus récente (ErrNewerSchema) : un retour arrière ne réécrit jamais une
 // base qu'il ne connaît pas. À incrémenter avec toute migration.
-// 1 : partages ; 2 : tables salons et salon_pieces (tables neuves, aucune donnée migrée).
-const SchemaVersion = 2
+// 1 : partages ; 2 : tables salons et salon_pieces (tables neuves, aucune donnée migrée) ;
+// 3 : colonne salons.compte et index salons_compte (ajout en place, salons gardés, compte NULL).
+const SchemaVersion = 3
 
 var (
 	// ErrNewerSchema : message fixe, sans chemin.
@@ -101,7 +115,7 @@ var (
 		"l'effacer avant de démarrer (rien n'a été fait)")
 	// ErrOldSchema : base d'une version antérieure (commandes d'administration du salon) ;
 	// message fixe, sans chemin.
-	ErrOldSchema = errors.New("base d'une version antérieure de Shhgone (sans les tables du salon) : " +
+	ErrOldSchema = errors.New("base d'une version antérieure de Shhgone (sans les tables ou colonnes du salon) : " +
 		"démarrer le serveur une fois pour la mettre à jour (rien n'a été fait)")
 	// ErrCheckpointBusy : le vidage du WAL n'a pas pu finir (lecteur ou écrivain en cours) ;
 	// le WAL garde encore des pages, à revider au prochain passage (spec §9.1).
@@ -213,6 +227,14 @@ func Open(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, ErrSalonsPerimes
 	}
+	if err := migrateCompte(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migration du schéma (salons.compte) : %w", err)
+	}
+	if _, err := db.Exec(salonsIndexes); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("création des index du salon : %w", err)
+	}
 	if version < SchemaVersion {
 		if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version=%d`, SchemaVersion)); err != nil {
 			db.Close()
@@ -220,6 +242,20 @@ func Open(path string) (*sql.DB, error) {
 		}
 	}
 	return db, nil
+}
+
+// migrateCompte : schéma 2 → 3, colonne salons.compte ajoutée en place (ALTER TABLE ADD
+// COLUMN : lignes existantes à NULL, aucune copie). Déjà là : rien.
+func migrateCompte(db *sql.DB) error {
+	var has int
+	if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info('salons') WHERE name='compte'`).Scan(&has); err != nil {
+		return err
+	}
+	if has != 0 {
+		return nil
+	}
+	_, err := db.Exec(`ALTER TABLE salons ADD COLUMN compte BLOB ` + compteCheck)
+	return err
 }
 
 // migrate retire les colonnes de dates de l'ancien schéma v2 (Task M2) : copie dans une

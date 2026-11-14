@@ -207,3 +207,9 @@ Versions exactes dans `server/go.mod` et `server/go.sum` ; liste des modules com
 - BSD-3-Clause : `modernc.org/sqlite` v1.62.0 (SQLite traduit en Go ; SQLite lui-même est dans le domaine public), `modernc.org/libc` v1.81.0, `modernc.org/mathutil` v1.7.1, `modernc.org/memory` v1.12.1, `golang.org/x/sys` v0.50.0, `github.com/google/uuid` v1.6.0, `github.com/remyoudompheng/bigfft` v0.0.0-20230129092748-24d4a6f8daec
 - Indirectes de `go.mod` absentes du binaire Linux (compilées sur d'autres systèmes seulement) : `github.com/mattn/go-isatty` v0.0.24 (MIT), `github.com/ncruces/go-strftime` v1.1.0 (MIT)
 - `deploy/shhcheck` : bibliothèque standard seulement.
+
+### Liste de domaines jetables (`server/internal/compte/jetables.txt`)
+
+- Source : https://github.com/disposable-email-domains/disposable-email-domains (fichier `disposable_email_blocklist.conf`, branche `main`), copie du 14 novembre 2026, 10 181 domaines, SHA-256 de la source `8a303e28fe2704fc20e73bd320cb9f47e8b3658adc0ebb046260d5acf59c27c2`.
+- Licence : CC0 1.0 Universal (domaine public), texte : https://creativecommons.org/publicdomain/zero/1.0/legalcode.
+- Utilisation : embarquée dans le binaire (`go:embed`), refus des adresses jetables à l'inscription et au changement d'adresse (conception du compte §5.3). Mise à jour sur le poste du développeur seulement : `node web/scripts/maj-jetables.mjs` ; le serveur ne la télécharge jamais.

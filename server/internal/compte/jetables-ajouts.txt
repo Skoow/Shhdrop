@@ -1,0 +1,2 @@
+# Domaines jetables ajoutés à la main (conception du compte §5.3) : vus par le fondateur, absents
+# de jetables.txt. Un domaine par ligne, en minuscules ; ses sous-domaines sont refusés aussi.

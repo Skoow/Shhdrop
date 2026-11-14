@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"strings"
 	"testing"
 )
@@ -195,6 +196,120 @@ func TestSalonsMaxInvalide(t *testing.T) {
 		env(t, map[string]string{"SHH_DATA_DIR": "/d", "SHH_SALONS_MAX": v})
 		if _, err := FromEnv(); err != nil {
 			t.Errorf("SHH_SALONS_MAX=%q refusé : %v", v, err)
+		}
+	}
+}
+
+// Compte (conception §8.1, plan lot 2) : désactivé par défaut, rien d'autre n'est exigé.
+func TestComptesDefautDesactive(t *testing.T) {
+	env(t, map[string]string{"SHH_DATA_DIR": "/d"})
+	c, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Comptes || c.ComptesCleFile != "" || c.ComptesMax != 10000 || c.SMTP != (SMTP{}) {
+		t.Fatalf("défauts du compte : %+v %d %+v", c.Comptes, c.ComptesMax, c.SMTP)
+	}
+	env(t, map[string]string{"SHH_DATA_DIR": "/d", "SHH_COMPTES": "0"})
+	if c, err := FromEnv(); err != nil || c.Comptes {
+		t.Fatalf("SHH_COMPTES=0 : %v %v", c.Comptes, err)
+	}
+}
+
+// comptesOK : configuration complète et valide avec SHH_COMPTES=1.
+func comptesOK() map[string]string {
+	return map[string]string{
+		"SHH_DATA_DIR": "/d", "SHH_SALONS": "1", "SHH_ORIGIN": "https://shhgone.com",
+		"SHH_COMPTES": "1", "SHH_COMPTES_CLE_FILE": "/run/secrets/shh_comptes_cle",
+		"SHH_SMTP_HOST": "smtp.tem.scaleway.com", "SHH_SMTP_USER": "utilisateur",
+		"SHH_SMTP_PASSWORD_FILE": "/run/secrets/shh_smtp_mdp", "SHH_MAIL_FROM": "Shhgone <ne-pas-repondre@shhgone.com>",
+	}
+}
+
+func avec(kv map[string]string, k, v string) map[string]string {
+	m := maps.Clone(kv)
+	m[k] = v
+	return m
+}
+
+func TestComptesConfigValide(t *testing.T) {
+	env(t, comptesOK())
+	c, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := SMTP{Host: "smtp.tem.scaleway.com", Port: 465, User: "utilisateur", PasswordFile: "/run/secrets/shh_smtp_mdp",
+		From: "Shhgone <ne-pas-repondre@shhgone.com>"}
+	if !c.Comptes || c.ComptesCleFile != "/run/secrets/shh_comptes_cle" || c.ComptesMax != 10000 || c.SMTP != want {
+		t.Fatalf("%v %q %d %+v", c.Comptes, c.ComptesCleFile, c.ComptesMax, c.SMTP)
+	}
+	for k, v := range map[string]string{
+		"SHH_SMTP_PORT": "587", "SHH_COMPTES_MAX": "1", "SHH_MAIL_FROM": "ne-pas-repondre@shhgone.com",
+	} {
+		env(t, avec(comptesOK(), k, v))
+		if _, err := FromEnv(); err != nil {
+			t.Errorf("%s=%q refusé : %v", k, v, err)
+		}
+	}
+	env(t, avec(comptesOK(), "SHH_COMPTES_MAX", "1000000"))
+	if c, err := FromEnv(); err != nil || c.ComptesMax != 1000000 {
+		t.Fatal(c.ComptesMax, err)
+	}
+	// Texte clair (autre port que 465 ou 587) : seulement vers la boucle locale (tests).
+	for _, h := range []string{"127.0.0.1", "localhost", "::1"} {
+		m := avec(comptesOK(), "SHH_SMTP_HOST", h)
+		m["SHH_SMTP_PORT"] = "2525"
+		env(t, m)
+		if c, err := FromEnv(); err != nil || c.SMTP.Port != 2525 {
+			t.Errorf("boucle locale %s : %v", h, err)
+		}
+	}
+}
+
+func TestComptesConfigRefusee(t *testing.T) {
+	sans := func(k string) map[string]string { m := comptesOK(); delete(m, k); return m }
+	cas := map[string]map[string]string{
+		"SHH_COMPTES=2":                 {"SHH_DATA_DIR": "/d", "SHH_COMPTES": "2"},
+		"SHH_COMPTES=true":              {"SHH_DATA_DIR": "/d", "SHH_COMPTES": "true"},
+		"sans SHH_SALONS=1":             avec(comptesOK(), "SHH_SALONS", "0"),
+		"sans clé":                      sans("SHH_COMPTES_CLE_FILE"),
+		"sans hôte SMTP":                sans("SHH_SMTP_HOST"),
+		"sans utilisateur SMTP":         sans("SHH_SMTP_USER"),
+		"sans mot de passe SMTP":        sans("SHH_SMTP_PASSWORD_FILE"),
+		"sans expéditeur":               sans("SHH_MAIL_FROM"),
+		"clé relative":                  avec(comptesOK(), "SHH_COMPTES_CLE_FILE", "cle"),
+		"clé dans SHH_DATA_DIR":         avec(comptesOK(), "SHH_COMPTES_CLE_FILE", "/d/cle"),
+		"clé = SHH_DATA_DIR":            avec(comptesOK(), "SHH_COMPTES_CLE_FILE", "/d"),
+		"clé sous SHH_DATA_DIR (..)":    avec(comptesOK(), "SHH_COMPTES_CLE_FILE", "/x/../d/sous/cle"),
+		"mot de passe dans les données": avec(comptesOK(), "SHH_SMTP_PASSWORD_FILE", "/d/mdp"),
+		"clé sous SHH_DATA_DIR (..x)":   avec(comptesOK(), "SHH_COMPTES_CLE_FILE", "/d/..x/cle"),
+		"mot de passe relatif":          avec(comptesOK(), "SHH_SMTP_PASSWORD_FILE", "mdp"),
+		"port 25":                       avec(comptesOK(), "SHH_SMTP_PORT", "25"),
+		"port 2525 hors boucle":         avec(comptesOK(), "SHH_SMTP_PORT", "2525"),
+		"port 0":                        avec(comptesOK(), "SHH_SMTP_PORT", "0"),
+		"port 65536":                    avec(comptesOK(), "SHH_SMTP_PORT", "65536"),
+		"port 0465":                     avec(comptesOK(), "SHH_SMTP_PORT", "0465"),
+		"port texte":                    avec(comptesOK(), "SHH_SMTP_PORT", "smtps"),
+		"hôte avec port":                avec(comptesOK(), "SHH_SMTP_HOST", "smtp.exemple.fr:465"),
+		"hôte en majuscules":            avec(comptesOK(), "SHH_SMTP_HOST", "SMTP.exemple.fr"),
+		"hôte avec espace":              avec(comptesOK(), "SHH_SMTP_HOST", "smtp exemple.fr"),
+		"hôte vide d'étiquette":         avec(comptesOK(), "SHH_SMTP_HOST", "smtp..fr"),
+		"expéditeur sans @":             avec(comptesOK(), "SHH_MAIL_FROM", "Shhgone"),
+		"expéditeur avec saut de ligne": avec(comptesOK(), "SHH_MAIL_FROM", "a@b.fr\r\nBcc: x@y.fr"),
+		"expéditeur deux adresses":      avec(comptesOK(), "SHH_MAIL_FROM", "a@b.fr, c@d.fr"),
+		"utilisateur avec saut":         avec(comptesOK(), "SHH_SMTP_USER", "u\nv"),
+		"max 0":                         avec(comptesOK(), "SHH_COMPTES_MAX", "0"),
+		"max 1000001":                   avec(comptesOK(), "SHH_COMPTES_MAX", "1000001"),
+		"max 010":                       avec(comptesOK(), "SHH_COMPTES_MAX", "010"),
+		"max texte":                     avec(comptesOK(), "SHH_COMPTES_MAX", "dix"),
+		// Valeur fausse refusée même compte désactivé (comme SHH_SALONS_MAX, SHH_ORIGIN).
+		"max faux, compte coupé":  {"SHH_DATA_DIR": "/d", "SHH_COMPTES_MAX": "0"},
+		"port faux, compte coupé": {"SHH_DATA_DIR": "/d", "SHH_SMTP_PORT": "25"},
+	}
+	for nom, kv := range cas {
+		env(t, kv)
+		if _, err := FromEnv(); err == nil {
+			t.Errorf("%s accepté", nom)
 		}
 	}
 }

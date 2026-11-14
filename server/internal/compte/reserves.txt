@@ -1,0 +1,40 @@
+# Pseudos réservés (conception du compte §21.5), sous leur forme canonique : pseudo_canon du
+# moteur Rust (NFKC, minuscules, squelette UTS #39 : « m » devient « rn », sans espaces ni
+# ponctuation). Exactement constants.reserves de engine/vectors/compte.json (test
+# TestPseudoReserve) ; une ligne par forme, le mot d'origine en commentaire au-dessus.
+# shhgone
+shhgone
+# shhdrop
+shhdrop
+# admin
+adrnin
+# administrateur
+adrninistrateur
+# moderateur
+rnoderateur
+# moderation
+rnoderation
+# support
+support
+# aide
+aide
+# equipe
+equipe
+# officiel
+officiel
+# systeme
+systerne
+# securite
+securite
+# contact
+contact
+# modérateur
+rnodérateur
+# modération
+rnodération
+# équipe
+équipe
+# système
+systèrne
+# sécurité
+sécurité

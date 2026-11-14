@@ -233,8 +233,24 @@ func TestConcurrent(t *testing.T) {
 			n++
 		}
 	}
-	if n != 10 {
-		t.Fatalf("%d créations acceptées en parallèle, attendu 10", n)
+	// En parallèle, une création peut être refusée parce que 2 envois de la même connexion
+	// sont déjà en cours (§29.5) : le nombre accepté dépend de l'ordonnancement. L'invariant
+	// est le plafond du jour : jamais plus de CreatesPer64, et exactement CreatesPer64 une fois
+	// les places libérées (le test exigeait 10 d'un coup et échouait selon la charge).
+	if n < 1 || n > CreatesPer64 {
+		t.Fatalf("%d créations acceptées en parallèle, attendu entre 1 et %d", n, CreatesPer64)
+	}
+	for {
+		ok, _ := l.AllowCreate(ip("1.2.3.4"), 1)
+		if !ok {
+			break
+		}
+		if n++; n > CreatesPer64 {
+			t.Fatalf("plafond du jour dépassé : %d créations", n)
+		}
+	}
+	if n != CreatesPer64 {
+		t.Fatalf("%d créations au total, attendu %d", n, CreatesPer64)
 	}
 }
 

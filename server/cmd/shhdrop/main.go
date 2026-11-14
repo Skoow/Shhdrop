@@ -21,6 +21,7 @@ import (
 	"github.com/skoow/shhdrop/server/internal/api"
 	"github.com/skoow/shhdrop/server/internal/blob"
 	"github.com/skoow/shhdrop/server/internal/captcha"
+	"github.com/skoow/shhdrop/server/internal/compte"
 	"github.com/skoow/shhdrop/server/internal/config"
 	"github.com/skoow/shhdrop/server/internal/janitor"
 	"github.com/skoow/shhdrop/server/internal/limits"
@@ -270,6 +271,34 @@ func setupSalons(cfg config.Config, db *sql.DB, svc *share.Service, lim *limits.
 	return m, nil
 }
 
+// comptes : clés du serveur et base des comptes (conception du compte §8 ; branchés aux
+// routes au lot 4 du plan du compte : rien n'est encore servi).
+type comptes struct {
+	db   *sql.DB
+	cles compte.Cles
+}
+
+// setupComptes : sans SHH_COMPTES=1, rien (nil : aucun fichier lu ni créé). Sinon K_serveur lu
+// (refus de démarrer si le fichier est faux) et comptes.db ouverte (créée en 0600) dans
+// SHH_DATA_DIR. Messages pour l'exploitant : le chemin donné par lui seulement.
+func setupComptes(cfg config.Config) (*comptes, error) {
+	if !cfg.Comptes {
+		return nil, nil
+	}
+	cles, err := compte.LireCles(cfg.ComptesCleFile)
+	if err != nil {
+		return nil, shown(err.Error())
+	}
+	db, err := compte.OuvrirBase(filepath.Join(cfg.DataDir, "comptes.db"))
+	if errors.Is(err, compte.ErrBasePlusRecente) {
+		return nil, shown(err.Error())
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &comptes{db: db, cles: cles}, nil
+}
+
 // usedAtStart : place déjà prise sous SHH_STORAGE_MAX au démarrage (checkStorage) : partages
 // et, salon actif, pièces et conversations (rien après la purge, compté quand même).
 func usedAtStart(svc *share.Service, m *salon.Manager) (int64, error) {
@@ -362,6 +391,13 @@ func serve(ctx context.Context, cfg config.Config, out io.Writer) error {
 	sm, err := setupSalons(cfg, db, svc, lim, gate, vidage)
 	if err != nil {
 		return err
+	}
+	cpt, err := setupComptes(cfg)
+	if err != nil {
+		return err
+	}
+	if cpt != nil {
+		defer cpt.db.Close()
 	}
 	// Vidage du WAL au démarrage, APRÈS les purges (partages : PurgeAtStart et Reconcile ;
 	// salons : PurgerAuDemarrage) et avant l'écoute : ni un -wal laissé par un arrêt brutal ni

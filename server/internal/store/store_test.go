@@ -215,8 +215,9 @@ func masterNames(t *testing.T, db *sql.DB) []string {
 	return out
 }
 
-// wantMaster : contenu exact de sqlite_master au schéma 2 (partages et salon), rien d'autre.
-const wantMaster = "index:salon_pieces_salon,index:salons_access_v,index:salons_manage_v," +
+// wantMaster : contenu exact de sqlite_master au schéma 3 (partages et salon ; index du lien
+// compte ↔ salons, conception du compte §8.2), rien d'autre.
+const wantMaster = "index:salon_pieces_salon,index:salons_access_v,index:salons_compte,index:salons_manage_v," +
 	"index:shares_access_v,index:shares_manage_v,table:salon_pieces,table:salons,table:shares"
 
 // Spec §36 S5, S11, S12 (Task M2) : progress_at, upload_deadline et purge_at vivent en
@@ -383,8 +384,8 @@ func TestSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v := pragma(t, db, "user_version"); v != "2" {
-		t.Fatalf("user_version = %s, attendu 2 (tables du salon)", v)
+	if v := pragma(t, db, "user_version"); v != "3" {
+		t.Fatalf("user_version = %s, attendu 3 (colonne salons.compte)", v)
 	}
 	if _, err := db.Exec(`PRAGMA user_version=0`); err != nil { // base d'avant la version
 		t.Fatal(err)
@@ -450,7 +451,7 @@ func TestSalonsColonnes(t *testing.T) {
 	}
 	defer db.Close()
 	want := "id,access_v,manage_v,proof_v,salt,kdf_ops,kdf_mem,expires_at,max_members," +
-		"members_can_destroy,failed_attempts,pieces_bytes,rotation_r"
+		"members_can_destroy,failed_attempts,pieces_bytes,rotation_r,compte"
 	if got := strings.Join(tableColumns(t, db, "salons"), ","); got != want {
 		t.Fatalf("colonnes de salons = %s, attendu %s", got, want)
 	}
@@ -603,7 +604,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS shares_manage_v ON shares(manage_v)`
 	}
 }
 
-// Une base du schéma 1 avec un partage s'ouvre, garde le partage et passe au schéma 2.
+// Une base du schéma 1 avec un partage s'ouvre, garde le partage et passe au schéma courant.
 func TestMigreV1VersV2(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shares.db")
 	baseV1(t, path, 1)
@@ -616,7 +617,7 @@ func TestMigreV1VersV2(t *testing.T) {
 	if err := db.QueryRow(`SELECT expires_at FROM shares WHERE id='r'`).Scan(&exp); err != nil || exp != 900 {
 		t.Fatal("partage perdu :", exp, err)
 	}
-	if v := pragma(t, db, "user_version"); v != "2" {
+	if v := pragma(t, db, "user_version"); v != strconv.Itoa(SchemaVersion) {
 		t.Fatalf("user_version = %s", v)
 	}
 	if err := insSalon(db, "a"); err != nil {
@@ -624,24 +625,24 @@ func TestMigreV1VersV2(t *testing.T) {
 	}
 }
 
-// Une base du schéma 3 (binaire plus récent) est refusée sans rien toucher : ni tables du
+// Une base du schéma 4 (binaire plus récent) est refusée sans rien toucher : ni tables du
 // salon créées, ni version réécrite.
-func TestRefuseV3(t *testing.T) {
+func TestRefuseV4(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "shares.db")
-	baseV1(t, path, 3)
+	baseV1(t, path, 4)
 	db, err := Open(path)
 	if !errors.Is(err, ErrNewerSchema) {
 		if db != nil {
 			db.Close()
 		}
-		t.Fatal("base du schéma 3 acceptée :", err)
+		t.Fatal("base du schéma 4 acceptée :", err)
 	}
 	raw, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	if v := pragma(t, raw, "user_version"); v != "3" {
+	if v := pragma(t, raw, "user_version"); v != "4" {
 		t.Fatal("version touchée", v)
 	}
 	if got := strings.Join(masterNames(t, raw), ","); got != "index:shares_access_v,index:shares_manage_v,table:shares" {
@@ -690,5 +691,118 @@ func TestOpenRefuseSalonsSansRotation(t *testing.T) {
 	}
 	if strings.Contains(ErrSalonsPerimes.Error(), p) {
 		t.Fatal("message avec le chemin")
+	}
+}
+
+// baseV2 : base du schéma 2 (partages et salon, sans la colonne compte), DDL figé en littéral
+// comme l'écrivait le binaire précédent, avec un salon.
+func baseV2(t *testing.T, path string) {
+	t.Helper()
+	baseV1(t, path, 2)
+	raw, err := sql.Open("sqlite", "file:"+path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	const v2 = `CREATE TABLE IF NOT EXISTS salons(
+  id TEXT PRIMARY KEY, access_v BLOB NOT NULL, manage_v BLOB NOT NULL, proof_v BLOB NOT NULL,
+  salt BLOB NOT NULL, kdf_ops INTEGER NOT NULL, kdf_mem INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+  max_members INTEGER NOT NULL CHECK(max_members BETWEEN 2 AND 10),
+  members_can_destroy INTEGER NOT NULL CHECK(members_can_destroy IN (0,1)),
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  pieces_bytes INTEGER NOT NULL DEFAULT 0 CHECK(pieces_bytes BETWEEN 0 AND 2147483648),
+  rotation_r INTEGER NOT NULL DEFAULT 0 CHECK(rotation_r BETWEEN 0 AND 4294967295),
+  CHECK(length(access_v)=32 AND length(manage_v)=32 AND length(proof_v)=32 AND length(salt)=16)) WITHOUT ROWID;
+CREATE UNIQUE INDEX IF NOT EXISTS salons_access_v ON salons(access_v);
+CREATE UNIQUE INDEX IF NOT EXISTS salons_manage_v ON salons(manage_v);
+CREATE TABLE IF NOT EXISTS salon_pieces(
+  id TEXT PRIMARY KEY, salon_id TEXT NOT NULL REFERENCES salons(id) ON DELETE CASCADE,
+  bucket INTEGER NOT NULL CHECK(bucket BETWEEN 1 AND 8000), state TEXT NOT NULL CHECK(state IN ('uploading','ready')),
+  segments_mask BLOB NOT NULL) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS salon_pieces_salon ON salon_pieces(salon_id)`
+	if _, err := raw.Exec(v2); err != nil {
+		t.Fatal(err)
+	}
+	if err := insSalon(raw, "s"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`INSERT INTO salon_pieces(id,salon_id,bucket,state,segments_mask) VALUES('p','s',1,'ready',x'00')`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Plan du compte, lot 2 : une base du schéma 2 passe au schéma 3 en place (salon et pièce
+// gardés, compte NULL), avec le même sqlite_master et les mêmes colonnes qu'une base neuve.
+func TestMigreV2VersV3(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shares.db")
+	baseV2(t, path)
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if v := pragma(t, db, "user_version"); v != "3" {
+		t.Fatalf("user_version = %s", v)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM salons WHERE id='s' AND compte IS NULL`).Scan(&n); err != nil || n != 1 {
+		t.Fatal("salon perdu ou compte non NULL :", n, err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM salon_pieces WHERE salon_id='s'`).Scan(&n); err != nil || n != 1 {
+		t.Fatal("pièce perdue :", n, err)
+	}
+	if got := strings.Join(masterNames(t, db), ","); got != wantMaster {
+		t.Fatalf("sqlite_master = %s", got)
+	}
+	want := "id,access_v,manage_v,proof_v,salt,kdf_ops,kdf_mem,expires_at,max_members," +
+		"members_can_destroy,failed_attempts,pieces_bytes,rotation_r,compte"
+	if got := strings.Join(tableColumns(t, db, "salons"), ","); got != want {
+		t.Fatalf("colonnes = %s", got)
+	}
+	compteContraintes(t, db, "s")
+	db.Close()
+	// Réouverture : rien à refaire.
+	db2, err := Open(path)
+	if err != nil {
+		t.Fatal("réouverture :", err)
+	}
+	db2.Close()
+}
+
+// compteContraintes : salons.compte est NULL ou un BLOB de 16 octets exactement (h du compte).
+func compteContraintes(t *testing.T, db *sql.DB, id string) {
+	t.Helper()
+	for _, v := range []string{"randomblob(15)", "randomblob(17)", "'0123456789abcdef'", "zeroblob(0)", "16"} {
+		if _, err := db.Exec(`UPDATE salons SET compte=`+v+` WHERE id=?`, id); err == nil {
+			t.Errorf("compte = %s accepté", v)
+		}
+	}
+	for _, v := range []string{"randomblob(16)", "NULL"} {
+		if _, err := db.Exec(`UPDATE salons SET compte=`+v+` WHERE id=?`, id); err != nil {
+			t.Errorf("compte = %s refusé : %v", v, err)
+		}
+	}
+}
+
+func TestSalonsCompte(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := insSalon(db, "a"); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM salons WHERE compte IS NULL`).Scan(&n); err != nil || n != 1 {
+		t.Fatal("compte non NULL par défaut :", n, err)
+	}
+	compteContraintes(t, db, "a")
+	// Plusieurs salons du même compte (index non unique).
+	if err := insSalon(db, "b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE salons SET compte=x'00112233445566778899aabbccddeeff'`); err != nil {
+		t.Fatal("deux salons du même compte refusés :", err)
 	}
 }

@@ -83,6 +83,12 @@ func TestServe(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Compte désactivé (défaut, SHH_COMPTES=0) : aucun fichier du compte sur disque.
+	for _, p := range []string{"data/comptes.db", "data/comptes.db-wal", "data/comptes.db-shm"} {
+		if _, err := os.Stat(filepath.Join(dir, p)); !os.IsNotExist(err) {
+			t.Fatalf("%s présent avec le compte désactivé : %v", p, err)
+		}
+	}
 }
 
 func TestHTTPServerLimits(t *testing.T) {
