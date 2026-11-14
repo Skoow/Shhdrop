@@ -17,6 +17,12 @@ openmls = "=0.9.2"
 openmls_rust_crypto = "=0.6.0"
 openmls_basic_credential = "=0.6.0"
 openmls_traits = "=0.6.0"
+# Clé de rôle du créateur (spec salon v3 §15.2, 14 novembre) : paire Ed25519 tirée d'une graine
+# (HKDF de S_gestion). Aucune crate nouvelle : ed25519-dalek 2.2.0 est déjà dans l'arbre et
+# compilée (openmls_basic_credential signe avec elle) ; seule l'arête directe est ajoutée au
+# Cargo.lock. Utilisée seulement pour `SigningKey::from_bytes` → clé publique (la signature reste
+# celle d'OpenMLS, `SignatureKeyPair::from_raw`).
+ed25519-dalek = { version = "=2.2.0", default-features = false }
 zeroize = { version = "1.9", default-features = false, features = ["alloc", "derive"] }
 serde = { version = "1", default-features = false, features = ["std"] }
 serde_json = "1"

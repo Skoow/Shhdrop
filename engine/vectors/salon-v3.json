@@ -2456,6 +2456,63 @@
       "same_key_as": "alice"
     }
   ],
+  "role": [
+    {
+      "cle_role": "8af739bd3ba638ff3479aae6035ef56adb3f2cd4f8ab0bf509173b94c788ffd6",
+      "code": "12295 62305 09832 43284 39807",
+      "graine_role": "6248b6659dde4607aed786b6d720232825e5df6f0708126b35be01e9650ff5b8",
+      "id_groupe": "00000000000000000000000000000000008af739bd3ba638ff3479aae6035ef56adb3f2cd4f8ab0bf509173b94c788ffd6",
+      "jeton_gestion": "8d8eb07fbcbfdcea1b29e2717df43dc860bc11b77b6d913eee4965715872efc1",
+      "label": "zeros",
+      "s_gestion": "0000000000000000000000000000000000000000000000000000000000000000",
+      "siege": 0,
+      "tag": "00000000000000000000000000000000"
+    },
+    {
+      "cle_role": "dea6190b82435270dec698594a8052eb070e1be5f08c66ed73b0a3545b43b6fa",
+      "code": "29715 79962 18930 18267 15840",
+      "graine_role": "c9b4fb6fa68e27248477349e92f96ca729621442f90231ec40cc562345873512",
+      "id_groupe": "ffffffffffffffffffffffffffffffff00dea6190b82435270dec698594a8052eb070e1be5f08c66ed73b0a3545b43b6fa",
+      "jeton_gestion": "4a39b8545354c0c59cc40f0977d77be649bc23c2e2f367873896e30e27c8b473",
+      "label": "ff",
+      "s_gestion": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "siege": 0,
+      "tag": "ffffffffffffffffffffffffffffffff"
+    },
+    {
+      "cle_role": "eb203ab6ee61dea744417533a9f2990a1924e6956186d5114cc7029b7c753de5",
+      "code": "31999 94511 33209 73646 47826",
+      "graine_role": "7cbdcde63a3e0013a1b171a31e0eaa3d871ed4e0866ded41c4820e222bb664e8",
+      "id_groupe": "dbd36ab8929c3e15fc2c2150f302609000eb203ab6ee61dea744417533a9f2990a1924e6956186d5114cc7029b7c753de5",
+      "jeton_gestion": "d2f444ba014f833238caebbf5933233c42d5ae53c5ec39710709a072c5dc6baa",
+      "label": "seq",
+      "s_gestion": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "siege": 0,
+      "tag": "dbd36ab8929c3e15fc2c2150f3026090"
+    },
+    {
+      "cle_role": "936cf471d1c75456f192b6a1fd9fcd5074270114180a0d9a6c182c4cb2882219",
+      "code": "57215 84831 18951 62833 16533",
+      "graine_role": "0037d75a5b822919ad9d56cc80bde74854aa656fc72568fd704a77fc3763b7ce",
+      "id_groupe": "adedba309f672a842e8f4c2e54335b4d00936cf471d1c75456f192b6a1fd9fcd5074270114180a0d9a6c182c4cb2882219",
+      "jeton_gestion": "4bb8fee173ab968579d0eb650972eccbac54d48c314b76ad861b9af32f230c01",
+      "label": "hasard_1",
+      "s_gestion": "5e6e0fbd21c3d5efb5c068cbf22f94c03c56c616059c193347e0745f1083582e",
+      "siege": 0,
+      "tag": "adedba309f672a842e8f4c2e54335b4d"
+    },
+    {
+      "cle_role": "63a5d4f76fa09ab609a3f026aea27a346ad8cc79ece07717660356bde68184df",
+      "code": "79141 36824 47193 16053 62197",
+      "graine_role": "4fba53bc896f9bc72f5f1091357fb92714e847a9ffc5cef1eec5d08768198528",
+      "id_groupe": "ba06182051db44c483add04b75c1525f0363a5d4f76fa09ab609a3f026aea27a346ad8cc79ece07717660356bde68184df",
+      "jeton_gestion": "5447000bb686dc6b23cdd81c177b0a5e148164fe7dd1170ddfb315f40f6d5ddc",
+      "label": "hasard_2_siege_3",
+      "s_gestion": "fd55a3561fc3b71e802be91473a9d91a3f8669c6680cbb7a102597edb3704552",
+      "siege": 3,
+      "tag": "ba06182051db44c483add04b75c1525f"
+    }
+  ],
   "texte": [
     {
       "in": {

@@ -14,11 +14,14 @@ mod stockage;
 mod texte;
 mod trame;
 
-pub use cles::{CleAcces, ClesSalon, cle_acces, cle_maitre, cles_depuis_maitre, cles_salon};
+pub use cles::{
+    CleAcces, ClesSalon, cle_acces, cle_maitre, cles_depuis_maitre, cles_salon, jeton_gestion,
+};
 pub use effacement::{Etat, etat};
 pub use error::{Error, Result};
 pub use groupe::{
-    ATTENTE_MAX, Evenement, Identite, Rejoue, Salon, code_verification, nouvelle_identite,
+    ATTENTE_MAX, Evenement, Identite, Rejoue, Salon, cle_publique_role, code_verification,
+    identite_createur, nouvelle_identite,
 };
 pub use message::{
     Enveloppe, Graine, IdMessage, JSON_MAX, Message, RefPiece, SortePiece, decoder, encoder,

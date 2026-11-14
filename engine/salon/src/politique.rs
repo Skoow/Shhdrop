@@ -6,6 +6,13 @@
 //! porte un `(siège, nonce_arrivee)` annoncé par le serveur (enregistrements 0x02 et 0x0A,
 //! §39.3.1) **et la clé du KeyPackage que ce siège a lui-même publié** (le `nonce_arrivee` est
 //! public : sans ce lien, n'importe quel membre fabriquerait la feuille d'un arrivant).
+//! **13 novembre (relecture, à valider par le propriétaire)** : « parti ou exclu » se dit d'une
+//! **arrivée** `(siège, nonce_arrivee)`, pas d'un numéro de siège ; le créateur est reconnu par
+//! son siège **et** sa clé d'identité ; tant qu'une feuille est à retirer, tout Commit doit la
+//! retirer (priorité du retrait).
+//! **14 novembre (décision du propriétaire)** : la clé d'identité du créateur est la clé de rôle
+//! tirée de `S_gestion` (`groupe::identite_createur`) ; elle n'est admise qu'au siège du créateur
+//! (contrôle dans `groupe.rs`, qui connaît l'identifiant du groupe).
 //! **Auteur** (audit du 13 novembre, F2) : un Commit dont l'auteur est un siège que le serveur a
 //! dit parti ou exclu est refusé, quel que soit son contenu (un renouvellement lui redonnerait
 //! les secrets de la nouvelle époque et ferait perdre le Commit qui le retire).
@@ -32,20 +39,32 @@ pub struct Changements {
     pub interdit: bool,
 }
 
-/// Vérifie un Commit de l'auteur `auteur_siege` ; `Err(CommitRefuse)` sinon (sans fusion).
-/// `sieges_partis` : sièges que le serveur a dits partis (0x03) ou exclus (0x09).
-/// `key_packages` : premier KeyPackage valide reçu pour chaque arrivée annoncée, **envoyé par
-/// le siège même** (siège attesté par le serveur, enregistrement 0x01).
+/// Vérifie un Commit ; `Err(CommitRefuse)` sinon (sans fusion).
+/// `auteur_createur` : la feuille de l'auteur est celle du créateur (siège **et** clé d'identité
+/// portés par l'identifiant du groupe, 13 novembre). `auteur` : credential `(siège,
+/// nonce_arrivee)` de sa feuille. `a_retirer` : credentials des feuilles de l'arbre dont
+/// l'arrivée est partie (0x03), exclue (0x09) ou inconnue du serveur : suivies par arrivée
+/// `(siège, nonce_arrivee)`, pas par numéro de siège (une nouvelle arrivée sur le même siège
+/// n'efface rien). `key_packages` : premier KeyPackage valide reçu pour chaque arrivée
+/// annoncée, **envoyé par le siège même** (siège attesté par le serveur, enregistrement 0x01).
+///
+/// **Priorité du retrait** (13 novembre) : tant qu'il reste des feuilles à retirer, un Commit
+/// qui ne les retire pas **toutes** est refusé. Sans cela, un membre encore admis qui enchaîne
+/// des renouvellements ferait perdre sans fin la course au Commit de retrait, et tout envoi
+/// resterait refusé (`retrait_en_attente`).
 pub fn verifier(
     commit: &Changements,
-    createur_siege: u8,
-    auteur_siege: u8,
+    auteur_createur: bool,
+    auteur: (u8, [u8; 16]),
     sieges_annonces: &[(u8, [u8; 16])],
-    sieges_partis: &[u8],
+    a_retirer: &[(u8, [u8; 16])],
     key_packages: &[Arrivee],
 ) -> Result<()> {
     let refus = Err(Error::CommitRefuse);
-    if commit.interdit || sieges_partis.contains(&auteur_siege) {
+    if commit.interdit || a_retirer.contains(&auteur) {
+        return refus;
+    }
+    if a_retirer.iter().any(|f| !commit.retraits.contains(f)) {
         return refus;
     }
     for (i, &(siege, nonce, cle)) in commit.ajouts.iter().enumerate() {
@@ -68,11 +87,11 @@ pub fn verifier(
             return refus;
         }
     }
-    for &(siege, _) in &commit.retraits {
-        let permis = auteur_siege == createur_siege
-            || siege == auteur_siege
-            || sieges_partis.contains(&siege)
-            || commit.ajouts.iter().any(|a| a.0 == siege);
+    for retrait in &commit.retraits {
+        let permis = auteur_createur
+            || retrait.0 == auteur.0
+            || a_retirer.contains(retrait)
+            || commit.ajouts.iter().any(|a| a.0 == retrait.0);
         if !permis {
             return refus;
         }

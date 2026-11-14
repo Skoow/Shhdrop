@@ -16,8 +16,9 @@ use shhdrop_core::{KLien, KMdp};
 use shhdrop_salon::{
     ClesSalon, EN_TETE_CONTROLE, EnTete, Enveloppe, Error, Etat, Graine, JSON_MAX, MAX_CHARGE,
     Message, RefPiece, Regle, SortePiece, TAILLE_O, TAILLE_TRAME, cle_acces, cle_maitre,
-    cle_unicite, cles_depuis_maitre, cles_salon, code_verification, decoder, en_tete_coherent,
-    en_tete_de, encoder, etat, lire_en_tete, nettoyer_texte, ouvrir, sceller, verifier_pseudo,
+    cle_publique_role, cle_unicite, cles_depuis_maitre, cles_salon, code_verification, decoder,
+    en_tete_coherent, en_tete_de, encoder, etat, jeton_gestion, lire_en_tete, nettoyer_texte,
+    ouvrir, sceller, verifier_pseudo,
 };
 
 const FILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../vectors/salon-v3.json");
@@ -1419,6 +1420,59 @@ fn empreinte() -> Value {
         .collect()
 }
 
+// ----------------------------------------------------------------------------------- rôle
+
+/// Clé de rôle du créateur et jeton de gestion (spec salon v3 §15.2, 14 novembre) : graine =
+/// HKDF(`S_gestion`, « shhdrop/v2/salon/role »), clé publique Ed25519 de cette graine (RFC 8032),
+/// son code de vérification, `J_gestion` = HKDF(`S_gestion`, « shhdrop/v2/salon/gestion-serveur »)
+/// (montré au serveur à la place de `S_gestion`) et l'identifiant du groupe MLS que fonde le
+/// créateur : `tag` ‖ siège ‖ clé publique de rôle.
+fn role_case(c: &Value) -> Value {
+    let s: [u8; 32] = unhex(c["s_gestion"].as_str().unwrap()).try_into().unwrap();
+    let tag = unhex(c["tag"].as_str().unwrap());
+    let siege = u8::try_from(c["siege"].as_u64().unwrap()).unwrap();
+    let cle = cle_publique_role(&s);
+    let mut id = tag;
+    id.push(siege);
+    id.extend_from_slice(&cle);
+    json!({
+        "graine_role": hex(&*shhdrop_core::kdf::hkdf::<32>(&s, "shhdrop/v2/salon/role")),
+        "cle_role": hex(&cle),
+        "code": code_verification(&cle),
+        "jeton_gestion": hex(&*jeton_gestion(&s)),
+        "id_groupe": hex(&id),
+    })
+}
+
+fn role() -> Value {
+    let cases = [
+        ("zeros", "00".repeat(32), "00".repeat(16), 0u8),
+        ("ff", "ff".repeat(32), "ff".repeat(16), 0),
+        (
+            "seq",
+            hex(&(0u8..32).collect::<Vec<_>>()),
+            h("role/tag-seq", 16),
+            0,
+        ),
+        ("hasard_1", h("role/s-1", 32), h("role/tag-1", 16), 0),
+        (
+            "hasard_2_siege_3",
+            h("role/s-2", 32),
+            h("role/tag-2", 16),
+            3,
+        ),
+    ];
+    cases
+        .into_iter()
+        .map(|(label, s, tag, siege)| {
+            let mut c = json!({ "label": label, "s_gestion": s, "tag": tag, "siege": siege });
+            let x = role_case(&c);
+            merge(&mut c, x);
+            c
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------------- fichier
 
 fn unicode() -> Value {
@@ -1473,6 +1527,7 @@ fn build() -> Value {
         "pseudo": pseudo(),
         "effacement": effacement(),
         "empreinte": empreinte(),
+        "role": role(),
     })
 }
 
@@ -1573,6 +1628,23 @@ fn replay_file(v: &Value) {
     }
     for c in lines(&v["empreinte"]) {
         assert_eq!(empreinte_case(&c), outputs(&c, &["code"]), "{}", c["label"]);
+    }
+    for c in lines(&v["role"]) {
+        assert_eq!(
+            role_case(&c),
+            outputs(
+                &c,
+                &[
+                    "graine_role",
+                    "cle_role",
+                    "code",
+                    "jeton_gestion",
+                    "id_groupe"
+                ]
+            ),
+            "{}",
+            c["label"]
+        );
     }
 }
 
@@ -1717,6 +1789,14 @@ fn salon_v3() {
     }
     for c in file["empreinte"].as_array().unwrap() {
         assert_eq!(c["code"].as_str().unwrap().split(' ').count(), 5);
+    }
+    // Rôle : cinq cas, jeton ≠ graine ≠ S_gestion, identifiant du groupe de 49 octets.
+    let roles = file["role"].as_array().unwrap();
+    assert_eq!(roles.len(), 5);
+    for c in roles {
+        assert_ne!(c["jeton_gestion"], c["graine_role"]);
+        assert_ne!(c["jeton_gestion"], c["s_gestion"]);
+        assert_eq!(c["id_groupe"].as_str().unwrap().len(), 2 * 49);
     }
     assert_eq!(ok("inconnu_e2_"), 2);
     assert!(

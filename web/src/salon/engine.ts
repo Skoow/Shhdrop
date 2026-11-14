@@ -28,6 +28,24 @@
 //   courante (`rotation_refusee` sinon : la clé ne sert pas, le créateur la renvoie), puis
 //   passent à `clesDepuisMaitre(cle)` et refondent le groupe (`Salon.refonder`). Jamais le lien,
 //   `K_lien` ni le mot de passe dans un message ;
+// - relecture du 13 novembre (spec salon v3 §15.1, « Relecture ») : le 0x03 va à `marquerParti`,
+//   le 0x09 à `marquerExclu(siège ou undefined, r)` ; la marque suit l'arrivée (siège, nonce),
+//   une nouvelle annonce sur le siège ne l'efface pas ; `n` d'une rotation doit être le `r` du
+//   dernier 0x09 ; à l'écho de sa rotation, le créateur reçoit `rotationAcceptee` (il refonde)
+//   ou `rotationARenvoyer` (il ne refonde pas, règle `aRetirer()` et la renvoie) ; le rôle de
+//   créateur tient au siège et à la clé d'identité (revenu après un rechargement, le créateur
+//   ne peut plus retirer un membre présent ni envoyer la rotation : `commit_refuse`,
+//   `rotation_refusee`) ; tant qu'un siège est à retirer, tout Commit le retire (`renouveler`
+//   et `ajouter` aussi) ; `exporterSframe` suit les refus d'`envoyer` ;
+// - 14 novembre (même section) : une seule rotation en vol (une seconde avant l'écho de la
+//   première : `rotation_refusee`) ; pendant une reprise de siège (0x0A), l'ancienne feuille
+//   est dans `aRetirer()` jusqu'au Commit qui la remplace (même jugement que par la liste
+//   complète du 0x0D) ;
+// - 14 novembre (spec salon v3 §15.2, décision du propriétaire) : le rôle de créateur tient à
+//   `S_gestion`. Le créateur passe `sGestion` à `Salon.creer` à la création comme à chaque retour
+//   (même clé de rôle, même code de vérification ; rôle rendu dès le Commit qui l'ajoute) ;
+//   `createurRevenu` sur `membres`, `commitPerdu` et `commitAccepte` : à afficher à tous. Au
+//   serveur, `X-Shh-Manage` = `jetonGestion(sGestion)`, jamais `S_gestion` ;
 // - poignées `ClesSalon` et `Salon` à libérer par `free()` (efface les clés et l'état MLS) ;
 // - secrets rendus (à mettre à zéro par `fill(0)` après usage) : `cleAcces().k`,
 //   `ClesSalon.kPreuve()` (montrées au serveur), `Salon.exporterSframe()` (clé des appels), les
@@ -247,7 +265,9 @@ export class Salon extends Poignee<wasm.Salon> {
    * Trame d'une enveloppe (en-tête tiré du contenu) et son identifiant (tiré s'il manque).
    * Refus à traiter, jamais à contourner : `commit_en_cours` (attendre l'écho de notre Commit),
    * `retrait_en_attente` (retirer d'abord les sièges de `aRetirer()`), `rotation_refusee`
-   * (message `rotation` d'un autre que le créateur).
+   * (message `rotation` d'un autre que le créateur, d'un numéro `n` qui n'est pas celui du
+   * dernier `marquerExclu` ou qui a déjà servi, ou tant que la rotation précédente attend son
+   * écho). L'écho d'une rotation envoyée rend `rotationAcceptee` ou `rotationARenvoyer`.
    */
   envoyer(c: ClesSalon, e: EnveloppeEnvoi): { trame: Uint8Array; id: Uint8Array } {
     objet(e);
@@ -277,15 +297,28 @@ export class Salon extends Poignee<wasm.Salon> {
     }
     this.avec((h) => h.remplacerAnnonces(createurSiege, liste));
   }
-  /** Siège annoncé parti (0x03) ou exclu (0x09). */
+  /** Siège annoncé parti (0x03). Pour un 0x09 : `marquerExclu`. */
   marquerParti(siege: number): void {
     nombre(siege);
     this.avec((h) => h.marquerParti(siege));
   }
+  /**
+   * Exclusion ou rotation de l'invitation annoncée par le serveur (0x09) : siège exclu
+   * (`undefined` pour le siège `0xFF`, nouveau lien sans exclu) et numéro `r`. Un message
+   * `rotation` n'est envoyé et accepté que si son `n` est ce numéro.
+   */
+  marquerExclu(siege: number | undefined, r: number): void {
+    if (siege !== undefined) nombre(siege);
+    nombre(r);
+    this.avec((h) => h.marquerExclu(siege, r));
+  }
   abandonnerCommit(): void {
     this.avec((h) => h.abandonnerCommit());
   }
-  /** Clé SFrame de l'époque (32 octets) : SECRET, copie que l'appelant met à zéro après usage. */
+  /**
+   * Clé SFrame de l'époque (32 octets) : SECRET, copie que l'appelant met à zéro après usage.
+   * Mêmes refus qu'`envoyer` : `commit_en_cours`, `retrait_en_attente`, `non_membre`.
+   */
   exporterSframe(): Uint8Array {
     return this.avec((h) => h.exporterSframe());
   }
@@ -302,7 +335,11 @@ export class Salon extends Poignee<wasm.Salon> {
   epoque(): number | undefined {
     return this.avec((h) => h.epoque());
   }
-  /** Sièges partis (0x03) ou exclus (0x09) encore dans l'arbre : tant qu'il en reste, `envoyer` lève `retrait_en_attente`. */
+  /**
+   * Sièges des feuilles parties (0x03) ou exclues (0x09) encore dans l'arbre (suivi par arrivée :
+   * une nouvelle annonce sur le siège n'efface rien) : tant qu'il en reste, `envoyer` lève
+   * `retrait_en_attente` et tout Commit doit les retirer (`retirer` de l'un les retire tous).
+   */
   aRetirer(): number[] {
     return this.avec((h) => h.aRetirer());
   }
@@ -311,7 +348,9 @@ export class Salon extends Poignee<wasm.Salon> {
    * cette poignée est consommée (état MLS effacé, tout appel suivant lève `poignee_liberee`) ; la
    * nouvelle garde l'identité (même code de vérification), les annonces et le dernier rang vu.
    * Le créateur recrée le groupe ; les autres publient un nouveau `keyPackage` et attendent
-   * leur Welcome.
+   * leur Welcome. Les clés d'identité de l'ancien groupe sont gardées : un siège connu ne revient
+   * qu'avec la même clé, et l'on n'entre que dans le groupe du créateur connu. Chez le créateur :
+   * à l'écho `rotationAcceptee` de sa rotation, jamais avant ni à `rotationARenvoyer`.
    */
   refonder(c: ClesSalon): Salon {
     return cles(c).brut((k) => this.consommer((h, g) => new Salon(h.refonder(k), g)));
@@ -346,14 +385,30 @@ export type SalonEngine = {
   cleUnicite(s: string): string;
   codeVerification(clePublique: Uint8Array): string;
   /**
+   * `J_gestion` (32 octets) tiré de `S_gestion` : ce qui va dans `X-Shh-Manage` pour toutes les
+   * routes du salon, jamais `S_gestion` lui-même (le serveur en tirerait la clé de rôle du
+   * créateur ; spec salon v3 §15.2). SECRET, copie que l'appelant met à zéro après usage.
+   */
+  jetonGestion(sGestion: Uint8Array): Uint8Array;
+  /** Clé publique de rôle (32 octets) tirée de `S_gestion` : clé d'identité du créateur, celle de son code de vérification. */
+  clePubliqueRole(sGestion: Uint8Array): Uint8Array;
+  /**
    * État d'un message à l'écran (engine/salon/src/effacement.rs). Un instant qui n'est ni un
    * entier sûr positif ni un bigint de 0 à 2^64 − 1 : `argument_invalide`. `finMs` est rendu en
    * nombre (exact jusqu'à 2^53 − 1).
    */
   etatEffacement(e: EntreeEffacement): EtatEffacement;
   Salon: {
-    /** Nouveau participant au siège donné par le serveur, avec une identité éphémère neuve. */
-    creer(siege: number, nonceArrivee: Uint8Array, cles: ClesSalon, createur: boolean): Salon;
+    /**
+     * Nouveau participant au siège donné par le serveur. Avec `sGestion` (secret du lien de
+     * gestion, 32 octets, que l'appelant met à zéro ensuite) : identité du créateur, la clé de
+     * rôle tirée de `S_gestion` (même clé et même code de vérification à chaque retour) ; sans
+     * lui : identité éphémère neuve. `createur` (créer le groupe : création du salon,
+     * renouvellement) exige `sGestion` (`argument_invalide` sinon). Le créateur qui revient
+     * (rechargement, « Quitter » puis retour, autre appareil) passe `sGestion` avec
+     * `createur = false` : son rôle est rendu dès le Commit qui l'ajoute (`createurRevenu`).
+     */
+    creer(siege: number, nonceArrivee: Uint8Array, cles: ClesSalon, createur: boolean, sGestion?: Uint8Array): Salon;
   };
 };
 
@@ -398,6 +453,8 @@ function moteur(g: number): SalonEngine {
     verifierPseudo: (s) => (texte(s), a(() => wasm.verifierPseudo(s))),
     cleUnicite: (s) => (texte(s), a(() => wasm.cleUnicite(s))),
     codeVerification: (c) => (octets(c), a(() => wasm.codeVerification(c))),
+    jetonGestion: (s) => (octets(s), a(() => wasm.jetonGestion(s))),
+    clePubliqueRole: (s) => (octets(s), a(() => wasm.clePubliqueRole(s))),
     etatEffacement: (e) => {
       objet(e);
       const regle = nombre(e.regle);
@@ -406,12 +463,13 @@ function moteur(g: number): SalonEngine {
       return r.etat === "rebours" ? { etat: "rebours", finMs: Number(r.finMs) } : r;
     },
     Salon: {
-      creer: (siege, nonceArrivee, c, createur) => {
+      creer: (siege, nonceArrivee, c, createur, sGestion) => {
         nombre(siege);
         octets(nonceArrivee);
         booleen(createur);
+        if (sGestion !== undefined) octets(sGestion);
         return new Salon(
-          cles(c).brut((h) => wasm.Salon.creer(siege, nonceArrivee, h, createur)),
+          cles(c).brut((h) => wasm.Salon.creer(siege, nonceArrivee, h, createur, sGestion)),
           g,
         );
       },

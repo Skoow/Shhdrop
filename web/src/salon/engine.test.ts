@@ -224,13 +224,27 @@ describe("vecteurs salon-v3.json rejoués par le module WebAssembly", () => {
     }
     for (const c of V.empreinte as Cas[]) expect(S.codeVerification(unhex(c.public_key)), c.label).toBe(c.code);
   });
+
+  it("rôle du créateur (14 novembre) : clé publique de rôle, son code, jeton de gestion montré au serveur", () => {
+    expect(V.role.length).toBe(5);
+    for (const c of V.role as Cas[]) {
+      const sg = unhex(c.s_gestion);
+      expect(hex(S.clePubliqueRole(sg)), c.label).toBe(c.cle_role);
+      expect(S.codeVerification(S.clePubliqueRole(sg)), c.label).toBe(c.code);
+      expect(hex(S.jetonGestion(sg)), c.label).toBe(c.jeton_gestion);
+      expect(c.id_groupe, c.label).toBe(c.tag + hex(new Uint8Array([c.siege])) + c.cle_role);
+    }
+  });
 });
+
+/** Secret de gestion du créateur dans ces tests (lien de gestion `#m…`). */
+const SG = new Uint8Array(32).fill(0x5a);
 
 describe("groupe en trames (I1, I2, M4, M5)", () => {
   it("en-tête tiré du contenu, identifiant tiré par le moteur, rescellement refusé ; l'arrivant garde les trames d'avant son Welcome et les rejoue", () => {
     const cles = S.clesSalon(new Uint8Array(32).fill(3), new Uint8Array(32).fill(4));
     const n = (s: number) => new Uint8Array(16).fill(s + 1);
-    const a = S.Salon.creer(0, n(0), cles, true);
+    const a = S.Salon.creer(0, n(0), cles, true, SG);
     a.remplacerAnnonces(0, [{ siege: 0, nonce: n(0) }]);
     a.annoncer(1, n(1));
     const b = S.Salon.creer(1, n(1), cles, false);
@@ -285,7 +299,7 @@ describe("exclusion, rotation de l'invitation, refondation (audit adverse du 13 
 
   /** Créateur (siège 0) et deux membres, sous `cles` ; `tous` joue le serveur (rang, écho à tous). */
   function trio(cles: ReturnType<SalonEngine["clesSalon"]>) {
-    const m = [S.Salon.creer(0, n(0), cles, true)];
+    const m = [S.Salon.creer(0, n(0), cles, true, SG)];
     const liste = [{ siege: 0, nonce: n(0) }];
     m[0]!.remplacerAnnonces(0, liste);
     const r = { m, seq: 0, liste };
@@ -321,9 +335,17 @@ describe("exclusion, rotation de l'invitation, refondation (audit adverse du 13 
     const { r } = trio(cles);
     const [c, a, x] = r.m as [Salon, Salon, Salon];
     // F2 : 0x09 pour le siège 2 ; personne n'écrit tant que sa feuille est là.
-    c.marquerParti(2);
-    a.marquerParti(2);
+    c.marquerExclu(2, 1);
+    a.marquerExclu(2, 1);
     expect(a.aRetirer()).toEqual([2]);
+    // Relecture du 13 novembre : une nouvelle annonce sur le siège n'efface pas la marque, et la
+    // clé des appels suit les refus de l'envoi.
+    a.annoncer(2, new Uint8Array(16).fill(0xee));
+    expect(a.aRetirer()).toEqual([2]);
+    expect(errorOf(() => a.exporterSframe())).toBe("retrait_en_attente");
+    for (const [siege, r] of [[256, 1], [2, -1], [2, 2 ** 32], [2, 1.5], ["2", 1], [2, "1"]] as const) {
+      expect(errorOf(() => a.marquerExclu(siege as number, r as number))).toBe("argument_invalide");
+    }
     expect(errorOf(() => a.envoyer(cles, texteDe("après l'exclusion")))).toBe("retrait_en_attente");
     expect(errorOf(() => c.envoyer(cles, { heureMs: 1, regle: 0, message: { k: "ecrit" } }))).toBe("retrait_en_attente");
     // Un Commit de l'exclu (serveur complice) est refusé avant fusion.
@@ -336,9 +358,10 @@ describe("exclusion, rotation de l'invitation, refondation (audit adverse du 13 
     // F1 : retrait en attente de son écho → aucun envoi ; après l'écho, l'envoi passe.
     const retrait = c.retirer(cles, 2);
     expect(errorOf(() => c.envoyer(cles, texteDe("trop tôt")))).toBe("commit_en_cours");
+    expect(errorOf(() => c.exporterSframe())).toBe("commit_en_cours");
     r.seq++;
     expect(c.recevoirTrame(cles, retrait, r.seq, 0).type).toBe("commitAccepte");
-    expect(a.recevoirTrame(cles, retrait, r.seq, 0)).toEqual({ type: "membres", ajoutes: [], retires: [2] });
+    expect(a.recevoirTrame(cles, retrait, r.seq, 0)).toEqual({ type: "membres", ajoutes: [], retires: [2], createurRevenu: false });
     expect(a.aRetirer()).toEqual([]);
     const { trame } = c.envoyer(cles, texteDe("après le retrait"));
     r.seq++;
@@ -347,6 +370,41 @@ describe("exclusion, rotation de l'invitation, refondation (audit adverse du 13 
     expect(ev.type === "message" && ev.epoque === a.epoque()).toBe(true);
     // L'exclu (client modifié, resté à l'époque e0) ne le lit pas.
     expect(errorOf(() => x.recevoirTrame(cles, trame, r.seq, 0))).toBe("epoque_perdue");
+    for (const y of [...r.m, cles]) y.free();
+  });
+
+  it("créateur rechargé (14 novembre) : même clé de rôle tirée de S_gestion, rôle rendu dès le Commit qui l'ajoute, signalé à tous, même code de vérification", () => {
+    const cles = S.clesSalon(new Uint8Array(32).fill(11), new Uint8Array(32).fill(12));
+    const { r, tous } = trio(cles);
+    const code = r.m[1]!.empreinte(0);
+    expect(S.codeVerification(S.clePubliqueRole(SG))).toBe(code);
+    // Page rechargée : l'état est perdu ; reprise 0x0A du siège 0 (nouvelle arrivée).
+    r.m[0]!.free();
+    const nn = new Uint8Array(16).fill(0x30);
+    for (const y of r.m.slice(1)) y.annoncer(0, nn);
+    const f = S.Salon.creer(0, nn, cles, false, SG);
+    f.remplacerAnnonces(0, [
+      { siege: 0, nonce: nn },
+      { siege: 1, nonce: n(1) },
+      { siege: 2, nonce: n(2) },
+    ]);
+    r.m[0] = f;
+    const kp = tous(f.keyPackage(cles), 0)[1]!;
+    if (kp.type !== "keyPackage") throw new Error(JSON.stringify(kp));
+    const [, accepte, membres] = tous(r.m[1]!.ajouter(cles, kp.octets), 1);
+    if (accepte!.type !== "commitAccepte" || !accepte.welcome) throw new Error(JSON.stringify(accepte));
+    expect(accepte.createurRevenu).toBe(true);
+    expect(membres).toEqual({ type: "membres", ajoutes: [0], retires: [0], createurRevenu: true });
+    expect(tous(accepte.welcome, 1)[0]!.type).toBe("entree");
+    expect(f.empreinte(0)).toBe(code);
+    // Rôle rendu : il retire un membre présent.
+    const [moi, a] = tous(f.retirer(cles, 2), 0);
+    expect(moi).toMatchObject({ type: "commitAccepte", createurRevenu: false });
+    expect(a).toEqual({ type: "membres", ajoutes: [], retires: [2], createurRevenu: false });
+    // Jeton de gestion : ni S_gestion ni la clé de rôle.
+    const j = S.jetonGestion(SG);
+    expect(hex(j)).not.toBe(hex(SG));
+    expect(hex(j)).not.toBe(hex(S.clePubliqueRole(SG)));
     for (const y of [...r.m, cles]) y.free();
   });
 
@@ -360,7 +418,10 @@ describe("exclusion, rotation de l'invitation, refondation (audit adverse du 13 
     expect(codes[0]).toMatch(/^\d{5}( \d{5}){4}$/);
     const x = r.m.pop()!;
     r.liste.pop();
-    for (const y of r.m) y.marquerParti(2);
+    // Sans le 0x09 (numéro de rotation), pas de rotation, même du créateur.
+    const cle0 = new Uint8Array(32);
+    expect(errorOf(() => r.m[0]!.envoyer(cles, { heureMs: 2, regle: 0, message: { k: "rotation", n: 1, cle: cle0 } }))).toBe("rotation_refusee");
+    for (const y of r.m) y.marquerExclu(2, 1);
     r.seq++;
     const retrait = r.m[0]!.retirer(cles, 2);
     expect(r.m[0]!.recevoirTrame(cles, retrait, r.seq, 0).type).toBe("commitAccepte");
@@ -368,9 +429,15 @@ describe("exclusion, rotation de l'invitation, refondation (audit adverse du 13 
     // Seul le créateur envoie la rotation.
     const cle = S.cleMaitre(lien2, mdp);
     expect(errorOf(() => r.m[1]!.envoyer(cles, { heureMs: 2, regle: 0, message: { k: "rotation", n: 1, cle } }))).toBe("rotation_refusee");
+    // Le numéro doit être celui du 0x09.
+    expect(errorOf(() => r.m[0]!.envoyer(cles, { heureMs: 2, regle: 0, message: { k: "rotation", n: 2, cle } }))).toBe("rotation_refusee");
     const { trame } = r.m[0]!.envoyer(cles, { heureMs: 2, regle: 0, message: { k: "rotation", n: 1, cle } });
     expect(S.lireEnTete(trame)).toEqual({ volatile: false, regle: 0 });
-    const [, recue] = tous(trame, 0);
+    // Une seule rotation en vol (14 novembre) : pas de seconde avant l'écho de la première.
+    expect(errorOf(() => r.m[0]!.envoyer(cles, { heureMs: 3, regle: 0, message: { k: "rotation", n: 1, cle: cle0 } }))).toBe("rotation_refusee");
+    const [echo, recue] = tous(trame, 0);
+    // Écho chez le créateur : les membres l'ont acceptée, il peut refonder.
+    expect(echo).toEqual({ type: "rotationAcceptee", n: 1 });
     if (recue!.type !== "message" || recue.enveloppe.message.k !== "rotation") throw new Error(JSON.stringify(recue));
     expect(recue.epoque).toBe(r.m[1]!.epoque());
     expect(recue.enveloppe.message.n).toBe(1);
@@ -428,8 +495,12 @@ describe("frontières du module", () => {
     expect(errorOf(() => S.clesDepuisMaitre(new Uint8Array(33)))).toBe("argument_invalide");
     expect(errorOf(() => S.clesDepuisMaitre("x" as never))).toBe("argument_invalide");
     expect(errorOf(() => S.codeVerification(new Uint8Array(31)))).toBe("argument_invalide");
-    for (const siege of [256, -1, 0.5, NaN]) expect(errorOf(() => S.Salon.creer(siege, new Uint8Array(16), cles, true))).toBe("argument_invalide");
-    expect(errorOf(() => S.Salon.creer(0, new Uint8Array(15), cles, true))).toBe("argument_invalide");
+    for (const siege of [256, -1, 0.5, NaN]) expect(errorOf(() => S.Salon.creer(siege, new Uint8Array(16), cles, true, SG))).toBe("argument_invalide");
+    expect(errorOf(() => S.Salon.creer(0, new Uint8Array(15), cles, true, SG))).toBe("argument_invalide");
+    // 14 novembre : créer le groupe exige S_gestion (clé de rôle), de 32 octets.
+    expect(errorOf(() => S.Salon.creer(0, new Uint8Array(16), cles, true))).toBe("argument_invalide");
+    expect(errorOf(() => S.Salon.creer(0, new Uint8Array(16), cles, true, new Uint8Array(31)))).toBe("argument_invalide");
+    expect(errorOf(() => S.jetonGestion(new Uint8Array(33)))).toBe("argument_invalide");
     for (const t of [-1, 1.5, 2 ** 53, Number.POSITIVE_INFINITY]) {
       expect(errorOf(() => S.etatEffacement({ regle: 1, maintenantMs: t, vuParMoiMs: null, effaceParServeur: false }))).toBe("argument_invalide");
       expect(errorOf(() => S.etatEffacement({ regle: 1, maintenantMs: 0, vuParMoiMs: t, effaceParServeur: false }))).toBe("argument_invalide");

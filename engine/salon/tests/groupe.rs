@@ -166,7 +166,7 @@ impl Reseau {
         for (i, r) in self.diffuser(de as u8, mls) {
             if i == de {
                 match r {
-                    Ok(Evenement::CommitAccepte { welcome: w }) => {
+                    Ok(Evenement::CommitAccepte { welcome: w, .. }) => {
                         assert_eq!(w.is_some(), !ajoutes.is_empty());
                         welcome = w;
                     }
@@ -177,7 +177,8 @@ impl Reseau {
                     r,
                     Ok(Evenement::Membres {
                         ajoutes: ajoutes.clone(),
-                        retires: retires.clone()
+                        retires: retires.clone(),
+                        createur_revenu: false,
                     }),
                     "membre {i}"
                 );
@@ -289,13 +290,18 @@ fn commits_concurrents() {
             Evenement::CommitPerdu {
                 ajoutes: vec![],
                 retires: vec![],
+                createur_revenu: false,
             }
         } else if i == 2 {
-            Evenement::CommitAccepte { welcome: None }
+            Evenement::CommitAccepte {
+                welcome: None,
+                createur_revenu: false,
+            }
         } else {
             Evenement::Membres {
                 ajoutes: vec![],
                 retires: vec![],
+                createur_revenu: false,
             }
         };
         assert_eq!(ev, Ok(attendu), "membre {i}");
@@ -334,13 +340,18 @@ fn ajout_perdu_puis_rejoue() {
             Evenement::CommitPerdu {
                 ajoutes: vec![],
                 retires: vec![],
+                createur_revenu: false,
             }
         } else if i == 4 {
-            Evenement::CommitAccepte { welcome: None }
+            Evenement::CommitAccepte {
+                welcome: None,
+                createur_revenu: false,
+            }
         } else {
             Evenement::Membres {
                 ajoutes: vec![],
                 retires: vec![],
+                createur_revenu: false,
             }
         };
         assert_eq!(ev, Ok(attendu), "membre {i}");
@@ -468,12 +479,15 @@ fn politique_regles() {
         };
     let v =
         |ajouts: &[(u8, [u8; 16])], retraits: &[u8], restants: &[u8], auteur: u8, partis: &[u8]| {
+            // Feuilles à retirer : celles (nonce d'arrivée 0) des sièges partis. Le créateur est
+            // ici l'auteur au siège 0 (le lien à sa clé est testé dans `redteam.rs`).
+            let a_retirer: Vec<_> = partis.iter().map(|&s| (s, nonce(s, 0))).collect();
             verifier(
                 &ch(avec_cle(ajouts), retraits, restants),
-                0,
-                auteur,
+                auteur == 0,
+                (auteur, nonce(auteur, 0)),
                 &annonces,
-                partis,
+                &a_retirer,
                 &kps,
             )
         };
@@ -489,6 +503,27 @@ fn politique_regles() {
     assert_eq!(v(&[], &[2], &[0, 1], 1, &[]), refus);
     assert_eq!(v(&[], &[2], &[0, 1], 1, &[2]), Ok(()));
     assert_eq!(v(&[], &[2, 3], &[0, 1], 1, &[2]), refus);
+    // 13 novembre. Suivi par arrivée : la feuille d'une AUTRE arrivée du siège parti (nonce 1)
+    // n'est pas retirable par tous ; auteur dont l'arrivée est partie : refusé.
+    let autre_arrivee = Changements {
+        retraits: vec![(2, nonce(2, 1))],
+        restants: vec![0, 1],
+        ..Changements::default()
+    };
+    let moi = (1, nonce(1, 0));
+    assert_eq!(
+        verifier(&autre_arrivee, false, moi, &annonces, &[], &kps),
+        refus
+    );
+    assert_eq!(v(&[], &[], &[0, 1, 2], 2, &[2]), refus);
+    // Priorité du retrait : tant qu'une feuille est à retirer, un Commit qui ne les retire pas
+    // toutes est refusé (renouvellement, ajout, retrait d'un autre, même du créateur).
+    assert_eq!(v(&[], &[], &[0, 1, 2], 1, &[2]), refus);
+    assert_eq!(v(&[(4, nonce(4, 0))], &[], &[0, 1, 2], 1, &[2]), refus);
+    assert_eq!(v(&[], &[3], &[0, 1, 2], 0, &[2]), refus);
+    assert_eq!(v(&[], &[2], &[0, 1, 3], 1, &[2, 3]), refus);
+    assert_eq!(v(&[], &[2, 3], &[0, 1], 1, &[2, 3]), Ok(()));
+    assert_eq!(v(&[(4, nonce(4, 0))], &[2], &[0, 1], 1, &[2]), Ok(()));
     // Retrait d'une feuille de son propre siège.
     assert_eq!(v(&[], &[1], &[0, 1], 1, &[]), Ok(()));
     // Retour : l'ancienne feuille du siège 5 retirée par le Commit qui ajoute la nouvelle.
@@ -507,15 +542,24 @@ fn politique_regles() {
     // Feuille annoncée mais d'une autre clé que le KeyPackage publié par le siège (fabriquée
     // par un membre avec le nonce public), ou sans KeyPackage reçu : refusée, même du créateur.
     let copie = ch(vec![(4, nonce(4, 0), [9; 32])], &[], &[0, 1]);
-    assert_eq!(verifier(&copie, 0, 0, &annonces, &[], &kps), refus);
+    assert_eq!(
+        verifier(&copie, true, (0, nonce(0, 0)), &annonces, &[], &kps),
+        refus
+    );
     let sans_kp = ch(vec![(4, nonce(4, 0), [4; 32])], &[], &[0, 1]);
-    assert_eq!(verifier(&sans_kp, 0, 0, &annonces, &[], &[]), refus);
+    assert_eq!(
+        verifier(&sans_kp, true, (0, nonce(0, 0)), &annonces, &[], &[]),
+        refus
+    );
     // Proposition interdite.
     let x = Changements {
         interdit: true,
         ..Changements::default()
     };
-    assert_eq!(verifier(&x, 0, 0, &annonces, &[], &kps), refus);
+    assert_eq!(
+        verifier(&x, true, (0, nonce(0, 0)), &annonces, &[], &kps),
+        refus
+    );
 }
 
 /// Review Focus 5 : le siège 3 revient avec une nouvelle identité ; un non-créateur retire
@@ -542,7 +586,8 @@ fn retour_nouvelle_feuille() {
         ancien.recevoir_trame(&cles(), &commit, r.seq, 1),
         Ok(Evenement::Membres {
             ajoutes: vec![3],
-            retires: vec![3]
+            retires: vec![3],
+            createur_revenu: false,
         })
     );
     r.entrer(&mut nouveau, &welcome, 1).unwrap();
@@ -823,8 +868,9 @@ fn etats() {
         Ok(Evenement::KeyPackage { .. })
     ));
     let c = ailleurs.ajouter(&cles(), &mls(&kp)).unwrap();
-    let Ok(Evenement::CommitAccepte { welcome: Some(w) }) =
-        ailleurs.recevoir_trame(&cles(), &c, 2, 0)
+    let Ok(Evenement::CommitAccepte {
+        welcome: Some(w), ..
+    }) = ailleurs.recevoir_trame(&cles(), &c, 2, 0)
     else {
         panic!("Welcome attendu à l'écho");
     };
@@ -1019,7 +1065,19 @@ fn kp_usurpe_par_un_membre() {
 }
 
 /// IMPORTANT 2 : retour du créateur ; un membre tente de prendre son siège avec le nouveau
-/// nonce (public) avant lui : refusé ; le vrai retour passe et garde le droit de retirer.
+/// nonce (public) avant lui : refusé ; le vrai retour passe.
+///
+/// **Changé le 13 novembre (relecture, point 4 ; à valider par le propriétaire)** : avant, le
+/// créateur revenu « gardait le droit de retirer » par son seul numéro de siège ; un fantôme
+/// annoncé par le serveur sur ce siège l'aurait eu aussi. Le rôle tient maintenant au siège
+/// **et** à la clé d'identité portée par l'identifiant du groupe : revenu avec une nouvelle
+/// clé, il ne retire plus un membre présent (refus local, sans divergence) ; il retire toujours
+/// un siège parti, comme tout membre. Le rôle revient quand le groupe est recréé.
+///
+/// **14 novembre (décision du propriétaire, spec salon v3 §15.2)** : le créateur de ce test a
+/// une identité tirée au hasard, il revient donc **sans son lien de gestion** : c'est toujours
+/// la règle (membre ordinaire). Avec `S_gestion`, il revient avec la même clé de rôle et retrouve
+/// ses droits dès son ajout (`role_*` de `tests/redteam.rs`).
 #[test]
 fn retour_du_createur_detourne() {
     let mut r = groupe(10);
@@ -1054,6 +1112,8 @@ fn retour_du_createur_detourne() {
     r.entrer(&mut createur, &welcome, 1).unwrap();
     r.m[0] = Some(createur);
     r.meme_epoque();
+    assert_eq!(r.salon(0).retirer(&cles(), 9), Err(Error::CommitRefuse));
+    r.partir(9);
     let c = r.salon(0).retirer(&cles(), 9).unwrap();
     r.commit_accepte(0, &c, vec![], vec![9]);
 }
@@ -1139,7 +1199,9 @@ fn faux_groupe_refuse() {
         Ok(Evenement::KeyPackage { .. })
     ));
     let c = faux.ajouter(&cles(), &mls(&kp)).unwrap();
-    let Ok(Evenement::CommitAccepte { welcome: Some(w) }) = faux.recevoir_trame(&cles(), &c, 2, 3)
+    let Ok(Evenement::CommitAccepte {
+        welcome: Some(w), ..
+    }) = faux.recevoir_trame(&cles(), &c, 2, 3)
     else {
         panic!("Welcome attendu");
     };
@@ -1169,8 +1231,9 @@ fn faux_groupe_refuse() {
         Ok(Evenement::KeyPackage { .. })
     ));
     let c9 = faux0.ajouter(&cles(), &mls(&kp)).unwrap();
-    let Ok(Evenement::CommitAccepte { welcome: Some(w) }) =
-        faux0.recevoir_trame(&cles(), &c9, 4, 0)
+    let Ok(Evenement::CommitAccepte {
+        welcome: Some(w), ..
+    }) = faux0.recevoir_trame(&cles(), &c9, 4, 0)
     else {
         panic!("Welcome attendu");
     };
@@ -1209,7 +1272,8 @@ fn commit_perdu_dit_ce_qui_a_change() {
                 ev,
                 Ok(Evenement::CommitPerdu {
                     ajoutes: vec![],
-                    retires: vec![9]
+                    retires: vec![9],
+                    createur_revenu: false,
                 })
             );
         }
@@ -1406,7 +1470,7 @@ fn arrivant_suit_le_groupe_avant_son_welcome() {
     let mut welcome = None;
     for (i, ev) in r.diffuser(0, &commit) {
         match (i, ev) {
-            (0, Ok(Evenement::CommitAccepte { welcome: w })) => welcome = w,
+            (0, Ok(Evenement::CommitAccepte { welcome: w, .. })) => welcome = w,
             (5, ev) => assert_eq!(ev, Ok(Evenement::Ignore)),
             (_, ev) => assert!(matches!(ev, Ok(Evenement::Membres { .. })), "{ev:?}"),
         }
@@ -1451,7 +1515,8 @@ fn arrivant_suit_le_groupe_avant_son_welcome() {
                 seq_renouvellement,
                 Ok(Evenement::Membres {
                     ajoutes: vec![],
-                    retires: vec![]
+                    retires: vec![],
+                    createur_revenu: false,
                 })
             ),
         ]
@@ -1476,7 +1541,7 @@ fn annonce_entre_commit_et_welcome() {
     let commit = r.salon(0).ajouter(&cles(), &mls(&kp)).unwrap();
     let mut welcome = None;
     for (i, ev) in r.diffuser(0, &commit) {
-        if let (0, Ok(Evenement::CommitAccepte { welcome: w })) = (i, ev) {
+        if let (0, Ok(Evenement::CommitAccepte { welcome: w, .. })) = (i, ev) {
             welcome = w;
         }
     }
@@ -1582,7 +1647,7 @@ fn n1_kp_mal_etiquete_ignore() {
     let mut w3 = None;
     for (i, ev) in r.diffuser(0, &c3) {
         match (i, ev) {
-            (0, Ok(Evenement::CommitAccepte { welcome })) => w3 = welcome,
+            (0, Ok(Evenement::CommitAccepte { welcome, .. })) => w3 = welcome,
             (4, ev) => assert_eq!(ev, Ok(Evenement::Ignore)),
             (_, ev) => assert!(matches!(ev, Ok(Evenement::Membres { .. })), "{ev:?}"),
         }
@@ -1605,7 +1670,7 @@ fn n1_kp_mal_etiquete_ignore() {
     let mut wx = None;
     for (i, ev) in r.diffuser(0, &cx) {
         match (i, ev) {
-            (0, Ok(Evenement::CommitAccepte { welcome })) => wx = welcome,
+            (0, Ok(Evenement::CommitAccepte { welcome, .. })) => wx = welcome,
             (4, ev) => assert_eq!(ev, Ok(Evenement::Ignore)),
             (_, ev) => assert!(matches!(ev, Ok(Evenement::Membres { .. })), "{ev:?}"),
         }
@@ -1675,13 +1740,14 @@ fn commit_refuse_puis_vrai(atteste_pour_x: u8) {
     let mut w = None;
     for (i, ev) in r.diffuser(0, &c) {
         match (i, ev) {
-            (0, Ok(Evenement::CommitAccepte { welcome })) => w = welcome,
+            (0, Ok(Evenement::CommitAccepte { welcome, .. })) => w = welcome,
             (4, ev) => assert_eq!(ev, Ok(Evenement::Ignore)),
             (i, ev) => assert_eq!(
                 ev,
                 Ok(Evenement::Membres {
                     ajoutes: vec![4],
-                    retires: vec![4]
+                    retires: vec![4],
+                    createur_revenu: false,
                 }),
                 "membre {i}"
             ),
@@ -1782,7 +1848,7 @@ fn renouvellement_du_salon_recree_le_groupe() {
         let mut welcome = None;
         for (i, res) in r.diffuser(0, &commit) {
             match (i, res) {
-                (0, Ok(Evenement::CommitAccepte { welcome: w })) => welcome = w,
+                (0, Ok(Evenement::CommitAccepte { welcome: w, .. })) => welcome = w,
                 (i, Ok(Evenement::Membres { ajoutes, .. })) if i != s as usize => {
                     assert_eq!(ajoutes, vec![s]);
                 }

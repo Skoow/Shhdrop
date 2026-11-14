@@ -131,6 +131,7 @@ fn croise_natif() {
     let commit = a.ajouter(&k1, &kp_b).unwrap();
     let Ok(Evenement::CommitAccepte {
         welcome: Some(welcome),
+        ..
     }) = a.recevoir_trame(&k1, &commit, 2, 0)
     else {
         panic!("écho du Commit de A")
@@ -179,7 +180,8 @@ fn croise_natif() {
         a.recevoir_trame(&k1, &champ(&w2, "t_c"), 6, 1),
         Ok(Evenement::Membres {
             ajoutes: vec![],
-            retires: vec![]
+            retires: vec![],
+            createur_revenu: false,
         })
     );
     assert_eq!(a.epoque(), Some(2));

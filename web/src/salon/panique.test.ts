@@ -38,7 +38,7 @@ describe("panique du module du salon (audit F4)", () => {
   it("mémoire mise à zéro aussitôt, tout appel suivant (moteur, poignées) lève salon_casse ; un nouveau chargement rend un moteur neuf", async () => {
     const S = await loadSalonEngine();
     const cles = S.clesSalon(new Uint8Array(32).fill(9), new Uint8Array(32).fill(8));
-    const s = S.Salon.creer(0, new Uint8Array(16), cles, true);
+    const s = S.Salon.creer(0, new Uint8Array(16), cles, true, new Uint8Array(32).fill(0x5a));
     const tag = cles.tag();
     const avant = memoire();
     expect(avant.some((b) => b !== 0)).toBe(true);
@@ -77,7 +77,7 @@ describe("panique signalée hors d'un appel gardé (M2)", () => {
   it("le rechargement met d'abord à zéro la mémoire de l'instance arrêtée", async () => {
     const S = await loadSalonEngine();
     const cles = S.clesSalon(new Uint8Array(32).fill(5), new Uint8Array(32).fill(6));
-    const s = S.Salon.creer(0, new Uint8Array(16), cles, true);
+    const s = S.Salon.creer(0, new Uint8Array(16), cles, true, new Uint8Array(32).fill(0x5a));
     const avant = memoire();
     expect(avant.some((b) => b !== 0)).toBe(true);
     // Le gestionnaire de panique a tourné, mais aucune RuntimeError n'est passée par un appel gardé.

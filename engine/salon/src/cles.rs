@@ -11,6 +11,10 @@ const PREUVE: &str = "shhdrop/v2/salon/preuve";
 const CLE: &str = "shhdrop/v2/salon/cle";
 const TRAME: &str = "shhdrop/v2/salon/trame";
 const ID: &str = "shhdrop/v2/salon/id";
+/// Graine de la clé de rôle du créateur (spec salon v3 §15.2, 14 novembre).
+const ROLE: &str = "shhdrop/v2/salon/role";
+/// Jeton de gestion montré au serveur à la place de `S_gestion` (spec salon v3 §15.2).
+const GESTION_SERVEUR: &str = "shhdrop/v2/salon/gestion-serveur";
 
 /// `K_accès_s` et son empreinte `V_accès_s` = SHA-256(K), donnée au serveur.
 /// `k` est effacée à la destruction.
@@ -107,6 +111,25 @@ pub fn cles_depuis_maitre(maitre: &[u8; 32]) -> ClesSalon {
     }
 }
 
+/// Graine (32 octets) de la clé de rôle du créateur : HKDF(`S_gestion`, « shhdrop/v2/salon/role »).
+/// La paire Ed25519 qui en est tirée (`groupe::identite_createur`) est la clé d'identité MLS du
+/// créateur : qui détient `S_gestion` retrouve la même clé sur tout appareil (décision du
+/// propriétaire, 14 novembre). SECRET, effacée à la destruction ; jamais rendue hors du moteur.
+pub(crate) fn graine_role(s_gestion: &[u8; 32]) -> Zeroizing<[u8; 32]> {
+    hkdf::<32>(s_gestion, ROLE)
+}
+
+/// Jeton de gestion du salon `J_gestion` = HKDF(`S_gestion`, « shhdrop/v2/salon/gestion-serveur ») :
+/// ce que le client met dans `X-Shh-Manage` pour les routes du salon (création, `rejoindre` du
+/// créateur, `exclure`, `detruire`, `gestion`, `reglages`), **jamais `S_gestion`** : le serveur,
+/// qui voit ce jeton en clair à chaque requête, ne peut pas en tirer la clé de rôle (HKDF à sens
+/// unique, étiquettes distinctes). Le serveur n'a pas à changer : il garde SHA-256 des 32 octets
+/// reçus, comme avant. SECRET (il donne les droits de gestion côté serveur) : l'appelant le met
+/// à zéro après usage.
+pub fn jeton_gestion(s_gestion: &[u8; 32]) -> Zeroizing<[u8; 32]> {
+    hkdf::<32>(s_gestion, GESTION_SERVEUR)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,6 +194,26 @@ mod tests {
         // La clé maîtresse n'est aucune des clés dérivées, ni K_accès.
         for k in [a.k_preuve(), a.k_trame(), &cle_acces(&l).k] {
             assert_ne!(&*maitre, k);
+        }
+    }
+
+    /// 14 novembre : la graine de rôle et le jeton du serveur viennent de `S_gestion` par deux
+    /// étiquettes distinctes de toutes les autres ; le jeton ne donne pas la graine.
+    #[test]
+    fn role_et_jeton_de_gestion() {
+        let s = [5u8; 32];
+        assert_eq!(*graine_role(&s), *hkdf::<32>(&s, "shhdrop/v2/salon/role"));
+        assert_eq!(
+            *jeton_gestion(&s),
+            *hkdf::<32>(&s, "shhdrop/v2/salon/gestion-serveur")
+        );
+        assert_ne!(*graine_role(&s), *jeton_gestion(&s));
+        assert_ne!(*graine_role(&s), s);
+        assert_ne!(*jeton_gestion(&s), s);
+        assert_ne!(*graine_role(&s), *graine_role(&[6u8; 32]));
+        for e in [ACCES, MAITRE, PREUVE, CLE, TRAME, ID] {
+            assert_ne!(e, ROLE);
+            assert_ne!(e, GESTION_SERVEUR);
         }
     }
 

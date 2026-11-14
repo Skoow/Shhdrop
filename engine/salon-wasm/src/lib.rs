@@ -11,12 +11,13 @@
 //!   `argument_invalide` : il n'est jamais tronqué ni arrondi (`wasm-bindgen` ferait de 300 un
 //!   siège 44). Dans une enveloppe, tout champ invalide donne `message_invalide`, comme un JSON
 //!   invalide.
-//! - Secrets venus de JavaScript (`K_lien`, `K_mdp`, `K_maître_s`) : copiés dans un tampon
+//! - Secrets venus de JavaScript (`K_lien`, `K_mdp`, `K_maître_s`, `S_gestion`) : copiés dans un tampon
 //!   `Zeroizing`. Aucun secret n'est rendu à JavaScript, sauf ce que le serveur doit recevoir
 //!   (`K_accès_s`, `K_preuve_s`, comme pour un partage), la clé SFrame de l'époque
 //!   (`exporterSframe`, pour les appels), les graines `R` des pièces dans les enveloppes lues et
 //!   `K_maître_s` (`cleMaitre` chez le créateur, champ `cle` d'un message `rotation` lu : elle va
-//!   dans le message de rotation et dans la preuve de membre chiffrée, D41-26) : l'appelant met
+//!   dans le message de rotation et dans la preuve de membre chiffrée, D41-26) et `J_gestion`
+//!   (`jetonGestion`, en-tête `X-Shh-Manage` des routes du salon) : l'appelant met
 //!   ces tableaux à zéro (`fill(0)`) dès qu'il n'en a plus besoin. `K_trame`, `K_salon` et l'état MLS restent
 //!   dans le module, derrière des poignées (`ClesSalon`, `Salon`) à libérer par `free()`, qui
 //!   les efface.
@@ -62,7 +63,7 @@ export type Message =
   | { k: "regle"; regle: Regle }
   | { k: "profil"; pseudo: string; couleur: number; avatar: { r: Uint8Array; piece: Uint8Array; palier: number } | null }
   | { k: "depart" }
-  /** Rotation de l'invitation : numéro `n` (celui du 0x09) et `K_maître_s'` (32 octets, SECRET : à mettre à zéro après `clesDepuisMaitre`). Envoyée par le créateur seulement ; lue seulement à l'époque courante. */
+  /** Rotation de l'invitation : numéro `n` (le `r` du dernier 0x09, donné par `marquerExclu` : le moteur le vérifie) et `K_maître_s'` (32 octets, SECRET : à mettre à zéro après `clesDepuisMaitre`). Envoyée par le créateur seulement ; lue seulement à l'époque courante. */
   | { k: "rotation"; n: number; cle: Uint8Array }
   /** Sorte inconnue de ce moteur (lue, ignorée ; jamais encodée). */
   | { k: "inconnu"; sorte: string };
@@ -73,10 +74,15 @@ export type Evenement =
   | { type: "message"; deSiege: number; epoque: number; enveloppe: Enveloppe }
   /** Entrée dans le groupe (Welcome reçu) : les trames gardées en attente, rejouées dans l'ordre `seq`. */
   | { type: "entree"; rejoues: Rejoue[] }
-  | { type: "membres"; ajoutes: number[]; retires: number[] }
-  | { type: "commitPerdu"; ajoutes: number[]; retires: number[] }
-  | { type: "commitAccepte"; welcome: Uint8Array | null }
+  /** `createurRevenu` (14 novembre) : ce Commit ajoute la feuille de la clé de rôle (le créateur a repris la main : rechargement, retour, autre appareil muni du lien de gestion) ; son ancienne feuille, s'il en avait une, est retirée par ce même Commit. L'écran le dit à tous. */
+  | { type: "membres"; ajoutes: number[]; retires: number[]; createurRevenu: boolean }
+  | { type: "commitPerdu"; ajoutes: number[]; retires: number[]; createurRevenu: boolean }
+  | { type: "commitAccepte"; welcome: Uint8Array | null; createurRevenu: boolean }
   | { type: "keyPackage"; octets: Uint8Array }
+  /** Écho, chez le créateur, de son message `rotation` numéro `n` : les membres l'ont acceptée (il peut refonder). */
+  | { type: "rotationAcceptee"; n: number }
+  /** Écho, chez le créateur, de son message `rotation` numéro `n` : les membres l'ont refusée (Commit, départ ou reprise passés entre l'envoi et l'écho) ; ne pas refonder, régler `aRetirer()`, puis la renvoyer. */
+  | { type: "rotationARenvoyer"; n: number }
   | { type: "ignore" };
 /** Trame gardée en attente puis rejouée à l'entrée : ce qu'elle a donné, ou son erreur (code snake_case). */
 export type Rejoue = { seq: number; evenement: Evenement } | { seq: number; erreur: string };
@@ -525,6 +531,31 @@ pub fn cle_maitre(k_lien: &Uint8Array, k_mdp: &Uint8Array) -> R<Uint8Array> {
     Ok(octets(&salon::cle_maitre(&l, &m)[..]))
 }
 
+/// `J_gestion` = HKDF(`S_gestion`, « shhdrop/v2/salon/gestion-serveur ») (32 octets) : ce qui va
+/// dans `X-Shh-Manage` pour toutes les routes du salon, **jamais `S_gestion`** (le serveur en
+/// tirerait la clé de rôle du créateur ; spec salon v3 §15.2). SECRET, copie à effacer.
+#[wasm_bindgen(js_name = jetonGestion)]
+pub fn jeton_gestion(s_gestion: &Uint8Array) -> R<Uint8Array> {
+    let s = gestion(s_gestion)?;
+    Ok(octets(&salon::jeton_gestion(&s)[..]))
+}
+
+/// Clé publique de rôle (Ed25519, 32 octets) tirée de `S_gestion` : la clé d'identité du
+/// créateur dans le groupe (son code de vérification : `codeVerification`). Publique.
+#[wasm_bindgen(js_name = clePubliqueRole)]
+pub fn cle_publique_role(s_gestion: &Uint8Array) -> R<Uint8Array> {
+    let s = gestion(s_gestion)?;
+    Ok(octets(&salon::cle_publique_role(&s)))
+}
+
+/// `S_gestion` (32 octets) venu de JavaScript, dans un tampon effacé.
+fn gestion(a: &Uint8Array) -> R<Zeroizing<[u8; 32]>> {
+    let v = secret32(a)?;
+    let mut s = Zeroizing::new([0u8; 32]);
+    s.copy_from_slice(&v);
+    Ok(s)
+}
+
 /// Clés du salon tirées de `K_maître_s` seule (reçue dans un message `rotation`, ou gardée par
 /// la preuve de membre) : les mêmes que `clesSalon` pour la même invitation.
 #[wasm_bindgen(js_name = clesDepuisMaitre)]
@@ -683,23 +714,45 @@ fn evenement_js(ev: Evenement) -> Object {
             set(&o, "epoque", epoque as f64);
             set(&o, "enveloppe", enveloppe_js(&enveloppe));
         }
-        Evenement::Membres { ajoutes, retires } => {
+        Evenement::Membres {
+            ajoutes,
+            retires,
+            createur_revenu,
+        } => {
             set(&o, "type", "membres");
             set(&o, "ajoutes", sieges(&ajoutes));
             set(&o, "retires", sieges(&retires));
+            set(&o, "createurRevenu", createur_revenu);
         }
-        Evenement::CommitPerdu { ajoutes, retires } => {
+        Evenement::CommitPerdu {
+            ajoutes,
+            retires,
+            createur_revenu,
+        } => {
             set(&o, "type", "commitPerdu");
             set(&o, "ajoutes", sieges(&ajoutes));
             set(&o, "retires", sieges(&retires));
+            set(&o, "createurRevenu", createur_revenu);
         }
-        Evenement::CommitAccepte { welcome } => {
+        Evenement::CommitAccepte {
+            welcome,
+            createur_revenu,
+        } => {
             set(&o, "type", "commitAccepte");
+            set(&o, "createurRevenu", createur_revenu);
             set(
                 &o,
                 "welcome",
                 welcome.map_or(JsValue::NULL, |w| octets(&w).into()),
             );
+        }
+        Evenement::RotationAcceptee { n } => {
+            set(&o, "type", "rotationAcceptee");
+            set(&o, "n", n);
+        }
+        Evenement::RotationARenvoyer { n } => {
+            set(&o, "type", "rotationARenvoyer");
+            set(&o, "n", n);
         }
         Evenement::KeyPackage { octets: kp } => {
             set(&o, "type", "keyPackage");
@@ -733,18 +786,29 @@ pub struct JsSalon(salon::Salon);
 
 #[wasm_bindgen(js_class = Salon)]
 impl JsSalon {
-    /// Nouveau participant au siège donné par le serveur, avec une identité éphémère neuve.
-    /// `createur` : il crée le groupe ; sinon il publie la trame de `keyPackage` et passe toutes
-    /// les trames à `recevoirTrame` : son Welcome le fait entrer (`entree`).
+    /// Nouveau participant au siège donné par le serveur. `s_gestion` (32 octets, le secret du
+    /// lien de gestion) : identité du créateur, la clé de rôle tirée de lui (même clé, même code
+    /// de vérification à chaque retour) ; sans lui, identité éphémère neuve (membre ordinaire).
+    /// `createur` : il crée le groupe (`s_gestion` exigé, sinon `argument_invalide`) ; sinon il
+    /// publie la trame de `keyPackage` et passe toutes les trames à `recevoirTrame` : son Welcome
+    /// le fait entrer (`entree`). Un créateur qui revient (rechargement, « Quitter » puis
+    /// retour, autre appareil) passe `s_gestion` avec `createur = false` : son rôle est rendu
+    /// dès le Commit qui l'ajoute (`createurRevenu`).
     pub fn creer(
         siege: f64,
         #[wasm_bindgen(unchecked_param_type = "Uint8Array")] nonce_arrivee: &JsValue,
         cles: &JsClesSalon,
         createur: bool,
+        s_gestion: Option<Uint8Array>,
     ) -> R<JsSalon> {
         let siege = self::siege(siege)?;
         let nonce = self::nonce_arrivee(nonce_arrivee)?;
-        let identite = salon::nouvelle_identite(siege, nonce).map_err(js_err)?;
+        let identite = match s_gestion {
+            Some(s) => salon::identite_createur(siege, nonce, &*gestion(&s)?),
+            None if createur => return Err(arg()),
+            None => salon::nouvelle_identite(siege, nonce),
+        }
+        .map_err(js_err)?;
         salon::Salon::creer(identite, &cles.0, createur)
             .map(JsSalon)
             .map_err(js_err)
@@ -788,7 +852,10 @@ impl JsSalon {
     /// Trame d'une enveloppe (en-tête tiré du contenu) et son identifiant (tiré par le moteur si
     /// `id` manque). Refus : `commit_en_cours` (un Commit de ce membre attend son écho),
     /// `retrait_en_attente` (un siège parti ou exclu est encore dans l'arbre : `aRetirer`,
-    /// `retirer`), `rotation_refusee` (message `rotation` d'un autre que le créateur).
+    /// `retirer`), `rotation_refusee` (message `rotation` d'un autre que le créateur, d'un
+    /// numéro qui n'est pas celui du dernier `marquerExclu` ou qui a déjà servi, ou tant que la
+    /// rotation précédente attend son écho). L'écho d'une rotation envoyée rend
+    /// `rotationAcceptee` ou `rotationARenvoyer`.
     #[wasm_bindgen(unchecked_return_type = "{ trame: Uint8Array; id: Uint8Array }")]
     pub fn envoyer(
         &mut self,
@@ -859,11 +926,22 @@ impl JsSalon {
         Ok(())
     }
 
-    /// Siège annoncé parti (0x03) ou exclu (0x09).
+    /// Siège annoncé parti (0x03). Pour un 0x09 : `marquerExclu`.
     #[wasm_bindgen(js_name = marquerParti)]
     pub fn marquer_parti(&mut self, siege: f64) -> R<()> {
         let s = self::siege(siege)?;
         self.0.marquer_parti(s);
+        Ok(())
+    }
+
+    /// Exclusion ou rotation de l'invitation annoncée par le serveur (0x09) : siège exclu
+    /// (`undefined` pour le siège `0xFF`, nouveau lien sans exclu) et numéro `r` (entier de 0 à
+    /// 2^32 − 1). Un message `rotation` n'est envoyé et accepté que si son `n` est ce numéro.
+    #[wasm_bindgen(js_name = marquerExclu)]
+    pub fn marquer_exclu(&mut self, siege: Option<f64>, r: f64) -> R<()> {
+        let s = siege.map(self::siege).transpose()?;
+        let r = entier(&JsValue::from_f64(r), u64::from(u32::MAX)).ok_or_else(arg)? as u32;
+        self.0.marquer_exclu(s, r);
         Ok(())
     }
 
@@ -873,6 +951,7 @@ impl JsSalon {
     }
 
     /// Clé SFrame de l'époque (32 octets) : SECRET, copie que l'appelant met à zéro après usage.
+    /// Mêmes refus qu'`envoyer` : `commit_en_cours`, `retrait_en_attente`, `non_membre`.
     #[wasm_bindgen(js_name = exporterSframe)]
     pub fn exporter_sframe(&self) -> R<Uint8Array> {
         self.0
@@ -898,8 +977,11 @@ impl JsSalon {
         self.0.epoque().map(|e| e as f64)
     }
 
-    /// Sièges partis (0x03) ou exclus (0x09) encore dans l'arbre, en ordre croissant : tant
-    /// qu'il en reste, `envoyer` est refusé (`retrait_en_attente`) ; tout membre les retire.
+    /// Sièges des feuilles parties (0x03) ou exclues (0x09) encore dans l'arbre, en ordre
+    /// croissant (suivi par arrivée : une nouvelle annonce sur le siège n'efface rien ; l'ancienne
+    /// feuille d'une reprise, 0x0A, y figure jusqu'au Commit qui la remplace) : tant
+    /// qu'il en reste, `envoyer` est refusé (`retrait_en_attente`) et tout Commit doit les
+    /// retirer ; tout membre les retire (`retirer` de l'un les retire tous).
     #[wasm_bindgen(js_name = aRetirer, unchecked_return_type = "number[]")]
     pub fn a_retirer(&self) -> Array {
         sieges(&self.0.a_retirer())
@@ -908,7 +990,9 @@ impl JsSalon {
     /// Refonde le salon sous d'autres clés (rotation de l'invitation) : cette poignée est
     /// consommée (son état MLS est effacé), la nouvelle garde l'identité (même code de
     /// vérification), les annonces et le dernier rang vu. Le créateur recrée le groupe ; les
-    /// autres publient un nouveau `keyPackage` et attendent leur Welcome.
+    /// autres publient un nouveau `keyPackage` et attendent leur Welcome. Les clés d'identité de
+    /// l'ancien groupe sont gardées : un siège connu ne revient qu'avec la même clé, et l'on
+    /// n'entre que dans le groupe du créateur connu. Chez le créateur : à `rotationAcceptee`.
     pub fn refonder(self, cles: &JsClesSalon) -> R<JsSalon> {
         self.0.refonder(&cles.0).map(JsSalon).map_err(js_err)
     }

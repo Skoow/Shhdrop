@@ -38,8 +38,9 @@
 //! a annoncé ; deux membres qui n'en savent pas autant divergent (l'un fusionne, l'autre
 //! refuse et reste en arrière). L'appelant doit donc donner à `remplacer_annonces` la liste
 //! complète `(siège, nonce_arrivee)` reçue à l'accueil du WebSocket (et à chaque
-//! reconnexion) **avant tout `recevoir_trame`**, puis chaque 0x02 / 0x0A à `annoncer` et chaque
-//! 0x03 / 0x09 à `marquer_parti`, dans l'ordre `seq`, avant les trames qui les suivent.
+//! reconnexion) **avant tout `recevoir_trame`**, puis chaque 0x02 / 0x0A à `annoncer`, chaque
+//! 0x03 à `marquer_parti` et chaque 0x09 à `marquer_exclu` (siège, ou aucun, et numéro `r`),
+//! dans l'ordre `seq`, avant les trames qui les suivent.
 //! Chaque trame va à `recevoir_trame` avec le siège que le serveur atteste l'avoir envoyée, **y
 //! compris en attente d'entrer** et pour la file rejouée à la (re)connexion : un ajout n'est
 //! accepté que si l'on a vu le KeyPackage publié par le siège même de l'arrivant.
@@ -54,8 +55,34 @@
 //! « membre » lira la suite. MLS ne peut pas l'empêcher sans service d'authentification ;
 //! seuls les codes de vérification (`empreinte`, comparés hors du salon) le révèlent.
 //!
-//! **Siège du créateur** : porté par l'identifiant du groupe MLS (`tag_salon` ‖ siège), fixé
-//! à la création et authentifié par MLS (contexte du groupe) chez tous les membres.
+//! **Créateur** : l'identifiant du groupe MLS est `tag_salon` (16) ‖ siège du créateur (1) ‖ sa
+//! clé d'identité Ed25519 (32), fixé à la création et authentifié par MLS (contexte du groupe)
+//! chez tous les membres, arrivés plus tard compris. Le rôle (retirer un membre présent, envoyer
+//! la rotation, recréer le groupe) tient au siège **et** à cette clé (relecture du 13 novembre,
+//! point 4). **Depuis le 14 novembre (décision du propriétaire : « L'admin ne doit jamais perdre
+//! ses rôles admin »)**, cette clé est la **clé de rôle**, tirée de `S_gestion`
+//! (`identite_createur` : HKDF « shhdrop/v2/salon/role », puis Ed25519) et non plus tirée au
+//! hasard : le créateur revenu (rechargement, page fermée, « Quitter » puis retour, autre
+//! appareil muni du lien de gestion) entre avec la même clé, et la feuille de son KeyPackage,
+//! signée par elle (signature du KeyPackage, puis de chaque message et Commit), **est** la preuve
+//! de rôle : rendu dès le Commit qui l'ajoute, sans attendre un renouvellement. Une preuve ne se
+//! rejoue pas sur une autre feuille (il faudrait signer avec la clé privée de rôle) ; une feuille
+//! d'une autre clé au siège du créateur est un membre ordinaire. **La clé de rôle n'est admise
+//! qu'au siège du créateur** (KeyPackage ignoré, ajout et Welcome refusés ailleurs) et MLS refuse
+//! deux feuilles de même clé : il y a au plus **une** feuille créatrice, la plus récente (le
+//! Commit qui ajoute la nouvelle retire l'ancienne, une feuille par siège). Ce Commit porte
+//! `createur_revenu` chez tous (`Membres`, `CommitPerdu`, `CommitAccepte`) : l'écran le dit.
+//!
+//! **Parti ou exclu : par arrivée, pas par siège** (relecture du 13 novembre, point 1) : la
+//! marque porte sur l'arrivée `(siège, nonce_arrivee)` de la feuille. Une nouvelle annonce sur
+//! le même siège ne l'efface pas ; l'arrivée marquée n'est jamais réadmise. Après une liste
+//! complète, une feuille qui n'est pas l'annonce courante de son siège est à retirer, y compris
+//! l'ancienne feuille d'une reprise (0x0A) jusqu'au Commit qui la remplace (14 novembre : la
+//! liste ne distingue pas une reprise d'un départ suivi d'une arrivée ; le flux et la liste
+//! doivent donner le même jugement chez tous).
+//!
+//! **Priorité du retrait** (point 6) : tant qu'une feuille est à retirer, un Commit qui ne les
+//! retire pas toutes est refusé ; `ajouter`, `retirer` et `renouveler` les retirent d'office.
 //!
 //! **Exclusion et départ : le moteur impose l'ordre** (audit adverse du 13 novembre, F1 et F2 ;
 //! spec salon v3 §15). Une erreur de l'appelant donne un refus, jamais une fuite :
@@ -64,26 +91,31 @@
 //!   retire ;
 //! - `envoyer` est refusé tant qu'un siège que le serveur a dit parti (0x03) ou exclu (0x09) a
 //!   encore une feuille dans l'arbre (`retrait_en_attente`) : tout membre peut le retirer
-//!   (`a_retirer`, `retirer`), puis renvoyer ;
+//!   (`a_retirer`, `retirer`), puis renvoyer ; `exporter_sframe` (clé des appels) suit les
+//!   mêmes refus ;
 //! - un Commit dont l'auteur est un siège parti ou exclu est refusé (`commit_refuse`), un
 //!   message de lui aussi (`non_membre`) ; les propositions ne sont jamais gardées ;
 //! - chaque `Message` rendu porte l'époque à laquelle il a été chiffré (un message de l'époque
 //!   précédente reste lisible, `max_past_epochs(1)` : l'appelant voit qu'il date d'avant le
 //!   dernier Commit) ;
 //! - le message `rotation` (`K_maître_s'`) n'est envoyé que par le créateur et n'est accepté
-//!   que de lui, à l'**époque courante** (jamais la précédente), sans siège parti ou exclu dans
-//!   l'arbre : sinon `rotation_refusee`, et la clé ne doit pas servir.
+//!   que de lui, à l'**époque courante** (jamais la précédente), chaque feuille de l'arbre
+//!   étant l'annonce courante de son siège, et son numéro `n` étant le `r` du dernier 0x09
+//!   (`marquer_exclu`), jamais déjà servi : sinon `rotation_refusee`, et la clé ne doit pas
+//!   servir ;
+//! - à l'écho de sa rotation, le créateur reçoit `RotationAcceptee` ou `RotationARenvoyer`
+//!   (mêmes conditions que chez les destinataires, au même rang).
 //!
 //! Ordre d'une exclusion (contrat de l'appelant) : `POST exclure` (le serveur émet `0x09` →
-//! `marquer_parti`) ; `retirer` par le créateur (ou tout membre) ; écho (`CommitAccepte`, ou
+//! `marquer_exclu`) ; `retirer` par le créateur (ou tout membre) ; écho (`CommitAccepte`, ou
 //! `Membres`/`CommitPerdu` avec le siège dans `retires`) ; `envoyer` du message `rotation` par
 //! le créateur ; à sa réception, chaque membre restant passe aux nouvelles clés
 //! (`cles_depuis_maitre`) et **refonde le groupe** (`refonder`) : l'identifiant du groupe MLS
 //! porte l'étiquette de l'invitation, une arrivante munie de la nouvelle invitation ne peut
-//! entrer que dans un groupe créé sous elle (F3). Si l'époque du créateur a changé entre l'envoi
-//! de la rotation et son écho (un Commit est passé entre les deux), les membres l'ont refusée :
-//! il la renvoie.
-use crate::cles::ClesSalon;
+//! entrer que dans un groupe créé sous elle (F3). Le créateur ne refonde qu'à l'écho
+//! `RotationAcceptee` ; à `RotationARenvoyer` (Commit, départ ou reprise passés entre l'envoi et
+//! l'écho), les membres l'ont refusée : il règle ce qui manque et la renvoie.
+use crate::cles::{ClesSalon, graine_role};
 use crate::error::{Error, Result};
 use crate::message::{Enveloppe, Message, decoder, encoder};
 use crate::politique::{self, Changements};
@@ -164,6 +196,42 @@ impl core::fmt::Debug for Identite {
     }
 }
 
+/// Clé publique de rôle (Ed25519, 32 octets) tirée de `S_gestion` : la clé d'identité de
+/// `identite_createur`, donc celle de l'identifiant du groupe et du code de vérification du
+/// créateur. Publique (voir spec salon v3 §15.2) ; vecteurs `role` de `salon-v3.json`.
+pub fn cle_publique_role(s_gestion: &[u8; 32]) -> [u8; 32] {
+    let graine = graine_role(s_gestion);
+    ed25519_dalek::SigningKey::from_bytes(&graine)
+        .verifying_key()
+        .to_bytes()
+}
+
+/// Identité du créateur pour le siège et le `nonce_arrivee` donnés par le serveur : la paire
+/// Ed25519 est la **clé de rôle**, tirée de `S_gestion` (graine = HKDF(`S_gestion`,
+/// « shhdrop/v2/salon/role »), RFC 8032), la même sur tout appareil et à chaque retour (même code
+/// de vérification). Pour créer le groupe (`Salon::creer(…, true)`) et pour tout retour du
+/// créateur (KeyPackage). La clé privée reste dans `SignatureKeyPair`, effacée à la destruction.
+pub fn identite_createur(
+    siege: u8,
+    nonce_arrivee: [u8; 16],
+    s_gestion: &[u8; 32],
+) -> Result<Identite> {
+    let graine = graine_role(s_gestion);
+    let publique = ed25519_dalek::SigningKey::from_bytes(&graine)
+        .verifying_key()
+        .to_bytes();
+    let signataire = SignatureKeyPair::from_raw(
+        SUITE.signature_algorithm(),
+        graine.to_vec(),
+        publique.to_vec(),
+    );
+    Ok(Identite {
+        signataire,
+        siege,
+        nonce_arrivee,
+    })
+}
+
 /// Tire une identité éphémère pour le siège et le `nonce_arrivee` donnés par le serveur.
 pub fn nouvelle_identite(siege: u8, nonce_arrivee: [u8; 16]) -> Result<Identite> {
     let signataire =
@@ -189,16 +257,31 @@ pub enum Evenement {
         enveloppe: Enveloppe,
     },
     /// Commit d'un autre membre fusionné : sièges ajoutés et retirés
-    /// (un retour après rechargement figure dans les deux listes).
-    Membres { ajoutes: Vec<u8>, retires: Vec<u8> },
+    /// (un retour après rechargement figure dans les deux listes). `createur_revenu` : ce Commit
+    /// ajoute la feuille de la clé de rôle (le créateur a repris la main : rechargement, retour ou
+    /// autre appareil muni du lien de gestion) ; son ancienne feuille, s'il en avait une, est
+    /// retirée par ce même Commit et n'a plus aucun droit (14 novembre).
+    Membres {
+        ajoutes: Vec<u8>,
+        retires: Vec<u8>,
+        createur_revenu: bool,
+    },
     /// Notre Commit en attente a perdu (un autre Commit de l'époque est passé avant, ou la
     /// politique le refuse à son écho) : l'appelant rejoue son intention. `ajoutes` et
     /// `retires` : ce qu'a changé le Commit gagnant (vides si la politique a refusé le nôtre
-    /// à son écho, sans autre Commit).
-    CommitPerdu { ajoutes: Vec<u8>, retires: Vec<u8> },
+    /// à son écho, sans autre Commit). `createur_revenu` : comme pour `Membres`.
+    CommitPerdu {
+        ajoutes: Vec<u8>,
+        retires: Vec<u8>,
+        createur_revenu: bool,
+    },
     /// Notre Commit en attente est revenu le premier de son époque et a été fusionné ; pour
-    /// un ajout, le Welcome à envoyer maintenant à l'arrivant.
-    CommitAccepte { welcome: Option<Vec<u8>> },
+    /// un ajout, le Welcome à envoyer maintenant à l'arrivant. `createur_revenu` : comme pour
+    /// `Membres` (nous venons d'ajouter la feuille de la clé de rôle).
+    CommitAccepte {
+        welcome: Option<Vec<u8>>,
+        createur_revenu: bool,
+    },
     /// KeyPackage d'un arrivant annoncé (valide, suite 0x0001, siège et nonce annoncés, pas
     /// déjà dans le groupe) : à passer à `ajouter` par le membre désigné.
     KeyPackage { octets: Vec<u8> },
@@ -208,6 +291,14 @@ pub enum Evenement {
     Entree {
         rejoues: Vec<(u64, Result<Evenement>)>,
     },
+    /// Écho de notre message `rotation` (créateur) : les conditions que les destinataires
+    /// vérifient (époque courante, chaque feuille admise, numéro `n` de l'exclusion) tiennent
+    /// aussi à son rang ; les membres l'ont acceptée, le créateur peut refonder.
+    RotationAcceptee { n: u32 },
+    /// Écho de notre message `rotation` : à son rang, une condition ne tient plus (Commit, départ
+    /// ou reprise passés entre l'envoi et l'écho) ; les membres l'ont refusée (`rotation_refusee`).
+    /// Ne pas refonder : régler ce qui manque (`a_retirer`), puis la renvoyer.
+    RotationARenvoyer { n: u32 },
     /// Rien à faire : écho de notre message, Commit perdant d'une époque passée, rejeu (`seq`
     /// déjà vu), Welcome destiné à d'autres, KeyPackage périmé ou non annoncé, proposition
     /// (jamais gardée).
@@ -215,23 +306,36 @@ pub enum Evenement {
 }
 
 /// Ce que le serveur a annoncé des sièges : la politique en dépend (voir l'en-tête du module).
+///
+/// **Suivi par arrivée** (13 novembre) : « parti ou exclu » se dit d'une arrivée `(siège,
+/// nonce_arrivee)`, celle que porte la credential de la feuille, jamais d'un numéro de siège :
+/// une nouvelle annonce sur le même siège n'efface pas la marque de l'ancienne feuille.
 #[derive(Clone, Default)]
 struct Registre {
     /// Dernière annonce `(siège, nonce_arrivee)` du serveur pour chaque siège.
     annonces: Vec<(u8, [u8; 16])>,
-    /// Sièges que le serveur a dits partis (0x03) ou exclus (0x09), non repris depuis.
-    partis: Vec<u8>,
-    /// Premier KeyPackage valide de chaque arrivée annoncée, envoyé par son propre siège.
+    /// Arrivées que le serveur a dites parties (0x03) ou exclues (0x09) : jamais réadmises,
+    /// même annoncées de nouveau.
+    parties: Vec<(u8, [u8; 16])>,
+    /// Premier KeyPackage valide de chaque arrivée annoncée, envoyé par son propre siège ; après
+    /// une refondation, aussi la clé d'identité de chaque membre de l'ancien groupe.
     key_packages: Vec<politique::Arrivee>,
     /// Siège du créateur donné par le serveur avec la liste complète (vérifié au Welcome).
     createur_annonce: Option<u8>,
     /// Une liste complète des sièges occupés a été donnée (`remplacer_annonces`).
     liste_complete: bool,
+    /// Numéro `r` de la dernière exclusion ou rotation annoncée par le serveur (0x09).
+    exclusion: Option<u32>,
+    /// Numéro `n` de la dernière rotation acceptée.
+    rotation_vue: Option<u32>,
 }
 
 impl Registre {
     fn annoncer(&mut self, siege: u8, nonce_arrivee: [u8; 16]) {
-        self.partis.retain(|&p| p != siege);
+        // Une arrivée partie ou exclue ne revient pas : annoncée de nouveau, elle est ignorée.
+        if self.parties.contains(&(siege, nonce_arrivee)) {
+            return;
+        }
         self.key_packages
             .retain(|k| k.0 != siege || k.1 == nonce_arrivee);
         self.annonces.retain(|a| a.0 != siege);
@@ -245,65 +349,100 @@ impl Registre {
         }
         let annonces = &self.annonces;
         self.key_packages.retain(|k| annonces.contains(&(k.0, k.1)));
-        self.partis.clear();
         self.createur_annonce = Some(createur_siege);
         self.liste_complete = true;
     }
 
-    fn marquer_parti(&mut self, siege: u8) {
-        self.annonces.retain(|a| a.0 != siege);
-        self.key_packages.retain(|k| k.0 != siege);
-        if !self.partis.contains(&siege) {
-            self.partis.push(siege);
-        }
-    }
-
-    /// Sièges partis ou exclus : marqués (0x03, 0x09) ou, après une liste complète du serveur,
-    /// présents dans l'arbre mais absents des annonces.
-    fn partis_effectifs(&self, groupe: &MlsGroup) -> Vec<u8> {
-        let mut p = self.partis.clone();
-        if self.liste_complete {
-            for m in groupe.members() {
-                if let Ok((s, _)) = lire_credential(&m.credential)
-                    && !self.annonces.iter().any(|a| a.0 == s)
-                    && !p.contains(&s)
-                {
-                    p.push(s);
-                }
+    /// Départ (0x03) ou exclusion (0x09) du siège : son annonce courante et `feuilles`
+    /// (credentials de ses feuilles dans l'arbre) sont marquées parties.
+    fn marquer_parti(&mut self, siege: u8, feuilles: &[(u8, [u8; 16])]) {
+        let connues: Vec<(u8, [u8; 16])> = self
+            .annonces
+            .iter()
+            .chain(feuilles)
+            .filter(|a| a.0 == siege)
+            .copied()
+            .collect();
+        for a in connues {
+            if !self.parties.contains(&a) {
+                self.parties.push(a);
             }
         }
-        p
+        self.annonces.retain(|a| a.0 != siege);
+        self.key_packages.retain(|k| k.0 != siege);
     }
 
-    /// Sièges partis ou exclus qui ont encore une feuille dans l'arbre, en ordre croissant :
-    /// tant qu'il en reste, ils liraient ce qui est envoyé.
-    fn a_retirer(&self, groupe: &MlsGroup) -> Vec<u8> {
-        let partis = self.partis_effectifs(groupe);
-        let mut s: Vec<u8> = groupe
+    /// Numéro `r` d'une exclusion ou d'une rotation annoncée (0x09) : le plus grand reçu.
+    fn noter_exclusion(&mut self, r: u32) {
+        if self.exclusion.is_none_or(|e| r > e) {
+            self.exclusion = Some(r);
+        }
+    }
+
+    /// La feuille de cette credential est-elle admise ? Jamais si son arrivée est partie ou
+    /// exclue ; après une liste complète du serveur, seulement si elle est l'annonce courante
+    /// de son siège.
+    ///
+    /// 14 novembre : une feuille remplacée par une reprise (0x0A) n'est **plus** admise jusqu'au
+    /// Commit qui la remplace. La liste complète (0x0D) ne dit que l'annonce courante de chaque
+    /// siège : elle ne distingue pas « reprise » de « départ puis nouvelle arrivée ». Un membre
+    /// qui a vu le 0x0A en direct et un membre qui n'a reçu que la liste (reconnexion) doivent
+    /// juger l'ancienne feuille de la même façon, sinon l'un fusionne un Commit que l'autre
+    /// refuse (groupe scindé).
+    fn admise(&self, c: &(u8, [u8; 16])) -> bool {
+        !self.parties.contains(c) && (!self.liste_complete || self.annonces.contains(c))
+    }
+
+    /// Credentials des feuilles de l'arbre à retirer (non admises) : tant qu'il en reste, elles
+    /// liraient ce qui est envoyé.
+    fn feuilles_a_retirer(&self, groupe: &MlsGroup) -> Vec<(u8, [u8; 16])> {
+        groupe
             .members()
             .filter_map(|m| lire_credential(&m.credential).ok())
+            .filter(|c| !self.admise(c))
+            .collect()
+    }
+
+    /// Sièges de ces feuilles, en ordre croissant.
+    fn a_retirer(&self, groupe: &MlsGroup) -> Vec<u8> {
+        let mut s: Vec<u8> = self
+            .feuilles_a_retirer(groupe)
+            .iter()
             .map(|c| c.0)
-            .filter(|s| partis.contains(s))
             .collect();
         s.sort_unstable();
         s.dedup();
         s
     }
 
-    /// Politique d'adhésion (`politique::verifier`) d'un Commit de `auteur` sur ce groupe.
+    /// Conditions d'un message `rotation` de numéro `n`, les mêmes à l'envoi, à la réception et
+    /// à l'écho : **chaque** feuille de l'arbre est l'annonce courante de son siège (ni partie,
+    /// ni exclue, ni inconnue, ni en cours de remplacement : un membre qui revient après un
+    /// rechargement ne lirait pas la rotation ; exigé aussi sans liste complète) ; `n` est le numéro de la dernière exclusion
+    /// annoncée par le serveur (0x09) et dépasse celui de la dernière rotation acceptée.
+    fn rotation_recevable(&self, groupe: &MlsGroup, n: u32) -> bool {
+        groupe.members().all(|m| {
+            lire_credential(&m.credential)
+                .is_ok_and(|c| self.annonces.contains(&c) && !self.parties.contains(&c))
+        }) && self.exclusion == Some(n)
+            && self.rotation_vue.is_none_or(|v| n > v)
+    }
+
+    /// Politique d'adhésion (`politique::verifier`) d'un Commit sur ce groupe ; `auteur` :
+    /// credential de la feuille de l'auteur, `auteur_createur` : c'est celle du créateur.
     fn verifier(
         &self,
         groupe: &MlsGroup,
         ch: &Changements,
-        createur_siege: u8,
-        auteur: u8,
+        auteur_createur: bool,
+        auteur: (u8, [u8; 16]),
     ) -> Result<()> {
         politique::verifier(
             ch,
-            createur_siege,
+            auteur_createur,
             auteur,
             &self.annonces,
-            &self.partis_effectifs(groupe),
+            &self.feuilles_a_retirer(groupe),
             &self.key_packages,
         )
     }
@@ -320,6 +459,9 @@ enum Attente {
     },
     Annonce(u8, [u8; 16]),
     Parti(u8),
+    /// Exclusion ou rotation annoncée (0x09) : siège exclu (aucun pour un simple nouveau lien)
+    /// et numéro `r`.
+    Exclusion(Option<u8>, u32),
     Liste(u8, Vec<(u8, [u8; 16])>),
 }
 
@@ -337,7 +479,20 @@ pub struct Salon {
     tag: [u8; 16],
     groupe: Option<MlsGroup>,
     createur_siege: u8,
+    /// Clé d'identité (Ed25519) du créateur, portée par l'identifiant du groupe MLS et donc
+    /// authentifiée chez tous : le rôle de créateur tient au siège **et** à cette clé (`None`
+    /// avant l'entrée).
+    createur_cle: Option<[u8; 32]>,
+    /// Après une refondation : clé du créateur de l'ancien groupe ; le Welcome d'un groupe créé
+    /// par une autre clé, ou sans la feuille de ce créateur, est refusé.
+    createur_attendu: Option<[u8; 32]>,
     registre: Registre,
+    /// Registre d'où part la file rejouée à l'entrée : vide, ou après une refondation ce que
+    /// l'ancien salon savait (arrivées parties, numéros d'exclusion et de rotation, identités).
+    depart: Registre,
+    /// Empreinte SHA-256 des octets MLS de notre dernier message `rotation` et son numéro, en
+    /// attente de son écho.
+    rotation_en_vol: Option<([u8; 32], u32)>,
     /// Octets MLS de notre Commit en attente de son écho, et la trame du Welcome qu'il rendra
     /// s'il gagne.
     commit_en_attente: Option<(Vec<u8>, Option<Vec<u8>>)>,
@@ -547,21 +702,53 @@ fn est_commit_de(mls: &[u8], epoque: u64) -> bool {
     }
 }
 
-fn membres_de(ch: &Changements) -> Evenement {
+fn membres_de(ch: &Changements, createur: Createur) -> Evenement {
     Evenement::Membres {
         ajoutes: ch.ajouts.iter().map(|a| a.0).collect(),
         retires: ch.retraits.iter().map(|r| r.0).collect(),
+        createur_revenu: createur_ajoute(ch, createur),
     }
 }
 
-/// Feuilles du siège `siege` (indices et credentials) et sièges des autres feuilles.
+/// Siège du créateur et clé de rôle portés par l'identifiant du groupe (clé absente avant
+/// l'entrée).
+type Createur = (u8, Option<[u8; 32]>);
+
+/// Le Commit ajoute-t-il la feuille de la clé de rôle, au siège du créateur ?
+fn createur_ajoute(ch: &Changements, (siege, cle): Createur) -> bool {
+    cle.is_some_and(|c| {
+        let e = sha256(&c);
+        ch.ajouts.iter().any(|a| a.0 == siege && a.2 == e)
+    })
+}
+
+/// 14 novembre : la clé de rôle n'est admise qu'au siège du créateur. Ailleurs (lien de gestion
+/// volé utilisé depuis une place d'invité, client modifié), la feuille n'aurait aucun droit
+/// (le rôle tient aussi au siège) mais prendrait la clé : MLS refusant deux feuilles de même clé,
+/// le vrai créateur ne pourrait plus revenir. `empreinte` : SHA-256 de la clé de la feuille.
+fn cle_de_role_hors_siege(siege: u8, empreinte: &[u8; 32], (cs, cle): Createur) -> bool {
+    siege != cs && cle.is_some_and(|c| sha256(&c) == *empreinte)
+}
+
+/// Un ajout du Commit porte-t-il la clé de rôle hors du siège du créateur ?
+fn ajout_de_role_hors_siege(ch: &Changements, createur: Createur) -> bool {
+    ch.ajouts
+        .iter()
+        .any(|a| cle_de_role_hors_siege(a.0, &a.2, createur))
+}
+
+/// Feuilles qu'un Commit retire (indices et credentials) et sièges des feuilles qui restent.
 type Prevision = (Vec<LeafNodeIndex>, Vec<(u8, [u8; 16])>, Vec<u8>);
 
-fn prevoir(groupe: &MlsGroup, siege: u8) -> Result<Prevision> {
+/// Ce que retire un Commit de ce membre : les feuilles du siège `siege` (s'il y en a un) et,
+/// toujours, les feuilles à retirer (arrivées parties, exclues ou inconnues du serveur :
+/// priorité du retrait, `politique::verifier`), sauf la nôtre (MLS ne laisse pas l'auteur se
+/// retirer ; la politique refuse alors le Commit).
+fn prevoir(groupe: &MlsGroup, registre: &Registre, siege: Option<u8>) -> Result<Prevision> {
     let (mut indices, mut retraits, mut restants) = (Vec::new(), Vec::new(), Vec::new());
     for m in groupe.members() {
         let c = lire_credential(&m.credential)?;
-        if c.0 == siege {
+        if m.index != groupe.own_leaf_index() && (siege == Some(c.0) || !registre.admise(&c)) {
             indices.push(m.index);
             retraits.push(c);
         } else {
@@ -571,19 +758,34 @@ fn prevoir(groupe: &MlsGroup, siege: u8) -> Result<Prevision> {
     Ok((indices, retraits, restants))
 }
 
+/// Taille de l'identifiant du groupe MLS : `tag_salon` (16) ‖ siège du créateur (1) ‖ clé
+/// d'identité Ed25519 du créateur (32).
+const TAILLE_ID_GROUPE: usize = 49;
+
 impl Salon {
     /// Nouveau participant. `createur` : il crée le groupe MLS (premier membre, seul à pouvoir
-    /// retirer autrui) ; sinon il publie son KeyPackage (`key_package`) et attend son Welcome,
-    /// qui arrive par `recevoir_trame` comme toute trame. Seule l'étiquette du salon est lue
-    /// dans `cles` (l'appelant les garde pour les trames).
+    /// retirer autrui ; l'identifiant du groupe porte son siège et sa clé d'identité) ; sinon il
+    /// publie son KeyPackage (`key_package`) et attend son Welcome, qui arrive par
+    /// `recevoir_trame` comme toute trame. Seule l'étiquette du salon est lue dans `cles`
+    /// (l'appelant les garde pour les trames).
+    ///
+    /// **Contrat (14 novembre)** : le créateur passe `identite_createur` (clé de rôle tirée de
+    /// `S_gestion`), pour créer le groupe comme pour revenir ; une identité tirée au hasard
+    /// (`nouvelle_identite`) fonderait un groupe dont le rôle serait perdu au premier
+    /// rechargement. Les liaisons (site : `Salon.creer(…, createur, sGestion)` ; apps : même
+    /// règle) refusent `createur` sans `S_gestion`.
     pub fn creer(identite: Identite, cles: &ClesSalon, createur: bool) -> Result<Salon> {
         let mut salon = Salon {
             fournisseur: Fournisseur::default(),
             tag: *cles.tag(),
             createur_siege: identite.siege,
+            createur_cle: None,
+            createur_attendu: None,
             identite,
             groupe: None,
             registre: Registre::default(),
+            depart: Registre::default(),
+            rotation_en_vol: None,
             commit_en_attente: None,
             dernier_seq: None,
             nos_key_packages: Vec::new(),
@@ -591,8 +793,15 @@ impl Salon {
             attente_pleine: false,
         };
         if createur {
+            let cle: [u8; 32] = salon
+                .identite
+                .cle_publique()
+                .try_into()
+                .map_err(|_| Error::MlsInterne)?;
             let mut id = salon.tag.to_vec();
             id.push(salon.identite.siege);
+            id.extend_from_slice(&cle);
+            salon.createur_cle = Some(cle);
             let groupe = MlsGroup::new_with_group_id(
                 &salon.fournisseur,
                 &salon.identite.signataire,
@@ -684,13 +893,15 @@ impl Salon {
         let contexte = prepare.group_context();
         let id = contexte.group_id().as_slice();
         if contexte.ciphersuite() != SUITE
-            || id.len() != 17
+            || id.len() != TAILLE_ID_GROUPE
             || id[..16] != self.tag
             || contexte.extensions().iter().next().is_some()
         {
             return Err(Error::MlsInvalide);
         }
         let createur_siege = id[16];
+        let mut createur_cle = [0u8; 32];
+        createur_cle.copy_from_slice(&id[17..]);
         let epoque = contexte.epoch().as_u64();
         // L'expéditeur attesté du Welcome est l'auteur du Commit qui nous ajoute : un membre
         // de l'arbre, autre que nous.
@@ -728,7 +939,10 @@ impl Salon {
         let mut avant = None;
         if candidats.is_empty() {
             self.registre = vivant.clone();
-            if self.verifier_welcome(&prepare, createur_siege).is_ok() {
+            if self
+                .verifier_welcome(&prepare, createur_siege, &createur_cle)
+                .is_ok()
+            {
                 avant = Some(file.len());
             }
         } else {
@@ -737,14 +951,17 @@ impl Salon {
             // appliquée une fois au plus, donc au plus `ATTENTE_MAX` vérifications de KeyPackage
             // quel que soit le nombre de candidats (une file remplie de copies par un serveur
             // malveillant reste linéaire).
-            self.registre = Registre::default();
+            self.registre = self.depart.clone();
             let mut pos = 0;
             for &i in &candidats {
                 for a in &file[pos..i] {
                     self.appliquer_en_attente(a);
                 }
                 pos = i;
-                if self.verifier_welcome(&prepare, createur_siege).is_ok() {
+                if self
+                    .verifier_welcome(&prepare, createur_siege, &createur_cle)
+                    .is_ok()
+                {
                     avant = Some(i);
                     break;
                 }
@@ -764,6 +981,7 @@ impl Salon {
             }
         };
         self.createur_siege = createur_siege;
+        self.createur_cle = Some(createur_cle);
         self.groupe = Some(groupe);
         // Entré : les clés d'init de tous nos KeyPackages (celui du Welcome et les autres
         // publiés) ne servent plus (confidentialité persistante). Chaque effacement est tenté ;
@@ -799,7 +1017,13 @@ impl Salon {
     fn appliquer_en_attente(&mut self, a: &Attente) {
         match a {
             Attente::Annonce(s, n) => self.registre.annoncer(*s, *n),
-            Attente::Parti(s) => self.registre.marquer_parti(*s),
+            Attente::Parti(s) => self.noter_parti(*s),
+            Attente::Exclusion(s, r) => {
+                if let Some(s) = s {
+                    self.noter_parti(*s);
+                }
+                self.registre.noter_exclusion(*r);
+            }
             Attente::Liste(c, l) => self.registre.remplacer(*c, l),
             // Comme à la réception : un KeyPackage sous un autre en-tête est refusé, jamais
             // retenu (N1).
@@ -819,9 +1043,24 @@ impl Salon {
 
     /// Le créateur est celui que le serveur a donné ; chaque feuille d'un siège occupé porte le
     /// nonce annoncé (et la clé retenue si son KeyPackage nous est passé). Une feuille d'un siège
-    /// absent de la liste est un parti pas encore retiré.
-    fn verifier_welcome(&self, prepare: &StagedWelcome, createur_siege: u8) -> Result<()> {
+    /// absent de la liste est un parti pas encore retiré. Après une refondation : le groupe est
+    /// celui du créateur attendu (sa clé dans l'identifiant du groupe) et sa feuille y est.
+    fn verifier_welcome(
+        &self,
+        prepare: &StagedWelcome,
+        createur_siege: u8,
+        createur_cle: &[u8; 32],
+    ) -> Result<()> {
         if self.registre.createur_annonce != Some(createur_siege) {
+            return Err(Error::MlsInvalide);
+        }
+        if let Some(attendu) = &self.createur_attendu
+            && (attendu != createur_cle
+                || !prepare.members().any(|m| {
+                    m.signature_key == attendu[..]
+                        && lire_credential(&m.credential).is_ok_and(|c| c.0 == createur_siege)
+                }))
+        {
             return Err(Error::MlsInvalide);
         }
         let mut sieges = Vec::new();
@@ -837,6 +1076,7 @@ impl Salon {
             if sieges.contains(&s)
                 || annonce.is_some_and(|a| a.1 != n)
                 || retenu.is_some_and(|k| k.2 != cle)
+                || cle_de_role_hors_siege(s, &cle, (createur_siege, Some(*createur_cle)))
             {
                 return Err(Error::MlsInvalide);
             }
@@ -859,7 +1099,9 @@ impl Salon {
     }
 
     /// Enregistre une arrivée annoncée par le serveur (0x02) ou une reprise de siège (0x0A) :
-    /// remplace l'annonce précédente du même siège (qui n'est plus « parti »). À appeler dans
+    /// remplace l'annonce précédente du même siège. Une arrivée dite partie ou exclue le reste
+    /// (annoncée de nouveau, elle est ignorée) ; l'ancienne feuille du siège, s'il en a une, est
+    /// à retirer (`a_retirer`) jusqu'au Commit qui la retire. À appeler dans
     /// l'ordre `seq`, avant le `recevoir_trame` des trames suivantes, pour que tous les membres
     /// appliquent la même politique.
     pub fn annoncer(&mut self, siege: u8, nonce_arrivee: [u8; 16]) {
@@ -869,8 +1111,9 @@ impl Salon {
 
     /// Liste complète des sièges occupés et de leur `nonce_arrivee`, donnée par le serveur à
     /// l'accueil du WebSocket (et à chaque reconnexion) avant toute trame : remplace toutes les
-    /// annonces connues. Un siège présent dans l'arbre MLS mais absent de cette liste compte
-    /// ensuite comme parti (retirable par tout membre), jusqu'à sa prochaine annonce.
+    /// annonces connues. Une feuille de l'arbre MLS dont l'arrivée `(siège, nonce_arrivee)`
+    /// n'est pas dans cette liste est ensuite à retirer (retirable par tout membre) ; une
+    /// annonce suivante du même siège ne la réadmet pas.
     pub fn remplacer_annonces(&mut self, createur_siege: u8, liste: &[(u8, [u8; 16])]) {
         self.en_file(Attente::Liste(createur_siege, liste.to_vec()));
         self.registre.remplacer(createur_siege, liste);
@@ -879,9 +1122,56 @@ impl Salon {
     /// Siège annoncé parti (0x03) ou exclu (0x09) par le serveur, dans l'ordre `seq` : tout
     /// membre peut alors en retirer la feuille ; son annonce est oubliée (une nouvelle arrivée
     /// sur ce siège sera annoncée de nouveau).
+    ///
+    /// La marque porte sur l'**arrivée** `(siège, nonce_arrivee)` : l'annonce courante du siège
+    /// et ses feuilles dans l'arbre. Une nouvelle annonce sur le même siège ne l'efface pas.
     pub fn marquer_parti(&mut self, siege: u8) {
         self.en_file(Attente::Parti(siege));
-        self.registre.marquer_parti(siege);
+        self.noter_parti(siege);
+    }
+
+    /// Exclusion ou rotation de l'invitation annoncée par le serveur (0x09), dans l'ordre
+    /// `seq` : `siege` exclu (`None` pour un nouveau lien sans exclu, siège `0xFF` du serveur),
+    /// marqué comme par `marquer_parti`, et numéro `r` de la rotation. Un message `rotation`
+    /// n'est envoyé et accepté que si son `n` est le dernier `r` reçu ici.
+    pub fn marquer_exclu(&mut self, siege: Option<u8>, r: u32) {
+        self.en_file(Attente::Exclusion(siege, r));
+        if let Some(s) = siege {
+            self.noter_parti(s);
+        }
+        self.registre.noter_exclusion(r);
+    }
+
+    fn noter_parti(&mut self, siege: u8) {
+        let feuilles: Vec<(u8, [u8; 16])> = self
+            .groupe
+            .iter()
+            .flat_map(|g| g.members())
+            .filter_map(|m| lire_credential(&m.credential).ok())
+            .collect();
+        self.registre.marquer_parti(siege, &feuilles);
+    }
+
+    /// Notre feuille est-elle celle du créateur (siège et clé d'identité de l'identifiant du
+    /// groupe) ?
+    fn suis_createur(&self) -> bool {
+        self.est_createur(self.identite.siege, self.identite.cle_publique())
+    }
+
+    /// La feuille `(siège, clé d'identité)` est-elle celle du créateur ? Le siège seul ne
+    /// suffit pas : une reprise annoncée du siège du créateur arrive avec une autre clé et n'a
+    /// pas ses droits (retirer un membre présent, envoyer la rotation). La clé est la clé de
+    /// rôle (tirée de `S_gestion`) : seul qui détient `S_gestion` signe pour cette feuille.
+    fn est_createur(&self, siege: u8, cle: &[u8]) -> bool {
+        siege == self.createur_siege && self.createur_cle.is_some_and(|c| c[..] == *cle)
+    }
+
+    fn createur(&self) -> Createur {
+        (self.createur_siege, self.createur_cle)
+    }
+
+    fn moi(&self) -> (u8, [u8; 16]) {
+        (self.identite.siege, self.identite.nonce_arrivee)
     }
 
     /// KeyPackage reçu dans le flux, envoyé par `emetteur` (siège attesté par le serveur). Le
@@ -913,7 +1203,8 @@ impl Salon {
         let Some(groupe) = self.groupe.as_ref() else {
             return Ok(Evenement::Ignore);
         };
-        if contient(groupe, (siege, nonce)) {
+        if contient(groupe, (siege, nonce)) || cle_de_role_hors_siege(siege, &cle, self.createur())
+        {
             return Ok(Evenement::Ignore);
         }
         Ok(Evenement::KeyPackage {
@@ -958,6 +1249,7 @@ impl Salon {
         ajout: Option<KeyPackage>,
         retraits: Vec<LeafNodeIndex>,
     ) -> Result<[u8; TAILLE_TRAME]> {
+        let (createur, moi, role) = (self.suis_createur(), self.moi(), self.createur());
         let groupe = self.groupe.as_mut().ok_or(Error::NonMembre)?;
         let renouvellement = ajout.is_none() && retraits.is_empty();
         groupe.set_aad(vec![EN_TETE_CONTROLE.drapeaux()]);
@@ -987,12 +1279,11 @@ impl Salon {
         let auteur = groupe.own_leaf_index();
         let verdict = (|| {
             let sc = groupe.pending_commit().ok_or(Error::MlsInterne)?;
-            self.registre.verifier(
-                groupe,
-                &changements(groupe, sc, auteur),
-                self.createur_siege,
-                self.identite.siege,
-            )?;
+            let ch = changements(groupe, sc, auteur);
+            if ajout_de_role_hors_siege(&ch, role) {
+                return Err(Error::CommitRefuse);
+            }
+            self.registre.verifier(groupe, &ch, createur, moi)?;
             let commit = serialiser(paquet.commit())?;
             let welcome = paquet
                 .to_welcome_msg()
@@ -1035,7 +1326,7 @@ impl Salon {
         if contient(groupe, (siege, nonce)) {
             return Err(Error::DejaMembre);
         }
-        let (indices, retraits, restants) = prevoir(groupe, siege)?;
+        let (indices, retraits, restants) = prevoir(groupe, &self.registre, Some(siege))?;
         let prevu = Changements {
             ajouts: vec![(
                 siege,
@@ -1046,19 +1337,26 @@ impl Salon {
             restants,
             interdit: false,
         };
+        if ajout_de_role_hors_siege(&prevu, self.createur()) {
+            return Err(Error::CommitRefuse);
+        }
         self.registre
-            .verifier(groupe, &prevu, self.createur_siege, self.identite.siege)?;
+            .verifier(groupe, &prevu, self.suis_createur(), self.moi())?;
         self.commit(cles, Some(kp), indices)
     }
 
-    /// Retire toutes les feuilles du siège : réservé au créateur, sauf siège parti ou exclu.
+    /// Retire toutes les feuilles du siège : réservé au créateur (siège et clé d'identité), sauf
+    /// arrivée partie ou exclue. Le même Commit retire aussi toute autre feuille à retirer.
     pub fn retirer(&mut self, cles: &ClesSalon, siege: u8) -> Result<[u8; TAILLE_TRAME]> {
         self.groupe_libre()?;
         let groupe = self.groupe.as_ref().ok_or(Error::NonMembre)?;
-        let (indices, retraits, restants) = prevoir(groupe, siege)?;
-        if indices.is_empty() {
+        if !groupe
+            .members()
+            .any(|m| lire_credential(&m.credential).is_ok_and(|c| c.0 == siege))
+        {
             return Err(Error::SiegeInconnu);
         }
+        let (indices, retraits, restants) = prevoir(groupe, &self.registre, Some(siege))?;
         // MLS ne laisse pas l'auteur se retirer lui-même par son propre Commit.
         if siege == self.identite.siege {
             return Err(Error::CommitRefuse);
@@ -1070,16 +1368,19 @@ impl Salon {
             interdit: false,
         };
         self.registre
-            .verifier(groupe, &prevu, self.createur_siege, self.identite.siege)?;
+            .verifier(groupe, &prevu, self.suis_createur(), self.moi())?;
         self.commit(cles, None, indices)
     }
 
     /// Renouvellement (self-update) : nouvelles clés de feuille et de chemin. À la charge de
     /// l'appelant : toutes les 100 trames envoyées (volatiles comprises) et toutes les heures
-    /// (spec v3 §3.1, §3.6.1).
+    /// (spec v3 §3.1, §3.6.1). S'il reste des feuilles à retirer (`a_retirer`), le Commit les
+    /// retire (priorité du retrait) : c'est alors un retrait, plus un simple renouvellement.
     pub fn renouveler(&mut self, cles: &ClesSalon) -> Result<[u8; TAILLE_TRAME]> {
         self.groupe_libre()?;
-        self.commit(cles, None, Vec::new())
+        let groupe = self.groupe.as_ref().ok_or(Error::NonMembre)?;
+        let (indices, ..) = prevoir(groupe, &self.registre, None)?;
+        self.commit(cles, None, indices)
     }
 
     /// Message MLS d'une enveloppe (JSON strict de `encoder`), l'octet des drapeaux de sa trame
@@ -1088,27 +1389,30 @@ impl Salon {
     /// Refus avant tout chiffrement (audit du 13 novembre, F1 et F2) : `commit_en_cours` si un
     /// Commit de ce membre attend son écho ; `retrait_en_attente` si un siège parti ou exclu a
     /// encore une feuille dans l'arbre (`non_membre` si c'est le nôtre) ; `rotation_refusee`
-    /// pour un message `rotation` qui ne vient pas du créateur.
+    /// pour un message `rotation` qui ne vient pas du créateur (siège et clé d'identité), dont
+    /// le `n` n'est pas celui de la dernière exclusion annoncée (`marquer_exclu`), ou tant
+    /// qu'une feuille de l'arbre n'est pas l'annonce courante de son siège, ou tant que notre
+    /// rotation précédente attend son écho. L'empreinte d'une rotation envoyée est gardée : son
+    /// écho rend `RotationAcceptee` ou `RotationARenvoyer`.
     fn chiffrer(&mut self, e: &Enveloppe, en_tete: EnTete) -> Result<Vec<u8>> {
+        let groupe = self.pret_a_chiffrer()?;
+        let rotation = match e.message {
+            Message::Rotation { n, .. } => {
+                // Une seule rotation en vol (14 novembre) : deux rotations du même `n` et de
+                // clés différentes seraient lues par les membres dans l'ordre (la première
+                // acceptée, la seconde refusée), et l'écho de la première, plus reconnu, ne
+                // dirait rien au créateur ; il refonderait sous la seconde clé, seul.
+                if !self.suis_createur()
+                    || self.rotation_en_vol.is_some()
+                    || !self.registre.rotation_recevable(groupe, n)
+                {
+                    return Err(Error::RotationRefusee);
+                }
+                Some(n)
+            }
+            _ => None,
+        };
         let groupe = self.groupe.as_mut().ok_or(Error::NonMembre)?;
-        if !groupe.is_active() {
-            return Err(Error::NonMembre);
-        }
-        if self.commit_en_attente.is_some() || groupe.pending_commit().is_some() {
-            return Err(Error::CommitEnCours);
-        }
-        let a_retirer = self.registre.a_retirer(groupe);
-        if a_retirer.contains(&self.identite.siege) {
-            return Err(Error::NonMembre);
-        }
-        if !a_retirer.is_empty() {
-            return Err(Error::RetraitEnAttente);
-        }
-        if matches!(e.message, Message::Rotation { .. })
-            && self.identite.siege != self.createur_siege
-        {
-            return Err(Error::RotationRefusee);
-        }
         let json = encoder(e)?;
         groupe.set_aad(vec![en_tete.drapeaux()]);
         let message = groupe
@@ -1118,7 +1422,30 @@ impl Salon {
         if octets.len() > MAX_CHARGE {
             return Err(Error::TropGrand);
         }
+        if let Some(n) = rotation {
+            self.rotation_en_vol = Some((sha256(&octets), n));
+        }
         Ok(octets)
+    }
+
+    /// Groupe prêt à chiffrer pour ses membres (message, clé d'appel) : mêmes refus pour tous
+    /// les chemins de chiffrement. `non_membre` hors du groupe ou si le serveur dit notre
+    /// arrivée partie ; `commit_en_cours` si un Commit de ce membre attend son écho (ce qui
+    /// serait chiffré le serait à l'époque que ce Commit ferme) ; `retrait_en_attente` si une
+    /// feuille à retirer est encore dans l'arbre (elle le lirait).
+    fn pret_a_chiffrer(&self) -> Result<&MlsGroup> {
+        let groupe = self.groupe_actif()?;
+        if self.commit_en_attente.is_some() || groupe.pending_commit().is_some() {
+            return Err(Error::CommitEnCours);
+        }
+        let a_retirer = self.registre.feuilles_a_retirer(groupe);
+        if a_retirer.contains(&self.moi()) {
+            return Err(Error::NonMembre);
+        }
+        if !a_retirer.is_empty() {
+            return Err(Error::RetraitEnAttente);
+        }
+        Ok(groupe)
     }
 
     /// Trame d'une enveloppe : chiffrée par MLS, puis scellée sous l'en-tête tiré de son contenu
@@ -1205,6 +1532,11 @@ impl Salon {
             }
             return self.confirmer_commit();
         }
+        if let Some((empreinte, n)) = self.rotation_en_vol
+            && sha256(mls) == empreinte
+        {
+            return self.echo_rotation(en_tete, mls, siege_emetteur, n);
+        }
         let protocole = match lire_mls(mls)? {
             MlsMessageBodyIn::PrivateMessage(p) => {
                 if p.aad() != [en_tete.drapeaux()] {
@@ -1224,6 +1556,8 @@ impl Salon {
             // jamais acceptés.
             _ => return Err(Error::MlsInvalide),
         };
+        let role = self.createur();
+        let (createur_siege, createur_cle) = role;
         let groupe = self.groupe.as_mut().ok_or(Error::NonMembre)?;
         if protocole.group_id() != groupe.group_id() {
             return Err(Error::MlsInvalide);
@@ -1255,7 +1589,12 @@ impl Salon {
         let Sender::Member(auteur) = *traite.sender() else {
             return Err(Error::MlsInvalide);
         };
-        let (de_siege, _) = lire_credential(traite.credential())?;
+        let credential = lire_credential(traite.credential())?;
+        let de_siege = credential.0;
+        let auteur_createur = de_siege == createur_siege
+            && groupe
+                .member_at(auteur)
+                .is_some_and(|m| createur_cle.is_some_and(|c| c[..] == m.signature_key[..]));
         // Le siège signé dans MLS est celui que le serveur atteste pour la trame.
         if de_siege != siege_emetteur {
             return Err(Error::MessageInvalide);
@@ -1271,23 +1610,25 @@ impl Salon {
         }
         match traite.into_content() {
             ProcessedMessageContent::ApplicationMessage(a) => {
-                // Auteur que le serveur a dit parti ou exclu (feuille pas encore retirée) : il
-                // n'écrit plus dans le salon (F2).
-                if self.registre.partis_effectifs(groupe).contains(&de_siege) {
+                // Auteur dont le serveur a dit l'arrivée partie ou exclue (feuille pas encore
+                // retirée) : il n'écrit plus dans le salon (F2).
+                if !self.registre.admise(&credential) {
                     return Err(Error::NonMembre);
                 }
                 let octets = Zeroizing::new(a.into_bytes());
                 let enveloppe = decoder(&octets)?;
                 en_tete_coherent(en_tete, Some(&enveloppe))?;
-                // Rotation de l'invitation (F1) : du créateur seulement, chiffrée à l'époque
-                // courante (à la précédente, un membre retiré depuis l'aurait lue), aucun siège
-                // parti ou exclu dans l'arbre.
-                if matches!(enveloppe.message, Message::Rotation { .. })
-                    && (de_siege != self.createur_siege
+                // Rotation de l'invitation (F1) : du créateur seulement (siège et clé
+                // d'identité), chiffrée à l'époque courante (à la précédente, un membre retiré
+                // depuis l'aurait lue), chaque feuille de l'arbre admise, `n` de l'exclusion.
+                if let Message::Rotation { n, .. } = enveloppe.message {
+                    if !auteur_createur
                         || epoque != courante
-                        || !self.registre.a_retirer(groupe).is_empty())
-                {
-                    return Err(Error::RotationRefusee);
+                        || !self.registre.rotation_recevable(groupe, n)
+                    {
+                        return Err(Error::RotationRefusee);
+                    }
+                    self.registre.rotation_vue = Some(n);
                 }
                 Ok(Evenement::Message {
                     de_siege,
@@ -1297,8 +1638,11 @@ impl Salon {
             }
             ProcessedMessageContent::StagedCommitMessage(sc) => {
                 let ch = changements(groupe, &sc, auteur);
+                if ajout_de_role_hors_siege(&ch, role) {
+                    return Err(Error::CommitRefuse);
+                }
                 self.registre
-                    .verifier(groupe, &ch, self.createur_siege, de_siege)?;
+                    .verifier(groupe, &ch, auteur_createur, credential)?;
                 let perdu = self.commit_en_attente.take().is_some();
                 if perdu {
                     groupe
@@ -1308,10 +1652,19 @@ impl Salon {
                 groupe
                     .merge_staged_commit(&self.fournisseur, *sc)
                     .map_err(|_| Error::MlsInterne)?;
-                Ok(match (perdu, membres_de(&ch)) {
-                    (true, Evenement::Membres { ajoutes, retires }) => {
-                        Evenement::CommitPerdu { ajoutes, retires }
-                    }
+                Ok(match (perdu, membres_de(&ch, role)) {
+                    (
+                        true,
+                        Evenement::Membres {
+                            ajoutes,
+                            retires,
+                            createur_revenu,
+                        },
+                    ) => Evenement::CommitPerdu {
+                        ajoutes,
+                        retires,
+                        createur_revenu,
+                    },
                     (_, membres) => membres,
                 })
             }
@@ -1323,15 +1676,14 @@ impl Salon {
     /// fusion ; sinon il est abandonné comme un Commit perdu.
     fn confirmer_commit(&mut self) -> Result<Evenement> {
         let welcome = self.commit_en_attente.take().and_then(|c| c.1);
+        let (createur, moi, role) = (self.suis_createur(), self.moi(), self.createur());
         let groupe = self.groupe.as_mut().ok_or(Error::NonMembre)?;
         let Some(sc) = groupe.pending_commit() else {
             return Err(Error::MlsInterne);
         };
         let ch = changements(groupe, sc, groupe.own_leaf_index());
-        if self
-            .registre
-            .verifier(groupe, &ch, self.createur_siege, self.identite.siege)
-            .is_err()
+        if ajout_de_role_hors_siege(&ch, role)
+            || self.registre.verifier(groupe, &ch, createur, moi).is_err()
         {
             groupe
                 .clear_pending_commit(self.fournisseur.storage())
@@ -1339,12 +1691,51 @@ impl Salon {
             return Ok(Evenement::CommitPerdu {
                 ajoutes: vec![],
                 retires: vec![],
+                createur_revenu: false,
             });
         }
+        let createur_revenu = createur_ajoute(&ch, role);
         groupe
             .merge_pending_commit(&self.fournisseur)
             .map_err(|_| Error::MlsInterne)?;
-        Ok(Evenement::CommitAccepte { welcome })
+        Ok(Evenement::CommitAccepte {
+            welcome,
+            createur_revenu,
+        })
+    }
+
+    /// Écho de notre message `rotation` (octets reconnus par leur empreinte) : mêmes conditions
+    /// que chez les destinataires, évaluées au même rang (mêmes annonces, même époque). Le
+    /// créateur sait ainsi si les membres l'ont acceptée, même quand son époque n'a pas changé
+    /// (départ annoncé entre l'envoi et l'écho).
+    fn echo_rotation(
+        &mut self,
+        en_tete: EnTete,
+        mls: &[u8],
+        siege_emetteur: u8,
+        n: u32,
+    ) -> Result<Evenement> {
+        let MlsMessageBodyIn::PrivateMessage(p) = lire_mls(mls)? else {
+            return Err(Error::MlsInvalide);
+        };
+        // Comme chez les destinataires : rescellée sous un autre en-tête ou attribuée à un autre
+        // siège, elle y est refusée ; ce n'est pas notre écho, il reste attendu.
+        if p.aad() != [en_tete.drapeaux()] || siege_emetteur != self.identite.siege {
+            return Err(Error::MessageInvalide);
+        }
+        self.rotation_en_vol = None;
+        let epoque = ProtocolMessage::from(p).epoch().as_u64();
+        let createur = self.suis_createur();
+        let groupe = self.groupe_actif()?;
+        if createur
+            && epoque == groupe.epoch().as_u64()
+            && self.registre.rotation_recevable(groupe, n)
+        {
+            self.registre.rotation_vue = Some(n);
+            Ok(Evenement::RotationAcceptee { n })
+        } else {
+            Ok(Evenement::RotationARenvoyer { n })
+        }
     }
 
     fn groupe_actif(&self) -> Result<&MlsGroup> {
@@ -1354,9 +1745,13 @@ impl Salon {
         }
     }
 
-    /// Clé SFrame de l'époque (exporteur MLS, 32 octets) : la même chez tous les membres.
+    /// Clé SFrame de l'époque (exporteur MLS, 32 octets) : la même chez tous les membres. Elle
+    /// chiffrera les appels (non codés) pour tous les membres de l'arbre : mêmes refus que
+    /// `envoyer` (`commit_en_cours`, `retrait_en_attente`, `non_membre`), sinon la clé rendue
+    /// serait celle d'une époque qu'un membre parti ou exclu connaît encore. À redemander à
+    /// chaque changement d'époque ; la clé d'une époque passée ne doit plus chiffrer.
     pub fn exporter_sframe(&self) -> Result<Zeroizing<[u8; 32]>> {
-        let groupe = self.groupe_actif()?;
+        let groupe = self.pret_a_chiffrer()?;
         let mut v = groupe
             .export_secret(self.fournisseur.crypto(), SFRAME, b"", 32)
             .map_err(|_| Error::MlsInterne)?;
@@ -1406,10 +1801,12 @@ impl Salon {
         self.groupe_actif().ok().map(|g| g.epoch().as_u64())
     }
 
-    /// Sièges que le serveur a dits partis (0x03) ou exclus (0x09) et qui ont encore une feuille
-    /// dans l'arbre, en ordre croissant (vide hors du groupe) : tant qu'il en reste, `envoyer`
-    /// est refusé (`retrait_en_attente`). Tout membre peut les retirer (`retirer`). Si notre
-    /// propre siège y figure, le serveur nous dit partis : `envoyer` rend `non_membre`.
+    /// Sièges des feuilles à retirer, en ordre croissant (vide hors du groupe) : feuilles dont
+    /// le serveur a dit l'arrivée `(siège, nonce_arrivee)` partie (0x03) ou exclue (0x09), ou
+    /// qu'il n'annonce pas (après une liste complète). Tant qu'il en reste, `envoyer` et
+    /// `exporter_sframe` sont refusés (`retrait_en_attente`) et tout Commit doit les retirer :
+    /// `retirer` de l'un d'eux (ou `ajouter`, `renouveler`) les retire tous. Si notre propre
+    /// siège y figure, le serveur nous dit partis : `envoyer` rend `non_membre`.
     pub fn a_retirer(&self) -> Vec<u8> {
         match self.groupe_actif() {
             Ok(g) => self.registre.a_retirer(g),
@@ -1422,15 +1819,40 @@ impl Salon {
     /// même clé Ed25519, donc même code de vérification), les annonces du serveur déjà reçues
     /// et le dernier rang vu (les rangs passés restent ignorés). Qui était le créateur du groupe
     /// crée le nouveau ; les autres publient un nouveau `key_package` et attendent leur Welcome,
-    /// comme à l'arrivée. Les KeyPackages retenus de l'ancien groupe sont oubliés.
+    /// comme à l'arrivée.
+    ///
+    /// **Identités gardées** (13 novembre) : le nouveau salon retient la clé d'identité de
+    /// chaque membre admis de l'ancien groupe. Tant que l'arrivée `(siège, nonce_arrivee)` est
+    /// la même, ce siège ne revient qu'avec cette clé : un KeyPackage d'une autre clé est
+    /// ignoré, son ajout refusé (`commit_refuse`), un Welcome où il figure refusé. Un membre
+    /// qui attend son Welcome n'entre que dans un groupe créé par la clé du créateur de l'ancien
+    /// groupe, dont la feuille est dans l'arbre. Une reprise (0x0A, nouveau `nonce_arrivee`)
+    /// arrive avec une nouvelle clé, comme hors refondation : l'appelant compare `empreinte`.
+    /// Les arrivées parties et les numéros d'exclusion et de rotation sont gardés aussi.
     ///
     /// À appeler à la réception du message `rotation` (avec `cles_depuis_maitre` de la clé
-    /// reçue) : l'identifiant du groupe MLS porte l'étiquette de l'invitation, une arrivante
-    /// munie de la nouvelle invitation n'entre que dans un groupe créé sous elle ; un exclu n'a
-    /// aucune feuille ni aucun secret du nouveau groupe (audit du 13 novembre, F3).
+    /// reçue), ou chez le créateur à `RotationAcceptee` : l'identifiant du groupe MLS porte
+    /// l'étiquette de l'invitation, une arrivante munie de la nouvelle invitation n'entre que
+    /// dans un groupe créé sous elle ; un exclu n'a aucune feuille ni aucun secret du nouveau
+    /// groupe (audit du 13 novembre, F3).
     /// En cas d'erreur (`mls_interne`), l'ancien état est perdu : repartir d'un `Salon` neuf.
     pub fn refonder(self, cles: &ClesSalon) -> Result<Salon> {
-        let createur = self.groupe.is_some() && self.identite.siege == self.createur_siege;
+        let createur = self.groupe.is_some() && self.suis_createur();
+        let identites: Vec<politique::Arrivee> = match self.groupe.as_ref() {
+            Some(g) => g
+                .members()
+                .filter_map(|m| {
+                    let c = lire_credential(&m.credential).ok()?;
+                    (self.registre.admise(&c) && self.registre.annonces.contains(&c))
+                        .then(|| (c.0, c.1, sha256(&m.signature_key)))
+                })
+                .collect(),
+            None => self.depart.key_packages.clone(),
+        };
+        let createur_attendu = match self.groupe {
+            Some(_) => self.createur_cle,
+            None => self.createur_attendu,
+        };
         let Salon {
             identite,
             registre,
@@ -1439,6 +1861,17 @@ impl Salon {
         } = self;
         let mut neuf = Salon::creer(identite, cles, createur)?;
         neuf.dernier_seq = dernier_seq;
+        if !createur {
+            neuf.createur_attendu = createur_attendu;
+        }
+        neuf.depart = Registre {
+            parties: registre.parties.clone(),
+            key_packages: identites,
+            exclusion: registre.exclusion,
+            rotation_vue: registre.rotation_vue,
+            ..Registre::default()
+        };
+        neuf.registre = neuf.depart.clone();
         // Par les mêmes portes que l'appelant : pour qui attend son Welcome, les annonces
         // entrent aussi dans la file rejouée à l'entrée.
         match registre.createur_annonce {
@@ -1448,9 +1881,6 @@ impl Salon {
                     neuf.annoncer(s, n);
                 }
             }
-        }
-        for &s in &registre.partis {
-            neuf.marquer_parti(s);
         }
         Ok(neuf)
     }
@@ -1490,8 +1920,14 @@ mod tests {
 
     /// Sièges 0 (créateur), 1 et 2.
     fn trois() -> (Vec<Salon>, u64) {
-        let mut m =
-            vec![Salon::creer(nouvelle_identite(0, [0; 16]).unwrap(), &cles(), true).unwrap()];
+        let mut m = vec![
+            Salon::creer(
+                identite_createur(0, [0; 16], &[0x5A; 32]).unwrap(),
+                &cles(),
+                true,
+            )
+            .unwrap(),
+        ];
         m[0].remplacer_annonces(0, &[(0, [0; 16])]);
         let mut seq = 0;
         for s in 1..3u8 {
@@ -1512,7 +1948,7 @@ mod tests {
             let mut welcome = None;
             for (i, ev) in diffuser(&mut m, &mut seq, &c, 0).into_iter().enumerate() {
                 match ev {
-                    Ok(Evenement::CommitAccepte { welcome: w }) => welcome = w,
+                    Ok(Evenement::CommitAccepte { welcome: w, .. }) => welcome = w,
                     Ok(Evenement::Membres { .. }) => {}
                     Ok(Evenement::Ignore) if i == s as usize => {}
                     ev => panic!("{ev:?}"),
@@ -1617,6 +2053,9 @@ mod tests {
     #[test]
     fn rotation_d_un_non_createur_refusee() {
         let (mut m, mut seq) = trois();
+        for x in m.iter_mut() {
+            x.marquer_exclu(None, 1); // 0x09 sans exclu : nouveau lien, rotation numéro 1
+        }
         let t = message_brut(&mut m[1], &rotation());
         seq += 1;
         for i in [0, 2] {
@@ -1647,7 +2086,7 @@ mod tests {
     #[test]
     fn rotation_avec_un_exclu_dans_l_arbre_refusee() {
         let (mut m, mut seq) = trois();
-        m[1].marquer_parti(2);
+        m[1].marquer_exclu(Some(2), 1);
         let t = message_brut(&mut m[0], &rotation());
         seq += 1;
         assert_eq!(
@@ -1661,7 +2100,7 @@ mod tests {
             Ok(Evenement::Message { de_siege: 0, .. })
         ));
         // Le siège exclu retiré, la rotation (renvoyée à la nouvelle époque) passe.
-        m[0].marquer_parti(2);
+        m[0].marquer_exclu(Some(2), 1);
         let c = m[1].retirer(&cles(), 2).unwrap();
         seq += 1;
         assert!(matches!(
@@ -1717,12 +2156,21 @@ mod tests {
             assert_eq!(x.tag, *autres.tag());
             assert_eq!(x.dernier_seq, Some(seq));
             assert!(x.commit_en_attente.is_none());
-            assert!(x.registre.key_packages.is_empty());
+            // Identités de l'ancien groupe gardées (sièges 0 et 1 ; le siège 2 est parti).
+            // (Seul le siège 0 a reçu le départ du siège 2 dans ce test.)
+            assert_eq!(x.registre.key_packages.len(), if i == 0 { 2 } else { 3 });
+            assert!(
+                x.registre
+                    .key_packages
+                    .iter()
+                    .all(|k| k.2 == sha256(&cle[k.0 as usize]))
+            );
+            assert!(x.rotation_en_vol.is_none());
             assert!(x.nos_key_packages.is_empty());
             assert_eq!(x.registre.createur_annonce, Some(0));
         }
         assert_eq!(m[0].membres(), vec![0]);
-        assert_eq!(m[0].registre.partis, vec![2]);
+        assert_eq!(m[0].registre.parties, vec![(2, [2; 16])]);
         assert_eq!(m[0].registre.annonces, vec![(0, [0; 16]), (1, [1; 16])]);
         assert_eq!(
             m[0].groupe.as_ref().unwrap().group_id().as_slice()[..16],
@@ -1733,6 +2181,275 @@ mod tests {
             // La liste est aussi dans la file rejouée à l'entrée.
             assert!(matches!(x.attente.first(), Some(Attente::Liste(0, _))));
         }
+    }
+
+    /// Relecture du 13 novembre, point 1 : chez le destinataire aussi, la marque suit l'arrivée
+    /// (siège, nonce) de la feuille. Après le 0x09 du siège 2 puis une nouvelle annonce sur ce
+    /// siège, une rotation fabriquée par le créateur (client modifié) reste refusée, un message
+    /// de l'exclu aussi. Pendant une simple reprise (0x0A), l'ancienne feuille est à retirer
+    /// (14 novembre : comme pour qui ne reçoit que la liste complète) : rotation et message de
+    /// cette feuille refusés.
+    #[test]
+    fn nouvelle_annonce_ne_leve_rien_chez_le_destinataire() {
+        let (mut m, mut seq) = trois();
+        m[1].marquer_exclu(Some(2), 1);
+        m[1].annoncer(2, [9; 16]);
+        assert_eq!(m[1].a_retirer(), vec![2]);
+        let t = message_brut(&mut m[0], &rotation());
+        seq += 1;
+        assert_eq!(
+            m[1].recevoir_trame(&cles(), &t, seq, 0),
+            Err(Error::RotationRefusee)
+        );
+        let t = message_brut(&mut m[2], &env());
+        seq += 1;
+        assert_eq!(
+            m[1].recevoir_trame(&cles(), &t, seq, 2),
+            Err(Error::NonMembre)
+        );
+        // Reprise sans départ.
+        let (mut m, mut seq) = trois();
+        m[1].marquer_exclu(None, 1);
+        m[1].annoncer(2, [9; 16]);
+        assert_eq!(m[1].a_retirer(), vec![2]);
+        let t = message_brut(&mut m[0], &rotation());
+        seq += 1;
+        assert_eq!(
+            m[1].recevoir_trame(&cles(), &t, seq, 0),
+            Err(Error::RotationRefusee)
+        );
+        let t = message_brut(&mut m[2], &env());
+        seq += 1;
+        assert_eq!(
+            m[1].recevoir_trame(&cles(), &t, seq, 2),
+            Err(Error::NonMembre)
+        );
+    }
+
+    /// 14 novembre : le flux (0x0A reçu en direct) et la liste complète (0x0D à la reconnexion,
+    /// qui ne porte que l'annonce courante du siège) jugent l'ancienne feuille d'une reprise de
+    /// la même façon ; sinon un renouvellement qui ne la retire pas serait fusionné par l'un et
+    /// refusé par l'autre (groupe scindé). Défaut du registre « arrivées remplacées » (travail du
+    /// 13 novembre, non commité) : son propre test donnait `a_retirer` = `[]` en direct ; après la
+    /// liste, l'ancienne feuille n'était pas une arrivée remplacée, donc `[2]`.
+    #[test]
+    fn reprise_meme_jugement_par_le_flux_et_par_la_liste() {
+        let (mut m, mut seq) = trois();
+        m[0].annoncer(2, [9; 16]); // en direct
+        m[1].remplacer_annonces(0, &[(0, [0; 16]), (1, [1; 16]), (2, [9; 16])]); // reconnexion
+        assert_eq!(m[0].a_retirer(), m[1].a_retirer());
+        assert_eq!(m[0].a_retirer(), vec![2]);
+        // Un renouvellement brut (client modifié) qui garde l'ancienne feuille : refusé des deux.
+        let c = commit_brut(&mut m[1], |b| b.force_self_update(true));
+        seq += 1;
+        let e = m[0].epoque();
+        assert_eq!(
+            m[0].recevoir_trame(&cles(), &c, seq, 1),
+            Err(Error::CommitRefuse)
+        );
+        assert_eq!(m[0].epoque(), e);
+        // Celui du moteur retire l'ancienne feuille : accepté des deux.
+        let c = m[1].renouveler(&cles()).unwrap();
+        let ev = diffuser(&mut m[..2], &mut seq, &c, 1);
+        assert_eq!(
+            ev[0],
+            Ok(Evenement::Membres {
+                ajoutes: vec![],
+                retires: vec![2],
+                createur_revenu: false,
+            })
+        );
+        assert!(matches!(ev[1], Ok(Evenement::CommitAccepte { .. })));
+    }
+
+    /// 14 novembre (point 2) : une seule rotation en vol. Une seconde, envoyée avant l'écho de la
+    /// première, est refusée : les membres liraient la première et refuseraient la seconde (même
+    /// `n`), alors que le créateur, l'écho de la première n'étant plus reconnu, refonderait sous
+    /// la seconde clé. Après l'écho, le créateur sait ce qui a été accepté.
+    #[test]
+    fn une_seule_rotation_en_vol() {
+        let (mut m, mut seq) = trois();
+        for x in m.iter_mut() {
+            x.marquer_exclu(None, 1);
+        }
+        let t = m[0].envoyer(&cles(), &rotation()).unwrap();
+        let autre = Enveloppe {
+            message: Message::Rotation {
+                n: 1,
+                cle: crate::message::Graine::new([8; 32]),
+            },
+            ..env()
+        };
+        assert_eq!(m[0].envoyer(&cles(), &autre), Err(Error::RotationRefusee));
+        let ev = diffuser(&mut m, &mut seq, &t, 0);
+        assert_eq!(ev[0], Ok(Evenement::RotationAcceptee { n: 1 }));
+        assert!(matches!(ev[1], Ok(Evenement::Message { .. })));
+    }
+
+    /// Relecture du 13 novembre, point 4 : une reprise annoncée du siège du créateur (autre clé
+    /// d'identité) entre dans le groupe ; un Commit qui retire un membre présent et une rotation
+    /// fabriqués avec cette feuille (client modifié) sont refusés par tous.
+    #[test]
+    fn createur_reconnu_par_sa_cle_pas_par_son_siege() {
+        let (mut m, mut seq) = trois();
+        for x in m.iter_mut() {
+            x.marquer_exclu(None, 1);
+            x.annoncer(0, [9; 16]);
+        }
+        let mut f = Salon::creer(nouvelle_identite(0, [9; 16]).unwrap(), &cles(), false).unwrap();
+        f.remplacer_annonces(0, &[(0, [9; 16]), (1, [1; 16]), (2, [2; 16])]);
+        f.marquer_exclu(None, 1);
+        let kp = f.key_package(&cles()).unwrap();
+        m.remove(0); // m[0] : siège 1, m[1] : siège 2
+        let ev = diffuser(&mut m, &mut seq, &kp, 0);
+        let Ok(Evenement::KeyPackage { octets }) = &ev[0] else {
+            panic!("{ev:?}")
+        };
+        let c = m[0].ajouter(&cles(), octets).unwrap();
+        f.recevoir_trame(&cles(), &c, seq + 1, 1).unwrap();
+        let ev = diffuser(&mut m, &mut seq, &c, 1);
+        let Ok(Evenement::CommitAccepte {
+            welcome: Some(w), ..
+        }) = &ev[0]
+        else {
+            panic!("{ev:?}")
+        };
+        seq += 1;
+        assert!(matches!(
+            f.recevoir_trame(&cles(), w, seq, 1),
+            Ok(Evenement::Entree { .. })
+        ));
+        assert_eq!(f.createur_siege, 0);
+        assert!(!f.suis_createur());
+        let cible = f
+            .groupe
+            .as_ref()
+            .unwrap()
+            .members()
+            .find(|x| lire_credential(&x.credential).unwrap().0 == 2)
+            .unwrap()
+            .index;
+        let c = commit_brut(&mut f, |b| b.propose_removals([cible]));
+        let e = m[0].epoque();
+        seq += 1;
+        for x in m.iter_mut() {
+            assert_eq!(
+                x.recevoir_trame(&cles(), &c, seq, 0),
+                Err(Error::CommitRefuse)
+            );
+            assert_eq!(x.epoque(), e);
+        }
+        let t = message_brut(&mut f, &rotation());
+        seq += 1;
+        for x in m.iter_mut() {
+            assert_eq!(
+                x.recevoir_trame(&cles(), &t, seq, 0),
+                Err(Error::RotationRefusee)
+            );
+        }
+        // Un message ordinaire de cette feuille passe : elle est un membre comme un autre.
+        let t = message_brut(&mut f, &env());
+        seq += 1;
+        assert!(matches!(
+            m[0].recevoir_trame(&cles(), &t, seq, 0),
+            Ok(Evenement::Message { de_siege: 0, .. })
+        ));
+    }
+
+    /// Relecture du 13 novembre, point 3 : après une refondation, un Welcome dont le groupe
+    /// porte bien la clé du créateur attendu mais dont l'arbre n'a pas sa feuille (groupe
+    /// fabriqué par un autre membre de l'ancien groupe) est refusé.
+    #[test]
+    fn refonder_welcome_sans_la_feuille_du_createur_refuse() {
+        let (m, seq) = trois();
+        let autres = cles_salon(&KLien::from_bytes([7; 32]), &KMdp::from_bytes([2; 32]));
+        let mut m: Vec<Salon> = m
+            .into_iter()
+            .map(|x| x.refonder(&autres).unwrap())
+            .collect();
+        let cle_createur = m[0].createur_cle.unwrap();
+        assert_eq!(m[1].createur_attendu, Some(cle_createur));
+        assert_eq!(m[0].createur_attendu, None);
+        // Le siège 2 fabrique un groupe au nom du créateur (identifiant copié), sans lui.
+        let mut id = autres.tag().to_vec();
+        id.push(0);
+        id.extend_from_slice(&cle_createur);
+        let x = &mut m[2];
+        x.groupe = Some(
+            MlsGroup::new_with_group_id(
+                &x.fournisseur,
+                &x.identite.signataire,
+                &config_creation(),
+                GroupId::from_slice(&id),
+                x.identite.credential(),
+            )
+            .unwrap(),
+        );
+        x.createur_siege = 0;
+        x.createur_cle = Some(cle_createur);
+        let kp = m[1].key_package(&autres).unwrap();
+        let Ok(Evenement::KeyPackage { octets }) = m[2].recevoir_trame(&autres, &kp, seq + 1, 1)
+        else {
+            panic!("KeyPackage attendu")
+        };
+        let c = m[2].ajouter(&autres, &octets).unwrap();
+        let Ok(Evenement::CommitAccepte {
+            welcome: Some(w), ..
+        }) = m[2].recevoir_trame(&autres, &c, seq + 2, 2)
+        else {
+            panic!("Welcome attendu")
+        };
+        m[1].recevoir_trame(&autres, &kp, seq + 1, 1).unwrap();
+        m[1].recevoir_trame(&autres, &c, seq + 2, 2).unwrap();
+        assert_eq!(
+            m[1].recevoir_trame(&autres, &w, seq + 3, 2),
+            Err(Error::MlsInvalide)
+        );
+        assert!(m[1].groupe.is_none());
+    }
+
+    /// 14 novembre : un Commit fabriqué par un membre (client modifié, hors `Salon::ajouter`) qui
+    /// ajoute la clé de rôle à une place d'invité (lien de gestion volé) est refusé par tous avant
+    /// fusion ; un Welcome dont l'arbre la porte hors du siège du créateur aussi.
+    #[test]
+    fn cle_de_role_hors_siege_refusee_dans_un_commit_brut() {
+        let (mut m, mut seq) = trois();
+        let code = m[2].empreinte(0).unwrap();
+        assert_eq!(code, code_verification(&cle_publique_role(&[0x5A; 32])));
+        // Le créateur a quitté (0x03) et sa feuille est retirée : sinon MLS refuserait déjà la
+        // même clé deux fois dans l'arbre (DuplicateSignatureKey).
+        m.remove(0);
+        for x in m.iter_mut() {
+            x.marquer_parti(0);
+        }
+        let c = m[0].retirer(&cles(), 0).unwrap();
+        let ev = diffuser(&mut m, &mut seq, &c, 1);
+        assert!(matches!(ev[1], Ok(Evenement::Membres { .. })), "{ev:?}");
+        for x in m.iter_mut() {
+            x.annoncer(3, [3; 16]);
+        }
+        let mut v = Salon::creer(
+            identite_createur(3, [3; 16], &[0x5A; 32]).unwrap(),
+            &cles(),
+            false,
+        )
+        .unwrap();
+        let kp = v.key_package(&cles()).unwrap();
+        let ev = diffuser(&mut m, &mut seq, &kp, 3);
+        assert!(ev.iter().all(|e| *e == Ok(Evenement::Ignore)), "{ev:?}");
+        let (_, octets) = ouvrir(&cles(), &kp).unwrap();
+        let MlsMessageBodyIn::KeyPackage(kin) = lire_mls(&octets).unwrap() else {
+            panic!()
+        };
+        let kp = lire_key_package(kin, &octets, m[0].fournisseur.crypto()).unwrap();
+        let c = commit_brut(&mut m[0], |b| b.propose_adds([kp]));
+        let e = m[1].epoque();
+        seq += 1;
+        assert_eq!(
+            m[1].recevoir_trame(&cles(), &c, seq, 1),
+            Err(Error::CommitRefuse)
+        );
+        assert_eq!((m[1].epoque(), m[1].membres()), (e, vec![1, 2]));
     }
 
     /// M4 : le siège de la credential (MLS) doit être celui que le serveur atteste pour la trame.
@@ -1760,7 +2477,7 @@ mod tests {
         );
         assert!(matches!(
             m[1].recevoir_trame(&cles(), &c, seq + 2, 1),
-            Ok(Evenement::CommitAccepte { welcome: None })
+            Ok(Evenement::CommitAccepte { welcome: None, .. })
         ));
     }
 
@@ -1894,7 +2611,10 @@ mod tests {
         };
         let c = m[0].ajouter(&cles(), octets).unwrap();
         let ev = diffuser(&mut m, &mut seq, &c, 0);
-        let Ok(Evenement::CommitAccepte { welcome: Some(w) }) = &ev[0] else {
+        let Ok(Evenement::CommitAccepte {
+            welcome: Some(w), ..
+        }) = &ev[0]
+        else {
             panic!("{ev:?}")
         };
         // La file de X : copies (KeyPackage, Commit) avant l'annonce de la reprise.
@@ -1951,8 +2671,9 @@ mod tests {
             panic!("KeyPackage attendu")
         };
         let commit = c.ajouter(&cles(), &octets).unwrap();
-        let Ok(Evenement::CommitAccepte { welcome: Some(w) }) =
-            c.recevoir_trame(&cles(), &commit, 2, 0)
+        let Ok(Evenement::CommitAccepte {
+            welcome: Some(w), ..
+        }) = c.recevoir_trame(&cles(), &commit, 2, 0)
         else {
             panic!("Welcome attendu")
         };

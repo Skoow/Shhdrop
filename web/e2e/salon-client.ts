@@ -6,8 +6,8 @@
 // échouer le test.
 //
 // Rôles du client (contrat de l'appelant, engine/salon/src/groupe.rs) : `0x0D` →
-// `remplacerAnnonces` avant toute trame ; `0x02`/`0x0A` → `annoncer` ; `0x03`/`0x09` →
-// `marquerParti` ; `0x01` → `recevoirTrame(trame, seq, siège)` ; événement `keyPackage` →
+// `remplacerAnnonces` avant toute trame ; `0x02`/`0x0A` → `annoncer` ; `0x03` → `marquerParti` ;
+// `0x09` → `marquerExclu(siège ou undefined si 0xFF, r)` (relecture du 13 novembre) ; `0x01` → `recevoirTrame(trame, seq, siège)` ; événement `keyPackage` →
 // `ajouter` par le plus petit siège en ligne du groupe ; `commitAccepte { welcome }` → envoi du
 // Welcome. Envoi refusé par le moteur (audit adverse du 13 novembre, spec salon v3 §15) :
 // `commit_en_cours` → le message attend l'écho du Commit ; `retrait_en_attente` → le plus petit
@@ -127,6 +127,11 @@ export class ClientSalon {
   #accueilli: (() => void) | undefined;
   /** KeyPackage de cette identité déjà publié. */
   #kpPublie = false;
+  /**
+   * Secret de gestion du créateur (`S_gestion`, 14 novembre) : sa clé de rôle en est tirée à
+   * chaque `Salon.creer` (création, reprise) ; jamais envoyé au serveur (`J_gestion` seulement).
+   */
+  #secretGestion: Uint8Array | undefined;
   /** Nouvel envoi prévu après un `0x0B` (effacé par `couper`). */
   #relance: ReturnType<typeof setTimeout> | undefined;
 
@@ -140,12 +145,19 @@ export class ClientSalon {
     readonly createur: boolean,
   ) {}
 
-  /** Crée un salon (1 h, `max_members`), puis y entre comme créateur (siège 0). */
-  static async creer(srv: Srv, opts: { maxMembers?: number; membersCanDestroy?: boolean; mdp?: string } = {}): Promise<{ createur: ClientSalon; lien: Uint8Array; mdp: string; sGestion: Uint8Array }> {
+  /**
+   * Crée un salon (1 h, `max_members`), puis y entre comme créateur (siège 0). `secretGestion` :
+   * `S_gestion` (lien de gestion), d'où viennent la clé de rôle du créateur et le jeton montré
+   * au serveur. `sGestion` garde son nom pour les tests qui appellent les routes de gestion à
+   * la main, mais c'est **ce que le serveur reçoit** (`X-Shh-Manage`) : depuis le 14 novembre,
+   * `J_gestion` = `jetonGestion(S_gestion)`, jamais `S_gestion` (spec salon v3 §15.2).
+   */
+  static async creer(srv: Srv, opts: { maxMembers?: number; membersCanDestroy?: boolean; mdp?: string } = {}): Promise<{ createur: ClientSalon; lien: Uint8Array; mdp: string; sGestion: Uint8Array; secretGestion: Uint8Array }> {
     const mdp = opts.mdp ?? MDP;
     const eng = await loadSalonEngine();
     const lien = alea(32);
-    const sGestion = alea(32);
+    const secretGestion = alea(32);
+    const sGestion = eng.jetonGestion(secretGestion);
     const salt = alea(16);
     const kMdp = await passwordKey(mdp, salt as Uint8Array<ArrayBuffer>, KDF);
     const cles = eng.clesSalon(lien, kMdp);
@@ -177,8 +189,8 @@ export class ClientSalon {
       },
     );
     acces.k.fill(0);
-    const createur = await ClientSalon.#entrer(srv, eng, lien, cles, sGestion);
-    return { createur, lien, mdp, sGestion };
+    const createur = await ClientSalon.#entrer(srv, eng, lien, cles, secretGestion);
+    return { createur, lien, mdp, sGestion, secretGestion };
   }
 
   /** Entre dans le salon avec le lien et le mot de passe (meta, Argon2id, rejoindre, WebSocket). */
@@ -202,14 +214,19 @@ export class ClientSalon {
     const acces = eng.cleAcces(lien);
     const kPreuve = cles.kPreuve();
     const h: Record<string, string> = { "X-Shh-Access": b64u(acces.k) };
-    if (sGestion) h["X-Shh-Manage"] = b64u(sGestion);
+    if (sGestion) {
+      const j = eng.jetonGestion(sGestion);
+      h["X-Shh-Manage"] = b64u(j);
+      j.fill(0);
+    }
     const e = await json(srv, "POST", "/api/salons/rejoindre", h, { proof: b64u(kPreuve) });
     acces.k.fill(0);
     kPreuve.fill(0);
     const createur = sGestion !== undefined;
     if (createur !== (e.seat === 0)) throw new Error(`siège inattendu ${e.seat}`);
     const c = new ClientSalon(srv, eng, cles, e.member_token, e.seat, unb64u(e.nonce_arrivee), createur);
-    c.#salon = eng.Salon.creer(e.seat, c.nonce, cles, createur);
+    c.#secretGestion = sGestion;
+    c.#salon = eng.Salon.creer(e.seat, c.nonce, cles, createur, sGestion);
     await c.#connecter(BigInt(e.seq));
     return c;
   }
@@ -306,8 +323,11 @@ export class ClientSalon {
         this.#salon?.annoncer(b[9]!, b.slice(10, 26));
         break;
       case 0x03:
+        this.#salon?.marquerParti(b[9]!);
+        break;
       case 0x09:
-        if (b[9] !== 0xff) this.#salon?.marquerParti(b[9]!);
+        // siège (1, 0xFF sans exclu) ‖ nonce_arrivée (16) ‖ r (4)
+        this.#salon?.marquerExclu(b[9] === 0xff ? undefined : b[9]!, new DataView(b.buffer, b.byteOffset + 26, 4).getUint32(0));
         break;
       case 0x05:
         // Raisons : 1 expiré, 2 détruit, 4 remplacé, 5 exclu, 6 trop lent, 7 interrompu par le
@@ -373,7 +393,8 @@ export class ClientSalon {
       const moi = liste.find((a) => a.siege === this.siege);
       if (!moi) throw new Error("0x0D de reprise sans mon siège");
       this.nonce = moi.nonce;
-      this.#salon = this.eng.Salon.creer(this.siege, this.nonce, this.cles, false);
+      // Créateur : même clé de rôle (S_gestion), rôle rendu dès le Commit qui l'ajoute.
+      this.#salon = this.eng.Salon.creer(this.siege, this.nonce, this.cles, false, this.#secretGestion);
       publier = true;
     } else if (!this.createur && this.salon.epoque() === undefined && !this.#kpPublie) {
       publier = true;
@@ -674,7 +695,7 @@ export class ClientSalon {
 }
 
 /**
- * `POST /api/salons/reglages` (créateur, `S_gestion`) : places et/ou renouvellement ; un
+ * `POST /api/salons/reglages` (créateur, `sGestion` = `J_gestion` rendu par `ClientSalon.creer`) : places et/ou renouvellement ; un
  * renouvellement porte une preuve anti-robot (comme une création). Rend `{ max_members, expires_in_s, depuis }`.
  */
 export async function reglerSalon(srv: Srv, sGestion: Uint8Array, opts: { maxMembers?: number; renouvelerH?: number }): Promise<{ max_members: number; expires_in_s: number; depuis: number }> {
