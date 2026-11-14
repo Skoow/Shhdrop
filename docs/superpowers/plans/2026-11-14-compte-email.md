@@ -1,306 +1,353 @@
-# Compte par e-mail et mot de passe (D42-26) — plan d'implémentation
+# Compte par e-mail et mot de passe (D42-26) — plan d'implémentation, version 2
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **À ne pas commencer avant la validation de la conception par le propriétaire** (décisions D1 à D8, §20 de la conception). Les valeurs ci-dessous sont les recommandations ; une décision contraire change les tâches citées.
+> **Version 2 du 14 novembre 2026** (décisions du propriétaire du même jour, conception §21). Elle **remplace** la version 1 (code de secours, e-mails « déjà inscrit » et « adresse changée », un seul coffre) ; la version 1 reste lisible dans l'historique git (commit `e620ae6`). **À ne pas commencer avant la validation de la conception** (décisions R-D1 à R-D5 de §21.19, et D1, D4, D7, D8 de §20). Les valeurs ci-dessous sont les recommandations ; une décision contraire change les lots cités.
 
-**Goal :** un compte gratuit (e-mail confirmé, mot de passe, double authentification facultative, pseudo et photo chiffrés) obligatoire pour créer un salon, avec ancienneté, bannissement par le fondateur, récupération et paramètres, sans que le serveur reçoive le mot de passe ni garde l'adresse en clair.
+**Goal :** un compte gratuit (e-mail confirmé, mot de passe, double authentification facultative, pseudo unique, photo) obligatoire pour créer un salon ; récupération par e-mail sans perte du profil ; accueil connecté, profil, paramètres, historique des téléchargements, signalements par catégorie, suppression totale, sauvegarde chiffrée et tableau de bord finalisé ; sans que le serveur reçoive le mot de passe, garde l'adresse en clair, ni puisse ouvrir les secrets du coffre privé.
 
-**Architecture :** le moteur Rust fait la normalisation de l'adresse, le sel, Argon2id, les dérivations et le code de secours (vecteurs communs, rejoués en Go). Le serveur Go gagne deux paquets : `internal/compte` (base `comptes.db`, empreintes à clé, codes, sessions, TOTP, ancienneté, bannissement) et `internal/courriel` (seul client sortant : SMTP vers le fournisseur, file en mémoire). Le site gagne `web/src/account/` (seul détenteur du jeton et de `K_compte`) et quatre pages sous `/compte`. Tout est désactivé par défaut (`SHH_COMPTES=0`).
+**Architecture :** moteur Rust : normalisation de l'adresse et du pseudo, sel, Argon2id, dérivations, formats des deux coffres (vecteurs communs, rejoués en wasm et en Go). Serveur Go : `internal/compte` (base `comptes.db`, empreintes, séquestre du profil, codes, sessions, TOTP, ancienneté, bannissement), `internal/courriel` (seul client sortant, un seul modèle d'e-mail), extensions de `internal/salon`, `internal/api`, `internal/adminui`. Site : `web/src/account/` (seul détenteur du jeton, de `K_compte` et de `s_profil`), `web/src/history/` étendu (quatre sortes d'entrées), `web/src/downloads/` (nouveau), pages sous `/compte`, accueil connecté, `/telechargements`. Déploiement : sortie SMTP seule, sauvegarde `age` depuis la machine. Tout est désactivé par défaut (`SHH_COMPTES=0` ; constante de construction `__COMPTES__` à `false` pour le site).
 
-**Tech Stack :** Go (go 1.26.0, toolchain go1.27.4), `modernc.org/sqlite` v1.62.0, `crypto/hkdf`, `crypto/hmac`, `crypto/aes`, `net/smtp`, `crypto/tls`, `github.com/pquerna/otp` (version exacte épinglée à la Task 7) ; Rust 1.99.1, crates déjà présentes (`argon2` 0.6, `hkdf` 0.13, `sha2` 0.11) ; Svelte 5, vitest 5.1.0, WebCrypto.
+**Tech Stack :** Go (go 1.26.0, toolchain go1.27.4), `modernc.org/sqlite` v1.62.0, `crypto/hkdf`, `crypto/hmac`, `crypto/aes`, `net/smtp`, `crypto/tls`, `github.com/pquerna/otp` (version exacte épinglée au lot 5) ; Rust 1.99.1, crates présentes (`argon2` 0.6, `hkdf` 0.13, `sha2` 0.11 ; NFKC par la crate déjà utilisée par `kdf.rs`, sinon revue de chaîne d'approvisionnement avant d'en ajouter une) ; Svelte 5, vitest 5.1.0, WebCrypto ; `age` (outil, version exacte, sur la machine seulement).
 
-**Spec :** `docs/superpowers/specs/2026-11-14-compte-email-design.md` (entière) ; spécification principale D42-26, §29.2, §33, §36, §37.2 (format de `B`), §39.4 (règles du pseudo) ; salon v3 §15.2.
+**Spec :** `docs/superpowers/specs/2026-11-14-compte-email-design.md` (entière, §21 en premier) ; spécification principale D42-26, §29.2, §33, §36, §37.2 (format « SHH-ACCT1 »), §39.4, §39.5 ; salon v3 §14.6, §15.2 ; tableau de bord `2026-11-13-tableau-de-bord-admin-design.md` ; UI `2026-11-04-shhdrop-ui-design.md` §6, §8, §9.6, §9.8.x, §9.10, §11.
 
 ## Global Constraints
 
-- CLAUDE.md : le serveur ne reçoit ni ne garde de mot de passe, de clé, de pseudo ni de photo ; aucune adresse e-mail en clair sur disque ni dans un journal ; aucune adresse IP sur disque ; aucune crypto maison ; aucune ressource tierce sur le site ; tests avant tout « fait » ; jamais « 100 % sécurisé ».
+- CLAUDE.md : le serveur ne reçoit ni ne garde de mot de passe, de contenu, de nom de fichier ; aucune adresse e-mail en clair sur disque ni dans un journal ; aucune adresse IP sur disque ; aucune crypto maison ; aucune ressource tierce sur le site ; tests avant tout « fait » ; jamais « 100 % sécurisé ». **Exception écrite, seulement si R-D1 est validée** : `s_profil` (clé du coffre de profil) est reçu et gardé chiffré par le serveur ; aucune autre clé.
 - Commits : `git commit --author="Skoow <190851638+Skoow@users.noreply.github.com>"`, sur `main`, message terminé par les lignes d'attribution de la session ; push après `make test` vert ; le contrôleur vérifie la CI après chaque push.
-- Désactivé par défaut : `SHH_COMPTES=0` → aucune route `/api/compte/*` (404 identique à une route inconnue), création de salon inchangée. `SHH_COMPTES=1` exige `SHH_SALONS=1`, `SHH_COMPTES_CLE_FILE`, `SHH_SMTP_HOST`, `SHH_SMTP_USER`, `SHH_SMTP_PASSWORD_FILE`, `SHH_MAIL_FROM`.
-- Valeurs fixes (conception) :
-  - Argon2id 64 Mio (67 108 864 octets), 3 passes, 1 fil, 32 octets ; sel = SHA-256(« shhdrop/v2/compte/sel » ‖ 0x00 ‖ canon)[0..16] ; HKDF-SHA-256 sel vide, étiquettes exactes : `shhdrop/v2/compte/auth`, `shhdrop/v2/compte/enveloppe-mdp`, `shhdrop/v2/compte/secours/acces`, `shhdrop/v2/compte/secours/enveloppe`, `shhdrop/v2/compte/blob`, `shhdrop/v2/compte/appareil` ; serveur : `shhdrop/v2/serveur/compte/email`, `shhdrop/v2/serveur/compte/mdp`, `shhdrop/v2/serveur/compte/totp` ;
-  - enveloppe = nonce 12 ‖ chiffré 32 ‖ étiquette 16 = 60 octets, AD = « SHH-CENV1 » ‖ `h` ‖ (« mdp » | « secours ») ; TOTP chiffré = 48 octets, AD = « SHH-TOTP1 » ‖ `h` ; coffre « SHH-ACCT1 » de §37.2, paliers 4, 16, 64, 256 Kio ;
-  - code de secours : 53 caractères (52 base32 Crockford + contrôle mod 37, alphabet `0-9A-Z*~$=U`) ;
-  - mot de passe 10 à 256 caractères ; pseudo : règles de §39.4 point 4 (2 à 24 graphèmes) ; photo 256 × 256, ≤ 64 Ko ;
-  - codes e-mail 6 chiffres, 15 min, 5 essais ; TOTP SHA-1, 6 chiffres, 30 s, ±1 pas, 5 essais par étape, 10 échecs par heure par compte ;
-  - limites : inscriptions 3/jour/connexion, 10/jour//48 ; e-mails 3/jour/adresse, 10/jour/connexion, renvoi après 60 s ; connexion 20 échecs/h/connexion, 60//48, preuve ALTCHA après 5 échecs/h/compte ; code de secours 10/h/connexion, 5/h/compte ; coffre 60 écritures/h/compte ; 20 sessions par compte ; file d'e-mails 256 ; `SHH_COMPTES_MAX` 10 000 ;
+- **Chaque lot est livrable seul** : il laisse `main` vert, ne change rien pour le public tant que `SHH_COMPTES=0` et `__COMPTES__ = false`, et se pousse sans attendre le suivant.
+- Désactivé par défaut : `SHH_COMPTES=0` → aucune route `/api/compte/*` (404 identique à une route inconnue), création de salon inchangée, signalement sans catégorie accepté et compté « Autre » (code 10), pour le site actuel et les clients d'avant. `SHH_COMPTES=1` exige `SHH_SALONS=1`, `SHH_COMPTES_CLE_FILE`, `SHH_SMTP_HOST`, `SHH_SMTP_USER`, `SHH_SMTP_PASSWORD_FILE`, `SHH_MAIL_FROM`.
+- Valeurs fixes (conception §6, §8, §21) :
+  - Argon2id 64 Mio, 3 passes, 1 fil, 32 octets ; sel = SHA-256(« shhdrop/v2/compte/sel » ‖ 0x00 ‖ canon)[0..16] ; HKDF-SHA-256 sel vide, étiquettes : `shhdrop/v2/compte/auth`, `shhdrop/v2/compte/enveloppe-mdp`, `shhdrop/v2/compte/blob` (coffre privé), `shhdrop/v2/compte/profil`, `shhdrop/v2/compte/appareil` ; serveur : `shhdrop/v2/serveur/compte/email`, `…/mdp`, `…/totp`, `…/sequestre`, `…/pseudo` ;
+  - enveloppe du mot de passe 60 octets, AD = « SHH-CENV1 » ‖ `h` ‖ « mdp » ; séquestre `cle_profil` 60 octets, AD = « SHH-CSEQ1 » ‖ `h` ; TOTP chiffré 48 octets, AD = « SHH-TOTP1 » ‖ `h` ; coffre privé « SHH-ACCT1 », coffre de profil « SHH-PROF1 » (même forme), paliers 4, 16, 64, 256 Kio ;
+  - `p_empreinte` = HMAC-SHA-256(`K_pseudo`, « pseudo » ‖ 0x00 ‖ `p_canon`) ; pseudos réservés : liste de la conception §21.5 ; changement de pseudo une fois par 24 h ; `pseudo/verifier` 30 par heure ;
+  - mot de passe 10 à 256 caractères ; pseudo 2 à 24 graphèmes (§39.4 point 4) ; photo 256 × 256, ≤ 64 Ko ;
+  - codes e-mail 6 chiffres, 15 min, 5 essais ; TOTP SHA-1, 6 chiffres, 30 s, ±1 pas, 5 essais par étape, 10 échecs par heure par compte ; **attentes : retrait de la double authentification 7 jours ; après une récupération par e-mail, 7 jours sans changement d'adresse ni suppression** ;
+  - limites (inchangées, version 1) : inscriptions 3/jour/connexion, 10/jour//48 ; e-mails 3/jour/adresse, 10/jour/connexion, renvoi après 60 s ; connexion 20 échecs/h/connexion, 60//48, preuve ALTCHA après 5 échecs/h/compte ; coffres 60 écritures/h/compte (les deux ensemble) ; 20 sessions par compte ; file d'e-mails 256 ; `SHH_COMPTES_MAX` 10 000 ;
   - sessions : simple 2 h sans usage et au plus jusqu'à la fin du jour UTC suivant ; « rester connecté » 30 jours sans usage, 90 jours au plus ; « récente » < 5 min ;
   - paliers : neuf (< 7 jours depuis `compte_des`) 1 salon, `max_members` ≤ 4, 24 h ; confirmé 3 salons, ≤ 10, 24 h ;
-  - bannissement 3 ans ; comptes effacés après 13 mois sans connexion ;
+  - bannissement : 30 jours, 1 an ou 3 ans (défaut) ; échéance modifiable jusqu'à aujourd'hui + 5 ans ; 20 bannissements par heure au plus ; comptes effacés après 13 mois sans connexion ;
+  - catégories de signalement : codes 1 à 10 de la conception §21.10.1 ;
+  - historique local : entrées terminées retirées 7 jours après ; historique des téléchargements : 30 jours ; écriture du coffre privé différée de 2 à 12 min après un événement de partage ou de salon ;
+  - sauvegarde : quotidienne, 30 copies, `age` X25519 ;
   - dates de `comptes.db` : jour (multiple de 86 400) ou mois (premier du mois), jamais d'heure.
-- Textes : messages exacts de la conception §12 ; clés `account.*` en `fr.ts` et `en.ts`.
-- Vérifications à chaque tâche Go : `cd server && go test -race ./...` puis `make test-go` **et** `make test-e2e` ; tâche moteur : `make test-engine` ; tâche site : `make test-web`.
+- E-mail : **un seul modèle** (conception §21.3), octet pour octet.
+- Textes : messages exacts de la conception §12 et §21.15 ; clés `account.*`, `home.inbox.*`, `downloads.*`, `report.*` en `fr.ts` et `en.ts`.
+- Vérifications à chaque lot Go : `cd server && go test -race ./...` puis `make test-go` **et** `make test-e2e` ; lot moteur : `make test-engine` ; lot site : `make test-web` (+ `make test-ui` et captures pour un écran) ; lot déploiement : `make lint-deploy` et le test du lot.
 
 ## Review Focus
 
-1. **Variante d'adresse à la connexion** (`Lea.Dupont+x@GMAIL.com` pour un compte créé avec `leadupont@gmail.com`) : connexion réussie, même sel ; récupération par e-mail refusée tant que l'adresse exacte n'est pas tapée (Task 6, `TestConnexionVarianteCanonique` ; Task 7, `TestOubliAdresseExacteSeulement`).
-2. **Remise à zéro par e-mail avec double authentification active** : sans code TOTP juste, aucune session et aucun mot de passe changé (Task 7, `TestOubliExigeTOTP`).
-3. **Deux onglets qui écrivent le coffre** (salon créé dans un onglet, pseudo changé dans l'autre) : 409, fusion, rien de perdu (Task 12, « deux écritures concurrentes fusionnées »).
-4. **Redémarrage du serveur pendant une inscription** : l'étape disparaît, l'écran dit « Code expiré. Demandez-en un nouveau. », aucun compte à moitié créé sur disque (Task 6, `TestInscriptionPerdueAuRedemarrage` ; Task 13).
-5. **Bannissement pendant qu'un salon du compte est ouvert** : salons fermés pour tous, WebSocket coupés, nouvelle création refusée `banni`, réinscription de la même adresse refusée (Task 10, `TestBannirFermeLesSalonsOuverts`).
+1. **Le séquestre n'ouvre que le profil** : aucune route, aucun chemin du code ne rend de quoi ouvrir `B_prive` sans le mot de passe (lot 4, `TestSequestreSeulementProfil` ; lot 16).
+2. **E-mails sans fuite** : pour une adresse libre, prise, bannie, une récupération et un changement d'adresse, le faux SMTP reçoit exactement le même modèle, seul le code change (lot 3, `TestEmailModeleUnique` ; lot 4, `TestInscriptionEtatSeulementApresCode` ; lot 16).
+3. **Boîte mail volée** : après une récupération par e-mail, adresse et suppression refusées 7 jours ; double authentification active : récupération impossible sans code d'application, sauf après l'attente de 7 jours qu'une connexion annule (lot 5).
+4. **Suppression totale** : salons créés fermés pour tous, partages connus détruits, aucun octet des coffres ni du séquestre dans les fichiers après arrêt ; l'écran ne promet rien pour les messages dans les salons d'autrui (lots 5, 13, 16).
+5. **Tableau de bord** : jamais une adresse, une empreinte, un `h`, un pseudo ; un salon signalé se désigne par une `ref` éphémère (lot 7, `TestPageSansIdentite`).
+6. **Variante d'adresse** (`Lea.Dupont+x@GMAIL.com`) : connexion réussie ; récupération seulement à l'adresse exacte (lots 4, 5).
 
 ---
 
-### Task 1 : moteur Rust, compte (normalisation, sel, dérivations, code de secours) et vecteurs
+## Lot 1 — Moteur Rust : compte v2 et vecteurs
+
+*Livrable seul : fonctions du moteur et vecteurs, utilisées par personne encore. Dépend de : rien.*
 
 **Files :**
-- Create : `engine/core/src/compte.rs`, `engine/core/tests/compte.rs`, `engine/vectors/compte.json`, `web/scripts/gen-compte-vectors.mjs` (cas d'enveloppes et de coffre produits par WebCrypto, nonces fixés)
+- Create : `engine/core/src/compte.rs`, `engine/core/tests/compte.rs`, `engine/vectors/compte.json`, `web/scripts/gen-compte-vectors.mjs` (cas d'enveloppes et de coffres produits par WebCrypto, nonces fixés), `web/src/engine/compte.test.ts`
 - Modify : `engine/core/src/lib.rs`, `engine/core/src/error.rs`, `engine/wasm/src/lib.rs`, `engine/vectors/README.md`, `web/src/engine/index.ts`, `web/src/engine/argon2.worker.ts`
-- Test : `web/src/engine/compte.test.ts`
 
 **Interfaces :**
-- Produces (Rust, `shhdrop_core::compte`) : `pub struct Adresse { pub canon: String, pub exacte: String }` ; `pub fn normaliser(email: &str) -> Result<Adresse, Erreur>` (erreurs `adresse_invalide`, `adresse_non_ascii`) ; `pub fn sel(canon: &str) -> [u8; 16]` ; `pub fn deriver(mot_de_passe: &[u8], canon: &str) -> Result<(Zeroizing<[u8;32]>, Zeroizing<[u8;32]>), Erreur>` (= `A_auth`, `KEK_mdp`) ; `pub fn deriver_secours(rk: &[u8;32]) -> ([u8;32], Zeroizing<[u8;32]>)` (= `A_s`, `KEK_s`) ; `pub fn cle_blob(k_compte: &[u8;32]) -> Zeroizing<[u8;32]>` ; `pub fn cle_appareil(k_compte: &[u8;32]) -> Zeroizing<[u8;32]>` ; `pub fn secours_encoder(rk: &[u8;32]) -> String` (53) ; `pub fn secours_lire(saisie: &str) -> Result<[u8;32], Erreur>` (`code_mal_recopie`) ; `pub fn mot_de_passe_valide(mdp: &str, adresse: &Adresse) -> Result<(), Erreur>` (`mdp_court`, `mdp_long`, `mdp_adresse`).
-- Produces (wasm, `web/src/engine/index.ts`) : `normaliserAdresse(email): { canon, exacte }`, `deriverCompte(mdp: Uint8Array, canon): Promise<{ aAuth, kek }>` (Argon2id dans le Worker existant), `deriverSecours(rk)`, `cleBlob(k)`, `cleAppareil(k)`, `secoursEncoder(rk)`, `secoursLire(s)`, `motDePasseValide(mdp, canon, exacte)`.
-- `engine/vectors/compte.json` : sections `normaliser` (≥ 40 cas : majuscules, blancs de bord, `+` partout, points Gmail, `googlemail.com`, `+` en tête, double `@`, 64/65 caractères locaux, 254/255 au total, accents, tiret en bord d'étiquette, TLD numérique), `sel`, `deriver` (mots de passe NFC difficiles, blancs de bord), `secours` (encodage, saisies avec `I`, `L`, `O`, tirets, espaces, contrôle faux), `enveloppes` et `coffre` (clé, nonce, AD, résultat ; produits par `gen-compte-vectors.mjs`).
+- Rust (`shhdrop_core::compte`) : `Adresse { canon, exacte }` ; `normaliser(email) -> Result<Adresse, Erreur>` (`adresse_invalide`, `adresse_non_ascii`) ; `sel(canon) -> [u8;16]` ; `deriver(mdp, canon) -> (A_auth, KEK_mdp)` (zéroïsés) ; `cle_prive(k_compte)`, `cle_profil(s_profil)`, `cle_appareil(k_compte)` ; `pseudo_valide(s) -> Result<String, Erreur>` (affichage normalisé, erreurs de §39.4) ; `pseudo_canon(s) -> String` ; `pseudo_reserve(canon) -> bool` ; `mot_de_passe_valide(mdp, &Adresse)`.
+- wasm (`web/src/engine/index.ts`) : `normaliserAdresse`, `deriverCompte` (Worker existant), `clePrive`, `cleProfil`, `cleAppareil`, `pseudoValide`, `pseudoCanon`, `pseudoReserve`, `motDePasseValide`.
+- `compte.json` : sections `normaliser` (≥ 40 cas, liste de la version 1), `sel`, `deriver`, `pseudo` (≥ 30 cas : casse, espaces, ponctuation, NFKC, écritures mêlées, émoji, 1 et 25 graphèmes, réservés), `enveloppes` (mot de passe), `coffre_prive`, `coffre_profil` (clé, nonce, AD, résultat).
 
-- [ ] **Step 1 : tests** — `engine/core/tests/compte.rs` : `vecteurs_normaliser`, `vecteurs_sel`, `vecteurs_deriver`, `vecteurs_secours` lisent `compte.json` et comparent octet pour octet ; `secours_aller_retour` (1 000 clés tirées) ; `controle_detecte_une_faute` (chaque substitution d'un caractère → `code_mal_recopie`) ; `canon_ne_depend_pas_de_la_variante` (`Lea.Dupont+x@GMAIL.com` et `leadupont@gmail.com` → même `canon`, `exacte` différentes). `web/src/engine/compte.test.ts` : mêmes vecteurs rejoués par le module wasm sous Node ; les cas `enveloppes` et `coffre` déchiffrés par WebCrypto.
-- [ ] **Step 2 :** `make test-engine` → FAIL (module absent).
-- [ ] **Step 3 :** implémenter `compte.rs` (aucune dépendance nouvelle ; NFC et blancs par les fonctions existantes de `kdf.rs`), liaisons wasm, générateur des cas WebCrypto.
-- [ ] **Step 4 :** `make test-engine` puis `cd web && npx vitest run src/engine/compte.test.ts` → PASS ; `node scripts/check-dist.mjs` : poids du `.wasm` des partages noté (attendu : < +2 Ko brotli).
-- [ ] **Step 5 :** commit `feat(moteur): compte, normalisation de l'adresse, sel, dérivations, code de secours (vecteurs communs)`.
+- [ ] **Step 1 : tests** — `engine/core/tests/compte.rs` : `vecteurs_normaliser`, `vecteurs_sel`, `vecteurs_deriver`, `vecteurs_pseudo` (octet pour octet) ; `canon_ne_depend_pas_de_la_variante` ; `pseudo_canon_identique_pour_variantes` (« Léa », « LÉA », « lé a ») ; `cles_de_coffre_distinctes` (`cle_prive(k)` ≠ `cle_profil(k)` pour la même entrée). `compte.test.ts` : mêmes vecteurs en wasm sous Node ; `enveloppes`, `coffre_prive`, `coffre_profil` déchiffrés par WebCrypto.
+- [ ] **Step 2 :** `make test-engine` → FAIL.
+- [ ] **Step 3 :** implémenter (aucune dépendance nouvelle sans revue).
+- [ ] **Step 4 :** `make test-engine` ; `cd web && npx vitest run src/engine/compte.test.ts` → PASS ; `node scripts/check-dist.mjs` : poids du `.wasm` des partages noté.
+- [ ] **Step 5 :** commit `feat(moteur): compte v2, adresse, pseudo, dérivations, coffres (vecteurs communs)`.
 
-### Task 2 : configuration, clé du serveur, schéma 3 du salon
+## Lot 2 — Serveur : configuration, clés, `comptes.db`, schéma 3 du salon, domaines jetables
+
+*Livrable seul : rien n'est servi (`SHH_COMPTES=0`). Dépend de : lot 1 (vecteurs).*
 
 **Files :**
-- Modify : `server/internal/config/config.go`, `server/internal/store/store.go`, `server/cmd/shhdrop/main.go`
-- Create : `server/internal/compte/cles.go`
-- Test : `server/internal/config/config_test.go`, `server/internal/store/store_test.go`, `server/internal/compte/cles_test.go`
+- Modify : `server/internal/config/config.go`, `server/internal/store/store.go`, `server/cmd/shhdrop/main.go`, `THIRD_PARTY_LICENSES.md`
+- Create : `server/internal/compte/{cles.go,base.go,adresse.go,pseudo.go,jetables.go,jetables.txt,jetables-ajouts.txt,reserves.txt}`, `web/scripts/maj-jetables.mjs`
+- Test : `server/internal/config/config_test.go`, `server/internal/store/store_test.go`, `server/internal/compte/{cles,base,adresse,pseudo}_test.go`
 
 **Interfaces :**
-- Produces : `config.Config` : `Comptes bool` (`SHH_COMPTES`), `ComptesCleFile string`, `ComptesMax int` (1 à 1 000 000, défaut 10 000), `SMTP config.SMTP{ Host string; Port int; User string; PasswordFile string; From string }` ; refus : `SHH_COMPTES=1` sans `SHH_SALONS=1`, fichier de clé dans `SHH_DATA_DIR`, de taille ≠ 32, droits plus larges que 0600 ; port SMTP ≠ 465/587 hors boucle locale ; `From` sans `@`.
-  - `compte.Cles{ Email, Poivre, TOTP [32]byte }` ; `func compte.LireCles(chemin string) (Cles, error)` (HKDF des étiquettes du Global Constraints ; tampon de la clé lue effacé).
-  - `store.SchemaVersion = 3` ; colonne `salons.compte BLOB CHECK(compte IS NULL OR length(compte)=16)`, index `salons_compte` ; migration 2 → 3 par `ALTER TABLE … ADD COLUMN` (lignes existantes : `NULL`).
-- [ ] **Step 1 : tests** — `TestComptesDefautDesactive` ; table `TestComptesConfigRefusee` (chaque refus ci-dessus) ; `TestComptesConfigValide` ; `TestLireClesDerivations` (clé fixe → trois sous-clés égales aux valeurs calculées par `hkdf.Key` dans le test, deux à deux différentes) ; `TestLireClesRefuse` (31 et 33 octets, 0644) ; `TestSchemaMinimal` mis à jour (`index:salons_compte` en plus) ; `TestSalonsColonnes` (une colonne de plus, `compte`) ; `TestMigreV2VersV3` (salon gardé, `compte` NULL) ; `TestRefuseV4`.
-- [ ] **Step 2 :** `cd server && go test -race ./internal/config/ ./internal/store/ ./internal/compte/` → FAIL.
-- [ ] **Step 3 :** implémenter ; `main.go` lit les clés seulement si `cfg.Comptes`.
+- `config.Config` : `Comptes`, `ComptesCleFile`, `ComptesMax`, `SMTP{Host,Port,User,PasswordFile,From}` (refus de la version 1, Task 2).
+- `compte.Cles{ Email, Poivre, TOTP, Sequestre, Pseudo [32]byte }` ; `LireCles(chemin)`.
+- `OuvrirBase(chemin)` : tables exactes de la conception §21.6.1 (`comptes`, `sessions`, `bannis`), toutes `WITHOUT ROWID`, `user_version = 1`.
+- `Normaliser(email) (Adresse, error)` ; `(Cles) Empreintes(a) (canon, envoi [32]byte)` ; `(Cles) EmpreintePseudo(pCanon []byte) ([32]byte, error)` (refus : vide, > 96 octets, UTF-8 invalide, réservé) ; `Jetable(domaine) bool`.
+- `store.SchemaVersion = 3` : colonne `salons.compte` BLOB(16) NULL, index `salons_compte`, migration 2 → 3.
+
+- [ ] **Step 1 : tests** — ceux de la version 1 (Tasks 2 et 3 : `TestComptesDefautDesactive`, `TestComptesConfigRefusee`, `TestLireClesDerivations` étendu à cinq sous-clés deux à deux différentes, `TestMigreV2VersV3`, `TestNormaliserVecteurs`, `TestEnveloppesVecteurs`, `TestJetable`, `TestDatesAuJour`) ; `TestSchemaComptes` (schéma exact de §21.6.1 ; aucune colonne texte ; aucune colonne `v_s`, `env_s`) ; `TestPseudoReserve` (liste) ; `TestPseudoVecteurs` (les `p_canon` de `compte.json` acceptés ; empreintes stables).
+- [ ] **Step 2 :** `go test -race ./internal/config/ ./internal/store/ ./internal/compte/` → FAIL.
+- [ ] **Step 3 :** implémenter ; listes lues une fois au démarrage (ligne `allowedMaps` « constante, aucun compteur »).
 - [ ] **Step 4 :** `go test -race ./...`, `make test-go`, `make test-e2e` → PASS.
-- [ ] **Step 5 :** commit `feat(compte): SHH_COMPTES, clé du serveur, colonne salons.compte (schéma 3)`.
+- [ ] **Step 5 :** commit `feat(compte): configuration, clés du serveur, comptes.db, schéma 3 du salon, domaines jetables`.
 
-### Task 3 : base `comptes.db`, normalisation Go, empreintes, domaines jetables
+## Lot 3 — Serveur : envoi d'e-mails (modèle unique) et limites
 
-**Files :**
-- Create : `server/internal/compte/base.go`, `server/internal/compte/adresse.go`, `server/internal/compte/jetables.go`, `server/internal/compte/jetables.txt`, `server/internal/compte/jetables-ajouts.txt`, `web/scripts/maj-jetables.mjs` (poste du développeur seulement)
-- Modify : `THIRD_PARTY_LICENSES.md` (liste des domaines, CC0, date de la copie)
-- Test : `server/internal/compte/base_test.go`, `server/internal/compte/adresse_test.go`
-
-**Interfaces :**
-- Produces : `func compte.OuvrirBase(chemin string) (*sql.DB, error)` (pragmas de `store` : WAL, `secure_delete`, `journal_size_limit(0)`, `temp_store(MEMORY)`, `foreign_keys`) ; tables exactes de la conception §8.2 (`comptes`, `sessions`, `bannis`, toutes `WITHOUT ROWID`, contraintes de longueur) ; `user_version = 1` ;
-  - `func Normaliser(email string) (Adresse, error)` (mêmes règles et mêmes erreurs que le moteur) ; `func (c Cles) Empreintes(a Adresse) (canon, envoi [32]byte)` ; `func Jetable(domaine string) bool`.
-- [ ] **Step 1 : tests** — `TestNormaliserVecteurs` : rejoue `../../../engine/vectors/compte.json` section `normaliser` (échoue si 0 cas) ; `TestEnveloppesVecteurs` : déchiffre les cas `enveloppes` avec `crypto/aes` (deuxième implémentation indépendante de WebCrypto) ; `TestEmpreintesDistinctes` (`canon` ≠ `envoi` pour la même adresse ; autre clé → autres empreintes) ; `TestJetable` (`mailinator.com`, `x.mailinator.com` → vrai ; `gmail.com`, `notmailinator.com` → faux ; un domaine de `jetables-ajouts.txt` → vrai) ; `TestSchemaComptes` (`sqlite_master` exact ; aucune colonne de type texte qui pourrait recevoir une adresse : toutes les colonnes sont BLOB ou INTEGER) ; `TestComptesWithoutRowid` ; `TestDatesAuJour` (`CHECK(cree_jour % 86400 = 0)` refuse 86 401).
-- [ ] **Step 2 :** `go test -race ./internal/compte/` → FAIL.
-- [ ] **Step 3 :** implémenter ; la liste est lue une fois au démarrage en un ensemble (map) : ligne `allowedMaps` « constante (liste de domaines), aucun compteur ».
-- [ ] **Step 4 :** `go test -race ./...`, `make test-go` → PASS.
-- [ ] **Step 5 :** commit `feat(compte): base comptes.db, normalisation et empreintes à clé, domaines jetables`.
-
-### Task 4 : envoi d'e-mails (`internal/courriel`)
+*Livrable seul : paquet non branché. Dépend de : lot 2.*
 
 **Files :**
-- Create : `server/internal/courriel/courriel.go` (file, modèles), `server/internal/courriel/smtp.go` (seule connexion sortante), `server/internal/courriel/modeles.go`, `server/internal/courriel/fauxsmtp_test.go` (serveur SMTP de test en mémoire), `server/internal/courriel/courriel_test.go`
-- Modify : `server/internal/stats_test.go` (exemption de `internal/courriel/smtp.go` ; `smtp.Dial`, `smtp.SendMail`, `smtp.NewClient`, `tls.Dial`, `tls.Dialer` interdits ailleurs ; ligne `allowedMaps` si une map est ajoutée), `deploy/Dockerfile` (certificats racine copiés de l'étape `server`, commentaire « aucune connexion sortante » corrigé)
-
-**Interfaces :**
-- Produces : `type Message struct{ A string; Modele Modele; Langue string; Code string }` ; `type Modele uint8` (`ModeleCode`, `ModeleDejaInscrit`, `ModeleBanni`, `ModeleAdresseChangee`) ; `type Envoyeur struct{…}` ; `func Nouveau(c config.SMTP, motDePasse []byte) *Envoyeur` ; `func (e *Envoyeur) Mettre(m Message) error` (`ErrPlein` si 256 en file) ; `func (e *Envoyeur) Run(ctx context.Context)` (un envoi à la fois, 20 s, un nouvel essai, message effacé de la file après envoi, **aucune sortie** sur stdout/stderr) ; textes exacts de la conception §12.5 en `fr` et `en` (`text/plain; charset=utf-8`, en-têtes `From`, `To`, `Subject`, `Date`, `Message-ID` aléatoire ; aucun en-tête qui porterait une adresse IP ou un identifiant de compte).
-- [ ] **Step 1 : tests** — `TestEnvoiCode` (faux SMTP en TLS sur la boucle locale : un message, corps exact, objet « Votre code Shhgone ») ; `TestTexteClairRefuseHorsBoucle` ; `TestFilePleine` (257ᵉ → `ErrPlein`) ; `TestEchecSilencieux` (faux SMTP qui refuse : aucune sortie, aucune panique, message oublié) ; `TestAucunEnTeteDeTrop` (en-têtes reçus = liste exacte) ; `TestNoOutgoingHTTP` et `TestNoUnlistedCounter` (paquet `internal`) verts.
-- [ ] **Step 2 :** `go test -race ./internal/courriel/ ./internal/` → FAIL.
-- [ ] **Step 3 :** implémenter avec `net/smtp` sur `crypto/tls` (TLS 1.2 au moins, vérification du certificat, `ServerName` = `SHH_SMTP_HOST`).
-- [ ] **Step 4 :** `go test -race ./...`, `make test-go` → PASS ; `docker build` du `Dockerfile` : le fichier de certificats est dans l'image (`make test-repro` vert).
-- [ ] **Step 5 :** commit `feat(courriel): envoi SMTP vers le fournisseur, file en mémoire, seul client sortant`.
-
-### Task 5 : limites du compte
-
-**Files :**
-- Modify : `server/internal/limits/limits.go`, `server/internal/stats_test.go` (lignes `allowedMaps` justifiées, et §9.5 de la spécification principale)
+- Create : `server/internal/courriel/{courriel.go,smtp.go,modele.go,fauxsmtp_test.go,courriel_test.go}`
+- Modify : `server/internal/limits/limits.go`, `server/internal/stats_test.go` (exemption de `internal/courriel/smtp.go` ; `smtp.*` et `tls.Dial*` interdits ailleurs ; lignes `allowedMaps`), `deploy/Dockerfile` (certificats racine)
 - Test : `server/internal/limits/limits_test.go`
 
 **Interfaces :**
-- Produces : `func (l *Limiter) AllowInscription(ip netip.Addr) bool` (3/jour, 10//48) ; `AllowCourriel(ip netip.Addr, canon [32]byte) bool` (10/jour/connexion, 3/jour/adresse) ; `AllowEchecConnexion(ip) bool` et `NoterEchecConnexion(ip, canon)` ; `PreuveRequise(canon) bool` (> 5 échecs dans l'heure) ; `AllowSecours(ip, canon) bool` ; `AllowTOTP(h [16]byte) bool` ; `AllowEcritureCoffre(h) bool` ; même rotation que les quotas du jour (clés HMAC du jour ; empreintes de compte effacées à la rotation de l'heure ou du jour).
-- [ ] **Step 1 : tests** — une fonction de test par limite, bornes exactes du Global Constraints ; `TestLimitesCompteOublieesALaRotation` ; `TestAucuneAdresseGardee` (inspection : aucune clé de map ne contient l'adresse ni le /64 en clair).
-- [ ] **Step 2 :** `go test -race ./internal/limits/ ./internal/` → FAIL.
-- [ ] **Step 3 :** implémenter.
-- [ ] **Step 4 :** `go test -race ./...`, `make test-go` → PASS.
-- [ ] **Step 5 :** commit `feat(compte): limites d'inscription, d'e-mails, de connexion et de récupération`.
+- `type Message struct{ A string; Langue string; Code string }` (**aucun champ de modèle** : un seul modèle) ; `Nouveau(c config.SMTP, mdp []byte) *Envoyeur` ; `Mettre(m) error` (`ErrPlein`) ; `Run(ctx)` (un envoi à la fois, 20 s, un nouvel essai, aucune sortie).
+- Limites : `AllowInscription`, `AllowCourriel`, `AllowEchecConnexion`/`NoterEchecConnexion`, `PreuveRequise`, `AllowTOTP`, `AllowEcritureCoffre`, `AllowPseudoVerifier(h|etape)`, `AllowBannir()` (20/h, global).
 
-### Task 6 : inscription, connexion, sessions
+- [ ] **Step 1 : tests** — `TestEnvoiCode` (corps et objet exacts de §21.3, en `fr` et `en`) ; `TestEmailModeleUnique` (le corps ne dépend que du code et de la langue ; recherche dans les sources : aucun autre texte d'e-mail) ; `TestAucunEnTeteDeTrop` (liste exacte de §21.3) ; `TestTexteClairRefuseHorsBoucle` ; `TestFilePleine` ; `TestEchecSilencieux` ; limites : une fonction par limite, bornes exactes, `TestLimitesCompteOublieesALaRotation`, `TestAucuneAdresseGardee`.
+- [ ] **Step 2 :** `go test -race ./internal/courriel/ ./internal/limits/ ./internal/` → FAIL.
+- [ ] **Step 3 :** implémenter (`net/smtp` sur `crypto/tls`, TLS 1.2 au moins, `ServerName`).
+- [ ] **Step 4 :** `go test -race ./...`, `make test-go`, `make test-repro` → PASS.
+- [ ] **Step 5 :** commit `feat(courriel): envoi SMTP d'un code seul, file en mémoire ; limites du compte`.
+
+## Lot 4 — Serveur : inscription, connexion, sessions, pseudo, deux coffres
+
+*Livrable seul : routes servies seulement avec `SHH_COMPTES=1` (tests). Dépend de : lots 2, 3.*
 
 **Files :**
-- Create : `server/internal/compte/service.go`, `server/internal/compte/etapes.go` (étapes en mémoire), `server/internal/compte/sessions.go`, `server/internal/api/handlers_compte.go`
-- Modify : `server/internal/api/api.go` (`api.Comptes{ S *compte.Service }` ; routes enregistrées seulement si `S != nil`), `server/internal/api/minimize_test.go` (`X-Shh-Session` lu par `handlers_compte.go` seulement à ce stade), `server/cmd/shhdrop/main.go` (ouverture de `comptes.db` dans `SHH_DATA_DIR`, vidage du WAL au démarrage, `Envoyeur.Run`)
-- Test : `server/internal/compte/service_test.go`, `server/internal/api/compte_test.go`
+- Create : `server/internal/compte/{service.go,etapes.go,sessions.go,coffres.go,sequestre.go}`, `server/internal/api/handlers_compte.go`
+- Modify : `server/internal/api/api.go`, `server/internal/api/minimize_test.go` (`X-Shh-Session` lu par `handlers_compte.go` seulement), `server/cmd/shhdrop/main.go`
+- Test : `server/internal/compte/{service,coffres,sequestre}_test.go`, `server/internal/api/compte_test.go`
 
 **Interfaces :**
-- Consumes : Tasks 2 à 5.
-- Produces : `type Service struct{…}` ; `func NewService(c Config) (*Service, error)` (`Config{ DB *sql.DB; Cles Cles; Courriel *courriel.Envoyeur; Limites *limits.Limiter; Now func() time.Time; Max int }`) ;
-  - `InscriptionDebut(ip, email, langue string) (h [16]byte, etape [32]byte, err error)` ; `Renvoyer(ip, etape)` ; `InscriptionFin(etape, code string, d Donnees, s OptionsSession) (jeton [32]byte, err error)` avec `type Donnees struct{ AAuth [32]byte; EnvMdp, EnvS [60]byte; VS [32]byte; Blob []byte }`, `type OptionsSession struct{ Persistante bool; Etiquette []byte }` ;
-  - `Connexion(ip, email string, aAuth [32]byte, s OptionsSession, preuve bool) (Ouverture, error)` où `type Ouverture struct{ Jeton [32]byte; H [16]byte; EnvMdp [60]byte; Blob []byte; Gen uint64; Etape *[32]byte }` ; `ConnexionTOTP(etape [32]byte, code string) (Ouverture, error)` (Task 7 la remplit) ;
-  - `Session(jeton []byte) (Courante, error)` (`type Courante struct{ H [16]byte; Recente bool; Sid [16]byte }`) ; `Reauth(c Courante, aAuth [32]byte, totp string) error` ; `Deconnexion(c)`, `Sessions(c) ([]SessionVue, error)`, `FermerSession(c, sid)`, `FermerAutres(c)` ;
-  - erreurs : `ErrIdentifiants`, `ErrCodeFaux{Restants int}`, `ErrEtape`, `ErrTOTPRequis`, `ErrPreuveRequise`, `ErrRecent`, `ErrJetable`, `ErrAdresse`, `ErrBanni`, `ErrBusy`, `ErrLimit{Retry}` ; `failCompte(w, err)` dans `handlers_compte.go` (codes HTTP et corps de la conception §8.6).
-- [ ] **Step 1 : tests** (`service_test.go`, faux SMTP de la Task 4, horloge figée)
-  - `TestInscriptionComplete` (code lu dans le faux SMTP ; ligne `comptes` créée seulement après `InscriptionFin`) ; `TestInscriptionAdressePriseMemeReponse` et `TestInscriptionAdresseBannieMemeReponse` (même forme de réponse, e-mail « déjà inscrit » ou « banni », `InscriptionFin` → `ErrCodeFaux` pour tout code) ; `TestCodeCinqEssais` ; `TestCodeExpire15Min` ; `TestInscriptionPerdueAuRedemarrage` (nouveau `Service` sur la même base → `ErrEtape`, aucune ligne) ; `TestJetableRefuse` ; `TestCourseDeuxInscriptionsMemeAdresse` (deux étapes confirmées : une seule ligne, l'autre `ErrCodeFaux`) ;
-  - `TestConnexionVarianteCanonique` ; `TestConnexionInconnueEtFausseIdentiques` (même erreur ; nombre d'appels HMAC égal, compté par un crochet de test) ; `TestPreuveApresCinqEchecs` ; `TestPasDeVerrouillage` (100 échecs d'une autre connexion n'empêchent pas une connexion juste avec preuve) ;
-  - `TestSessionSimpleExpire` (2 h d'inactivité ; fin du jour UTC suivant) ; `TestSessionPersistante30Et90Jours` ; `TestSessionRecente5Min` ; `TestJetonJamaisEnClair` (la base ne contient que SHA-256 du jeton) ; `TestVingtSessionsAuPlus` ; `TestFermerAutres` ; `TestDatesDeLaBase` (toutes les dates multiples de 86 400 ou premiers du mois).
-  - `compte_test.go` : `TestRoutesCompteAbsentes` (`SHH_COMPTES=0` : corps identique à `GET /api/inconnu`) ; `TestJSONStrictCompte` (clé inconnue, doublon, `a_auth` de 42 caractères, `null` → 400) ; `TestEnTeteSessionSeulementIci` (minimize).
+- `NewService(Config{ DB, Cles, Courriel, Limites, Now, Max })`.
+- `InscriptionDebut(ip, email, langue) (h, etape, err)` (envoie **toujours** un code, conception §21.3) ; `Renvoyer` ; `InscriptionFin(etape, code, d Donnees, s OptionsSession) (jeton, err)` avec `Donnees{ AAuth [32]byte; EnvMdp [60]byte; SProfil [32]byte; PCanon []byte; BlobProfil, BlobPrive []byte }` ; erreurs `ErrCodeFaux`, `ErrDejaInscrit`, `ErrBanni{Jusqu}`, `ErrPseudoPris`.
+- `Connexion(...) (Ouverture, error)`, `Ouverture{ Jeton; H; EnvMdp; SProfil [32]byte; BlobProfil []byte; GenProfil uint64; BlobPrive []byte; GenPrive uint64; Etape *[32]byte }` ; `ConnexionTOTP` (rempli au lot 5).
+- `Session`, `Reauth`, `Deconnexion`, `Sessions`, `FermerSession`, `FermerAutres` (version 1).
+- `LireCoffre(c, Profil|Prive)`, `EcrireCoffre(c, sorte, ifGen, blob)` ; `PseudoVerifier(etape|c, pCanon) (libre bool, err)` ; `ChangerPseudo(c, pCanon)`.
+- Séquestre : `cle_profil` scellé à `InscriptionFin`, ouvert seulement dans `Connexion`, `ConnexionTOTP`, `OubliFin` ; `s_profil` jamais journalisé, tampon effacé au mieux.
+
+- [ ] **Step 1 : tests** — de la version 1 (Task 6) : `TestInscriptionComplete`, `TestCodeCinqEssais`, `TestCodeExpire15Min`, `TestInscriptionPerdueAuRedemarrage`, `TestJetableRefuse`, `TestCourseDeuxInscriptionsMemeAdresse`, `TestConnexionVarianteCanonique`, `TestConnexionInconnueEtFausseIdentiques`, `TestPreuveApresCinqEchecs`, `TestPasDeVerrouillage`, sessions (`TestSessionSimpleExpire`, `TestSessionPersistante30Et90Jours`, `TestSessionRecente5Min`, `TestJetonJamaisEnClair`, `TestVingtSessionsAuPlus`, `TestFermerAutres`, `TestDatesDeLaBase`) ; **nouveaux** : `TestInscriptionEtatSeulementApresCode` (adresse prise ou bannie : même réponse à `inscription/debut`, même e-mail ; `inscription/fin` avec le code juste → `deja_inscrit` ou `banni`, aucune ligne créée ; code faux → `code_faux` dans les trois cas) ; `TestPseudoUnique` (deux comptes, même `p_canon` → `pseudo_pris`) ; `TestPseudoReserveRefuse` ; `TestPseudoUneFoisPar24h` ; `TestPseudoJamaisEnClair` (la base ne contient que `p_empreinte`) ; `TestSequestreSeulementProfil` (`cle_profil` ouvre `B_profil` ; aucune réponse ne contient `K_compte` ni rien qui ouvre `B_prive`) ; `TestSequestreChiffre` (colonne ≠ `s_profil`, ouverte avec `K_sequestre` et AD) ; `TestDeuxCoffresIndependants` (`if_gen` séparés ; 60 écritures par heure pour les deux) ; `compte_test.go` : `TestRoutesCompteAbsentes`, `TestJSONStrictCompte`, `TestEnTeteSessionSeulementIci`.
 - [ ] **Step 2 :** `go test -race ./internal/compte/ ./internal/api/` → FAIL.
-- [ ] **Step 3 :** implémenter ; comparaisons en temps constant (`subtle.ConstantTimeCompare`, `hmac.Equal`) ; `v_mdp` = HMAC(`Poivre`, `h` ‖ `A_auth`) ; écriture de `vu_mois` au plus une fois par mois.
+- [ ] **Step 3 :** implémenter (comparaisons en temps constant ; `vu_mois` une fois par mois).
 - [ ] **Step 4 :** `go test -race ./...`, `make test-go`, `make test-e2e` → PASS.
-- [ ] **Step 5 :** commit `feat(compte): inscription par code e-mail, connexion, sessions sans cookie`.
+- [ ] **Step 5 :** commit `feat(compte): inscription par code e-mail, connexion, sessions, pseudo unique, coffres et séquestre du profil`.
 
-### Task 7 : double authentification, code de secours, mot de passe oublié
+## Lot 5 — Serveur : récupération par e-mail, double authentification, paramètres, suppression
+
+*Livrable seul. Dépend de : lot 4.*
 
 **Files :**
-- Create : `server/internal/compte/totp.go`, `server/internal/compte/secours.go`, `server/internal/compte/oubli.go`
-- Modify : `server/go.mod`, `server/go.sum`, `THIRD_PARTY_LICENSES.md`, `server/internal/api/handlers_compte.go`
-- Test : `server/internal/compte/totp_test.go`, `server/internal/compte/oubli_test.go`
+- Create : `server/internal/compte/{totp.go,oubli.go,parametres.go,effacement.go}`
+- Modify : `server/go.mod`, `server/go.sum`, `THIRD_PARTY_LICENSES.md`, `server/internal/api/handlers_compte.go`, `server/internal/janitor/janitor.go` (passe quotidienne `compte.Effacer(now)`)
+- Test : `server/internal/compte/{totp,oubli,parametres,effacement}_test.go`
 
 **Interfaces :**
-- Produces : `TOTPDebut(c Courante) (etape [32]byte, secretB32 string, err error)` ; `TOTPFin(c, etape, code) error` ; `TOTPRetirer(c) error` ; `SecoursDebut(ip, email string, aS [32]byte) (etape [32]byte, h [16]byte, envS [60]byte, err error)` ; `SecoursFin(etape, d Donnees, retirerTOTP bool, s OptionsSession) (Ouverture, error)` ; `OubliDebut(ip, email, langue string) ([32]byte, error)` ; `OubliVerifier(etape, code, totp string) ([16]byte, error)` ; `OubliFin(etape, d Donnees, s OptionsSession) (Ouverture, error)` ; `SecoursRenouveler(c, vS [32]byte, envS [60]byte) error`.
-- [ ] **Step 1 : revue de chaîne d'approvisionnement** de `github.com/pquerna/otp` et de `github.com/boombuler/barcode` (compétence `supply-chain-risk-auditor`) : dernière version stable publiée depuis ≥ 7 jours, licence, mainteneurs, avis de sécurité ; résultat noté dans le message de commit. Refus → arrêter la tâche et le signaler au propriétaire (pas de TOTP maison).
-- [ ] **Step 2 : tests** — `TestTOTPVecteursRFC6238` (secrets et instants de l'annexe B de la RFC, SHA-1) ; `TestTOTPTolerance` (pas −1, 0, +1 acceptés ; ±2 refusés) ; `TestTOTPRejeu` ; `TestTOTPSecretChiffre` (colonne `totp` ≠ secret, déchiffrée avec `K_totp` et AD) ; `TestTOTPActivationExigeCode` ; `TestConnexionAvecTOTP` ; `TestSecoursOuvreSansTOTP` ; `TestSecoursRetireTOTPSurDemande` ; `TestSecoursFermeLesAutresSessions` ; `TestOubliAdresseExacteSeulement` (aucun e-mail pour une variante canonique non exacte ; réponse identique) ; `TestOubliExigeTOTP` ; `TestOubliGardeAncienneteEtSalons` (`cree_jour`, `compte_des`, `salons.compte` inchangés ; `blob` remplacé ; `gen` croît) ; `TestRenouvelerSecoursRendAncienInutile`.
+- `TOTPDebut`, `TOTPFin`, `TOTPRetirer`, `TOTPAnnulerRetrait(c)` ;
+- `OubliDebut(ip, email, langue)` ; `OubliVerifier(etape, code, totp string, totpPerdu bool) (h [16]byte, attenteJusqu string, err)` ; `OubliFin(etape, d DonneesOubli, s) (Ouverture, error)` (`DonneesOubli{ AAuth; EnvMdp; BlobPrive }` : `blob_profil` et `cle_profil` gardés, `blob_prive` remplacé, `gen` des deux continue, `recup_jour` posé, sessions fermées) ;
+- `Etat(c)` (champs de §21.6.2 : `recup_jusqu`, `retrait_totp_le`, `banni_jusqu`, `banni_motif`) ; `ChangerMdp` ; `EmailDebut(c, ip, actuel, nouveau, langue)` ; `EmailFin(c, etape, code, aAuth, envMdp, totp)` ; `Export(c)` ; `Supprimer(c) (salonsFermes int, err)` (crochet `FermerSalons`, branché au lot 6) ; `Effacer(now)` (inactifs 13 mois ; bannis échus) ; erreur `ErrAttente{Jusqu}` (403 `attente`).
+
+- [ ] **Step 1 : revue de chaîne d'approvisionnement** de `github.com/pquerna/otp` et `github.com/boombuler/barcode` (compétence `supply-chain-risk-auditor`), comme la version 1 (Task 7, Step 1).
+- [ ] **Step 2 : tests** — TOTP de la version 1 (`TestTOTPVecteursRFC6238`, `TestTOTPTolerance`, `TestTOTPRejeu`, `TestTOTPSecretChiffre`, `TestTOTPActivationExigeCode`, `TestConnexionAvecTOTP`) ; **récupération** : `TestOubliAdresseExacteSeulement` ; `TestOubliExigeTOTP` ; `TestRecuperationGardeProfil` (`blob_profil`, `cle_profil`, `p_empreinte`, `cree_jour`, `compte_des`, `salons.compte` inchangés) ; `TestRecuperationVideCoffrePrive` (`blob_prive` remplacé ; l'ancien n'est plus lisible) ; `TestRecuperationFermeLesSessions` ; `TestAttente7Jours` (`email/fin` et `supprimer` → `attente` jusqu'au jour + 7 ; passent au jour + 7) ; `TestRetraitTOTPApres7Jours` ; `TestRetraitTOTPAnnuleParConnexion` ; `TestRetraitTOTPAnnuleParSession` ; **paramètres** : `TestChangerMdpFermeAutres`, `TestChangerMdpExigeRecent`, `TestEmailAncienneAdresseExigee`, `TestEmailNouvelleJetableRefusee`, `TestEmailChangeEmpreintes`, `TestEmailAucunAvisAncienne` (faux SMTP : un seul e-mail, vers la nouvelle), `TestEmailNouvelleDejaPrise`, `TestExportSansAdresse` ; **suppression** : `TestSuppressionEfface` (lignes, coffres, séquestre, empreinte du pseudo ; `wal_checkpoint(TRUNCATE)` ; octets absents du fichier et du WAL après fermeture ; ligne `bannis` gardée ; pseudo libre aussitôt) ; `TestInactifs13Mois` ; `TestBannisEchus`.
 - [ ] **Step 3 :** `go test -race ./internal/compte/` → FAIL.
 - [ ] **Step 4 :** implémenter ; version exacte dans `go.mod` ; `govulncheck ./...` vert.
-- [ ] **Step 5 :** `go test -race ./...`, `make test-go`, `make test-e2e` → PASS ; commit `feat(compte): double authentification TOTP, code de secours, mot de passe oublié`.
+- [ ] **Step 5 :** `go test -race ./...`, `make test-go`, `make test-e2e` → PASS ; commit `feat(compte): récupération par e-mail sans perte du profil, double authentification avec attente, paramètres, suppression`.
 
-### Task 8 : paramètres côté serveur (coffre, mot de passe, adresse, export, suppression)
+## Lot 6 — Serveur : salon ↔ compte, salons du compte, signalements par catégorie
+
+*Livrable seul : avec `SHH_COMPTES=0`, seule la catégorie de signalement change (facultative, absente = « Autre »). Dépend de : lot 5.*
 
 **Files :**
-- Create : `server/internal/compte/parametres.go`, `server/internal/compte/effacement.go` (comptes inactifs, bannis échus)
-- Modify : `server/internal/api/handlers_compte.go`, `server/internal/janitor/janitor.go` (passe quotidienne : `compte.Effacer(now)`)
-- Test : `server/internal/compte/parametres_test.go`, `server/internal/compte/effacement_test.go`
+- Modify : `server/internal/salon/{manager.go,reglages.go,fin.go,relais.go}`, `server/internal/api/{handlers_salon.go,handlers_manage.go}` (ou le fichier qui sert `destroy`), `server/internal/api/minimize_test.go`, `server/internal/compte/service.go`, `server/internal/usage/usage.go` (compteurs par catégorie)
+- Create : `server/internal/compte/salons.go` (`ref` éphémères)
+- Test : `server/internal/salon/compte_test.go`, `server/internal/api/{salon_compte_test.go,signaler_test.go}`
 
 **Interfaces :**
-- Produces : `Etat(c) (EtatCompte, error)` (`EtatCompte{ CreeLe, ConfirmeLe string; Palier string; Limites Limites; SalonsActifs int; TOTP, Banni bool }`, `Limites{ Salons, Places, Heures int }`) ; `LireCoffre(c) ([]byte, uint64, error)` ; `EcrireCoffre(c, ifGen uint64, blob []byte) (uint64, error)` (`ErrConflit{Gen}` ; palier exact exigé) ; `ChangerMdp(c, aAuth, envMdp) error` ; `EmailDebut(c, ip, actuel, nouveau, langue string) ([32]byte, error)` ; `EmailFin(c, etape, code string, aAuth [32]byte, envMdp [60]byte) error` ; `Export(c) (Export, error)` ; `Supprimer(c) (salonsFermes int, err error)` (ferme les salons par le crochet `Config.FermerSalons func(h [16]byte) (int, error)`, nil jusqu'à la Task 9 qui le branche sur `salon.Manager.FermerDuCompte` ; nil → 0 salon) ; `Effacer(now time.Time) (int, error)`.
-- [ ] **Step 1 : tests** — `TestCoffrePaliers` (4/16/64/256 Kio acceptés ; 1 octet de plus, 512 Kio → 400) ; `TestCoffreConflit` ; `TestCoffre60ParHeure` ; `TestChangerMdpFermeAutres` ; `TestChangerMdpExigeRecent` ; `TestEmailAncienneAdresseExigee` ; `TestEmailNouvelleJetableRefusee` ; `TestEmailChangeEmpreintes` (connexion par la nouvelle avec le nouvel `A_auth`, l'ancienne → `ErrIdentifiants`) ; `TestEmailAvisAncienne` (faux SMTP : modèle « adresse changée » à l'ancienne) ; `TestEmailNouvelleDejaPrise` (même réponse, aucun code valable) ; `TestExportSansAdresse` (aucune empreinte, aucun champ d'adresse dans l'export) ; `TestSuppressionEfface` (lignes `comptes` et `sessions` effacées, `wal_checkpoint(TRUNCATE)`, octets de `blob` absents du fichier et du WAL après fermeture ; ligne `bannis` gardée) ; `TestInactifs13Mois` ; `TestBannisEchus3Ans`.
-- [ ] **Step 2 :** `go test -race ./internal/compte/` → FAIL.
-- [ ] **Step 3 :** implémenter.
+- de la version 1 (Task 9) : `CreerReq.Compte`, `SalonsDuCompte`, `CompteDuSalon`, `FermerDuCompte`, `Palier`, `Signale`, réponses `409 palier`, `401 compte_requis`, `403 banni`.
+- `SalonsVivantsDuCompte(h) ([]SalonVue, error)` (`expire_vers` au quart d'heure, `places`, `sieges`) ; `compte.Service.SalonsListe(c) ([]SalonRef, error)` (`ref` 16 octets, 10 min, en mémoire) ; `DetruireParRef(c, ref)`.
+- Signalement : `POST /api/salons/signaler` `{ "categorie": n }` (1 à 10 ; `{}` compté comme 10, « Autre ») ; `destroy` d'un partage : `{ "reason": "report", "categorie": n }` (catégorie absente : 10) ; `salon.Manager.Signalements(salon)` en mémoire (par catégorie), effacé avec le salon ; `usage` : compteur par catégorie et par sorte.
+
+- [ ] **Step 1 : tests** — de la version 1 (Task 9) : `TestCreationSansSessionRefusee`, `TestCreationSansComptesInchangee`, `TestPalierNeuf`, `TestPalierConfirme`, `TestReglagesSuiventLePalier`, `TestSignalementRemetAZero`, `TestSessionJamaisLueAilleurs`, `TestSuppressionFermeSalons`, `TestColonneCompteEffaceeAvecLeSalon` ; **nouveaux** : `TestSalonsDuCompteSansIdentifiant` (réponse : `ref` aléatoire, aucune valeur de la ligne `salons` ni de `access_v`/`manage_v`) ; `TestRefExpire10Min` ; `TestRefDUnAutreCompteRefusee` ; `TestCategorieBornes` (0, 11, texte, `null` → 400 ; absente → comptée 10 ; `categorie` sans `reason: "report"` → 400) ; `TestCategorieJamaisSurDisque` (`shares.db` après signalement : aucune colonne, aucune valeur) ; `TestSignalementsDuSalonOubliesALaFin` ; `TestCompteursParCategorie` (`usage` : un entier par catégorie et par sorte).
+- [ ] **Step 2 :** `go test -race ./internal/salon/ ./internal/api/ ./internal/usage/` → FAIL.
+- [ ] **Step 3 :** implémenter (compte lu dans la même transaction que le décompte des salons vivants).
 - [ ] **Step 4 :** `go test -race ./...`, `make test-go`, `make test-e2e` → PASS.
-- [ ] **Step 5 :** commit `feat(compte): coffre, mot de passe, adresse, export, suppression, effacement des inactifs`.
+- [ ] **Step 5 :** commit `feat(salon): création réservée aux comptes, paliers, salons du compte, signalements par catégorie`.
 
-### Task 9 : salon ↔ compte (création, paliers, signalement, fermeture)
+## Lot 7 — Serveur : bannissement révisé et tableau de bord finalisé
 
-**Files :**
-- Modify : `server/internal/salon/manager.go` (`CreerReq.Compte *[16]byte` ; `SalonsDuCompte`, `CompteDuSalon`), `server/internal/salon/reglages.go`, `server/internal/salon/fin.go` (`FermerDuCompte`), `server/internal/salon/relais.go` (`QuitterSignaler` rend le compte), `server/internal/api/handlers_salon.go`, `server/internal/api/minimize_test.go` (`X-Shh-Session` lu aussi par `handlers_salon.go`, création seulement), `server/internal/compte/service.go` (`Palier`, `Signale`)
-- Test : `server/internal/salon/compte_test.go`, `server/internal/api/salon_compte_test.go`
-
-**Interfaces :**
-- Consumes : `compte.Service.Session`, `Etat`.
-- Produces : `func (m *Manager) SalonsDuCompte(h [16]byte) (int, error)` (vivants) ; `func (m *Manager) CompteDuSalon(kAcces []byte) (*[16]byte, error)` ; `func (m *Manager) FermerDuCompte(h [16]byte) (int, error)` (raison « fermé par l'administrateur », WebSocket coupés, comme `DetruireAdmin`) ; `func (s *Service) Palier(h [16]byte) (Limites, error)` ; `func (s *Service) Signale(h [16]byte) error` (`compte_des` = aujourd'hui) ; réponse `409 {"error":"palier","salons":n,"places":n,"heures":n}`, `401 compte_requis`, `403 banni`.
-- [ ] **Step 1 : tests** — `TestCreationSansSessionRefusee` (`SHH_COMPTES=1` : 401) ; `TestCreationSansComptesInchangee` (`SHH_COMPTES=0` : comportement actuel, aucun en-tête lu) ; `TestPalierNeuf` (2ᵉ salon vivant → 409 ; `max_members` 5 → 409 ; 4 → 201) ; `TestPalierConfirme` (horloge + 7 jours : 3 salons, 10 places ; 4ᵉ → 409) ; `TestReglagesSuiventLePalier` (places 5 sur un compte neuf → 409, sans session) ; `TestSignalementRemetAZero` ; `TestSessionJamaisLueAilleurs` (requêtes `rejoindre`, `ws`, `gestion`, `reglages`, `exclure`, `detruire`, `signaler`, `pieces` portant `X-Shh-Session` : en-tête ignoré, aucune différence de réponse) ; `TestSuppressionFermeSalons` ; `TestColonneCompteEffaceeAvecLeSalon`.
-- [ ] **Step 2 :** `go test -race ./internal/salon/ ./internal/api/` → FAIL.
-- [ ] **Step 3 :** implémenter ; le compte est lu dans la même transaction que le décompte des salons vivants (pas de course entre deux créations).
-- [ ] **Step 4 :** `go test -race ./...`, `make test-go`, `make test-e2e` → PASS.
-- [ ] **Step 5 :** commit `feat(salon): création réservée aux comptes, paliers d'ancienneté, signalement`.
-
-### Task 10 : bannissement (tableau de bord et ligne de commande)
+*Livrable seul : le tableau de bord reste désactivé par défaut (`SHH_ADMIN_LISTEN` vide). Dépend de : lot 6.*
 
 **Files :**
-- Modify : `server/internal/adminui/adminui.go` (`Config.Bannir`, `Config.Lever`, `Config.RendreAnciennete` ; routes `POST /api/bannir`, `POST /api/lever`, `POST /api/anciennete`), `server/internal/adminui/page/{index.html,admin.js,admin.css}`, `server/cmd/shhdrop/admin.go` (`bannir -`, `lever -`), `server/cmd/shhdrop/admin_serve.go`, `server/internal/compte/bannir.go` (nouveau)
-- Test : `server/internal/adminui/adminui_test.go`, `server/cmd/shhdrop/admin_serve_test.go`, `server/internal/compte/bannir_test.go`
+- Create : `server/internal/compte/bannir.go`, `server/internal/compte/agregats.go`
+- Modify : `server/internal/adminui/adminui.go` (routes de la conception §21.14.5), `server/internal/adminui/page/{index.html,admin.js,admin.css}` (onglets de §21.14.1), `server/cmd/shhdrop/{admin.go,admin_serve.go}` (`bannir -`, `bannis …`), `docs/superpowers/specs/2026-11-13-tableau-de-bord-admin-design.md` (ligne de renvoi datée vers §21.14)
+- Test : `server/internal/compte/{bannir,agregats}_test.go`, `server/internal/adminui/adminui_test.go`, `server/cmd/shhdrop/admin_serve_test.go`
 
 **Interfaces :**
-- Produces : `func (s *Service) Bannir(h [16]byte, now time.Time) error` (transaction : `banni = 1`, ligne `bannis` 3 ans, sessions effacées) ; `func (s *Service) Lever(email []byte) (bool, error)` (tampon effacé au retour) ; `func (s *Service) RendreAnciennete(h [16]byte) error` ; réponses fixes `{"banni":"compte","salons_fermes":n}`, `{"banni":"aucun"}`, `{"leve":true|false}`, `{"anciennete":"rendue"|"aucun"}`.
-- [ ] **Step 1 : tests** — `TestBannirFermeLesSalonsOuverts` (deux salons dont un avec WebSocket ouvert : fermés, `4xxx`/raison reçue, création suivante → 403 `banni`, réinscription de la même adresse → réponse uniforme, e-mail « banni ») ; `TestBanniPeutExporterEtSupprimer` ; `TestBannirSalonSansCompte` (`aucun`) ; `TestLeverParAdresse` ; `TestPageSansAdresse` (la page et les réponses ne contiennent jamais l'adresse tapée, une empreinte ni `h` : recherche des repères dans les corps) ; `TestRefusUniforme` étendu aux nouvelles routes (jeton faux) ; `TestAdminBannirStdin`.
+- `Bannir(cible Cible, dureeJours int, motif uint8, now) (Ban, error)` où `Cible` = lien de salon, adresse (octets, tampon effacé) ou `ref` de salon signalé ; `ActionBan(id [8]byte, action, jusqu *Jour) (avant, apres BanVue, err)` (`suspendre`, `reactiver`, `echeance`, `lever`, `annuler`) ; `ChercherBan(email []byte) (*BanVue, CompteVue, error)` ; `ListeBans(filtre, page)` ; `Agregats(now) AgregatsComptes` (liste de §21.14.2) ; `SalonsSignales() []SalonSignaleVue` (§21.14.3).
+- `BanVue{ ID string ("B-XXXX-XXXX"); Debut, Jusqu string; Actif bool; Motif uint8; SalonsFermes int }` ; `CompteVue{ Existe bool; Palier string; AncienneteJours int; Banni bool }` — **aucun** champ d'adresse, d'empreinte, de `h`, de pseudo.
+
+- [ ] **Step 1 : tests** — `TestBannirFermeLesSalonsOuverts` (version 1) ; `TestBannirDepuisRefSignale` ; `TestBannirParAdresse` ; `TestDurees` (30, 365, 1 095 jours ; autre → 400) ; `TestSuspendreReactiver` (suspendu : réinscription et création permises ; échéance inchangée) ; `TestEcheanceBornes` (hier, aujourd'hui + 5 ans + 1 jour → 400) ; `TestLever` ; `TestAnnulerRendAnciennete` ; `TestVingtBannissementsParHeure` ; `TestMotifMontreALaConnexion` (`GET /api/compte` : `banni_jusqu`, `banni_motif`) ; `TestAgregatsQueDesEntiers` ; `TestSalonsSignalesSansHeureDeCreation` (seulement « < 6 h » ou « 6 à 24 h ») ; `TestPageSansIdentite` (toutes les réponses et la page : aucune adresse tapée, `e_canon`, `h`, `p_empreinte`, pseudo, IP, lien) ; `TestRefusUniforme` étendu ; `TestAdminBannirStdin` (lien et adresse).
 - [ ] **Step 2 :** `go test -race ./internal/adminui/ ./internal/compte/ ./cmd/shhdrop/` → FAIL.
-- [ ] **Step 3 :** implémenter ; mêmes protections que `destroy` (tampon fixe, effacé).
+- [ ] **Step 3 :** implémenter ; captures de la page (clair, sombre, 390 px) jointes au rapport.
 - [ ] **Step 4 :** `go test -race ./...`, `make test-go`, `make test-e2e` → PASS.
-- [ ] **Step 5 :** commit `feat(admin): bannir le créateur d'un salon signalé, lever un bannissement`.
+- [ ] **Step 5 :** commit `feat(admin): bannissements modifiables, signalements par catégorie, comptes et statistiques`.
 
-### Task 11 : module de compte du site (`web/src/account/`)
+## Lot 8 — Déploiement : sortie SMTP seule, secrets, sauvegarde chiffrée et restauration
+
+*Livrable seul : `SHH_COMPTES` reste `"0"` dans `compose.yaml`. Dépend de : lot 3 (SMTP) ; la sauvegarde ne dépend que du schéma (lot 2).*
 
 **Files :**
-- Create : `web/src/account/api.ts`, `web/src/account/keys.ts` (enveloppes WebCrypto, AD exactes), `web/src/account/vault.ts` (coffre `B`, JSON `v: 1`), `web/src/account/session.svelte.ts`, `web/src/account/persist.ts` (IndexedDB `shhdrop-compte`), `web/src/account/device.ts` (nom d'appareil local), `web/src/account/*.test.ts`
-- Modify : `web/src/source-rules.test.ts` (`X-Shh-Session` seulement dans `web/src/account/` ; aucun `document.cookie` ; `shhdrop-compte` seulement dans `persist.ts`)
+- Modify : `deploy/compose.yaml` (secrets `shh_comptes_cle`, `shh_smtp_mdp` hors de `/data` ; réseau `sortie`), `deploy/env.example`, `deploy/deploy.sh` (pare-feu : TCP 465 vers `SHH_SMTP_HOST` seulement), `deploy/README.md` (clé du serveur : création, droits, **copie hors ligne séparée** ; SPF, DKIM, DMARC ; sauvegarde et restauration), `Makefile` (`test-sortie`, `test-restauration`)
+- Create : `deploy/test-sortie.sh`, `deploy/sauvegarder.sh` (minuteur systemd quotidien : `sqlite3 … ".backup"` vers le volume chiffré, `age -r <clé publique>`, envoi au stockage objet en écriture seule, clair effacé), `deploy/restaurer.sh`, `deploy/test-restauration.sh`, `deploy/systemd/shhdrop-sauvegarde.{service,timer}`
+
+- [ ] **Step 1 : tests** — `test-sortie.sh` (version 1, Task 17) ; `test-restauration.sh` : base de test avec un compte, sauvegarde, vérification que le fichier commence par `age-encryption.org/v1` et ne contient ni `h` ni repère, effacement, restauration avec la clé privée de test, `PRAGMA integrity_check` = `ok`, connexion du compte de test réussie ; `sauvegarder.sh` refuse de tourner si la clé publique manque ou si le clair temporaire est hors du volume chiffré.
+- [ ] **Step 2 :** `make test-sortie`, `make test-restauration`, `make test-proxy`, `make lint-deploy` → FAIL puis PASS.
+- [ ] **Step 3 :** relecture : `SHH_COMPTES: "0"` ; `age` en version exacte ; stockage objet : compte en écriture seule, règle de cycle de vie 30 jours (décrite dans `deploy/README.md`, faite par l'exploitant) ; démo GitHub Pages sans compte.
+- [ ] **Step 4 :** `make test` → PASS ; push.
+- [ ] **Step 5 :** commit `chore(deploy): sortie SMTP seule, secrets du compte, sauvegarde chiffrée et restauration testée`.
+
+## Lot 9 — Site : module de compte (`web/src/account/`) et drapeau de construction
+
+*Livrable seul : aucun écran ne l'utilise ; `__COMPTES__ = false`. Dépend de : lots 1, 4, 5 (formats).*
+
+**Files :**
+- Create : `web/src/account/{api.ts,keys.ts,vaults.ts,session.svelte.ts,persist.ts,device.ts}` et tests voisins
+- Modify : `web/vite.config.ts` (`define: { __COMPTES__: … }`, `false` par défaut et dans la démo), `web/src/env.d.ts`, `web/src/source-rules.test.ts` (`X-Shh-Session`, `s_profil` et `shhdrop-compte` seulement dans `web/src/account/` ; aucun `document.cookie`)
 
 **Interfaces :**
-- Consumes : Task 1 (`normaliserAdresse`, `deriverCompte`, `deriverSecours`, `cleBlob`, `cleAppareil`, `secoursEncoder`, `secoursLire`).
-- Produces : `inscrire(debut: { email, langue, preuve }): Promise<{ h, etape }>` ; `confirmer(etape, code, mdp, profil: Profil, persistante): Promise<{ codeSecours: string }>` ; `seConnecter(email, mdp, persistante): Promise<"ok" | { totp: Etape }>` ; `validerTotp(etape, code)` ; `recuperer…` (trois fonctions de la conception §10.3) ; `account: { etat: "absent" | "verrouille" | "ouvert"; profil?: Profil; salons?: SalonCompte[] }` ; `ajouterSalon(sGestion: Uint8Array, libelle?: string)` ; `type Profil = { pseudo: string; photo: Uint8Array | null }` ; écriture du coffre avec `if_gen`, relecture et fusion sur 409 ; refus d'un `gen` plus petit que le plus grand vu.
-- [ ] **Step 1 : tests** — `keys.test.ts` (vecteurs `enveloppes` et `coffre` de `compte.json`) ; `vault.test.ts` (aller-retour ; paliers ; 64 Ko de photo tiennent dans 256 Kio ; « deux écritures concurrentes fusionnées » ; `gen` plus petit refusé) ; `session.test.ts` (déconnexion efface `shhdrop-compte` et les clés ; « Rester connecté » décoché : rien dans IndexedDB) ; `api.test.ts` (aucune requête du module ne vise `/api/shares`, `/api/manage`, ni `/api/salons` hors `POST /api/salons`) ; `source-rules.test.ts` étendu.
+- `inscrire`, `confirmer(etape, code, mdp, profil: Profil, persistante)` (tire `K_compte` et `s_profil`, construit les deux coffres, calcule `p_canon`), `seConnecter`, `validerTotp`, `oubli.{debut, verifier, fin}`, `pseudoLibre(p)`, `changerPseudo(p)`, `account: { etat: "absent" | "verrouille" | "ouvert"; profil?: Profil; prive?: CoffrePrive }`, `ecrireProfil(patch)`, `ecrirePrive(patch, { differe: boolean })` (délai aléatoire 2 à 12 min si `differe`), fusion sur 409, refus d'un `gen` plus petit ; `type Profil = { pseudo: string; photo: Uint8Array | null; langue: string; reglages: Reglages; pass: string | null }`.
+
+- [ ] **Step 1 : tests** — `keys.test.ts` (vecteurs `enveloppes`, `coffre_prive`, `coffre_profil`) ; `vaults.test.ts` (aller-retour, paliers, photo de 64 Ko dans 256 Kio, deux écritures concurrentes fusionnées pour chaque coffre, `gen` plus petit refusé, rien de `prive` dans `profil`) ; `session.test.ts` (déconnexion efface `shhdrop-compte`, `K_compte`, `s_profil`) ; `api.test.ts` (aucune requête vers `/api/shares`, `/api/manage`, ni `/api/salons` hors `POST /api/salons`) ; `source-rules.test.ts` étendu ; build de la démo : aucune chaîne `/api/compte` dans `dist/`.
 - [ ] **Step 2 :** `cd web && npx vitest run src/account` → FAIL.
-- [ ] **Step 3 :** implémenter (clés AES-GCM importées non extractibles, tampons mis à zéro au mieux).
+- [ ] **Step 3 :** implémenter.
 - [ ] **Step 4 :** `make test-web` → PASS.
-- [ ] **Step 5 :** commit `feat(site): module de compte, clés et coffre chiffrés sur l'appareil`.
+- [ ] **Step 5 :** commit `feat(site): module de compte, deux coffres chiffrés sur l'appareil`.
 
-### Task 12 : pages Inscription et Connexion
+## Lot 10 — Site : inscription, connexion, mot de passe oublié
 
-**Files :**
-- Create : `web/src/routes/compte/Inscription.svelte`, `web/src/routes/compte/Connexion.svelte`, `web/src/ui/RecoveryCode.svelte` (affichage unique, Copier, Télécharger, confirmation des 4 derniers caractères), `web/src/ui/CodeField.svelte` (6 chiffres, `one-time-code`), `web/src/ui/AvatarPicker.svelte` (recadrage, ré-encodage 256 × 256, ≤ 64 Ko, par `web/src/media/`), tests `*.test.ts` voisins
-- Modify : `web/src/app/router.svelte.ts` (`/compte`, `/compte/inscription`, `/compte/connexion`, `/compte/oubli` → routes `compte`, `inscription`, `connexion`, `oubli` ; `suite=salon` seul paramètre lu), `web/src/App.svelte`, `web/src/app/title.ts`, `web/src/app/seo.ts` (`noindex`), `web/src/i18n/fr.ts`, `web/src/i18n/en.ts`
-
-**Interfaces :**
-- Consumes : Task 11.
-- Produces : clés `account.signup.*`, `account.login.*`, `account.err.*` (textes exacts de la conception §12.1, §12.2).
-- [ ] **Step 1 : tests** — `router.test.ts` (quatre chemins ; `/compte/x` → 404 ; aucun secret ni adresse dans `location`) ; `Inscription.test.ts` (chaque message d'erreur exact ; focus sur le premier champ en erreur ; `autocomplete` exacts ; bouton « Renvoyer le code » actif après 60 s ; impossible de quitter l'étape du code de secours sans les 4 caractères) ; `Connexion.test.ts` (étape TOTP ; « Adresse ou mot de passe incorrect. » ; compte suspendu) ; `RecoveryCode.test.ts` ; `i18n.test.ts` (clés présentes en `fr` et `en`) ; `no-analytics.test.ts` vert.
-- [ ] **Step 2 :** `cd web && npx vitest run src/routes/compte src/ui/RecoveryCode src/app/router` → FAIL.
-- [ ] **Step 3 :** implémenter avec les composants existants (`TextField`, `PassphraseField`, `Button`, `Banner`, `LiveRegion`).
-- [ ] **Step 4 :** `make test-web` → PASS ; `make test-ui` : captures des deux pages (clair, sombre, 360 px, 1 280 px) jointes au rapport de tâche.
-- [ ] **Step 5 :** commit `feat(site): pages d'inscription et de connexion`.
-
-### Task 13 : page Mot de passe oublié
+*Livrable seul : pages présentes seulement si `__COMPTES__`. Dépend de : lot 9.*
 
 **Files :**
-- Create : `web/src/routes/compte/Oubli.svelte`, `web/src/routes/compte/Oubli.test.ts`
-- Modify : `web/src/i18n/fr.ts`, `web/src/i18n/en.ts`
+- Create : `web/src/routes/compte/{Inscription,Connexion,Oubli}.svelte`, `web/src/ui/{CodeField,AvatarPicker,PseudoField}.svelte`, tests voisins
+- Modify : `web/src/app/router.svelte.ts` (`/compte`, `/compte/inscription`, `/compte/connexion`, `/compte/oubli`, `/compte/profil` ; `suite=salon` seul paramètre), `web/src/App.svelte`, `web/src/app/title.ts`, `web/src/app/seo.ts` (`noindex`), `web/src/i18n/{fr,en}.ts`
+
+- [ ] **Step 1 : tests** — `router.test.ts` (chemins ; `/compte/x` → 404 ; rien dans `location`) ; `Inscription.test.ts` (erreurs exactes de §12.1 ; vérification du pseudo après 400 ms ; « Déjà pris » ; **aucune étape de code de secours** ; messages d'état de §21.3 après le code juste) ; `Connexion.test.ts` (étape TOTP ; « Adresse ou mot de passe incorrect. » ; compte suspendu avec date et motif) ; `Oubli.test.ts` (adresse exacte ; « Je n'ai plus mon application » → texte d'attente exact de §21.2.4 ; bandeau de §21.15.6 avant validation ; `attente` affichée) ; `i18n.test.ts` ; `no-analytics.test.ts` vert.
+- [ ] **Step 2 :** `cd web && npx vitest run src/routes/compte src/ui/CodeField src/ui/PseudoField src/app/router` → FAIL.
+- [ ] **Step 3 :** implémenter avec `TextField`, `PassphraseField`, `Button`, `Banner`, `LiveRegion`.
+- [ ] **Step 4 :** `make test-web` → PASS ; `make test-ui` : captures (clair, sombre, 360 px, 1 280 px).
+- [ ] **Step 5 :** commit `feat(site): inscription, connexion et récupération par e-mail`.
+
+## Lot 11 — Site : historique de l'appareil étendu et synchronisation
+
+*Livrable seul : sans compte, l'historique gagne les partages reçus (visibles au lot 12). Dépend de : lot 9 (pour la synchronisation seulement).*
+
+**Files :**
+- Modify : `web/src/history/store.ts` (champ `sorte` : `envoi` | `recu` | `salon_cree` | `salon_rejoint` ; champ `origine` ; migration des entrées existantes en `envoi`/`local` ; champs de §21.7 ; `clean` refuse tout mot de passe, nom d'élément ou contenu), `web/src/history/live.svelte.ts`, `web/src/flows/` (ouverture réussie → entrée `recu` si le réglage le permet ; case « Garder dans mon accueil »), `web/src/account/vaults.ts` (fusion historique ↔ `B_prive`, retour des entrées `local` après une récupération)
+- Test : `web/src/history/{store,live}.test.ts`, `web/src/account/sync.test.ts`
+
+- [ ] **Step 1 : tests** — migration (anciennes entrées intactes) ; `clean` (champ `password`, `names`, `items` ignorés ; `K_lien` accepté seulement pour `recu`, `salon_*`) ; ouverture d'un partage → entrée `recu` (sans mot de passe) ; case décochée → rien ; synchronisation : écriture différée de 2 à 12 min (horloge simulée), fusion, entrées `compte` retirées à la déconnexion, `local` gardées ; après `oubli/fin` : entrées `local` réécrites dans le nouveau coffre privé.
+- [ ] **Step 2 :** `cd web && npx vitest run src/history src/account/sync` → FAIL.
+- [ ] **Step 3 :** implémenter ; la page Confidentialité n'est pas encore changée (lot 16).
+- [ ] **Step 4 :** `make test-web` → PASS.
+- [ ] **Step 5 :** commit `feat(site): historique de l'appareil à quatre sortes, synchronisé dans le coffre privé`.
+
+## Lot 12 — Site : accueil connecté
+
+*Livrable seul : l'accueil connecté n'apparaît qu'avec une session (`__COMPTES__`) ; sans compte, ce lot ajoute à `/envois` le filtre « Reçus » (même `InboxRow`), visible de tous. Dépend de : lots 11 et, pour l'accueil connecté, 10. Les entrées « salon » s'affichent avec les écrans du salon (C-3, C-5).*
+
+**Files :**
+- Create : `web/src/routes/home/Inbox.svelte`, `web/src/ui/{InboxRow,InboxDetail,NewSheet,Avatar}.svelte`, tests voisins
+- Modify : `web/src/routes/Home.svelte` (accueil connecté si session ouverte), `web/src/routes/History.svelte` (filtre « Reçus » sans compte), `web/src/app/tabbar.ts` (onglets connectés de §21.15.1), `web/src/ui/TabIcon.svelte`, `web/src/ui/TopNav.svelte`, `web/src/ui/Icon.ts` (icônes de §21.15, revue du jeu fermé), `web/src/i18n/{fr,en}.ts`
+
+- [ ] **Step 1 : tests** — `Inbox.test.ts` : **aucune requête au chargement** (faux `fetch`) ; filtres « Tout / Salons / Reçus / Envoyés » ; tri ; « Expiré » quand `expiresAt` est passé ; « Rouvrir compte une ouverture » sur une entrée `recu` d'un autre appareil ; retrait au glissement et au clavier ; relecture d'une entrée ≤ 1 par 5 min ; état vide exact ; bandeau après récupération ; `tabbar.test.ts` (quatre onglets connectés) ; `History.test.ts` (filtre « Reçus », aucune requête au chargement) ; 320 px sans défilement horizontal.
+- [ ] **Step 2 :** `cd web && npx vitest run src/routes/home src/ui/InboxRow src/app/tabbar` → FAIL.
+- [ ] **Step 3 :** implémenter (§21.15.1).
+- [ ] **Step 4 :** `make test-web` → PASS ; `make test-ui` : captures téléphone et ordinateur, clair et sombre.
+- [ ] **Step 5 :** commit `feat(site): accueil connecté, liens reçus, salons et envois au même endroit`.
+
+## Lot 13 — Site : profil, paramètres, export, suppression totale
+
+*Livrable seul. Dépend de : lots 10, 11, 6 (`GET salons`).*
+
+**Files :**
+- Create : `web/src/routes/compte/{Profil,Parametres,Supprimer}.svelte`, `web/src/routes/compte/sections/{Email,MotDePasse,DoubleAuth,Appareils,Confidentialite,Abonnement,Recuperation,Donnees}.svelte`, `web/src/ui/TotpSetup.svelte`, `web/src/account/suppression.ts`, tests voisins
+- Modify : `web/src/i18n/{fr,en}.ts`
 
 **Interfaces :**
-- Consumes : Tasks 11, 12 (`RecoveryCode`, `CodeField`).
-- [ ] **Step 1 : tests** — chemin « avec code » (contrôle local « Code mal recopié : vérifiez chaque groupe. » avant toute requête ; case « J'ai aussi perdu mon application ») ; chemin « sans code » (avertissement visible **avant** l'envoi ; champ du code TOTP seulement après `totp_requis` ; pseudo redemandé ; nouveau code de secours) ; « Code expiré. Demandez-en un nouveau. » sur `not_found` ; message « ne peut pas être récupéré » ; textes exacts §12.3.
-- [ ] **Step 2 :** `cd web && npx vitest run src/routes/compte/Oubli` → FAIL.
+- `supprimerTout({ effacerAppareil }): AsyncIterable<Progres>` : (1) `manage/destroy` de chaque `S_gestion` du coffre privé et de l'historique (un par un, sans `X-Shh-Session`) ; (2) départ de chaque salon où une preuve de membre existe ; (3) `POST supprimer` ; (4) effacement local si demandé.
+
+- [ ] **Step 1 : tests** — `Profil.test.ts` (photo : changer, retirer, ≤ 64 Ko ; pseudo : « Disponible », « Déjà pris », `limit` → texte exact ; carte « Votre compte » : date, palier, « Dès le 21 novembre » ; note de confidentialité exacte) ; `Parametres.test.ts` (sections dans l'ordre de §21.15.4 ; boutons désactivés avec la raison pendant `recup_jusqu` ; demande de retrait de la double authentification : bandeau et « Annuler la demande » ; réglages de confidentialité écrits dans le coffre de profil) ; `suppression.test.ts` (ordre exact ; une destruction échouée n'empêche pas les autres et est dite ; aucune requête de destruction ne porte `X-Shh-Session` ; textes de ce qui reste ; pass perdu annoncé) ; export : JSON sans adresse, avec profil et listes.
+- [ ] **Step 2 :** `cd web && npx vitest run src/routes/compte src/account/suppression src/ui/TotpSetup` → FAIL.
 - [ ] **Step 3 :** implémenter.
 - [ ] **Step 4 :** `make test-web` → PASS ; captures `make test-ui`.
-- [ ] **Step 5 :** commit `feat(site): récupération du compte, avec ou sans code de secours`.
+- [ ] **Step 5 :** commit `feat(site): profil, paramètres complets, export et suppression totale`.
 
-### Task 14 : page Paramètres
+## Lot 14 — Site : signalement avec catégories (partage ouvert ; salon avec C-5)
+
+*Livrable seul : utile sans compte. Dépend de : lot 6 (le serveur accepte la catégorie). Le côté salon se branche avec l'écran du salon (C-5) ; ce lot fournit le composant et son test.*
 
 **Files :**
-- Create : `web/src/routes/compte/Parametres.svelte`, `web/src/routes/compte/sections/{Profil,Salons,Securite,Appareils,Donnees}.svelte`, `web/src/ui/TotpSetup.svelte` (QR par `web/src/qr/`, secret groupé, premier code), tests voisins
-- Modify : `web/src/i18n/fr.ts`, `web/src/i18n/en.ts`
+- Modify : `web/src/ui/ReportSheet.svelte` (deux étapes, dix catégories, textes de §21.15.7), `web/src/transfer/api.ts` (`destroy("report", categorie)`), `web/src/routes/Content.svelte`, `web/src/i18n/{fr,en}.ts` ; spécification UI §9.10 et A13 : ligne de renvoi datée vers la conception §21.10
+- Test : `web/src/ui/ReportSheet.test.ts`, `web/src/transfer/api.test.ts`
 
-**Interfaces :**
-- Consumes : Task 11 ; `GET /api/salons/gestion` par le client de salon existant (jeton de gestion `jetonGestion(sGestion)`, salon v3 §15.2).
-- [ ] **Step 1 : tests** — `Parametres.test.ts` : sections dans l'ordre de la conception §12.4 ; palier et date « Dès le 21 novembre » calculés depuis `confirme_le` ; « Détruire » d'un salon avec `InlineConfirm` ; actions sensibles qui redemandent le mot de passe sur `recent` ; double authentification : activation exige un code, lien `otpauth://` sans adresse ni pseudo ; liste des appareils sans IP ni heure ; export : fichier JSON sans adresse, avec pseudo et salons ; suppression : texte avec le nombre de salons ; coffre illisible → bannière d'erreur exacte.
-- [ ] **Step 2 :** `cd web && npx vitest run src/routes/compte/Parametres src/ui/TotpSetup` → FAIL.
+- [ ] **Step 1 : tests** — dix catégories dans l'ordre, au clavier (flèches), « Continuer » désactivé sans choix ; aucune requête avant « Signaler et détruire » ; corps exact `{"reason":"report","categorie":n}` ; bandeau PHAROS pour 1 et 2 seulement ; focus par défaut sur « Annuler ».
+- [ ] **Step 2 :** `cd web && npx vitest run src/ui/ReportSheet src/transfer/api` → FAIL.
 - [ ] **Step 3 :** implémenter.
-- [ ] **Step 4 :** `make test-web` → PASS ; captures `make test-ui`.
-- [ ] **Step 5 :** commit `feat(site): paramètres du compte`.
+- [ ] **Step 4 :** `make test-web`, `make test-e2e` → PASS ; captures.
+- [ ] **Step 5 :** commit `feat(site): signalement par catégorie`.
 
-### Task 15 : textes publics et page Confidentialité
+## Lot 15 — Site : « À télécharger » et historique des téléchargements
 
-**Files :**
-- Modify : `web/src/i18n/fr.ts`, `web/src/i18n/en.ts` (clés de la conception §16 : `home.priv.account.t`, `home.priv.account.p`, `home.fact.account`, `band.2`, `demo.info`, `seo.home`, `seo.confidentialite`, `seo.conditions`, `title.landing`, `foot.tagline`, `settings.about.body`), `web/src/routes/pages/content.ts` (Confidentialité, Conditions, Sécurité), `web/src/routes/pages/content.test.ts`, `web/src/ui/limits-copy.test.ts` si une limite y est citée
-- Modify (spec) : `docs/superpowers/specs/2026-11-03-shhdrop-design.md` (§9.5 lignes des nouvelles maps, §36 lignes S64 à S74, §17 renvoi), `docs/superpowers/specs/2026-11-04-shhdrop-ui-design.md` (§10, renvoi aux textes du compte)
-
-- [ ] **Step 1 : tests** — `content.test.ts` : la page Confidentialité contient le bloc « Si vous créez un compte » (empreinte, mot de passe jamais reçu, fournisseur d'envoi nommé, durées 13 mois et 3 ans, recours) ; aucune page ne contient « ni e-mail », « No email » ni « 100 % » ; « Aucun cookie » toujours présent ; `brand.test.ts` vert.
-- [ ] **Step 2 :** `cd web && npx vitest run src/routes/pages src/i18n` → FAIL.
-- [ ] **Step 3 :** réécrire les textes (formulations de la conception §16 ; anglais au même sens).
-- [ ] **Step 4 :** `make test-web` → PASS.
-- [ ] **Step 5 :** commit `docs(site): textes publics et confidentialité pour le compte (à relire par le juriste)`.
-
-### Task 16 : « le serveur ne voit rien » étendu au compte, parcours de bout en bout
+*Livrable seul : sans compte, indépendant des lots 2 à 14 (peut être avancé). Dépend de : rien.*
 
 **Files :**
-- Create : `web/e2e/compte-sees-nothing.test.ts`, `web/e2e/compte-flow.test.ts`, `web/e2e/smtp.ts` (faux SMTP en TLS sur la boucle locale, certificat de test, codes lus en mémoire)
-- Modify : `web/e2e/server.ts` (option `comptes`: `SHH_COMPTES=1`, fichier de clé temporaire hors du dossier de données, `SHH_SMTP_*` vers le faux SMTP)
+- Create : `web/src/downloads/{store.ts,store.test.ts}` (base `shhdrop-telechargements`, AES-256-GCM, clé non extractible ; 30 jours), `web/src/routes/Downloads.svelte`, `web/src/routes/Downloads.test.ts`
+- Modify : `web/src/routes/Content.svelte` (en-tête « À télécharger », mention d'échéance ; entrée d'historique après chaque `saveItem` réussi), `web/src/app/router.svelte.ts` (`/telechargements`), `web/src/app/tabbar.ts` (onglet Téléchargements), `web/src/source-rules.test.ts` (`shhdrop-telechargements` seulement dans `web/src/downloads/` ; aucun `fetch` dans ce module), `web/src/i18n/{fr,en}.ts`
 
-- [ ] **Step 1 : test bloquant** `compte-sees-nothing.test.ts` : assertions exactes de la conception §14 (repères : adresse `Repere.Adresse+Zq7@Exemple.test` et ses formes, mot de passe, pseudo, photo, nom d'appareil, `A_auth`, `K_compte`, `RK`, `A_s`, secret TOTP, jeton, codes) ; dossier de données, `comptes.db` et son WAL, `shares.db`, stdout, stderr, réponses ; dates au jour ; `X-Shh-Session` absent de toute requête hors `/api/compte/*` et `POST /api/salons` ; faux SMTP sans pseudo ni mot de passe ; après suppression et arrêt, ni `h`, ni `e_canon`, ni octet de `B`. Mémoire du processus : aucun repère de clé ni de mot de passe (l'adresse y passe forcément : exclue de la fouille mémoire, comme l'adresse IP).
-- [ ] **Step 2 :** `compte-flow.test.ts` : inscription → création de salon (`S_gestion` rangé) → connexion sur un « autre appareil » (nouvelle instance, stockage vide) → `S_gestion` retrouvé, rôle de créateur rendu (moteur du salon, `createurRevenu`) → mot de passe oublié avec code (salons gardés dans le coffre) → sans code (coffre vidé, ancienneté gardée) → bannissement par le tableau de bord → salon fermé, création refusée.
-- [ ] **Step 3 :** `make test-e2e` → PASS (bloque toute mise en ligne).
-- [ ] **Step 4 :** `make test` → PASS.
-- [ ] **Step 5 :** commit `test(compte): le serveur ne voit rien, étendu au compte ; parcours complet`.
+- [ ] **Step 1 : tests** — entrée créée seulement après un enregistrement réussi (annulé ou échoué : rien) ; champs exacts (nom, taille, sorte, source, date ; jamais lien, clé, mot de passe) ; stockage chiffré (`fake-idb` : aucun nom en clair dans `raw()`) ; 30 jours ; réglage coupé → rien d'écrit ; « Effacer tout » ; page : groupes par jour, états vide et désactivé, textes exacts de §21.15.5 ; 320 px.
+- [ ] **Step 2 :** `cd web && npx vitest run src/downloads src/routes/Downloads` → FAIL.
+- [ ] **Step 3 :** implémenter.
+- [ ] **Step 4 :** `make test-web` → PASS ; captures.
+- [ ] **Step 5 :** commit `feat(site): à télécharger et historique des téléchargements sur l'appareil`.
 
-### Task 17 : déploiement (sortie SMTP seule, secrets, DNS, sauvegarde)
+## Lot 16 — Textes publics, « le serveur ne voit rien » étendu, parcours complet
+
+*Livrable seul : bloque toute activation publique. Dépend de : lots 1 à 15.*
 
 **Files :**
-- Modify : `deploy/compose.yaml` (`SHH_COMPTES: "0"` ; secret `shh_comptes_cle` et `shh_smtp_mdp` montés en lecture seule hors de `/data` ; second réseau `sortie` non interne), `deploy/env.example` (variables SMTP, pas de secret), `deploy/deploy.sh` (règles du pare-feu : seule sortie TCP 465 vers les adresses de `SHH_SMTP_HOST`, résolution DNS par la machine ; mise à jour des adresses à chaque déploiement), `deploy/README.md` (création de la clé `head -c 32 /dev/urandom`, droits, **sauvegarde hors ligne de la clé**, SPF, DKIM, DMARC du fournisseur, copie chiffrée quotidienne de `comptes.db` par `sqlite3 … ".backup"` sur la machine puis chiffrement avant transfert ; restauration), `Makefile` (`test-sortie`)
-- Create : `deploy/test-sortie.sh`
+- Create : `web/e2e/compte-sees-nothing.test.ts`, `web/e2e/compte-flow.test.ts`, `web/e2e/smtp.ts`
+- Modify : `web/e2e/server.ts` (option `comptes`), `web/src/i18n/{fr,en}.ts` et `web/src/routes/pages/content.ts` (textes de la conception §16 et §21.18), `web/src/routes/pages/content.test.ts` ; spécification principale (§6, §33, §36 S14, S21, S64 à S82, §37.4, §38.4, §39.4, §39.5, D42-26 point 5 : amendements datés listés en fin de spécification)
 
-- [ ] **Step 1 : test** `deploy/test-sortie.sh` : depuis un conteneur sur le réseau `sortie` avec les mêmes règles, TCP 465 vers l'hôte SMTP de test ouvert ; TCP 443 vers un autre hôte, TCP 25, UDP 53 vers un résolveur extérieur : refusés ; le conteneur du serveur n'a toujours aucun port publié ; `make lint-deploy` vert.
-- [ ] **Step 2 :** `make test-sortie`, `make test-proxy`, `make lint-deploy` → PASS.
-- [ ] **Step 3 :** relecture : `SHH_COMPTES` reste à `"0"` dans `compose.yaml` (activation publique : décision D8, après le juriste) ; démo GitHub Pages sans compte (`npm run build:demo` : aucune route `/compte`).
-- [ ] **Step 4 :** `make test` → PASS ; push sur `main`.
-- [ ] **Step 5 :** commit `chore(deploy): sortie SMTP seule, secrets du compte, sauvegarde (compte désactivé)`.
+- [ ] **Step 1 : test bloquant** `compte-sees-nothing.test.ts` : assertions de la conception §14 **et** §21.17 (pseudo et photo repères, `s_profil`, e-mails égaux au modèle dans les cinq cas, liens repères seulement dans `blob_prive` chiffré, réponses du tableau de bord, fichier de sauvegarde `age`, catégorie jamais sur disque) ; après suppression et arrêt : ni `h`, ni `e_canon`, ni `p_empreinte`, ni octet des coffres.
+- [ ] **Step 2 :** `compte-flow.test.ts` : inscription → création de salon → ouverture d'un partage reçu (entrée `recu`) → connexion sur un autre appareil (listes retrouvées) → mot de passe oublié (profil gardé, coffre privé vidé, entrées de l'appareil revenues) → tentative de changement d'adresse refusée (`attente`) → horloge + 7 jours → suppression totale (salon fermé pour un autre membre, partage créé détruit) → réinscription de la même adresse permise ; bannissement depuis la liste des salons signalés → création refusée, motif affiché.
+- [ ] **Step 3 :** `content.test.ts` : Confidentialité (séquestre du profil, deux coffres, sauvegardes 30 jours, catégories, motif, attente de 7 jours, fournisseur nommé) ; aucune page avec « ni e-mail », « No email », « 100 % » ; « Aucun cookie » présent.
+- [ ] **Step 4 :** `make test-e2e`, `make test` → PASS.
+- [ ] **Step 5 :** commit `test(compte): le serveur ne voit rien, étendu ; parcours complet ; textes publics (à relire par le juriste)`.
 
 ---
 
+## Ordre et dépendances (résumé)
+
+| Lot | Dépend de | Peut être poussé sans changer le site public |
+|---|---|---|
+| 1 Moteur | — | oui |
+| 2 Socle serveur | 1 | oui |
+| 3 Courriel, limites | 2 | oui |
+| 4 Inscription, connexion, pseudo, coffres | 2, 3 | oui (`SHH_COMPTES=0`) |
+| 5 Récupération, double authentification, paramètres, suppression | 4 | oui |
+| 6 Salon ↔ compte, signalements par catégorie | 5 | oui (catégorie facultative) |
+| 7 Bannissement, tableau de bord | 6 | oui (tableau de bord désactivé par défaut) |
+| 8 Déploiement, sauvegarde | 2, 3 | oui (`SHH_COMPTES: "0"`) |
+| 9 Module de compte du site | 1, 4, 5 | oui (`__COMPTES__ = false`) |
+| 10 Pages d'accès | 9 | oui |
+| 11 Historique étendu | 9 (synchro) | oui (entrées « reçus » invisibles jusqu'au lot 12) |
+| 12 Accueil connecté | 11 (10 pour la partie connectée) | **change le site public** (filtre « Reçus » de `/envois`) |
+| 13 Profil, paramètres, suppression | 10, 11, 6 | oui |
+| 14 Signalement par catégorie | 6 | **change le site public** (nouvelle feuille) : à pousser quand le serveur du lot 6 est en ligne |
+| 15 Téléchargements | — | **change le site public** (nouvel onglet) : peut être avancé |
+| 16 Textes, e2e | 1 à 15 | change les textes publics : à pousser juste avant l'activation |
+
+Activation publique (`SHH_COMPTES=1`, `__COMPTES__ = true`) : **décision D8**, après le juriste (R15 à R18) et le test bloquant du lot 16.
+
 ## Auto-relecture (faite)
 
-- **Couverture de la conception** : §5 (Tasks 1, 3) ; §6 et §7 (1, 11) ; §8.1 (2) ; §8.2 (2, 3) ; §8.3 (5, 6, 7) ; §8.4 (7) ; §8.5 (6) ; §8.6 (6 à 9) ; §8.7 (6, 7) ; §8.8 (5) ; §9 (11) ; §10 (12, 13, 16) ; §11 (9) ; §12 (12 à 14) ; §12.5 (4) ; §13 (10) ; §14 (15, 16) ; §15 (4, 6, 9, 11) ; §16 textes (15) — le volet juridique reste au juriste ; §17 (1, 6) ; §18 démo et DNS (17). Le bouton « Créer un salon » des écrans du salon (C-5) n'est pas ici : il appellera `ajouterSalon` et la page `/compte/connexion?suite=salon`.
-- **Types** : `Adresse`, `Cles`, `Donnees`, `OptionsSession`, `Ouverture`, `Courante`, `Limites`, `EtatCompte` gardent les mêmes noms d'une tâche à l'autre ; `h` est toujours `[16]byte`, empreintes et `A_auth` `[32]byte`, enveloppes `[60]byte`.
-- **Proportion** : aucune fonction écrite en entier ; valeurs fixées une fois (Global Constraints) ; textes renvoyés à la conception.
+- **Couverture de la conception** : §5 (lots 1, 2) ; §6 et §21.2.2 (1, 4, 9) ; §8.1 (2) ; §21.6.1 (2) ; §8.3, §8.8 (3, 4, 5) ; §8.4 et §21.2.4 (5) ; §8.5 (4) ; §21.6.2 (4 à 6) ; §21.3 (3, 4) ; §21.5 (1, 2, 4, 10, 13) ; §11 (6) ; §21.7, §21.8 (11, 12) ; §21.9 (15) ; §21.10 (6, 14) ; §21.11 (7) ; §21.12 (5, 13) ; §21.13 (8) ; §21.14 (7) ; §21.15 (10, 12 à 15) ; §21.16, §21.17 (16) ; §16, §21.18 textes (16 ; le volet juridique reste au juriste) ; §17 (1, 4, formats communs). Le bouton « Créer un salon » et les entrées « salon » de l'accueil dépendent des écrans du salon (C-3, C-5), hors de ce plan.
+- **Retiré de la version 1** : code de secours (moteur, routes, écrans, vecteurs), modèles d'e-mail « déjà inscrit », « banni », « adresse changée », coffre unique `blob`.
+- **Types** : `Adresse`, `Cles`, `Donnees`, `DonneesOubli`, `OptionsSession`, `Ouverture`, `Courante`, `Limites`, `EtatCompte`, `BanVue`, `CompteVue` gardent les mêmes noms d'un lot à l'autre ; `h` `[16]byte`, empreintes, `A_auth` et `s_profil` `[32]byte`, enveloppes et séquestre `[60]byte`, identifiant de bannissement `[8]byte`.
