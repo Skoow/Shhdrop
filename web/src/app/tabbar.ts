@@ -5,16 +5,18 @@
 // pendant un envoi et sur « Lien prêt ».
 import type { Route } from "./router.svelte";
 
-export type TabId = "send" | "shares" | "chat";
+export type TabId = "send" | "shares" | "downloads" | "chat";
 
 /** Onglets dans l'ordre ; `soon` : pas encore construit (désactivé, « Bientôt »). */
 export const TABS: readonly { id: TabId; soon: boolean }[] = [
   { id: "send", soon: false },
   { id: "shares", soon: false }, // historique « Vos envois » (/envois, Task H)
-  { id: "chat", soon: true }, // Tasks C-1 à C-6 (salon)
+  // Conception compte §21.15.5 : sans compte, trois onglets (Envoyer, Mes partages,
+  // Téléchargements) ; « Salon (bientôt) » laisse sa place (le salon reste annoncé ailleurs).
+  { id: "downloads", soon: false },
 ];
 
-const ROOTS: ReadonlySet<Route["name"]> = new Set(["home", "envois", "securite", "confidentialite", "conditions", "mentions", "signaler", "offres", "notfound"]);
+const ROOTS: ReadonlySet<Route["name"]> = new Set(["home", "envois", "telechargements", "securite", "confidentialite", "conditions", "mentions", "signaler", "offres", "notfound"]);
 
 /** Une barre d'onglets n'a de sens qu'avec au moins deux onglets qui fonctionnent. */
 export function tabBarUseful(tabs: readonly { id?: TabId; soon: boolean }[]): boolean {
@@ -35,5 +37,6 @@ export function tabBarVisible(o: { supported: boolean; route: Route["name"]; sen
 export function currentTab(route: Route["name"]): TabId | null {
   if (route === "home" || route === "envoyer") return "send";
   if (route === "envois") return "shares";
+  if (route === "telechargements") return "downloads";
   return null;
 }

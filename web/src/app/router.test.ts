@@ -14,6 +14,7 @@ describe("match", () => {
     expect(match("/envoyer", `#${KEY}`)).toEqual({ name: "envoyer" });
     // Task H : tableau de bord « Mes partages » (spec §33).
     expect(match("/envois")).toEqual({ name: "envois" });
+    expect(match("/telechargements")).toEqual({ name: "telechargements" });
     expect(match("/envois", `#m${KEY}`)).toEqual({ name: "envois" });
   });
 
@@ -66,6 +67,7 @@ describe("match", () => {
     expect(match("/shhdrop/securite", "", base)).toEqual({ name: "securite" });
     expect(match("/shhdrop/envoyer", "", base)).toEqual({ name: "envoyer" });
     expect(match("/shhdrop/envois", "", base)).toEqual({ name: "envois" });
+    expect(match("/shhdrop/telechargements", "", base)).toEqual({ name: "telechargements" });
     expect(match("/", `#${KEY}`, base)).toEqual({ name: "notfound" });
     expect(match("/shhdropx/", `#${KEY}`, base)).toEqual({ name: "notfound" });
   });

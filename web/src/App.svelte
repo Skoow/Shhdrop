@@ -12,6 +12,7 @@
   import { getLang } from "./i18n/i18n.svelte";
   import { watchKeyboard } from "./app/viewport";
   import { watchOpenGrant } from "./session/open-grant";
+  import Downloads from "./routes/Downloads.svelte";
   import History from "./routes/History.svelte";
   import Manage from "./routes/Manage.svelte";
   import NotFound from "./routes/NotFound.svelte";
@@ -129,6 +130,8 @@
     {#key linkGen}<Manage take={takeManage} />{/key}
   {:else if router.current.name === "envois"}
     <History />
+  {:else if router.current.name === "telechargements"}
+    <Downloads />
   {:else if router.current.name === "offres"}
     <Offres />
   {:else}

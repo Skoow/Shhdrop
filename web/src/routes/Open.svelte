@@ -182,6 +182,8 @@
 
   // ---------- Fin de lecture ----------
   let expired = $state(false);
+  // Échéance fixée à l'ouverture (« Disponible jusqu'au … », conception compte §21.9).
+  const endsAt = $derived(r.state === "open" ? Date.now() + r.remainingS() * 1000 : undefined);
   let end = $state<"destroyed" | "gone" | null>(null);
   const capState = $derived(
     r.state === "destroyed_by_password" || end === "destroyed" || end === "gone" || gone.closed ? "destroyed" : r.state === "open" ? "open" : "locked",
@@ -331,6 +333,7 @@
         {expired}
         {gone}
         onforget={() => r.forgetHere()}
+        {endsAt}
         onend={(k) => {
           end = k;
           r.forget(); // clés déjà effacées ; le contenu déchiffré n'est plus référencé

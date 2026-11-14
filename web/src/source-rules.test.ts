@@ -46,7 +46,7 @@ const RE_DEMO_IMPORT = new RegExp(
   "g",
 );
 
-const UI_DIRS = ["routes", "ui", "flows", "viewers", "media", "captcha", "app", "history"];
+const UI_DIRS = ["routes", "ui", "flows", "viewers", "media", "captcha", "app", "history", "downloads"];
 const inUiDir = (rel: string) => UI_DIRS.includes(rel.split("/")[0]!);
 
 function offenders(
@@ -76,7 +76,7 @@ describe("règles de sources", () => {
     expect(offenders(/\bfetch\s*\(|XMLHttpRequest/, inUiDir)).toEqual([]));
   it("aucun stockage navigateur (hors historique local et retours, ci-dessous)", () =>
     expect(
-      offenders(/localStorage|indexedDB|document\.cookie/, (r) => r !== "history/live.svelte.ts" && r !== "history/returns.ts"),
+      offenders(/localStorage|indexedDB|document\.cookie/, (r) => r !== "history/live.svelte.ts" && r !== "history/returns.ts" && r !== "downloads/live.svelte.ts"),
     ).toEqual([]));
   // Spec §33, §33.1 : exception écrite, l'historique local chiffré des envois. Seul
   // history/live.svelte.ts lit `indexedDB` (pour le passer à history/store.ts, qui chiffre) ;
@@ -85,7 +85,7 @@ describe("règles de sources", () => {
     const live = files.find((f) => f.rel === "history/live.svelte.ts");
     expect(live?.text).toMatch(/indexedDB/);
     expect(live?.text).not.toMatch(/localStorage|document\.cookie|sessionStorage/);
-    expect(offenders(/\bIDB(?:Factory|Database|ObjectStore|Transaction)\b/, (r) => !r.startsWith("history/"))).toEqual([]);
+    expect(offenders(/\bIDB(?:Factory|Database|ObjectStore|Transaction)\b/, (r) => !r.startsWith("history/") && !r.startsWith("downloads/"))).toEqual([]);
   });
   // D42-22 : exception écrite, l'octroi d'ouverture gardé chiffré pour revenir jusqu'à
   // l'échéance (history/returns.ts, voisin de l'historique et même mécanisme : AES-GCM, clé non
@@ -98,6 +98,21 @@ describe("règles de sources", () => {
     expect(r.text).not.toMatch(/localStorage|document\.cookie|sessionStorage/);
     const type = r.text.match(/export type ReturnEntry = \{([\s\S]*?)\n\};/)![1]!;
     expect([...type.matchAll(/^\s+(\w+):/gm)].map((m) => m[1])).toEqual(["tag", "grant", "expiresAt"]);
+  });
+  // Conception compte §21.9 (R12) : exception écrite, l'historique des téléchargements, chiffré
+  // comme l'historique des envois. Seul downloads/live.svelte.ts lit `indexedDB` ; la base
+  // `shhdrop-telechargements` n'est nommée que dans downloads/ ; aucune requête dans ce module ;
+  // l'entrée n'a que nom, taille, format, source et date (jamais lien, clé, mot de passe).
+  it("téléchargements : base seulement dans downloads/, indexedDB lu par downloads/live.svelte.ts, aucun fetch, entrée sans secret", () => {
+    expect(offenders(/shhdrop-telechargements/, (r) => !r.startsWith("downloads/"))).toEqual([]);
+    expect(files.find((f) => f.rel === "downloads/store.ts")?.text).toMatch(/shhdrop-telechargements/);
+    const live = files.find((f) => f.rel === "downloads/live.svelte.ts")!;
+    expect(live.text).toMatch(/indexedDB/);
+    expect(live.text).not.toMatch(/localStorage|document\.cookie|sessionStorage/);
+    expect(offenders(/\bfetch\b|XMLHttpRequest|sendBeacon|WebSocket|EventSource/, (r) => r.startsWith("downloads/"))).toEqual([]);
+    const store = files.find((f) => f.rel === "downloads/store.ts")!;
+    const type = store.text.match(/export type DownloadEntry = \{([\s\S]*?)\n\};/)![1]!;
+    expect([...type.matchAll(/^\s+(\w+):/gm)].map((m) => m[1])).toEqual(["id", "name", "sizeBytes", "format", "source", "savedAt"]);
   });
   it("historique : aucun secret de partage ni nom d'élément dans HistoryEntry", () => {
     const store = files.find((f) => f.rel === "history/store.ts")!;

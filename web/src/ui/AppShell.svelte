@@ -72,7 +72,7 @@
   // secondaires de l'expéditeur, et le grand titre de l'écran qui se réduit dans la barre une
   // fois défilé (titre marqué data-large-title, sinon le h1 de l'écran). Sur ordinateur, rien ne change.
   const INFO: ReadonlySet<string> = new Set(["securite", "confidentialite", "conditions", "mentions", "signaler", "offres"]);
-  const BACK: ReadonlySet<string> = new Set([...INFO, "notfound", "manage", "envois"]);
+  const BACK: ReadonlySet<string> = new Set([...INFO, "notfound", "manage", "envois", "telechargements"]);
   // Pied de page sur toutes les pages, ordinateur et téléphone, composeur compris (retours du
   // 11 novembre) ; sur ordinateur, le composeur tient dans l'écran et le pied est juste dessous.
   /** `tiers` : « Plus » et « Pro » du libellé au bleu de leur offre, le reste comme les autres liens. */
@@ -84,6 +84,7 @@
       links: [
         { label: t("foot.send"), path: "/" },
         { label: t("foot.shares"), path: "/envois" },
+        { label: t("foot.downloads"), path: "/telechargements" },
         { label: t("foot.room"), soon: true },
         { label: t("foot.offers"), path: "/offres", tiers: true },
       ],
@@ -112,8 +113,8 @@
   const tierParts = (label: string) => label.split(/\b(Plus|Pro)\b/).map((text, i) => ({ text, tier: i % 2 === 1 ? text.toLowerCase() : null }));
   // « Envoyer » (/) n'est la page courante que sur l'accueil : un partage ouvert a aussi « / » pour chemin.
   const pathHere = (p: string) => (router.current.name !== "notfound" && location.pathname === href(p) && (p !== "/" || router.current.name === "home") ? "page" : undefined);
-  // « Mes partages » est un onglet racine quand la barre d'onglets est là : pas de Retour.
-  const back = $derived(BACK.has(router.current.name) && !(tabs && router.current.name === "envois"));
+  // « Mes partages » et « Téléchargements » sont des onglets racine quand la barre d'onglets est là : pas de Retour.
+  const back = $derived(BACK.has(router.current.name) && !(tabs && (router.current.name === "envois" || router.current.name === "telechargements")));
   let small = $state("");
   let raf = 0;
   function measure() {

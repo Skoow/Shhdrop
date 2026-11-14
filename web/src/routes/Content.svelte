@@ -6,6 +6,8 @@
   // titre, l'adresse ni un stockage. « Voir seulement » : aucune action de téléchargement ni de
   // copie dans le DOM (ni barre, ni ligne, ni visionneuse).
   import { lowMemory } from "../app/env";
+  import { recordDownload } from "../downloads/live.svelte";
+  import { afterSave } from "../downloads/store";
   import { guardUnload } from "../app/lifecycle";
   import { createDownloads, readSkipping, summarize, type Target } from "../flows/downloads.svelte";
   import { destroyFromContent, release, type DestroyOutcome } from "../flows/endoflife";
@@ -15,7 +17,7 @@
   import { CATEGORY_ORDER, categoryOfReceived, extOf, type Category } from "../flows/kinds";
   import { createReadMeter } from "../flows/read-meter";
   import { browserWatchDeps, startWatch } from "../flows/watch";
-  import { formatBytes, formatDuration } from "../i18n/format";
+  import { formatBytes, formatDayTime, formatDuration } from "../i18n/format";
   import { getLang, t, type Key } from "../i18n/i18n.svelte";
   import { setProgressTitle } from "../app/title";
   import type { ItemSink } from "../flows/downloads.svelte";
@@ -49,8 +51,10 @@
     gone: Gone;
     /** « Oublier ce partage sur cet appareil » (audit R2) : retour gardé et entrée de l'onglet effacés. */
     onforget?: () => Promise<void>;
+    /** Échéance du partage (ms, horloge locale) : « Disponible jusqu'au … » (conception compte §21.9). */
+    endsAt?: number;
   };
-  let { opened, expired, onend, gone: closer, onforget }: Props = $props();
+  let { opened, expired, onend, gone: closer, onforget, endsAt }: Props = $props();
   const lang = $derived(getLang());
 
   // Le manifeste ne change pas pendant la vie de l'écran : lu une fois.
@@ -126,7 +130,12 @@
       const b = previews.get(i);
       return b ? blobRead(b, from, on) : serverRead(i, from, on);
     },
-    openSink: (i, target) => (target as (name: string) => Promise<ItemSink | null>)(fileName(i)),
+    // Historique des téléchargements (conception compte §21.9) : une entrée quand le fichier est
+    // entièrement écrit (close réussi) ; arrêt, échec ou sélecteur fermé : rien.
+    openSink: async (i, target) => {
+      const sink = await (target as (name: string) => Promise<ItemSink | null>)(fileName(i));
+      return sink && afterSave(sink, () => recordDownload({ name: fileName(i), sizeBytes: totals[i]!, format: formats[i]!, source: "partage", savedAt: Date.now() }));
+    },
     meter,
     now: () => performance.now(),
     track: (i) => closer.begin(names[i]!, totals[i]!),
@@ -219,7 +228,10 @@
       return;
     }
     if (!sink) return;
-    const z = createZip(sink as Parameters<typeof createZip>[0]);
+    // L'archive enregistrée est un seul fichier : une seule entrée « shhgone.zip ».
+    const zipTotal = totals.reduce((a, n) => a + n, 0);
+    const saved = afterSave(sink, () => recordDownload({ name, sizeBytes: zipTotal, format: { family: "archive", label: "ZIP" }, source: "partage", savedAt: Date.now() }));
+    const z = createZip(saved as Parameters<typeof createZip>[0]);
     dl.startZip({
       total: totals.reduce((a, n) => a + n, 0),
       abort: () => z.abort(),
@@ -405,6 +417,13 @@
   {#if lastOpen && !closer.closed}
     <p class="notice" data-last-top><Clock size={18} aria-hidden="true" /> <span>{t("content.lastOpen.top")}</span></p>
   {/if}
+  {#if !viewOnly}
+    <!-- « À télécharger » (conception compte §21.9) : nombre, taille et échéance du serveur. -->
+    <div class="todo" data-todo>
+      <h2 class="todo-t num">{t("downloads.todo", { n: entries.length, size: formatBytes(totalBytes, lang) })}</h2>
+      {#if endsAt !== undefined}<p class="todo-m num">{t("downloads.until", { date: formatDayTime(endsAt, lang) })}</p>{/if}
+    </div>
+  {/if}
   {#if viewOnly}
     <p class="notice"><Eye size={18} aria-hidden="true" /> <span>{t("content.viewOnly")}</span></p>
   {:else}
@@ -546,6 +565,21 @@
     outline: none;
   }
   .sum {
+    margin: 0;
+    color: var(--text-2);
+    font-size: var(--fs-small);
+  }
+  .todo {
+    display: grid;
+    gap: 2px;
+  }
+  .todo-t {
+    margin: 0;
+    font-size: var(--fs-small);
+    font-weight: 600;
+    color: var(--text);
+  }
+  .todo-m {
     margin: 0;
     color: var(--text-2);
     font-size: var(--fs-small);
