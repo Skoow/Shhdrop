@@ -599,6 +599,9 @@ func TestPartDesSalonsMemeCalcul(t *testing.T) {
 			t.Errorf("%v : config %d, salon %d (pot %d)", c, got, part, pot)
 		}
 	}
+	if config.WebSocketMem != salon.MemoireParConnexion {
+		t.Fatal("budget d'un WebSocket :", config.WebSocketMem, salon.MemoireParConnexion)
+	}
 	if config.SalonJournalMem != salon.MemoireJournalMax {
 		t.Fatal("budget du journal :", config.SalonJournalMem, salon.MemoireJournalMax)
 	}

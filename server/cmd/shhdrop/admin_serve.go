@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -34,6 +33,12 @@ type adminDeps struct {
 	start  time.Time  // démarrage du processus, en mémoire seulement
 }
 
+// buildID : empreinte du commit compilé, posée à la compilation (-ldflags "-X main.buildID=…",
+// deploy/Dockerfile) : l'image de production est construite sans dossier .git ni empreinte
+// vcs (-buildvcs=false), et la page ne pouvait pas dire quel code tourne (audit adverse du
+// 13 novembre, 3e campagne, tableau de bord, F6). Vide : repli sur l'empreinte vcs du binaire.
+var buildID string
+
 // adminListen : ouverture de l'écouteur d'administration (variable pour les tests).
 var adminListen = func(addr string) (net.Listener, error) { return net.Listen("tcp", addr) }
 
@@ -50,8 +55,9 @@ func startAdmin(cfg config.Config, out io.Writer, d adminDeps) (stop func()) {
 		fmt.Fprintln(out, "SHH_ADMIN_INDISPONIBLE")
 		return func() {}
 	}
+	hote, _, _ := net.SplitHostPort(cfg.AdminListen) // forme vérifiée par config
 	srv := adminui.Server(adminui.New(adminui.Config{
-		TokenHash: cfg.AdminTokenHash, Peers: cfg.TrustedProxies,
+		TokenHash: cfg.AdminTokenHash, Peers: cfg.TrustedProxies, Host: hote,
 		State:    func() (adminui.State, error) { return adminState(cfg, d) },
 		Freeze:   func() error { return freeze(d.svc.FrozenFile) },
 		Unfreeze: func() error { return unfreeze(d.svc.FrozenFile) },
@@ -68,6 +74,7 @@ func unfreeze(frozen string) error {
 	if err := os.Remove(frozen); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
+	sansDate(filepath.Dir(frozen)) // l'heure du dégel ne reste pas sur le dossier (freeze)
 	return nil
 }
 
@@ -75,7 +82,7 @@ func unfreeze(frozen string) error {
 // Rien n'est gardé d'une lecture à l'autre.
 func adminState(cfg config.Config, d adminDeps) (adminui.State, error) {
 	var st adminui.State
-	goVersion, rev := adminui.Build()
+	goVersion, rev := adminui.Build(buildID)
 	st.Sante = adminui.Sante{DepuisS: int64(time.Since(d.start) / time.Second), Go: goVersion, Revision: rev,
 		Gele: d.svc.Frozen(), SalonActif: d.sm != nil, Origine: cfg.Origin, AlerteSignalements: d.probes.Alert(),
 		VidagesRates: d.svc.Vidage.Rates()}
@@ -116,37 +123,59 @@ func adminState(cfg config.Config, d adminDeps) (adminui.State, error) {
 	return st, nil
 }
 
+// errSalonMort : le salon est détruit pour tous (ligne morte), mais sa ligne n'a pas pu être
+// supprimée par la destruction sans gestionnaire ; jamais annoncé « détruit ».
+var errSalonMort = errors.New("salon : ligne morte, effacement à finir")
+
 // adminDestroy : destruction d'un lien signalé depuis la page, comme « shhdrop admin
-// destroy - » mais dans le serveur en marche : seule K_accès est tirée du lien, puis effacée.
-// Partage : flux coupés tout de suite (DestroyAdmin). Salon : ligne, pièces et conversation
-// supprimées ; les connexions se ferment au tick suivant (≤ 1 s).
+// destroy - » mais dans le serveur en marche : seule K_accès est tirée du lien (traité en
+// octets, effacés au retour : cleAccesDuLien). Partage : flux coupés tout de suite
+// (DestroyAdmin). Salon : fini par le gestionnaire du serveur (salon.Manager.DetruireAdmin :
+// connexions fermées tout de suite, conversation, pièces et ligne effacées) ; salon désactivé :
+// lignes d'une configuration antérieure, sans gestionnaire (salon.DetruireHorsLigne). Dans les
+// deux cas le vidage du WAL est demandé au vidage regroupé, sans l'attendre (audit adverse du
+// 13 novembre, 3e campagne, tableau de bord F3 : un vidage direct tenait la seule connexion à
+// la base 5 s et faisait répondre « erreur » pour un salon détruit).
+//
+// Rend « salon » seulement si la ligne et les pièces sont parties ; « salon-reste » si le
+// salon est détruit pour tous (état oublié, ligne morte) mais qu'un effacement de fichier reste
+// à finir par l'entretien (F2 : jamais « détruit » pour un salon qui survit).
 func adminDestroy(cfg config.Config, d adminDeps, body []byte) (string, error) {
-	link, err := readLink(bytes.NewReader(body))
+	k, estSalon, err := cleAccesDuLien(body)
 	if err != nil {
 		return "", adminui.ErrLienInvalide
 	}
-	if k, ok := salonAccessKeyOf(link); ok {
-		defer clear(k)
-		if err := store.RequireCurrent(d.db); err != nil {
+	defer clear(k)
+	if !estSalon {
+		if err := d.svc.DestroyAdmin(k); err != nil {
+			if errors.Is(err, share.ErrNotFound) {
+				return "", adminui.ErrIntrouvable
+			}
 			return "", err
 		}
-		err := salon.DetruireHorsLigne(d.db, &blob.Store{Dir: filepath.Join(cfg.DataDir, dirSalonPieces), Gate: d.gate},
-			filepath.Join(cfg.DataDir, dirSalons), k)
-		if errors.Is(err, salon.ErrNotFound) {
-			return "", adminui.ErrIntrouvable
-		}
-		return "salon", err
+		return "partage", nil
 	}
-	k, ok := accessKeyOf(link)
-	if !ok {
-		return "", adminui.ErrLienInvalide
-	}
-	defer clear(k)
-	if err := d.svc.DestroyAdmin(k); err != nil {
-		if errors.Is(err, share.ErrNotFound) {
-			return "", adminui.ErrIntrouvable
-		}
+	if err := store.RequireCurrent(d.db); err != nil {
 		return "", err
 	}
-	return "partage", nil
+	var complet bool
+	if d.sm != nil {
+		complet, err = d.sm.DetruireAdmin(k)
+	} else {
+		complet, err = salon.DetruireHorsLigne(d.db, &blob.Store{Dir: filepath.Join(cfg.DataDir, dirSalonPieces), Gate: d.gate},
+			filepath.Join(cfg.DataDir, dirSalons), k)
+		d.svc.Vidage.Demander() // lignes effacées ou récrites : vidage regroupé, sans attendre
+		if err == nil && !complet {
+			err = errSalonMort // sans gestionnaire, personne ne finirait l'effacement
+		}
+	}
+	switch {
+	case errors.Is(err, salon.ErrNotFound):
+		return "", adminui.ErrIntrouvable
+	case err != nil:
+		return "", err
+	case !complet:
+		return "salon-reste", nil
+	}
+	return "salon", nil
 }

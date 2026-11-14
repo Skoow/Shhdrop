@@ -4,6 +4,7 @@
 
 let jeton = '';
 let minuterie = 0;
+let echecs = 0; // lectures d'état sans réponse, de suite
 let gele = false;
 let armeGel = 0;
 let armeDetruire = 0;
@@ -179,7 +180,26 @@ function boutonGel() {
     : 'Ouvertes. Geler est réversible et ne touche pas ce qui existe.';
 }
 
+// fermer : le jeton est oublié, la minuterie arrêtée, et la page revient à la saisie. Appelée
+// dès qu'une réponse refuse le jeton (404 : ce qui répond n'est pas, ou plus, le serveur qui le
+// connaît) ou après trois lectures d'état sans réponse de suite (tunnel coupé) : sinon l'onglet
+// renverrait le jeton toutes les 5 secondes à quiconque répond ensuite sur ce port.
+function fermer(message) {
+  jeton = '';
+  echecs = 0;
+  if (minuterie) { clearInterval(minuterie); minuterie = 0; }
+  $('tableau').hidden = true;
+  $('perdu').hidden = true;
+  $('entree').hidden = false;
+  $('fraicheur').textContent = '';
+  $('entree-erreur').textContent = message;
+}
+
+// Onglet fermé, quitté ou mis en cache par le navigateur : le jeton ne survit pas.
+addEventListener('pagehide', () => fermer(''));
+
 async function appel(methode, chemin, corps) {
+  if (!jeton) throw new Error('sans jeton');
   const r = await fetch(chemin, {
     method: methode,
     headers: corps === undefined
@@ -190,18 +210,39 @@ async function appel(methode, chemin, corps) {
   return { ok: r.ok, statut: r.status, json: await r.json().catch(() => null) };
 }
 
+// rafraichir : 'ok', 'refus' (le serveur a répondu sans accepter le jeton) ou 'injoignable'.
 async function rafraichir() {
+  let r;
   try {
-    const r = await appel('GET', '/api/etat');
-    if (!r.ok || !r.json) throw new Error('refus');
-    afficher(r.json);
-    $('perdu').hidden = true;
-    $('fraicheur').textContent = 'Lu à ' + new Date().toLocaleTimeString('fr-FR') + ', relu toutes les 5 secondes. Rien n’est enregistré.';
-    return true;
+    r = await appel('GET', '/api/etat');
   } catch {
     $('perdu').hidden = false;
-    return false;
+    return 'injoignable';
   }
+  if (!r.ok || !r.json) return r.statut === 404 ? 'refus' : 'injoignable';
+  try {
+    afficher(r.json);
+  } catch {
+    return 'refus'; // réponse qui n'a pas la forme de l'état : ce n'est pas notre serveur
+  }
+  $('perdu').hidden = true;
+  $('fraicheur').textContent = 'Lu à ' + new Date().toLocaleTimeString('fr-FR') + ', relu toutes les 5 secondes. Rien n’est enregistré.';
+  return 'ok';
+}
+
+// relire : lecture périodique, et après chaque action. Refus : fermeture tout de suite ; trois
+// lectures sans réponse de suite : fermeture aussi.
+async function relire() {
+  if (!jeton) return;
+  const r = await rafraichir();
+  if (!jeton) return; // fermée entretemps
+  if (r === 'ok') { echecs = 0; return; }
+  if (r === 'refus') {
+    fermer('Session fermée : le serveur a refusé le jeton (redémarré, ou autre programme sur ce port). Le jeton a été oublié.');
+    return;
+  }
+  $('perdu').hidden = false;
+  if (++echecs >= 3) fermer('Session fermée : serveur injoignable trois fois de suite. Le jeton a été oublié ; rouvrir le tunnel, puis le saisir de nouveau.');
 }
 
 $('entree').addEventListener('submit', async (ev) => {
@@ -209,14 +250,14 @@ $('entree').addEventListener('submit', async (ev) => {
   jeton = $('jeton').value.trim();
   $('jeton').value = '';
   $('entree-erreur').textContent = '';
-  if (await rafraichir()) {
+  if (minuterie) { clearInterval(minuterie); minuterie = 0; }
+  echecs = 0;
+  if (await rafraichir() === 'ok') {
     $('entree').hidden = true;
     $('tableau').hidden = false;
-    minuterie = setInterval(rafraichir, 5000);
+    minuterie = setInterval(relire, 5000);
   } else {
-    jeton = '';
-    $('perdu').hidden = true;
-    $('entree-erreur').textContent = 'Refusé : jeton faux, ou serveur injoignable.';
+    fermer('Refusé : jeton faux, ou serveur injoignable.');
     $('jeton').focus();
   }
 });
@@ -234,7 +275,7 @@ $('gel').addEventListener('click', async () => {
   const r = await appel('POST', gele ? '/api/degeler' : '/api/geler').catch(() => ({ ok: false }));
   b.disabled = false;
   $('resultat').textContent = r.ok ? (gele ? 'Créations rétablies.' : 'Créations gelées.') : 'Échec : rien n’a changé.';
-  await rafraichir();
+  await relire();
   boutonGel();
 });
 
@@ -255,9 +296,11 @@ $('detruire').addEventListener('submit', async (ev) => {
   b.disabled = false;
   const res = $('resultat');
   if (r.ok && r.json && r.json.detruit === 'partage') res.textContent = '1 partage détruit.';
-  else if (r.ok && r.json && r.json.detruit === 'salon') res.textContent = '1 salon détruit.';
+  else if (r.ok && r.json && r.json.detruit === 'salon' && r.json.reste) {
+    res.textContent = '1 salon détruit : plus personne ne peut y entrer ni y lire. L’effacement d’un de ses fichiers se termine en arrière-plan (repris chaque seconde).';
+  } else if (r.ok && r.json && r.json.detruit === 'salon') res.textContent = '1 salon détruit.';
   else if (r.ok) res.textContent = 'Introuvable : déjà détruit, expiré, ou lien inconnu. Rien n’a été détruit.';
   else if (r.statut === 400) res.textContent = 'Ce n’est pas un lien de partage ou de salon. Rien n’a été détruit.';
   else res.textContent = 'Échec : le serveur n’a pas confirmé la destruction.';
-  rafraichir();
+  relire();
 });

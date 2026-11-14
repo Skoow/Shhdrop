@@ -38,13 +38,20 @@ const (
 	delaiAccueil = 5 * time.Second
 	// fileMax : enregistrements en attente au plus dans la file du direct.
 	fileMax = 256
-	// lotRattrapage : enregistrements lus au plus par lot de rattrapage.
-	lotRattrapage = 64
-	retardMax     = 5 * time.Second
-	ecritureMax   = 10 * time.Second
-	periodePing   = 20 * time.Second
-	delaiPing     = 25 * time.Second
-	silenceMax    = 45 * time.Second
+	// lotRattrapage : enregistrements lus au plus par lot de rattrapage. Le lot entier est en
+	// mémoire tant que le client ne l'a pas lu (jusqu'à ecritureMax) : 8 et non 64 (audit adverse
+	// du 13 novembre, 3e campagne, front serveur, D : 310 Kio par connexion, hors de tout budget ;
+	// le débit du rattrapage ne dépend pas de la taille du lot).
+	lotRattrapage = 8
+	// MemoireParConnexion : mémoire budgétée par WebSocket (config.computeCapacity, un test
+	// compare) : un lot de rattrapage tenu par un client qui ne lit plus (≈ 5 Kio par trame,
+	// mesuré : ≈ 42 Kio), plus la marge des tampons de la connexion et de ses réponses en attente.
+	MemoireParConnexion = 64 << 10
+	retardMax           = 5 * time.Second
+	ecritureMax         = 10 * time.Second
+	periodePing         = 20 * time.Second
+	delaiPing           = 25 * time.Second
+	silenceMax          = 45 * time.Second
 	// controlesParMinute : messages 0x02 à 0x05 par minute et par connexion (au-delà, 4003).
 	controlesParMinute = 600
 	// repriseMax : reprises (0x0A) par heure et par siège, par WebSocket (au-delà, 4003) ou

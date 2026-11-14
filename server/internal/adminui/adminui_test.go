@@ -8,10 +8,20 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
+
+// Délai après un jeton faux : écourté pour toute la suite (TestFreinApresJetonFaux le règle
+// lui-même).
+func TestMain(m *testing.M) {
+	delaiFaux, delaiFauxMax = time.Millisecond, 4*time.Millisecond
+	os.Exit(m.Run())
+}
 
 const jeton = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
@@ -30,6 +40,7 @@ func nouveauBanc() *banc {
 	b.h = New(Config{
 		TokenHash: sha256.Sum256([]byte(jeton)),
 		Peers:     []netip.Prefix{netip.MustParsePrefix("172.30.53.1/32")},
+		Host:      "172.30.53.2",
 		State: func() (State, error) {
 			b.etats++
 			if b.etat != nil {
@@ -53,6 +64,7 @@ func nouveauBanc() *banc {
 
 type req struct {
 	method, path, pair, corps string
+	hote                      string // en-tête Host ("" : localhost:9191, comme par le tunnel SSH)
 	hdr                       [][2]string
 }
 
@@ -62,6 +74,10 @@ func (b *banc) faire(q req) *httptest.ResponseRecorder {
 	}
 	r := httptest.NewRequest(q.method, q.path, strings.NewReader(q.corps))
 	r.RemoteAddr = q.pair
+	r.Host = "localhost:9191"
+	if q.hote != "" {
+		r.Host = q.hote
+	}
 	for _, kv := range q.hdr {
 		r.Header.Add(kv[0], kv[1])
 	}
@@ -185,6 +201,7 @@ func TestDetruire(t *testing.T) {
 		body string
 	}{
 		{"salon", nil, 200, `{"detruit":"salon"}`},
+		{"salon-reste", nil, 200, `{"detruit":"salon","reste":true}`},
 		{"", ErrIntrouvable, 200, `{"detruit":"aucun"}`},
 		{"", ErrLienInvalide, 400, `{"error":"lien_invalide"}`},
 		{"", errors.New("fichier /data/salons/IDSECRET"), 500, `{"error":"internal"}`},
@@ -286,4 +303,176 @@ func TestEtatQueDesAgregats(t *testing.T) {
 		}
 	}
 	voir("", reflect.TypeOf(State{}))
+}
+
+// Audit adverse du 13 novembre, 3e campagne (tableau de bord H1, site F3) : l'en-tête Host est
+// contrôlé. Seuls localhost, 127.0.0.1 et l'adresse d'écoute sont servis, sur n'importe quel
+// port (le tunnel SSH choisit le port local) ; tout autre nom (un site qui fait pointer son nom
+// vers la boucle locale, ou Caddy qui relaierait le nom public) reçoit le refus uniforme, page
+// comprise, même avec le bon jeton.
+func TestHoteControle(t *testing.T) {
+	b := nouveauBanc()
+	ref := b.faire(req{method: "GET", path: "/api/nimporte"})
+	for _, h := range []string{"evil.example:9191", "evil.example", "shhgone.com", "localhost.evil.example:9191",
+		"evil.example.localhost:9191", "LOCALHOST:9191", "127.0.0.2:9191", "127.1:9191", "[::1]:9191", "172.30.53.1:9191",
+		"localhost:", "localhost:99999", "localhost:0x50", "localhost:9191:9191", "localhost:9191 ", " localhost:9191",
+		"localhost.", "localhost:9191/", "user@localhost:9191", "0.0.0.0:9191"} {
+		for _, q := range []req{{method: "GET", path: "/"}, {method: "GET", path: "/admin.js"},
+			{method: "GET", path: "/api/etat", hdr: [][2]string{bon()}}, {method: "POST", path: "/api/geler", hdr: [][2]string{bon()}}} {
+			q.hote = h
+			w := b.faire(q)
+			if w.Code != ref.Code || !bytes.Equal(w.Body.Bytes(), ref.Body.Bytes()) || !reflect.DeepEqual(w.Header(), ref.Header()) {
+				t.Errorf("Host %q, %s %s : servi (%d, %d octets)", h, q.method, q.path, w.Code, w.Body.Len())
+			}
+		}
+	}
+	if b.appels() != 0 {
+		t.Fatalf("une fonction a été appelée sous un hôte étranger : %+v", b)
+	}
+	for _, h := range []string{"localhost:9191", "localhost:8000", "localhost", "127.0.0.1:9191", "127.0.0.1:1", "127.0.0.1",
+		"172.30.53.2:9191", "172.30.53.2:65535"} {
+		if w := b.faire(req{method: "GET", path: "/", hote: h}); w.Code != 200 {
+			t.Errorf("Host %q : page refusée (%d)", h, w.Code)
+		}
+		if w := b.faire(req{method: "GET", path: "/api/etat", hote: h, hdr: [][2]string{bon()}}); w.Code != 200 {
+			t.Errorf("Host %q : état refusé (%d)", h, w.Code)
+		}
+	}
+	// Écouteur en IPv6 : son adresse est servie entre crochets.
+	b6 := New(Config{TokenHash: sha256.Sum256([]byte(jeton)), Host: "::1", State: func() (State, error) { return State{}, nil }})
+	for h, code := range map[string]int{"[::1]:9191": 200, "[::1]": 200, "::1": 404, "[::2]:9191": 404} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr, r.Host = "[::1]:40000", h
+		w := httptest.NewRecorder()
+		b6.ServeHTTP(w, r)
+		if w.Code != code {
+			t.Errorf("écouteur ::1, Host %q : %d, attendu %d", h, w.Code, code)
+		}
+	}
+}
+
+// Audit adverse du 13 novembre, 3e campagne, tableau de bord, F4 : aucun frein aux essais de
+// jeton (26 900 par seconde mesurés). Un jeton faux pose maintenant un délai global (rien par
+// adresse) : sa réponse, et celle de toute vérification arrivée entretemps, bonne ou fausse,
+// n'est rendue qu'à la fin du délai ; chaque jeton faux le prolonge, jusqu'à un plafond.
+// L'exploitant n'est jamais refusé : au pire il attend le plafond.
+func TestFreinApresJetonFaux(t *testing.T) {
+	const pas, plafond = 40 * time.Millisecond, 160 * time.Millisecond
+	av, avMax := delaiFaux, delaiFauxMax
+	delaiFaux, delaiFauxMax = pas, plafond
+	defer func() { delaiFaux, delaiFauxMax = av, avMax }()
+	faux := req{method: "GET", path: "/api/etat", hdr: [][2]string{{"Authorization", "Bearer " + strings.Repeat("f", 64)}}}
+	juste := req{method: "GET", path: "/api/etat", hdr: [][2]string{bon()}}
+	duree := func(b *banc, q req) (time.Duration, int) {
+		t0 := time.Now()
+		w := b.faire(q)
+		return time.Since(t0), w.Code
+	}
+
+	// Sans jeton faux : aucune attente.
+	b := nouveauBanc()
+	if d, code := duree(b, juste); code != 200 || d > pas/2 {
+		t.Fatalf("bon jeton, aucun essai faux : %d après %v", code, d)
+	}
+	// Essais faux à la suite : un pas chacun (force brute sur une connexion : 1 par pas au plus).
+	t0 := time.Now()
+	for range 4 {
+		if _, code := duree(b, faux); code != 404 {
+			t.Fatal("jeton faux accepté :", code)
+		}
+	}
+	if d := time.Since(t0); d < 4*pas {
+		t.Fatalf("FAIBLESSE F4 : 4 essais faux à la suite en %v (au moins %v attendu)", d, 4*pas)
+	}
+	// Le délai est écoulé : le bon jeton passe de nouveau sans attendre.
+	if d, code := duree(b, juste); code != 200 || d > pas/2 {
+		t.Fatalf("bon jeton après les essais faux : %d après %v", code, d)
+	}
+
+	// Rafale d'essais faux en même temps : le délai monte jusqu'au plafond, pas au-delà ; un bon
+	// jeton arrivé pendant la rafale est servi (jamais refusé), au plus tard au plafond, et pas
+	// avant la fin du délai en cours (sa réussite ne se voit pas plus tôt qu'un échec).
+	b = nouveauBanc()
+	var wg sync.WaitGroup
+	debut := time.Now()
+	var plusLong time.Duration
+	var mu sync.Mutex
+	for range 50 {
+		wg.Go(func() {
+			d, code := duree(b, faux)
+			if code != 404 {
+				t.Error("jeton faux accepté :", code)
+			}
+			mu.Lock()
+			plusLong = max(plusLong, d)
+			mu.Unlock()
+		})
+	}
+	time.Sleep(pas / 4)
+	d, code := duree(b, juste)
+	wg.Wait()
+	if code != 200 {
+		t.Fatal("DÉNI DE SERVICE : bon jeton refusé pendant une rafale d'essais faux :", code)
+	}
+	if d < pas/2 {
+		t.Fatalf("bon jeton servi en %v pendant une rafale : sa réussite se voit avant la fin du délai", d)
+	}
+	if d > plafond+pas || plusLong > plafond+pas || time.Since(debut) > 2*plafond+pas {
+		t.Fatalf("attente au-delà du plafond : bon jeton %v, essai faux le plus long %v (plafond %v)", d, plusLong, plafond)
+	}
+	if b.etats != 1 {
+		t.Fatal("appels à State :", b.etats)
+	}
+}
+
+// Audit adverse du 13 novembre, 3e campagne, site F3 : après une coupure du tunnel, l'onglet
+// renvoyait le jeton toutes les 5 s à quiconque répondait sur ce port. Le script oublie
+// maintenant le jeton, arrête sa minuterie et revient à la saisie dès un refus (404) ou après
+// trois lectures sans réponse de suite. Le comportement est prouvé hors de ce dépôt de tests Go
+// par un essai du script (faux DOM, faux fetch) ; ici, garde-fou de structure seulement : les
+// pièces de ce comportement sont dans le script servi.
+func TestPageOublieLeJeton(t *testing.T) {
+	js, err := page.ReadFile("page/admin.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(js)
+	i := strings.Index(s, "function fermer(")
+	if i < 0 {
+		t.Fatal("le script n'a plus de fonction fermer")
+	}
+	corps := s[i:]
+	corps = corps[:strings.Index(corps, "\n}\n")]
+	for _, attendu := range []string{"jeton = ''", "clearInterval(minuterie)", "$('entree').hidden = false", "$('tableau').hidden = true"} {
+		if !strings.Contains(corps, attendu) {
+			t.Errorf("fermer ne fait plus %q", attendu)
+		}
+	}
+	for _, attendu := range []string{"r.statut === 404 ? 'refus'", "++echecs >= 3", "addEventListener('pagehide'", "setInterval(relire, 5000)",
+		"if (!jeton) throw"} {
+		if !strings.Contains(s, attendu) {
+			t.Errorf("le script n'a plus %q", attendu)
+		}
+	}
+	if strings.Contains(s, "setInterval(rafraichir") {
+		t.Error("la minuterie appelle rafraichir sans passer par relire (qui ferme la session)")
+	}
+}
+
+// Audit adverse du 13 novembre, 3e campagne, tableau de bord, F6 : l'empreinte posée à la
+// compilation (-ldflags -X main.buildID, deploy/Dockerfile) est celle affichée ; vide, repli
+// sur l'empreinte vcs du binaire. Abrégée à 12 caractères, et rien d'autre que les caractères
+// d'une empreinte ou d'une étiquette n'arrive dans l'état.
+func TestEmpreinteDeCompilation(t *testing.T) {
+	for id, want := range map[string]string{
+		"0123abc": "0123abc", "0123456789abcdef0123": "0123456789ab", "v1.2-rc_3": "v1.2-rc_3",
+		"<script>a</script>": "scriptascrip", "a\"b\nc": "abc",
+	} {
+		if g, r := Build(id); g == "" || r != want {
+			t.Errorf("Build(%q) = %q, attendu %q", id, r, want)
+		}
+	}
+	if _, r := Build(""); len(r) > 12 {
+		t.Errorf("repli vcs : %q", r)
+	}
 }

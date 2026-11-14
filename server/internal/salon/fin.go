@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/blob"
@@ -108,14 +109,14 @@ func (m *Manager) detruire(id string) error {
 
 // detruireAvec : detruire, avec le signalement de finirAvec.
 func (m *Manager) detruireAvec(id string, signaler bool) (premier bool, err error) {
-	m.mu.Lock()
-	s := m.salons[id]
-	if s == nil {
-		// Échéance inconnue sans la ligne : la plus lointaine possible (24 h, arrondie).
-		s = nouveauSalon(id, m.cfg.Now().Add(25*time.Hour), 0, nil, m.now)
-		m.salons[id] = s
-	}
-	m.mu.Unlock()
+	var s *salon
+	m.avecMu(func() {
+		if s = m.salons[id]; s == nil {
+			// Échéance inconnue sans la ligne : la plus lointaine possible (24 h, arrondie).
+			s = nouveauSalon(id, m.cfg.Now().Add(25*time.Hour), 0, nil, m.now)
+			m.salons[id] = s
+		}
+	})
 	return m.finirAvec(s, RaisonDetruit, signaler)
 }
 
@@ -130,9 +131,7 @@ func (m *Manager) finir(s *salon, raison uint8) error {
 // finirAvec : finir ; signaler (« Détruire et signaler ») : premier vaut vrai si cet appel a
 // fini le salon et que personne ne l'avait encore signalé (salon.signale, sous son verrou).
 func (m *Manager) finirAvec(s *salon, raison uint8, signaler bool) (premier bool, err error) {
-	m.mu.Lock()
-	m.finirLocked(s.id)
-	m.mu.Unlock()
+	m.avecMu(func() { m.finirLocked(s.id) })
 	fait, premier := m.oublier(s, raison, signaler)
 	if !fait {
 		return false, nil
@@ -216,10 +215,7 @@ func (m *Manager) achever(s *salon) (err error) {
 	}
 	var errs []error
 	// Lue sous le verrou : un renouvellement (reglages.go) la remplace, jamais après « fini ».
-	conv := func() *Conversation { s.mu.Lock(); defer s.mu.Unlock(); return s.conv }()
-	if conv != nil {
-		errs = append(errs, conv.Detruire())
-	}
+	errs = append(errs, s.detruireConversations())
 	_, e := m.cfg.DB.Exec(`UPDATE salons SET failed_attempts=? WHERE id=? AND failed_attempts<?`, maxEssais, s.id, maxEssais)
 	errs = append(errs, base(e))
 	m.purger(s) // pièces connues en mémoire : fichier, ligne, index, quotas
@@ -247,6 +243,23 @@ func (m *Manager) achever(s *salon) (err error) {
 	// passage du janitor).
 	m.vidage.Demander()
 	return err
+}
+
+// detruireConversations : conversation du salon détruite (clé oubliée, fichier supprimé), et
+// celle qu'un renouvellement venait de remplacer s'il n'avait pas fini de la détruire. Lues
+// sous le verrou (un renouvellement les remplace, jamais après « fini »), détruites hors du
+// verrou ; idempotent. Sans la borne des partages et des pièces.
+func (s *salon) detruireConversations() error {
+	s.mu.Lock()
+	conv, ancienne := s.conv, s.ancienne
+	s.mu.Unlock()
+	var errs []error
+	for _, c := range []*Conversation{conv, ancienne} {
+		if c != nil {
+			errs = append(errs, c.Detruire())
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // effacerPiecesEnBase : pièces du salon id encore en base (inconnues en mémoire : création
@@ -304,13 +317,11 @@ func (s *salon) finIncomplete() bool {
 // lotLignes : identifiants par requête IN (bien sous la limite de variables de SQLite).
 const lotLignes = 500
 
-// lignes : passe de Tick sur la base. Lignes à 10 essais supprimées s'il y en a (sans pièce restante :
-// celles d'une fin en cours sont effacées par achever d'abord) ; lignes échues sans état en
-// mémoire supprimées (echuesSansEtat) ; salons vivants de ce
-// processus (état en mémoire non fini, ou place de bloc comptée) dont la ligne vivante a
-// disparu (admin destroy, wipe, 10 essais) : fin en raison 2, place du bloc rendue. Les
-// tombes n'y sont pas. Sous createMu : une création en cours a déjà sa ligne ou n'est pas
-// encore comptée.
+// lignes : passe de l'entretien sur la base (entretienPieces). Lignes à 10 essais supprimées
+// s'il y en a (sans pièce restante : celles d'une fin en cours sont effacées par achever
+// d'abord) ; lignes échues sans état en mémoire supprimées (echuesSansEtat). Les salons
+// vivants de ce processus dont la ligne vivante a disparu (admin destroy, wipe, 10 essais) sont
+// finis par la passe disque (disparus).
 func (m *Manager) lignes(now time.Time) {
 	// Lecture d'abord (cas rare) : aucune écriture en base à chaque seconde.
 	var un int
@@ -320,18 +331,28 @@ func (m *Manager) lignes(now time.Time) {
 		m.vidage.Demander()
 	}
 	m.echuesSansEtat(now.Unix())
-	partis := m.disparus()
-	for _, s := range partis {
-		_ = m.finir(s, RaisonDetruit)
+}
+
+// finHorsPieces : ce qu'une fin doit au disque sans passer par la borne des partages et des
+// pièces (passe disque de l'entretien) : conversation détruite (clé oubliée, fichier supprimé)
+// et ligne du salon rendue morte (plus aucune requête ne la voit). Idempotent, sans prendre la
+// fin (prendreFin) : achever, en cours ou à venir (entretienPieces), refait ces deux étapes
+// sans effet, puis efface les pièces et la ligne. Erreurs ignorées : reprises par achever.
+func (m *Manager) finHorsPieces(s *salon) {
+	_ = s.detruireConversations()
+	res, err := m.cfg.DB.Exec(`UPDATE salons SET failed_attempts=? WHERE id=? AND failed_attempts<?`, maxEssais, s.id, maxEssais)
+	if err != nil {
+		return
 	}
-	if len(partis) > 0 {
-		// Fichiers de pièces supprimés par un autre processus : usage relu (blob.Store).
-		_ = m.cfg.Pieces.Resync()
+	if k, _ := res.RowsAffected(); k > 0 {
+		m.vidage.Demander() // ligne récrite : vidage du WAL regroupé
 	}
 }
 
 // disparus : salons vivants de ce processus dont la ligne vivante a disparu (lignes), place
-// du bloc rendue ; rend ceux qui ont un état, à finir hors des verrous. Chaque verrou est
+// du bloc rendue ; rend ceux qui ont un état (non fini : les tombes n'y sont pas), à finir en
+// raison 2 hors des verrous. Sous createMu : une création en cours a déjà sa ligne ou n'est
+// pas encore comptée. Chaque verrou est
 // rendu par defer : une panique récupérée par Run ne laisse ni createMu ni Manager.mu pris.
 func (m *Manager) disparus() []*salon {
 	m.createMu.Lock()
@@ -441,22 +462,22 @@ func (m *Manager) echuesSansEtat(now int64) {
 	}
 }
 
-// Run : entretien chaque seconde jusqu'à l'annulation de ctx, en deux boucles indépendantes :
-// la passe mémoire (entretienMemoire) et la passe disque (entretienDisque), pour que la
-// première n'attende jamais la seconde (audit adverse du 13 novembre, front serveur, F1). Rend
-// la main quand les deux sont finies. Une panique dans une passe est récupérée sans aucune
+// Run : entretien chaque seconde jusqu'à l'annulation de ctx, en trois boucles indépendantes :
+// la passe mémoire (entretienMemoire), la passe disque (entretienDisque) et la passe des
+// pièces (entretienPieces), pour que la première n'attende jamais le disque (audit adverse du
+// 13 novembre, front serveur, F1) ni la deuxième la borne des partages (3e campagne, H). Rend
+// la main quand les trois sont finies. Une panique dans une passe est récupérée sans aucune
 // sortie (ni journal ni stderr : le message pourrait citer un identifiant) et la passe suivante
 // repart (revue finale C-2, mineur f) : une panique de l'entretien n'arrête pas tout le
 // serveur, partages compris. Tous les verrous pris par l'entretien sont rendus par defer ; une
 // fin interrompue reste « à faire » (achever) et est reprise.
 func (m *Manager) Run(ctx context.Context) {
-	fini := make(chan struct{})
-	go func() {
-		defer close(fini)
-		chaqueSeconde(ctx, func() { m.passeSure(m.entretienDisque) })
-	}()
+	var fini sync.WaitGroup
+	for _, passe := range []func(){m.entretienDisque, m.entretienPieces} {
+		fini.Go(func() { chaqueSeconde(ctx, func() { m.passeSure(passe) }) })
+	}
 	chaqueSeconde(ctx, func() { m.passeSure(m.entretienMemoire) })
-	<-fini
+	fini.Wait()
 }
 
 func chaqueSeconde(ctx context.Context, f func()) {
@@ -550,35 +571,102 @@ func viderDossier(d string) error {
 	return sansDate(d)
 }
 
-// DetruireHorsLigne : commande d'administration (shhdrop admin destroy - d'un lien #c…),
-// hors du serveur : le salon dont access_v = SHA-256(kAcces), vivant ou non, est supprimé :
-// pièces (fichier puis ligne), fichier de conversation, ligne du salon ; puis vidage du WAL.
-// Salon inconnu : ErrNotFound. Le serveur en marche voit la ligne disparue au tick suivant
-// (Tick, lignes) : connexions fermées en raison 2, état oublié, place du bloc rendue.
-func DetruireHorsLigne(db *sql.DB, pieces *blob.Store, dossierConv string, kAcces []byte) error {
+// passesHorsLigne : passes d'effacement de DetruireHorsLigne (pièces puis ligne) : une pièce
+// déposée par un membre pendant une passe est effacée par la suivante.
+const passesHorsLigne = 3
+
+// DetruireHorsLigne : destruction par l'administrateur (shhdrop admin destroy - d'un lien #c…,
+// ou page d'administration d'un serveur dont le salon est désactivé), sans gestionnaire : le
+// salon dont access_v = SHA-256(kAcces), vivant ou non, est détruit. Salon inconnu :
+// ErrNotFound.
+//
+// La ligne est rendue morte D'ABORD (failed_attempts = 10, une seule requête) : dès cet instant
+// plus aucune requête ne voit le salon, et un serveur en marche le finit à sa passe suivante
+// (lignes disparues : connexions fermées en raison 2, état oublié, place du bloc rendue,
+// pièces et ligne effacées). Ensuite seulement : pièces (fichier puis ligne), fichier de
+// conversation, ligne du salon, vérifiée partie (audit adverse du 13 novembre, 3e campagne,
+// tableau de bord, F2 : la ligne était supprimée en dernier, sans regarder si elle l'avait
+// été ; une pièce déposée pendant la destruction la gardait vivante, et la commande répondait
+// quand même « détruit »).
+//
+// complet : la ligne et ses pièces sont parties. Faux sans erreur : la ligne, morte, reste
+// avec une pièce déposée pendant les passes ; le serveur en marche finit l'effacement.
+// Aucun vidage du WAL ici : l'appelant le fait (ligne de commande : store.Checkpoint) ou le
+// demande (serveur : store.Vidage).
+func DetruireHorsLigne(db *sql.DB, pieces *blob.Store, dossierConv string, kAcces []byte) (complet bool, err error) {
 	v := share.Verifier(kAcces)
 	if v == nil {
-		return ErrNotFound
+		return false, ErrNotFound
 	}
 	var id string
 	if err := db.QueryRow(`SELECT id FROM salons WHERE access_v=?`, v).Scan(&id); err != nil {
-		return notFound(err)
+		return false, notFound(err)
 	}
 	if !idValide(id) {
-		return ErrBase
+		return false, ErrBase
+	}
+	if _, err := db.Exec(`UPDATE salons SET failed_attempts=? WHERE id=? AND failed_attempts<?`, maxEssais, id, maxEssais); err != nil {
+		return false, base(err)
 	}
 	m := &Manager{cfg: Config{DB: db, Pieces: pieces}}
-	if err := m.effacerPiecesEnBase(id); err != nil {
-		return err
+	for range passesHorsLigne {
+		if err := m.effacerPiecesEnBase(id); err != nil {
+			return false, err
+		}
+		for _, f := range []string{id, id + suffixeProvisoire} {
+			if err := os.Remove(filepath.Join(dossierConv, f)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return false, es(err)
+			}
+		}
+		if _, err := db.Exec(`DELETE FROM salons WHERE id=? AND NOT EXISTS (SELECT 1 FROM salon_pieces WHERE salon_id=?)`,
+			id, id); err != nil {
+			return false, base(err)
+		}
+		var un int
+		switch err := db.QueryRow(`SELECT 1 FROM salons WHERE id=?`, id).Scan(&un); {
+		case errors.Is(err, sql.ErrNoRows):
+			return true, nil
+		case err != nil:
+			return false, base(err)
+		}
 	}
-	if err := os.Remove(filepath.Join(dossierConv, id)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return es(err)
+	return false, nil
+}
+
+// DetruireAdmin : destruction par l'administrateur dans le serveur en marche (page
+// d'administration) : le salon dont access_v = SHA-256(kAcces), vivant ou non, est fini par le
+// gestionnaire, comme une destruction par son créateur : sous son verrou, plus rien n'y entre
+// (ni membre, ni trame, ni pièce : une pièce en cours de création est défaite par son propre
+// appel), connexions fermées en raison 2 tout de suite, puis conversation détruite, ligne
+// rendue morte, pièces et ligne effacées, vidage du WAL demandé (regroupé, sans attendre).
+// Salon inconnu : ErrNotFound.
+//
+// complet : la ligne et les pièces sont parties. Faux sans erreur : le salon est détruit pour
+// tous (état oublié, ligne morte), mais un effacement reste à finir (fichier de pièce qui ne
+// s'efface pas, pièce défaite en même temps) : l'entretien le reprend chaque seconde. Erreur
+// (ErrBase) : la ligne n'a pas pu être rendue morte ; rien ne permet de dire « détruit ».
+func (m *Manager) DetruireAdmin(kAcces []byte) (complet bool, err error) {
+	v := share.Verifier(kAcces)
+	if v == nil {
+		return false, ErrNotFound
 	}
-	if _, err := db.Exec(`DELETE FROM salons WHERE id=? AND NOT EXISTS (SELECT 1 FROM salon_pieces WHERE salon_id=?)`,
-		id, id); err != nil {
-		return base(err)
+	var id string
+	if err := m.cfg.DB.QueryRow(`SELECT id FROM salons WHERE access_v=?`, v).Scan(&id); err != nil {
+		return false, notFound(err)
 	}
-	return base(store.Checkpoint(db))
+	_ = m.detruire(id) // partie disque ratée : état lu ci-dessous, reprise par l'entretien
+	// Déjà une tombe (fin commencée avant cet appel) : sa partie disque est reprise ici.
+	if s := func() *salon { m.mu.Lock(); defer m.mu.Unlock(); return m.salons[id] }(); s != nil {
+		m.reprendreFin(s)
+	}
+	var essais int
+	switch err := m.cfg.DB.QueryRow(`SELECT failed_attempts FROM salons WHERE id=?`, id).Scan(&essais); {
+	case errors.Is(err, sql.ErrNoRows):
+		return true, nil
+	case err != nil || essais < maxEssais:
+		return false, ErrBase
+	}
+	return false, nil
 }
 
 // EffacerTout : commande d'administration (shhdrop admin wipe --yes) : fichiers de pièces et

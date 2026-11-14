@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -220,4 +221,104 @@ func TestDestructionBaseOccupeeSansAttendre(t *testing.T) {
 	}
 	tx.Rollback()
 	plusRien(t, "après le départ du lecteur", dir, r)
+}
+
+// Audit adverse du 13 novembre, 3e campagne, stockage, Z3 : chaque réécriture de la ligne d'un
+// partage vivant (ouverture, essai faux, fin d'une ouverture, agrandissement, effacement de
+// segments) laissait une version de la ligne dans shares.db-wal jusqu'au janitor (60 s) : un
+// lecteur du disque savait quels partages avaient été ouverts ou essayés dans la dernière
+// minute, et combien de fois. Chacune demande maintenant un vidage regroupé : le WAL est vidé
+// dans un délai borné. La préparation se fait sans boucle de vidage (ses demandes ne comptent
+// pas) ; seule la demande de l'événement peut vider le WAL ensuite.
+func TestReecrituresDemandentUnVidage(t *testing.T) {
+	brouillon := func(t *testing.T, s *Service) string {
+		id, _, err := s.Create(newKeys().req(160, 1, 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		bucket := 160
+		sendLike(t, s, id, &bucket, 0, 0, SegChunks)
+		sendLike(t, s, id, &bucket, 1, 0, SegChunks)
+		return id
+	}
+	for nom, c := range map[string]struct {
+		prep func(t *testing.T, s *Service) (id string, k keys)
+		evt  func(t *testing.T, s *Service, id string, k keys)
+	}{
+		"ouverture (pas la dernière)": {
+			func(t *testing.T, s *Service) (string, keys) { k := newKeys(); return ready(t, s, k, 1, 24, 2), k },
+			func(t *testing.T, s *Service, id string, k keys) {
+				if _, _, err := s.Unlock(id, k.acces, k.preuve); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		"essai faux (pas le 5e)": {
+			func(t *testing.T, s *Service) (string, keys) { k := newKeys(); return ready(t, s, k, 1, 24, 2), k },
+			func(t *testing.T, s *Service, id string, k keys) {
+				var bp *BadPassword
+				if _, _, err := s.Unlock(id, k.acces, rnd(32)); !errors.As(err, &bp) {
+					t.Fatal(err)
+				}
+			},
+		},
+		"fin d'une ouverture (pas la dernière)": {
+			func(t *testing.T, s *Service) (string, keys) {
+				k := newKeys()
+				id := ready(t, s, k, 1, 24, 2)
+				if _, _, err := s.Unlock(id, k.acces, k.preuve); err != nil {
+					t.Fatal(err)
+				}
+				return id, k
+			},
+			func(t *testing.T, s *Service, id string, k keys) {
+				if err := s.Done(id, 1); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		"agrandissement": {
+			func(t *testing.T, s *Service) (string, keys) { return brouillon(t, s), keys{} },
+			func(t *testing.T, s *Service, id string, k keys) {
+				if err := s.Grow(id, 400); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		"effacement de segments": {
+			func(t *testing.T, s *Service) (string, keys) { return brouillon(t, s), keys{} },
+			func(t *testing.T, s *Service, id string, k keys) {
+				if err := s.Erase(id, 1, 2); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	} {
+		t.Run(nom, func(t *testing.T) {
+			t.Parallel()
+			s, _ := newSvc(t)
+			id, k := c.prep(t, s)
+			s.Vidage = store.NewVidage(s.DB) // demandes de la préparation oubliées
+			if err := store.Checkpoint(s.DB); err != nil {
+				t.Fatal(err)
+			}
+			wal := s.Blobs.Dir + "/../shares.db-wal"
+			if fi, err := os.Stat(wal); err != nil || fi.Size() != 0 {
+				t.Fatal("témoin : WAL non vide après un vidage", err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			fini := make(chan struct{})
+			go func() { s.Vidage.Run(ctx); close(fini) }()
+			defer func() { cancel(); <-fini }()
+			c.evt(t, s, id, k)
+			for fin := time.Now().Add(3 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+				if fi, err := os.Stat(wal); err == nil && fi.Size() == 0 {
+					return
+				}
+				if time.Now().After(fin) {
+					t.Fatalf("%s : ligne récrite gardée dans shares.db-wal (aucun vidage demandé)", nom)
+				}
+			}
+		})
+	}
 }

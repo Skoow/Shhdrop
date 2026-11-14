@@ -177,3 +177,17 @@ Demande du propriétaire du 13 novembre, **non codée, à trancher** : « nombre
 ## Statistiques d'usage (13 novembre, codées après confirmation du propriétaire)
 
 Demande confirmée (« un dashboard admin complet avec des stats sur l'utilisation du site »). Codé : compteurs depuis le démarrage, en mémoire, un entier chacun (détail et limites : amendement du 13 novembre à la fin de la spécification principale). Cela remplace, dans ce document, « aucune statistique », « aucun compteur nouveau » et la note « Aucun total cumulé » de la page. Restent hors de la page : tout total gardé sur disque, toute courbe dans le temps, le nombre de fichiers, les comptes et les abonnés (rien à compter tant que §37 et §38 ne sont pas codés).
+
+## Corrections de la troisième campagne d'audit adverse (14 novembre)
+
+Remplacent les passages correspondants plus haut (jeton, hôte, lien collé) :
+
+- **Jeton** : le serveur ne reçoit que l'empreinte SHA-256 du jeton (`SHH_ADMIN_TOKEN_SHA256`) ; le jeton (`openssl rand -hex 32`) reste chez l'exploitant. `SHH_ADMIN_TOKEN` en clair : développement local seulement, refusé au démarrage avec `SHH_BEHIND_PROXY=1`. **Migration** : un serveur configuré avec l'ancienne variable refusera de démarrer (site public compris) tant qu'elle n'est pas remplacée par l'empreinte (`deploy/README.md` §4).
+- **Frein global après un jeton faux** : 250 ms de plus par essai faux, plafond 2 s, rien gardé par adresse, réponse identique. C'est un frein, pas un verrou : avec C connexions simultanées, environ C essais toutes les 2 s.
+- **Hôte** : seuls `localhost`, `127.0.0.1` et l'adresse d'écoute sont servis (n'importe quel port, le tunnel SSH le change) ; tout autre `Host` reçoit le refus uniforme, page comprise.
+- **Page** : le jeton est oublié et la saisie réaffichée sur un refus, une réponse inattendue, trois échecs réseau de suite ou la fermeture de l'onglet ; plus aucun envoi sans jeton.
+- **Lien collé** : traité en octets de bout en bout et ses copies effacées au mieux ; il reste le tampon de lecture de net/http et l'état interne de HMAC, hors de portée.
+- **Destruction d'un salon** : faite par le gestionnaire du serveur en marche (salon fermé tout de suite) ; « détruit » n'est rendu que si la ligne et les pièces sont parties, sinon « l'effacement se termine en arrière-plan ».
+- **Empreinte de compilation** : gravée dans le binaire à la construction de l'image (`SHH_BUILD_ID`).
+
+Proposé, non codé (décisions du propriétaire) : écouteur d'administration sur une socket Unix réservée à root ; valeurs de `/api/etat` arrondies et au plus une lecture par seconde, pour ôter le capteur d'activité en temps réel à qui volerait le jeton.

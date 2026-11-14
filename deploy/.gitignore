@@ -1,4 +1,5 @@
-# Réglages et état propres à chaque serveur (aucun secret, mais rien à publier).
+# Réglages et état propres à chaque serveur (rien à publier ; .env ne porte que l'empreinte du
+# jeton du tableau de bord, jamais le jeton : README §4).
 /.env
 /.release
 /.release.prev

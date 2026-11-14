@@ -64,6 +64,14 @@ func (s *Service) ensureKillKey() ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
+	// Dossier des demandes créé ici, au premier passage du serveur, et non à la première
+	// destruction par l'administrateur : sa date de création (btime, que rien ne remet) ne dit
+	// plus l'heure de la première destruction (audit adverse du 13 novembre, 3e campagne,
+	// stockage, F5).
+	if err := os.MkdirAll(s.killDir(), 0o700); err != nil {
+		return nil, err
+	}
+	_ = epoch0(s.killDir())
 	p := s.killKeyFile()
 	f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
@@ -229,4 +237,34 @@ func (s *Service) pollKillsLocked(es []os.DirEntry, key []byte) error {
 		}
 	}
 	return nil
+}
+
+// fichiersDeDonnees : fichiers du dossier de données hors des dossiers de fichiers chiffrés
+// (blobs/, salons/, salon-pieces/, brouillés par leurs propres passes), relatifs au dossier de
+// données : gel, demandes de destruction, clé de leurs noms, base SQLite (nom ouvert par
+// cmd/shhdrop, avec ses deux fichiers du mode WAL).
+var fichiersDeDonnees = []string{"frozen", "kill", "kill.key", "shares.db", "shares.db-wal", "shares.db-shm"}
+
+// ScrubDataTimes (janitor, à chaque passage) : dates de contenu et d'accès de fichiersDeDonnees
+// et du dossier de données remises à l'epoch ; leur date de changement d'inode (ctime) prend
+// l'heure de ce passage, comme pour les autres fichiers (blob.Store.ScrubTimes). Sans cela,
+// ils donnaient à qui lit le disque l'heure du dernier gel ou dégel (frozen, dossier), de la
+// dernière destruction par l'administrateur (kill/) et de la dernière écriture en base
+// (shares.db, shares.db-wal), à la milliseconde (audit adverse du 13 novembre, 3e campagne,
+// stockage, F5). Après un passage, ces heures ne sont plus lisibles qu'à la période du janitor
+// près. Sans effet sur SQLite, qui ne lit jamais les dates de ses fichiers (son compteur de
+// changements est dans l'en-tête). La date de création (btime) reste : celle de frozen dit
+// l'heure du gel en cours (README §9). Fichier absent : ignoré ; la première autre erreur est
+// rendue, sans arrêter le passage. Sous la borne des appels disque des partages.
+func (s *Service) ScrubDataTimes() error {
+	dir := filepath.Dir(s.FrozenFile)
+	var first error
+	for _, n := range append(fichiersDeDonnees, "") {
+		p := filepath.Join(dir, n)
+		err := s.Blobs.Gate.Do(func() error { return epoch0(p) })
+		if err != nil && !errors.Is(err, fs.ErrNotExist) && first == nil {
+			first = err
+		}
+	}
+	return first
 }

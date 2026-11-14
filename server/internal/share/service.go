@@ -986,6 +986,7 @@ func (s *Service) UnlockGrant(id string, kAcces, kPreuve []byte, grant string) (
 		if err != nil {
 			return Opened{}, notFound(err)
 		}
+		s.Vidage.Demander() // ligne récrite : vidage du WAL regroupé (audit adverse 3, stockage, Z3)
 		if state == "draining" {
 			// D42-22 : toutes les ouvertures sont prises ; le partage reste jusqu'à son échéance
 			// pour que leurs détentrices y reviennent (purge en mémoire : un redémarrage, qui
@@ -1035,6 +1036,7 @@ func (s *Service) countFailure(id string) (int, error) {
 	if err != nil {
 		return 0, notFound(err)
 	}
+	s.Vidage.Demander() // ligne récrite : vidage du WAL regroupé (audit adverse 3, stockage, Z3)
 	if failed >= maxAttempts {
 		// En cas d'échec, Sweep réessaie (failed_attempts>=5) ; le partage est déjà inaccessible.
 		// 5 mots de passe faux : comme une suppression (spec §41.8 cas 2), les ouvertures
@@ -1092,6 +1094,7 @@ func (s *Service) Done(id string, openN int) error {
 	if err != nil {
 		return err
 	}
+	s.Vidage.Demander() // ligne récrite : vidage du WAL regroupé (audit adverse 3, stockage, Z3)
 	// En « draining », opens_issued est figé et done_mask ne fait que croître : sûr. Toutes
 	// les ouvertures sont terminées : aucune n'a besoin de grâce.
 	if state == "draining" && bits.OnesCount64(uint64(mask)) == issued {

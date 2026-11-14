@@ -109,6 +109,9 @@ func (m *Manager) Exclure(r ExclureReq) error {
 	if err := m.tourner(id, r, now.Unix()); err != nil {
 		return err
 	}
+	// Anciens V_accès, V_preuve et sel récrits : vidage du WAL demandé (regroupé, hors de cette
+	// requête ; audit adverse du 13 novembre, 3e campagne, stockage, F6).
+	m.vidage.Demander()
 	defer m.purger(s) // pièces des trames effacées par le départ : fichier et ligne hors du verrou
 	return m.appliquerExclusion(s, r, cible)
 }

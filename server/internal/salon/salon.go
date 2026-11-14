@@ -106,6 +106,10 @@ type salon struct {
 	// une au plus par entrée de l'index ; vidées par Tick, la fin et le renouvellement.
 	echeances echeances
 	conv      *Conversation // nil pour la tombe d'un salon détruit sans état
+	// ancienne : conversation remplacée par un renouvellement et pas encore détruite (reglages.go,
+	// remplacer : détruite hors du verrou du salon) ; nil sinon. La fin du salon la détruit aussi
+	// (achever), si sa destruction avait échoué ou n'était pas finie.
+	ancienne *Conversation
 	// aEcraser : emplacements de conv marqués effacés (retrait, échéance, trame écrite pour
 	// un membre parti entre-temps), à écraser sur le disque HORS du verrou (Manager.ecraser :
 	// aucun appel disque ni attente de la borne sous s.mu, audit adverse du 13 novembre, F1).

@@ -117,20 +117,31 @@ func Runtime() Memoire {
 	return m
 }
 
-// Build : version de Go et empreinte de compilation (vcs.revision, abrégée), si présente.
-func Build() (goVersion, revision string) {
+// Build : version de Go et empreinte de compilation : id (posée à la compilation par
+// -ldflags -X, cmd/shhdrop) si elle est donnée, sinon l'empreinte vcs du binaire
+// (debug.ReadBuildInfo), si présente. Abrégée à 12 caractères ; seuls les caractères d'une
+// empreinte ou d'une étiquette sont gardés (lettres, chiffres, « . », « - », « _ ») : rien
+// d'autre ne peut arriver dans l'état par cette chaîne.
+func Build(id string) (goVersion, revision string) {
 	goVersion = runtime.Version()
-	if bi, ok := debug.ReadBuildInfo(); ok {
-		for _, s := range bi.Settings {
-			if s.Key == "vcs.revision" {
-				revision = s.Value
-				if len(revision) > 12 {
-					revision = revision[:12]
+	revision = id
+	if revision == "" {
+		if bi, ok := debug.ReadBuildInfo(); ok {
+			for _, s := range bi.Settings {
+				if s.Key == "vcs.revision" {
+					revision = s.Value
 				}
 			}
 		}
 	}
-	return goVersion, revision
+	propre := make([]byte, 0, 12)
+	for i := 0; i < len(revision) && len(propre) < 12; i++ {
+		c := revision[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '-' || c == '_' {
+			propre = append(propre, c)
+		}
+	}
+	return goVersion, string(propre)
 }
 
 // threads : ligne « Threads: » de /proc/self/status (Linux) ; 0 ailleurs ou si illisible.

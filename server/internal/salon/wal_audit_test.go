@@ -133,3 +133,24 @@ func TestRenouvellementVideLeWAL(t *testing.T) {
 	b.regler(t, c, ReglagesReq{Heures: 24})
 	b.plusRienEnBase(t, "renouvellement", ancienne)
 }
+
+// Rotation de l'invitation (exclusion) : l'ancien V_accès, l'ancien V_preuve et l'ancien sel ne
+// restent ni dans le -wal ni dans la base (audit adverse du 13 novembre, 3e campagne, stockage,
+// F6 : seule réécriture de vérificateurs qui ne demandait pas de vidage ; ils restaient
+// jusqu'au passage du janitor, 60 s au plus).
+func TestRotationVideLeWAL(t *testing.T) {
+	b := bancVidage(t)
+	c, r := b.creerRepere(t)
+	if err := store.Checkpoint(b.db); err != nil {
+		t.Fatal(err)
+	}
+	anciens := map[string][]byte{"ancien V_accès": r["V_accès"], "ancien V_preuve": r["V_preuve"], "ancien sel": r["sel"]}
+	if len(restesBase(b.dir, anciens)) != 3 {
+		t.Fatal("témoin : anciens vérificateurs absents de shares.db")
+	}
+	b.entrer(t, c, true)
+	if err := b.m.Exclure(reqExclure(c, nouvellesCles(), nil, nil, 1)); err != nil {
+		t.Fatal(err)
+	}
+	b.plusRienEnBase(t, "rotation", anciens)
+}

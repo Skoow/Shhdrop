@@ -11,7 +11,9 @@
 #   deploy/deploy.sh diagnose                             serveur au premier plan, pour lire
 #                                                         un refus de démarrer (rien n'est écrit)
 #
-# Réglages : deploy/.env (modèle : deploy/env.example). Aucun secret, nulle part.
+# Réglages : deploy/.env (modèle : deploy/env.example). Aucun secret qui ouvre quoi que ce soit :
+# le tableau de bord n'y a que l'EMPREINTE de son jeton (SHH_ADMIN_TOKEN_SHA256, README §4), le
+# jeton reste chez l'exploitant. Tout deploy/.env est exporté aux commandes de ce script (set -a).
 # État : deploy/.release (empreinte en service) et deploy/.release.prev (la précédente).
 #
 # Limites, dites aussi dans le README :

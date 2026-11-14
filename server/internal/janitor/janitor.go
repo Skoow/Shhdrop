@@ -16,8 +16,9 @@ import (
 // d'administration supprime des fichiers depuis un autre processus), brouille les dates
 // d'inode des fichiers (blob.Store.ScrubTimes), puis vide le WAL
 // (svc.Vidage.Maintenant : attente courte d'une base occupée par un autre processus, échec
-// compté pour le tableau de bord ; audit adverse du 13 novembre, stockage, F3), à chaque
-// période, jusqu'à l'annulation de ctx.
+// compté pour le tableau de bord ; audit adverse du 13 novembre, stockage, F3), et enfin
+// brouille les dates du dossier de données (svc.ScrubDataTimes), à chaque période, jusqu'à
+// l'annulation de ctx.
 func Run(ctx context.Context, svc *share.Service, every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
@@ -39,6 +40,11 @@ func Run(ctx context.Context, svc *share.Service, every time.Duration) {
 			}
 			if cerr := svc.Vidage.Maintenant(); cerr != nil {
 				err = errors.Join(err, cerr)
+			}
+			// Puis celles du dossier de données (gel, demandes de destruction, base), après le
+			// vidage qui vient d'écrire dans la base (stockage, 3e campagne, F5).
+			if derr := svc.ScrubDataTimes(); derr != nil {
+				err = errors.Join(err, derr)
 			}
 			return err
 		})

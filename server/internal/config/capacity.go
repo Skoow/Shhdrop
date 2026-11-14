@@ -23,7 +23,8 @@ type Capacity struct {
 	Downloads int
 	// Watches (SHH_WATCH_MAX) : surveillances tenues (GET /api/shares/watch, 25 s).
 	Watches int
-	// WebSockets (SHH_WS_MAX) : WebSocket du salon ouverts.
+	// WebSockets (SHH_WS_MAX) : WebSocket du salon ouverts. Chacun peut tenir un lot de
+	// rattrapage en mémoire tant que son client ne lit pas (wsCost).
 	WebSockets int
 	// DiskOps (SHH_DISK_OPS_MAX) : appels système de fichiers simultanés dans les dossiers des
 	// partages et des pièces (blob.Gate) : chacun tient un fil du système (audit D4).
@@ -54,6 +55,11 @@ const (
 	uploadCost = 4 * mib
 	// downloadCost : tampon d'un GET en flux.
 	downloadCost = 256 << 10
+	// wsCost : mémoire budgétée par WebSocket du salon (salon.MemoireParConnexion, un test les
+	// compare) : un lot de rattrapage tenu par un client qui ne lit plus, et la marge de la
+	// connexion (audit adverse du 13 novembre, 3e campagne, front serveur, D : aucun budget ne
+	// comptait les WebSocket ; 2 000 connexions tenaient ≈ 600 Mio pour GOMEMLIMIT = 900 Mio).
+	wsCost = WebSocketMem
 	// Valeurs sans GOMEMLIMIT (aucune base de calcul : celles d'avant le 13 novembre).
 	defaultUploads, defaultDownloads = 64, 256
 	defaultWebSockets                = 2000
@@ -119,6 +125,9 @@ func checkThreads(c Capacity, pids int) error {
 	return nil
 }
 
+// WebSocketMem : wsCost, exportée pour le test qui la compare à salon.MemoireParConnexion.
+const WebSocketMem = 64 << 10
+
 const (
 	// SalonJournalMem : mémoire budgétée pour le journal des annonces d'un salon, hors de
 	// SalonFramesTotal : 4 096 annonces au plus (salon.journalMax) à 64 o (rang, tranche,
@@ -173,9 +182,13 @@ func checkSalons(salonsMax int, c Capacity, mem int64) error {
 //   - Index des salons (SalonFramesTotal) : 10 % de GOMEMLIMIT à 48 o la trame, tous salons
 //     confondus (900 Mio → ≈ 1,97 M de trames). C'est le plafond GLOBAL : le plafond PAR salon
 //     (SalonFrames) reste un garde-fou secondaire.
-//   - Le reste (≈ 50 %, doublement du ramasse-miettes compris) pour SQLite, les conversations
-//     et la marge.
-//   - Surveillances : autant que de lectures. WebSocket : 2 000.
+//   - WebSocket du salon : 10 % de GOMEMLIMIT à 64 Kio par connexion (wsCost), 2 000 au plus
+//     (900 Mio → 1 440).
+//   - Journaux des salons : 10 % au plus (checkSalons).
+//   - Le reste (≈ 30 %) pour SQLite, les conversations et la marge. Avec GOMEMLIMIT, le
+//     ramasse-miettes passe plus souvent quand le tas vivant approche de la limite, au lieu de
+//     le laisser doubler.
+//   - Surveillances : autant que de lectures.
 //   - Descripteurs : chaque catégorie a au plus nofile / 8 places (lectures et envois : 2
 //     descripteurs chacun), soit 3/4 de la limite au total, le reste pour la base, les
 //     conversations et la marge.
@@ -186,6 +199,7 @@ func computeCapacity(mem int64, nofile uint64) Capacity {
 		c.Uploads = clamp(mem*3/10/uploadCost, 8, capMax)
 		c.Downloads = clamp(mem/10/downloadCost, 16, capMax)
 		c.SalonFramesTotal = clamp(mem/10/salonFrameMem, 1000, framesTotalMax)
+		c.WebSockets = clamp(mem/10/wsCost, 16, defaultWebSockets)
 	}
 	c.Watches = c.Downloads
 	if fd := fdShare(nofile); fd > 0 {
@@ -248,5 +262,23 @@ func capacityFromEnv(mem int64, nofile uint64) (Capacity, error) {
 		*v.dst = n
 	}
 	c.ConvDiskOps = max(1, c.DiskOps/4)
+	if err := checkWebSockets(c, mem); err != nil {
+		return Capacity{}, err
+	}
 	return c, nil
+}
+
+// checkWebSockets refuse un SHH_WS_MAX que la mémoire ne porte pas : SHH_WS_MAX × wsCost doit
+// tenir dans 10 % de GOMEMLIMIT (mem ; sans limite connue : pas de contrôle), comme la valeur
+// calculée (audit adverse du 13 novembre, 3e campagne, front serveur, D). Sinon des connexions
+// en rattrapage qui ne lisent plus, ou une reconnexion de tous les membres après une coupure,
+// feraient tuer le processus faute de mémoire, et tous les salons avec lui.
+func checkWebSockets(c Capacity, mem int64) error {
+	if mem > 0 && mem < math.MaxInt64 && int64(c.WebSockets)*wsCost > max(mem/10, 16*wsCost) {
+		return fmt.Errorf("SHH_WS_MAX=%d : les WebSocket du salon pourraient tenir %d Mio (%d Kio chacun), plus de 10 %% de "+
+			"GOMEMLIMIT (%d Mio) : au plus %d avec cette mémoire ; baisser SHH_WS_MAX (ou le laisser vide : il est alors "+
+			"calculé) ou relever mem_limit et GOMEMLIMIT", c.WebSockets, int64(c.WebSockets)*wsCost/mib, wsCost>>10, mem/mib,
+			max(mem/10/wsCost, 16))
+	}
+	return nil
 }

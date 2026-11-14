@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/share"
@@ -42,8 +44,11 @@ var ErrOccupied = errors.New("salon: places occupées")
 // errRenouvellement : la conversation n'a pas pu être recréée ; le salon est fini.
 var errRenouvellement = errors.New("salon: renouvellement impossible")
 
-// rouvrirConversation : recréation de la conversation (variable pour les tests : panne).
-var rouvrirConversation = OuvrirConversation
+// rouvrirConversation : conversation neuve d'un renouvellement, ouverte sous le nom provisoire
+// du salon (variable pour les tests : panne).
+var rouvrirConversation = func(dossier, id string) (*Conversation, error) {
+	return ouvrirConversation(dossier, id, cheminProvisoire(dossier, id))
+}
 
 // ReglagesReq : POST /api/salons/reglages. Places : 0 = inchangé ; Heures : 0 = pas de
 // renouvellement.
@@ -82,11 +87,13 @@ type Reglages struct {
 // Ordre (sous essaiLock : aucune entrée ni exclusion en même temps ; les sièges occupés ne
 // peuvent que diminuer) : ligne relue ; état mémoire (créé s'il manque, comme Exclure) ;
 // vérifications ; avant ; une requête SQL atomique hors du verrou du salon (expires_at,
-// max_members, ligne vivante seulement) ; échéance du bloc (Manager.vivants) ; puis, sous le
-// verrou du salon, l'état mémoire (renouvelerLocked) et le 0x10 ; enfin les pièces effacées
+// max_members, ligne vivante seulement) ; échéance du bloc (Manager.vivants) ; nouvelle
+// conversation ouverte hors de tout verrou de salon ; puis, sous le verrou du salon, l'état
+// mémoire seul (renouvelerLocked) et le 0x10 ; ancienne conversation détruite hors du verrou
+// (remplacer) ; enfin les pièces effacées
 // hors du verrou (fichier, puis ligne et budget : pieces_bytes revient à 0 pièce par pièce,
 // jamais par une remise à 0 forcée qui retirerait le budget d'une pièce créée juste après).
-// Si la conversation ne peut pas être recréée, rien d'avant n'est déjà plus servi et le salon
+// Si la conversation ne peut pas être recréée (ou l'ancienne détruite), le salon
 // est fini (raison 7, « interrompu par le serveur ») : Tick reprend sa partie disque comme
 // pour toute fin de vie.
 func (m *Manager) Regler(sGestion []byte, r ReglagesReq, avant func() error) (Reglages, error) {
@@ -150,51 +157,91 @@ func (m *Manager) Regler(sGestion []byte, r ReglagesReq, avant func() error) (Re
 		m.mu.Unlock()
 	}
 	defer m.purger(s) // pièces d'avant : fichier, puis ligne et budget, hors du verrou du salon
-	depart, err := m.appliquerReglages(s, places, exp, r.Heures != 0)
-	if errors.Is(err, errRenouvellement) {
-		_ = m.finir(s, RaisonInterrompu) // partie disque ratée : reprise par Tick
-		return Reglages{}, ErrES
+	// Renouvellement : la nouvelle conversation est ouverte AVANT de prendre le verrou du salon
+	// (appel disque, sous un nom provisoire : l'ancienne tient encore le nom du salon), et
+	// l'ancienne est détruite APRÈS l'avoir rendu (audit adverse du 13 novembre, 3e campagne,
+	// front serveur, A : la destruction attendait le verrou de la conversation, donc le disque,
+	// sous le verrou du salon, et figeait l'entretien en mémoire de tous les salons).
+	var neuve *Conversation
+	if r.Heures != 0 {
+		_ = os.Remove(cheminProvisoire(m.cfg.DossierConversations, id)) // reste d'un essai raté ; sous essaiLock
+		if neuve, err = rouvrirConversation(m.cfg.DossierConversations, id); err != nil {
+			_ = m.finir(s, RaisonInterrompu) // partie disque ratée : reprise par l'entretien
+			return Reglages{}, ErrES
+		}
+		neuve.lec = m.lec // lectures bornées comme à l'ouverture
+		neuve.compterDans(&m.octetsConv)
 	}
+	depart, ancienne, err := m.appliquerReglages(s, places, exp, neuve)
 	if err != nil {
+		if neuve != nil {
+			_ = neuve.Detruire() // jamais installée ; un reste est retiré au prochain renouvellement
+		}
 		return Reglages{}, err
+	}
+	if neuve != nil && m.remplacer(s, ancienne, neuve) != nil {
+		_ = m.finir(s, RaisonInterrompu) // partie disque ratée : reprise par l'entretien
+		return Reglages{}, ErrES
 	}
 	return Reglages{MaxMembers: places, ExpiresIn: secs(exp - now.Unix()), Depuis: depart}, nil
 }
 
-// appliquerReglages : état mémoire sous le verrou du salon, puis 0x10 à tous. Salon fini ou
-// échu en mémoire entre-temps : ErrNotFound (sa ligne est effacée par sa fin).
-func (m *Manager) appliquerReglages(s *salon, places int, exp int64, renouveler bool) (uint64, error) {
+// remplacer : partie disque d'un renouvellement, hors de tout verrou de salon (sous essaiLock) :
+// l'ancienne conversation est détruite (clé oubliée, fichier supprimé ; attend la fin d'une
+// écriture en cours dans ce fichier), puis la nouvelle prend le nom du salon. Un échec laisse
+// l'ancienne dans salon.ancienne : la fin du salon, décidée par l'appelant, la reprend
+// (achever).
+func (m *Manager) remplacer(s *salon, ancienne, neuve *Conversation) error {
+	if ancienne != nil {
+		if err := ancienne.Detruire(); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		if s.ancienne == ancienne {
+			s.ancienne = nil
+		}
+		s.mu.Unlock()
+	}
+	return neuve.renommer(filepath.Join(m.cfg.DossierConversations, s.id))
+}
+
+// appliquerReglages : état mémoire sous le verrou du salon, puis 0x10 à tous ; aucun appel
+// disque. neuve (non nil : renouvellement) devient la conversation du salon ; l'ancienne est
+// rendue, à détruire hors du verrou (remplacer). Salon fini ou échu en mémoire entre-temps :
+// ErrNotFound (sa ligne est effacée par sa fin), rien n'est changé.
+func (m *Manager) appliquerReglages(s *salon, places int, exp int64, neuve *Conversation) (uint64, *Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := m.cfg.Now()
 	if s.fini || !now.Before(s.expires) {
-		return 0, ErrNotFound
+		return 0, nil, ErrNotFound
 	}
 	s.maxMembers = places
-	if renouveler {
-		if err := m.renouvelerLocked(s); err != nil {
-			return 0, err
-		}
+	var ancienne *Conversation
+	if neuve != nil {
+		ancienne = m.renouvelerLocked(s, neuve)
 		s.expires = time.Unix(exp, 0)
 	}
 	s.regle = true
 	s.diffuserLocked(s.enrReglagesLocked(now), genreReglages, nil)
-	return s.depart, nil
+	return s.depart, ancienne, nil
 }
 
-// renouvelerLocked : tout ce qui est d'avant cesse d'être servi d'abord (pièces marquées
-// effacées et leurs flux coupés, index, échéances, lectures attendues, 0x0E en attente,
-// trames en file des connexions ; rang de départ posé, gen incrémenté), puis la conversation
-// est détruite (clé mise à zéro, fichier supprimé) et recréée vide sous une clé neuve. Échec
-// de la destruction ou de la recréation : errRenouvellement (l'appelant finit le salon ; la
-// conversation détruite rend ErrDetruite à toute écriture d'ici là). Appelé sous s.mu.
-func (m *Manager) renouvelerLocked(s *salon) error {
+// renouvelerLocked : partie mémoire d'un renouvellement, sans aucun appel disque ni attente
+// d'un autre verrou que ceux des connexions : tout ce qui est d'avant cesse d'être servi
+// (pièces marquées effacées et leurs flux coupés, index, échéances, lectures attendues, 0x0E en
+// attente, trames en file des connexions ; rang de départ posé, gen incrémenté), et neuve
+// (vide, sous une clé neuve, déjà ouverte) remplace la conversation. Rend l'ancienne, gardée
+// aussi dans salon.ancienne tant qu'elle n'est pas détruite : une écriture en cours dans
+// l'ancienne voit salon.conv changée et récrit sa trame dans la nouvelle (ranger). Appelé sous
+// s.mu.
+func (m *Manager) renouvelerLocked(s *salon, neuve *Conversation) *Conversation {
 	for _, p := range s.lesPieces {
 		s.supprimerPieceLocked(p)
 	}
 	s.globDec(len(s.index)) // trames en mémoire rendues au compte global avant de vider l'index
 	s.index, s.echeances, s.pieces = nil, nil, nil
-	s.aEcraser = nil // emplacements de la conversation détruite ci-dessous
+	s.aEcraser = nil // emplacements de l'ancienne conversation, détruite par remplacer
 	s.depart = s.seq
 	s.gen.Add(1)
 	for _, c := range s.conns {
@@ -202,17 +249,9 @@ func (m *Manager) renouvelerLocked(s *salon) error {
 			c.oublierAvantLocked()
 		}
 	}
-	if err := s.conv.Detruire(); err != nil {
-		return errRenouvellement
-	}
-	conv, err := rouvrirConversation(m.cfg.DossierConversations, s.id)
-	if err != nil {
-		return errRenouvellement
-	}
-	conv.lec = m.lec // lectures bornées comme à l'ouverture
-	conv.compterDans(&m.octetsConv)
-	s.conv = conv
-	return nil
+	ancienne := s.conv
+	s.conv, s.ancienne = neuve, ancienne
+	return ancienne
 }
 
 // besoinPlaces : places au moins nécessaires, sièges occupés plus le siège 0 s'il est libre

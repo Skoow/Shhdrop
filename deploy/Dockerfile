@@ -79,7 +79,14 @@ WORKDIR /src/server
 COPY server/go.mod server/go.sum ./
 RUN go mod download && go mod verify
 COPY server/ ./
-RUN go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /out/shhdrop ./cmd/shhdrop
+# Empreinte du commit gravée dans le binaire (main.buildID), affichée par le tableau de bord
+# d'administration : sans .git ni empreinte vcs (-buildvcs=false), la page ne pouvait pas dire
+# quel code tourne (audit adverse du 13 novembre, 3e campagne, tableau de bord, F6). Même
+# SHH_BUILD_ID, même binaire : la reproductibilité tient. Forme revérifiée ici (ARG propre à
+# cette étape : la valeur ne peut rien injecter dans -ldflags).
+ARG SHH_BUILD_ID
+RUN printf '%s' "$SHH_BUILD_ID" | grep -Eqx '[0-9a-f]{7,40}' || { echo "SHH_BUILD_ID manquant ou invalide : 7 à 40 chiffres hexadécimaux minuscules" >&2; exit 1; } \
+ && go build -trimpath -buildvcs=false -ldflags="-s -w -buildid= -X main.buildID=$SHH_BUILD_ID" -o /out/shhdrop ./cmd/shhdrop
 # shhcheck : contrôle de santé du conteneur et test TLS hybride (deploy/shhcheck/main.go).
 WORKDIR /src/shhcheck
 COPY deploy/shhcheck/ ./

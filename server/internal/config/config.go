@@ -3,6 +3,7 @@ package config
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -42,8 +43,9 @@ type Config struct {
 	// que SHH_LISTEN : boucle locale, sauf derrière un proxy déclaré (le conteneur de
 	// production, où seuls la boucle locale et SHH_TRUSTED_PROXY sont servis, adminui).
 	AdminListen string
-	// AdminTokenHash : SHA-256 de SHH_ADMIN_TOKEN (obligatoire avec SHH_ADMIN_LISTEN). Le jeton
-	// lui-même n'est pas gardé : seule son empreinte sert à la comparaison en temps constant.
+	// AdminTokenHash : SHA-256 du jeton d'administration (obligatoire avec SHH_ADMIN_LISTEN) :
+	// SHH_ADMIN_TOKEN_SHA256, ou, en développement local seulement, calculée depuis
+	// SHH_ADMIN_TOKEN (adminFromEnv). Seule l'empreinte sert, à la comparaison en temps constant.
 	AdminTokenHash [32]byte
 }
 
@@ -96,7 +98,7 @@ func FromEnv() (Config, error) {
 	if err := checkListen("SHH_LISTEN", c.Listen, proxied); err != nil {
 		return Config{}, err
 	}
-	if c.AdminListen, c.AdminTokenHash, err = adminFromEnv(c.Listen, proxied); err != nil {
+	if c.AdminListen, c.AdminTokenHash, err = adminFromEnv(c.Listen, proxied, c.BehindProxy); err != nil {
 		return Config{}, err
 	}
 	if c.StaticDir, err = absDir("SHH_STATIC_DIR", os.Getenv("SHH_STATIC_DIR")); err != nil {
@@ -276,7 +278,7 @@ func checkListen(name, l string, proxied bool) error {
 	return nil
 }
 
-// Jeton d'administration : au moins adminTokenMin caractères de l'alphabet base64url (43 =
+// Jeton d'administration en clair (SHH_ADMIN_TOKEN, développement local) : au moins adminTokenMin caractères de l'alphabet base64url (43 =
 // 32 octets aléatoires), dont adminTokenDistinct différents au moins (refuse « aaaa… »).
 // 10 et non 16 (audit adverse 3, F1) : un jeton hexadécimal de 64 caractères tiré au hasard
 // n'a que 16 symboles possibles et en omet un environ une fois sur quatre ; il était alors
@@ -284,11 +286,35 @@ func checkListen(name, l string, proxied bool) error {
 // hexadécimaux : probabilité inférieure à 10^-9.
 const adminTokenMin, adminTokenMax, adminTokenDistinct = 43, 512, 10
 
-// adminFromEnv : SHH_ADMIN_LISTEN et SHH_ADMIN_TOKEN (tableau de bord d'administration,
-// conception du 13 novembre). Sans SHH_ADMIN_LISTEN : désactivé, le jeton n'est pas lu.
-// Aucun message d'erreur ne reprend le jeton.
-func adminFromEnv(listen string, proxied bool) (string, [32]byte, error) {
+// emptyTokenHash : SHA-256 de la chaîne vide, ce que donne la commande documentée quand la
+// variable du jeton n'est pas posée ; refusée (aucun jeton vide n'est jamais accepté).
+const emptyTokenHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+// adminFromEnv : SHH_ADMIN_LISTEN et le jeton du tableau de bord d'administration (conception
+// du 13 novembre). Le serveur n'a besoin que de l'EMPREINTE du jeton (il ne compare que des
+// empreintes) :
+//
+//   - SHH_ADMIN_TOKEN_SHA256 : SHA-256 du jeton, 64 chiffres hexadécimaux en minuscules
+//     (printf %s "$JETON" | sha256sum). Le jeton lui-même reste chez l'exploitant : il n'est
+//     plus ni dans deploy/.env, ni dans la configuration du conteneur, ni dans l'environnement
+//     du processus (audit adverse du 13 novembre, 3e campagne : tableau de bord F5, stockage
+//     F3). Contrepartie : la qualité du jeton ne peut plus être contrôlée ici (une empreinte ne
+//     dit rien de ce qu'elle résume) ; c'est à la commande de tirage de la garantir
+//     (openssl rand -hex 32).
+//   - SHH_ADMIN_TOKEN : le jeton en clair, pour le développement local seulement. REFUSÉ avec
+//     SHH_BEHIND_PROXY=1 (production), même sans tableau de bord.
+//
+// Les deux à la fois : refus. Sans SHH_ADMIN_LISTEN : désactivé, rien d'autre n'est lu (sauf
+// le refus ci-dessus). Aucun message d'erreur ne reprend le jeton.
+func adminFromEnv(listen string, proxied, behindProxy bool) (string, [32]byte, error) {
 	var none [32]byte
+	const calcul = `tirer le jeton sur son poste (openssl rand -hex 32), le garder hors du serveur, et ne donner ici que ` +
+		`son empreinte : printf %s "$JETON" | sha256sum (les 64 premiers caractères)`
+	t := os.Getenv("SHH_ADMIN_TOKEN")
+	if t != "" && behindProxy {
+		return "", none, errors.New("SHH_ADMIN_TOKEN (jeton en clair) est refusé avec SHH_BEHIND_PROXY=1 : le serveur ne doit " +
+			"pas recevoir le jeton ; retirer cette variable et poser SHH_ADMIN_TOKEN_SHA256 : " + calcul)
+	}
 	l := os.Getenv("SHH_ADMIN_LISTEN")
 	if l == "" {
 		return "", none, nil
@@ -300,13 +326,46 @@ func adminFromEnv(listen string, proxied bool) (string, [32]byte, error) {
 	if _, p, _ := net.SplitHostPort(listen); p == port {
 		return "", none, errors.New("SHH_ADMIN_LISTEN doit avoir un autre port que SHH_LISTEN (écouteur distinct, jamais le port public)")
 	}
-	t := os.Getenv("SHH_ADMIN_TOKEN")
-	if !adminTokenOK(t) {
-		return "", none, fmt.Errorf("SHH_ADMIN_LISTEN exige SHH_ADMIN_TOKEN : %d à %d caractères parmi A-Z a-z 0-9 - _ "+
-			"tirés au hasard (exemple : openssl rand -hex 32) ; valeur absente ou refusée (non affichée)",
+	e := os.Getenv("SHH_ADMIN_TOKEN_SHA256")
+	switch {
+	case e != "" && t != "":
+		return "", none, errors.New("SHH_ADMIN_TOKEN_SHA256 et SHH_ADMIN_TOKEN sont posées toutes les deux : n'en garder qu'une " +
+			"(l'empreinte ; le jeton en clair ne sert qu'au développement local)")
+	case e != "":
+		h, ok := adminHashOK(e)
+		if !ok {
+			return "", none, errors.New("SHH_ADMIN_TOKEN_SHA256 invalide : attendu l'empreinte SHA-256 du jeton, 64 chiffres " +
+				"hexadécimaux en minuscules, et pas celle d'un jeton vide ; " + calcul)
+		}
+		return l, h, nil
+	case t == "":
+		return "", none, errors.New("SHH_ADMIN_LISTEN exige SHH_ADMIN_TOKEN_SHA256 : " + calcul)
+	case !adminTokenOK(t):
+		return "", none, fmt.Errorf("SHH_ADMIN_TOKEN (développement local) : %d à %d caractères parmi A-Z a-z 0-9 - _ "+
+			"tirés au hasard (exemple : openssl rand -hex 32) ; valeur refusée (non affichée)",
 			adminTokenMin, adminTokenMax)
 	}
 	return l, sha256.Sum256([]byte(t)), nil
+}
+
+// adminHashOK : empreinte SHA-256 en hexadécimal, telle que sha256sum l'écrit (64 chiffres, en
+// minuscules). Refusées : l'empreinte du jeton vide, et une valeur de moins de
+// adminTokenDistinct symboles différents (« 000… » : pas une empreinte ; probabilité inférieure
+// à 10^-9 pour une vraie).
+func adminHashOK(e string) ([32]byte, bool) {
+	var h [32]byte
+	if len(e) != 64 || e == emptyTokenHash {
+		return h, false
+	}
+	for i := 0; i < len(e); i++ {
+		if c := e[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return h, false
+		}
+	}
+	if _, err := hex.Decode(h[:], []byte(e)); err != nil || !adminTokenOK(e) {
+		return [32]byte{}, false
+	}
+	return h, true
 }
 
 func adminTokenOK(t string) bool {

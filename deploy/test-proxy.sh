@@ -10,7 +10,8 @@
 #   4. les en-têtes du serveur Go arrivent une seule fois, les octets ne changent pas ; aucune
 #      réponse, même fabriquée par Caddy (308, 413, 502), ne porte « Server » ni « Via » ;
 #   5. TLS 1.3, échange de clés X25519MLKEM768, redirection HTTP vers HTTPS ; HTTP/3 annoncé
-#      (Alt-Svc) et écouté en UDP (la requête HTTP/3 elle-même n'est pas faite) ;
+#      (Alt-Svc) et écouté en UDP (la requête HTTP/3 elle-même n'est pas faite), 0-RTT refusé
+#      dans la configuration adaptée (« allow_0rtt »:false ; aucune requête 0-RTT n'est faite) ;
 #   6. aucune adresse de client dans ce que Caddy et le serveur écrivent (fichiers, sorties) ;
 #   7. salon (SHH_SALONS=1, plan C-2 Task 17) : Caddy garde l'en-tête Origin et laisse passer la
 #      mise à niveau WebSocket ; un WebSocket de /api/salons/ws, ouvert depuis l'adresse repère
@@ -335,6 +336,15 @@ check "308 de Caddy : ni Server, ni Via" bash -c "! grep -qiE '^(server|via):' '
 protos=$(SHH_DOMAIN=$name "$caddy" adapt --config "$here/Caddyfile" --adapter caddyfile 2>/dev/null |
 	grep -o '"protocols":\["h1","h2","h3"\]' | sort -u)
 check "Caddyfile : protocoles h1, h2 et h3" test "$protos" = '"protocols":["h1","h2","h3"]'
+# 0-RTT refusé sur chaque serveur (audit adverse du 13 novembre, 3e campagne, site, F1 : Caddy
+# 2.11.9 l'accepte par défaut en HTTP/3 ; une requête anticipée arrive sans adresse de client
+# vérifiée et /api répond 500). Autant de « allow_0rtt »:false que de serveurs, aucun « true ».
+adapte=$(SHH_DOMAIN=$name "$caddy" adapt --config "$here/Caddyfile" --adapter caddyfile 2>/dev/null)
+n_srv=$(grep -o '"protocols":\[' <<<"$adapte" | wc -l)
+n_0rtt=$(grep -o '"allow_0rtt":false' <<<"$adapte" | wc -l)
+zrtt=refusé
+if [ "$n_srv" -lt 1 ] || [ "$n_0rtt" != "$n_srv" ] || grep -q '"allow_0rtt":true' <<<"$adapte"; then zrtt=accepté; fi
+check "Caddyfile : 0-RTT refusé sur les $n_srv serveurs ($n_0rtt « allow_0rtt »:false)" test "$zrtt" = refusé
 udp_hex=$(printf '%04X' "$p_https")
 check "Caddy écoute en UDP sur $p_https (QUIC)" \
 	bash -c "cat /proc/net/udp /proc/net/udp6 2>/dev/null | awk '{print \$2}' | grep -q ':$udp_hex\$'"

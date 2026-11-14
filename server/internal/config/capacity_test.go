@@ -18,14 +18,15 @@ func TestCapaciteCalculee(t *testing.T) {
 		// Sans GOMEMLIMIT ni limite connue : valeurs d'avant le 13 novembre (plafond global des
 		// trames : defaultSalonFramesTotal).
 		{"sans limites", math.MaxInt64, 0, Capacity{64, 256, 256, 2000, 64, 1500, 100000, 1000000, 16}},
-		// compose.yaml : GOMEMLIMIT 900 Mio, nofile 65 536 (plafond global = 10 % / 48 o).
-		{"production", 900 << 20, 65536, Capacity{67, 360, 360, 2000, 64, 1500, 100000, 1966080, 16}},
+		// compose.yaml : GOMEMLIMIT 900 Mio, nofile 65 536 (plafond global = 10 % / 48 o ;
+		// WebSocket = 10 % / 64 Kio, 2 000 au plus).
+		{"production", 900 << 20, 65536, Capacity{67, 360, 360, 1440, 64, 1500, 100000, 1966080, 16}},
 		// 4 Gio de mémoire : 307 envois, 1 638 lectures, le plafond global monte avec la mémoire.
 		{"4 Gio", 4 << 30, 1 << 20, Capacity{307, 1638, 1638, 2000, 64, 1500, 100000, 8947848, 16}},
 		// Descripteurs rares : nofile / 8 par catégorie (sans effet sur le plafond global).
 		{"1 024 descripteurs", 4 << 30, 1024, Capacity{128, 128, 128, 128, 64, 1500, 100000, 8947848, 16}},
 		// Très peu de mémoire : planchers.
-		{"64 Mio", 64 << 20, 65536, Capacity{8, 25, 25, 2000, 64, 1500, 100000, 139810, 16}},
+		{"64 Mio", 64 << 20, 65536, Capacity{8, 25, 25, 102, 64, 1500, 100000, 139810, 16}},
 	}
 	for _, c := range cas {
 		if got := computeCapacity(c.mem, c.nofile); got != c.want {
@@ -38,14 +39,14 @@ func TestCapaciteReglee(t *testing.T) {
 	t.Setenv("SHH_UPLOADS_MAX", "200")
 	t.Setenv("SHH_DOWNLOADS_MAX", "1000")
 	t.Setenv("SHH_WATCH_MAX", "50")
-	t.Setenv("SHH_WS_MAX", "5000")
+	t.Setenv("SHH_WS_MAX", "1200")
 	t.Setenv("SHH_DISK_OPS_MAX", "16")
 	t.Setenv("SHH_SEGMENTS_PER_MIN", "600")
 	t.Setenv("SHH_SALON_FRAMES_MAX", "20000")
 	// Plafond global réglé au-dessus de capMax (il monte avec la mémoire : borne framesTotalMax).
 	t.Setenv("SHH_SALON_FRAMES_TOTAL", "3000000")
 	c, err := capacityFromEnv(900<<20, 65536)
-	if err != nil || c != (Capacity{200, 1000, 50, 5000, 16, 600, 20000, 3000000, 4}) {
+	if err != nil || c != (Capacity{200, 1000, 50, 1200, 16, 600, 20000, 3000000, 4}) {
 		t.Fatal(c, err)
 	}
 	for _, v := range []string{"0", "-1", "012", "1e3", " 5", "x", "1048577"} {
@@ -66,6 +67,41 @@ func TestCapaciteReglee(t *testing.T) {
 	t.Setenv("SHH_DOWNLOADS_MAX", "129")
 	if _, err := capacityFromEnv(900<<20, 1024); err == nil || !strings.Contains(err.Error(), "descripteurs") {
 		t.Fatal("129 lectures pour 1 024 descripteurs acceptées :", err)
+	}
+}
+
+// Audit adverse du 13 novembre, 3e campagne, front serveur (D) : les WebSocket du salon sont
+// dans le budget mémoire (10 % de GOMEMLIMIT, au coût d'un lot de rattrapage par connexion), et
+// un SHH_WS_MAX réglé au-delà refuse le démarrage, avec un message qui dit quoi changer. Sans
+// limite de mémoire connue : pas de contrôle.
+func TestWebSocketContreMemoire(t *testing.T) {
+	const mem = 900 << 20
+	c := computeCapacity(mem, 65536)
+	if int64(c.WebSockets)*wsCost > mem/10 {
+		t.Fatalf("valeur calculée hors budget : %d WebSocket × %d o > 10 %% de %d", c.WebSockets, wsCost, mem)
+	}
+	if err := checkWebSockets(c, mem); err != nil {
+		t.Fatal("valeur calculée refusée :", err)
+	}
+	t.Setenv("SHH_WS_MAX", "1440")
+	if _, err := capacityFromEnv(mem, 65536); err != nil {
+		t.Fatal("1 440 WebSocket (10 % de 900 Mio juste) :", err)
+	}
+	t.Setenv("SHH_WS_MAX", "2000")
+	_, err := capacityFromEnv(mem, 65536)
+	if err == nil || !strings.Contains(err.Error(), "SHH_WS_MAX=2000") || !strings.Contains(err.Error(), "au plus 1440") {
+		t.Fatal("2 000 WebSocket pour 900 Mio acceptés :", err)
+	}
+	if c, err := capacityFromEnv(math.MaxInt64, 65536); err != nil || c.WebSockets != 2000 {
+		t.Fatal("sans GOMEMLIMIT :", c, err)
+	}
+	// Très peu de mémoire : le plancher calculé (16) n'est pas refusé.
+	if c, err := capacityFromEnv(8<<20, 0); err == nil || c.WebSockets != 0 {
+		t.Fatal("2 000 WebSocket pour 8 Mio acceptés :", c, err)
+	}
+	t.Setenv("SHH_WS_MAX", "")
+	if c, err := capacityFromEnv(8<<20, 0); err != nil || c.WebSockets != 16 {
+		t.Fatal("plancher :", c, err)
 	}
 }
 

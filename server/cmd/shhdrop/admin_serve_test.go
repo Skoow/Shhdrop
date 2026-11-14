@@ -19,8 +19,10 @@ import (
 
 	"github.com/skoow/shhdrop/server/internal/adminui"
 	"github.com/skoow/shhdrop/server/internal/api"
+	"github.com/skoow/shhdrop/server/internal/blob"
 	"github.com/skoow/shhdrop/server/internal/config"
 	"github.com/skoow/shhdrop/server/internal/limits"
+	"github.com/skoow/shhdrop/server/internal/share"
 	"github.com/skoow/shhdrop/server/internal/store"
 	"github.com/skoow/shhdrop/server/internal/usage"
 )
@@ -126,7 +128,7 @@ func TestTableauDeBord(t *testing.T) {
 	}
 	var chaines []string
 	chainesDe(brut, &chaines)
-	goVersion, rev := adminui.Build()
+	goVersion, rev := adminui.Build(buildID)
 	for _, c := range chaines {
 		if c != goVersion && c != rev && c != "" {
 			t.Errorf("chaîne inattendue dans l'état : %q", c)
@@ -316,5 +318,116 @@ func TestUsageCompteLesRefusDeDebit(t *testing.T) {
 	}
 	if st.Usage.PartagesCrees != 0 || st.Usage.ExpediteursDuJour != 0 {
 		t.Fatalf("compteurs étrangers touchés : %+v", st.Usage)
+	}
+}
+
+// Audit adverse du 13 novembre, 3e campagne, tableau de bord, F2 : « détruire » ne répond
+// « salon » que si le salon est détruit. Un membre commence l'envoi d'une pièce pendant la
+// destruction (la borne des appels disque, occupée, tient la fenêtre ouverte) : avant, la ligne
+// du salon restait et la page répondait quand même « Salon détruit ».
+func TestRT3SalonDetruitMalgreUnePieceDeposeePendant(t *testing.T) {
+	cfg, svc := adminSetup(t)
+	gate := blob.NewGate(1)
+	d := adminDeps{svc: svc, db: svc.DB, gate: gate, start: time.Now(), lim: limits.New(time.Now), probes: sondesVides()}
+	s := nouveauSalonTest(t)
+	insererSalon(t, cfg.DataDir, s)
+	p1 := share.NewID()
+	if _, err := svc.DB.Exec(`INSERT INTO salon_pieces(id,salon_id,bucket,state,segments_mask) VALUES(?,?,1,'ready',x'')`, p1, s.id); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{filepath.Join("salon-pieces", p1), filepath.Join("salons", s.id)} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(cfg.DataDir, f)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cfg.DataDir, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lache, pris := make(chan struct{}), make(chan struct{})
+	go gate.Do(func() error { close(pris); <-lache; return nil })
+	<-pris
+	type res struct {
+		kind string
+		err  error
+	}
+	fin := make(chan res, 1)
+	go func() { k, err := adminDestroy(cfg, d, []byte(s.lien)); fin <- res{k, err} }()
+	time.Sleep(300 * time.Millisecond) // la destruction attend son tour pour effacer la première pièce
+	// Dès cet instant, plus aucune requête ne voit le salon (ligne morte avant tout le reste).
+	var vivant int
+	if err := svc.DB.QueryRow(`SELECT count(*) FROM salons WHERE id=? AND failed_attempts<10`, s.id).Scan(&vivant); err != nil || vivant != 0 {
+		t.Fatalf("pendant la destruction : ligne encore vivante (%d, %v)", vivant, err)
+	}
+	// Un membre du salon commence l'envoi d'une pièce : même INSERT que salon.CreerPieceID.
+	p2 := share.NewID()
+	if _, err := svc.DB.Exec(`INSERT INTO salon_pieces(id,salon_id,bucket,state,segments_mask) VALUES(?,?,1,'uploading',x'00')`, p2, s.id); err != nil {
+		t.Fatal(err)
+	}
+	close(lache)
+	r := <-fin
+	var pieces int
+	if err := svc.DB.QueryRow(`SELECT count(*) FROM salon_pieces WHERE salon_id=?`, s.id).Scan(&pieces); err != nil {
+		t.Fatal(err)
+	}
+	lignes := salonLignes(t, svc.DB, s.id)
+	if r.err == nil && r.kind == "salon" && (lignes != 0 || pieces != 0) {
+		t.Fatalf("FAIBLESSE F2 : réponse « salon détruit », mais %d ligne de salon et %d pièce restent en base", lignes, pieces)
+	}
+	if r.err != nil || r.kind != "salon" {
+		t.Fatalf("destruction : %q %v (lignes %d, pièces %d)", r.kind, r.err, lignes, pieces)
+	}
+}
+
+// Audit adverse du 13 novembre, 3e campagne, tableau de bord F3 et stockage F2 : la destruction
+// d'un salon depuis la page passe par le vidage regroupé (store.Vidage, demande non bloquante).
+// Base lue par un autre programme : la destruction répond « salon » sans attendre, aucune autre
+// requête n'attend, et le vidage raté est compté puis redemandé.
+func TestRT3DestructionSalonBaseOccupee(t *testing.T) {
+	cfg, svc := adminSetup(t)
+	svc.Vidage = store.NewVidage(svc.DB)
+	ctx, cancel := context.WithCancel(context.Background())
+	vfini := make(chan struct{})
+	go func() { svc.Vidage.Run(ctx); close(vfini) }()
+	defer func() { cancel(); <-vfini }()
+	d := adminDeps{svc: svc, db: svc.DB, start: time.Now(), lim: limits.New(time.Now), probes: sondesVides()}
+	s := nouveauSalonTest(t)
+	insererSalon(t, cfg.DataDir, s)
+	autre, err := store.OpenExisting(filepath.Join(cfg.DataDir, "shares.db")) // « un autre programme »
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer autre.Close()
+	tx, err := autre.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var n int
+	if err := tx.QueryRow(`SELECT count(*) FROM salons`).Scan(&n); err != nil { // lecteur ouvert
+		t.Fatal(err)
+	}
+	attente := make(chan time.Duration, 1)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		t0 := time.Now()
+		svc.CountByState() // une requête ordinaire du serveur public
+		attente <- time.Since(t0)
+	}()
+	t0 := time.Now()
+	kind, err := adminDestroy(cfg, d, []byte(s.lien))
+	dur := time.Since(t0)
+	if err != nil || kind != "salon" || salonLignes(t, svc.DB, s.id) != 0 {
+		t.Fatalf("FAIBLESSE F3 : destruction, base occupée : %q %v après %v (lignes : %d)", kind, err, dur, salonLignes(t, svc.DB, s.id))
+	}
+	if dur > time.Second {
+		t.Fatalf("FAIBLESSE F3 : la destruction a tenu la base %v", dur)
+	}
+	if a := <-attente; a > time.Second {
+		t.Fatalf("FAIBLESSE F3 : une requête ordinaire a attendu %v", a)
+	}
+	for fin := time.Now().Add(5 * time.Second); svc.Vidage.Rates() == 0; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(fin) {
+			t.Fatal("FAIBLESSE F3 : vidage raté ni compté ni redemandé")
+		}
 	}
 }

@@ -7,6 +7,7 @@
 package adminui
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
@@ -17,6 +18,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -33,6 +35,9 @@ var (
 type Config struct {
 	// TokenHash : SHA-256 du jeton d'administration (config.Config.AdminTokenHash).
 	TokenHash [32]byte
+	// Host : hôte de l'adresse d'écoute (SHH_ADMIN_LISTEN, sans le port ; IPv6 sans crochets),
+	// seul nom servi en plus de localhost et 127.0.0.1 (hoteOK). Vide : ces deux-là seulement.
+	Host string
 	// Peers : pairs servis en plus de la boucle locale (SHH_TRUSTED_PROXY : dans le conteneur
 	// de production, la machine elle-même, par où arrive le tunnel SSH).
 	Peers []netip.Prefix
@@ -40,8 +45,10 @@ type Config struct {
 	State func() (State, error)
 	// Freeze, Unfreeze : gel et dégel des créations (fichier « frozen »).
 	Freeze, Unfreeze func() error
-	// Destroy : détruit le partage ou le salon du lien signalé ; rend « partage » ou « salon »,
-	// ErrLienInvalide ou ErrIntrouvable. link est effacé par l'appelant au retour.
+	// Destroy : détruit le partage ou le salon du lien signalé ; rend « partage », « salon »
+	// (ligne et fichiers effacés) ou « salon-reste » (salon détruit pour tous, un effacement de
+	// fichier reste à finir par l'entretien), ErrLienInvalide ou ErrIntrouvable. link est effacé
+	// par l'appelant au retour : Destroy ne doit en garder aucune copie (ni chaîne ni tranche).
 	Destroy func(link []byte) (string, error)
 }
 
@@ -71,6 +78,66 @@ var headers = [][2]string{
 type admin struct {
 	c     Config
 	files [3]file
+	frein frein
+}
+
+// Délai global après un jeton faux (variables : écourtées par les tests).
+var (
+	// delaiFaux : ce que chaque jeton faux ajoute au délai en cours.
+	delaiFaux = 250 * time.Millisecond
+	// delaiFauxMax : plafond du délai, donc de l'attente de l'exploitant légitime.
+	delaiFauxMax = 2 * time.Second
+)
+
+// frein : délai global après un jeton faux (audit adverse du 13 novembre, 3e campagne, tableau
+// de bord, F4 : 26 900 essais par seconde, sans aucun frein). Rien n'est gardé par adresse :
+// une seule heure, en mémoire, « fin du délai en cours ».
+//
+//   - Chaque jeton faux repousse cette fin de delaiFaux (à partir de maintenant si le délai
+//     était écoulé), sans jamais dépasser maintenant + delaiFauxMax.
+//   - La réponse à TOUTE vérification de jeton, bonne ou fausse, n'est rendue qu'à la fin du
+//     délai en cours à son arrivée (pour une fausse : prolongement compris). Une réussite ne se
+//     voit donc pas plus tôt qu'un échec : couper la connexion sans attendre n'apprend rien.
+//   - Sans jeton faux récent, aucune attente. L'exploitant légitime n'est jamais refusé : au
+//     pire, pendant une attaque, il attend delaiFauxMax par requête.
+//
+// Ce que cela borne, honnêtement : une connexion qui essaie à la suite fait au plus un essai
+// par delaiFaux ; C connexions simultanées en font au plus C par delaiFauxMax (le plafond qui
+// protège l'exploitant est aussi ce qui laisse passer une rafale). Ce n'est pas un verrouillage :
+// la vraie défense reste un jeton de 256 bits tiré au hasard.
+type frein struct {
+	mu  sync.Mutex
+	fin time.Time
+}
+
+// passer attend la fin du délai en cours (prolongé d'abord si le jeton est faux) ; faux si le
+// client est parti entretemps (plus rien à répondre).
+func (f *frein) passer(ctx context.Context, juste bool) bool {
+	now := time.Now()
+	f.mu.Lock()
+	fin := f.fin
+	if !juste {
+		if fin.Before(now) {
+			fin = now
+		}
+		if fin = fin.Add(delaiFaux); fin.After(now.Add(delaiFauxMax)) {
+			fin = now.Add(delaiFauxMax)
+		}
+		f.fin = fin
+	}
+	f.mu.Unlock()
+	d := fin.Sub(now)
+	if d <= 0 {
+		return true
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 type file struct {
@@ -86,8 +153,10 @@ type file struct {
 //	POST /api/detruire              lien signalé dans le CORPS (text/plain), jamais dans l'URL
 //
 // Tout /api/* exige « Authorization: Bearer <jeton> ». Jeton absent, faux, de mauvaise
-// longueur, route inconnue, mauvaise méthode, pair hors boucle locale, requête relayée :
-// la même réponse (refuse), sans rien qui les distingue.
+// longueur, route inconnue, mauvaise méthode, pair hors boucle locale, requête relayée, hôte
+// étranger (hoteOK) : la même réponse (refuse), sans rien qui les distingue dans son contenu.
+// Seule sa date diffère : un jeton faux est répondu après le délai global (frein) ; un pair ou
+// un hôte refusé, qui n'a jamais droit à une vérification de jeton, tout de suite.
 func New(c Config) http.Handler {
 	a := &admin{c: c}
 	for i, f := range []file{
@@ -157,7 +226,7 @@ func (a *admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			write(w, http.StatusInternalServerError, []byte(`{"error":"internal"}`))
 		}
 	}()
-	if !a.peerOK(r) || relayed(r) {
+	if !a.peerOK(r) || relayed(r) || !a.hoteOK(r.Host) {
 		refuse(w)
 		return
 	}
@@ -172,7 +241,11 @@ func (a *admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Le jeton est toujours vérifié, avant de regarder la route : une route inconnue et un
 	// jeton faux prennent le même chemin.
-	if !a.authorized(r) {
+	juste := a.authorized(r)
+	if !a.frein.passer(r.Context(), juste) {
+		return // client parti pendant le délai : rien à répondre, rien d'appelé
+	}
+	if !juste {
 		refuse(w)
 		return
 	}
@@ -219,6 +292,45 @@ func (a *admin) peerOK(r *http.Request) bool {
 	return false
 }
 
+// hoteOK : nom sous lequel la page est demandée (en-tête Host de la requête, lu par net/http
+// dans http.Request.Host). Servis : localhost, 127.0.0.1 et l'adresse d'écoute (Config.Host),
+// écrits exactement ainsi, avec ou sans port, quel que soit le port (le tunnel SSH choisit le
+// port local). Tout autre nom est refusé comme une route inconnue (audit adverse du
+// 13 novembre, 3e campagne : tableau de bord H1, site F3) : un site qui fait pointer son nom
+// vers la boucle locale (« DNS rebinding ») ne devient pas de même origine que la page, et un
+// Caddy mal réglé, qui relaierait le nom public vers cet écouteur, n'est pas servi. Le nom
+// n'est ni gardé, ni journalisé, ni recopié.
+func (a *admin) hoteOK(hote string) bool {
+	h := hote
+	if i := strings.LastIndexByte(hote, ':'); i >= 0 && !strings.HasSuffix(hote, "]") {
+		port := hote[i+1:]
+		if len(port) == 0 || len(port) > 5 {
+			return false
+		}
+		n := 0
+		for _, c := range []byte(port) {
+			if c < '0' || c > '9' {
+				return false
+			}
+			n = n*10 + int(c-'0')
+		}
+		if n < 1 || n > 65535 {
+			return false
+		}
+		h = hote[:i]
+	}
+	if h == "localhost" || h == "127.0.0.1" {
+		return true
+	}
+	if a.c.Host == "" {
+		return false
+	}
+	if strings.Contains(a.c.Host, ":") { // adresse IPv6 : entre crochets dans Host
+		return h == "["+a.c.Host+"]"
+	}
+	return h == a.c.Host
+}
+
 // relayed : requête passée par Caddy (qui pose toujours X-Shh-Client-IP). La page ne se sert
 // jamais à travers le proxy public : refusée comme une route inconnue.
 func relayed(r *http.Request) bool { return len(r.Header.Values("X-Shh-Client-IP")) != 0 }
@@ -250,15 +362,23 @@ func (a *admin) act(w http.ResponseWriter, r *http.Request, f func() error) {
 	write(w, http.StatusOK, []byte(`{"ok":true}`))
 }
 
-// destroy : le lien signalé est lu dans le corps, borné, puis effacé de la mémoire. La
-// réponse ne le reprend jamais, ni aucun identifiant : seulement ce qui a été détruit.
+// destroy : le lien signalé est lu dans le corps, dans UN seul tampon de taille fixe (jamais
+// recopié par une croissance), effacé au retour ; Destroy le traite en octets et efface ses
+// propres copies (clés). Effacé au mieux : il reste, hors de portée de ce code, le tampon de
+// lecture de la connexion (net/http), récrit par la requête suivante ou rendu au ramasse-miettes
+// à la fermeture, et l'état interne du calcul de K_accès (audit adverse du 13 novembre, 3e
+// campagne, stockage, F4 : le commentaire promettait « effacé de la mémoire », alors que le
+// lien, clé comprise, restait en neuf exemplaires). La réponse ne reprend jamais le lien, ni
+// aucun identifiant : seulement ce qui a été détruit.
 func (a *admin) destroy(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxLink+1))
-	defer clear(body)
-	if err != nil || len(body) > maxLink {
+	tampon := make([]byte, maxLink+1)
+	defer clear(tampon)
+	n, err := io.ReadFull(r.Body, tampon)
+	if (err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF)) || n > maxLink {
 		write(w, http.StatusBadRequest, []byte(`{"error":"lien_invalide"}`))
 		return
 	}
+	body := tampon[:n]
 	kind, err := a.c.Destroy(body)
 	switch {
 	case errors.Is(err, ErrLienInvalide):
@@ -269,6 +389,8 @@ func (a *admin) destroy(w http.ResponseWriter, r *http.Request) {
 		write(w, http.StatusInternalServerError, []byte(`{"error":"internal"}`))
 	case kind == "salon":
 		write(w, http.StatusOK, []byte(`{"detruit":"salon"}`))
+	case kind == "salon-reste":
+		write(w, http.StatusOK, []byte(`{"detruit":"salon","reste":true}`))
 	default:
 		write(w, http.StatusOK, []byte(`{"detruit":"partage"}`))
 	}

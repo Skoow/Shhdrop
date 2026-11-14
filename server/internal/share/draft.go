@@ -224,6 +224,7 @@ func (s *Service) GrowCharged(id string, bucket int, charge func(bucket int) err
 	if k, _ := res.RowsAffected(); k != 1 {
 		return ErrNotFound
 	}
+	s.Vidage.Demander() // ligne récrite : vidage du WAL regroupé (audit adverse 3, stockage, Z3)
 	s.touchUpload(id, s.now())
 	return nil
 }
@@ -267,6 +268,7 @@ func (s *Service) Erase(id string, from, to int) error {
 	if _, err := s.DB.Exec(`UPDATE shares SET segments_mask=? WHERE id=? AND state='uploading'`, next, id); err != nil {
 		return err
 	}
+	s.Vidage.Demander() // ligne récrite : vidage du WAL regroupé (audit adverse 3, stockage, Z3)
 	s.touchUpload(id, s.now())
 	return nil
 }

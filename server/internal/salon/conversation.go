@@ -201,13 +201,25 @@ func (c *Conversation) annuler(taille, max int64) {
 
 // OuvrirConversation crée dossier/id (qui ne doit pas exister, mode 0600) et tire sa clé.
 func OuvrirConversation(dossier, id string) (*Conversation, error) {
+	return ouvrirConversation(dossier, id, filepath.Join(dossier, id))
+}
+
+// suffixeProvisoire : fin du nom provisoire de la conversation neuve d'un renouvellement, le
+// temps que l'ancienne soit détruite (reglages.go). Jamais un identifiant valide : le
+// brouillage des dates l'ignore, la purge du démarrage l'efface comme tout le dossier.
+const suffixeProvisoire = ".n"
+
+func cheminProvisoire(dossier, id string) string { return filepath.Join(dossier, id+suffixeProvisoire) }
+
+// ouvrirConversation : OuvrirConversation, fichier créé à chemin (dans dossier).
+func ouvrirConversation(dossier, id, chemin string) (*Conversation, error) {
 	if !idValide(id) {
 		return nil, errIDConv
 	}
 	if err := os.MkdirAll(dossier, 0o700); err != nil {
 		return nil, es(err)
 	}
-	c := &Conversation{chemin: filepath.Join(dossier, id)}
+	c := &Conversation{chemin: chemin}
 	f, err := os.OpenFile(c.chemin, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return nil, es(err)
@@ -366,6 +378,25 @@ func (c *Conversation) Detruire() error {
 	c.poserTaille(0)
 	// Fichier supprimé et clé oubliée : une erreur de fermeture est seulement signalée.
 	return es(errFermeture)
+}
+
+// renommer donne au fichier le nom chemin (même dossier ; renouvellement : la conversation
+// neuve, ouverte sous un nom provisoire, prend le nom du salon une fois l'ancienne détruite).
+// Sous le verrou de la conversation : les écritures, qui remettent les dates par le chemin,
+// voient toujours le nom courant. Conversation détruite entre-temps (fin du salon) : rien à
+// faire, sans erreur.
+func (c *Conversation) renommer(chemin string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.detruite {
+		return nil
+	}
+	if err := os.Rename(c.chemin, chemin); err != nil {
+		return es(err)
+	}
+	c.chemin = chemin
+	dossierSansDate(chemin)
+	return sansDate(chemin)
 }
 
 // EffacerPlusieurs écrase d'octets aléatoires chaque emplacement de l (effacements en chaîne :

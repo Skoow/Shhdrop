@@ -1,15 +1,15 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"crypto/hkdf"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/skoow/shhdrop/server/internal/blob"
@@ -60,20 +60,20 @@ func runAdmin(args []string, cfg config.Config, stdin io.Reader, stdout, stderr 
 	}
 
 	// destroy : le lien est lu avant d'ouvrir quoi que ce soit ; seule K_accès en est gardée
-	// (K_accès_s pour un lien de salon #c<43>).
+	// (K_accès_s pour un lien de salon #c<43>), effacée à la fin.
 	var kAcces []byte
 	var estSalon bool
 	if args[0] == "destroy" {
-		link, err := readLink(stdin)
+		lien, err := lireLien(stdin)
 		if err != nil {
 			return usage(err.Error())
 		}
-		var ok bool
-		if kAcces, estSalon = salonAccessKeyOf(link); !estSalon {
-			if kAcces, ok = accessKeyOf(link); !ok {
-				return usage("lien invalide (attendu : https://…/#<clé de 43 caractères>, ou #c<clé> pour un salon)")
-			}
+		kAcces, estSalon, err = cleAccesDuLien(lien)
+		clear(lien)
+		if err != nil {
+			return usage(err.Error())
 		}
+		defer clear(kAcces)
 	}
 
 	dir, err := adminDataDir(cfg.DataDir)
@@ -186,36 +186,118 @@ func adminDataDir(dir string) (string, error) {
 	return dir, nil
 }
 
-// readLink lit une seule ligne non vide (le lien) sur l'entrée standard.
-func readLink(r io.Reader) (string, error) {
-	b, err := io.ReadAll(io.LimitReader(r, maxStdinLink+1))
-	if err != nil {
-		return "", errors.New("entrée standard illisible")
+// lireLien lit l'entrée standard, bornée, dans un seul tampon (à effacer par l'appelant).
+func lireLien(r io.Reader) ([]byte, error) {
+	buf := make([]byte, maxStdinLink+1)
+	n, err := io.ReadFull(r, buf)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		clear(buf)
+		return nil, errors.New("entrée standard illisible")
 	}
-	if len(b) > maxStdinLink {
-		return "", errors.New("entrée standard trop longue")
+	if n > maxStdinLink {
+		clear(buf)
+		return nil, errors.New("entrée standard trop longue")
 	}
-	sc := bufio.NewScanner(strings.NewReader(string(b)))
-	var lines []string
-	for sc.Scan() {
-		if l := strings.TrimSpace(sc.Text()); l != "" {
-			lines = append(lines, l)
+	return buf[:n], nil
+}
+
+var (
+	errUneLigne    = errors.New("entrée standard : une seule ligne attendue (le lien)")
+	errLienAttendu = errors.New("lien invalide (attendu : https://…/#<clé de 43 caractères>, ou #c<clé> pour un salon)")
+)
+
+// cleAccesDuLien tire K_accès du lien signalé, traité en OCTETS de bout en bout (jamais de
+// chaîne, qu'on ne peut pas effacer : audit adverse du 13 novembre, 3e campagne, stockage, F4 :
+// le lien, donc K_lien, restait en plusieurs exemplaires dans le tas). lien : une seule ligne
+// non vide (espaces et lignes vides autour ignorés). Partage : les 43 caractères base64url
+// après le dernier « # » (spec §32), ou la clé seule ; K_accès = HKDF-SHA-256(K_lien, sel
+// vide, « shhdrop/v2/acces », 32) (spec §29.2). Salon : « c » puis 43 caractères (spec
+// §39.3) ; K_accès_s = HKDF-SHA-256(K_lien, sel vide, « shhdrop/v2/salon/acces », 32)
+// (vecteurs « cles » de engine/vectors/salon-v3.json). Tout autre lien (gestion #m<43>…) :
+// erreur. K_lien décodée est effacée ici ; lien n'est pas modifié (à effacer par l'appelant, de
+// même que la clé rendue). Ce qui ne peut pas être effacé : l'état interne de HMAC pendant le
+// calcul, et les tampons de lecture du système ou de net/http.
+func cleAccesDuLien(lien []byte) (k []byte, estSalon bool, err error) {
+	ligne, ok := seuleLigne(lien)
+	if !ok {
+		return nil, false, errUneLigne
+	}
+	cle := ligne
+	if i := bytes.LastIndexByte(ligne, '#'); i >= 0 {
+		cle = ligne[i+1:]
+	}
+	info := "shhdrop/v2/acces"
+	if len(cle) == 44 && cle[0] == 'c' {
+		cle, estSalon, info = cle[1:], true, "shhdrop/v2/salon/acces"
+	}
+	var kLien [32]byte
+	defer clear(kLien[:])
+	if !decoderCle(&kLien, cle) {
+		return nil, false, errLienAttendu
+	}
+	if k, err = hkdf.Key(sha256.New, kLien[:], nil, info, 32); err != nil {
+		return nil, false, errLienAttendu
+	}
+	return k, estSalon, nil
+}
+
+// seuleLigne : la seule ligne non vide de b (sous-tranche de b, sans copie), espaces retirés.
+func seuleLigne(b []byte) ([]byte, bool) {
+	var ligne []byte
+	for len(b) > 0 {
+		l := b
+		if i := bytes.IndexByte(b, '\n'); i >= 0 {
+			l, b = b[:i], b[i+1:]
+		} else {
+			b = nil
 		}
+		if l = bytes.TrimSpace(l); len(l) == 0 {
+			continue
+		}
+		if ligne != nil {
+			return nil, false
+		}
+		ligne = l
 	}
-	if len(lines) != 1 {
-		return "", errors.New("entrée standard : une seule ligne attendue (le lien)")
+	return ligne, ligne != nil
+}
+
+// decoderCle décode 43 caractères base64url sans bourrage, canoniques, vers 32 octets (comme
+// share.DecodeB64, sans passer par une chaîne). En cas d'échec, dst est effacé.
+func decoderCle(dst *[32]byte, src []byte) bool {
+	if len(src) != 43 {
+		return false
 	}
-	return lines[0], nil
+	var tmp [33]byte // Decode peut écrire au-delà de 32 octets avant de refuser
+	defer clear(tmp[:])
+	n, err := base64.RawURLEncoding.Strict().Decode(tmp[:], src)
+	if err != nil || n != 32 {
+		return false
+	}
+	copy(dst[:], tmp[:32])
+	return true
 }
 
 // freeze crée le fichier de gel (0600) dans un dossier existant ; idempotent.
+// Dates de frozen et du dossier de données remises à l'epoch tout de suite (audit adverse du
+// 13 novembre, 3e campagne, stockage, F5 : elles donnaient l'heure du gel à la milliseconde) ;
+// leur ctime est ramené par le janitor (share.Service.ScrubDataTimes), à la minute près. Au
+// mieux : un échec de Chtimes ne change pas le gel.
 func freeze(frozen string) error {
 	f, err := os.OpenFile(frozen, os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return err
+	}
+	sansDate(frozen)
+	sansDate(filepath.Dir(frozen))
+	return nil
 }
+
+// sansDate : dates de contenu et d'accès de p à l'epoch, au mieux.
+func sansDate(p string) { _ = os.Chtimes(p, time.Unix(0, 0), time.Unix(0, 0)) }
 
 func countShares(svc *share.Service) (int, error) {
 	var n int
@@ -239,32 +321,15 @@ func openService(cfg config.Config, dir string) (*share.Service, func(), error) 
 	return svc, func() { db.Close() }, nil
 }
 
-// accessKeyOf : K_accès = HKDF-SHA-256(K_lien, « shhdrop/v2/acces ») (spec §29.2), K_lien
-// étant les 43 caractères base64url après le « # » d'un lien de partage (spec §32), ou la
-// clé seule. Seule K_accès sert ensuite (DestroyAdmin cherche par V_accès) ; rien n'est écrit.
-func accessKeyOf(link string) ([]byte, bool) {
-	key := link
-	if i := strings.LastIndexByte(link, '#'); i >= 0 {
-		key = link[i+1:]
-	}
-	kLien, err := share.DecodeB64(key, 32)
-	if err != nil {
-		return nil, false
-	}
-	k, err := hkdf.Key(sha256.New, kLien, nil, "shhdrop/v2/acces", 32)
-	clear(kLien)
-	return k, err == nil
-}
-
-// destroySalon : destroy - d'un lien de salon : ligne, pièces et conversation supprimées
-// (salon.DetruireHorsLigne) ; le serveur en marche ferme les connexions en raison 2 au tick
-// suivant. Exige le schéma courant (tables du salon). Ni le lien ni l'identifiant ne sont
+// destroySalon : destroy - d'un lien de salon : ligne rendue morte, puis pièces, conversation
+// et ligne supprimées (salon.DetruireHorsLigne), puis vidage du WAL ; le serveur en marche
+// ferme les connexions en raison 2 à sa passe suivante. Exige le schéma courant (tables du salon). Ni le lien ni l'identifiant ne sont
 // affichés.
 func destroySalon(svc *share.Service, dir string, kAcces []byte, stdout, stderr io.Writer, fail func(error) int) int {
 	if err := store.RequireCurrent(svc.DB); err != nil {
 		return fail(err)
 	}
-	err := salon.DetruireHorsLigne(svc.DB, &blob.Store{Dir: filepath.Join(dir, dirSalonPieces)},
+	complet, err := salon.DetruireHorsLigne(svc.DB, &blob.Store{Dir: filepath.Join(dir, dirSalonPieces)},
 		filepath.Join(dir, dirSalons), kAcces)
 	if errors.Is(err, salon.ErrNotFound) {
 		fmt.Fprintf(stderr, "introuvable (%s ; 0 salon détruit)\n", dir)
@@ -273,28 +338,16 @@ func destroySalon(svc *share.Service, dir string, kAcces []byte, stdout, stderr 
 	if err != nil {
 		return fail(err)
 	}
+	if !complet {
+		// Jamais « détruit » pour une ligne encore en base (audit adverse 3, F2).
+		fmt.Fprintf(stderr, "salon rendu inaccessible (plus aucune requête ne le voit), mais des pièces déposées pendant la "+
+			"commande restent à effacer (%s) : le serveur en marche le fait dans la seconde ; relancer la commande pour "+
+			"vérifier (réponse attendue : introuvable)\n", dir)
+		return 1
+	}
+	if err := store.Checkpoint(svc.DB); err != nil {
+		return fail(err)
+	}
 	fmt.Fprintf(stdout, "1 salon détruit (%s)\n", dir)
 	return 0
-}
-
-// salonAccessKeyOf : K_accès_s = HKDF-SHA-256(K_lien, sel vide, « shhdrop/v2/salon/acces »,
-// 32) (vecteurs « cles » de engine/vectors/salon-v3.json), K_lien étant les 43 caractères
-// après « #c » d'un lien de salon (spec §39.3), ou « c<43> » seul. Faux pour tout autre lien
-// (partage #<43>, gestion #m<43>).
-func salonAccessKeyOf(link string) ([]byte, bool) {
-	key := link
-	if i := strings.LastIndexByte(link, '#'); i >= 0 {
-		key = link[i+1:]
-	}
-	rest, ok := strings.CutPrefix(key, "c")
-	if !ok || len(rest) != 43 {
-		return nil, false
-	}
-	kLien, err := share.DecodeB64(rest, 32)
-	if err != nil {
-		return nil, false
-	}
-	k, err := hkdf.Key(sha256.New, kLien, nil, "shhdrop/v2/salon/acces", 32)
-	clear(kLien)
-	return k, err == nil
 }
